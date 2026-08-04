@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-31
+Last verified: 2026-08-04
 
 ## Current Guardrails
 
@@ -32,14 +32,20 @@ Last verified: 2026-07-31
   scheduled selection and wake admission both exclude explicit revocation; and
   queued model work rechecks authority before usage is consumed. Renewal is a
   new durable grant, not an implicit cleanup rollback.
-- Venice core inference is an all-or-none operator configuration: one Worker
-  secret plus fixed Luna/Terra/Sol mappings. Deploy preflight rejects partial
-  configuration, and Web keeps Venice hidden and projects OpenAI until the
-  Worker/runner deployment has been verified. Missing or invalid mappings,
-  unsupported paths/models, malformed JSON, and request bodies above 20 MiB
+- Venice core inference requires one optional Worker secret. The regular
+  Venice GPT-5.6 Luna/Terra/Sol mapping is code-owned and derived at egress;
+  there are no duplicate model vars that can become partial or mismatched.
+  Web keeps Venice hidden and projects OpenAI until the Worker/runner
+  deployment has been verified. Unsupported paths/models, malformed JSON, and
+  request bodies above 20 MiB
   fail closed before provider egress. Rollback removes Web exposure first; it
   does not add a queue, repair pass, provider fallback, or second preference
   owner.
+- Web selects immutable allowance rates from both the canonical product model
+  and recorded provider. Venice standard usage uses Venice's documented
+  input, cache-read, cache-write, and output rates and records the provider
+  model and pricing source in the snapshot; unknown non-Venice standard
+  provider evidence retains the existing OpenAI-compatible behavior.
 - An authenticated Settings provider change commits Postgres first and then
   sends the payload-free `runtime_wake_requested` Temporal signal. The per-user
   workflow coalesces duplicate wakes as one boolean and calls the existing

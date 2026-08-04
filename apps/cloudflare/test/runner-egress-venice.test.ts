@@ -7,11 +7,6 @@ import {
   isAllowedHostedVeniceRequest,
 } from "../src/runner-egress-venice.ts";
 
-const MODEL_ENV = {
-  HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
-  HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
-  HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
-};
 const MURPH_NAMESPACE_TOOLS = [{
   name: "murph",
   tools: [
@@ -42,16 +37,34 @@ test("Venice egress keeps ordinary Responses tools and rewrites only the upstrea
       stream: true,
       tools: MURPH_NAMESPACE_TOOLS,
     }),
-    env: MODEL_ENV,
   });
   assert.ok(body);
   assert.deepEqual(JSON.parse(body), {
     input: standardInput,
     model:
-      "zai-org-glm-4.7:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+      "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
     stream: true,
     tools: MURPH_NAMESPACE_TOOLS,
   });
+});
+
+test("Venice egress derives every priced provider model from the shared contract", () => {
+  const cases = [
+    ["gpt-5.6-luna", "openai-gpt-56-luna"],
+    ["gpt-5.6-terra", "openai-gpt-56-terra"],
+    ["gpt-5.6-sol", "openai-gpt-56-sol"],
+  ] as const;
+
+  for (const [productModel, providerModel] of cases) {
+    const body = buildHostedVeniceResponsesRequestBody({
+      body: encodeJson({ model: productModel }),
+    });
+    assert.ok(body);
+    assert.equal(
+      JSON.parse(body).model,
+      `${providerModel}:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false`,
+    );
+  }
 });
 
 test("Venice egress restores Codex Responses Lite tools to the standard top-level field", () => {
@@ -84,13 +97,12 @@ test("Venice egress restores Codex Responses Lite tools to the standard top-leve
         tool_choice: "auto",
         tools: topLevelTools,
       }),
-      env: MODEL_ENV,
     });
     assert.ok(body);
     assert.deepEqual(JSON.parse(body), {
       input: standardInput,
       model:
-        "zai-org-glm-4.7:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+        "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
       parallel_tool_calls: false,
       stream: true,
       tool_choice: "auto",
@@ -149,20 +161,14 @@ test("Venice egress fails closed for malformed or conflicting Responses Lite too
         ...request,
         model: "gpt-5.6-terra",
       }),
-      env: MODEL_ENV,
     }), null, label);
   }
 });
 
-test("Venice egress fails closed for unknown product models and missing mappings", () => {
+test("Venice egress fails closed for unknown product models", () => {
   assert.equal(buildHostedVeniceResponsesRequestBody({
     body: encodeJson({ model: "other" }),
-    env: MODEL_ENV,
   }), null);
-  assert.throws(() => buildHostedVeniceResponsesRequestBody({
-    body: encodeJson({ model: "gpt-5.6-sol" }),
-    env: {},
-  }), /HOSTED_VENICE_SOL_MODEL/u);
 });
 
 test("Venice egress admits only Codex Responses POST endpoints", () => {

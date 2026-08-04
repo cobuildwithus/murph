@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-07-30
+Last verified: 2026-08-04
 
 ## Non-Negotiable Rules
 
@@ -110,8 +110,13 @@ Last verified: 2026-07-30
   flag. The Cloudflare Worker owns both real API keys and gives the runner only
   provider-, user-, and runner-bound signed credentials. Venice egress accepts
   only the two Responses POST paths, canonical product model ids, a bounded
-  20 MiB request body, and fixed operator model mappings; it disables Venice's
+  20 MiB request body, and fixed code-owned model mappings; it disables Venice's
   added system prompt, web search, and web scraping at the final egress rewrite.
+  Those mappings are pinned to `openai-gpt-56-luna`,
+  `openai-gpt-56-terra`, and `openai-gpt-56-sol`. Runtime egress derives them
+  directly from the shared code-owned map, so provider-aware allowance pricing
+  cannot drift from the model that received member content through duplicate
+  operator configuration.
   Settings may say that Murph disables OpenAI response storage because the
   direct OpenAI Responses path sends `store: false`, which [disables Responses
   API storage](https://developers.openai.com/api/docs/guides/migrate-to-responses#4-decide-when-to-use-statefulness).

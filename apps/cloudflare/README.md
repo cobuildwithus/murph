@@ -75,9 +75,12 @@ The runner container also uses Cloudflare HTTPS outbound interception for hosted
 Venice joins that same Worker-owned credential boundary for core inference.
 The Worker permits only `POST /api/v1/responses` and
 `POST /api/v1/responses/compact`, accepts only canonical Luna/Terra/Sol request
-models, and replaces the model with its fixed operator mapping while disabling
+models, and replaces the model with the matching regular Venice provider id
+(`openai-gpt-56-luna`, `openai-gpt-56-terra`, or `openai-gpt-56-sol`) while disabling
 Venice's added system prompt, web search, and web scraping at the final egress
-boundary. Specialized
+boundary. Runtime egress derives the provider id from the same shared map that
+Web records in its pricing snapshot, so the allowance rate remains bound to
+the actual upstream model. Specialized
 tools such as generated images continue to use their own managed providers even
 when Venice owns the core assistant turn.
 The container supervisor sets `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, and `CURL_CA_BUNDLE` to Cloudflare's runtime interception CA path, and direct invocation builds the runtime config from an explicit frozen supervisor env, preserves those CA bundle pointers plus Cloudflare-managed proxy env needed by hosted-local Containers egress interception, and still blocks operator-only process-control env plus user-supplied proxy overrides.
@@ -243,10 +246,11 @@ Optional execution vars and secrets:
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
 - `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY` plus `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`; hosted Codex receives only a signed Murph provider credential, never the real OpenAI key. Host Codex bridge/proxy env is not accepted
-- Optional Venice core inference is configured only as the all-or-none group
-  `VENICE_API_KEY`, `HOSTED_VENICE_LUNA_MODEL`,
-  `HOSTED_VENICE_TERRA_MODEL`, and `HOSTED_VENICE_SOL_MODEL`. The fleet default
-  remains `HOSTED_ASSISTANT_PROVIDER=openai`; Web projects the per-member
+- Optional Venice core inference uses the Worker-owned `VENICE_API_KEY` secret.
+  The regular provider ids `openai-gpt-56-luna`, `openai-gpt-56-terra`, and
+  `openai-gpt-56-sol` are code-owned and derived from Murph's canonical model;
+  there are no separate operator model vars. The fleet default remains
+  `HOSTED_ASSISTANT_PROVIDER=openai`; Web projects the per-member
   Venice override for an invocation only after its separate rollout flag is
   enabled. The runner receives only a signed Venice credential.
 - `HOSTED_R2_PRESIGN_ENDPOINT` can override the default account-scoped R2 S3 endpoint for direct snapshot URL generation. Production deploys must leave it as the account-scoped R2 HTTPS origin. Hosted-local dev, worker-only, and E2E profiles start a MinIO sidecar and inject local S3-compatible endpoints behind the local-only `HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT=1` guard; those local endpoint flags are not deploy vars.
