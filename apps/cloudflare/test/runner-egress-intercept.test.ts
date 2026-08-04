@@ -2301,9 +2301,9 @@ describe("hostedRunnerIntercept", () => {
       providerKind: "venice",
     });
     const env = createInterceptEnv({
-      HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
-      HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
-      HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+      HOSTED_VENICE_LUNA_MODEL: "openai-gpt-56-luna",
+      HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol",
+      HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
       VENICE_API_KEY: "venice-worker-secret",
       validateRuntimeProviderEgressCredential,
     });
@@ -2343,7 +2343,7 @@ describe("hostedRunnerIntercept", () => {
     await expect(forwardedRequest.json()).resolves.toEqual({
       input: "hello",
       model:
-        "zai-org-glm-4.7:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+        "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
       stream: true,
     });
   });
@@ -2360,9 +2360,9 @@ describe("hostedRunnerIntercept", () => {
       providerKind: "venice",
     });
     const env = createInterceptEnv({
-      HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
-      HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
-      HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+      HOSTED_VENICE_LUNA_MODEL: "openai-gpt-56-luna",
+      HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol",
+      HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
       VENICE_API_KEY: "venice-worker-secret",
       validateRuntimeProviderEgressCredential,
     });
@@ -2413,7 +2413,7 @@ describe("hostedRunnerIntercept", () => {
     await expect(forwardedRequest.json()).resolves.toEqual({
       input: standardInput,
       model:
-        "zai-org-glm-4.7:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+        "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
       parallel_tool_calls: false,
       stream: true,
       tool_choice: "auto",
@@ -2433,9 +2433,9 @@ describe("hostedRunnerIntercept", () => {
       providerKind: "venice",
     });
     const env = createInterceptEnv({
-      HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
-      HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
-      HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+      HOSTED_VENICE_LUNA_MODEL: "openai-gpt-56-luna",
+      HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol",
+      HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
       VENICE_API_KEY: "venice-worker-secret",
       validateRuntimeProviderEgressCredential,
     });

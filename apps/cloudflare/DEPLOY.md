@@ -490,10 +490,11 @@ default or specialized tool providers. Configure the selected GitHub
 Environment with these four values as one group:
 
 - secret `VENICE_API_KEY`
-- vars `HOSTED_VENICE_LUNA_MODEL`, `HOSTED_VENICE_TERRA_MODEL`, and
-  `HOSTED_VENICE_SOL_MODEL`
+- var `HOSTED_VENICE_LUNA_MODEL=openai-gpt-56-luna`
+- var `HOSTED_VENICE_TERRA_MODEL=openai-gpt-56-terra`
+- var `HOSTED_VENICE_SOL_MODEL=openai-gpt-56-sol`
 
-Deploy preflight rejects a partial group. Keep the hosted Web
+Deploy preflight rejects a partial group or different model id. Keep the hosted Web
 `HOSTED_VENICE_ENABLED` flag off while applying the nullable member migration
 and deploying the compatible Web reader. Then deploy Cloudflare and the runner
 with `container_rollout=immediate`, require the exact runner fingerprint, and
@@ -659,11 +660,15 @@ Hosted assistant config:
 - `HOSTED_ASSISTANT_SANDBOX`
 - Optional all-or-none Venice model mappings: `HOSTED_VENICE_LUNA_MODEL`,
   `HOSTED_VENICE_TERRA_MODEL`, and `HOSTED_VENICE_SOL_MODEL`, paired with the
-  `VENICE_API_KEY` GitHub Environment secret.
+  `VENICE_API_KEY` GitHub Environment secret. Set those vars respectively to
+  `openai-gpt-56-luna`, `openai-gpt-56-terra`, and `openai-gpt-56-sol`.
 
 When changing hosted assistant model pricing or allowance enforcement, deploy the
 Cloudflare Worker/runner model config before or atomically with the hosted web
 allowance logic so runtime usage callbacks keep using an allowance-priced model.
+For the Venice provider-aware pricing rollout, deploy Cloudflare first so the
+exact upstream mappings are enforced, then deploy Web so new immutable usage
+rows select the Venice rate table.
 
 Vault-share selector-scope production deploys must also use
 `container_rollout=immediate` until the distance/count selector-scope runner

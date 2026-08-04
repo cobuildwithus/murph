@@ -651,7 +651,7 @@ describe("deploy preflight helpers", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(
         createRequiredWorkerDeployEnv({
-          HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+          HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
         }),
         { deployWorker: true },
       ),
@@ -660,9 +660,9 @@ describe("deploy preflight helpers", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(
         createRequiredWorkerDeployEnv({
-          HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
-          HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
-          HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+          HOSTED_VENICE_LUNA_MODEL: "openai-gpt-56-luna",
+          HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol",
+          HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
           VENICE_API_KEY: "venice-key",
         }),
         { deployWorker: true },
@@ -675,6 +675,22 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).not.toContain(error);
+  });
+
+  it("requires Venice model mappings to match the priced GPT-5.6 models", () => {
+    const errors = listHostedDeployEnvironmentInvariantErrors(
+      createRequiredWorkerDeployEnv({
+        HOSTED_VENICE_LUNA_MODEL: "openai-gpt-56-luna",
+        HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol-pro",
+        HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
+        VENICE_API_KEY: "venice-key",
+      }),
+      { deployWorker: true },
+    );
+
+    expect(errors).toContain(
+      "HOSTED_VENICE_SOL_MODEL must be openai-gpt-56-sol so Venice inference and allowance pricing use the same model.",
+    );
   });
 
   it("requires an explicitly priced hosted assistant model for worker deploys", () => {

@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-31
+Last verified: 2026-08-04
 
 ## Current Guardrails
 
@@ -9,13 +9,19 @@ Last verified: 2026-07-31
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
 - Venice core inference is an all-or-none operator configuration: one Worker
-  secret plus fixed Luna/Terra/Sol mappings. Deploy preflight rejects partial
+  secret plus the regular Venice GPT-5.6 Luna/Terra/Sol mappings. Deploy
+  preflight rejects partial or mismatched
   configuration, and Web keeps Venice hidden and projects OpenAI until the
   Worker/runner deployment has been verified. Missing or invalid mappings,
   unsupported paths/models, malformed JSON, and request bodies above 20 MiB
   fail closed before provider egress. Rollback removes Web exposure first; it
   does not add a queue, repair pass, provider fallback, or second preference
   owner.
+- Web selects immutable allowance rates from both the canonical product model
+  and recorded provider. Venice standard usage uses Venice's documented
+  input, cache-read, cache-write, and output rates and records the provider
+  model and pricing source in the snapshot; unknown non-Venice standard
+  provider evidence retains the existing OpenAI-compatible behavior.
 - An authenticated Settings provider change commits Postgres first and then
   sends the payload-free `runtime_wake_requested` Temporal signal. The per-user
   workflow coalesces duplicate wakes as one boolean and calls the existing

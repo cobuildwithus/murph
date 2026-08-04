@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-07-31
+Last verified: 2026-08-04
 
 ## Purpose
 
@@ -18,6 +18,12 @@ untrusted-provider-text boundary, and reader-first hosted compatibility
 contract are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
+
+Venice provider-model binding and provider-aware immutable allowance pricing
+are jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+`agent-docs/RELIABILITY.md`,
+`agent-docs/product-specs/hosted-plan-usage.md`, and the Web and Cloudflare app
+docs.
 
 ## Canonical Docs
 

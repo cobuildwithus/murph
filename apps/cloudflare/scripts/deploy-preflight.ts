@@ -9,6 +9,12 @@ import {
 import {
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution/env";
+import {
+  HOSTED_ASSISTANT_LUNA_MODEL,
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
+} from "@murphai/hosted-execution/assistant-model";
 
 import { readHostedDeployAutomationTimeouts } from "./deploy-automation/environment.ts";
 import { HOSTED_WORKER_REQUIRED_SECRET_NAMES } from "./deploy-automation/secrets.ts";
@@ -437,6 +443,29 @@ export function listHostedDeployEnvironmentInvariantErrors(
     errors.push(
       `Venice runtime env must set ${VENICE_RUNTIME_REQUIRED_ENV_NAMES.join(", ")} together.`,
     );
+  }
+  if (missingVeniceEnv.length === 0) {
+    const veniceModelEnv = [
+      [
+        "HOSTED_VENICE_LUNA_MODEL",
+        HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[HOSTED_ASSISTANT_LUNA_MODEL],
+      ],
+      [
+        "HOSTED_VENICE_TERRA_MODEL",
+        HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[HOSTED_ASSISTANT_TERRA_MODEL],
+      ],
+      [
+        "HOSTED_VENICE_SOL_MODEL",
+        HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[HOSTED_ASSISTANT_SOL_MODEL],
+      ],
+    ] as const;
+    for (const [envName, expectedModel] of veniceModelEnv) {
+      if (normalizeOptionalString(source[envName]) !== expectedModel) {
+        errors.push(
+          `${envName} must be ${expectedModel} so Venice inference and allowance pricing use the same model.`,
+        );
+      }
+    }
   }
 
   if (deployContext === "preview") {

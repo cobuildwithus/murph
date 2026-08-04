@@ -2,6 +2,7 @@ import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
   isHostedAssistantProductModel,
   type HostedAssistantProductModel,
 } from "@murphai/hosted-execution/assistant-model";
@@ -138,6 +139,14 @@ function readHostedVeniceModel(input: {
   if (!HOSTED_VENICE_MODEL_ID_PATTERN.test(normalized)) {
     throw new Error(
       `${envName} must name one fixed Venice model before Venice inference is enabled.`,
+    );
+  }
+  const expectedModel = HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[
+    input.productModel
+  ];
+  if (normalized !== expectedModel) {
+    throw new Error(
+      `${envName} must be ${expectedModel} so Venice inference and allowance pricing use the same model.`,
     );
   }
   return normalized;

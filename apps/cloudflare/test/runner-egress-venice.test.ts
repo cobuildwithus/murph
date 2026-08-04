@@ -8,9 +8,9 @@ import {
 } from "../src/runner-egress-venice.ts";
 
 const MODEL_ENV = {
-  HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
-  HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
-  HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
+  HOSTED_VENICE_LUNA_MODEL: "openai-gpt-56-luna",
+  HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
+  HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol",
 };
 const MURPH_NAMESPACE_TOOLS = [{
   name: "murph",
@@ -48,7 +48,7 @@ test("Venice egress keeps ordinary Responses tools and rewrites only the upstrea
   assert.deepEqual(JSON.parse(body), {
     input: standardInput,
     model:
-      "zai-org-glm-4.7:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+      "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
     stream: true,
     tools: MURPH_NAMESPACE_TOOLS,
   });
@@ -90,7 +90,7 @@ test("Venice egress restores Codex Responses Lite tools to the standard top-leve
     assert.deepEqual(JSON.parse(body), {
       input: standardInput,
       model:
-        "zai-org-glm-4.7:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+        "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
       parallel_tool_calls: false,
       stream: true,
       tool_choice: "auto",
@@ -163,6 +163,13 @@ test("Venice egress fails closed for unknown product models and missing mappings
     body: encodeJson({ model: "gpt-5.6-sol" }),
     env: {},
   }), /HOSTED_VENICE_SOL_MODEL/u);
+  assert.throws(() => buildHostedVeniceResponsesRequestBody({
+    body: encodeJson({ model: "gpt-5.6-sol" }),
+    env: {
+      ...MODEL_ENV,
+      HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol-pro",
+    },
+  }), /HOSTED_VENICE_SOL_MODEL must be openai-gpt-56-sol/u);
 });
 
 test("Venice egress admits only Codex Responses POST endpoints", () => {
