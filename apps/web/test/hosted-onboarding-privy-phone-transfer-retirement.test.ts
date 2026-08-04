@@ -51,6 +51,7 @@ import {
   acquireHostedPrivyPhoneTransferPhoneLocksTx,
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
+  readHostedPrivyPhoneTransferProof,
 } from "@/src/lib/hosted-onboarding/privy-phone-transfer-retirement";
 import {
   buildHostedBrowserVaultRefreshRuntimeControlEvent,
@@ -78,6 +79,84 @@ describe("Privy phone-transfer source retirement", () => {
     mocks.acquireHostedLinqParticipantPhoneLockTx.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedPrivyUserByIdIfExists.mockResolvedValue(null);
+  });
+
+  describe("surviving provider source accounts", () => {
+    function stubPhoneOwner() {
+      mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+        core: { id: SOURCE_MEMBER_ID },
+        identity: { privyUserId: SOURCE_PRIVY_USER_ID },
+      });
+    }
+
+    function readProof() {
+      return readHostedPrivyPhoneTransferProof({
+        identity: {
+          phone: { number: PHONE_NUMBER, verifiedAt: 1 },
+          telegram: null,
+          userId: TARGET_PRIVY_USER_ID,
+        },
+        memberId: TARGET_MEMBER_ID,
+        prisma: {} as never,
+      });
+    }
+
+    it("asks the member to wait while the source still holds the phone", async () => {
+      stubPhoneOwner();
+      mocks.readHostedPrivyUserByIdIfExists.mockResolvedValue({
+        id: SOURCE_PRIVY_USER_ID,
+        linkedAccounts: [
+          {
+            latest_verified_at: 1,
+            phone_number: PHONE_NUMBER,
+            type: "phone",
+          },
+        ],
+      });
+
+      await expect(readProof()).rejects.toMatchObject({
+        code: "PRIVY_PHONE_NOT_READY",
+        retryable: true,
+      });
+    });
+
+    it("stops retrying once the source keeps other sign-ins without the phone", async () => {
+      stubPhoneOwner();
+      mocks.readHostedPrivyUserByIdIfExists.mockResolvedValue({
+        id: SOURCE_PRIVY_USER_ID,
+        linkedAccounts: [
+          {
+            address: "owner@example.com",
+            latest_verified_at: 1,
+            type: "email",
+          },
+          {
+            telegram_user_id: "telegram-source-a",
+            type: "telegram",
+          },
+          {
+            telegram_user_id: "telegram-source-b",
+            type: "telegram",
+          },
+        ],
+      });
+
+      await expect(readProof()).rejects.toMatchObject({
+        code: "PRIVY_PHONE_TRANSFER_SOURCE_STILL_ACTIVE",
+        retryable: false,
+      });
+    });
+
+    it("returns transfer proof once the provider released the source", async () => {
+      stubPhoneOwner();
+      mocks.readHostedPrivyUserByIdIfExists.mockResolvedValue(null);
+
+      await expect(readProof()).resolves.toEqual({
+        phoneNumber: PHONE_NUMBER,
+        sourceMemberId: SOURCE_MEMBER_ID,
+        sourcePrivyUserId: SOURCE_PRIVY_USER_ID,
+      });
+    });
   });
 
   it("fences an exact pristine not-started signup scaffold", async () => {

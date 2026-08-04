@@ -131,6 +131,46 @@ describe("runHostedWorkspaceInvocation", () => {
     );
   });
 
+  it("enables physical notes only for normalized true platform flags", async () => {
+    const enabledResults: boolean[] = [];
+    mocks.runPackageHostedWorkspaceInvocation.mockImplementation(
+      async (input: Record<string, unknown>) => {
+        const platform = requireObjectRecord(input.platform, "captured platform");
+        enabledResults.push(platform.physicalNotes !== undefined);
+        return {
+          nextWakeAt: null,
+          redactedStatus: { importedCount: 0 },
+          status: "idle" as const,
+        };
+      },
+    );
+    const supervisorEnv = {
+      HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      NODE_ENV: "production",
+    };
+
+    for (const value of ["TRUE", " true ", "false", undefined]) {
+      const platformEnv: Record<string, string> = {};
+      if (value !== undefined) {
+        platformEnv.HOSTED_PHYSICAL_NOTES_ENABLED = value;
+      }
+      await runHostedWorkspaceInvocation(createWorkspaceJob({
+        forwardedEnv: {
+          HOSTED_ASSISTANT_MODEL: "gpt-job",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
+          NODE_ENV: "production",
+        },
+        platformEnv,
+      }), {
+        supervisorEnv,
+        waitForBackgroundAssistantWork,
+      });
+    }
+
+    expect(enabledResults).toEqual([true, true, false, false]);
+  });
+
   it("clears browser-vault warm source state and invokes the package runtime in process", async () => {
     const runtimeResult = {
       nextWakeAt: null,

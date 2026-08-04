@@ -78,6 +78,9 @@ import {
   resolveAssistantUsageCredentialSource,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+} from "@murphai/operator-config/assistant/target-runtime";
+import {
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
   runHostedIdleCheckpointMaintenance,
   type HostedIdleMaintenanceOutcome,
@@ -3497,6 +3500,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               // must not have platform allowance debited for it.
               credentialSource: resolveAssistantUsageCredentialSource({
                 apiKeyEnv: null,
+                credentialSourceHint:
+                  runtimeEnv.HOSTED_ASSISTANT_PROVIDER
+                    === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
+                    ? "member"
+                    : null,
                 effectiveEnv: runtimeEnv,
                 provider: "codex-cli",
                 userEnvKeys: Object.keys(guardedRuntime.userEnv),

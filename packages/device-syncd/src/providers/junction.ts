@@ -28,6 +28,7 @@ import {
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
+import type { JunctionDeviceSyncJobPayloads } from "../config/provider-manifests.ts";
 import {
   isHostedRuntimeIdShapedDiagnosticToken,
   sanitizeHostedRuntimeDiagnosticText,
@@ -601,7 +602,7 @@ export function createJunctionDeviceSyncProvider(
       payload: {
         silentSinceAt: due.silentSinceAt,
         sourceProviderSlug: due.sourceProviderSlug,
-      },
+      } satisfies JunctionDeviceSyncJobPayloads["push_source_recovery"],
       priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
       availableAt: now,
       // One attempt per episode may be queued at a time.
@@ -3923,6 +3924,7 @@ function toClientConfig(config: JunctionDeviceSyncProviderConfig): JunctionClien
     apiKey: config.apiKey,
     environment: config.environment,
     region: config.region,
+    apiBaseUrl: config.apiBaseUrl,
     allowedLinkHosts: config.allowedLinkHosts,
     requestTimeoutMs: config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     fetchImpl: config.fetchImpl,
@@ -5107,10 +5109,15 @@ function buildConnectHistoricalBackfillWindow(
   };
 }
 
-function buildWindowJob(input: {
-  kind: "backfill" | "reconcile";
+type JunctionWindowJobPayload<Kind extends "backfill" | "reconcile"> = Omit<
+  JunctionDeviceSyncJobPayloads[Kind],
+  "windowStart" | "windowEnd"
+>;
+
+function buildWindowJob<Kind extends "backfill" | "reconcile">(input: {
+  kind: Kind;
   now: string;
-  payload?: Record<string, unknown>;
+  payload?: JunctionWindowJobPayload<Kind>;
   windowStart: string;
   priority: number;
 }): DeviceSyncJobInput {
@@ -5127,15 +5134,16 @@ function buildWindowJob(input: {
   });
 }
 
-function buildExactWindowJob(input: {
+function buildExactWindowJob<Kind extends "backfill" | "reconcile">(input: {
   availableAt?: string;
-  kind: "backfill" | "reconcile";
-  payload?: Record<string, unknown>;
+  kind: Kind;
+  payload?: JunctionWindowJobPayload<Kind>;
   windowStart: string;
   windowEnd: string;
   priority: number;
 }): DeviceSyncJobInput {
-  const sourceProviderSlug = normalizeString(input.payload?.sourceProviderSlug);
+  const windowPayload: { sourceProviderSlug?: string } | undefined = input.payload;
+  const sourceProviderSlug = normalizeString(windowPayload?.sourceProviderSlug);
   const dedupeIdentity = [
     "junction",
     input.kind,
@@ -5207,7 +5215,7 @@ function buildJunctionWebhookJobs(input: {
         ...(webhookDataJson ? { webhookDataJson } : {}),
         windowStart: input.window.windowStart,
         windowEnd: input.window.windowEnd,
-      },
+      } satisfies JunctionDeviceSyncJobPayloads["resource"],
       priority: 65,
       dedupeKey: webhookDataJson
         ? sha256Text(JSON.stringify([

@@ -36,6 +36,7 @@ export const JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA =
   defineSerializableConfiguredDeviceSyncProviderSchema<"junction">({
     serializableFields: {
       allowedLinkHosts: "string[]",
+      apiBaseUrl: "string",
       environment: "string",
       providerFilter: "string[]",
       pushSourceRecoveryEnabled: "boolean",

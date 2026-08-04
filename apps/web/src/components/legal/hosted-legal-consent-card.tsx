@@ -45,6 +45,7 @@ interface HostedLegalConsentCardProps {
   launchTitle?: string;
   mode?: HostedLegalConsentCardMode;
   onAccepted?: (status: HostedConsentStatus) => void | Promise<void>;
+  onActionPendingChange?: (pending: boolean) => void;
   onDecline?: () => void;
   onRequirementChange?: (required: boolean) => void;
   preferredScope?: HostedConsentScope;
@@ -87,6 +88,7 @@ function HostedLegalConsentCardState({
   launchTitle,
   mode = "panel",
   onAccepted,
+  onActionPendingChange,
   onDecline,
   onRequirementChange,
   preferredScope = "launch.legal",
@@ -181,6 +183,10 @@ function HostedLegalConsentCardState({
   );
   const actionPending = pending || acceptedHandoffPending;
   const canSubmit = isLaunchFlow || (isFeatureFlow && featureAccepted);
+
+  useEffect(() => {
+    onActionPendingChange?.(actionPending);
+  }, [actionPending, onActionPendingChange]);
 
   useEffect(() => {
     if (!status) return;
@@ -660,8 +666,7 @@ function resolveLaunchConsentVariant(
 }
 
 const LAUNCH_CONSENT_ASSURANCES = [
-  "We do not sell health data.",
-  "We do not use Murph-managed health data to train general-purpose AI models.",
+  "Not sold or used to train general-purpose AI models. Withdraw anytime in Settings.",
 ];
 
 function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
@@ -684,7 +689,7 @@ function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
       actionLabel: "Consent",
       assurances: LAUNCH_CONSENT_ASSURANCES,
       description:
-        "Murph and contracted AI providers use your health data to personalize your experience.",
+        "Murph uses health data you share to personalize answers and insights. AI providers process relevant data on Murph’s behalf to generate results.",
       title: "Use your health data",
     };
   }
@@ -693,7 +698,7 @@ function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
     actionLabel: "Consent",
     assurances: LAUNCH_CONSENT_ASSURANCES,
     description:
-      "By consenting, you accept the terms and let Murph and contracted AI providers use your health data to personalize your experience.",
+      "Murph uses health data you share to personalize answers and insights. AI providers process relevant data on Murph’s behalf to generate results. You’ll also agree to Murph’s Terms.",
     title: "Use your health data",
   };
 }

@@ -16,6 +16,7 @@ import {
   readHostedLinqRecentMessageEffectCountsTx,
   readHostedLinqIncomingLineState,
   readHostedLinqReceiptCorrelatedRecoveryLineTx,
+  syncHostedLinqConfiguredLinesTx,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
@@ -39,6 +40,7 @@ describe("listHostedLinqContactCardLines", () => {
     const findMany = vi.fn()
       .mockResolvedValueOnce([
         buildLineRow("+15550100001", {
+          configuredAt: new Date("2026-06-30T11:00:00.000Z"),
           providerLastSeenAt: new Date("2026-06-30T12:00:00.000Z"),
           providerReputationStatus: "HEALTHY",
           providerServiceStatus: "ACTIVE",
@@ -64,12 +66,14 @@ describe("listHostedLinqContactCardLines", () => {
       }),
     ).resolves.toMatchObject([
       {
+        isConfigured: true,
         phoneNumber: "+15550100001",
         phoneNumberHint: "*** 0001",
         providerReputationStatus: "HEALTHY",
         providerServiceStatus: "ACTIVE",
       },
       {
+        isConfigured: false,
         phoneNumber: "+15550100002",
         phoneNumberHint: "*** 0002",
         providerReputationStatus: "AT_RISK",
@@ -82,6 +86,8 @@ describe("listHostedLinqContactCardLines", () => {
       where: {
         configuredAt: { not: null },
         phoneNumberEncrypted: { not: null },
+        providerInventoryConfirmedAt: { gte: expect.any(Date) },
+        providerPhoneNumberId: { not: null },
       },
     }));
     expect(findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
@@ -89,6 +95,7 @@ describe("listHostedLinqContactCardLines", () => {
       where: {
         configuredAt: null,
         phoneNumberEncrypted: { not: null },
+        providerInventoryConfirmedAt: { gte: expect.any(Date) },
         providerPhoneNumberId: { not: null },
         providerSeenAt: { not: null },
       },
@@ -662,6 +669,57 @@ describe("hosted Linq proactive-conversation capacity", () => {
   });
 });
 
+describe("syncHostedLinqConfiguredLinesTx", () => {
+  it("takes the inventory-wide lock before any per-phone lock, read, or write", async () => {
+    const events: string[] = [];
+    const transactionClient = {
+      $executeRaw: vi.fn().mockImplementation((strings: TemplateStringsArray) => {
+        events.push(
+          strings.join("?").includes("hosted_linq_phone_number_inventory")
+            ? "inventory-lock"
+            : "phone-lock",
+        );
+        return Promise.resolve([]);
+      }),
+      hostedLinqLine: {
+        findMany: vi.fn().mockImplementation(() => {
+          events.push("candidate-read");
+          return Promise.resolve([]);
+        }),
+        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) => {
+          events.push("write");
+          return Promise.resolve({
+            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+          });
+        }),
+      },
+    };
+
+    await syncHostedLinqConfiguredLinesTx({
+      activeMemberLimit: null,
+      observedAt: new Date("2026-06-30T12:00:00.000Z"),
+      phoneNumbers: ["+15550100001", "+15550100002"],
+      prisma: transactionClient as never,
+    });
+
+    // Every multi-phone writer must serialize on the shared inventory lock
+    // before touching any per-phone lock, so lock acquisition can never
+    // invert against the provider-inventory writer.
+    expect(events[0]).toBe("inventory-lock");
+    expect(events.filter((event) => event === "inventory-lock")).toHaveLength(1);
+    expect(events.filter((event) => event === "phone-lock")).toHaveLength(2);
+    expect(events).toEqual([
+      "inventory-lock",
+      "phone-lock",
+      "candidate-read",
+      "write",
+      "phone-lock",
+      "candidate-read",
+      "write",
+    ]);
+  });
+});
+
 describe("upsertHostedLinqLineForPhoneTx", () => {
   it("keeps the advisory lock, candidate lookup, and upsert inside one transaction for plain clients", async () => {
     const events: string[] = [];
@@ -804,12 +862,14 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
 function buildLineRow(
   phoneNumber: string,
   input: {
+    configuredAt?: Date | null;
     providerLastSeenAt: Date;
     providerReputationStatus: string;
     providerServiceStatus: string;
   },
 ) {
   return {
+    configuredAt: input.configuredAt ?? null,
     phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
     phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
     phoneNumberLookupKey: `lookup:${phoneNumber}`,

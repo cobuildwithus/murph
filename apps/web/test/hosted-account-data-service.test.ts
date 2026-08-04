@@ -166,6 +166,7 @@ import {
 
 const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member",
+  "prisma.hosted_inference_connection",
   "prisma.hosted_web_session",
   "prisma.hosted_sensitive_action_challenge",
   "prisma.hosted_member_identity",
@@ -2537,6 +2538,32 @@ describe("deleteHostedAccountData", () => {
     expect(deleteCalls).toContainEqual({
       model: "hostedPhoneCall",
       where: { memberId: "member_123" },
+    });
+  });
+
+  it("records hosted physical-note rows before member deletion cascades them", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      countResults: { hostedPhysicalNote: 2 },
+      deleteCalls,
+      onTransaction: () => undefined,
+      operationOrder,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_physical_note"]).toBe(2);
+    expect(operationOrder.indexOf("count:hostedPhysicalNote")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedMember"),
+    );
+    expect(deleteCalls).not.toContainEqual({
+      model: "hostedPhysicalNote",
+      where: expect.anything(),
     });
   });
 

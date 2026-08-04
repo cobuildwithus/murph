@@ -59,6 +59,17 @@ describe("workspace source resolution", () => {
     expect(resolveAliasReplacement(aliases, "@murphai/cloudflare-hosted-control/client")).toBe(
       path.join(repoRoot, "packages/cloudflare-hosted-control/src/client.ts"),
     );
+    expect(
+      resolveAliasReplacement(
+        aliases,
+        "@murphai/cloudflare-hosted-control/inference-verification",
+      ),
+    ).toBe(
+      path.join(
+        repoRoot,
+        "packages/cloudflare-hosted-control/src/inference-verification.ts",
+      ),
+    );
     expect(resolveAliasReplacement(aliases, "@murphai/cloudflare-hosted-control/routes")).toBe(
       path.join(repoRoot, "packages/cloudflare-hosted-control/src/routes.ts"),
     );
@@ -163,6 +174,13 @@ describe("workspace source resolution", () => {
       .toEqual(["./packages/hosted-execution/src/assistant-personalization.ts"]);
     expect(tsconfig.compilerOptions?.paths?.["@murphai/clinical-records/retrieval-limits"])
       .toEqual(["./packages/clinical-records/src/retrieval-limits.ts"]);
+    expect(
+      tsconfig.compilerOptions?.paths?.[
+        "@murphai/cloudflare-hosted-control/inference-verification"
+      ],
+    ).toEqual([
+      "./packages/cloudflare-hosted-control/src/inference-verification.ts",
+    ]);
   });
 });
 

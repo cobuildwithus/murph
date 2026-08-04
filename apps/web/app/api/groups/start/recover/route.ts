@@ -1,3 +1,4 @@
+import { isUniqueViolation } from "@/src/lib/device-sync/prisma-store/prisma-errors";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
@@ -88,15 +89,26 @@ export const POST = withJsonError(async (request: Request) => {
       throwRecoveryConflict();
     }
 
-    await upsertHostedMemberPendingLinqBindingTx({
-      homeLineAssignedAt: null,
-      linqChatId: recovery.chatId,
-      memberId: session.member.id,
-      participantContact: recovery.participantContact,
-      participantContactObservedAt: recovery.observedAt,
-      prisma: tx,
-      recipientPhone: recovery.recipientPhone,
-    });
+    try {
+      await upsertHostedMemberPendingLinqBindingTx({
+        homeLineAssignedAt: null,
+        linqChatId: recovery.chatId,
+        memberId: session.member.id,
+        participantContact: recovery.participantContact,
+        participantContactObservedAt: recovery.observedAt,
+        prisma: tx,
+        recipientPhone: recovery.recipientPhone,
+      });
+    } catch (error) {
+      // The routing store signals "this contact already belongs to another
+      // member" as a unique-violation. The checks above only see the session
+      // member's own bindings, so this is the same conflict arriving from the
+      // one place that can see every member's — report it as one.
+      if (isUniqueViolation(error)) {
+        throwRecoveryConflict();
+      }
+      throw error;
+    }
     return "linked" as const;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 

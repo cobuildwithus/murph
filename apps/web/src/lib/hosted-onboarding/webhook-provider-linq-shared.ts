@@ -335,6 +335,7 @@ export const HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON: Record<
   string
 > = {
   billing_inactive: "sent-billing-inactive-notice",
+  health_data_consent_withdrawn: "sent-health-data-consent-withdrawn-notice",
   trial_conversion_pending: "sent-trial-conversion-notice",
 };
 

@@ -910,6 +910,15 @@ test("assistant usage parsing rejects invalid schema and non-string optional val
 test("assistant usage credential source resolves against the hosted user env snapshot", () => {
   assert.equal(
     resolveAssistantUsageCredentialSource({
+      apiKeyEnv: null,
+      credentialSourceHint: "member",
+      provider: "codex-cli",
+      userEnvKeys: [],
+    }),
+    "member",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
       apiKeyEnv: "OPENAI_API_KEY",
       effectiveEnv: {
         OPENAI_API_KEY: "member-api-key",

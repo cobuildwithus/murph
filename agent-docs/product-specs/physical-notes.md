@@ -11,8 +11,15 @@ Murph can mail one expressive, US-only physical note from a direct conversation
 or a hosted group. GPT Image generates the complete color artwork page, including
 any handwriting, illustration, and a small `murph ai` mark. Murph may show the
 artwork first when a draft or choice is useful, but an explicit send request with
-a complete address may continue through generation and mailing without an extra
-preview round trip.
+a complete or reliably resolved recipient address may continue through
+generation and mailing without an extra preview round trip. The platform
+supplies Murph's fixed return address; it is never collected from the person
+sending the note.
+
+A clear request to send a thank-you, congratulations, apology, or similar note
+also supplies ordinary drafting intent. Murph uses the conversation to write
+fitting short copy and asks about the message only when authorship, relationship,
+signature, or meaning is materially ambiguous.
 
 Each hosted member receives one complimentary note under the versioned
 `physical-note-v1` offer. A hosted group receives its own complimentary note
@@ -44,6 +51,35 @@ silently ending. If graceful runtime shutdown interrupts generation, the
 existing completion channel durably stages one failed result so a restart can
 tell the conversation instead of losing the continuation.
 
+## Address completion
+
+Omitted city, state, or ZIP fields are not automatically a conversational
+blocker. Before asking for one of those objective details, the assistant may run
+`vault-cli route resolve-address` against the exact US destination text already
+supplied for the current note request. The command reuses the CLI-owned Mapbox
+command surface and the existing Worker-owned provider-egress credential
+boundary and requests at most three candidates. The command itself does not
+cache or write the query or result into canonical vault or hosted-product state;
+the normalized result remains ordinary assistant-turn context under the
+runtime's existing conversation and checkpoint retention rules.
+
+The command returns a `recommendedCandidate` only when deduplication leaves one
+candidate, the provider classifies it as a strong address result, the supplied
+house number and street matched, any secondary-address component matched rather
+than being extrapolated, and every field fits the existing physical-note
+recipient schema. Every supplied delivery component must survive the lookup:
+city, state names or codes, the complete five- or nine-digit ZIP, and any unit,
+suite, floor, or building value must agree with the candidate and the provider's
+component match. Any additional candidate, weaker or conflicting component
+match, incomplete US mailing field, or overlong send field leaves the
+recommendation empty and requires one narrow clarification.
+
+Address completion may fill only the destination the requester already supplied.
+It cannot identify a recipient, discover where a person lives, choose between
+genuinely ambiguous people or destinations, or authorize the mail effect. The
+explicit accepted send request remains the sole model-facing authority for one
+note.
+
 ## Ownership and persistence
 
 Web owns the sole durable `HostedPhysicalNote` row. It stores only operational
@@ -54,12 +90,15 @@ note text.
 
 The exact authorized input derives the request key. The artwork and recipient
 remain in the separate request fingerprint, so reusing one approval with changed
-content is a collision rather than a second effect. Before inserting a row, Web
-validates the artwork lifetime, constructs the provider runtime, reasserts final
-group authority, and observes caller cancellation. Accepted replays resolve
+content is a collision rather than a second effect. Accepted replays resolve
 from the durable row even after the temporary artwork capability expires; an
-existing uncertain send remains pending rather than being rewritten. Web then
-admits a new provider effect under the member lock.
+existing uncertain send remains pending rather than being rewritten. After that
+replay check, Web constructs the provider runtime and a later request may repair
+one stale complimentary claim against Lob. Confirmed acceptance finalizes the
+stale row, confirmed absence releases its claim, and an indeterminate lookup
+changes nothing. The current request then validates the artwork lifetime,
+reasserts final group authority, observes caller cancellation, and follows its
+ordinary member-locked admission, provider effect, replay, and response path.
 
 `memberId + complimentaryOfferCode` atomically admits one complimentary note per
 direct member or synthetic group member. A definite provider rejection releases
@@ -76,16 +115,32 @@ remaining capacity, and no second balance owner is needed.
 
 ## Provider boundary
 
-Web alone holds `LOB_API_KEY` and the configured return-address id. Lob receives
-one color US Letter request using First Class mail, `insert_blank_page`, and a
-provider idempotency key equal to the physical-note id. The generated artwork is
-wrapped only in deterministic letter-sized transport HTML with the required
-print-safe margin; visual expression remains model-owned.
+The existing Worker-owned hosted provider-egress boundary holds the real Mapbox
+credential. The runner issues only the bounded CLI request through the
+already-allowlisted Mapbox Geocoding path, so the real credential does not enter
+the model prompt or workspace. The request uses `autocomplete=false` and
+`permanent=false`, and its normalized result omits coordinates and provider
+identifiers before returning to the assistant.
 
-Test keys may render proofs. A `live_` key is rejected unless
-`LOB_PHYSICAL_NOTES_LIVE_ENABLED=true`. The charged amount comes from
-`LOB_PHYSICAL_NOTE_COST_USD_MICROS` and its explicit pricing version, not from a
-scraped public rate.
+Web alone holds `LOB_API_KEY` and the configured return-address id. The assistant
+and tool schema accept only the recipient address. Lob receives one color US
+Letter request using First Class mail, `insert_blank_page`, and a provider
+idempotency key equal to the physical-note id. The generated artwork is wrapped
+only in deterministic letter-sized transport HTML with the required print-safe
+margin; visual expression remains model-owned.
+
+USPS Secure Destruction is an account-level Lob setting rather than a per-letter
+API field. Operators enable it in the Lob account before live sending so eligible
+undeliverable First Class notes are destroyed instead of returned to Murph's
+mailbox. The runtime keeps every note on First Class mail, and a `live_` key is
+rejected unless both `LOB_PHYSICAL_NOTES_LIVE_ENABLED=true` and
+`LOB_USPS_SECURE_DESTRUCTION_CONFIRMED=true` are present. The confirmation flag
+does not change the Lob account; it records that an operator already enabled the
+account setting.
+
+Test keys may render proofs without the two live-account confirmations. The
+charged amount comes from `LOB_PHYSICAL_NOTE_COST_USD_MICROS` and its explicit
+pricing version, not from a scraped public rate.
 
 Cloudflare exposes the composable tool only when the non-secret platform
 capability `HOSTED_PHYSICAL_NOTES_ENABLED=true` is set. This flag must be enabled
@@ -114,10 +169,20 @@ and postal-service retention remain governed by those providers.
 
 ## Deployment
 
-Deploy the Prisma migration and Web route/service first, with live sending off.
+The proactive address-completion change ships in the runner bundle and reuses an
+existing CLI command family plus the unchanged Worker-owned Mapbox provider-egress
+credential boundary and allowlist. It adds no Web route, database schema, durable
+state, or mixed-version protocol. Deploy the Cloudflare Worker and runner bundle
+with the ordinary fingerprint convergence check; an older warm runner simply
+retains the prior ask-for-address behavior.
+
+The original physical-note deployment order remains: deploy the Prisma migration
+and Web route/service first, with live sending off.
 Then deploy Cloudflare and the assistant runtime/tool surface with
-`HOSTED_PHYSICAL_NOTES_ENABLED` still off. Verify at least one Lob test-mode
-proof before enabling the Cloudflare capability, and enable live sending only
-after that proof passes. The older runtime simply lacks the tool during a
-Web-first compatibility window; a new runtime against an old Web deployment
+`HOSTED_PHYSICAL_NOTES_ENABLED` still off. Configure Lob's fixed Murph return
+address and enable USPS Secure Destruction in the Lob account. Verify at least
+one Lob test-mode proof before enabling the Cloudflare capability. Set
+`LOB_USPS_SECURE_DESTRUCTION_CONFIRMED=true` only after the account setting is
+active, then enable live sending. The older runtime simply lacks the tool during
+a Web-first compatibility window; a new runtime against an old Web deployment
 would expose a route that does not exist and is therefore the unsafe order.

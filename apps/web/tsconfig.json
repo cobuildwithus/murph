@@ -75,6 +75,9 @@
       "@murphai/hosted-execution/assistant-identifiers": [
         "../../packages/hosted-execution/src/assistant-identifiers.ts"
       ],
+      "@murphai/hosted-execution/assistant-inference": [
+        "../../packages/hosted-execution/src/assistant-inference.ts"
+      ],
       "@murphai/hosted-execution/assistant-model": [
         "../../packages/hosted-execution/src/assistant-model.ts"
       ],

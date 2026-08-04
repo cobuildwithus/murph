@@ -27,6 +27,7 @@ import {
   normalizeOptionalText,
   readDeliveredCleanupMessages,
   readDeliveredCleanupTargetAliases,
+  readDeliveredIdempotencyKey,
   readDeliveredProviderMessageId,
   readDeliveredProviderMessageIds,
   readDeliveredProviderThreadId,
@@ -516,6 +517,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     answeredMailboxItemIds,
     bindingDelivery,
     candidate,
+    card,
     deliverySource,
     dependencies,
     explicitTarget,
@@ -545,17 +547,36 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     }
 
     let delivered
+    let effectiveTextDelivery = card === null
+      ? { idempotencyKey }
+      : null
+    const persistLinqAppCardTextFallback =
+      dependencies.persistLinqAppCardTextFallback
+    const persistAppCardTextFallback =
+      persistLinqAppCardTextFallback
+        ? async (input: { idempotencyKey: string }): Promise<void> => {
+            await persistLinqAppCardTextFallback(input)
+            effectiveTextDelivery = input
+          }
+        : undefined
     const mediaInput = media.length > 0 ? media : undefined
     const request: Parameters<
       NonNullable<AssistantChannelDependencies['sendLinq']>
     >[0] = {
+      directRecipientPhoneNumber: normalizeDirectLinqRecipient(actorId),
       fromPhoneNumber: deliverySource?.kind === 'linq' ? deliverySource.fromPhoneNumber : null,
       idempotencyKey: idempotencyKey ?? null,
       target: candidate.target,
       targetKind: candidate.kind,
+      ...(card === null ? {} : { card, threadIsDirect }),
       message,
       ...(nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
       ...(mediaInput ? { media: mediaInput } : {}),
+      ...(persistAppCardTextFallback
+        ? {
+            persistAppCardTextFallback,
+          }
+        : {}),
       replyToMessageId: replyToMessageId ?? null,
       ...(dependencies.signal ? { signal: dependencies.signal } : {}),
     }
@@ -564,7 +585,6 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         ? await dependencies.sendLinq({
             ...request,
             answeredMailboxItemIds: answeredMailboxItemIds ?? [],
-            directRecipientPhoneNumber: normalizeDirectLinqRecipient(actorId),
             homeRouteFallbackAllowed: shouldAllowLinqHomeRouteFallback({
               bindingDelivery,
               candidate,
@@ -573,23 +593,34 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
             }),
             ...(mediaInput ? { media: mediaInput } : {}),
           })
-        : await sendLinqMessage(request, dependencies.signal ? { signal: dependencies.signal } : {})
+        : await sendLinqMessage(request, {
+            ...(request.persistAppCardTextFallback
+              ? {
+                  persistAppCardTextFallback:
+                    request.persistAppCardTextFallback,
+                }
+              : {}),
+            ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+          })
     } catch (error) {
-      const recovered = await maybeRecoverMissingLinqDirectThread({
-        actorId,
-        candidate,
-        dependencies,
-        error,
-        fromPhoneNumber:
-          deliverySource?.kind === 'linq'
-            ? deliverySource.fromPhoneNumber
-            : null,
-        idempotencyKey,
-        media,
-        message,
-        ...(nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
-        replyToMessageId,
-      })
+      const textDelivery = effectiveTextDelivery
+      const recovered = textDelivery
+        ? await maybeRecoverMissingLinqDirectThread({
+            actorId,
+            candidate,
+            dependencies,
+            error,
+            fromPhoneNumber:
+              deliverySource?.kind === 'linq'
+                ? deliverySource.fromPhoneNumber
+                : null,
+            idempotencyKey: textDelivery.idempotencyKey,
+            media,
+            message,
+            ...(nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
+            replyToMessageId,
+          })
+        : null
       if (!recovered) {
         throw error
       }
@@ -599,6 +630,10 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     const deliveredTarget = readDeliveredTarget(delivered)
     const providerThreadId = readDeliveredProviderThreadId(delivered)
     return {
+      idempotencyKey:
+        readDeliveredIdempotencyKey(delivered) ??
+        effectiveTextDelivery?.idempotencyKey ??
+        idempotencyKey,
       target: deliveredTarget ?? providerThreadId ?? candidate.target,
       targetKind: inferDeliveredLinqTargetKind(candidate.kind, delivered),
       providerMessageId: readDeliveredProviderMessageId(delivered),

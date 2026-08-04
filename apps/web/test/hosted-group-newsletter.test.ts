@@ -150,6 +150,28 @@ describe("hosted group newsletter participants", () => {
     )).toHaveLength(3);
   });
 
+  it("excludes explicitly withdrawn grantors while keeping legacy missing grants eligible", async () => {
+    const prisma = createPrismaMock({
+      newsletterWithdrawnMemberIds: ["member_active_with_email"],
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const participants = await prepareHostedGroupNewsletterParticipants({
+      runtimeMemberId: "group_runtime_member",
+    });
+
+    expect(participants).toEqual(expect.objectContaining({
+      participants: [
+        {
+          authorizedShares: [],
+          hasEmail: false,
+          memberId: "member_active_missing_email",
+        },
+      ],
+      status: "ok",
+    }));
+  });
+
   it("keeps participant-backed thread-container members eligible in the batched access read", async () => {
     const prisma = createPrismaMock({
       newsletterParticipantBackedMemberIds: ["member_active_with_email"],
@@ -196,6 +218,29 @@ describe("hosted group newsletter participants", () => {
         },
       }),
     }));
+  });
+
+  it("does not derive newsletter access from an explicitly withdrawn container owner", async () => {
+    const prisma = createPrismaMock({
+      newsletterActiveOwnerMemberIds: ["member_active_with_email"],
+      newsletterParticipantBackedMemberIds: ["member_active_with_email"],
+      newsletterParticipantUnavailableMemberIds: ["member_active_with_email"],
+      newsletterWithdrawnOwnerMemberIds: ["member_active_with_email"],
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const participants = await prepareHostedGroupNewsletterParticipants({
+      runtimeMemberId: "group_runtime_member",
+    });
+
+    if (participants.status !== "ok") {
+      throw new Error("Expected newsletter preparation.");
+    }
+    expect(participants.participants).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        memberId: "member_active_with_email",
+      }),
+    ]));
   });
 
   it("returns current address-free data grant ids only for email-authorized active members", async () => {
@@ -794,13 +839,20 @@ function verifiedEmailFact(address: string, input?: {
 }
 
 function newsletterMemberAccessState(input: {
+  activeOwner?: boolean;
   memberId: string;
   participantBacked?: boolean;
+  participantEligible?: boolean;
   suspended: boolean;
+  withdrawn?: boolean;
+  withdrawnOwner?: boolean;
 }) {
   return {
     accountGroupMemberships: [],
     billingStatus: input.participantBacked ? "not_started" as const : "active" as const,
+    consentGrants: input.withdrawn
+      ? [{ scope: "launch.health-data", status: "revoked" }]
+      : [],
     id: input.memberId,
     suspendedAt: input.suspended
       ? new Date("2026-07-13T12:00:00.000Z")
@@ -809,10 +861,15 @@ function newsletterMemberAccessState(input: {
       ? {
           owner: {
             accountGroupMemberships: [],
-            billingStatus: "not_started" as const,
+            billingStatus: input.activeOwner ? "active" as const : "not_started" as const,
+            consentGrants: input.withdrawnOwner
+              ? [{ scope: "launch.health-data", status: "revoked" }]
+              : [],
             suspendedAt: null,
           },
-          participants: [{ participantMemberId: "member_active_participant" }],
+          participants: input.participantEligible === false
+            ? []
+            : [{ participantMemberId: "member_active_participant" }],
         }
       : null,
   };
@@ -822,9 +879,13 @@ function createPrismaMock(input?: {
   emailGrant?: boolean;
   groupRuntimeMemberId?: string | null;
   newsletterEmailLookupKeyByMember?: Readonly<Record<string, string | null>>;
+  newsletterActiveOwnerMemberIds?: readonly string[];
   newsletterMissingEmailMemberIds?: readonly string[];
   newsletterParticipantBackedMemberIds?: readonly string[];
+  newsletterParticipantUnavailableMemberIds?: readonly string[];
   newsletterSuspendedMemberIds?: readonly string[];
+  newsletterWithdrawnMemberIds?: readonly string[];
+  newsletterWithdrawnOwnerMemberIds?: readonly string[];
 }) {
   const prisma = {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
@@ -854,6 +915,18 @@ function createPrismaMock(input?: {
           const participantBackedMemberIds = new Set(
             input?.newsletterParticipantBackedMemberIds ?? [],
           );
+          const participantUnavailableMemberIds = new Set(
+            input?.newsletterParticipantUnavailableMemberIds ?? [],
+          );
+          const activeOwnerMemberIds = new Set(
+            input?.newsletterActiveOwnerMemberIds ?? [],
+          );
+          const withdrawnMemberIds = new Set(
+            input?.newsletterWithdrawnMemberIds ?? [],
+          );
+          const withdrawnOwnerMemberIds = new Set(
+            input?.newsletterWithdrawnOwnerMemberIds ?? [],
+          );
           const memberIds = [
             "member_active_with_email",
             "member_suspended",
@@ -865,9 +938,13 @@ function createPrismaMock(input?: {
             members: memberIds.map((memberId) => ({
               member: {
                 ...newsletterMemberAccessState({
+                  activeOwner: activeOwnerMemberIds.has(memberId),
                   memberId,
                   participantBacked: participantBackedMemberIds.has(memberId),
+                  participantEligible: !participantUnavailableMemberIds.has(memberId),
                   suspended: suspendedMemberIds.has(memberId),
+                  withdrawn: withdrawnMemberIds.has(memberId),
+                  withdrawnOwner: withdrawnOwnerMemberIds.has(memberId),
                 }),
                 emailAuthorization: missingEmailMemberIds.has(memberId)
                   ? null
@@ -909,14 +986,30 @@ function createPrismaMock(input?: {
         const participantBackedMemberIds = new Set(
           input?.newsletterParticipantBackedMemberIds ?? [],
         );
+        const participantUnavailableMemberIds = new Set(
+          input?.newsletterParticipantUnavailableMemberIds ?? [],
+        );
+        const activeOwnerMemberIds = new Set(
+          input?.newsletterActiveOwnerMemberIds ?? [],
+        );
+        const withdrawnMemberIds = new Set(
+          input?.newsletterWithdrawnMemberIds ?? [],
+        );
+        const withdrawnOwnerMemberIds = new Set(
+          input?.newsletterWithdrawnOwnerMemberIds ?? [],
+        );
         return [
           "member_active_with_email",
           "member_suspended",
           "member_active_missing_email",
         ].map((memberId) => newsletterMemberAccessState({
+          activeOwner: activeOwnerMemberIds.has(memberId),
           memberId,
           participantBacked: participantBackedMemberIds.has(memberId),
+          participantEligible: !participantUnavailableMemberIds.has(memberId),
           suspended: suspendedMemberIds.has(memberId),
+          withdrawn: withdrawnMemberIds.has(memberId),
+          withdrawnOwner: withdrawnOwnerMemberIds.has(memberId),
         }));
       }),
     },

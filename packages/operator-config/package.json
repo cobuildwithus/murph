@@ -163,6 +163,11 @@
       "types": "./dist/assistant/delivery-failure.d.ts",
       "import": "./dist/assistant/delivery-failure.js",
       "default": "./dist/assistant/delivery-failure.js"
+    },
+    "./assistant-response-cards": {
+      "types": "./dist/assistant-response-cards.d.ts",
+      "import": "./dist/assistant-response-cards.js",
+      "default": "./dist/assistant-response-cards.js"
     }
   },
   "files": [

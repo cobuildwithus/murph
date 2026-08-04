@@ -149,6 +149,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes the member row after child stores are explicitly deleted; Prisma cascade remains a safety net.",
   },
   {
+    slug: "prisma.hosted_inference_connection",
+    label: "Encrypted custom inference connection",
+    deletion: "live-delete",
+    note: "Deletes the selected state, encrypted endpoint and credential, model, protocol, capabilities, and verification metadata before the member row. Browser-facing projections expose only sanitized connection metadata and never the credential or ciphertext.",
+  },
+  {
     slug: "prisma.hosted_web_session",
     label: "Hosted web app sessions",
     deletion: "live-delete",
@@ -2109,6 +2115,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_ai_usage_period", await input.prisma.hostedAiUsagePeriod.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_product_feedback", await input.prisma.hostedProductFeedback.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_codex_auth_connection", await input.prisma.hostedCodexAuthConnection.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.hosted_inference_connection", await input.prisma.hostedInferenceConnection.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_linq_daily_state", await input.prisma.hostedLinqDailyState.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_linq_invite_delivery", await input.prisma.hostedLinqDelivery.deleteMany({
     where: buildHostedLinqInviteSignupDeliveryWhere(input.memberIds),
@@ -2140,6 +2147,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_computer_handoff", await input.prisma.hostedComputerHandoff.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_phone_call", await input.prisma.hostedPhoneCall.deleteMany({ where: { memberId: memberIdFilter } }));
+  recordCount("prisma.hosted_physical_note", await input.prisma.hostedPhysicalNote.count({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_subscription_checkout", await input.prisma.hostedMemberSubscriptionCheckout.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId: memberIdFilter } }));

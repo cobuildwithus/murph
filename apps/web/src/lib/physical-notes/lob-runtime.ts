@@ -8,7 +8,9 @@ import type {
 
 const LOB_API_BASE_URL = "https://api.lob.com";
 const LOB_API_VERSION = "2024-01-01";
-const LOB_CREATE_TIMEOUT_MS = 30_000;
+const LOB_LOOKUP_TIMEOUT_MS = 5_000;
+const LOB_REQUEST_TIMEOUT_MS = 30_000;
+const PHYSICAL_NOTE_METADATA_KEY = "murph_physical_note_id";
 
 export type LobPhysicalNoteCreateResult =
   | {
@@ -23,6 +25,18 @@ export type LobPhysicalNoteCreateResult =
       kind: "ambiguous_failure";
     };
 
+export type LobPhysicalNoteLookupResult =
+  | {
+      kind: "accepted";
+      providerLetterId: string;
+    }
+  | {
+      kind: "absent";
+    }
+  | {
+      kind: "indeterminate";
+    };
+
 export interface LobPhysicalNoteRuntime {
   create(input: {
     artworkUrl: string;
@@ -31,6 +45,10 @@ export interface LobPhysicalNoteRuntime {
     recipient: HostedPhysicalNoteRecipient;
     signal?: AbortSignal;
   }): Promise<LobPhysicalNoteCreateResult>;
+  findLetterByNoteId(input: {
+    noteId: string;
+    signal?: AbortSignal;
+  }): Promise<LobPhysicalNoteLookupResult>;
 }
 
 export function createLobPhysicalNoteRuntime(input: {
@@ -48,9 +66,9 @@ export function createLobPhysicalNoteRuntime(input: {
       const signal = request.signal
         ? AbortSignal.any([
             request.signal,
-            AbortSignal.timeout(LOB_CREATE_TIMEOUT_MS),
+            AbortSignal.timeout(LOB_REQUEST_TIMEOUT_MS),
           ])
-        : AbortSignal.timeout(LOB_CREATE_TIMEOUT_MS);
+        : AbortSignal.timeout(LOB_REQUEST_TIMEOUT_MS);
       let response: Response;
       try {
         response = await fetchImpl(`${LOB_API_BASE_URL}/v1/letters`, {
@@ -62,7 +80,7 @@ export function createLobPhysicalNoteRuntime(input: {
             from: fromAddressId,
             mail_type: "usps_first_class",
             metadata: {
-              murph_physical_note_id: request.noteId,
+              [PHYSICAL_NOTE_METADATA_KEY]: request.noteId,
             },
             size: "us_letter",
             to: {
@@ -109,6 +127,48 @@ export function createLobPhysicalNoteRuntime(input: {
         ? { kind: "accepted", providerLetterId }
         : { kind: "ambiguous_failure" };
     },
+    async findLetterByNoteId(request) {
+      request.signal?.throwIfAborted();
+      const signal = request.signal
+        ? AbortSignal.any([
+            request.signal,
+            AbortSignal.timeout(LOB_LOOKUP_TIMEOUT_MS),
+          ])
+        : AbortSignal.timeout(LOB_LOOKUP_TIMEOUT_MS);
+      const url = new URL("/v1/letters", LOB_API_BASE_URL);
+      url.searchParams.set("limit", "2");
+      url.searchParams.set(
+        `metadata[${PHYSICAL_NOTE_METADATA_KEY}]`,
+        request.noteId,
+      );
+
+      let response: Response;
+      try {
+        response = await fetchImpl(url, {
+          headers: {
+            authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
+            "Lob-Version": LOB_API_VERSION,
+          },
+          method: "GET",
+          redirect: "error",
+          signal,
+        });
+      } catch {
+        return { kind: "indeterminate" };
+      }
+
+      if (!response.ok) {
+        return { kind: "indeterminate" };
+      }
+
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        return { kind: "indeterminate" };
+      }
+      return readLobLetterLookup(payload) ?? { kind: "indeterminate" };
+    },
   };
 }
 
@@ -138,6 +198,26 @@ function readLobLetterId(value: unknown): string | null {
   const id = Reflect.get(value, "id");
   return typeof id === "string" && /^ltr_[A-Za-z0-9]+$/u.test(id)
     ? id
+    : null;
+}
+
+function readLobLetterLookup(value: unknown): LobPhysicalNoteLookupResult | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const data = Reflect.get(value, "data");
+  if (!Array.isArray(data)) {
+    return null;
+  }
+  if (data.length === 0) {
+    return { kind: "absent" };
+  }
+  if (data.length !== 1) {
+    return null;
+  }
+  const providerLetterId = readLobLetterId(data[0]);
+  return providerLetterId
+    ? { kind: "accepted", providerLetterId }
     : null;
 }
 

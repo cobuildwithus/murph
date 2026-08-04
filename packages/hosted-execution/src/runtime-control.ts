@@ -14,6 +14,9 @@ import type {
   AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
+  HostedAssistantCustomInferenceOverride,
+} from "./assistant-inference.ts";
+import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
   HostedAssistantProvider,
@@ -2608,9 +2611,11 @@ export interface HostedWorkspaceState {
 
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
+  hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
+  platformAiUsageAllowed?: boolean;
   workspace: HostedWorkspaceState | null;
 }
 
@@ -2869,6 +2874,21 @@ export interface HostedRuntimeWebStatusResponse {
   recentLogs?: HostedRuntimeLogEntry[];
   userId: string;
   workspace: HostedWorkspaceState | null;
+}
+
+export const HOSTED_HEALTH_DATA_CONSENT_STATES = [
+  "granted",
+  "revoked",
+  "missing",
+] as const;
+
+export type HostedHealthDataConsentState =
+  (typeof HOSTED_HEALTH_DATA_CONSENT_STATES)[number];
+
+export interface HostedRuntimeHealthDataAdmissionResponse {
+  consentState: HostedHealthDataConsentState;
+  processingAllowed: boolean;
+  userId: string;
 }
 
 export const HOSTED_WORKSPACE_INVOCATION_STATUSES = [
