@@ -37,6 +37,8 @@ materially ambiguous.
 
 1. Confirm the recipient address is complete as supplied or safely resolved and
    the request contains enough intent to make the note.
+   Murph's fixed return address is platform configuration. Never ask the person
+   for a return address, invent one, or place one in tool arguments or artwork.
 2. Call `murph.generate_image` with portrait size `1024x1536`, JPEG output,
    high quality, and the exact current authorizing message as `message_ref`.
    The generated image is the complete expressive page.
@@ -78,8 +80,9 @@ Include these print constraints in the prompt:
   branding inside the artwork;
 - large enough lettering and contrast to remain legible in print.
 
-The address belongs only in `murph.send_physical_note`; never place it in the
-image prompt.
+The recipient address belongs only in `murph.send_physical_note`; never place
+it in the image prompt. Trusted server code supplies the platform return
+address.
 
 ## Authority and safety
 
@@ -93,7 +96,7 @@ claims to come from an uninvolved real person. Ask one concise question only
 after the permitted lookup cannot uniquely resolve a delivery-critical address
 field, or when send intent or note authorship is genuinely incomplete. Do not
 ask the person to repeat retrievable city, state, or ZIP details or whether
-Murph should draft a clear note request.
+Murph should draft a clear note request. Never ask for a return address.
 
 Treat tool results literally:
 

@@ -1,15 +1,43 @@
 import {
   HOSTED_PHYSICAL_NOTES_PATH,
+  HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS,
   type HostedPhysicalNoteSendRequest,
 } from "@murphai/hosted-execution/physical-notes";
-import { describe, expect, it, vi } from "vitest";
+import {
+  HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
+} from "@murphai/hosted-execution/routes";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
+}));
+
+vi.mock("../src/web-control-plane.ts", async () => {
+  const actual = await vi.importActual<typeof import("../src/web-control-plane.ts")>(
+    "../src/web-control-plane.ts",
+  );
+  return {
+    ...actual,
+    fetchHostedExecutionWebControlPlaneResponse:
+      mocks.fetchHostedExecutionWebControlPlaneResponse,
+  };
+});
+
+import { readHostedExecutionEnvironment } from "../src/env.ts";
+import {
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
+} from "../src/runner-outbound/headers.ts";
 import {
   createHostedWebPhysicalNotePort,
 } from "../src/runtime-platform/physical-notes-port.ts";
 import {
   readHostedRunnerWebControlPolicy,
 } from "../src/runner-outbound/shared-web-control-policy.ts";
+import type { RunnerOutboundEnvironmentSource } from "../src/runner-outbound/shared.ts";
+import { handleRunnerWebControlRequest } from "../src/runner-outbound/web-control.ts";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 const REQUEST = {
   artwork: {
@@ -27,6 +55,16 @@ const REQUEST = {
   },
   requestKey: "physical_note_test",
 } satisfies HostedPhysicalNoteSendRequest;
+
+const WRITE_FENCE_HEADERS = {
+  [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_physical_note",
+  [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "generation_physical_note",
+  [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "1",
+};
+
+beforeEach(() => {
+  mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
+});
 
 describe("createHostedWebPhysicalNotePort", () => {
   it("allows only the bounded physical-note POST route", () => {
@@ -95,5 +133,51 @@ describe("createHostedWebPhysicalNotePort", () => {
       code: "HOSTED_PHYSICAL_NOTE_UNAVAILABLE",
       status: 503,
     });
+  });
+
+  it("forwards physical notes with their longer deadline and keeps other operations on the default", async () => {
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(
+      Response.json({ ok: true }),
+    );
+    const environment = readHostedExecutionEnvironment(
+      createHostedExecutionTestEnv({
+        HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "30000",
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+    );
+    const env: RunnerOutboundEnvironmentSource = {
+      BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
+      USER_RUNNER: {
+        getByName: () => ({
+          validateRuntimeWriteFence: async () => true,
+        }),
+      },
+    };
+
+    for (const path of [
+      HOSTED_PHYSICAL_NOTES_PATH,
+      HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
+    ]) {
+      const url = new URL(`http://web-control.worker${path}`);
+      const response = await handleRunnerWebControlRequest({
+        env,
+        environment,
+        request: new Request(url, {
+          body: "{}",
+          headers: WRITE_FENCE_HEADERS,
+          method: "POST",
+        }),
+        url,
+        userId: "member_physical_note",
+      });
+      expect(response.status).toBe(200);
+    }
+
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.map(
+      ([call]) => call.timeoutMs,
+    )).toEqual([
+      HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS,
+      environment.webControlTimeoutMs,
+    ]);
   });
 });

@@ -20,10 +20,10 @@ import { getPrisma } from "@/src/lib/prisma";
 
 export const HOSTED_PRODUCT_SUPPORT_EMAIL = "support@withmurph.ai";
 export const HOSTED_PRODUCT_SUPPORT_EMAILS_PER_MEMBER_UTC_DAY_MAX = 3;
-// The member-linked row and outbound email carry only this server-authored
-// text. Model-authored free text is best-effort de-identified and may retain
-// semantic private details, so it is persisted exclusively on the anonymous
-// path (see the detail row below), never beside member identity.
+// The support alert and its member-linked marker carry only server-authored
+// text because that path deliberately sends identity to an operator. Ordinary
+// stored feedback may be linked to a private member, but stays bounded and
+// sanitized and is never emailed beside that identity by this service.
 export const HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY =
   "Support escalation: member-requested product support escalation.";
 
@@ -58,7 +58,9 @@ export async function recordHostedProductFeedback(input: {
     return await persistHostedProductFeedback({
       feedback,
       feedbackId,
-      memberId: input.memberId ?? null,
+      memberId: await resolveOrdinaryHostedProductFeedbackMemberId(
+        input.memberId,
+      ),
     });
   }
   if (!isHostedProductSupportEscalationFeedback(feedback)) {
@@ -253,6 +255,25 @@ export function buildHostedProductFeedbackId(input: {
     .digest("hex")
     .slice(0, 32);
   return `product_feedback_${digest}`;
+}
+
+async function resolveOrdinaryHostedProductFeedbackMemberId(
+  memberId: string | null | undefined,
+): Promise<string | null> {
+  const normalizedMemberId = memberId?.trim();
+  if (!normalizedMemberId) {
+    return null;
+  }
+
+  // Group callbacks are bound to a synthetic hosted member row, not the human
+  // speaker who expressed the feedback. Keep those rows anonymous rather than
+  // making the synthetic runtime look like a messageable person.
+  const threadContainer = await getPrisma().hostedThreadContainer.findUnique({
+    select: { memberId: true },
+    where: { memberId: normalizedMemberId },
+  });
+
+  return threadContainer ? null : normalizedMemberId;
 }
 
 async function persistHostedProductFeedback(input: {
