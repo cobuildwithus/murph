@@ -18,6 +18,12 @@ or weakening the production `__Host-` cookie boundary.
   signed connect-link boundary but calls the deleted callback `complete` POST
   route and receives `404`. The production callback now completes directly on
   the exact provider redirect URL with `GET`.
+- The production artifact also emits the secure callback-proof cookie name,
+  while the dual-mode scenario expected only its development name. The
+  scenario must select the callback-proof name from the issued session mode.
+- Current private interactive turns advertise `attach_response_card`, but two
+  hosted-local assertions retained the older gated-tool expectation after the
+  on-demand response-card contract shipped on `main`.
 
 ## Success criteria
 
@@ -42,9 +48,12 @@ or weakening the production `__Host-` cookie boundary.
    existing production and test assertions.
 4. Keep the Junction hosted-local journey on the provider redirect URL emitted
    by production code instead of reconstructing a removed callback route.
-5. Run focused Web and hosted-local proof, then push the coordinated public
+5. Make the dual-mode Junction scenario expect the callback-proof cookie name
+   matching its issued app session, and align affected dynamic-tool assertions
+   with the shipped private-interactive response-card contract.
+6. Run focused Web and hosted-local proof, then push the coordinated public
    branch so the paired private integration PR can select the exact fix.
-6. Complete the required specialist, final ReviewGPT, CI, and parent-review
+7. Complete the required specialist, final ReviewGPT, CI, and parent-review
    gates before closing the plan.
 
 ## Verification

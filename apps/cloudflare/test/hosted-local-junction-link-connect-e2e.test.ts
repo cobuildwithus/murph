@@ -137,7 +137,9 @@ describe("hosted local junction link connect e2e", () => {
 
     const callbackProofCookie = readSetCookiePair(
       startResponse,
-      "murph-device-sync-junction",
+      session.cookieName.startsWith("__Host-")
+        ? "__Host-murph-device-sync-junction"
+        : "murph-device-sync-junction",
     );
 
     // The redirect_url Murph handed Junction carries the murph_state the
