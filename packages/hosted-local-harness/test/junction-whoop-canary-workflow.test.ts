@@ -1,0 +1,69 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { describe, expect, it } from "vitest";
+
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+);
+const workflow = readFileSync(
+  path.join(repoRoot, ".github", "workflows", "junction-whoop-canary.yml"),
+  "utf8",
+);
+
+describe("live Junction WHOOP canary workflow", () => {
+  it("admits secrets only after protected main updates or manual retries", () => {
+    expect(workflow).toContain("permissions:\n  contents: read");
+    expect(workflow).toMatch(
+      /^on:\n  push:\n    branches:\n      - main\n  workflow_dispatch:/mu,
+    );
+    expect(workflow).not.toMatch(
+      /^\s*(pull_request|pull_request_target|repository_dispatch|schedule):/mu,
+    );
+    expect(workflow).toContain(
+      "if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}",
+    );
+    expect(workflow).toContain("environment: junction-whoop-canary");
+    expect(workflow).toContain("group: live-junction-whoop-canary");
+    expect(workflow).toContain("cancel-in-progress: false");
+  });
+
+  it("keeps the credential set step-scoped and artifact-free", () => {
+    const liveStepMarker = "      - name: Run live Junction WHOOP browser canary\n";
+    const liveStepOffset = workflow.indexOf(liveStepMarker);
+    expect(liveStepOffset).toBeGreaterThan(0);
+    expect(workflow.slice(0, liveStepOffset)).not.toContain("${{ secrets.");
+
+    const secretNames = [...workflow.matchAll(/\$\{\{ secrets\.([A-Z0-9_]+) \}\}/gu)]
+      .map((match) => match[1])
+      .sort();
+    expect(secretNames).toEqual([
+      "JUNCTION_API_KEY",
+      "JUNCTION_CLIENT_USER_ID_SECRET",
+      "WHOOP_CANARY_EMAIL",
+      "WHOOP_CANARY_PASSWORD",
+    ]);
+    expect(workflow).not.toContain("actions/upload-artifact");
+    expect(workflow).not.toContain("WHOOP_CLIENT_ID");
+    expect(workflow).not.toContain("WHOOP_CLIENT_SECRET");
+  });
+
+  it("runs only the sandbox browser proof with pinned actions", () => {
+    expect(workflow).toContain("JUNCTION_ENV: sandbox");
+    expect(workflow).toContain("MURPH_DEV_TEMPORAL: disabled");
+    expect(workflow).toContain('MURPH_E2E_JUNCTION_WHOOP_LIVE: "1"');
+    expect(workflow).toContain('MURPH_E2E_WHOOP_HEADLESS: "1"');
+    expect(workflow).toContain("run: pnpm hosted-local e2e device-connect");
+    expect(workflow).toContain("image: public.ecr.aws/docker/library/postgres:17");
+
+    const actionRefs = [...workflow.matchAll(/^\s*uses:\s*[^@\s]+@([^\s#]+)/gmu)];
+    expect(actionRefs.length).toBeGreaterThan(0);
+    for (const actionRef of actionRefs) {
+      expect(actionRef[1]).toMatch(/^[a-f0-9]{40}$/u);
+    }
+  });
+});

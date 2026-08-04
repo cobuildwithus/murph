@@ -95,6 +95,7 @@ describe("hosted local device connect e2e", () => {
           JUNCTION_PROVIDER_FILTER: "whoop_v2",
           JUNCTION_REGION: junctionConfig.region,
           MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+          MURPH_DEV_TEMPORAL: liveJunctionWhoopConfig ? "disabled" : "managed",
           MURPH_DEV_WEB_HOST: "localhost",
         },
         localDatabaseUrl,
@@ -172,6 +173,9 @@ describe("hosted local device connect e2e", () => {
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_EMAIL)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_OTP)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_PASSWORD)).toBe(false);
+      expect(requireScenario().runtimeEnv.MURPH_DEV_TEMPORAL).toBe(
+        liveJunctionWhoopConfig ? "disabled" : "managed",
+      );
 
       const connectLink = await createHostedWhoopConnectLink(userId);
 
