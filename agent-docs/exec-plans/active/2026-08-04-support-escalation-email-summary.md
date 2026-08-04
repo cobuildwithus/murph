@@ -55,6 +55,12 @@ Updated: 2026-08-04
    provider key with a different body.
    Mitigation: read and validate both deterministic stored rows, format from the
    stored detail row, and reject conflicts before Resend.
+3. Risk: a legacy alert accepted shortly before rollout can be replayed with
+   the same provider key after the email body changes.
+   Mitigation: retain the key so Resend fails closed instead of duplicating the
+   alert during its 24-hour retention window; document the normal Web-only
+   rollout and monitor the bounded transition without adding compatibility
+   state.
 
 ## Tasks
 
