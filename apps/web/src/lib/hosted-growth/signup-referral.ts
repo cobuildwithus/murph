@@ -41,9 +41,10 @@ export function buildHostedSignupReferralUrl(
   inviteCode: string,
   publicBaseUrl = requireHostedOnboardingPublicBaseUrl(),
 ): string {
-  const url = new URL("/", publicBaseUrl);
-  url.searchParams.set("referral", inviteCode);
-  return url.toString();
+  return new URL(
+    `/join/${encodeURIComponent(inviteCode)}`,
+    publicBaseUrl,
+  ).toString();
 }
 
 export async function issueHostedSignupReferralLink(input: {
