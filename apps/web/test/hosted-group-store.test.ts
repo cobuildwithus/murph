@@ -35,8 +35,17 @@ vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
+  HOSTED_HEALTH_DATA_CONSENT_SCOPE: "launch.health-data",
   assertHostedHistoricalLaunchConsentGranted: mocks.assertHostedHistoricalLaunchConsentGranted,
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+  hostedHealthDataConsentNotRevokedWhere: () => ({
+    consentGrants: {
+      none: {
+        scope: "launch.health-data",
+        status: "revoked",
+      },
+    },
+  }),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
@@ -1604,6 +1613,24 @@ describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", 
     });
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(hostedVaultShareFindMany).toHaveBeenCalledTimes(1);
+    expect(hostedVaultShareFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          grantor: {
+            AND: expect.arrayContaining([
+              {
+                consentGrants: {
+                  none: {
+                    scope: "launch.health-data",
+                    status: "revoked",
+                  },
+                },
+              },
+            ]),
+          },
+        }),
+      }),
+    );
     expect(deviceConnectionFindMany).not.toHaveBeenCalled();
   });
 

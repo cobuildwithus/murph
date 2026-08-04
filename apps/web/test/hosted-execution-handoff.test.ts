@@ -469,9 +469,11 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
+      reconcileRuntimeHealthDataConsent: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
       stageEnvironmentVoice: vi.fn(),
       stageMealPhoto: vi.fn(),
+      verifyInferenceConnection: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(deleteHostedRunnerUserDataBestEffort({
@@ -514,9 +516,11 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       }),
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
+      reconcileRuntimeHealthDataConsent: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
       stageEnvironmentVoice: vi.fn(),
       stageMealPhoto: vi.fn(),
+      verifyInferenceConnection: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(deleteHostedRunnerUserDataBestEffort({
@@ -540,9 +544,11 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
+      reconcileRuntimeHealthDataConsent: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
       stageEnvironmentVoice: vi.fn(),
       stageMealPhoto: vi.fn(),
+      verifyInferenceConnection: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(deleteHostedRunnerUserDataBestEffort({

@@ -40,6 +40,7 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
   if (
     blockedReason !== "user_not_active"
     && blockedReason !== "ai_usage_denied"
+    && blockedReason !== "health_data_consent_withdrawn"
   ) {
     return facts;
   }
@@ -99,6 +100,7 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
   });
   if (access.kind === "allowed") {
     return blockedReason === "user_not_active"
+        || blockedReason === "health_data_consent_withdrawn"
       ? await readHostedRuntimeReconciliationFacts(input)
       : facts;
   }

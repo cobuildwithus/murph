@@ -14,6 +14,12 @@ export type HostedAssistantProductModel =
 export const HOSTED_ASSISTANT_OPENAI_PROVIDER = "openai" as const;
 export const HOSTED_ASSISTANT_VENICE_PROVIDER = "venice" as const;
 
+export const HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS = {
+  [HOSTED_ASSISTANT_LUNA_MODEL]: "openai-gpt-56-luna",
+  [HOSTED_ASSISTANT_TERRA_MODEL]: "openai-gpt-56-terra",
+  [HOSTED_ASSISTANT_SOL_MODEL]: "openai-gpt-56-sol",
+} as const satisfies Record<HostedAssistantProductModel, string>;
+
 export const HOSTED_ASSISTANT_PROVIDERS = [
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
   HOSTED_ASSISTANT_VENICE_PROVIDER,

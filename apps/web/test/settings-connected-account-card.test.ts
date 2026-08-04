@@ -123,4 +123,18 @@ describe("SettingsStatusLine", () => {
     expect(markup).toContain("min-h-[1.25rem]");
     expect(markup).toContain("text-muted-foreground");
   });
+
+  test("can render visible feedback without owning a live region", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(SettingsStatusLine, {
+        announce: false,
+        message: "Inference mode saved.",
+        tone: "neutral",
+      }),
+    );
+
+    expect(markup).toContain("Inference mode saved.");
+    expect(markup).not.toContain("aria-live");
+    expect(markup).not.toContain("role=");
+  });
 });

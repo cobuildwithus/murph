@@ -10,6 +10,9 @@ import {
   parseAssistantUsageRecord,
 } from "../assistant-usage.ts";
 import {
+  parseHostedAssistantCustomInferenceOverride,
+} from "../assistant-inference.ts";
+import {
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   isHostedAssistantProductModel,
   isHostedAssistantProvider,
@@ -106,6 +109,8 @@ import {
   type HostedRuntimeLogPhase,
   type HostedRuntimeLogRequest,
   type HostedRuntimeLogResponse,
+  HOSTED_HEALTH_DATA_CONSENT_STATES,
+  type HostedRuntimeHealthDataAdmissionResponse,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
   type HostedRuntimeRedactedScalar,
@@ -5943,6 +5948,13 @@ export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState 
 
 export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspaceReadResponse {
   const record = requireObject(value, "Hosted workspace read response");
+  const hostedAssistantCustomInferenceOverride =
+    record.hostedAssistantCustomInferenceOverride === undefined
+      || record.hostedAssistantCustomInferenceOverride === null
+      ? null
+      : parseHostedAssistantCustomInferenceOverride(
+          record.hostedAssistantCustomInferenceOverride,
+        );
   const hostedAssistantModelOverride = parseHostedAssistantModelOverride(
     record.hostedAssistantModelOverride,
   );
@@ -5953,9 +5965,18 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
     parseHostedAssistantReasoningEffortOverride(
       record.hostedAssistantReasoningEffortOverride,
     );
+  const platformAiUsageAllowed = record.platformAiUsageAllowed === undefined
+    ? null
+    : requireBoolean(
+        record.platformAiUsageAllowed,
+        "Hosted workspace read response platformAiUsageAllowed",
+      );
 
   return {
     fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
+    ...(hostedAssistantCustomInferenceOverride
+      ? { hostedAssistantCustomInferenceOverride }
+      : {}),
     ...(hostedAssistantModelOverride
       ? { hostedAssistantModelOverride }
       : {}),
@@ -5965,6 +5986,7 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
     ...(hostedAssistantReasoningEffortOverride
       ? { hostedAssistantReasoningEffortOverride }
       : {}),
+    ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };
 }
@@ -6458,12 +6480,38 @@ function parseHostedRunnerR2CutoverStatus(
       record.coexisting,
       "Hosted runner status response r2Cutover.coexisting",
     ),
+    ...(record.pausedCanaryConfigured === undefined
+      ? {}
+      : {
+          pausedCanaryConfigured: requireBoolean(
+            record.pausedCanaryConfigured,
+            "Hosted runner status response r2Cutover.pausedCanaryConfigured",
+          ),
+        }),
     phase,
     protocolVersion: requireString(
       record.protocolVersion,
       "Hosted runner status response r2Cutover.protocolVersion",
     ),
+    ...(record.writeAdmission === undefined
+      ? {}
+      : {
+          writeAdmission: parseHostedR2WriteAdmission(record.writeAdmission),
+        }),
   };
+}
+
+function parseHostedR2WriteAdmission(value: unknown): "open" | "paused" {
+  const writeAdmission = requireString(
+    value,
+    "Hosted runner status response r2Cutover.writeAdmission",
+  );
+  if (writeAdmission !== "open" && writeAdmission !== "paused") {
+    throw new TypeError(
+      "Hosted runner status response r2Cutover.writeAdmission must be open or paused.",
+    );
+  }
+  return writeAdmission;
 }
 
 export function parseHostedRuntimeWebStatusResponse(value: unknown): HostedRuntimeWebStatusResponse {
@@ -6494,6 +6542,38 @@ export function parseHostedRuntimeWebStatusResponse(value: unknown): HostedRunti
         }),
     userId: requireString(record.userId, "Hosted runtime web status response userId"),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
+  };
+}
+
+export function parseHostedRuntimeHealthDataAdmissionResponse(
+  value: unknown,
+): HostedRuntimeHealthDataAdmissionResponse {
+  const record = requireObject(
+    value,
+    "Hosted runtime health-data admission response",
+  );
+  const consentState = parseAllowedString(
+    record.consentState,
+    "Hosted runtime health-data admission response consentState",
+    HOSTED_HEALTH_DATA_CONSENT_STATES,
+  );
+  const processingAllowed = requireBoolean(
+    record.processingAllowed,
+    "Hosted runtime health-data admission response processingAllowed",
+  );
+  if (processingAllowed !== (consentState !== "revoked")) {
+    throw new TypeError(
+      "Hosted runtime health-data admission response processingAllowed did not match consentState.",
+    );
+  }
+
+  return {
+    consentState,
+    processingAllowed,
+    userId: requireString(
+      record.userId,
+      "Hosted runtime health-data admission response userId",
+    ),
   };
 }
 

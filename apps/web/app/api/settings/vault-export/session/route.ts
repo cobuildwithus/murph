@@ -22,7 +22,10 @@ import {
   readHostedWorkspace,
   readHostedWorkspaceBrowserVaultSourceStateHash,
 } from "@/src/lib/hosted-workspace/store";
-import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
+import {
+  assertHostedLaunchRequiredConsentGranted,
+  readHostedHealthDataConsentState,
+} from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 import {
   buildSettingsSensitiveActionBinding,
@@ -36,10 +39,17 @@ export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const prisma = getPrisma();
   const auth = await requireHostedAppSessionFromRequest(request);
-  await assertHostedLaunchRequiredConsentGranted({
+  const healthDataConsentState = await readHostedHealthDataConsentState({
     memberId: auth.member.id,
     prisma,
   });
+  let allowLatestAvailableReplica = healthDataConsentState === "revoked";
+  if (!allowLatestAvailableReplica) {
+    await assertHostedLaunchRequiredConsentGranted({
+      memberId: auth.member.id,
+      prisma,
+    });
+  }
   const body = await readHostedOnboardingJsonObject(request, {
     limitBytes: SETTINGS_VAULT_EXPORT_BODY_LIMIT_BYTES,
     tooLargeErrorCode: "BROWSER_VAULT_SESSION_BODY_TOO_LARGE",
@@ -67,21 +77,44 @@ export const POST = withJsonError(async (request: Request) => {
     privyUserId: auth.privyUserId,
   });
 
-  // Re-read workspace + pending dirty-connection state AFTER the slow
-  // Privy/signature path. Fail closed on either lookup error so a transient
-  // database problem cannot release a "complete" export.
+  // Consent may change while the member completes the slow sensitive-action
+  // proof. Re-read it before any freshness decision can wake processing.
+  const latestHealthDataConsentState = await readHostedHealthDataConsentState({
+    memberId: auth.member.id,
+    prisma,
+  });
+  allowLatestAvailableReplica = latestHealthDataConsentState === "revoked";
+  if (!allowLatestAvailableReplica) {
+    await assertHostedLaunchRequiredConsentGranted({
+      memberId: auth.member.id,
+      prisma,
+    });
+  }
+
+  // Re-read the workspace AFTER the slow Privy/signature path. Active
+  // processing still requires a complete, fresh export; withdrawn members get
+  // the newest retained replica without restarting processing.
   let workspace: Awaited<ReturnType<typeof readHostedWorkspace>>;
-  let deviceSyncImportPending: boolean;
   try {
-    [workspace, deviceSyncImportPending] = await Promise.all([
-      readHostedWorkspace({ userId: auth.member.id }),
-      new PrismaHostedDirtyConnectionStore(prisma).hasPendingDirtyConnectionForUser(
-        auth.member.id,
-      ),
-    ]);
+    workspace = await readHostedWorkspace({ userId: auth.member.id });
   } catch {
+    if (allowLatestAvailableReplica) {
+      throw browserVaultRetainedReplicaUnavailableError();
+    }
     scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
     throw browserVaultSessionNotFreshError();
+  }
+
+  let deviceSyncImportPending = true;
+  try {
+    deviceSyncImportPending =
+      await new PrismaHostedDirtyConnectionStore(prisma)
+        .hasPendingDirtyConnectionForUser(auth.member.id);
+  } catch {
+    if (!allowLatestAvailableReplica) {
+      scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
+      throw browserVaultSessionNotFreshError();
+    }
   }
 
   const replicaRef = parseHostedBrowserVaultReplicaRef(
@@ -99,10 +132,18 @@ export const POST = withJsonError(async (request: Request) => {
 
   if (
     !replicaRef
-    || freshness.freshness !== "fresh"
-    || freshness.shouldRefresh
-    || deviceSyncImportPending
+    || (
+      !allowLatestAvailableReplica
+      && (
+        freshness.freshness !== "fresh"
+        || freshness.shouldRefresh
+        || deviceSyncImportPending
+      )
+    )
   ) {
+    if (allowLatestAvailableReplica) {
+      throw browserVaultRetainedReplicaUnavailableError();
+    }
     scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
     throw browserVaultSessionNotFreshError();
   }
@@ -125,6 +166,9 @@ export const POST = withJsonError(async (request: Request) => {
     });
   } catch (error) {
     if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
+      if (allowLatestAvailableReplica) {
+        throw browserVaultRetainedReplicaUnavailableError();
+      }
       scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
       throw browserVaultSessionNotFreshError();
     }
@@ -146,9 +190,9 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk({
     ...session,
-    deviceSyncImportPending: false,
+    deviceSyncImportPending,
     freshness: freshness.freshness,
-    refreshPending: false,
+    refreshPending: freshness.shouldRefresh,
     workspaceVersion: workspace?.version ?? null,
   });
 });
@@ -158,6 +202,15 @@ function browserVaultSessionNotFreshError() {
     code: "BROWSER_VAULT_SESSION_NOT_FRESH",
     httpStatus: 409,
     message: "Your vault is still being prepared. Try the export again in a moment.",
+    retryable: true,
+  });
+}
+
+function browserVaultRetainedReplicaUnavailableError() {
+  return hostedOnboardingError({
+    code: "BROWSER_VAULT_RETAINED_REPLICA_UNAVAILABLE",
+    httpStatus: 409,
+    message: "Murph does not have a retained dashboard export available yet. Try again later, or use Murph again to resume processing.",
     retryable: true,
   });
 }

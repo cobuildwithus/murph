@@ -35,6 +35,7 @@ import {
 
 import {
   CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH,
+  CLOUDFLARE_HOSTED_CUSTOM_INFERENCE_HOST,
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
@@ -78,6 +79,16 @@ import {
 import {
   readHostedProviderCredentialDiagnosticKind,
 } from "./hosted-provider-credential-diagnostics.ts";
+import {
+  openHostedInferenceRuntimeTarget,
+} from "./hosted-inference-target-envelope.ts";
+import {
+  HOSTED_CUSTOM_INFERENCE_RESPONSES_MAX_BODY_BYTES,
+  HostedCustomInferenceRequestError,
+  adaptHostedCustomInferenceUpstreamResponse,
+  buildHostedCustomInferenceUpstreamRequestBody,
+  injectHostedCustomInferenceAuth,
+} from "./runner-egress-custom-inference.ts";
 import {
   DEFAULT_ELEVENLABS_API_BASE_URL,
   HOSTED_ELEVENLABS_MAX_BODY_BYTES,
@@ -146,6 +157,7 @@ export const HOSTED_DEPLOY_SMOKE_OPENAI_REQUEST_MAX_BODY_BYTES = 256 * 1024;
 export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   artifactStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
   browserVaultReplicaStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore,
+  customInference: CLOUDFLARE_HOSTED_CUSTOM_INFERENCE_HOST,
   dataApi: HOSTED_DATA_API_RUNTIME_HOST,
   effectsPort: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
   elevenLabs: "api.elevenlabs.io",
@@ -370,9 +382,11 @@ type HostedProviderEgressRejectReason =
 
 interface HostedProviderEgressAuthorization {
   authorized: boolean;
+  customInferenceEnvelope?: string | null;
   durationMs: number;
   mode: HostedProviderEgressValidationMode;
   providerEgressTokenPresent: boolean;
+  platformAiUsageAllowed?: boolean;
   rejectReason?: HostedProviderEgressRejectReason;
   runtimeAuthorityHeadersPresent: boolean;
   userId: string | null;
@@ -389,6 +403,15 @@ interface HostedProviderEgressWriteFenceMetadata {
   workspaceVersion: string | null;
 }
 
+const HOSTED_PLATFORM_METERED_PROVIDER_KINDS = new Set([
+  "elevenlabs",
+  "exa",
+  "mapbox",
+  "openai",
+  "venice",
+  "xai",
+]);
+
 export type HostedOpenAiCacheDiagnosticEndpointKind = "responses" | "responses_compact";
 type HostedRunnerDiagnosticScalar = boolean | null | number | string;
 export type HostedRunnerDiagnosticJson = Record<
@@ -399,6 +422,8 @@ export type HostedRunnerDiagnosticJson = Record<
 export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutboundHandler> = {
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.artifactStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.browserVaultReplicaStore]: handleHostedRunnerInternalOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.customInference]:
+    handleHostedRunnerCustomInferenceOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.dataApi]: handleHostedRunnerOpenInternetOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.elevenLabs]: handleHostedRunnerElevenLabsOutbound,
@@ -432,6 +457,7 @@ export async function handleHostedRunnerOpenInternetOutbound(
 
   const handled =
     await maybeHandleHostedDataApiRequest({ ctx, env, request, url, userId })
+    ?? await maybeHandleCustomInferenceRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleHostedTranscribeRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleElevenLabsRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleXaiRequest({ ctx, env, request, url, userId })
@@ -573,6 +599,23 @@ async function emitHostedRunnerInternalOutboundResponseCompleted(input: {
     message: "Hosted runner internal outbound response completed.",
     phase: "wake.running",
   });
+}
+
+export async function handleHostedRunnerCustomInferenceOutbound(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  ctx: HostedRunnerOutboundContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  return await requireHandledProviderEgress(
+    await maybeHandleCustomInferenceRequest({
+      ctx,
+      env,
+      request,
+      url,
+      userId: readHostedRunnerBoundUserId(request),
+    }),
+  );
 }
 
 export async function handleHostedRunnerOpenAiOutbound(
@@ -761,7 +804,6 @@ async function maybeHandleHostedDataApiRequest(input: {
       url: input.url,
     });
   }
-
   const upstreamBody = input.request.method.toUpperCase() === "POST"
     ? await readBoundedRequestBody(input.request, HOSTED_DATA_API_MAX_POST_BODY_BYTES)
     : undefined;
@@ -952,6 +994,9 @@ async function maybeHandleHostedTranscribeRequest(input: {
       startedAt,
       url: input.url,
     });
+  }
+  if (authorization.platformAiUsageAllowed === false) {
+    return platformAiUsageDenied();
   }
 
   const ai = input.env.AI;
@@ -1209,6 +1254,121 @@ function readHostedTranscribeNonNegativeNumber(value: unknown): number | null {
     : null;
 }
 
+async function maybeHandleCustomInferenceRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  upstreamFetchImpl?: typeof fetch;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  if (input.url.hostname !== CLOUDFLARE_HOSTED_CUSTOM_INFERENCE_HOST) {
+    return null;
+  }
+  if (
+    input.request.method !== "POST"
+    || input.url.pathname !== "/v1/responses"
+    || !hasBearerCredentialSentinel(input.request.headers)
+  ) {
+    return disallowedProviderEgress();
+  }
+
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
+    ctx: input.ctx,
+    env: input.env,
+    providerKind: "custom_inference",
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "custom_inference",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
+  }
+  if (!authorization.customInferenceEnvelope) {
+    return new Response("Custom inference is not active for this invocation.", {
+      status: 409,
+    });
+  }
+
+  let target;
+  try {
+    target = await openHostedInferenceRuntimeTarget({
+      envelope: authorization.customInferenceEnvelope,
+      source: input.env,
+    });
+  } catch {
+    return new Response("Hosted custom inference configuration is unavailable.", {
+      status: 500,
+    });
+  }
+  const body = await readBoundedRequestBody(
+    input.request,
+    HOSTED_CUSTOM_INFERENCE_RESPONSES_MAX_BODY_BYTES,
+  );
+  if (body === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+
+  let upstreamBody: string;
+  try {
+    upstreamBody = buildHostedCustomInferenceUpstreamRequestBody({
+      body,
+      target,
+    });
+  } catch (error) {
+    if (error instanceof HostedCustomInferenceRequestError) {
+      return new Response(error.message, { status: error.httpStatus });
+    }
+    return new Response("The custom inference request was invalid.", {
+      status: 400,
+    });
+  }
+
+  // The upstream endpoint is member-controlled, so the header set is built
+  // from scratch rather than stripped from the inbound request: only the
+  // JSON/SSE transport headers plus the one configured auth header may cross
+  // this boundary.
+  const headers = new Headers({
+    accept: "text/event-stream",
+    "content-type": "application/json",
+  });
+  injectHostedCustomInferenceAuth(headers, target);
+  try {
+    return await adaptHostedCustomInferenceUpstreamResponse({
+      protocol: target.protocol,
+      response: await fetchAuthorizedProviderUpstream({
+        authorization,
+        providerKind: "custom_inference",
+        request: input.request,
+        startedAt,
+        upstreamRequest: await createHostedRunnerUpstreamRequest(
+          input.request,
+          new URL(target.endpointUrl),
+          headers,
+          {
+            body: upstreamBody,
+            redirect: "manual",
+          },
+        ),
+        upstreamFetchImpl: input.upstreamFetchImpl,
+        url: input.url,
+      }),
+      revision: target.revision,
+    });
+  } catch (error) {
+    if (error instanceof HostedCustomInferenceRequestError) {
+      return new Response(error.message, { status: error.httpStatus });
+    }
+    throw error;
+  }
+}
+
 async function maybeHandleOpenAiRequest(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
@@ -1369,7 +1529,6 @@ async function maybeHandleVeniceRequest(input: {
   }
   const upstreamBody = buildHostedVeniceResponsesRequestBody({
     body,
-    env: input.env,
   });
   if (upstreamBody === null) {
     return disallowedProviderEgress();
@@ -3673,6 +3832,9 @@ async function authorizeHostedProviderEgressCredential(input: {
     durationMs: Date.now() - startedAt,
     mode: "provider_egress_credential",
     providerEgressTokenPresent,
+    ...(validation.platformAiUsageAllowed === undefined
+      ? {}
+      : { platformAiUsageAllowed: validation.platformAiUsageAllowed }),
     ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
     runtimeAuthorityHeadersPresent,
     userId: verification.claims.userId,
@@ -3727,9 +3889,15 @@ async function authorizeHostedProviderEgressToken(input: {
   const validation = normalizeProviderEgressTokenValidationResult(rawValidation);
   return {
     authorized: validation.owns,
+    ...(validation.customInferenceEnvelope
+      ? { customInferenceEnvelope: validation.customInferenceEnvelope }
+      : {}),
     durationMs: Date.now() - input.startedAt,
     mode: "provider_egress_token",
     providerEgressTokenPresent: input.providerEgressTokenPresent,
+    ...(validation.platformAiUsageAllowed === undefined
+      ? {}
+      : { platformAiUsageAllowed: validation.platformAiUsageAllowed }),
     ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
     runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
     userId: input.activeUserId,
@@ -3739,6 +3907,7 @@ async function authorizeHostedProviderEgressToken(input: {
 
 function normalizeProviderEgressCredentialValidationResult(value: unknown): {
   owns: boolean;
+  platformAiUsageAllowed?: boolean;
   rejectReason: HostedProviderEgressRejectReason | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 } {
@@ -3778,6 +3947,9 @@ function normalizeProviderEgressCredentialValidationResult(value: unknown): {
 
   return {
     owns: true,
+    ...(typeof record.platformAiUsageAllowed === "boolean"
+      ? { platformAiUsageAllowed: record.platformAiUsageAllowed }
+      : {}),
     rejectReason: null,
     writeFence: {
       attemptId: record.attemptId,
@@ -3791,7 +3963,9 @@ function normalizeProviderEgressCredentialValidationResult(value: unknown): {
 }
 
 function normalizeProviderEgressTokenValidationResult(value: unknown): {
+  customInferenceEnvelope?: string;
   owns: boolean;
+  platformAiUsageAllowed?: boolean;
   rejectReason: HostedProviderEgressRejectReason | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 } {
@@ -3837,7 +4011,14 @@ function normalizeProviderEgressTokenValidationResult(value: unknown): {
   }
 
   return {
+    ...(typeof record.customInferenceEnvelope === "string"
+        && record.customInferenceEnvelope.length > 0
+      ? { customInferenceEnvelope: record.customInferenceEnvelope }
+      : {}),
     owns: true,
+    ...(typeof record.platformAiUsageAllowed === "boolean"
+      ? { platformAiUsageAllowed: record.platformAiUsageAllowed }
+      : {}),
     rejectReason: null,
     writeFence: {
       attemptId: record.attemptId,
@@ -3908,6 +4089,25 @@ async function fetchAuthorizedProviderUpstream(input: {
   upstreamFetchImpl?: typeof fetch;
   url: URL;
 }): Promise<Response> {
+  if (
+    input.authorization.platformAiUsageAllowed === false
+    && HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind)
+  ) {
+    const response = platformAiUsageDenied();
+    emitHostedProviderEgressDiagnostic({
+      authorization: input.authorization,
+      providerKind: input.providerKind,
+      ...(input.providerOperation
+        ? { providerOperation: input.providerOperation }
+        : {}),
+      request: input.request,
+      response,
+      startedAt: input.startedAt,
+      upstreamDurationMs: null,
+      url: input.url,
+    });
+    return response;
+  }
   const upstreamStartedAt = Date.now();
   try {
     const response = await (input.upstreamFetchImpl ?? fetch)(input.upstreamRequest);
@@ -3935,6 +4135,19 @@ async function fetchAuthorizedProviderUpstream(input: {
     });
     throw error;
   }
+}
+
+function platformAiUsageDenied(): Response {
+  return Response.json({
+    error: {
+      code: "HOSTED_PLATFORM_AI_USAGE_DENIED",
+      message:
+        "This Murph-funded tool is unavailable because the managed AI allowance is exhausted.",
+    },
+  }, {
+    headers: { "cache-control": "no-store" },
+    status: 402,
+  });
 }
 
 function emitHostedProviderEgressDiagnostic(input: {
@@ -4075,6 +4288,7 @@ function stripHostedRuntimeAuthorityHeaders(headers: Headers): Headers {
 
 function stripHostedProviderUpstreamHeaders(headers: Headers): Headers {
   const stripped = stripHostedRuntimeAuthorityHeaders(headers);
+  stripped.delete("api-key");
   stripped.delete("authorization");
   stripped.delete("cookie");
   stripped.delete("proxy-authorization");

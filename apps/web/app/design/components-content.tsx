@@ -2,7 +2,6 @@
 
 import {
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
-  type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
 import { CheckCircle2, ContactRound, Monitor } from "lucide-react";
@@ -46,7 +45,10 @@ import {
 import {
   AssistantProviderDialog,
   AssistantProviderSummary,
+  type AssistantRoutingChoice,
 } from "@/src/components/settings/hosted-assistant-model-settings";
+import { HostedInferenceConnectionPane } from "@/src/components/settings/hosted-inference-connection-settings";
+import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
@@ -154,6 +156,8 @@ import {
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { DataExportControlStudy } from "./data-export-study";
+import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
@@ -558,7 +562,7 @@ export function ComponentsContent() {
     useState<SegmentedControlDemoValue>("email");
   const [choiceCardValue, setChoiceCardValue] = useState("terra");
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
-  const [providerValue, setProviderValue] = useState<HostedAssistantProvider>(
+  const [providerValue, setProviderValue] = useState<AssistantRoutingChoice>(
     HOSTED_ASSISTANT_OPENAI_PROVIDER,
   );
   const [addedContactAvatar, setAddedContactAvatar] =
@@ -1130,10 +1134,13 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Radio Group, Choice Cards & Provider Picker">
+        <Section
+          id="assistant-provider-picker"
+          title="Radio Group, Choice Cards & Provider Picker"
+        >
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Compare model choice cards and review the compact provider-storage
-            disclosures used by assistant settings.
+            Compare model choice cards and review the provider privacy and
+            included-capacity disclosures used by assistant settings.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"
@@ -1171,16 +1178,35 @@ export function ComponentsContent() {
             />
           </RadioGroup>
           <AssistantProviderSummary
-            currentProvider={HOSTED_ASSISTANT_OPENAI_PROVIDER}
-            draftProvider={providerValue}
+            connection={DESIGN_INFERENCE_CONNECTION}
+            currentRouting={HOSTED_ASSISTANT_OPENAI_PROVIDER}
+            draftRouting={providerValue}
             onChangeClick={() => setProviderDialogOpen(true)}
           />
           <AssistantProviderDialog
+            chatCompletionsAvailable
+            connection={DESIGN_INFERENCE_CONNECTION}
+            customInferenceAvailable
             onOpenChange={setProviderDialogOpen}
-            onProviderChange={setProviderValue}
+            onRoutingChange={setProviderValue}
             open={providerDialogOpen}
-            provider={providerValue}
+            routing={providerValue}
+            veniceAvailable
           />
+        </Section>
+
+        <Separator />
+
+        <Section title="Custom inference endpoint pane">
+          <div inert>
+            <HostedInferenceConnectionPane
+              chatCompletionsAvailable
+              configurationAvailable={false}
+              connection={null}
+              onConnectionChange={() => {}}
+              selected={false}
+            />
+          </div>
         </Section>
 
         <Separator />
@@ -2263,6 +2289,18 @@ export function ComponentsContent() {
             <ConclusionCard title="Key insights" variant="insight" items={[{ icon: "•", text: "Evening sessions drove sleep gains. Morning sessions showed no benefit." }, { icon: "•", text: "2–3x/week appears sufficient. Skipping one session had no negative impact." }]} />
             <ConclusionCard title="Recommendations" variant="recommendation" items={[{ icon: "→", text: "Continue sauna 2x/week as maintenance." }, { icon: "→", text: "Add cold exposure post-sauna for contrast protocol." }]} />
           </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Health data consent settings">
+          <HealthDataConsentControlStudy />
+        </Section>
+
+        <Separator />
+
+        <Section title="Data export">
+          <DataExportControlStudy />
         </Section>
 
         <Separator />

@@ -11,6 +11,9 @@ import {
   type HostedAssistantProviderOverride,
   type HostedAssistantReasoningEffortOverride,
 } from "@murphai/hosted-execution/assistant-model";
+import type {
+  HostedAssistantCustomInferenceOverride,
+} from "@murphai/hosted-execution/assistant-inference";
 
 import {
   readHostedRunnerContainerIdentity,
@@ -48,6 +51,9 @@ import {
   RuntimeProcessingController,
 } from "../src/user-runner/runtime-processing-controller.js";
 import {
+  openHostedInferenceRuntimeTarget,
+} from "../src/hosted-inference-target-envelope.js";
+import {
   RunnerStoreCache,
   type RunnerUserStores,
 } from "../src/user-runner/runner-store-cache.js";
@@ -71,6 +77,7 @@ const TEST_USER_ID = "member_123";
 describe("hosted runner container identity", () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("round-trips a versioned runner container identity", () => {
@@ -412,6 +419,203 @@ describe("hosted runner container identity", () => {
     ).toBe("xhigh");
   });
 
+  it("resolves a selected custom target once, pins it to the fence, and gives Codex only a sentinel", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const override: HostedAssistantCustomInferenceOverride = {
+      contextWindowTokens: 131_072,
+      modelAlias: "murph-custom-r7",
+      protocol: "responses",
+      revision: 7,
+      supportsImages: false,
+      verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+    };
+    const runtimeTarget = {
+      auth: {
+        kind: "bearer",
+        secret: "synthetic-upstream-secret",
+      },
+      contextWindowTokens: override.contextWindowTokens,
+      endpointUrl: "https://inference.example.com/v1/responses",
+      model: "synthetic-upstream-model",
+      protocol: override.protocol,
+      revision: override.revision,
+      schema: "murph.hosted-inference-runtime-target.v1",
+      supportsImages: override.supportsImages,
+      verificationProfile: override.verificationProfile,
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json(runtimeTarget)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const runnerRuntimeEnvSource = {
+      CF_VERSION_METADATA: { id: "version_1" },
+      HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
+      OPENAI_API_KEY: "test-openai-key",
+    };
+    const service = createRuntimeInvocationService({
+      hostedAssistantCustomInferenceOverride: override,
+      invokedContainerNames: [],
+      platformAiUsageAllowed: false,
+      runnerRuntimeEnvSource,
+      stateStore,
+      state: durable.state,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    const prepared = await service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_custom_inference",
+        userId: TEST_USER_ID,
+      },
+      token,
+    });
+    const forwardedEnv = prepared.job.runtime?.forwardedEnv;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(prepared.job.request.processingMode).toBeUndefined();
+    expect(forwardedEnv).toMatchObject({
+      HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
+      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
+      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
+      MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
+    });
+    expect(forwardedEnv).not.toHaveProperty("HOSTED_ASSISTANT_REASONING_EFFORT");
+    expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.endpointUrl);
+    expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.auth.secret);
+
+    if (!token.providerEgressToken) {
+      throw new Error("Expected a provider egress token on the active fence.");
+    }
+    const validation = await stateStore.validateProviderEgressToken({
+      providerEgressToken: token.providerEgressToken,
+      userId: TEST_USER_ID,
+    });
+    expect(validation).toMatchObject({ owns: true });
+    if (!validation.owns || !validation.customInferenceEnvelope) {
+      throw new Error("Expected the selected custom target on the active fence.");
+    }
+    await expect(openHostedInferenceRuntimeTarget({
+      envelope: validation.customInferenceEnvelope,
+      source: runnerRuntimeEnvSource,
+    })).resolves.toEqual(runtimeTarget);
+  });
+
+  it("narrows a denied managed default wake to model-free system mailbox work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const invokedContainerNames: string[] = [];
+    const service = createRuntimeInvocationService({
+      invokedContainerNames,
+      platformAiUsageAllowed: false,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "version_1" },
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      stateStore,
+      state: durable.state,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    const prepared = await service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_managed_denied",
+        userId: TEST_USER_ID,
+      },
+      token,
+    });
+    expect(invokedContainerNames).toEqual([]);
+    expect(prepared.job.request.processingMode).toBe("system_mailbox");
+    if (!prepared.token.providerEgressToken) {
+      throw new Error("Expected a provider egress token on the active fence.");
+    }
+    await expect(stateStore.validateProviderEgressToken({
+      providerEgressToken: prepared.token.providerEgressToken,
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      owns: true,
+      platformAiUsageAllowed: false,
+    });
+  });
+
+  it("lets inbox media retention run under a denied allowance while metered egress stays blocked", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const service = createRuntimeInvocationService({
+      invokedContainerNames: [],
+      platformAiUsageAllowed: false,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "version_1" },
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      stateStore,
+      state: durable.state,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    // System-mailbox work uses the same denied provider-egress fence as the
+    // default runtime path.
+    await expect(service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_system_mailbox_denied",
+        processingMode: "system_mailbox",
+        userId: TEST_USER_ID,
+      },
+      token,
+    })).resolves.toMatchObject({
+      workspaceVersion: "0",
+    });
+
+    await expect(service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_retention_denied",
+        processingMode: "inbox_media_retention",
+        userId: TEST_USER_ID,
+      },
+      token,
+    })).resolves.toMatchObject({
+      workspaceVersion: "0",
+    });
+
+    if (!token.providerEgressToken) {
+      throw new Error("Expected a provider egress token on the active fence.");
+    }
+    const validation = await stateStore.validateProviderEgressToken({
+      providerEgressToken: token.providerEgressToken,
+      userId: TEST_USER_ID,
+    });
+    expect(validation).toMatchObject({
+      owns: true,
+      platformAiUsageAllowed: false,
+    });
+  });
+
   it("wakes an active runtime through the write fence's stored runner container name", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -603,10 +807,12 @@ class EmptyRunnerSecretsService extends RunnerSecretsService {
 }
 
 function createRuntimeInvocationService(input: {
+  hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   invokedContainerNames: string[];
+  platformAiUsageAllowed?: boolean;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   state: DurableObjectStateLike;
   stateStore: RunnerStateStore;
@@ -626,6 +832,18 @@ function createRuntimeInvocationService(input: {
     readHostedWebControlBaseUrl: () => "https://web.example.test",
     readHostedWorkspaceFromWeb: async () => ({
       fetchedAt: FIXED_NOW,
+      ...(input.platformAiUsageAllowed === undefined
+        ? {}
+        : { platformAiUsageAllowed: input.platformAiUsageAllowed }),
+      ...(input.hostedAssistantCustomInferenceOverride
+        ? {
+            hostedAssistantCustomInferenceOverride:
+              input.hostedAssistantCustomInferenceOverride,
+            ...(input.platformAiUsageAllowed === undefined
+              ? { platformAiUsageAllowed: false }
+              : {}),
+          }
+        : {}),
       ...(input.hostedAssistantModelOverride
         ? { hostedAssistantModelOverride: input.hostedAssistantModelOverride }
         : {}),

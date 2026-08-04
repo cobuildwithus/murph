@@ -1,5 +1,7 @@
-import { resolveJunctionConnectSourceLabel } from "@murphai/device-syncd/connect-config";
-import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
+import {
+  formatDeviceSyncProviderLabel,
+  resolveJunctionConnectSourceLabel,
+} from "@murphai/device-syncd/provider-label";
 
 const INTERMEDIARY_DEVICE_SYNC_PROVIDERS = new Set(["junction"]);
 const UNKNOWN_SOURCE_LABEL = "Connected source";

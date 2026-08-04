@@ -11,9 +11,15 @@ Murph can mail one expressive, US-only physical note from a direct conversation
 or a hosted group. GPT Image generates the complete color artwork page, including
 any handwriting, illustration, and a small `murph ai` mark. Murph may show the
 artwork first when a draft or choice is useful, but an explicit send request with
-a complete recipient address may continue through generation and mailing without
-an extra preview round trip. The platform supplies Murph's fixed return address;
-it is never collected from the person sending the note.
+a complete or reliably resolved recipient address may continue through
+generation and mailing without an extra preview round trip. The platform
+supplies Murph's fixed return address; it is never collected from the person
+sending the note.
+
+A clear request to send a thank-you, congratulations, apology, or similar note
+also supplies ordinary drafting intent. Murph uses the conversation to write
+fitting short copy and asks about the message only when authorship, relationship,
+signature, or meaning is materially ambiguous.
 
 Each hosted member receives one complimentary note under the versioned
 `physical-note-v1` offer. A hosted group receives its own complimentary note
@@ -44,6 +50,35 @@ conversations. The image-launch turn sends a short acknowledgement rather than
 silently ending. If graceful runtime shutdown interrupts generation, the
 existing completion channel durably stages one failed result so a restart can
 tell the conversation instead of losing the continuation.
+
+## Address completion
+
+Omitted city, state, or ZIP fields are not automatically a conversational
+blocker. Before asking for one of those objective details, the assistant may run
+`vault-cli route resolve-address` against the exact US destination text already
+supplied for the current note request. The command reuses the CLI-owned Mapbox
+command surface and the existing Worker-owned provider-egress credential
+boundary and requests at most three candidates. The command itself does not
+cache or write the query or result into canonical vault or hosted-product state;
+the normalized result remains ordinary assistant-turn context under the
+runtime's existing conversation and checkpoint retention rules.
+
+The command returns a `recommendedCandidate` only when deduplication leaves one
+candidate, the provider classifies it as a strong address result, the supplied
+house number and street matched, any secondary-address component matched rather
+than being extrapolated, and every field fits the existing physical-note
+recipient schema. Every supplied delivery component must survive the lookup:
+city, state names or codes, the complete five- or nine-digit ZIP, and any unit,
+suite, floor, or building value must agree with the candidate and the provider's
+component match. Any additional candidate, weaker or conflicting component
+match, incomplete US mailing field, or overlong send field leaves the
+recommendation empty and requires one narrow clarification.
+
+Address completion may fill only the destination the requester already supplied.
+It cannot identify a recipient, discover where a person lives, choose between
+genuinely ambiguous people or destinations, or authorize the mail effect. The
+explicit accepted send request remains the sole model-facing authority for one
+note.
 
 ## Ownership and persistence
 
@@ -79,6 +114,13 @@ period's capacity. Concurrent sends therefore cannot each spend the same
 remaining capacity, and no second balance owner is needed.
 
 ## Provider boundary
+
+The existing Worker-owned hosted provider-egress boundary holds the real Mapbox
+credential. The runner issues only the bounded CLI request through the
+already-allowlisted Mapbox Geocoding path, so the real credential does not enter
+the model prompt or workspace. The request uses `autocomplete=false` and
+`permanent=false`, and its normalized result omits coordinates and provider
+identifiers before returning to the assistant.
 
 Web alone holds `LOB_API_KEY` and the configured return-address id. The assistant
 and tool schema accept only the recipient address. Lob receives one color US
@@ -127,7 +169,15 @@ and postal-service retention remain governed by those providers.
 
 ## Deployment
 
-Deploy the Prisma migration and Web route/service first, with live sending off.
+The proactive address-completion change ships in the runner bundle and reuses an
+existing CLI command family plus the unchanged Worker-owned Mapbox provider-egress
+credential boundary and allowlist. It adds no Web route, database schema, durable
+state, or mixed-version protocol. Deploy the Cloudflare Worker and runner bundle
+with the ordinary fingerprint convergence check; an older warm runner simply
+retains the prior ask-for-address behavior.
+
+The original physical-note deployment order remains: deploy the Prisma migration
+and Web route/service first, with live sending off.
 Then deploy Cloudflare and the assistant runtime/tool surface with
 `HOSTED_PHYSICAL_NOTES_ENABLED` still off. Configure Lob's fixed Murph return
 address and enable USPS Secure Destruction in the Lob account. Verify at least

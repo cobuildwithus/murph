@@ -28,6 +28,11 @@ import {
 } from "../hosted-onboarding/member-access";
 import { isHostedMemberSuspended } from "../hosted-onboarding/entitlement";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import {
+  hostedHealthDataConsentNotRevokedWhere,
+  HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+  resolveHostedHealthDataConsentState,
+} from "../legal/consent";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import {
   resolveHostedMemberDirectRoute,
@@ -76,18 +81,43 @@ type ReadClient = PrismaClient;
 function buildHostedGroupNewsletterMemberAccessSelect(now: Date) {
   return Prisma.validator<Prisma.HostedMemberSelect>()({
     ...hostedMemberAccessSelect,
+    consentGrants: {
+      select: {
+        scope: true,
+        status: true,
+      },
+      where: {
+        scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+      },
+    },
     id: true,
     threadContainer: {
       select: {
         owner: {
-          select: hostedMemberPersonAccessSelect,
+          select: {
+            ...hostedMemberPersonAccessSelect,
+            consentGrants: {
+              select: {
+                scope: true,
+                status: true,
+              },
+              where: {
+                scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+              },
+            },
+          },
         },
         participants: {
           select: { participantMemberId: true },
           take: 1,
           where: {
             ...activeHostedThreadContainerParticipantWhere({ now }),
-            participant: activeHostedMemberAccessWhere(),
+            participant: {
+              AND: [
+                activeHostedMemberAccessWhere(),
+                hostedHealthDataConsentNotRevokedWhere(),
+              ],
+            },
           },
         },
       },
@@ -494,6 +524,17 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
 function hasHostedGroupNewsletterMemberActiveAccess(
   member: HostedGroupNewsletterMemberAccess,
 ): boolean {
+  if (resolveHostedHealthDataConsentState(member.consentGrants) === "revoked") {
+    return false;
+  }
+  if (
+    member.threadContainer
+    && resolveHostedHealthDataConsentState(
+      member.threadContainer.owner.consentGrants,
+    ) === "revoked"
+  ) {
+    return member.threadContainer.participants.length > 0;
+  }
   if (hasActiveHostedMemberAccess(member)) {
     return true;
   }

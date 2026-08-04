@@ -16,7 +16,7 @@ import {
 } from "./linq";
 import {
   sanitizeHostedOnboardingLogString,
-  sanitizeHostedOnboardingPersistedErrorMessage,
+  sanitizeHostedOnboardingProviderReason,
 } from "./http";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import {
@@ -873,7 +873,7 @@ function normalizeSafeProviderToken(value: string | null): string | null {
 }
 
 function normalizeProviderFreeText(value: string | null): string | null {
-  return sanitizeHostedOnboardingPersistedErrorMessage(normalizeNullableString(value));
+  return sanitizeHostedOnboardingProviderReason(normalizeNullableString(value));
 }
 
 function readProviderStatusValue(value: unknown): string | null {

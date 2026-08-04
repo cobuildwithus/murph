@@ -78,6 +78,9 @@ import {
   resolveAssistantUsageCredentialSource,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+} from "@murphai/operator-config/assistant/target-runtime";
+import {
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
   runHostedIdleCheckpointMaintenance,
   type HostedIdleMaintenanceOutcome,
@@ -116,6 +119,10 @@ import {
 import {
   readHostedMailboxImportState,
 } from "./hosted-runtime/mailbox-state.ts";
+import {
+  buildHostedRuntimeLogContextFields,
+  writeHostedRuntimeLogBestEffort,
+} from "./hosted-runtime/runtime-logs.ts";
 import {
   offerHostedVaultShareProjectionBestEffort,
 } from "./hosted-runtime/vault-share-projection.ts";
@@ -537,30 +544,36 @@ async function createHostedForegroundMailboxPrefetch(input: {
   });
 }
 
-async function hostedMailboxPrefetchContainsOnlyPreCheckpointSafeSystemWakes(
+async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   prefetch: HostedMailboxPrefixPrefetch,
-): Promise<boolean> {
+): Promise<{
+  containsOnlySafeSystemWakes: boolean;
+  hasSystemWork: boolean;
+}> {
   const response = await prefetch.response;
-  return response.items.length > 0
-    && response.items.every((item) =>
-      item.lane === "system"
-      && (
-        item.kind === "runtime.pending-effects-reconcile-requested"
-        || item.kind === "assistant.ask.requested"
-        || item.kind === "assistant.ask.completed"
-        || (
-          item.kind === "assistant.notification.requested"
-          && (
-            item.dedupeKey.startsWith(
-              "assistant.notification.requested:phone-call-result:",
-            )
-            || item.dedupeKey.startsWith(
-              "assistant.notification.requested:usage-referral-reward:",
+  return {
+    containsOnlySafeSystemWakes: response.items.length > 0
+      && response.items.every((item) =>
+        item.lane === "system"
+        && (
+          item.kind === "runtime.pending-effects-reconcile-requested"
+          || item.kind === "assistant.ask.requested"
+          || item.kind === "assistant.ask.completed"
+          || (
+            item.kind === "assistant.notification.requested"
+            && (
+              item.dedupeKey.startsWith(
+                "assistant.notification.requested:phone-call-result:",
+              )
+              || item.dedupeKey.startsWith(
+                "assistant.notification.requested:usage-referral-reward:",
+              )
             )
           )
         )
-      )
-    );
+      ),
+    hasSystemWork: response.items.some((item) => item.lane === "system"),
+  };
 }
 
 function isHostedInitialBootstrapPending(input: {
@@ -2973,6 +2986,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
       const runForegroundMailboxWakeIfWork = async (input: {
         latencySeed: HostedRuntimeWakeLatencySeed | null;
+        rearmIdleCheckpointAfterEmptyProbe: boolean;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
         runAssistantWithoutMailboxWork?: boolean;
         shouldContinue?: () => boolean;
@@ -3030,6 +3044,48 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             signal: runtimeAbortController.signal,
           });
           await stageMailboxImportWake(mailboxImport);
+        };
+        const deferCheckpointAfterEmptyForegroundProbe = (
+          mailboxImport: HostedMailboxImportCheckpointResult,
+        ): void => {
+          if (
+            input.rearmIdleCheckpointAfterEmptyProbe !== true
+            || input.latencySeed === null
+            || !shouldContinue()
+          ) {
+            return;
+          }
+
+          markIdleCheckpointTimerAfterDirtyWork();
+          const importResult = mailboxImport.importResult;
+          void writeHostedRuntimeLogBestEffort({
+            entry: {
+              ...buildHostedRuntimeLogContextFields(runtimeLogContext),
+              component: "mailbox",
+              eventCode: "mailbox.imported",
+              level: "info",
+              phase: "checkpoint",
+              redactedJson: {
+                assistantInputPresent:
+                  (importResult.assistantInputIds?.length ?? 0) > 0,
+                blockedCount: importResult.blocked.length,
+                checkpointDeferred: true,
+                conversationImportedCount:
+                  importResult.conversationImportedCount ?? 0,
+                conversationSeqEnd: mailboxImport.state.watermarks.conversation,
+                conversationSeqStart:
+                  mailboxImport.previousState.watermarks.conversation,
+                fetchedCount: importResult.fetchedCount,
+                foregroundProbeOutcome: "no_runnable_work",
+                idleCheckpointTimerRearmed: true,
+                importedCount: importResult.importedCount,
+                runtimeWakePresent: true,
+                stateChanged: mailboxImport.stateChanged,
+              },
+            },
+            now: baseRunnerInput.now,
+            platform: baseRunnerInput.platform,
+          });
         };
         const runForegroundPassAfterMailboxImport = async (
           wakeInput: Parameters<typeof runForegroundPass>[0],
@@ -3150,15 +3206,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           return true;
         }
-        const shouldImportSystemMailbox =
-          input.systemMailboxAdmission === "all"
-          || (
-            runtimeStateDirtyBeforeMailboxImport
-            && await hostedMailboxPrefetchContainsOnlyPreCheckpointSafeSystemWakes(
-              initialMailboxPrefetch,
-            )
-          );
+        const preCheckpointSystemPrefetch =
+          input.systemMailboxAdmission === "pre_checkpoint_safe"
+          && runtimeStateDirtyBeforeMailboxImport
+            ? await inspectHostedPreCheckpointSystemMailboxPrefetch(
+                initialMailboxPrefetch,
+              )
+            : null;
+        const shouldImportSystemMailbox = input.systemMailboxAdmission === "all"
+          || preCheckpointSystemPrefetch?.containsOnlySafeSystemWakes === true;
         if (!shouldImportSystemMailbox) {
+          if (preCheckpointSystemPrefetch?.hasSystemWork !== true) {
+            deferCheckpointAfterEmptyForegroundProbe(conversationImport);
+          }
           await finishMailboxImportWithoutAssistant(conversationImport);
           return false;
         }
@@ -3207,6 +3267,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const runPreCheckpointConversationWake = async (
         latencySeed: HostedRuntimeWakeLatencySeed | null,
         wakeOptions: {
+          rearmIdleCheckpointAfterEmptyProbe?: boolean;
           shouldContinue?: () => boolean;
           signal?: AbortSignal;
         } = {},
@@ -3231,6 +3292,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         const ran = await runForegroundMailboxWakeIfWork({
           latencySeed,
+          rearmIdleCheckpointAfterEmptyProbe:
+            wakeOptions.rearmIdleCheckpointAfterEmptyProbe === true,
           requestIdKind: "checkpoint-interrupt",
           runAssistantWithoutMailboxWork:
             imageAssistantWakePending
@@ -3261,6 +3324,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }): Promise<boolean> => {
         return await runForegroundMailboxWakeIfWork({
           latencySeed: input.latencySeed,
+          rearmIdleCheckpointAfterEmptyProbe: false,
           requestIdKind: "checkpoint-wake",
           shouldContinue: input.shouldContinue,
           signal: input.signal,
@@ -3497,6 +3561,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               // must not have platform allowance debited for it.
               credentialSource: resolveAssistantUsageCredentialSource({
                 apiKeyEnv: null,
+                credentialSourceHint:
+                  runtimeEnv.HOSTED_ASSISTANT_PROVIDER
+                    === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
+                    ? "member"
+                    : null,
                 effectiveEnv: runtimeEnv,
                 provider: "codex-cli",
                 userEnvKeys: Object.keys(guardedRuntime.userEnv),
@@ -3658,6 +3727,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               checkpointInterruptHandled = await runPreCheckpointConversationWake(
                 latencySeed,
                 {
+                  rearmIdleCheckpointAfterEmptyProbe: true,
                   shouldContinue: () => !shutdownWasSignaled(),
                   signal: checkpointInterruptSignal,
                 },

@@ -235,8 +235,10 @@ export function expectAdvertisedMurphDynamicTools(
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
     newsletterAvailable?: boolean;
+    physicalNotesAvailable?: boolean;
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
+    responseCardAvailable?: boolean;
     vaultFileSendAvailable?: boolean;
     askGrokAvailable?: boolean;
   } = {},
@@ -292,8 +294,22 @@ export function expectAdvertisedMurphDynamicTools(
       }
 
       if (
+        options.physicalNotesAvailable !== true
+        && name === "murph.send_physical_note"
+      ) {
+        return false;
+      }
+
+      if (
         options.progressUpdatesAvailable === false
         && name === "murph.send_progress_update"
+      ) {
+        return false;
+      }
+
+      if (
+        options.responseCardAvailable !== true
+        && name === "murph.attach_response_card"
       ) {
         return false;
       }

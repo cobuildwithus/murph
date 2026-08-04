@@ -71,7 +71,7 @@ beforeEach(() => {
 });
 
 test("listVisibleConnectSources covers every hosted-visible device source with UI metadata", async () => {
-  const { listVisibleConnectSources } = await import("../app/(dashboard)/connect/page");
+  const { listVisibleConnectSources } = await import("../app/(dashboard)/connect/connect-page-content");
   const { DEVICE_CONNECT_SOURCES } = await import("@murphai/device-syncd/connect-config");
 
   const expectedVisibleSourceIds = DEVICE_CONNECT_SOURCES

@@ -21,11 +21,13 @@ import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
+import { DataExportFlowStudy } from "./data-export-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GroupStartStudy } from "./group-start-study";
 import { GroupMemberPlanStudy } from "./group-member-plan-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
+import { HealthDataConsentWithdrawalFlowStudy } from "./health-data-consent-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
@@ -33,6 +35,7 @@ import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-s
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
+import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
 import {
   GroupUsageFundingStudy,
@@ -61,7 +64,10 @@ function StudySection({
 
 export function SectionsContent() {
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-16 px-5 py-12 sm:px-8 lg:px-12">
+    <div
+      className="mx-auto flex max-w-7xl flex-col gap-16 px-5 py-12 sm:px-8 lg:px-12"
+      data-design-section="catalog-navigation"
+    >
       <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">
         Sections
       </h1>
@@ -125,15 +131,17 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings model choice with compact provider and save controls">
+      <StudySection title="Settings model choice with provider usage disclosure">
         <div
           id="settings-model-provider-save-controls"
           data-design-section="settings-compact-provider-control"
+          className="max-w-5xl"
           inert
         >
           <HostedAssistantModelSettings
             canUpgradeToEdge={false}
             configurationAvailable
+            customInferenceAvailable
             initialDormantSolPreference={false}
             initialModel="gpt-5.6-terra"
             initialProvider="venice"
@@ -141,6 +149,24 @@ export function SectionsContent() {
             veniceAvailable
           />
         </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Settings custom inference connection">
+        <SettingsCustomInferenceStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Settings health data consent withdrawal and return">
+        <HealthDataConsentWithdrawalFlowStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Settings retained data export">
+        <DataExportFlowStudy />
       </StudySection>
 
       <Separator />
@@ -215,7 +241,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Connect source card actions">
+      <StudySection title="Connect source actions and disconnect lifecycle">
         <ConnectSourceCardStudy />
       </StudySection>
 
