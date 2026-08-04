@@ -61,48 +61,67 @@ jobs:
               (
                   "- Apple Watch/iPhone/Apple Health, WHOOP, and Zepp/Amazfit relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.",
                   "- Apple Watch/iPhone, WHOOP, and Zepp/Amazfit: apply the app-link rule; in Murph, sign in and connect Apple Health.",
+                  1,
+                  False,
               ),
               (
                   "- WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.",
                   "- WHOOP limits third-party access; direct sync lacks steps. Apple Health may relay them. Never infer/request missing steps.",
+                  2,
+                  True,
               ),
               (
                   "- WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.",
                   "- WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow.",
+                  2,
+                  True,
               ),
               (
                   "- Zepp/Amazfit is an Apple Health relay, not a direct Murph connection. Tell the user to enable Apple Health sharing in the Zepp app for the categories they want, then connect Apple Health in Murph. Do not promise direct Zepp cloud access or historical backfill.",
                   "- Zepp/Amazfit is an Apple Health relay, not a direct Murph connection. Enable sharing in Zepp, then connect it in Murph. Do not promise direct Zepp cloud access or historical backfill.",
+                  1,
+                  False,
               ),
               (
                   "When the user asks to set up Zepp/Amazfit and ",
                   "With ",
+                  1,
+                  False,
               ),
               (
                   " is available, send one short privacy-safe voice memo that explains those two steps. Keep accompanying text minimal and follow the app-link rule, including the App Store URL alone on the final line.",
                   ", send one brief privacy-safe Zepp setup memo. Keep text minimal; put the App Store URL alone on the final line.",
+                  1,
+                  False,
               ),
               (
                   "Apple Watch/iPhone/Apple Health, WHOOP, and Zepp/Amazfit relay handoffs",
                   "Apple Watch/iPhone, WHOOP, and Zepp/Amazfit",
+                  1,
+                  False,
               ),
               (
                   "enable Apple Health sharing in the Zepp app",
                   "Enable sharing in Zepp",
+                  1,
+                  False,
               ),
               (
                   "one short privacy-safe voice memo",
                   "one brief privacy-safe Zepp setup memo",
+                  1,
+                  False,
               ),
           ]
 
-          for old, new in replacements:
+          for old, new, expected_count, replace_last in replacements:
               count = content.count(old)
-              if count != 1:
+              if count != expected_count:
                   raise RuntimeError(
-                      f"Expected exactly one prompt-compaction match, found {count}: {old!r}"
+                      f"Expected {expected_count} prompt-compaction match(es), found {count}: {old!r}"
                   )
-              content = content.replace(old, new, 1)
+              index = content.rfind(old) if replace_last else content.find(old)
+              content = content[:index] + new + content[index + len(old):]
 
           path.write_text(content, encoding="utf-8")
           PY
