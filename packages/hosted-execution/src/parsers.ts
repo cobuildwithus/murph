@@ -193,6 +193,7 @@ export {
   parseHostedRuntimeAssistantConfigurationToolResponse,
   parseHostedRuntimeProductFeedbackRecordRequest,
   parseHostedRuntimeProductFeedbackRecordResponse,
+  parseHostedRuntimeHealthDataAdmissionResponse,
   parseHostedRuntimeWebStatusResponse,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,

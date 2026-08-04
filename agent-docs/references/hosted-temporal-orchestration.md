@@ -379,6 +379,19 @@ histories.
 
 ## Cloudflare Execution Adapter Contract
 
+Health-data consent remains Web-owned and never enters Temporal history as a
+second state projection. Every Cloudflare `ensure-processing` operation first
+uses the signed Web callback to read the current `launch.health-data` grant and
+refuses a start or wake for explicit revocation. Web withdrawal separately
+calls Vercel OIDC-authenticated
+`POST /internal/users/:userId/runtime/health-data-consent`; the per-user Durable
+Object serializes that command with ensures, re-reads current consent, clears
+the write fence, and destroys the runner before returning a revoked result.
+Renewal waits on the same command before committing its new grant and then
+signals the existing per-user Temporal workflow. This is an execution barrier,
+not a Temporal workflow termination path, durable consent mirror, queue, lease,
+or reconciliation loop.
+
 Temporal calls a single Cloudflare processing adapter:
 
 ```text

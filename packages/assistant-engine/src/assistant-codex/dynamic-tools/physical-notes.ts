@@ -67,6 +67,7 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
     'On a trusted hosted image-completion turn whose generation was launched with the exact authorizing message_ref, omit image_ref, image_sha256, and message_ref so runtime code binds the exact generated image and request automatically.',
     'When a generated note was intentionally shown first and a person later says to send it, provide the exact image_ref and image_sha256 from that trusted completion plus the exact message_ref approving the send in the current turn. Runtime code re-reads and verifies the private vault bytes and exact accepted input.',
     'When the originating user already explicitly asked Murph to mail the note and supplied a complete US address, call this tool automatically after generation finishes; showing or attaching the image first is optional, not required.',
+    "The server supplies Murph's fixed return address. Never ask the person for a return address, invent one, or include one in the tool arguments or artwork.",
     'Do not call for a draft-only request, an incomplete address, bulk mail, an international address, impersonation, threats, harassment, fraud, or illegal content.',
     'The server decides whether the note is complimentary and computes any Murph-time cost. Never claim acceptance until this tool reports accepted.',
   ].join(' '),
@@ -96,6 +97,8 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
       to: {
         type: 'object',
         additionalProperties: false,
+        description:
+          "One recipient address only. Trusted server code supplies Murph's fixed return address.",
         properties: {
           name: { type: 'string', minLength: 1, maxLength: 40 },
           address_line1: { type: 'string', minLength: 1, maxLength: 64 },

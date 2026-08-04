@@ -11,8 +11,9 @@ Murph can mail one expressive, US-only physical note from a direct conversation
 or a hosted group. GPT Image generates the complete color artwork page, including
 any handwriting, illustration, and a small `murph ai` mark. Murph may show the
 artwork first when a draft or choice is useful, but an explicit send request with
-a complete address may continue through generation and mailing without an extra
-preview round trip.
+a complete recipient address may continue through generation and mailing without
+an extra preview round trip. The platform supplies Murph's fixed return address;
+it is never collected from the person sending the note.
 
 Each hosted member receives one complimentary note under the versioned
 `physical-note-v1` offer. A hosted group receives its own complimentary note
@@ -79,16 +80,25 @@ remaining capacity, and no second balance owner is needed.
 
 ## Provider boundary
 
-Web alone holds `LOB_API_KEY` and the configured return-address id. Lob receives
-one color US Letter request using First Class mail, `insert_blank_page`, and a
-provider idempotency key equal to the physical-note id. The generated artwork is
-wrapped only in deterministic letter-sized transport HTML with the required
-print-safe margin; visual expression remains model-owned.
+Web alone holds `LOB_API_KEY` and the configured return-address id. The assistant
+and tool schema accept only the recipient address. Lob receives one color US
+Letter request using First Class mail, `insert_blank_page`, and a provider
+idempotency key equal to the physical-note id. The generated artwork is wrapped
+only in deterministic letter-sized transport HTML with the required print-safe
+margin; visual expression remains model-owned.
 
-Test keys may render proofs. A `live_` key is rejected unless
-`LOB_PHYSICAL_NOTES_LIVE_ENABLED=true`. The charged amount comes from
-`LOB_PHYSICAL_NOTE_COST_USD_MICROS` and its explicit pricing version, not from a
-scraped public rate.
+USPS Secure Destruction is an account-level Lob setting rather than a per-letter
+API field. Operators enable it in the Lob account before live sending so eligible
+undeliverable First Class notes are destroyed instead of returned to Murph's
+mailbox. The runtime keeps every note on First Class mail, and a `live_` key is
+rejected unless both `LOB_PHYSICAL_NOTES_LIVE_ENABLED=true` and
+`LOB_USPS_SECURE_DESTRUCTION_CONFIRMED=true` are present. The confirmation flag
+does not change the Lob account; it records that an operator already enabled the
+account setting.
+
+Test keys may render proofs without the two live-account confirmations. The
+charged amount comes from `LOB_PHYSICAL_NOTE_COST_USD_MICROS` and its explicit
+pricing version, not from a scraped public rate.
 
 Cloudflare exposes the composable tool only when the non-secret platform
 capability `HOSTED_PHYSICAL_NOTES_ENABLED=true` is set. This flag must be enabled
@@ -119,8 +129,10 @@ and postal-service retention remain governed by those providers.
 
 Deploy the Prisma migration and Web route/service first, with live sending off.
 Then deploy Cloudflare and the assistant runtime/tool surface with
-`HOSTED_PHYSICAL_NOTES_ENABLED` still off. Verify at least one Lob test-mode
-proof before enabling the Cloudflare capability, and enable live sending only
-after that proof passes. The older runtime simply lacks the tool during a
-Web-first compatibility window; a new runtime against an old Web deployment
+`HOSTED_PHYSICAL_NOTES_ENABLED` still off. Configure Lob's fixed Murph return
+address and enable USPS Secure Destruction in the Lob account. Verify at least
+one Lob test-mode proof before enabling the Cloudflare capability. Set
+`LOB_USPS_SECURE_DESTRUCTION_CONFIRMED=true` only after the account setting is
+active, then enable live sending. The older runtime simply lacks the tool during
+a Web-first compatibility window; a new runtime against an old Web deployment
 would expose a route that does not exist and is therefore the unsafe order.

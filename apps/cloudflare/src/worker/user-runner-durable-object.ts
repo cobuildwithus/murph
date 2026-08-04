@@ -50,6 +50,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.deleteHostedUserData(userId);
   }
 
+  async reconcileRuntimeHealthDataConsentForUser(
+    userId: string,
+  ): ReturnType<HostedUserRunner["reconcileRuntimeHealthDataConsentForUser"]> {
+    return this.runner.reconcileRuntimeHealthDataConsentForUser(userId);
+  }
+
   async publishHostedPrivateMedia(
     input: Parameters<HostedUserRunner["publishHostedPrivateMedia"]>[0],
   ): ReturnType<HostedUserRunner["publishHostedPrivateMedia"]> {

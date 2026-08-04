@@ -57,6 +57,10 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
     expect(query.text).toContain('"membership"."status" = \'active\'');
     expect(query.text).toContain('"account_group"."billing_status" = \'active\'');
     expect(query.text).toContain('"account_group"."suspended_at" is null');
+    expect(query.text).toContain('from "hosted_consent_grant" as "consent_grant"');
+    expect(query.text).toContain('"consent_grant"."member_id" = "member"."id"');
+    expect(query.text).toContain('"consent_grant"."scope" = $2');
+    expect(query.text).toContain('"consent_grant"."status" = \'revoked\'');
     expect(query.text).toContain("not exists");
     expect(query.text).not.toContain('from "device_sync_dirty_connection" as "dirty"');
     expect(query.text).not.toContain('from "device_sync_dirty_payload" as "payload"');
@@ -64,10 +68,15 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
     expect(query.text).toContain('"signal"."connection_id" = "connection"."id"');
     expect(query.text).toContain('"signal"."kind" = \'reconcile_due\'');
     expect(query.text).toContain('"signal"."next_reconcile_at" = "connection"."next_reconcile_at"');
-    expect(query.text).toContain('"signal"."created_at" >= $2');
+    expect(query.text).toContain('"signal"."created_at" >= $3');
     expect(query.text).toContain(
       'order by\n        "connection"."next_reconcile_at" asc,\n        "connection"."updated_at" asc,\n        "connection"."id" asc',
     );
-    expect(query.values).toEqual([dueAt, recoveryBucketStartedAt, 251]);
+    expect(query.values).toEqual([
+      dueAt,
+      "launch.health-data",
+      recoveryBucketStartedAt,
+      251,
+    ]);
   });
 });

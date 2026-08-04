@@ -499,6 +499,25 @@ it has been explicitly elevated to a cross-cutting invariant.
   authority fail closed. An advisory dependency may degrade only into an
   already-authorized narrower path and never silently suppress an accepted
   reply.
+- Explicit hosted health-data withdrawal revokes processing authority before
+  cleanup. AI and message admission, queued runtime usage, source connections,
+  webhooks, scheduled sync, and companion processing independently reject that
+  state. The withdrawal response waits for the per-user Cloudflare execution
+  barrier to serialize behind earlier ensures, re-read the Web-owned grant,
+  clear the write fence, and stop the runner; every later ensure re-reads that
+  grant before work. Renewal waits behind the earlier stop before committing a
+  new grant. Cleanup failure cannot restore authority, while an absent legacy
+  grant is not reinterpreted as withdrawal. Settings, latest-available export,
+  and account deletion remain available; renewed consent is the only processing
+  restore path.
+- The Cloudflare Worker that can retain an exact user-control stop target after
+  clearing write authority is a hard rollback floor after the first such row is
+  written. Withdrawal and account deletion must consume that same persisted
+  target; an older Worker that derives its own versioned target is not a valid
+  rollback candidate. The consent-aware Web artifact is also a hard rollback
+  floor after it can record an explicit revoke because Web-only ingress and
+  shared-data readers must enforce that row. Recovery uses a coordinated
+  forward fix on the compatible Web and Worker pair.
 
 ## Deployment Compatibility
 
