@@ -158,7 +158,7 @@ export async function recordHostedProductFeedback(input: {
       || !detailRow
       || detailRow.memberId !== null
       || detailRow.kind !== feedback.kind
-      || detailRow.summary !== detailSummary
+      || !isValidStoredHostedProductSupportDetailSummary(detailRow.summary)
       || !isEmptyJsonArray(detailRow.relatedChangelogItemIdsJson)
     ) {
       throw hostedOnboardingError({
@@ -357,6 +357,16 @@ function resolveUtcDayWindow(value: Date): {
 
 function isEmptyJsonArray(value: unknown): boolean {
   return Array.isArray(value) && value.length === 0;
+}
+
+function isValidStoredHostedProductSupportDetailSummary(
+  value: string | null,
+): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH
+    && sanitizeHostedProductFeedbackSummary(value) === value
+    && !isHostedProductSupportEscalationSummary(value);
 }
 
 function rejectHostedProductSupportEscalation(): never {

@@ -874,15 +874,20 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   activation side effects, and email paths must not persist provider payloads
   or expose recipients in logs.
 
-  An exact verified-private `Support escalation:` product-feedback write uses
-  two deterministic rows under the existing Web owner: one member-linked row
-  with a fixed server-authored marker and one anonymous row containing the
-  bounded, de-identified product-only issue after the reserved prefix. The
-  first three distinct member escalations per UTC day may send an immediate
+  An exact, disclosed, and affirmatively approved verified-private
+  `Support escalation:` product-feedback write uses two deterministic rows
+  under the existing Web owner: one member-linked row with a fixed
+  server-authored marker and one anonymous row containing the bounded,
+  de-identified product-only issue after the reserved prefix. The member first
+  sees that exact summary and is told internal support will receive it linked
+  to their account. Only after approval, the first three distinct member
+  escalations per UTC day may send an immediate
   plain-text support alert that pairs the stored anonymous issue summary with
   the internal feedback and member ids. Web reads back and validates both rows
   before provider entry and formats from the stored detail, so an exact replay
-  reuses one body and Resend idempotency key while changed content fails closed.
+  reuses one body and Resend idempotency key. Later callback rewording cannot
+  replace the first stored detail, while a missing, linked, or malformed stored
+  row fails closed.
   The alert never reads raw conversation, health, contact, secret, provider, or
   other private context and adds no table, queue, cursor, or delivery owner.
 

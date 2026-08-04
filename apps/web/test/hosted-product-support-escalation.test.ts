@@ -341,15 +341,89 @@ describe("hosted product support escalation", () => {
     expect(prismaMocks.transaction).not.toHaveBeenCalled();
   });
 
-  it("rejects an idempotent replay bound to different support content", async () => {
+  it("fails closed before email when the stored issue detail is member-linked", async () => {
     const feedback = makeSupportFeedback({
-      idempotencyKey: "f".repeat(64),
+      idempotencyKey: "7".repeat(64),
     });
     const feedbackId = buildHostedProductFeedbackId({ feedback });
+    const sendEmail = vi.fn();
+    prismaMocks.createMany.mockResolvedValue({ count: 0 });
+    const storedRows = makeStoredSupportFeedbackRows({ feedback, feedbackId });
+    const detailRow = storedRows.find(
+      (row) => row.id === buildHostedProductSupportDetailFeedbackId(feedbackId),
+    );
+    if (!detailRow) {
+      throw new Error("Expected a stored support detail row.");
+    }
+    detailRow.memberId = MEMBER_ID;
+    prismaMocks.findFeedbackRows.mockResolvedValue(storedRows);
+
+    await expect(recordHostedProductFeedback({
+      env: EMAIL_ENV,
+      feedback,
+      memberId: MEMBER_ID,
+      now: NOW,
+      sendEmail,
+    })).rejects.toMatchObject({
+      code: "HOSTED_PRODUCT_SUPPORT_IDEMPOTENCY_CONFLICT",
+      httpStatus: 409,
+    });
+
+    expect(prismaMocks.count).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("replays reworded callback content from the first stored issue detail", async () => {
+    const feedback = makeSupportFeedback({
+      idempotencyKey: "f".repeat(64),
+      detail: "the connection callback was reworded during replay.",
+    });
+    const feedbackId = buildHostedProductFeedbackId({ feedback });
+    const sendEmail = vi.fn().mockResolvedValue({ providerMessageId: null });
     prismaMocks.createMany.mockResolvedValue({ count: 0 });
     prismaMocks.findFeedbackRows.mockResolvedValue(
       makeStoredSupportFeedbackRows({
-        detailSummary: "a different issue.",
+        detailSummary:
+          "a connected source reports success but Murph does not finish the connection.",
+        feedback,
+        feedbackId,
+      }),
+    );
+    prismaMocks.count.mockResolvedValue(1);
+
+    await expect(recordHostedProductFeedback({
+      env: EMAIL_ENV,
+      feedback,
+      memberId: MEMBER_ID,
+      now: NOW,
+      sendEmail,
+    })).resolves.toEqual({
+      feedbackId,
+      recorded: false,
+    });
+
+    const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
+    expect(emailText).toContain(
+      "Product issue: a connected source reports success but Murph does not finish the connection.",
+    );
+    expect(emailText).not.toContain(
+      "the connection callback was reworded during replay.",
+    );
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: `hosted-product-support/${feedbackId}`,
+    }));
+  });
+
+  it("rejects a malformed stored support detail before provider entry", async () => {
+    const feedback = makeSupportFeedback({
+      idempotencyKey: "6".repeat(64),
+    });
+    const feedbackId = buildHostedProductFeedbackId({ feedback });
+    const sendEmail = vi.fn();
+    prismaMocks.createMany.mockResolvedValue({ count: 0 });
+    prismaMocks.findFeedbackRows.mockResolvedValue(
+      makeStoredSupportFeedbackRows({
+        detailSummary: "",
         feedback,
         feedbackId,
       }),
@@ -360,12 +434,14 @@ describe("hosted product support escalation", () => {
       feedback,
       memberId: MEMBER_ID,
       now: NOW,
+      sendEmail,
     })).rejects.toMatchObject({
       code: "HOSTED_PRODUCT_SUPPORT_IDEMPOTENCY_CONFLICT",
       httpStatus: 409,
     });
 
     expect(prismaMocks.count).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it("requires the exact support escalation prefix, content, and structured shape", () => {

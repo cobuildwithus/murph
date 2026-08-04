@@ -271,9 +271,16 @@ Immediate support-escalation alert coverage is also Web-owned and provider-free.
 fixed linked marker plus anonymous detail ownership, shared recognizable-value
 scrubbing, read-back row validation, a labeled issue summary in the bounded
 plain-text alert, the three-per-member UTC-day cap, exact stable-body/key replay,
-conflicting-detail rejection before provider entry, and synthetic-room denial.
+first-stored-detail canonicalization across callback rewording, linked or
+malformed-detail rejection before provider entry, and synthetic-room denial.
 The route suite proves callback-bound member attribution;
 routine tests inject the sender and use a mocked email effect rather than Resend.
+Assistant Engine support-guidance coverage fixes the two-turn disclosure contract:
+the first private turn shows the exact product-only summary, discloses account
+linkage, and asks naturally without calling the tool; only a resumed affirmative
+approval may submit it. The opt-in real-model scenario also carries synthetic
+semantic private context and proves that context is absent from the disclosed
+summary and tool payload, while the group case remains tool-free.
 
 ## Current CI Workflows
 
