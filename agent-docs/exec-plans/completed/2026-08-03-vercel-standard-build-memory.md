@@ -1,6 +1,6 @@
 # Make Vercel Standard builds reliable
 
-Status: active
+Status: completed
 Created: 2026-08-03
 Updated: 2026-08-04
 
@@ -59,7 +59,7 @@ Updated: 2026-08-04
   navigation as links removes that graph-wide client boundary. The few shared
   client modules exposed by a diagnostic Webpack build now import through
   client-safe public entrypoints instead of server-heavy barrels, and only the
-  three synthetic studies that pass callback props declare local client
+  four synthetic studies that pass callback props declare local client
   boundaries.
 - After that boundary correction, a cold local production Turbopack build with
   the same 1 GiB parent / 3 GiB TypeScript-worker policy compiled in 57 seconds
@@ -78,6 +78,26 @@ Updated: 2026-08-04
   legacy-facing re-export, and making route entry modules conform to Next 16
   preserved validation instead of suppressing it. The complete Webpack build
   then passed locally in the same 1 GiB / 3 GiB heap policy with all 229 pages.
+- Three consecutive forced-cold previews of the production-code candidate
+  completed on Vercel's 4-core, 8-GB Standard builder. Webpack compilation took
+  2.8, 2.6, and 2.5 minutes; generated-route TypeScript validation took 59, 53,
+  and 58 seconds; each build generated all 229 static pages without an OOM.
+- After merging the current base branch, an integration preview completed on
+  the same Standard builder in 2.8 minutes of compilation and 56 seconds of
+  generated-route TypeScript validation, generating all 233 static pages.
+  The final corrected head completed again in 2.6 minutes and 56 seconds with
+  all 233 pages, proving the post-merge client boundary correction on the
+  target machine class.
+- Focused exact-head browser proof loaded `/design?tab=sections` successfully
+  and passed all five selected chart, onboarding, and responsive ownership
+  checks. Focused catalog tests, Web typechecking, and scoped linting also
+  passed.
+- Final ReviewGPT round 3 passed after inspecting the exact corrected head,
+  responsive catalog evidence, and the required change-shape retrospective.
+- Every required exact-head CI check passed. The assistant coverage shard's
+  first run had one unrelated 60-second warm-process test timeout followed by
+  busy-process cascades; the exact test passed locally with and without
+  coverage instrumentation, and the failed CI shard passed on rerun.
 
 ## Architecture decision gate
 
@@ -113,3 +133,4 @@ Updated: 2026-08-04
 - The project remains on Standard while this work proceeds. Returning the
   production project to Enhanced is a separate reversible incident mitigation
   that requires explicit user authority.
+Completed: 2026-08-04
