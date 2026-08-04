@@ -1,0 +1,166 @@
+name: Apply Zepp Apple Health relay patch
+
+on:
+  push:
+    branches:
+      - codex/zepp-apple-health-relay
+
+permissions:
+  contents: write
+
+concurrency:
+  group: codex-zepp-apple-health-relay
+  cancel-in-progress: false
+
+jobs:
+  patch-and-verify:
+    if: ${{ !contains(github.event.head_commit.message, '[zepp-patch-applied]') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout task branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/zepp-apple-health-relay
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Apply focused patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def read(path: str) -> str:
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path: str, content: str) -> None:
+              target = Path(path)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(content, encoding='utf-8')
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              content = read(path)
+              count = content.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{path}: expected exactly one occurrence, found {count}: {old[:120]!r}')
+              write(path, content.replace(old, new, 1))
+
+          def replace_all(path: str, old: str, new: str, minimum: int=1) -> None:
+              content = read(path)
+              count = content.count(old)
+              if count < minimum:
+                  raise RuntimeError(f'{path}: expected at least {minimum} occurrence(s), found {count}: {old!r}')
+              write(path, content.replace(old, new))
+          write('apps/web/src/lib/device-sync/zepp-apple-health-setup-guide.ts', 'import type { DeviceSyncCompletionSetupGuide } from "@/src/lib/device-sync/connect-completion-types";\n\nconst MURPH_IOS_APP_STORE_URL = "https://apps.apple.com/us/app/murph-ai/id6786145859";\n\nexport function buildZeppAppleHealthSetupGuide(): DeviceSyncCompletionSetupGuide {\n  return {\n    actionAriaLabel: "See how to sync Zepp through Apple Health",\n    actionLabel: "Set up sync",\n    detail: "Zepp shares supported Amazfit data with Apple Health, and Murph reads it there.",\n    downloadAction: {\n      ariaLabel: "Download App to sync Zepp through Apple Health",\n      href: MURPH_IOS_APP_STORE_URL,\n      label: "Download App",\n      rel: "noopener noreferrer",\n      target: "_blank",\n    },\n    steps: [\n      {\n        detail: "Get the Murph app on your iPhone and connect Apple Health when it asks.",\n        title: "Download Murph and sign in",\n      },\n      {\n        detail:\n          "In the Zepp app, open its Apple Health integration and allow the health categories you want Murph to use.",\n        title: "Turn on Apple Health in Zepp",\n      },\n    ],\n    title: "Sync Zepp through Apple Health",\n  };\n}\n')
+          write('apps/web/public/brand-logos/connect/zepp.svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 32">\n  <path\n    d="M7 7h29L12 25h29"\n    fill="none"\n    stroke="#1c1917"\n    stroke-linecap="round"\n    stroke-linejoin="round"\n    stroke-width="5"\n  />\n</svg>\n')
+          replace_once('apps/web/src/lib/device-sync/connect-completion-types.ts', "  // Pre-generated memo in the member's picked Murph voice.\n  voiceMemoSrc: string;\n", "  // Optional pre-generated memo in the member's picked Murph voice.\n  // Guided flows may instead ask Murph to generate one in the conversation.\n  voiceMemoSrc?: string | null;\n")
+          replace_once('apps/web/app/(dashboard)/home/device-sync-completion-dialog.tsx', '        <VoiceMemoPlayer\n          src={guide.voiceMemoSrc}\n          bars={24}\n          preload="metadata"\n          containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"\n          accentClassName="bg-primary"\n          fillClassName="bg-primary"\n          trackClassName="bg-primary/20"\n        />\n', '        {guide.voiceMemoSrc ? (\n          <VoiceMemoPlayer\n            src={guide.voiceMemoSrc}\n            bars={24}\n            preload="metadata"\n            containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"\n            accentClassName="bg-primary"\n            fillClassName="bg-primary"\n            trackClassName="bg-primary/20"\n          />\n        ) : null}\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-page-types.ts', 'export type ConnectSource = {\n', 'export type ConnectSourceSetupGuideId = "zepp-apple-health";\n\nexport type ConnectSource = {\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-page-types.ts', '  requiresReconnect?: boolean;\n  unavailableActionLabel?: string;\n', '  requiresReconnect?: boolean;\n  setupGuideActionLabel?: string;\n  setupGuideId?: ConnectSourceSetupGuideId;\n  unavailableActionLabel?: string;\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-source-card.tsx', 'import type { ConnectSource } from "./connect-page-types";\n', 'import type {\n  ConnectSource,\n  ConnectSourceSetupGuideId,\n} from "./connect-page-types";\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-source-card.tsx', '  source,\n  onDisconnectTargetChange,\n  onStartConnection,\n', '  source,\n  onDisconnectTargetChange,\n  onSetupGuideOpen,\n  onStartConnection,\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-source-card.tsx', '  source: ConnectSource;\n  onDisconnectTargetChange: (source: ConnectSource | null) => void;\n  onStartConnection: (source: ConnectSource) => Promise<void>;\n}) {\n  const isAvailable = Boolean(source.connectTarget);\n', '  source: ConnectSource;\n  onDisconnectTargetChange: (source: ConnectSource | null) => void;\n  onSetupGuideOpen?: (setupGuideId: ConnectSourceSetupGuideId) => void;\n  onStartConnection: (source: ConnectSource) => Promise<void>;\n}) {\n  const setupGuideActionLabel = source.setupGuideActionLabel;\n  const setupGuideId = source.setupGuideId;\n  const isAvailable = Boolean(source.connectTarget);\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-source-card.tsx', '            ) : !authenticated ? (\n              <AuthButton\n', '            ) : setupGuideId && setupGuideActionLabel ? (\n              <Button\n                type="button"\n                disabled={!onSetupGuideOpen}\n                aria-label={`${setupGuideActionLabel} for ${source.name}`}\n                onClick={() => onSetupGuideOpen?.(setupGuideId)}\n                className="self-end"\n              >\n                {setupGuideActionLabel}\n              </Button>\n            ) : !authenticated ? (\n              <AuthButton\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-page-client.tsx', 'import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";\n', 'import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";\nimport { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-page-client.tsx', '  ConnectPageInitialLoadError,\n  ConnectSource,\n  InitialDeviceConnectIntent,\n', '  ConnectPageInitialLoadError,\n  ConnectSource,\n  ConnectSourceSetupGuideId,\n  InitialDeviceConnectIntent,\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-page-client.tsx', '  whoopSyncContactAction = null,\n  whoopSyncVoiceMemoSrc = null,\n', '  whoopSyncContactAction = null,\n  whoopSyncVoiceMemoSrc = null,\n  zeppSyncContactAction = null,\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-page-client.tsx', '  whoopSyncContactAction?: DeviceSyncCompletionContactAction | null;\n  whoopSyncVoiceMemoSrc?: string | null;\n}) {\n', '  whoopSyncContactAction?: DeviceSyncCompletionContactAction | null;\n  whoopSyncVoiceMemoSrc?: string | null;\n  zeppSyncContactAction?: DeviceSyncCompletionContactAction | null;\n}) {\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-page-client.tsx', '  const [showWhoopAppleHealthSetupDialog, setShowWhoopAppleHealthSetupDialog] = useState(false);\n  const [disconnectSource, setDisconnectSource] = useState<ConnectSource | null>(null);\n', '  const [showWhoopAppleHealthSetupDialog, setShowWhoopAppleHealthSetupDialog] = useState(false);\n  const [activeSetupGuideId, setActiveSetupGuideId] =\n    useState<ConnectSourceSetupGuideId | null>(null);\n  const [disconnectSource, setDisconnectSource] = useState<ConnectSource | null>(null);\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-page-client.tsx', '    setConnectIntentRecovery(null);\n    setShowWhoopAppleHealthSetupDialog(false);\n\n    if (\n', '    setConnectIntentRecovery(null);\n    setShowWhoopAppleHealthSetupDialog(false);\n    setActiveSetupGuideId(null);\n\n    if (\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-page-client.tsx', '              onDisconnectTargetChange={setDisconnectSource}\n              onStartConnection={startConnection}\n', '              onDisconnectTargetChange={setDisconnectSource}\n              onSetupGuideOpen={setActiveSetupGuideId}\n              onStartConnection={startConnection}\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-page-client.tsx', '      <DeviceSyncSetupGuideDialog\n        contactAction={whoopSyncContactAction}\n        guide={buildWhoopAppleHealthSetupGuide(whoopSyncVoiceMemoSrc)}\n        open={showWhoopAppleHealthSetupDialog}\n        onOpenChange={setShowWhoopAppleHealthSetupDialog}\n      />\n\n      <GarminHistoricalDataDialog\n', '      <DeviceSyncSetupGuideDialog\n        contactAction={whoopSyncContactAction}\n        guide={buildWhoopAppleHealthSetupGuide(whoopSyncVoiceMemoSrc)}\n        open={showWhoopAppleHealthSetupDialog}\n        onOpenChange={setShowWhoopAppleHealthSetupDialog}\n      />\n\n      <DeviceSyncSetupGuideDialog\n        contactAction={zeppSyncContactAction}\n        guide={buildZeppAppleHealthSetupGuide()}\n        open={activeSetupGuideId === "zepp-apple-health"}\n        onOpenChange={(open) => {\n          if (!open) {\n            setActiveSetupGuideId(null);\n          }\n        }}\n      />\n\n      <GarminHistoricalDataDialog\n')
+          replace_once('apps/web/app/(dashboard)/connect/page.tsx', 'const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>(["apple-health"]);\n', 'const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>(["apple-health", "zepp"]);\n')
+          replace_once('apps/web/app/(dashboard)/connect/page.tsx', '  "apple-health": {\n    description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",\n    logo: logoAsset("apple-health.png"),\n    name: "Apple Health",\n    unavailableActionLabel: "Download app",\n    unavailableActionUrl: MURPH_IOS_APP_STORE_URL,\n  },\n  whoop: {\n', '  "apple-health": {\n    description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",\n    logo: logoAsset("apple-health.png"),\n    name: "Apple Health",\n    unavailableActionLabel: "Download app",\n    unavailableActionUrl: MURPH_IOS_APP_STORE_URL,\n  },\n  zepp: {\n    description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",\n    logo: logoAsset(\n      "zepp.svg",\n      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",\n      48,\n      32,\n    ),\n    name: "Zepp / Amazfit",\n    setupGuideActionLabel: "Set up sync",\n    setupGuideId: "zepp-apple-health",\n  },\n  whoop: {\n')
+          replace_once('apps/web/app/(dashboard)/connect/page.tsx', '  const [recoveryContactAction, voiceMemoSources, whoopSyncContactAction] = await Promise.all([\n    resolveDeviceConnectRecoveryContactAction(Boolean(auth.authenticatedMember)),\n    resolveDeviceSyncVoiceMemoSources(auth.authenticatedMember?.id ?? null),\n    resolveWhoopSyncContactAction(Boolean(auth.authenticatedMember)),\n  ]);\n', '  const [\n    recoveryContactAction,\n    voiceMemoSources,\n    whoopSyncContactAction,\n    zeppSyncContactAction,\n  ] = await Promise.all([\n    resolveDeviceConnectRecoveryContactAction(Boolean(auth.authenticatedMember)),\n    resolveDeviceSyncVoiceMemoSources(auth.authenticatedMember?.id ?? null),\n    resolveWhoopSyncContactAction(Boolean(auth.authenticatedMember)),\n    resolveZeppSyncContactAction(Boolean(auth.authenticatedMember)),\n  ]);\n')
+          replace_once('apps/web/app/(dashboard)/connect/page.tsx', '        whoopSyncContactAction={whoopSyncContactAction}\n        whoopSyncVoiceMemoSrc={voiceMemoSources.whoopSync}\n', '        whoopSyncContactAction={whoopSyncContactAction}\n        whoopSyncVoiceMemoSrc={voiceMemoSources.whoopSync}\n        zeppSyncContactAction={zeppSyncContactAction}\n')
+          replace_once('apps/web/app/(dashboard)/connect/page.tsx', '            ...(ui.unavailableActionLabel ? { unavailableActionLabel: ui.unavailableActionLabel } : {}),\n            ...(ui.unavailableActionUrl ? { unavailableActionUrl: ui.unavailableActionUrl } : {}),\n', '            ...(ui.setupGuideActionLabel\n              ? { setupGuideActionLabel: ui.setupGuideActionLabel }\n              : {}),\n            ...(ui.setupGuideId ? { setupGuideId: ui.setupGuideId } : {}),\n            ...(ui.unavailableActionLabel ? { unavailableActionLabel: ui.unavailableActionLabel } : {}),\n            ...(ui.unavailableActionUrl ? { unavailableActionUrl: ui.unavailableActionUrl } : {}),\n')
+          page_path = 'apps/web/app/(dashboard)/connect/page.tsx'
+          page_content = read(page_path)
+          helper_pattern = re.compile('async function resolveWhoopSyncContactAction\\(\n  authenticated: boolean,\n\\): Promise<DeviceSyncCompletionContactAction \\| null> \\{.*?\n\\}\n\nfunction isVisibleConnectSource', re.DOTALL)
+          helper_replacement = 'async function resolveWhoopSyncContactAction(\n  authenticated: boolean,\n): Promise<DeviceSyncCompletionContactAction | null> {\n  return resolveAppleHealthRelayContactAction(\n    authenticated,\n    "Help me finish setting up WHOOP through Apple Health.",\n  );\n}\n\nasync function resolveZeppSyncContactAction(\n  authenticated: boolean,\n): Promise<DeviceSyncCompletionContactAction | null> {\n  return resolveAppleHealthRelayContactAction(\n    authenticated,\n    "Help me set up Zepp/Amazfit through Apple Health. Please walk me through it with a voice memo.",\n  );\n}\n\nasync function resolveAppleHealthRelayContactAction(\n  authenticated: boolean,\n  messageBody: string,\n): Promise<DeviceSyncCompletionContactAction | null> {\n  if (!authenticated) {\n    return null;\n  }\n\n  try {\n    const options = await resolveHostedMurphContactOptions({\n      message: {\n        body: messageBody,\n      },\n    });\n    const option = options.find(\n      (candidate) => candidate.kind === "text" || candidate.kind === "telegram",\n    );\n\n    if (!option || option.kind === "email") {\n      return null;\n    }\n\n    return {\n      href: option.href,\n      kind: option.kind === "text" ? "imessage" : "telegram",\n      label: "Text Murph",\n      ...(option.rel ? { rel: option.rel } : {}),\n      ...(option.target ? { target: option.target } : {}),\n    };\n  } catch {\n    return null;\n  }\n}\n\nfunction isVisibleConnectSource'
+          page_content, helper_count = helper_pattern.subn(helper_replacement, page_content, count=1)
+          if helper_count != 1:
+              raise RuntimeError(f'{page_path}: could not replace WHOOP contact helper')
+          write(page_path, page_content)
+          replace_once('apps/web/app/(dashboard)/connect/page.tsx', '    source.connectionAvailable !== false\n    || source.connected === true\n', '    source.connectionAvailable !== false\n    || Boolean(source.setupGuideId)\n    || source.connected === true\n')
+          replace_once('packages/device-syncd/src/config/connect-routes.ts', '  {\n    connectSourceId: "health-connect",\n    label: "Health Connect",\n', '  {\n    connectSourceId: "zepp",\n    label: "Zepp / Amazfit",\n    routes: [\n      unavailableRoute(\n        "Zepp and Amazfit sync through Apple Health in the Murph iOS app.",\n      ),\n    ],\n  },\n  {\n    connectSourceId: "health-connect",\n    label: "Health Connect",\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-source-order.ts', '  "apple-health",\n  "samsung-health",\n', '  "apple-health",\n  "zepp",\n  "samsung-health",\n')
+          replace_once('apps/web/app/design/connect-source-card-study.tsx', '  {\n    authenticated: true,\n    errorMessage: null,\n    source: {\n      connectTarget: "fitbit",\n', '  {\n    authenticated: true,\n    errorMessage: null,\n    source: {\n      description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",\n      id: "zepp",\n      logo: {\n        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",\n        height: 32,\n        src: "/brand-logos/connect/zepp.svg",\n        width: 48,\n      },\n      name: "Zepp / Amazfit",\n      setupGuideActionLabel: "Set up sync",\n      setupGuideId: "zepp-apple-health",\n    },\n  },\n  {\n    authenticated: true,\n    errorMessage: null,\n    source: {\n      connectTarget: "fitbit",\n')
+          replace_once('apps/web/app/design/connect-source-card-study.tsx', '            onDisconnectTargetChange={() => {}}\n            onStartConnection={() => Promise.resolve()}\n', '            onDisconnectTargetChange={() => {}}\n            onSetupGuideOpen={() => {}}\n            onStartConnection={() => Promise.resolve()}\n')
+          replace_once('apps/web/app/design/sections-content.tsx', '      <StudySection title="Connect source card actions">\n', '      <StudySection title="Connect source card and guided setup actions">\n')
+          replace_once('apps/web/README.md', 'Routes and pages that only need connect-target metadata should use the narrower\n`@murphai/device-syncd/connect-config` entrypoint so builds do not pull provider\nruntime factories into static analysis.\n', "Routes and pages that only need connect-target metadata should use the narrower\n`@murphai/device-syncd/connect-config` entrypoint so builds do not pull provider\nruntime factories into static analysis.\n\nThe `/connect` catalog may also expose an explicitly guided relay without\npretending it is a hosted provider account. Zepp/Amazfit uses that path: its\ncard explains how to share supported data into Apple Health and then connect\nApple Health in the native Murph app. It must not create a Zepp provider row,\nclaim direct Zepp cloud access, or promise historical backfill. The\nconversation handoff reuses Murph's existing contact routing and runtime voice\nmemo tool.\n")
+          replace_once('packages/assistant-engine/src/assistant/system-prompt.ts', 'function buildAssistantAppleHealthRelayGuidanceText(): string {\n  return `Apple Health relay:\n- Apple Watch/iPhone/Apple Health and WHOOP relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.\n- WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.\n- WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.\n- No documented WHOOP settings deeplink; never invent one.`;\n}\n', 'function buildAssistantAppleHealthRelayGuidanceText(): string {\n  return `Apple Health relay:\n- Apple Watch/iPhone/Apple Health, WHOOP, and Zepp/Amazfit relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.\n- WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.\n- WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.\n- No documented WHOOP settings deeplink; never invent one.\n- Zepp/Amazfit is an Apple Health relay, not a direct Murph connection. Tell the user to enable Apple Health sharing in the Zepp app for the categories they want, then connect Apple Health in Murph. Do not promise direct Zepp cloud access or historical backfill.\n- When the user asks to set up Zepp/Amazfit and \\`murph.generate_voice_memo\\` is available, send one short privacy-safe voice memo that explains those two steps. Keep accompanying text minimal and follow the app-link rule, including the App Store URL alone on the final line.`;\n}\n')
+          replace_all('packages/assistant-engine/src/assistant/system-prompt.ts', 'other than Apple Health or WHOOP', 'other than Apple Health, WHOOP, or Zepp/Amazfit')
+          model_test_path = 'packages/assistant-engine/test/model-behavior.test.ts'
+          replace_all(model_test_path, 'Apple Watch/iPhone/Apple Health and WHOOP relay handoffs', 'Apple Watch/iPhone/Apple Health, WHOOP, and Zepp/Amazfit relay handoffs')
+          replace_all(model_test_path, 'other than Apple Health or WHOOP', 'other than Apple Health, WHOOP, or Zepp/Amazfit')
+          model_test = read(model_test_path)
+          zepp_prompt_test = '\n\nit(\'guides Zepp and Amazfit through Apple Health with a voice memo handoff\', () => {\n  const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())\n\n  expect(prompt).toContain(\n    \'Zepp/Amazfit is an Apple Health relay, not a direct Murph connection.\',\n  )\n  expect(prompt).toContain(\'enable Apple Health sharing in the Zepp app\')\n  expect(prompt).toContain(\n    \'Do not promise direct Zepp cloud access or historical backfill.\',\n  )\n  expect(prompt).toContain(\'`murph.generate_voice_memo`\')\n  expect(prompt).toContain(\'one short privacy-safe voice memo\')\n  expect(prompt).toContain(\'App Store URL alone on the final line\')\n})\n'
+          if 'guides Zepp and Amazfit through Apple Health with a voice memo handoff' in model_test:
+              raise RuntimeError(f'{model_test_path}: Zepp prompt test already exists')
+          write(model_test_path, model_test.rstrip() + zepp_prompt_test + '\n')
+          connect_test_path = 'apps/web/test/connect-page.test.ts'
+          replace_once(connect_test_path, '  assert.match(markup, />27 of 27 sources</);\n', '  assert.match(markup, />28 of 28 sources</);\n')
+          replace_once(connect_test_path, '  assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[0]?.[0], {\n    message: {\n      body: "Help me finish setting up WHOOP through Apple Health.",\n    },\n  });\n', '  assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[0]?.[0], {\n    message: {\n      body: "Help me finish setting up WHOOP through Apple Health.",\n    },\n  });\n  assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[1]?.[0], {\n    message: {\n      body:\n        "Help me set up Zepp/Amazfit through Apple Health. Please walk me through it with a voice memo.",\n    },\n  });\n')
+          replace_once(connect_test_path, '    {\n      assetPath: "/brand-logos/connect/whoop.svg",\n', '    {\n      assetPath: "/brand-logos/connect/zepp.svg",\n      description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",\n      name: "Zepp / Amazfit",\n    },\n    {\n      assetPath: "/brand-logos/connect/whoop.svg",\n')
+          replace_once(connect_test_path, '  assert.equal(sources.length, 27);\n', '  assert.equal(sources.length, 28);\n')
+          replace_once(connect_test_path, '  assert.equal(markup.match(/>Not available<\\/button>/gu)?.length, sources.length - 1);\n', '  assert.equal(markup.match(/>Not available<\\/button>/gu)?.length, sources.length - 2);\n')
+          replace_once(connect_test_path, '  assert.match(markup, /aria-label="Download app for Apple Health"/);\n', '  assert.match(markup, /aria-label="Download app for Apple Health"/);\n  assert.match(markup, /aria-label="Set up sync for Zepp \\/ Amazfit"/);\n')
+          replace_once(connect_test_path, '  assert.ok(sourceHeadingIndex(markup, "Apple Health") < sourceHeadingIndex(markup, "Garmin"));\n', '  assert.ok(sourceHeadingIndex(markup, "Apple Health") < sourceHeadingIndex(markup, "Zepp / Amazfit"));\n  assert.ok(sourceHeadingIndex(markup, "Zepp / Amazfit") < sourceHeadingIndex(markup, "Garmin"));\n')
+          zepp_server_test = 'test("ConnectPage maps the Zepp setup Messages option at the server boundary", async () => {\n  mocks.resolveHostedMurphContactOptions\n    .mockResolvedValueOnce([])\n    .mockResolvedValueOnce([\n      {\n        href: "sms:+15550100001?body=Help%20me%20set%20up%20Zepp",\n        kind: "text",\n        label: "Messages",\n      },\n    ]);\n\n  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");\n  const page = await ConnectPage();\n\n  assert.deepEqual(readZeppSyncContactAction(page), {\n    href: "sms:+15550100001?body=Help%20me%20set%20up%20Zepp",\n    kind: "imessage",\n    label: "Text Murph",\n  });\n});\n\n'
+          replace_once(connect_test_path, 'test("filterConnectSourcesForSearch matches source names, ids, and descriptions", async () => {\n', zepp_server_test + 'test("filterConnectSourcesForSearch matches source names, ids, and descriptions", async () => {\n')
+          zepp_dialog_test = 'test("ConnectSourcesGrid opens the Zepp Apple Health setup guide", async () => {\n  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");\n  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {\n    sources: [\n      {\n        connectionAvailable: false,\n        description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",\n        id: "zepp",\n        logo: {\n          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",\n          height: 32,\n          src: "/brand-logos/connect/zepp.svg",\n          width: 48,\n        },\n        name: "Zepp / Amazfit",\n        setupGuideActionLabel: "Set up sync",\n        setupGuideId: "zepp-apple-health",\n      },\n    ],\n    zeppSyncContactAction: {\n      href: "sms:+15550100001?body=Help%20me%20set%20up%20Zepp",\n      kind: "imessage",\n      label: "Text Murph",\n    },\n  }));\n\n  const setupButton = rendered.container.querySelector(\n    \'button[aria-label="Set up sync for Zepp / Amazfit"]\',\n  );\n  assert.ok(setupButton instanceof rendered.window.HTMLButtonElement);\n\n  await act(async () => {\n    setupButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));\n  });\n\n  assert.match(rendered.container.textContent ?? "", /Sync Zepp through Apple Health/);\n  assert.match(\n    rendered.container.textContent ?? "",\n    /Zepp shares supported Amazfit data with Apple Health, and Murph reads it there\\./,\n  );\n  assert.match(rendered.container.textContent ?? "", /Download Murph and sign in/);\n  assert.match(rendered.container.textContent ?? "", /Turn on Apple Health in Zepp/);\n  assert.equal(\n    rendered.container.querySelector(\'button[aria-label="Play voice memo"]\'),\n    null,\n  );\n  assert.equal(rendered.container.querySelector("audio"), null);\n\n  const appStoreLink = rendered.container.querySelector(\n    \'a[aria-label="Download App to sync Zepp through Apple Health"]\',\n  );\n  assert.ok(appStoreLink instanceof rendered.window.HTMLAnchorElement);\n  assert.equal(\n    appStoreLink.href,\n    "https://apps.apple.com/us/app/murph-ai/id6786145859",\n  );\n\n  const continueLink = rendered.container.querySelector(\n    \'a[aria-label="Continue with Murph in Messages"]\',\n  );\n  assert.ok(continueLink instanceof rendered.window.HTMLAnchorElement);\n  assert.equal(continueLink.textContent, "Continue with Murph");\n\n  await rendered.cleanup();\n});\n\n'
+          replace_once(connect_test_path, 'test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches capacity", async () => {\n', zepp_dialog_test + 'test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches capacity", async () => {\n')
+          replace_once(connect_test_path, '  assert.match(markup, /aria-label="Download app for Apple Health"/u);\n  assert.match(markup, /aria-label="Connect Fitbit"/u);\n', '  assert.match(markup, /aria-label="Download app for Apple Health"/u);\n  assert.match(markup, /aria-label="Set up sync for Zepp \\/ Amazfit"/u);\n  assert.match(markup, /aria-label="Connect Fitbit"/u);\n')
+          replace_once(connect_test_path, 'function readWhoopSyncContactAction(page: ReactNode): unknown {\n  assert.ok(isValidElement<{ children?: ReactNode }>(page));\n  const connectSourcesGrid = Children.toArray(page.props.children).find((child) => {\n    if (!isValidElement(child)) {\n      return false;\n    }\n    return "whoopSyncContactAction" in (child.props as Record<string, unknown>);\n  });\n\n  assert.ok(isValidElement(connectSourcesGrid));\n  return (connectSourcesGrid.props as Record<string, unknown>).whoopSyncContactAction;\n}\n', 'function readWhoopSyncContactAction(page: ReactNode): unknown {\n  return readConnectSourcesGridProp(page, "whoopSyncContactAction");\n}\n\nfunction readZeppSyncContactAction(page: ReactNode): unknown {\n  return readConnectSourcesGridProp(page, "zeppSyncContactAction");\n}\n\nfunction readConnectSourcesGridProp(page: ReactNode, propName: string): unknown {\n  assert.ok(isValidElement<{ children?: ReactNode }>(page));\n  const connectSourcesGrid = Children.toArray(page.props.children).find((child) => {\n    if (!isValidElement(child)) {\n      return false;\n    }\n    return propName in (child.props as Record<string, unknown>);\n  });\n\n  assert.ok(isValidElement(connectSourcesGrid));\n  return (connectSourcesGrid.props as Record<string, unknown>)[propName];\n}\n')
+          replace_once('apps/web/app/(dashboard)/connect/connect-page-client.tsx', '        source.connectionAvailable !== false\n        || source.connected === true\n', '        source.connectionAvailable !== false\n        || Boolean(source.setupGuideId)\n        || source.connected === true\n')
+          for path in ['apps/web/app/(dashboard)/connect/connect-page-client.tsx', 'apps/web/app/(dashboard)/connect/connect-source-card.tsx', 'apps/web/app/(dashboard)/connect/page.tsx', 'apps/web/app/design/connect-source-card-study.tsx', 'apps/web/app/design/sections-content.tsx', 'apps/web/src/lib/device-sync/connect-completion-types.ts', 'apps/web/src/lib/device-sync/zepp-apple-health-setup-guide.ts', 'apps/web/test/connect-page.test.ts', 'packages/assistant-engine/src/assistant/system-prompt.ts', 'packages/assistant-engine/test/model-behavior.test.ts', 'packages/device-syncd/src/config/connect-routes.ts']:
+              content = read(path)
+              if '\t' in content:
+                  raise RuntimeError(f'{path}: patch introduced tabs')
+          PY
+
+      - name: Install dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Focused web tests
+        run: >-
+          pnpm exec vitest run
+          --config apps/web/vitest.workspace.ts
+          --no-coverage
+          apps/web/test/connect-page.test.ts
+          apps/web/test/device-sync-completion-dialog-client.test.ts
+
+      - name: Focused assistant prompt tests
+        run: >-
+          pnpm exec vitest run
+          --config packages/assistant-engine/vitest.config.ts
+          --no-coverage
+          packages/assistant-engine/test/model-behavior.test.ts
+
+      - name: Typecheck affected packages
+        run: |
+          pnpm --dir packages/device-syncd typecheck
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir apps/web typecheck
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+      - name: Commit verified patch
+        shell: bash
+        run: |
+          git rm .github/workflows/codex-zepp-apple-health-relay.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: add Zepp Apple Health setup [zepp-patch-applied]"
+          git push origin HEAD:codex/zepp-apple-health-relay
