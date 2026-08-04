@@ -211,6 +211,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
     "environment-progress-study.tsx",
     "experiment-results-share-study.tsx",
     "homepage-auth-warm-runtime-study.tsx",
+    "settings-custom-inference-study.tsx",
   ]) {
     const clientStudySource = readFileSync(
       new URL(`../app/design/${clientStudy}`, import.meta.url),
