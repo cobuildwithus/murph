@@ -130,13 +130,18 @@ async function addHostedSessionCookie(
   if (separatorIndex <= 0) {
     throw new Error("Hosted session cookie was malformed.");
   }
+  const cookieName = pair.slice(0, separatorIndex);
+  const cookieUrl = new URL(config.webBaseUrl);
+  if (cookieName.startsWith("__Host-")) {
+    cookieUrl.protocol = "https:";
+  }
 
   await context.addCookies([{
     httpOnly: true,
-    name: pair.slice(0, separatorIndex),
+    name: cookieName,
     sameSite: "Lax",
-    secure: pair.startsWith("__Host-") || config.webBaseUrl.startsWith("https://"),
-    url: config.webBaseUrl,
+    secure: cookieName.startsWith("__Host-") || config.webBaseUrl.startsWith("https://"),
+    url: cookieUrl.toString(),
     value: decodeURIComponent(pair.slice(separatorIndex + 1)),
   }]);
 }
