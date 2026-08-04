@@ -465,6 +465,45 @@ describe("deploy preflight helpers", () => {
     );
   });
 
+  it("requires a supported R2 write-admission state", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_WRITE_ADMISSION: "draining",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_WRITE_ADMISSION must be open or paused.",
+    );
+  });
+
+  it("restricts the temporary paused canary digest to destination-active paused deploys", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "not-a-digest",
+      HOSTED_R2_WRITE_ADMISSION: "paused",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be a lowercase SHA-256 hex digest.",
+    );
+
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
+      HOSTED_R2_WRITE_ADMISSION: "open",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
+    );
+
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
+      HOSTED_R2_WRITE_ADMISSION: "paused",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
+    );
+
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
+      HOSTED_R2_WRITE_ADMISSION: "paused",
+    }), { deployWorker: true })).not.toContain(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
+    );
+  });
+
   it("requires the direct-R2 presign account to match the Cloudflare deploy account", () => {
     expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
       HOSTED_R2_PRESIGN_ACCOUNT_ID: "other-account",

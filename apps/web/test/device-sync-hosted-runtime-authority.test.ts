@@ -927,6 +927,76 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       );
   });
 
+  it.each([
+    "SOURCE_DISCONNECT_IN_PROGRESS",
+    "SOURCE_START_CLEANUP_IN_PROGRESS",
+    "SOURCE_USER_DISCONNECTED",
+  ])("does not let a runtime source projection cross the %s fence", async (lastErrorCode) => {
+    const connectionId = "conn_junction";
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId,
+      sourceProviderSlug: "oura",
+    });
+    if (!sourceInstanceKey) {
+      throw new Error("Expected a canonical Junction source instance key.");
+    }
+    const harness = createAuthorityHarness({
+      connectionSources: [{
+        connectionId,
+        displayName: null,
+        firstSeenAt: "2026-04-06T09:00:00.000Z",
+        lastErrorCode,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-06T10:00:00.000Z",
+        resourceAvailabilitySummary: { sleep: true },
+        sourceInstanceKey,
+        sourceProviderSlug: "oura",
+        status: "disconnected",
+      }],
+      record: buildHostedRecord({
+        id: connectionId,
+        provider: "junction",
+        updatedAt: "2026-04-06T10:00:00.000Z",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{
+            connectionId,
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            sources: [{
+              displayName: null,
+              firstSeenAt: "2026-04-06T09:00:00.000Z",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: "2026-04-06T10:05:00.000Z",
+              observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+              resourceAvailabilitySummary: { sleep: true },
+              sourceInstanceKey,
+              sourceProviderSlug: "oura",
+              status: "connected",
+            }],
+          }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId,
+      writeUpdate: "skipped_version_mismatch",
+    });
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
+  });
+
   it("applies an update whose only change is the arrival timestamp", async () => {
     const harness = createAuthorityHarness({
       connectionSources: [
