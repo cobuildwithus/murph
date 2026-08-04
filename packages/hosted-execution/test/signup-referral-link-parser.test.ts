@@ -6,6 +6,7 @@ import {
 } from "../src/parsers/runtime-control.js";
 
 const MESSAGE_REF = `ain_${"a".repeat(32)}`;
+const SIGNUP_URL = "https://www.withmurph.ai/join/invite";
 
 describe("signup referral group-tool parsing", () => {
   it("accepts direct and provider-authenticated group requests", () => {
@@ -44,14 +45,14 @@ describe("signup referral group-tool parsing", () => {
       action: "create_signup_referral_link",
       result: {
         expiresAt: "2026-08-06T22:30:00.000Z",
-        signupUrl: "https://www.withmurph.ai/?referral=invite",
+        signupUrl: SIGNUP_URL,
         status: "ok",
       },
     })).toEqual({
       action: "create_signup_referral_link",
       result: {
         expiresAt: "2026-08-06T22:30:00.000Z",
-        signupUrl: "https://www.withmurph.ai/?referral=invite",
+        signupUrl: SIGNUP_URL,
         status: "ok",
       },
     });
@@ -83,7 +84,7 @@ describe("signup referral group-tool parsing", () => {
       action: "create_signup_referral_link",
       result: {
         expiresAt: "tomorrow",
-        signupUrl: "https://www.withmurph.ai/?referral=invite",
+        signupUrl: SIGNUP_URL,
         status: "ok",
       },
     })).toThrow(/timestamp/u);
