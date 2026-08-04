@@ -1,0 +1,138 @@
+name: Fix product feedback prompt CI contract
+
+on:
+  push:
+    branches:
+      - agent/product-feedback-problem-discovery
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-fix-product-feedback-ci
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/product-feedback-problem-discovery
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+
+      - name: Install workspace
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+          pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Compact guidance and update the canonical prompt contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path('packages/assistant-engine/src/assistant/system-prompt.ts')
+          source = source_path.read_text()
+          source_start_marker = 'function buildAssistantProductFeedbackGuidanceText(): string {'
+          source_end_marker = '\n\nfunction buildAssistantStyleSettingsGuidanceText'
+          source_start = source.index(source_start_marker)
+          source_end = source.index(source_end_marker, source_start)
+          source_replacement = '''function buildAssistantProductFeedbackGuidanceText(): string {
+            return [
+              "Product feedback:",
+              "- When `murph.submit_product_feedback` is available, capture explicit Murph product frustration or feature requests, changelog/feature-catalog interest, clear inferred workflow friction, and repeated Murph-observed tool friction.",
+              "- A blocked, degraded, or manual Murph workflow is a high-confidence inferred feature request even without a complaint. Treat requests, bugs, and workarounds as clues to the user's goal, underlying problem, and desired outcome—not automatically the thing to build. When known, summarize that problem and outcome instead of only the requested implementation or symptom.",
+              "- If one missing answer would materially change what Murph should build, ask one concise natural follow-up and do not call the tool yet. Ask at most one feedback-discovery question per turn; use prior context, never re-ask, and continue later only while each answer improves product understanding. Do not mention logging or ask permission. Still help with the immediate request or best fallback.",
+              "- Otherwise, when the problem is clear or Murph observed the friction, capture it silently: select the single most material gap and call the tool at most once for the accepted request. Never retry any result; persistence is best-effort after the reply. Do not log safety refusals, missing input, or external/transient failures unless they expose a Murph-owned gap.",
+              "- Use `feature_request` for a missing path. Record only kind, a concise product-only summary, and relevant changelog ids when known; ids are optional. Prefix inferred summaries `Speculative:` and assistant-observed summaries `Murph-observed:`. Do not log vague low-confidence guesses, tags, topics, raw user wording or conversation text, health details, identifiers, contact details, secrets, or provider payloads.",
+            ].join("\\n");
+          }'''
+          source_path.write_text(source[:source_start] + source_replacement + source[source_end:])
+
+          test_path = Path('packages/assistant-engine/test/model-behavior.test.ts')
+          test = test_path.read_text()
+          test_start_marker = "  it('guides proactive silent structured product feedback capture', () => {"
+          test_end_marker = "\n\n  it('keeps only Murph-specific behavior outside the Codex base kernel'"
+          test_start = test.index(test_start_marker)
+          test_end = test.index(test_end_marker, test_start)
+          test_replacement = '''  it('guides problem-first structured product feedback capture', () => {
+            const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+            expect(prompt).toContain('Product feedback:')
+            expect(prompt).toContain('`murph.submit_product_feedback`')
+            expect(prompt).toContain(
+              'capture explicit Murph product frustration or feature requests, changelog/feature-catalog interest, clear inferred workflow friction, and repeated Murph-observed tool friction',
+            )
+            expect(prompt).toContain(
+              'A blocked, degraded, or manual Murph workflow is a high-confidence inferred feature request even without a complaint',
+            )
+            expect(prompt).toContain(
+              "Treat requests, bugs, and workarounds as clues to the user's goal, underlying problem, and desired outcome—not automatically the thing to build",
+            )
+            expect(prompt).toContain(
+              'If one missing answer would materially change what Murph should build, ask one concise natural follow-up and do not call the tool yet',
+            )
+            expect(prompt).toContain('Ask at most one feedback-discovery question per turn')
+            expect(prompt).toContain('use prior context, never re-ask')
+            expect(prompt).toContain('Still help with the immediate request or best fallback')
+            expect(prompt).toContain(
+              'Otherwise, when the problem is clear or Murph observed the friction, capture it silently',
+            )
+            expect(prompt).toContain(
+              'select the single most material gap and call the tool at most once for the accepted request',
+            )
+            expect(prompt).toContain('Never retry any result')
+            expect(prompt).toContain('persistence is best-effort after the reply')
+            expect(prompt).toContain('external/transient failures')
+            expect(prompt).toContain('Use `feature_request` for a missing path')
+            expect(prompt).toContain(
+              'Record only kind, a concise product-only summary, and relevant changelog ids when known; ids are optional',
+            )
+            expect(prompt).toContain('Prefix inferred summaries `Speculative:`')
+            expect(prompt).toContain('assistant-observed summaries `Murph-observed:`')
+            expect(prompt).toContain('Do not log vague low-confidence guesses')
+            expect(prompt).toContain(
+              'raw user wording or conversation text, health details, identifiers, contact details, secrets, or provider payloads',
+            )
+            expect(prompt).not.toContain('structured kind/topic')
+            expect(prompt).not.toContain('feedback tags')
+            expect(prompt).not.toContain('feedbackTags')
+          })'''
+          test_path.write_text(test[:test_start] + test_replacement + test[test_end:])
+
+          Path('packages/assistant-engine/test/assistant-product-feedback-problem-discovery.test.ts').unlink()
+          Path('.github/workflows/agent-fix-product-feedback-ci.yml').unlink()
+          PY
+
+          git diff --check
+          git diff -- packages/assistant-engine/src/assistant/system-prompt.ts packages/assistant-engine/test/model-behavior.test.ts packages/assistant-engine/test/assistant-product-feedback-problem-discovery.test.ts
+
+      - name: Run canonical prompt and feedback tests
+        shell: bash
+        run: |
+          pnpm --dir packages/assistant-engine exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/model-behavior.test.ts \
+            test/assistant-product-feedback.test.ts
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            packages/assistant-engine/src/assistant/system-prompt.ts \
+            packages/assistant-engine/test/model-behavior.test.ts \
+            packages/assistant-engine/test/assistant-product-feedback-problem-discovery.test.ts \
+            .github/workflows/agent-fix-product-feedback-ci.yml
+          git commit -m 'Keep problem-first feedback guidance within prompt budget'
+          git push origin HEAD:agent/product-feedback-problem-discovery
