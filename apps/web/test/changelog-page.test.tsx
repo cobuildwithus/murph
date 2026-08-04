@@ -57,14 +57,16 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("More control over data, models, and connections");
+    expect(markup).toContain(
+      "Connected apps recover with a clearer next step",
+    );
+    expect(markup).toContain("Recovery that stops at the right moment");
+    expect(markup).toContain("More ways to finish what you started");
     expect(markup).toContain("A clearer view of home, stronger follow-through");
     expect(markup).toContain("More ways through, less waiting around");
     expect(markup).toContain("Corrections that carry forward");
-    expect(markup).toContain("A first text that goes somewhere");
-    expect(markup).toContain("Reminders on your time, not ours");
-    expect(markup).toContain("Group memory, clearer recovery");
-    expect(markup).toContain("A Murph that knows when to speak");
-    expect(markup).not.toContain("Group chats that read the room");
+    expect(markup).not.toContain("A first text that goes somewhere");
     expect(markup).not.toContain(
       "Updated documents, honest reactions, usage you can see",
     );
@@ -84,9 +86,9 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-24"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-28"');
     expect(markup).toContain(
-      'href="/changelog?edition=2026-07-31#private-environment-report"',
+      'href="/changelog?edition=2026-08-04#custom-inference-endpoint"',
     );
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");
@@ -97,26 +99,22 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
-    expect(markup).toContain("Ask about X");
-    expect(markup).toContain("Turn it up");
+    expect(markup).toContain("Open model settings");
+    expect(markup).toContain("Open privacy settings");
+    expect(markup).toContain("Ask for today&#x27;s nutrition card");
+    expect(markup).toContain("Manage connections");
     expect(markup).toContain("Open Environment");
     expect(markup).toContain('href="/environment"');
-    expect(markup).toContain("Explore club challenges");
-    expect(markup).toContain('href="/clubs"');
+    expect(markup).toContain("Open Connections");
+    expect(markup).toContain('href="/connect"');
     expect(
       mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
     ).toEqual(
       expect.arrayContaining([
         {
           message: {
-            body: "What are people on X saying about zone 2 training this week?",
-            subject: "Try it: Ask Grok what people are saying on X",
-          },
-        },
-        {
-          message: {
-            body: "Turn up my Unhinged setting a little.",
-            subject: "Try it: Ask Murph to loosen up",
+            body: "Show me today's nutrition card.",
+            subject: "Try it: Ask for today's nutrition card",
           },
         },
       ]),
@@ -131,9 +129,15 @@ describe("ChangelogPage", () => {
   });
 
   it("renders explanatory visuals for the major new features", async () => {
-    const markup = renderToStaticMarkup(
-      await ChangelogPage({ searchParams: Promise.resolve({}) }),
-    );
+    const [latestPage, olderPage] = await Promise.all([
+      ChangelogPage({ searchParams: Promise.resolve({}) }),
+      ChangelogPage({
+        searchParams: Promise.resolve({ edition: "2026-07-28" }),
+      }),
+    ]);
+    const markup = [latestPage, olderPage]
+      .map((page) => renderToStaticMarkup(page))
+      .join("\n");
 
     expect(markup).toContain("Add usage");
     expect(markup).toContain("Add to Contacts");
