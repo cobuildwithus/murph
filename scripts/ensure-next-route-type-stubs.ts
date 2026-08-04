@@ -4,6 +4,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const routeTypesImportPattern = /import\s+["'](\.\/[^"'`]*types\/routes\.d\.ts)["'];/u;
+const rootParamsTypesImportPattern =
+  /import\s+["'](\.\/[^"'`]*types\/root-params\.d\.ts)["'];/u;
 const defaultRouteTypesImportPath = "./.next/types/routes.d.ts";
 const nextEnvCommonLines = [
   '/// <reference types="next" />',
@@ -17,6 +19,12 @@ const nextEnvTrailingLines = [
 ];
 const routeTypesStubContents = [
   "// Auto-generated route-type stub for clean typecheck flows.",
+  "export {};",
+  "",
+].join("\n");
+const rootParamsTypesStubContents = [
+  "// Type definitions for Next.js root params (next/root-params)",
+  "// No root params detected.",
   "export {};",
   "",
 ].join("\n");
@@ -38,6 +46,10 @@ export function extractNextRouteTypesImport(nextEnvContents: string): string | n
   return nextEnvContents.match(routeTypesImportPattern)?.[1] ?? null;
 }
 
+export function extractNextRootParamsTypesImport(nextEnvContents: string): string | null {
+  return nextEnvContents.match(rootParamsTypesImportPattern)?.[1] ?? null;
+}
+
 export async function ensureNextRouteTypeStub(nextEnvPath: string): Promise<string | null> {
   const nextEnvContents = await readOrCreateNextEnvDeclaration(nextEnvPath);
   const stubRelativeImportPath = extractNextRouteTypesImport(nextEnvContents);
@@ -47,12 +59,14 @@ export async function ensureNextRouteTypeStub(nextEnvPath: string): Promise<stri
   }
 
   const stubPath = path.resolve(path.dirname(nextEnvPath), stubRelativeImportPath);
-  await mkdir(path.dirname(stubPath), { recursive: true });
+  await ensureDeclarationStub(stubPath, routeTypesStubContents);
 
-  try {
-    await readFile(stubPath, "utf8");
-  } catch {
-    await writeFile(stubPath, routeTypesStubContents, "utf8");
+  const rootParamsRelativeImportPath = extractNextRootParamsTypesImport(nextEnvContents);
+  if (rootParamsRelativeImportPath) {
+    await ensureDeclarationStub(
+      path.resolve(path.dirname(nextEnvPath), rootParamsRelativeImportPath),
+      rootParamsTypesStubContents,
+    );
   }
 
   await ensureNextRouteTypesRuntimeStub(stubPath);
@@ -76,9 +90,23 @@ async function readOrCreateNextEnvDeclaration(nextEnvPath: string): Promise<stri
 }
 
 function buildNextEnvDeclarationArtifact(routeTypesImportPath: string): string {
-  return [...nextEnvCommonLines, `import "${routeTypesImportPath}";`, ...nextEnvTrailingLines].join(
-    "\n",
-  );
+  const rootParamsImportPath = routeTypesImportPath.replace(/routes\.d\.ts$/u, "root-params.d.ts");
+  return [
+    ...nextEnvCommonLines,
+    `import "${routeTypesImportPath}";`,
+    `import "${rootParamsImportPath}";`,
+    ...nextEnvTrailingLines,
+  ].join("\n");
+}
+
+async function ensureDeclarationStub(stubPath: string, contents: string): Promise<void> {
+  await mkdir(path.dirname(stubPath), { recursive: true });
+
+  try {
+    await readFile(stubPath, "utf8");
+  } catch {
+    await writeFile(stubPath, contents, "utf8");
+  }
 }
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
