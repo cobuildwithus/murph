@@ -122,8 +122,9 @@ test("renders separate active and paused consent controls", async () => {
   expect(active.container.textContent).toContain("Withdraw consent");
   const sourceReviewLink = active.container.querySelector('a[href="/connect"]');
   expect(sourceReviewLink?.textContent).toContain("Review or reconnect sources");
-  expect(sourceReviewLink?.className).toContain("before:-inset-y-2.5");
-  expect(sourceReviewLink?.parentElement?.className).toContain("py-2.5");
+  expect(sourceReviewLink?.className).toContain("before:-inset-y-2");
+  expect(sourceReviewLink?.parentElement?.className).toContain("mt-2");
+  expect(active.container.firstElementChild?.className).toContain("items-start");
 
   await cleanupRender();
   cleanupRender = null;

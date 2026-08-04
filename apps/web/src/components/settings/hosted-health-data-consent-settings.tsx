@@ -224,17 +224,17 @@ export function HostedHealthDataConsentControl({
   const unavailable = presentation === "unavailable";
 
   return (
-    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-3 border-b border-border pb-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-3 border-b border-border pb-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
       {active ? (
         <ShieldCheck
           aria-hidden="true"
-          className="size-[18px] shrink-0 text-muted-foreground"
+          className="mt-0.5 size-[18px] shrink-0 text-muted-foreground"
           strokeWidth={1.6}
         />
       ) : (
         <ShieldOff
           aria-hidden="true"
-          className="size-[18px] shrink-0 text-muted-foreground"
+          className="mt-0.5 size-[18px] shrink-0 text-muted-foreground"
           strokeWidth={1.6}
         />
       )}
@@ -244,7 +244,7 @@ export function HostedHealthDataConsentControl({
         </div>
         <p
           aria-live="polite"
-          className={`text-xs leading-5 ${
+          className={`mt-0.5 text-xs leading-5 ${
             unavailable && errorMessage
               ? "text-destructive"
               : "text-muted-foreground"
@@ -261,9 +261,9 @@ export function HostedHealthDataConsentControl({
                   : errorMessage ?? "Status unavailable"}
         </p>
         {active || paused ? (
-          <div className="py-2.5">
+          <div className="mt-2">
             <Link
-              className="relative inline-flex self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
+              className="relative inline-flex self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:-inset-y-2 before:content-['']"
               href="/connect"
             >
               {paused ? "Review source disconnections" : "Review or reconnect sources"}
@@ -274,8 +274,8 @@ export function HostedHealthDataConsentControl({
       <Button
         className={
           active
-            ? "col-start-2 justify-self-end sm:col-start-auto"
-            : "col-span-2 w-full sm:col-span-1 sm:w-auto"
+            ? "col-start-2 justify-self-start sm:col-start-auto sm:justify-self-end"
+            : "col-span-2 w-full sm:col-span-1 sm:w-auto sm:self-start"
         }
         disabled={pending}
         onClick={onAction}
