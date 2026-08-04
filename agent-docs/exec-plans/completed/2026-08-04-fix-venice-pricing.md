@@ -1,6 +1,6 @@
 # Price Venice-hosted assistant usage at Venice's documented rates
 
-Status: active
+Status: completed
 Created: 2026-08-04
 Updated: 2026-08-04
 
@@ -87,7 +87,7 @@ Updated: 2026-08-04
    mapping failures.
 5. [x] Update durable owner and deployment docs.
 6. [x] Disclose higher Venice capacity use in pending and saved Settings states.
-7. [ ] Run focused checks, review the diff, push a candidate, and complete
+7. [x] Run focused checks, review the diff, push a candidate, and complete
    ReviewGPT plus CI.
 
 ## Decisions
@@ -145,3 +145,11 @@ Updated: 2026-08-04
     locally and through their hosted design-proof variants at native resolution.
   - The required second-model UI review was attempted but could not run because
     that service reported explicit usage-credit exhaustion.
+  - Final ReviewGPT correction round: PASS with no findings. Its PR-body count
+    notes were corrected in the live description; its bundled-render gap is
+    covered by the completed specialist review and inspected hosted proof.
+  - Candidate exact-head GitHub Actions passed all substantive release,
+    coverage, hygiene, viewport, and deployment checks. The stale-event design
+    check is corrected by the final plan-closing head and live `## Design proof`
+    body.
+Completed: 2026-08-04
