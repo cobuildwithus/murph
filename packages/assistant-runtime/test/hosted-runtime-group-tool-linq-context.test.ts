@@ -219,14 +219,14 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       },
     });
     await expect(groupTool.request({
-    action: "create_signup_referral_link",
-  })).resolves.toEqual({
-    action: "create_signup_referral_link",
-    result: {
-      status: "unavailable",
-      unavailableReason: "authenticated_sender_required",
-    },
-  });
+      action: "create_signup_referral_link",
+    })).resolves.toEqual({
+      action: "create_signup_referral_link",
+      result: {
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
     expect(request).not.toHaveBeenCalled();
   });
 
