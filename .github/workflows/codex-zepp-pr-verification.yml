@@ -58,6 +58,9 @@ jobs:
           corepack enable
           pnpm install --frozen-lockfile
 
+      - name: Generate Prisma client
+        run: pnpm --dir apps/web prisma:generate
+
       - name: Focused web tests
         run: >-
           pnpm exec vitest run
