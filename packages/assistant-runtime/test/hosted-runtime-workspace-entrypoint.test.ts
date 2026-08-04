@@ -9407,15 +9407,23 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const idleCheckpointDelayMs = 50;
     const wakeTimers: ReturnType<typeof setTimeout>[] = [];
     let wakeTimersStarted = false;
+    let checkpointExpectationCountAtWakeStart = 0;
+    const countCheckpointExpectations = () =>
+      latencyTraceRequests.filter((request) =>
+        request.event.type === "runtime_milestone"
+        && request.event.milestone === "checkpoint_publication_expected_by"
+      ).length;
     const startNoProgressWakes = () => {
       if (wakeTimersStarted) {
         return;
       }
       wakeTimersStarted = true;
+      checkpointExpectationCountAtWakeStart = countCheckpointExpectations();
       for (const delayMs of [2, 8, 14, 20]) {
         wakeTimers.push(setTimeout(() => runtimeWakeSignal.notify(), delayMs));
       }
@@ -9428,7 +9436,6 @@ describe("hosted workspace runtime entrypoint", () => {
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const startedAt = performance.now();
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -9457,6 +9464,7 @@ describe("hosted workspace runtime entrypoint", () => {
             return { status: "imported" };
           },
           platform: createPlatform({
+            latencyTraceRequests,
             mailboxPort: createMailboxPort({
               events,
               fetchRequests,
@@ -9477,9 +9485,12 @@ describe("hosted workspace runtime entrypoint", () => {
           vaultRoot,
         },
       );
-      const elapsedMs = performance.now() - startedAt;
 
-      assert.ok(elapsedMs >= idleCheckpointDelayMs - 20);
+      assert.equal(
+        countCheckpointExpectations() - checkpointExpectationCountAtWakeStart,
+        2,
+        "empty wake probes must not publish additional checkpoint deadlines",
+      );
       assert.ok(fetchRequests.length > 1);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_no_progress_wake_001",

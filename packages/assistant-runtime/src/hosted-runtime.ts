@@ -2983,6 +2983,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
       const runForegroundMailboxWakeIfWork = async (input: {
         latencySeed: HostedRuntimeWakeLatencySeed | null;
+        rearmIdleCheckpointAfterEmptyProbe: boolean;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
         runAssistantWithoutMailboxWork?: boolean;
         shouldContinue?: () => boolean;
@@ -3045,7 +3046,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           mailboxImport: HostedMailboxImportCheckpointResult,
         ): void => {
           if (
-            input.requestIdKind !== "checkpoint-interrupt"
+            input.rearmIdleCheckpointAfterEmptyProbe !== true
             || input.latencySeed === null
             || !shouldContinue()
           ) {
@@ -3263,6 +3264,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const runPreCheckpointConversationWake = async (
         latencySeed: HostedRuntimeWakeLatencySeed | null,
         wakeOptions: {
+          rearmIdleCheckpointAfterEmptyProbe?: boolean;
           shouldContinue?: () => boolean;
           signal?: AbortSignal;
         } = {},
@@ -3287,6 +3289,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         const ran = await runForegroundMailboxWakeIfWork({
           latencySeed,
+          rearmIdleCheckpointAfterEmptyProbe:
+            wakeOptions.rearmIdleCheckpointAfterEmptyProbe === true,
           requestIdKind: "checkpoint-interrupt",
           runAssistantWithoutMailboxWork:
             imageAssistantWakePending
@@ -3317,6 +3321,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }): Promise<boolean> => {
         return await runForegroundMailboxWakeIfWork({
           latencySeed: input.latencySeed,
+          rearmIdleCheckpointAfterEmptyProbe: false,
           requestIdKind: "checkpoint-wake",
           shouldContinue: input.shouldContinue,
           signal: input.signal,
@@ -3714,6 +3719,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               checkpointInterruptHandled = await runPreCheckpointConversationWake(
                 latencySeed,
                 {
+                  rearmIdleCheckpointAfterEmptyProbe: true,
                   shouldContinue: () => !shutdownWasSignaled(),
                   signal: checkpointInterruptSignal,
                 },

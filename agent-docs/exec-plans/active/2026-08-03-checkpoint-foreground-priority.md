@@ -36,4 +36,7 @@ Success criteria:
 
 Implementation complete. Focused reproduction, adjacent checkpoint invariants,
 both package typechecks, and the full assistant-runtime and hosted-execution
-test suites pass. PR review and exact-head CI remain.
+test suites pass. Exact-head CI passed. Preliminary and final review findings
+both traced to ordinary pre-checkpoint wakes sharing the snapshot-interrupt
+request kind; the correction now grants deadline-rearm authority only from the
+actual snapshot-interruption catch. Correction-delta review remains.
