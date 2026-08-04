@@ -1,8 +1,8 @@
 # Scope Junction disconnects to the selected source
 
-Status: active
+Status: completed
 Created: 2026-08-03
-Updated: 2026-08-03
+Updated: 2026-08-04
 
 ## Goal
 
@@ -108,3 +108,12 @@ Updated: 2026-08-03
   - Focused hosted source-lifecycle Vitest passed: 114 tests.
   - Device-syncd typecheck and focused public-ingress/Junction-provider Vitest passed: 285 tests.
   - Diff hygiene and identifier/privacy scans passed.
+
+## Results
+
+- PR #1274 implements target-only Junction source removal while preserving the parent connection, sibling sources, and historical health data.
+- Exact-source lifecycle fencing now covers browser Link, native Apple Health, companion WHOOP/metadata, queued runtime import, signed provider registration, and stale callback cleanup through one existing source row and mutation lock.
+- Full hosted-Web Vitest passed with 8,552 tests and 302 suite skips; focused device-syncd proof passed with 285 tests. Web/device-syncd typechecks, scoped lint, diff hygiene, and privacy scanning passed.
+- Preliminary specialist findings and final ReviewGPT rounds 1–4 were resolved or disproven with direct regression proof. ReviewGPT round 5 passed with no qualifying findings on the exact pushed head.
+- All GitHub Actions checks passed on the round-5 head, and the fetched current base merges cleanly without conflicts.
+Completed: 2026-08-04
