@@ -414,6 +414,8 @@ function resolveHostedLocalR2PresignEnvironment(
       ?? HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
     HOSTED_R2_CUTOVER_PHASE:
       normalizeOptionalString(env.HOSTED_R2_CUTOVER_PHASE) ?? "source_active",
+    HOSTED_R2_WRITE_ADMISSION:
+      normalizeOptionalString(env.HOSTED_R2_WRITE_ADMISSION) ?? "open",
     HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME:
       normalizeOptionalString(env.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME)
       ?? HOSTED_LOCAL_R2_PRESIGN_ENAM_BUCKET_NAME,
@@ -1040,6 +1042,7 @@ export function buildWranglerLocalDevConfig(
     HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS", source) ?? "60000",
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: resolveWranglerEnvValue("HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT", source) ?? "development",
     HOSTED_R2_CUTOVER_PHASE: resolveWranglerEnvValue("HOSTED_R2_CUTOVER_PHASE", source) ?? "source_active",
+    HOSTED_R2_WRITE_ADMISSION: resolveWranglerEnvValue("HOSTED_R2_WRITE_ADMISSION", source) ?? "open",
   };
 
   for (const key of new Set(WRANGLER_VAR_ALLOWLIST)) {
