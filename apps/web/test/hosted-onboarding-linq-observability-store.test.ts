@@ -284,7 +284,9 @@ describe("hosted Linq observability stores", () => {
           eventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
           eventType: "message.failed",
           failureCode: "30007",
-          failureReason: "[redacted]",
+          // The provider's wording is the operator's evidence for why the send
+          // failed, so it survives; the phone number inside it does not.
+          failureReason: "carrier filtered <redacted-phone> provider_msg_123 private text",
         }),
         skipDuplicates: true,
       }),
@@ -297,7 +299,7 @@ describe("hosted Linq observability stores", () => {
         data: expect.objectContaining({
           healthStatus: "warning",
           lastFailureCode: "30007",
-          lastFailureReason: "[redacted]",
+          lastFailureReason: "carrier filtered <redacted-phone> provider_msg_123 private text",
           lastReceiptEventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
           totalFailedCount: { increment: 1 },
         }),
@@ -307,7 +309,7 @@ describe("hosted Linq observability stores", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           failureCode: "30007",
-          failureReason: "[redacted]",
+          failureReason: "carrier filtered <redacted-phone> provider_msg_123 private text",
           status: "failed",
         }),
         where: expect.objectContaining({
@@ -322,6 +324,56 @@ describe("hosted Linq observability stores", () => {
           eventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
           kind: "message_failed",
           status: "pending",
+        }),
+        skipDuplicates: true,
+      }),
+    );
+  });
+
+  it("names the line on a message.failed alert whose payload carries no phone number", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValue({
+      id: "hld_attempt_456",
+      idempotencyKey: null,
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+      sourceRef: null,
+      template: null,
+    });
+    fixture.hostedLinqLineFindUnique.mockResolvedValue({
+      phoneNumberHint: "*** 0351",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+    });
+    // A real `message.failed` payload names the chat and the message but not
+    // the line, so the parsed event's own hint is null and the alert has to
+    // read it off the line the delivery receipt resolved.
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        chat_id: "chat_failed_456",
+        error: { code: "4001" },
+        message_id: "msg_failed_456",
+      },
+      eventId: "evt_failed_456",
+      eventType: "message.failed",
+    }));
+    expect(event.phoneNumberHint).toBeNull();
+    expect(event.phoneNumberRole).toBe("unknown");
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+      receivedAt: new Date("2026-03-26T12:00:02.000Z"),
+    });
+
+    expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: "message_failed",
+          phoneNumberHint: "*** 0351",
+          subject: "[Murph] Linq message failed *** 0351",
+          detailsJson: expect.objectContaining({
+            failureCode: "4001",
+            line: "*** 0351",
+          }),
         }),
         skipDuplicates: true,
       }),

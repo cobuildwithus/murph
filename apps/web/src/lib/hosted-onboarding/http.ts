@@ -27,6 +27,7 @@ const HOSTED_ONBOARDING_DEVELOPMENT_STACK_MAX_LENGTH = 6_000;
 const HOSTED_ONBOARDING_DEVELOPMENT_LOG_MAX_DEPTH = 3;
 const HOSTED_ONBOARDING_DEVELOPMENT_LOG_MAX_ENTRIES = 20;
 const HOSTED_ONBOARDING_PERSISTED_ERROR_TOKEN_MAX_LENGTH = 128;
+const HOSTED_ONBOARDING_PROVIDER_REASON_MAX_LENGTH = 256;
 const HOSTED_ONBOARDING_SENSITIVE_LOG_KEY_PATTERN =
   /authorization|secret|token|password|cookie|set-cookie|api[-_]?key/iu;
 const HOSTED_ONBOARDING_SAFE_DOMAIN_ERROR_DETAIL_KEYS = new Set([
@@ -290,6 +291,22 @@ export function sanitizeHostedOnboardingPersistedErrorMessage(
   return sanitizeHostedOnboardingLogString(value, 1)
     ? HOSTED_ONBOARDING_REDACTED_ERROR_MESSAGE
     : null;
+}
+
+// The boundary between this and `sanitizeHostedOnboardingPersistedErrorMessage`
+// is who authored the string. Our own exception text can carry anything the
+// runtime touched, so it keeps presence only. A reason lifted from a provider's
+// webhook payload is a bounded diagnostic and the operator's only evidence for
+// why a send failed, so it keeps its wording; collapsing it to `[redacted]`
+// made every message_failed alert unactionable. Value patterns are still
+// scrubbed: secrets, URLs, emails, phone numbers, and paths.
+export function sanitizeHostedOnboardingProviderReason(
+  value: string | null | undefined,
+): string | null {
+  return sanitizeHostedOnboardingLogString(
+    value,
+    HOSTED_ONBOARDING_PROVIDER_REASON_MAX_LENGTH,
+  );
 }
 
 function isHostedOnboardingDevelopmentLoggingEnabled(): boolean {
