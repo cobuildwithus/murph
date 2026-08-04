@@ -104,6 +104,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   );
 
   expect(sectionsMarkup).toContain(">Sections<");
+  expect(sectionsMarkup).toContain('data-design-section="catalog-navigation"');
   expect(sectionsMarkup).toContain("Homepage security and privacy");
   expect(sectionsMarkup).toContain("Consumer Health Data Privacy Notice");
   expect(sectionsMarkup).toContain(

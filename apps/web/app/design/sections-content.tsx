@@ -61,7 +61,10 @@ function StudySection({
 
 export function SectionsContent() {
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-16 px-5 py-12 sm:px-8 lg:px-12">
+    <div
+      className="mx-auto flex max-w-7xl flex-col gap-16 px-5 py-12 sm:px-8 lg:px-12"
+      data-design-section="catalog-navigation"
+    >
       <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">
         Sections
       </h1>
