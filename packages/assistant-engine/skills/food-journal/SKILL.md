@@ -39,17 +39,54 @@ Ask at most one question, and only when the missing detail materially changes sa
 - Do not estimate or surface calories or macros for intuitive-eating contexts, eating-disorder risk, or number-sensitive users. In symptom or digestion work, keep numbers secondary to the focus rather than leading with them.
 - Structured label facts may remain available when useful; surface the details relevant to the user's request alongside the default totals.
 
-## Resolve exact labels only when they matter
+## Ground numeric estimates in label and USDA data
 
-When nutrition, ingredients, allergens, or exact product identity could change
-the answer or saved record, use `vault-cli food search-labels` for one item or
-`vault-cli food search-labels-batch` for several before estimating from memory
-or searching the web. Use `--generic` for ordinary ingredients where a USDA
-generic row is preferable; use normal lookup for branded, packaged, menu, UPC,
-or exact-FDC searches. Increase the default result limit only when the first
-match is ambiguous or missing a likely variant. If the database is unavailable
-or incomplete, use an official label/manufacturer/menu source or a clearly
-marked estimate with assumptions.
+Treat every calorie or macro estimate as two separate questions:
+
+1. Which nutrient density or exact label facts apply?
+2. How much was actually eaten, including preparation and additions?
+
+Do not let vision or memory answer both. For every numeric meal estimate—including
+interactive meal logs, user-sent photos, automatic-meal-capture enrichment, and
+scheduled closeouts—resolve nutrient density from the hosted food-label database
+for every identifiable material component. Use the photo, description,
+and conversation to estimate identity, quantity, and preparation; use returned
+label or USDA facts for calories and macros. If another meal skill says to
+estimate visible ingredients or portions, that means estimate those quantities
+and preparation assumptions, not nutrient density from memory.
+
+Before calculating a meal total:
+
+- Enumerate the material components separately. Count discrete pieces or slices
+  when visible, and include cooking oil, butter, dressing, sauce, cheese,
+  toppings, and caloric drinks when they are visible, named, or strongly implied
+  by the preparation. Do not silently assume restaurant or prepared food has no
+  added fat.
+- Use `vault-cli food search-labels` for one item or
+  `vault-cli food search-labels-batch` for several before estimating from memory
+  or searching the web. Use `--generic` for ordinary ingredients where a USDA
+  generic row is preferable; use normal lookup for branded, packaged, menu, UPC,
+  or exact-FDC searches. Because `--generic` applies to the whole batch, split a
+  mixed meal into at most two lookups: one generic USDA batch and one normal
+  branded/menu/package batch.
+- Prefer an exact visible or user-named product, restaurant item, variant, UPC,
+  or FDC id over a nearby generic substitute. Never merge nutrition from
+  similarly named variants without evidence that they are the same item.
+- Read the returned serving basis before scaling. Determine whether nutrition is
+  per labeled serving, per stated gram amount, or per 100 g, then scale it to the
+  estimated amount actually eaten. A database serving is not evidence that the
+  user ate exactly one serving.
+- Sum component estimates only after that scaling. Give a central estimate plus
+  a useful range when portion size, preparation, hidden fat, or exact identity
+  could materially move the total. Avoid fake precision; set confidence from
+  the weakest material identity, quantity, or preparation assumption.
+
+Increase the default result limit only when the first match is ambiguous or
+missing a likely variant. If the database is unavailable or incomplete, use an
+official label, manufacturer, or restaurant menu source. Only after those fail
+may you use a clearly marked memory-based estimate with the assumptions and
+material uncertainty stated. Never invent an exact label or imply that a visual
+portion estimate was database-measured.
 
 For a fridge or pantry photo, enumerate distinct visible products and resolve
 them in one batch. Summarize only relevant nutrition, ingredient, allergen, and
@@ -57,8 +94,9 @@ uncertainty flags. Do not create recurring food records from a scan unless the
 user asks.
 
 When an exact label matters to a meal, preserve serving size and returned label
-nutrition on the meal with label-based provenance. For a user-approved recurring
-or pantry item, save or update the food record with serving, ingredients,
+nutrition on the meal with label-based provenance. For USDA generic rows, use
+database provenance and retain the lookup id or source detail used for scaling.
+For a user-approved recurring or pantry item, save or update the food record with serving, ingredients,
 nutrition, and the label lookup id in provenance so it can be found again.
 
 Treat contaminant observations as exact-product lab context only. Never infer
