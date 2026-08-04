@@ -1370,6 +1370,16 @@ machine: 4 vCPUs, 8 GB RAM, and 32 GB disk. The CI guard currently observes the
 production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
+The production build launches the parent Next process explicitly through Node
+with `--max-old-space-size=2048`. Next 16.2.6 passes
+`turbopackMemoryLimit=4GiB` separately to the native Turbopack project and
+removes a Node old-space flag only from its isolated static workers. Bounding
+the parent JavaScript old space therefore reduces one independent contributor
+to the container peak without changing later worker isolation, Turbopack's
+native target, or the compiled application. The bound is not proof that a
+particular Vercel build fits; repeated forced-cold Standard previews remain the
+direct acceptance evidence.
+
 The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
 machine model minus a 0.8 GB reserve for OS/container overhead outside the build
 cgroup at the ceiling. The legacy-named
@@ -1405,6 +1415,10 @@ the prior 4 GiB run. Any hard cgroup limit that leaves a meaningful reserve on
 the 8 GB machine would currently false-fail the cold build. Cold-build memory
 optimization is the follow-up work; production config should not carry
 unproven heap-limit churn from the 3 GiB trial.
+
+That failed 3 GiB trial changed the native Turbopack target, not the parent
+Node old-space bound above. Keep the two controls distinct when profiling or
+changing the build.
 
 The guard samples cgroup `memory.current` and selected `memory.stat` fields
 about every 3 seconds during the build, prints trajectory lines about every 15

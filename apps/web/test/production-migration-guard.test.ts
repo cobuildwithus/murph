@@ -1144,6 +1144,11 @@ describe("hosted web production migration guard", () => {
 
     assert.match(buildScript, /pnpm prisma:generate/u);
     assert.match(buildScript, /pnpm typecheck:prepared/u);
+    assert.match(
+      buildScript,
+      /node --max-old-space-size=2048 node_modules\/next\/dist\/bin\/next build/u,
+    );
+    assert.doesNotMatch(buildScript, /&& next build &&/u);
     assert.equal(
       typecheckScript,
       "pnpm health-commons:generate && pnpm prisma:generate && pnpm typecheck:prepared",
@@ -1158,7 +1163,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       buildScript,
-      /pnpm typecheck:prepared && next build/u,
+      /pnpm typecheck:prepared && node --max-old-space-size=2048 node_modules\/next\/dist\/bin\/next build/u,
     );
     assert.match(
       buildScript,

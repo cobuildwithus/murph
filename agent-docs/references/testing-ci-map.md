@@ -273,7 +273,13 @@ never reads production feedback or enters Resend.
   creates a root-level cgroup-v2 child for accounting only and moves the build
   process into that cgroup while keeping the build itself on the invoking user,
   environment, cwd, and stdio. It does not currently write `memory.max`,
-  `memory.swap.max`, or `memory.oom.group`. The advisory budget is a cgroup-unit
+  `memory.swap.max`, or `memory.oom.group`. The production command starts the
+  parent Next process through Node with `--max-old-space-size=2048`; Next 16.2.6
+  keeps that parent JavaScript old-space bound separate from the native
+  Turbopack project's 4 GiB target and removes it from isolated static workers.
+  The bound reduces one independent peak contributor without changing build
+  semantics, while repeated forced-cold Standard previews remain the real
+  Vercel acceptance proof. The advisory budget is a cgroup-unit
   model of Vercel Standard's 8 GB build machine: 7.2 GB available to the build
   cgroup and a 0.8 GB reserve for OS/container overhead outside it at the
   ceiling. The legacy-named guard budget override must stay strictly above the
@@ -287,7 +293,8 @@ never reads production feedback or enters Resend.
   plus page cache. Live CI on 2026-07-07 showed the hard limit cannot ship green
   yet: `turbopackMemoryLimit=3GiB` matched the 4 GiB cold-build anon ramp,
   rising about 2.9 GB at 12 seconds, 5.5 GB at 27 seconds, and 6.9 GB at 42
-  seconds before an OOM-group kill. The guard samples cgroup `memory.current`
+  seconds before an OOM-group kill. That trial changed the native Turbopack
+  target, not the parent Node old-space bound. The guard samples cgroup `memory.current`
   and selected `memory.stat` fields about every 3 seconds, prints trajectory
   lines about every 15 seconds, then reports sampled maxima before cgroup
   `memory.peak`, `memory.events`, and selected final-read `memory.stat` values.
