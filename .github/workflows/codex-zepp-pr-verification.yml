@@ -45,7 +45,11 @@ jobs:
               candidate["name"] == "Apply focused patch"
             end
             raise "Patch step not found" unless step && step["run"]
-            File.write("/tmp/apply-zepp-patch.sh", "set -euo pipefail\n#{step.fetch("run")}")
+            run = step.fetch("run")
+            needle = "replace_once(connect_test_path, '\''  assert.ok(sourceHeadingIndex(markup, \"Apple Health\") < sourceHeadingIndex(markup, \"Garmin\"));\\n'\''"
+            raise "Expected one ordering replacement" unless run.scan(needle).length == 1
+            run = run.sub(needle, needle.sub("replace_once", "replace_all"))
+            File.write("/tmp/apply-zepp-patch.sh", "set -euo pipefail\n#{run}")
           '
           bash /tmp/apply-zepp-patch.sh
 
