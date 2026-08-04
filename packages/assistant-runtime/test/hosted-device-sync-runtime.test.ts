@@ -46,7 +46,10 @@ import {
   reconcileHostedDeviceSyncControlPlaneState,
   syncHostedDeviceSyncControlPlaneState,
 } from "../src/hosted-device-sync-runtime.ts";
-import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform.ts";
+import {
+  HostedRuntimeArtifactWriteError,
+  type HostedRuntimeDeviceSyncPort,
+} from "../src/hosted-runtime/platform.ts";
 import { recordHostedDeviceSyncDirtyPostCheckpointRecord } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   createHostedRuntimeResolvedConfig,
@@ -1544,6 +1547,77 @@ describe("hosted device-sync runtime", () => {
         [{
           code: "HOSTED_DEVICE_SYNC_SOURCE_STATE_UNAVAILABLE",
           retryable: true,
+        }],
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test.each([
+    { expectedStatus: "queued", retryable: true },
+    { expectedStatus: "dead", retryable: false },
+  ] as const)("hosted artifact write failures preserve retryable=$retryable for device-sync jobs", async ({
+    expectedStatus,
+    retryable,
+  }) => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      `hosted-device-sync-artifact-write-${retryable ? "retryable" : "terminal"}-`,
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const provider = createFakeProvider({
+      jobExecutor: {
+        async executeJob(context) {
+          await context.importSnapshot({ provider: "demo" });
+          return {};
+        },
+      },
+    });
+    const service = createHostedRuntimeDeviceSyncService({
+      config: {
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+        vaultRoot,
+      },
+      importer: {
+        async importDeviceProviderSnapshot() {
+          throw new HostedRuntimeArtifactWriteError({
+            cause: new Error("Hosted artifact upload failed."),
+            retryable,
+          });
+        },
+      },
+      providers: [provider],
+      secret: DEVICE_SYNC_SECRET,
+    });
+
+    try {
+      const begin = await service.startConnection({ provider: "demo" });
+      const connected = await service.handleOAuthCallback({
+        code: "artifact-write-classification",
+        provider: "demo",
+        state: begin.state,
+      });
+      const job = getStore(service).enqueueJob({
+        accountId: connected.account.id,
+        availableAt: "2026-07-30T00:00:00.000Z",
+        kind: "reconcile",
+        payload: {},
+        provider: "demo",
+      });
+
+      await service.runWorkerOnce();
+
+      assert.equal(getStore(service).getJobById(job.id)?.status, expectedStatus);
+      assert.deepEqual(
+        service.listJobFailureDiagnostics().map((diagnostic) => ({
+          code: diagnostic.code,
+          retryable: diagnostic.retryable,
+        })),
+        [{
+          code: "HOSTED_DEVICE_SYNC_ARTIFACT_WRITE_FAILED",
+          retryable,
         }],
       );
     } finally {

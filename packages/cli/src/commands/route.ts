@@ -1,5 +1,9 @@
 import { Cli, z } from 'incur'
 import {
+  mapboxAddressResolveResultSchema,
+  resolveMapboxAddress,
+} from '../mapbox-address.js'
+import {
   estimateMapboxRoute,
   mapboxRouteEstimateResultSchema,
   mapboxRouteProfileSchema,
@@ -10,7 +14,55 @@ const isoCountryCodeSchema = z.string().regex(/^[A-Za-z]{2}$/u)
 export function registerRouteCommands(cli: Cli.Cli) {
   const route = Cli.create('route', {
     description:
-      'Estimate route distance, duration, and optional approximate elevation through temporary Mapbox lookups without persisting route data in Murph state.',
+      'Resolve addresses or estimate route distance, duration, and optional approximate elevation through temporary Mapbox lookups without persisting location data in Murph state.',
+  })
+
+  route.command('resolve-address', {
+    description:
+      'Resolve a partial or complete mailing address into bounded structured candidates through temporary Mapbox geocoding without persisting the lookup in Murph state.',
+    args: z.object({
+      query: z
+        .string()
+        .min(1)
+        .max(256)
+        .describe('Partial or complete mailing address supplied for the current task.'),
+    }),
+    options: z.object({
+      country: z
+        .array(isoCountryCodeSchema)
+        .max(10)
+        .optional()
+        .describe(
+          'Optional ISO 3166-1 alpha-2 country restriction. Repeat --country to add more than one.',
+        ),
+      language: z
+        .string()
+        .min(1)
+        .max(10)
+        .optional()
+        .describe('Optional language hint for provider display names.'),
+    }),
+    examples: [
+      {
+        description: 'Complete a US street address before mailing something.',
+        args: {
+          query: '42 Example Lane',
+        },
+        options: {
+          country: ['US'],
+        },
+      },
+    ],
+    hint:
+      'Set MAPBOX_ACCESS_TOKEN first. Use recommendedCandidate only when it is non-null; otherwise ask for the unresolved delivery-critical detail. The lookup is temporary, does not identify the recipient, and does not grant permission to mail anything.',
+    output: mapboxAddressResolveResultSchema,
+    async run({ args, options }) {
+      return await resolveMapboxAddress({
+        query: args.query,
+        country: options.country,
+        language: options.language,
+      })
+    },
   })
 
   route.command('estimate', {

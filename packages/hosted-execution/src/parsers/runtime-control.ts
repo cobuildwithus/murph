@@ -109,6 +109,8 @@ import {
   type HostedRuntimeLogPhase,
   type HostedRuntimeLogRequest,
   type HostedRuntimeLogResponse,
+  HOSTED_HEALTH_DATA_CONSENT_STATES,
+  type HostedRuntimeHealthDataAdmissionResponse,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
   type HostedRuntimeRedactedScalar,
@@ -6514,6 +6516,38 @@ export function parseHostedRuntimeWebStatusResponse(value: unknown): HostedRunti
         }),
     userId: requireString(record.userId, "Hosted runtime web status response userId"),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
+  };
+}
+
+export function parseHostedRuntimeHealthDataAdmissionResponse(
+  value: unknown,
+): HostedRuntimeHealthDataAdmissionResponse {
+  const record = requireObject(
+    value,
+    "Hosted runtime health-data admission response",
+  );
+  const consentState = parseAllowedString(
+    record.consentState,
+    "Hosted runtime health-data admission response consentState",
+    HOSTED_HEALTH_DATA_CONSENT_STATES,
+  );
+  const processingAllowed = requireBoolean(
+    record.processingAllowed,
+    "Hosted runtime health-data admission response processingAllowed",
+  );
+  if (processingAllowed !== (consentState !== "revoked")) {
+    throw new TypeError(
+      "Hosted runtime health-data admission response processingAllowed did not match consentState.",
+    );
+  }
+
+  return {
+    consentState,
+    processingAllowed,
+    userId: requireString(
+      record.userId,
+      "Hosted runtime health-data admission response userId",
+    ),
   };
 }
 

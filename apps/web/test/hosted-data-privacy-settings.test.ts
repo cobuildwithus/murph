@@ -127,6 +127,7 @@ vi.mock("@/src/components/ui/label", () => ({
 }));
 
 import {
+  formatVaultExportSuccess,
   hasIncompleteHostedAccountDeletionCleanup,
   HostedDataPrivacySettings,
 } from "@/src/components/settings/hosted-data-privacy-settings";
@@ -235,6 +236,20 @@ describe("HostedDataPrivacySettings", () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
     });
 
+    assert.equal(
+      container.querySelector("#hosted-data-export-title")?.textContent,
+      "Export your data",
+    );
+    assert.match(
+      container.querySelector("#hosted-data-export-description")?.textContent ?? "",
+      /latest dashboard data Murph has retained/u,
+    );
+    assert.equal(
+      container.querySelector('[aria-labelledby="hosted-data-export-title"]')
+        ?.getAttribute("aria-describedby"),
+      "hosted-data-export-description",
+    );
+
     const button = findButton(container, "Download my data");
     assert.equal(button.disabled, true);
 
@@ -318,7 +333,7 @@ describe("HostedDataPrivacySettings", () => {
     ]);
   });
 
-  test("does not download the vault when the replica is stale or a refresh is still pending", async () => {
+  test("accepts the route-authorized latest retained replica without a page consent projection", async () => {
     mockHostedVaultExportFlowState();
     mocks.loadBrowserVaultReplica.mockResolvedValueOnce({
       client: {
@@ -368,8 +383,15 @@ describe("HostedDataPrivacySettings", () => {
     await clickButton(container, "Download my data", window);
 
     expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledTimes(1);
-    expect(createObjectURL).not.toHaveBeenCalled();
-    expect(clickDownloadLink).not.toHaveBeenCalled();
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(clickDownloadLink).toHaveBeenCalledTimes(1);
+    expect(formatVaultExportSuccess({
+      deviceSyncImportPending: true,
+      freshness: "stale",
+      refreshPending: true,
+    })).toContain(
+      "Changes Murph had not processed before you withdrew consent may be absent.",
+    );
   });
 
   test("sends the typed deletion confirmation phrase when the delete flow is submitted", async () => {

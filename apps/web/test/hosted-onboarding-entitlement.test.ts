@@ -369,6 +369,45 @@ describe("hosted runtime AI access decision", () => {
     expect(prisma).not.toHaveProperty("hostedAiUsagePeriod");
   });
 
+  it("denies AI admission after explicit health-data consent withdrawal", async () => {
+    const prisma = buildRuntimeAiAccessPrisma({
+      billingRef: buildRuntimeAiBillingRef(),
+      consentGrants: [{
+        scope: "launch.health-data",
+        status: "revoked",
+      }],
+    });
+
+    await expect(readHostedRuntimeAiAccessDecision({
+      memberId: "member_withdrawn",
+      now,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      allowed: false,
+      reason: "health_data_consent_withdrawn",
+      retryAfter: new Date("2026-07-12T12:15:00.000Z"),
+      userNotice: {
+        code: "health_data_consent_withdrawn",
+        message:
+          "Murph is paused because you withdrew health data consent. "
+          + "Use Murph again in Settings: https://withmurph.ai/settings#data-privacy",
+      },
+    });
+  });
+
+  it("keeps missing legacy health-data grants compatible with AI admission", async () => {
+    const prisma = buildRuntimeAiAccessPrisma({
+      billingRef: buildRuntimeAiBillingRef(),
+      consentGrants: [],
+    });
+
+    await expect(readHostedRuntimeAiAccessDecision({
+      memberId: "member_legacy",
+      now,
+      prisma: prisma as never,
+    })).resolves.toEqual({ allowed: true });
+  });
+
   it.each([
     [
       "expired",
@@ -534,6 +573,32 @@ describe("hosted runtime AI access decision", () => {
     });
   });
 
+  it("keeps a withdrawn owner fail-closed for queued thread-container work", async () => {
+    const prisma = buildRuntimeAiAccessPrisma({
+      billingRef: null,
+      billingStatus: HostedBillingStatus.not_started,
+      threadContainer: {
+        owner: {
+          ...person({ billingStatus: HostedBillingStatus.active }),
+          billingRef: buildRuntimeAiBillingRef(),
+          consentGrants: [{
+            scope: "launch.health-data",
+            status: "revoked",
+          }],
+        },
+      },
+    });
+
+    await expect(readHostedRuntimeAiAccessDecision({
+      memberId: "member_container",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "health_data_consent_withdrawn",
+    });
+  });
+
   it("allows a thread container through a valid-trial participant", async () => {
     const prisma = buildRuntimeAiAccessPrisma({
       billingRef: null,
@@ -610,10 +675,12 @@ function buildRuntimeAiAccessPrisma(
     accountGroupMemberships?: ReturnType<typeof person>["accountGroupMemberships"];
     billingRef: ReturnType<typeof buildRuntimeAiBillingRef> | null;
     billingStatus?: HostedBillingStatus;
+    consentGrants?: Array<{ scope: string; status: string }>;
     suspendedAt?: Date | null;
     threadContainer?: {
       owner: ReturnType<typeof person> & {
         billingRef: ReturnType<typeof buildRuntimeAiBillingRef> | null;
+        consentGrants?: Array<{ scope: string; status: string }>;
       };
     } | null;
   },
@@ -627,6 +694,7 @@ function buildRuntimeAiAccessPrisma(
         accountGroupMemberships: member.accountGroupMemberships ?? [],
         billingRef: member.billingRef,
         billingStatus: member.billingStatus ?? HostedBillingStatus.active,
+        consentGrants: member.consentGrants ?? [],
         suspendedAt: member.suspendedAt ?? null,
         threadContainer: member.threadContainer ?? null,
       })),

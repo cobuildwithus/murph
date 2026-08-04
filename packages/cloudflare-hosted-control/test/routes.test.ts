@@ -12,6 +12,7 @@ import {
   buildCloudflareHostedControlMealPhotoDeletePath,
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
+  buildCloudflareHostedControlRuntimeHealthDataConsentPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -28,6 +29,9 @@ describe("cloudflare hosted control routes", () => {
     );
     expect(buildCloudflareHostedControlRuntimeEnsureProcessingPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/runtime/ensure-processing",
+    );
+    expect(buildCloudflareHostedControlRuntimeHealthDataConsentPath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/runtime/health-data-consent",
     );
     expect(buildCloudflareHostedControlTelegramUsageLimitNoticePath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/telegram/usage-limit-notice",
@@ -58,6 +62,7 @@ describe("cloudflare hosted control routes", () => {
       buildCloudflareHostedControlMealPhotoStagePath,
       buildCloudflareHostedControlUserDataDeletionPath,
       buildCloudflareHostedControlRuntimeEnsureProcessingPath,
+      buildCloudflareHostedControlRuntimeHealthDataConsentPath,
       buildCloudflareHostedControlTelegramUsageLimitNoticePath,
       buildCloudflareHostedControlUserStatusPath,
     ]) {
@@ -107,6 +112,12 @@ describe("cloudflare hosted control routes", () => {
     ).toEqual({ userId: encodedUserId });
     expect(
       matchCloudflareHostedControlUserRoutePath(
+        "runtimeHealthDataConsentReconcile",
+        buildCloudflareHostedControlRuntimeHealthDataConsentPath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
         "telegramUsageLimitNotice",
         buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId),
       ),
@@ -137,6 +148,10 @@ describe("cloudflare hosted control routes", () => {
       mealPhotoDelete: { method: "DELETE", suffix: "meal-photos/delete" },
       mealPhotoStage: { method: "POST", suffix: "meal-photos/stage" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
+      runtimeHealthDataConsentReconcile: {
+        method: "POST",
+        suffix: "runtime/health-data-consent",
+      },
       status: { method: "GET", suffix: "status" },
       telegramUsageLimitNotice: { method: "POST", suffix: "telegram/usage-limit-notice" },
       userDataDelete: { method: "POST", suffix: "account-data/delete" },
@@ -197,6 +212,7 @@ describe("cloudflare hosted control routes", () => {
       "buildCloudflareHostedControlMealPhotoDeletePath",
       "buildCloudflareHostedControlMealPhotoStagePath",
       "buildCloudflareHostedControlRuntimeEnsureProcessingPath",
+      "buildCloudflareHostedControlRuntimeHealthDataConsentPath",
       "buildCloudflareHostedControlTelegramUsageLimitNoticePath",
       "buildCloudflareHostedControlUserDataDeletionPath",
       "buildCloudflareHostedControlUserStatusPath",
@@ -209,6 +225,7 @@ describe("cloudflare hosted control routes", () => {
       buildCloudflareHostedControlInferenceVerificationPath: expect.any(Function),
       buildCloudflareHostedControlMealPhotoDeletePath: expect.any(Function),
       buildCloudflareHostedControlMealPhotoStagePath: expect.any(Function),
+      buildCloudflareHostedControlRuntimeHealthDataConsentPath: expect.any(Function),
       buildCloudflareHostedControlTelegramUsageLimitNoticePath: expect.any(Function),
       buildCloudflareHostedControlUserDataDeletionPath: expect.any(Function),
       buildCloudflareHostedControlUserStatusPath: expect.any(Function),

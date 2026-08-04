@@ -44,6 +44,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "runtime/ensure-processing",
   },
+  runtimeHealthDataConsentReconcile: {
+    method: "POST",
+    suffix: "runtime/health-data-consent",
+  },
   telegramUsageLimitNotice: {
     method: "POST",
     suffix: "telegram/usage-limit-notice",
@@ -78,6 +82,15 @@ export function buildCloudflareHostedControlInferenceVerificationPath(
 
 export function buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("runtimeEnsureProcessing", userId);
+}
+
+export function buildCloudflareHostedControlRuntimeHealthDataConsentPath(
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath(
+    "runtimeHealthDataConsentReconcile",
+    userId,
+  );
 }
 
 export function buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId: string): string {
