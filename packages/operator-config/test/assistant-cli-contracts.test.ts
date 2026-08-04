@@ -43,6 +43,18 @@ import {
   normalizeAssistantResponseMediaUrl,
 } from '../src/assistant-cli-contracts.ts'
 
+const NUTRITION_RESPONSE_CARD = {
+  kind: 'daily_nutrition',
+  localDate: '2026-07-28',
+  mealCount: 3,
+  totals: {
+    calories: { total: 1_490.25, mealCount: 3 },
+    proteinGrams: { total: 94.5, mealCount: 3 },
+    carbsGrams: { total: 193.125, mealCount: 3 },
+    fatGrams: { total: 34.75, mealCount: 3 },
+  },
+} as const
+
 describe('assistant CLI delivery contracts', () => {
   it('accepts hash-bound private vault images without a public URL', () => {
     const media = {
@@ -165,6 +177,76 @@ describe('assistant CLI delivery contracts', () => {
         expectedUpdatedAt: '2026-04-12T00:00:00.000Z',
       },
     })).toThrow()
+  })
+
+  it('defaults legacy outbox cards to null and rejects card conflicts', () => {
+    const baseIntent = {
+      schema: 'murph.assistant-outbox-intent.v1',
+      intentId: 'outbox_card_contract',
+      sessionId: 'session_card_contract',
+      turnId: 'turn_card_contract',
+      createdAt: '2026-07-28T00:00:00.000Z',
+      updatedAt: '2026-07-28T00:00:00.000Z',
+      lastAttemptAt: null,
+      nextAttemptAt: null,
+      sentAt: null,
+      attemptCount: 0,
+      status: 'pending',
+      message: 'nutrition summary',
+      media: [],
+      operation: null,
+      subject: null,
+      dedupeKey: 'dedupe-card-contract',
+      targetFingerprint: 'target-card-contract',
+      channel: 'linq',
+      identityId: null,
+      actorId: '+15550001',
+      answeredMailboxItemIds: [],
+      threadId: 'linq-thread-card-contract',
+      threadIsDirect: true,
+      replyToMessageId: null,
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'linq-thread-card-contract',
+      },
+      deliverySource: null,
+      explicitTarget: null,
+      delivery: null,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: null,
+      deliveryTransportIdempotent: false,
+      preparedDispatchToken: null,
+      lastError: null,
+    }
+
+    expect(assistantOutboxIntentSchema.parse(baseIntent).card).toBeNull()
+    expect(assistantOutboxIntentSchema.parse({
+      ...baseIntent,
+      card: NUTRITION_RESPONSE_CARD,
+    }).card).toEqual(NUTRITION_RESPONSE_CARD)
+    expect(() => assistantOutboxIntentSchema.parse({
+      ...baseIntent,
+      card: NUTRITION_RESPONSE_CARD,
+      media: [{
+        alt: null,
+        kind: 'image',
+        source: null,
+        url: 'https://cdn.example.test/nutrition.png',
+      }],
+    })).toThrow('Assistant response cards cannot be combined with response media.')
+    expect(() => assistantOutboxIntentSchema.parse({
+      ...baseIntent,
+      card: NUTRITION_RESPONSE_CARD,
+      operation: {
+        kind: 'message-reaction',
+        reaction: 'heart',
+      },
+    })).toThrow('Assistant response cards require a normal message intent.')
+    expect(() => assistantOutboxIntentSchema.parse({
+      ...baseIntent,
+      card: NUTRITION_RESPONSE_CARD,
+      threadIsDirect: false,
+    })).toThrow('Assistant response cards require a private direct conversation.')
   })
 
   it('accepts only valid true-only native reply message intents', () => {

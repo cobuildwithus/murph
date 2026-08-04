@@ -15,6 +15,11 @@ import {
   type AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  assistantResponseCardSchema,
+  renderAssistantResponseCardText,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
+import {
   type AutomationQueryRecord,
 } from '@murphai/query'
 import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
@@ -78,6 +83,7 @@ import {
   markAssistantOutboxIntentSent,
   assistantOutboxIntentMatchesDispatchOwner,
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
+  persistAssistantOutboxIntentLinqAppCardTextFallback,
   resetAssistantOutboxPreparedDispatch,
   rescheduleAssistantOutboxConfirmationRetry,
   sameAssistantChannelDelivery,
@@ -135,6 +141,7 @@ export interface AssistantOutboxDispatchMessage {
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
+  card?: AssistantResponseCard | null
   channel?: string | null
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
@@ -259,6 +266,7 @@ export type AssistantOutboxCreateIntentInput = {
   initialState?:
     | { status: 'pending' }
     | { nextAttemptAt: string; status: 'awaiting_approval' }
+  card?: AssistantResponseCard | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
@@ -282,13 +290,21 @@ export async function createAssistantOutboxIntent(
     const createdAt = input.createdAt ?? new Date().toISOString()
     const initialState = input.initialState ?? { status: 'pending' as const }
     const media = normalizeAssistantResponseMediaList(input.media ?? [])
+    const card = input.card == null
+      ? null
+      : assistantResponseCardSchema.parse(input.card)
     const operation = normalizeAssistantOutboxReactionOperation(
       input.operation ?? null,
     )
-    const message = operation ? '' : normalizeOutboxMessage({
-      media,
-      message: input.message,
-    })
+    assertAssistantOutboxCardCompatible({ card, media, operation })
+    const message = operation
+      ? ''
+      : card
+        ? renderAssistantResponseCardText(card)
+        : normalizeOutboxMessage({
+            media,
+            message: input.message,
+          })
     assertAssistantOutboxResponseMediaSupported({
       channel: input.channel ?? null,
       media,
@@ -300,6 +316,12 @@ export async function createAssistantOutboxIntent(
       ...input,
       replyToMessageId,
     })
+    if (card !== null && persistedTarget.threadIsDirect !== true) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
+        'A response card requires a private direct conversation.',
+      )
+    }
     assertAssistantOutboxNativeReplyTarget({
       channel: persistedTarget.channel,
       nativeReplyRequested: persistedTarget.nativeReplyRequested,
@@ -317,6 +339,7 @@ export async function createAssistantOutboxIntent(
     const rawTargetIdentity = buildAssistantOutboxRawTargetIdentity(persistedTarget)
     const dedupeKey = hashAssistantOutboxIdentity({
       dedupeToken: input.dedupeToken,
+      card,
       media,
       message,
       operation,
@@ -427,6 +450,7 @@ export async function createAssistantOutboxIntent(
       message,
       emailHtml: input.emailHtml ?? null,
       media,
+      card,
       subject,
       operation,
       dedupeKey,
@@ -861,6 +885,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
   let deliveryTransportIdempotent = inferAssistantOutboxDeliveryTransportIdempotent(dispatchIntent)
   let preparedDispatchReserved = false
   let dispatchFailureOwnerIntent = dispatchIntent
+  let effectiveDispatchIntent = dispatchIntent
 
   try {
     const reconciledDelivery =
@@ -941,8 +966,28 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     })
     preparedDispatchReserved = input.dispatchHooks?.prepareDispatchIntent !== undefined
 
+    const dispatchDependencies = withAssistantOutboxSignal(
+      input.dependencies,
+      input.signal,
+    )
     const delivered = await sendAssistantOutboxDispatchIntent({
-      dependencies: withAssistantOutboxSignal(input.dependencies, input.signal),
+      dependencies: dispatchIntent.card === null
+        ? dispatchDependencies
+        : {
+            ...(dispatchDependencies ?? {}),
+            persistLinqAppCardTextFallback: async ({ idempotencyKey }) => {
+              const persisted =
+                await persistAssistantOutboxIntentLinqAppCardTextFallback({
+                  idempotencyKey,
+                  intentPath: dispatchIntentPath,
+                  persistedAt: new Date(),
+                  sending: dispatchIntent,
+                  vault: input.vault,
+                })
+              effectiveDispatchIntent = persisted
+              dispatchFailureOwnerIntent = persisted
+            },
+          },
       ...dispatchIntent,
       vault: input.vault,
     })
@@ -959,7 +1004,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     const deliveredIntent = buildAssistantOutboxDeliveredIntent({
       delivery,
       deliveryTransportIdempotent,
-      intent: dispatchIntent,
+      intent: effectiveDispatchIntent,
       session: delivered.session ?? null,
     })
     const deliveredOwnerIntent = assistantOutboxIntentSchema.parse(
@@ -1130,6 +1175,7 @@ export async function deliverAssistantOutboxMessage(input: {
   reviewedAssistantAskCompletionExpiresAt?: string | null
   automationAuthority?: AssistantOutboxIntent['automationAuthority']
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
+  card?: AssistantResponseCard | null
   channel?: string | null
   dedupeToken?: string | null
   deliveryIdempotencyKey?: string | null
@@ -1167,6 +1213,7 @@ export async function deliverAssistantOutboxMessage(input: {
     automationAuthority: input.automationAuthority ?? null,
     bindingDelivery: input.bindingDelivery,
     channel: input.channel,
+    card: input.card ?? null,
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliverySource: input.deliverySource ?? null,
@@ -1456,6 +1503,7 @@ export async function sendAssistantOutboxDispatchMessage(input: AssistantOutboxD
     delivered: await deliverAssistantMessageOverBinding({
       vault: input.vault,
       sessionId: input.sessionId,
+      card: input.card ?? null,
       media: input.media ?? [],
       message: input.message,
       ...(input.nativeReplyRequested === undefined
@@ -1979,6 +2027,25 @@ function assertAssistantOutboxDedupeEffectMatches(input: {
     || existingNativeReplyRequested !== requestedNativeReplyRequested
   ) {
     throw createAssistantOutboxDedupeEffectMismatchError()
+  }
+}
+
+function assertAssistantOutboxCardCompatible(input: {
+  card: AssistantResponseCard | null
+  media: readonly AssistantResponseMedia[]
+  operation: AssistantOutboxOperation | null
+}): void {
+  if (input.card !== null && input.media.length > 0) {
+    throw new VaultCliError(
+      'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+      'A response card cannot be combined with response media.',
+    )
+  }
+  if (input.card !== null && input.operation !== null) {
+    throw new VaultCliError(
+      'ASSISTANT_RESPONSE_CARD_OPERATION_CONFLICT',
+      'A response card requires a normal message intent.',
+    )
   }
 }
 

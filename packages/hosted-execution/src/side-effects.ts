@@ -1,4 +1,10 @@
 import {
+  assistantResponseCardSchema,
+  type AssistantResponseCard,
+  type DailyNutritionResponseCard,
+  type NutritionCardMetric,
+} from "@murphai/contracts";
+import {
   gatewayDeliveryTargetKindValues,
   gatewayReplyRouteKindValues,
   type GatewayDeliveryTargetKind,
@@ -117,6 +123,11 @@ export type HostedAssistantDeliveryMedia =
   | HostedAssistantDeliveryVoiceMemoMedia
   | HostedAssistantDeliveryVaultFileMedia;
 
+export type HostedAssistantNutritionCardMetric = NutritionCardMetric;
+export type HostedAssistantDailyNutritionResponseCard =
+  DailyNutritionResponseCard;
+export type HostedAssistantResponseCard = AssistantResponseCard;
+
 export type HostedAssistantMessageReaction =
   | "heart"
   | "thumbs_up"
@@ -128,6 +139,7 @@ export interface HostedAssistantDeliveryPayload {
   bindingDeliveryKind: HostedAssistantBindingDeliveryKind | null;
   bindingDeliveryTarget: string | null;
   channel: string | null;
+  card?: HostedAssistantResponseCard | null;
   deliverySourceKey: string | null;
   emailHtml?: string | null;
   explicitTarget: string | null;
@@ -665,6 +677,24 @@ function parseHostedAssistantDeliveryPayload(
   label: string,
 ): HostedAssistantDeliveryPayload {
   const record = requireObject(value, label);
+  const card = parseHostedAssistantResponseCard(
+    record.card ?? null,
+    `${label}.card`,
+  );
+  const media = parseHostedAssistantDeliveryMediaList(
+    record.media ?? [],
+    `${label}.media`,
+  );
+  if (card !== null && media.length > 0) {
+    throw new TypeError(`${label} cannot combine card and media.`);
+  }
+  const threadIsDirect = requireNullableBoolean(
+    record.threadIsDirect ?? null,
+    `${label}.threadIsDirect`,
+  );
+  if (card !== null && threadIsDirect !== true) {
+    throw new TypeError(`${label}.card requires a private direct conversation.`);
+  }
 
   return {
     actorId: requireNullableString(record.actorId ?? null, `${label}.actorId`),
@@ -681,6 +711,7 @@ function parseHostedAssistantDeliveryPayload(
       `${label}.bindingDeliveryTarget`,
     ),
     channel: requireNullableString(record.channel ?? null, `${label}.channel`),
+    ...(record.card === undefined ? {} : { card }),
     deliverySourceKey: requireNullableString(
       record.deliverySourceKey ?? null,
       `${label}.deliverySourceKey`,
@@ -696,7 +727,7 @@ function parseHostedAssistantDeliveryPayload(
     ),
     idempotencyKey: requireString(record.idempotencyKey, `${label}.idempotencyKey`),
     identityId: requireNullableString(record.identityId ?? null, `${label}.identityId`),
-    media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
+    media,
     message: requireStringValue(record.message, `${label}.message`),
     ...(record.nativeReplyRequested === undefined
       ? {}
@@ -721,16 +752,27 @@ function parseHostedAssistantDeliveryPayload(
     ),
     sessionId: requireString(record.sessionId, `${label}.sessionId`),
     threadId: requireNullableString(record.threadId ?? null, `${label}.threadId`),
-    threadIsDirect: requireNullableBoolean(
-      record.threadIsDirect ?? null,
-      `${label}.threadIsDirect`,
-    ),
+    threadIsDirect,
     transportIdempotent: requireBoolean(
       record.transportIdempotent,
       `${label}.transportIdempotent`,
     ),
     turnId: requireString(record.turnId, `${label}.turnId`),
   };
+}
+
+function parseHostedAssistantResponseCard(
+  value: unknown,
+  label: string,
+): HostedAssistantResponseCard | null {
+  if (value === null) {
+    return null;
+  }
+  const parsed = assistantResponseCardSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new TypeError(`${label} must be a valid assistant response card.`);
+  }
+  return parsed.data;
 }
 
 function requireNullableNewsletterAuthorizationProof(

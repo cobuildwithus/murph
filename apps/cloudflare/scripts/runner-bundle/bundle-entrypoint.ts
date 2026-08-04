@@ -57,6 +57,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // remain the guard against that regression, while the existing tolerances cover
 // ordinary small authored-code growth.
 //
+// The native iMessage response-card contract, tool, outbox, and transport paths
+// measured 9,798,967B total on 2026-07-29. No forbidden subsystem entered the
+// boot graph. The later combined measurements below supersede that total while
+// retaining the response-card path in the reviewed graph.
+//
 // Direct/group turn parity, exact-message participant authorization, private
 // media, hosted-alert integration, and open-ended experiment outcomes add
 // authored code to existing runner chunks without adding a forbidden boot
@@ -77,23 +82,27 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // closure. No forbidden subsystem entered the boot graph. Preserve that static
 // measurement alongside main's higher cross-platform total measurement.
 //
+// Daily-nutrition response cards and the durable Linq app-card text fallback
+// extend the existing assistant, hosted-runtime, and provider paths without
+// adding a forbidden boot input. CI measured 10,020,882B total on 2026-07-31.
+//
 // Physical notes extend the existing dynamic-tool, hosted-runtime, and Web-port
 // paths without adding a forbidden boot input. Linux CI measured 10,012,825B
 // total on 2026-07-31.
 //
 // Deterministic reminder-availability refresh and foreground preemption extend
 // the existing hosted-runtime chunk without adding a forbidden boot input.
-// Linux CI measured 10,016,296B total on 2026-07-31. Ratchet the total baseline
-// to that measurement and retain the established 32KB allowance.
+// Linux CI measured 10,016,296B total on 2026-07-31.
 //
-// After integrating both paths and the checkpoint-first shutdown correction on
-// current main, macOS assembly measured a 1,698,855B entry, 8,418,623B static
-// closure, and 10,097,265B total on 2026-07-31. No forbidden subsystem entered
-// the boot graph. Ratchet each baseline to that combined measurement and retain
-// the established allowances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_097_265 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_698_855;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_418_623;
+// After merging the response-card path with physical notes, deterministic
+// reminder refresh, and the checkpoint-first shutdown correction on current
+// main, macOS assembly measured a 1,699,250B entry, 8,442,983B static
+// closure, and 10,119,605B total on 2026-08-01. No forbidden subsystem
+// entered the boot graph. Ratchet each baseline to the merged measurement and
+// retain the established allowances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_119_605 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_699_250;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_442_983;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
