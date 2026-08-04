@@ -100,13 +100,13 @@ describe("hosted signup referral links", () => {
     mocks.upsertHostedMemberIdentity.mockResolvedValue({});
   });
 
-  it("builds an opaque homepage signup handoff", () => {
+  it("builds an opaque handoff to the existing join flow", () => {
     expect(
       buildHostedSignupReferralUrl(
         "a b/c",
         "https://www.withmurph.ai/app",
       ),
-    ).toBe("https://www.withmurph.ai/?referral=a+b%2Fc");
+    ).toBe("https://www.withmurph.ai/join/a%20b%2Fc");
   });
 
   it("reuses the current unclaimed attributed invite", async () => {
@@ -129,7 +129,7 @@ describe("hosted signup referral links", () => {
       expiresAt: existingInvite.expiresAt,
       inviteCode: "existing_invite",
       signupUrl:
-        "https://www.withmurph.ai/?referral=existing_invite",
+        "https://www.withmurph.ai/join/existing_invite",
       targetMemberId: "member_target_existing",
     });
 
@@ -164,6 +164,7 @@ describe("hosted signup referral links", () => {
       referrerMemberId: "member_referrer",
     })).resolves.toMatchObject({
       inviteCode: "new_invite",
+      signupUrl: "https://www.withmurph.ai/join/new_invite",
       targetMemberId: "member_target_new",
     });
 
