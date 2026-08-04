@@ -194,7 +194,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
   assert.doesNotMatch(
     view.container.textContent ?? "",
-    /No chat history saved\./u,
+    /higher provider rates use included AI capacity faster/u,
   );
   await act(async () => {
     findButton(view.container, "Change").click();
@@ -206,7 +206,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   );
   assert.match(
     view.document.body.textContent ?? "",
-    /Privacy-first inference\./u,
+    /Privacy-first inference\. Venice’s higher provider rates use included AI capacity faster\./u,
   );
   assert.match(
     view.document.body.textContent ?? "",
@@ -214,7 +214,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   );
   assert.match(
     view.document.body.textContent ?? "",
-    /This only changes core replies\. Image generation, voice, search, and other tools still use their specialized providers\./u,
+    /The selected provider handles core replies\. Image generation, voice, search, and other tools still use their specialized providers\./u,
   );
   const providerDialog = view.document.querySelector<HTMLElement>(
     '[role="dialog"]',
@@ -242,6 +242,10 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     view.container.textContent ?? "",
     /Core replies switch to Venice after Save\./u,
   );
+  assert.match(
+    view.container.textContent ?? "",
+    /Venice’s higher provider rates use included AI capacity faster\./u,
+  );
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   await act(async () => {
     submitForm(view.container);
@@ -256,6 +260,10 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     url: "/api/settings/assistant-model",
   });
   assert.match(view.container.textContent ?? "", /New core replies use Venice\./u);
+  assert.match(
+    view.container.textContent ?? "",
+    /Venice’s higher provider rates use included AI capacity faster\./u,
+  );
   assertHiddenSaveAnnouncement(
     view.container,
     /Saved\. Terra through Venice is your default\./u,
@@ -265,6 +273,26 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     HOSTED_ASSISTANT_TERRA_MODEL,
   )));
   view.cleanup();
+});
+
+test("a saved Venice provider discloses its higher included-capacity use", () => {
+  const markup = renderToStaticMarkup(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+
+  assert.match(markup, /New core replies use.*Venice/su);
+  assert.match(
+    markup,
+    /Venice’s higher provider rates use included AI capacity faster\./u,
+  );
 });
 
 test("closing the provider dialog leaves the draft unchanged", async () => {

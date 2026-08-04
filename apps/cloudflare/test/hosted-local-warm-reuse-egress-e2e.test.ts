@@ -34,9 +34,6 @@ describe("hosted local warm-reuse egress e2e", () => {
     egress = await startHostedLocalLinqEgressScenario({
       additionalEnv: {
         HOSTED_VENICE_ENABLED: "1",
-        HOSTED_VENICE_LUNA_MODEL: "openai-gpt-56-luna",
-        HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol",
-        HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
         HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "30000",
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
         VENICE_API_KEY: "stub-local-venice-key",

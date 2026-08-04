@@ -2301,9 +2301,6 @@ describe("hostedRunnerIntercept", () => {
       providerKind: "venice",
     });
     const env = createInterceptEnv({
-      HOSTED_VENICE_LUNA_MODEL: "openai-gpt-56-luna",
-      HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol",
-      HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
       VENICE_API_KEY: "venice-worker-secret",
       validateRuntimeProviderEgressCredential,
     });
@@ -2360,9 +2357,6 @@ describe("hostedRunnerIntercept", () => {
       providerKind: "venice",
     });
     const env = createInterceptEnv({
-      HOSTED_VENICE_LUNA_MODEL: "openai-gpt-56-luna",
-      HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol",
-      HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
       VENICE_API_KEY: "venice-worker-secret",
       validateRuntimeProviderEgressCredential,
     });
@@ -2433,9 +2427,6 @@ describe("hostedRunnerIntercept", () => {
       providerKind: "venice",
     });
     const env = createInterceptEnv({
-      HOSTED_VENICE_LUNA_MODEL: "openai-gpt-56-luna",
-      HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol",
-      HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
       VENICE_API_KEY: "venice-worker-secret",
       validateRuntimeProviderEgressCredential,
     });
@@ -7540,9 +7531,6 @@ function createInterceptEnv(input: {
   MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED?: string;
   MURPH_HOSTED_LOCAL_PROFILE?: string;
   OPENAI_API_KEY?: string;
-  HOSTED_VENICE_LUNA_MODEL?: string;
-  HOSTED_VENICE_SOL_MODEL?: string;
-  HOSTED_VENICE_TERRA_MODEL?: string;
   readActiveRuntimeUserFence?: () => Promise<WorkerActiveRuntimeUserFenceResult>;
   readDeploySmokeLiveModelTurnFence?: () => Promise<{
     active: boolean;
@@ -7590,9 +7578,6 @@ function createInterceptEnv(input: {
       input.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED,
     MURPH_HOSTED_LOCAL_PROFILE: input.MURPH_HOSTED_LOCAL_PROFILE,
     OPENAI_API_KEY: input.OPENAI_API_KEY,
-    HOSTED_VENICE_LUNA_MODEL: input.HOSTED_VENICE_LUNA_MODEL,
-    HOSTED_VENICE_SOL_MODEL: input.HOSTED_VENICE_SOL_MODEL,
-    HOSTED_VENICE_TERRA_MODEL: input.HOSTED_VENICE_TERRA_MODEL,
     RUNNER_CONTAINER: {
       get: () => ({
         readActiveRuntimeUserFence:

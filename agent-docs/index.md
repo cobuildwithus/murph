@@ -19,8 +19,9 @@ contract are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
-Venice provider-model binding and provider-aware immutable allowance pricing
-are jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+Venice's code-owned provider-model binding without duplicate deploy variables
+and its provider-aware immutable allowance pricing are jointly specified by
+`ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
 `agent-docs/RELIABILITY.md`,
 `agent-docs/product-specs/hosted-plan-usage.md`, and the Web and Cloudflare app
 docs.

@@ -204,9 +204,6 @@ export interface WorkerEnvironmentContract<
   HOSTED_ASSISTANT_PROVIDER?: string;
   HOSTED_ASSISTANT_REASONING_EFFORT?: string;
   HOSTED_ASSISTANT_SANDBOX?: string;
-  HOSTED_VENICE_LUNA_MODEL?: string;
-  HOSTED_VENICE_SOL_MODEL?: string;
-  HOSTED_VENICE_TERRA_MODEL?: string;
   ELEVENLABS_API_KEY?: string;
   OPENAI_API_KEY?: string;
   VENICE_API_KEY?: string;

@@ -1155,7 +1155,8 @@ application code.
   OpenAI uses its existing Responses intercept; Venice accepts only the two
   Responses POST paths and rewrites a canonical
   Luna/Terra/Sol model to the matching regular Venice GPT-5.6 provider id at
-  egress. Deploy preflight and runtime egress reject any other mapping. Web
+  egress. The shared mapping is code-owned and exposes no duplicate operator
+  model variables, so inference and pricing cannot drift independently. Web
   prices immutable usage rows by canonical model plus recorded provider, using
   Venice's distinct input, cache-read, cache-write, and output rates when
   `provider_name=venice`; each pricing snapshot records the matching provider

@@ -487,24 +487,27 @@ The production smoke also runs one real `gpt-5.6-terra` model turn inside the de
 
 Venice is an optional core-inference provider, not a replacement for the fleet
 default or specialized tool providers. Configure the selected GitHub
-Environment with these four values as one group:
+Environment with this secret:
 
 - secret `VENICE_API_KEY`
-- var `HOSTED_VENICE_LUNA_MODEL=openai-gpt-56-luna`
-- var `HOSTED_VENICE_TERRA_MODEL=openai-gpt-56-terra`
-- var `HOSTED_VENICE_SOL_MODEL=openai-gpt-56-sol`
 
-Deploy preflight rejects a partial group or different model id. Keep the hosted Web
+The Worker derives the regular Venice Luna/Terra/Sol provider ids from one
+code-owned mapping; do not add model vars. Keep the hosted Web
 `HOSTED_VENICE_ENABLED` flag off while applying the nullable member migration
 and deploying the compatible Web reader. Then deploy Cloudflare and the runner
-with `container_rollout=immediate`, require the exact runner fingerprint, and
-exercise a controlled core turn that reaches Venice through the Worker
-intercept without exposing the key to the container. Only after that proof
-should Web enable the flag and redeploy so Settings can offer Venice.
+with `container_rollout=immediate` and require the exact runner fingerprint.
+Before Web enables the flag, use that exact candidate bundle to exercise Luna,
+Terra, and Sol through Venice. For each tier, prove a direct streamed reply, a
+tool-bearing turn, and a compact request through the Worker intercept without
+exposing the key to the container. Confirm completed streams and usage
+snapshots identify `venice` plus the expected code-owned provider model. A
+static translation test or one successful tier is not sufficient activation
+proof. Only after the full matrix passes should Web enable the flag and
+redeploy so Settings can offer Venice.
 
 Rollback in the opposite exposure order: disable the Web flag and redeploy Web
 first, verify new workspace reads omit the Venice override, and only then
-remove the Venice secret/mappings or roll Cloudflare back. The nullable stored
+remove the Venice secret or roll Cloudflare back. The nullable stored
 preference may remain; while the flag is off it resolves to OpenAI.
 
 ## Required GitHub Environment Secrets
@@ -658,17 +661,17 @@ Hosted assistant config:
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
-- Optional all-or-none Venice model mappings: `HOSTED_VENICE_LUNA_MODEL`,
-  `HOSTED_VENICE_TERRA_MODEL`, and `HOSTED_VENICE_SOL_MODEL`, paired with the
-  `VENICE_API_KEY` GitHub Environment secret. Set those vars respectively to
-  `openai-gpt-56-luna`, `openai-gpt-56-terra`, and `openai-gpt-56-sol`.
+- Optional Venice core inference uses the `VENICE_API_KEY` GitHub Environment
+  secret. The regular provider model ids are code-owned rather than deploy
+  variables.
 
 When changing hosted assistant model pricing or allowance enforcement, deploy the
-Cloudflare Worker/runner model config before or atomically with the hosted web
+Cloudflare Worker/runner model contract before or atomically with the hosted web
 allowance logic so runtime usage callbacks keep using an allowance-priced model.
 For the Venice provider-aware pricing rollout, deploy Cloudflare first so the
-exact upstream mappings are enforced, then deploy Web so new immutable usage
-rows select the Venice rate table.
+exact upstream mappings are active, complete the all-tier direct/tool/compact
+proof above, then deploy Web so new immutable usage rows select the Venice rate
+table. Historical immutable usage rows are not repriced.
 
 Vault-share selector-scope production deploys must also use
 `container_rollout=immediate` until the distance/count selector-scope runner

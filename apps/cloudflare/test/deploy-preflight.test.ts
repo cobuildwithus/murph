@@ -644,55 +644,6 @@ describe("deploy preflight helpers", () => {
     );
   });
 
-  it("requires Venice runtime env to be configured all-or-none", () => {
-    const error =
-      "Venice runtime env must set VENICE_API_KEY, HOSTED_VENICE_LUNA_MODEL, HOSTED_VENICE_TERRA_MODEL, HOSTED_VENICE_SOL_MODEL together.";
-
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv({
-          HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
-        }),
-        { deployWorker: true },
-      ),
-    ).toContain(error);
-
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv({
-          HOSTED_VENICE_LUNA_MODEL: "openai-gpt-56-luna",
-          HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol",
-          HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
-          VENICE_API_KEY: "venice-key",
-        }),
-        { deployWorker: true },
-      ),
-    ).not.toContain(error);
-
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv(),
-        { deployWorker: true },
-      ),
-    ).not.toContain(error);
-  });
-
-  it("requires Venice model mappings to match the priced GPT-5.6 models", () => {
-    const errors = listHostedDeployEnvironmentInvariantErrors(
-      createRequiredWorkerDeployEnv({
-        HOSTED_VENICE_LUNA_MODEL: "openai-gpt-56-luna",
-        HOSTED_VENICE_SOL_MODEL: "openai-gpt-56-sol-pro",
-        HOSTED_VENICE_TERRA_MODEL: "openai-gpt-56-terra",
-        VENICE_API_KEY: "venice-key",
-      }),
-      { deployWorker: true },
-    );
-
-    expect(errors).toContain(
-      "HOSTED_VENICE_SOL_MODEL must be openai-gpt-56-sol so Venice inference and allowance pricing use the same model.",
-    );
-  });
-
   it("requires an explicitly priced hosted assistant model for worker deploys", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(

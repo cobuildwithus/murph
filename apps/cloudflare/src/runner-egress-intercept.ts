@@ -1369,7 +1369,6 @@ async function maybeHandleVeniceRequest(input: {
   }
   const upstreamBody = buildHostedVeniceResponsesRequestBody({
     body,
-    env: input.env,
   });
   if (upstreamBody === null) {
     return disallowedProviderEgress();

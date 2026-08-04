@@ -125,10 +125,11 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings model choice with compact provider and save controls">
+      <StudySection title="Settings model choice with provider usage disclosure">
         <div
           id="settings-model-provider-save-controls"
           data-design-section="settings-compact-provider-control"
+          className="max-w-5xl"
           inert
         >
           <HostedAssistantModelSettings

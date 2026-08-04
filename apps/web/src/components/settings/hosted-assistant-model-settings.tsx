@@ -51,6 +51,8 @@ import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
 const ASSISTANT_MODEL_SETTINGS_URL = "/api/settings/assistant-model";
 const SOL_REQUIRES_EDGE_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
 const VENICE_UNAVAILABLE_ERROR_CODE = "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE";
+const VENICE_USAGE_DISCLOSURE =
+  "Venice’s higher provider rates use included AI capacity faster.";
 
 const MODEL_OPTIONS = [
   {
@@ -94,7 +96,7 @@ const PROVIDER_OPTIONS = [
     provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
   },
   {
-    description: "Privacy-first inference.",
+    description: `Privacy-first inference. ${VENICE_USAGE_DISCLOSURE}`,
     logo: {
       height: 356,
       src: "/brand-logos/assistant-providers/venice-light.svg",
@@ -159,26 +161,33 @@ export function AssistantProviderSummary({
   const hasPendingChange = currentProvider !== draftProvider;
 
   return (
-    <div className="flex w-full items-center gap-2 px-1">
-      <p className="text-sm text-muted-foreground">
-        {hasPendingChange ? (
-          <>
-            Core replies switch to{" "}
-            <span className="font-medium text-foreground">
-              {draftProviderName}
-            </span>{" "}
-            after Save.
-          </>
-        ) : (
-          <>
-            New core replies use{" "}
-            <span className="font-medium text-foreground">
-              {currentProviderName}
-            </span>
-            .
-          </>
-        )}
-      </p>
+    <div className="flex w-full items-start gap-2 px-1">
+      <div className="flex flex-1 flex-col gap-0.5">
+        <p className="text-sm text-muted-foreground">
+          {hasPendingChange ? (
+            <>
+              Core replies switch to{" "}
+              <span className="font-medium text-foreground">
+                {draftProviderName}
+              </span>{" "}
+              after Save.
+            </>
+          ) : (
+            <>
+              New core replies use{" "}
+              <span className="font-medium text-foreground">
+                {currentProviderName}
+              </span>
+              .
+            </>
+          )}
+        </p>
+        {draftProvider === HOSTED_ASSISTANT_VENICE_PROVIDER ? (
+          <p className="text-xs/5 text-pretty text-muted-foreground">
+            {VENICE_USAGE_DISCLOSURE}
+          </p>
+        ) : null}
+      </div>
       <Button
         aria-label={
           hasPendingChange
@@ -273,8 +282,8 @@ export function AssistantProviderDialog({
           })}
         </RadioGroup>
         <p className="px-1 text-xs/5 text-pretty text-muted-foreground">
-          This only changes core replies. Image generation, voice, search, and
-          other tools still use their specialized providers.
+          The selected provider handles core replies. Image generation, voice,
+          search, and other tools still use their specialized providers.
         </p>
       </DialogContent>
     </Dialog>
