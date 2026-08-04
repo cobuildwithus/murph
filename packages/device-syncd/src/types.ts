@@ -610,6 +610,24 @@ export interface DeviceSyncPublicIngressConnectionEstablishedResult {
   sourceAdmissionCommitted: true;
 }
 
+export interface DeviceSyncPublicIngressConnectionSourceAdmissionRejectedInput {
+  account: PublicDeviceSyncAccount;
+  /** Start instant of the rejected browser source-connection attempt. */
+  connectionStartedAt: string;
+  sourceProviderSlug: string;
+  provider: DeviceSyncProvider;
+  now: string;
+}
+
+export interface DeviceSyncPublicIngressConnectionSourceObservedInput {
+  account: PublicDeviceSyncAccount;
+  /** Provider-authored event instant; missing timestamps cannot open an epoch. */
+  observedAt: string | null;
+  sourceProviderSlug: string;
+  provider: DeviceSyncProvider;
+  now: string;
+}
+
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   account: PublicDeviceSyncAccount;
   claimToken: string;
@@ -657,6 +675,21 @@ export interface DeviceSyncPublicIngressHooks {
   // source with its durable initial work and returns sourceAdmissionCommitted.
   onConnectionEstablished?(
     input: DeviceSyncPublicIngressConnectionEstablishedInput,
+  ): void
+    | DeviceSyncPublicIngressConnectionEstablishedResult
+    | Promise<void | DeviceSyncPublicIngressConnectionEstablishedResult>;
+  // A reused Junction parent can finish provider authorization before hosted
+  // source admission rejects an obsolete attempt. The hosted owner uses this
+  // hook to remove only that rejected provider registration without applying
+  // account-wide cleanup or racing a newer source epoch.
+  onConnectionSourceAdmissionRejected?(
+    input: DeviceSyncPublicIngressConnectionSourceAdmissionRejectedInput,
+  ): void | Promise<void>;
+  // Native SDK sources have no browser callback. A current provider-authored
+  // event may commit their pending exact-source epoch; passive traffic cannot
+  // clear a completed disconnect fence.
+  onConnectionSourceObserved?(
+    input: DeviceSyncPublicIngressConnectionSourceObservedInput,
   ): void
     | DeviceSyncPublicIngressConnectionEstablishedResult
     | Promise<void | DeviceSyncPublicIngressConnectionEstablishedResult>;
@@ -861,6 +894,8 @@ export interface StartConnectionInput {
   returnTo?: string | null;
   ownerId?: string | null;
   sourceProviderSlug?: string | null;
+  /** Hosted owner already committed the pending exact-source epoch. */
+  sourceLifecyclePrepared?: boolean;
   connectSourceId?: string | null;
   connectTarget?: string | null;
 }

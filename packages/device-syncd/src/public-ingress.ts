@@ -624,7 +624,11 @@ export class DeviceSyncPublicIngress {
             sourceProviderSlug,
           })
         : null;
-      if (sourceInstanceKey && sourceProviderSlug) {
+      if (
+        sourceInstanceKey
+        && sourceProviderSlug
+        && !(reusedEstablishedJunctionAccount && input.sourceLifecyclePrepared === true)
+      ) {
         await this.store.upsertConnectionSource({
           connectionId: seededAccount.id,
           sourceInstanceKey,
@@ -1253,9 +1257,25 @@ export class DeviceSyncPublicIngress {
     } catch (error) {
       if (reusedEstablishedJunctionAccount) {
         // Never apply account-wide cleanup to a source-scoped Link attempt.
-        // The established hook owns target admission with its durable wake:
-        // before that commit the seeded row stays disconnected; afterward the
-        // connected source and its work are already durable.
+        // Provider completion precedes hosted source admission, so a rejected
+        // obsolete Link can have recreated the exact provider registration.
+        // The hosted hook owns source-epoch-aware target cleanup; it is the
+        // only safe place to remove that registration without touching the
+        // established parent or a newer accepted source epoch.
+        const cleanupAccount = account ?? seededAccount;
+        if (connection && cleanupAccount && sourceProviderSlug) {
+          try {
+            await this.hooks.onConnectionSourceAdmissionRejected?.({
+              account: cleanupAccount,
+              connectionStartedAt: stateRecord.createdAt,
+              sourceProviderSlug,
+              provider,
+              now,
+            });
+          } catch (cleanupError) {
+            throw attachOAuthCallbackContext(cleanupError, callbackContext);
+          }
+        }
       } else if (connection) {
         try {
           if (connectionPersisted && account) {
@@ -1356,12 +1376,21 @@ export class DeviceSyncPublicIngress {
         matchingSources.length > 0
         && !matchingSources.some((source) => source.status === "connected")
       ) {
-        throw deviceSyncError({
-          code: "WEBHOOK_SOURCE_NOT_READY",
-          message: "Device source setup must finish before its webhook can be accepted.",
-          retryable: true,
-          httpStatus: 503,
+        const sourceObservation = await this.hooks.onConnectionSourceObserved?.({
+          account,
+          observedAt: webhook.occurredAt ?? null,
+          sourceProviderSlug: webhookSourceProviderSlug,
+          provider,
+          now,
         });
+        if (sourceObservation?.sourceAdmissionCommitted !== true) {
+          throw deviceSyncError({
+            code: "WEBHOOK_SOURCE_NOT_READY",
+            message: "Device source setup must finish before its webhook can be accepted.",
+            retryable: true,
+            httpStatus: 503,
+          });
+        }
       }
     }
 

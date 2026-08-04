@@ -68,6 +68,7 @@ import {
 } from "../shared.ts";
 import {
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
+  JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
   JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
@@ -1536,7 +1537,23 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
   ): Promise<ProviderJobResult> {
-    if (normalizeString(job.payload.resource) === COMPANION_HRV_RMSSD_RESOURCE) {
+    const resourceName = normalizeString(job.payload.resource);
+    const sourceProviderSlug = normalizeProviderSlug(
+      resourceName === COMPANION_HRV_RMSSD_RESOURCE
+        ? JUNCTION_COMPANION_HRV_SOURCE_PROVIDER
+        : job.payload.sourceProviderSlug,
+    );
+    if (
+      sourceProviderSlug
+      && !isJunctionSourceAdmittedForImport(
+        context.account.sources ?? [],
+        sourceProviderSlug,
+      )
+    ) {
+      return {};
+    }
+
+    if (resourceName === COMPANION_HRV_RMSSD_RESOURCE) {
       let observation;
       let admissionId;
       try {
@@ -1581,16 +1598,6 @@ export function createJunctionDeviceSyncProvider(
 
     const resource = normalizeJunctionResourceName(job.payload.resource);
     const resourceCategory = normalizeString(job.payload.resourceCategory);
-    const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
-    if (
-      sourceProviderSlug
-      && !isJunctionSourceAdmittedForImport(
-        context.account.sources ?? [],
-        sourceProviderSlug,
-      )
-    ) {
-      return {};
-    }
     let listedSourceProviders: readonly JunctionProviderConnection[] | null = null;
     let projectedSourceProviders: readonly JunctionProviderConnection[] | null = null;
     const loadSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {

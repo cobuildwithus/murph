@@ -10613,6 +10613,87 @@ test("Junction companion HRV jobs import the derived observation without Junctio
   }]);
 });
 
+test("Junction companion jobs do not import through a disconnected exact source", async () => {
+  let fetchCalls = 0;
+  const provider = createJunctionProvider(async () => {
+    fetchCalls += 1;
+    throw new Error("Fenced companion jobs must not call Junction.");
+  });
+  const hrvObservation = {
+    schema: COMPANION_HRV_RMSSD_SCHEMA,
+    methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    nightDate: "2026-04-02",
+    rmssdMs: 48.25,
+    completedWindowCount: 96,
+    acceptedWindowCount: 56,
+  } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
+  const hrvJson = serializeCompanionHrvRmssdObservation(hrvObservation);
+  const jobs = [
+    {
+      authoritySourceProviderSlug: "whoop_v2",
+      payload: {
+        companionAdmissionId: createHash("sha256").update(hrvJson).digest("hex"),
+        companionObservationJson: hrvJson,
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+        resourceCategory: "derived",
+        sourceProviderSlug: "whoop",
+      },
+    },
+    {
+      authoritySourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      payload: {
+        eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+        occurredAt: "2026-04-03T13:00:00.000Z",
+        resource: JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+        resourceCategory: "summary",
+        sourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+        webhookDataJson: JSON.stringify({
+          records: [{
+            endAt: "2026-04-02T12:00:00-04:00",
+            kind: "recovery_score",
+            recordId: "a".repeat(64),
+            startAt: "2026-04-02T04:00:00-04:00",
+            syncVersion: 3,
+            value: 72,
+          }],
+          schemaVersion: 1,
+        }),
+      },
+    },
+  ];
+
+  for (const testCase of jobs) {
+    const importedSnapshots: unknown[] = [];
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          sources: [{
+            displayName: null,
+            firstSeenAt: "2026-04-03T00:00:00.000Z",
+            lastDataAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-03T00:00:00.000Z",
+            resourceCount: 0,
+            sourceProviderSlug: testCase.authoritySourceProviderSlug,
+            status: "disconnected",
+          }],
+        }),
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+      }),
+      createJob("resource", testCase.payload),
+    );
+
+    assert.deepEqual(result, {});
+    assert.deepEqual(importedSnapshots, []);
+  }
+  assert.equal(fetchCalls, 0);
+});
+
 test("Junction companion HRV jobs reject malformed derived observations without network access", async () => {
   let fetchCalls = 0;
   const provider = createJunctionProvider(async () => {

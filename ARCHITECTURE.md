@@ -1424,7 +1424,22 @@ before removal cannot restore the source. A failed provider revoke restores the
 captured source lifecycle and remains retryable; a fresh explicit connect clears
 the completed fence before opening the new provider link. Historical-export
 reset remains the deliberate connection-wide exception and keeps its broader
-confirmation copy.
+confirmation copy. If an already-open Junction Link completes after removal,
+the rejected callback reclaims that same source fence and deregisters only the
+obsolete provider authorization; a new Link cannot start while that cleanup is
+in progress. Repeating Disconnect also rechecks provider state instead of
+treating the local fence as proof of remote revocation.
+
+Native companion work uses the same source row. Source-attributed Apple Health
+metadata and WHOOP overnight summaries are admitted only when the exact source
+is absent for first use or connected without a disconnect fence, and the hosted
+runtime repeats that check before canonical import. An explicit Apple Health
+SDK connect opens a pending source epoch after token mint; only a newer
+provider-authored event can mark it connected. Passive SDK resume, omitted
+intent, stale events, background uploads, and queued runtime work cannot clear
+or bypass a completed source disconnect. Companion WHOOP summaries retain the
+`whoop` health-data provenance while authorization is derived from the
+disconnectable Junction `whoop_v2` source row.
 
 The companion Privy bearer rule above is the default, with one authenticated
 extension bridge: `POST /api/device-sync/companion/imessage-mini-app/enrollment`

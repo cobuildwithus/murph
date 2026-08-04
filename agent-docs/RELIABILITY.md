@@ -348,6 +348,17 @@ Last verified: 2026-07-31
   clears it. Provider failure restores the captured source lifecycle and returns
   a retryable error; it does not disconnect siblings or the parent account.
   Connection-wide historical reset remains the explicit broader operation.
+  Repeated removal performs target-only provider cleanup again, and a Link
+  callback rejected after provider completion uses the same two-phase source
+  claim to remove authorization recreated by an obsolete Link. A newer Link is
+  not issued while exact-source cleanup is in progress.
+- Companion Apple Health metadata and WHOOP overnight summaries recheck their
+  exact source inside the health-data admission lock and again before runtime
+  import. Explicit Apple Health SDK connect creates a pending source epoch only
+  after token mint; a provider-authored event newer than that epoch may commit
+  it connected. WHOOP summary provenance remains `whoop`, but admission uses
+  the Junction `whoop_v2` lifecycle source. Resume, omitted intent, stale
+  events, and background work never clear the source fence.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate
   intentionally denies receive one assign-once timestamp at the mutating

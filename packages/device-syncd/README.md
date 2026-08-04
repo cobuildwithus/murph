@@ -112,7 +112,10 @@ account before reconnecting.
 Ordinary removal of a healthy Junction-backed source is source-scoped. Hosted
 Web deregisters only the selected provider slug and leaves the shared Junction
 account, its credentials, and sibling source rows active. The connection-wide
-path above is reserved for the explicit historical-export reset.
+path above is reserved for the explicit historical-export reset. Obsolete Link
+completion is followed by exact-target cleanup, and repeated removal rechecks
+provider state so a local disconnected row is never treated as proof of remote
+revocation.
 
 WHOOP uses OAuth plus webhooks.
 Strava uses OAuth, polling, and optional app-global webhooks.
@@ -142,6 +145,12 @@ establishes only when zero provider rows exist, and rejects terminal or
 ambiguous state. Only a future visible hosted-health/Junction Reconnect action
 may send `connect` and create/reactivate the shared lane. Resume, omitted intent,
 data ingress, and retry work cannot undo an explicit disconnect.
+That explicit Apple Health connect opens one pending source epoch after the SDK
+token is minted; only a newer provider-authored event can commit it connected.
+Apple Health companion metadata, WHOOP overnight summaries, and their queued
+runtime jobs all honor the exact-source disconnect state before import. WHOOP
+summaries keep `whoop` as data provenance while their authorization is checked
+against the disconnectable Junction `whoop_v2` source.
 
 The provider lifecycle metadata used here now comes from the shared `@murphai/importers/device-providers/provider-descriptors` surface, so callback paths, default scopes, webhook capabilities, sync windows, metric families, and source-priority hints stay aligned between connector code and snapshot normalization.
 The configured-provider assembly composes a lightweight hosted-runtime config schema from `packages/device-syncd/src/config/serializable-provider-configs.ts` into the full registry in `packages/device-syncd/src/config/provider-manifests.ts`. Serialization fields and secret exclusions therefore have one boot-safe owner, while descriptors, provider-owned jobs, and runtime adapters stay outside the hosted runner's static boot closure. Hosted web and runner startup can read provider config without importing the provider implementation graph.
