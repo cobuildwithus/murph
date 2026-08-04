@@ -8,6 +8,7 @@ import {
   createHostedEmailLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
   createHostedPrivyUserLookupKeyReadCandidates,
+  hostedPhoneLookupKeyMatchesValue,
 } from "./contact-privacy";
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { getPrisma } from "../prisma";
@@ -424,6 +425,10 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
       now: input.now,
       phone: shouldPersistHostedPrivyPhoneIdentity({
         authMethod,
+      }) && canPersistHostedInteractiveLivePhone({
+        allowLiveAuthority: input.allowVerifiedEmailRebinding,
+        bearerIdentity: input.identity,
+        liveIdentity: identity,
       })
         ? identity.phone
         : null,
@@ -575,7 +580,12 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
     phone: shouldPersistHostedPrivyPhoneIdentity({
       authMethod,
       expectedPhoneLookupKey: input.expectedPhoneLookupKey,
-    }) && !privyUserChanged
+    }) && !privyUserChanged && canPersistHostedInteractiveLivePhone({
+      allowLiveAuthority: input.allowVerifiedEmailRebinding,
+      bearerIdentity: input.identity,
+      currentIdentity,
+      liveIdentity: identity,
+    })
       ? identity.phone
       : null,
   });
@@ -594,6 +604,33 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
     identity,
     member: currentMember,
   };
+}
+
+function canPersistHostedInteractiveLivePhone(input: {
+  allowLiveAuthority?: boolean;
+  bearerIdentity: HostedPrivyIdentity;
+  currentIdentity?: {
+    phoneLookupKey: string | null;
+    phoneNumber: string | null;
+  } | null;
+  liveIdentity: HostedPrivyIdentity;
+}): boolean {
+  if (!input.allowLiveAuthority || !input.liveIdentity.phone) {
+    return true;
+  }
+
+  if (input.currentIdentity?.phoneLookupKey) {
+    return hostedPhoneLookupKeyMatchesValue(
+      input.liveIdentity.phone.number,
+      input.currentIdentity.phoneLookupKey,
+    );
+  }
+
+  if (input.currentIdentity?.phoneNumber) {
+    return input.currentIdentity.phoneNumber === input.liveIdentity.phone.number;
+  }
+
+  return input.bearerIdentity.phone?.number === input.liveIdentity.phone.number;
 }
 
 async function hasHostedVerifiedEmailRebindingAuthorityTx(input: {

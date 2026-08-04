@@ -1796,7 +1796,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const memberId = `hbm_email_rebind_retry_${fixtureId}`;
       const canonicalEmailAddress = `rebind-retry-live-${fixtureId}@example.test`;
       const staleTokenEmailAddress = `rebind-retry-stale-${fixtureId}@example.test`;
-      const phoneNumber = "+15551234567";
+      const storedPhoneNumber = "+15551234567";
+      const unownedLivePhoneNumber = "+15557654321";
       const oldPrivyUserId = `did:privy:old-retry-${fixtureId}`;
       const replacementPrivyUserId = `did:privy:replacement-retry-${fixtureId}`;
       const laterEmailOwnerPrivyUserId = `did:privy:later-email-owner-${fixtureId}`;
@@ -1812,13 +1813,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       installPassthroughHostedSecureBoxTestCodec();
       privyProvider.exists = true;
       privyProvider.emailByUserId.set(replacementPrivyUserId, canonicalEmailAddress);
-      privyProvider.phoneByUserId.set(replacementPrivyUserId, phoneNumber);
+      privyProvider.phoneByUserId.set(replacementPrivyUserId, unownedLivePhoneNumber);
       privyProvider.telegramByUserId.set(replacementPrivyUserId, liveTelegramUserId);
       await seedVerifiedEmailRebindingMember({
         emailAddress: canonicalEmailAddress,
         memberId,
         oldPrivyUserId,
-        phoneNumber,
+        phoneNumber: storedPhoneNumber,
         prisma: observer,
       });
       const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
@@ -1831,7 +1832,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           verifiedAt: 1_754_218_800,
         },
         phone: {
-          number: phoneNumber,
+          number: storedPhoneNumber,
           verifiedAt: 1_754_218_800,
         },
         telegram: {
@@ -1864,8 +1865,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
           where: { memberId },
         })).resolves.toMatchObject({
+          phoneLookupKey: createHostedPhoneLookupKey(storedPhoneNumber),
           privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
         });
+        await expect(observer.hostedMemberIdentity.count({
+          where: {
+            phoneLookupKey: createHostedPhoneLookupKey(unownedLivePhoneNumber),
+          },
+        })).resolves.toBe(0);
         await expect(observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
           where: { memberId },
         })).resolves.toMatchObject({
@@ -1930,6 +1937,116 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               in: [memberId, ...(laterEmailOwnerMemberId ? [laterEmailOwnerMemberId] : [])],
             },
           },
+        });
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await disconnectClients([observer]);
+      }
+    });
+
+    it("keeps the canonical phone when the retry's live phone belongs to another member", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_email_rebind_retry_phone_${fixtureId}`;
+      const phoneOwnerMemberId = `hbm_retry_phone_owner_${fixtureId}`;
+      const emailAddress = `rebind-retry-phone-${fixtureId}@example.test`;
+      const storedPhoneNumber = "+15551234567";
+      const ownedLivePhoneNumber = "+15557654321";
+      const oldPrivyUserId = `did:privy:old-retry-phone-${fixtureId}`;
+      const replacementPrivyUserId = `did:privy:replacement-retry-phone-${fixtureId}`;
+      const liveTelegramUserId = `telegram-live-retry-phone-${fixtureId}`;
+      const ownedLivePhoneLookupKey = createHostedPhoneLookupKey(ownedLivePhoneNumber);
+      const liveTelegramLookupKey = createHostedTelegramUserLookupKey(liveTelegramUserId);
+
+      if (!ownedLivePhoneLookupKey || !liveTelegramLookupKey) {
+        throw new Error("Expected phone and Telegram lookup keys for the retry fixture.");
+      }
+
+      installPassthroughHostedSecureBoxTestCodec();
+      privyProvider.exists = true;
+      privyProvider.emailByUserId.set(replacementPrivyUserId, emailAddress);
+      privyProvider.phoneByUserId.set(replacementPrivyUserId, ownedLivePhoneNumber);
+      privyProvider.telegramByUserId.set(replacementPrivyUserId, liveTelegramUserId);
+      await seedVerifiedEmailRebindingMember({
+        emailAddress,
+        memberId,
+        oldPrivyUserId,
+        phoneNumber: storedPhoneNumber,
+        prisma: observer,
+      });
+      await observer.hostedMember.create({ data: { id: phoneOwnerMemberId } });
+      await observer.hostedMemberIdentity.create({
+        data: {
+          memberId: phoneOwnerMemberId,
+          phoneLookupKey: ownedLivePhoneLookupKey,
+          phoneNumberEncrypted: ownedLivePhoneNumber,
+          phoneNumberVerifiedAt: new Date("2026-08-03T11:00:00.000Z"),
+        },
+      });
+      const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://join.example.test";
+      clearHostedOnboardingEnvCache();
+      const staleBearerIdentity = {
+        email: {
+          address: emailAddress,
+          verifiedAt: 1_754_218_800,
+        },
+        phone: {
+          number: storedPhoneNumber,
+          verifiedAt: 1_754_218_800,
+        },
+        telegram: null,
+        userId: replacementPrivyUserId,
+      };
+
+      try {
+        await expect(ensureHostedCompanionMemberId({
+          identity: staleBearerIdentity,
+          now: new Date("2026-08-03T12:00:00.000Z"),
+          prisma: observer,
+        })).rejects.toMatchObject({
+          code: "HOSTED_CONSENT_REQUIRED",
+          httpStatus: 403,
+        });
+
+        companionBoundaries.consentedMemberIds.add(memberId);
+        await expect(ensureHostedCompanionMemberId({
+          identity: staleBearerIdentity,
+          now: new Date("2026-08-03T12:01:00.000Z"),
+          prisma: observer,
+        })).resolves.toBe(memberId);
+
+        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          phoneLookupKey: createHostedPhoneLookupKey(storedPhoneNumber),
+          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
+        });
+        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+          where: { memberId: phoneOwnerMemberId },
+        })).resolves.toMatchObject({
+          phoneLookupKey: ownedLivePhoneLookupKey,
+        });
+        await expect(observer.hostedMemberRouting.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          telegramUserLookupKey: liveTelegramLookupKey,
+        });
+        await expect(observer.hostedInvite.count({
+          where: { memberId },
+        })).resolves.toBe(1);
+      } finally {
+        if (previousPublicBaseUrl === undefined) {
+          delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+        } else {
+          process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = previousPublicBaseUrl;
+        }
+        clearHostedOnboardingEnvCache();
+        companionBoundaries.consentedMemberIds.delete(memberId);
+        privyProvider.emailByUserId.delete(replacementPrivyUserId);
+        privyProvider.phoneByUserId.delete(replacementPrivyUserId);
+        privyProvider.telegramByUserId.delete(replacementPrivyUserId);
+        await observer.hostedMember.deleteMany({
+          where: { id: { in: [memberId, phoneOwnerMemberId] } },
         });
         setHostedSecureBoxStringTestCodecForTests(null);
         await disconnectClients([observer]);
