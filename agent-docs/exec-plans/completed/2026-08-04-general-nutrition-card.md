@@ -1,6 +1,6 @@
 # Generally available daily nutrition response card
 
-Status: active
+Status: completed
 Created: 2026-08-04
 Updated: 2026-08-04
 
@@ -61,7 +61,7 @@ Updated: 2026-08-04
    behavior proof, and provider-input measurement.
 4. [x] Push the candidate, open the draft PR, and run preliminary specialist
    and final ReviewGPT concurrently with exact-head CI.
-5. [ ] Resolve accepted findings, complete parent review, close this plan, and
+5. [x] Resolve accepted findings, complete parent review, close this plan, and
    prove final mergeability.
 
 ## Verification log
@@ -102,10 +102,18 @@ Updated: 2026-08-04
   or new attachment after the context advances is rejected. The two live-steer
   regressions and existing singular-card scenario pass after the correction.
 - All required GitHub Actions passed on correction head
-  `6c5d22d914493d70ac446e87698a659a5bb5204d`; the live-steer correction head
-  still requires its exact-head run and ReviewGPT round 3.
+  `d50501061b87d9b782bdc74adbb3e38bafb4b17a`.
+- Final ReviewGPT round 3 found only that the required affected-surface list
+  omitted the already-documented live-steer behavior. The disclosure-only retry
+  on the unchanged head returned `PASS` with no qualifying findings after
+  clearing the repo trust floor and model verification. One earlier retry was
+  discarded at 283 seconds, and one pre-completion attempt was intentionally
+  stopped when parent review found and closed the post-steer attachment gap.
+- Parent final review found no remaining issue. The synthetic merge with current
+  `main` completed without conflict, and the pushed behavior head was clean.
 - Corrected-head product-experience revalidation: `NO FINDINGS`. The smallest
   complete journey remains one explicit private request, one fresh canonical
   read, and one existing card/fallback effect in the same thread. The material
   evidence gap is live nondeterministic model selection and physical delivery;
   renderer and delivery code are unchanged.
+Completed: 2026-08-04
