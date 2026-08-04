@@ -44,6 +44,32 @@ The isolated database does not store the raw hosted member id and has no
 cross-database foreign key. Attempt ids and other existing redacted operational
 correlation fields retain their current contract and limits.
 
+### Provider request diagnostics
+
+`runner.provider_egress_diagnostic` is the bounded provider-request trace for
+hosted OpenAI and Venice Responses traffic. Version 2 records request and input
+byte counts, allowlisted shape/model kinds, cache-key presence, and keyed prefix
+fingerprints. Venice rows additionally record the canonical Murph model, the
+allowlisted upstream Venice model id, response-header latency, HTTP outcome,
+validated `CF-RAY`, bounded provider retry count, and whether the provider's
+reported model matches the requested route. `providerResponseTtfbMs` measures
+time through response headers, not full streamed-generation latency.
+
+Codex `session_id`, `thread_id`, `turn_id`, and `window_id` values are never
+stored. When `HOSTED_LOG_FINGERPRINT_SECRET` is configured, the Worker records
+only context-separated HMAC-SHA256 fingerprints so repeated `request_kind`
+`memory` calls can be grouped within the retention window. Without the secret,
+the diagnostic records fingerprint availability only. Provider request and
+response bodies, prompts, messages, tool arguments/results, arbitrary response
+headers, account balances, credentials, paths, vault content, and direct member
+identifiers remain excluded.
+
+The row is observability only and remains failure-isolated from provider egress.
+Container egress persists it through the existing awaited callback fallback
+when a Cloudflare `waitUntil` scheduler is unavailable. Non-OK and
+transport-error diagnostics use warning retention, while
+accepted and request-only diagnostics use debug retention.
+
 ## Append and deletion serialization
 
 Every append runs in one short transaction:

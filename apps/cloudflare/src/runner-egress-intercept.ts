@@ -18,6 +18,9 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
+} from "@murphai/hosted-execution/assistant-model";
+import {
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
@@ -215,9 +218,12 @@ const OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS = new Set([
   "o3-mini",
   "o4-mini",
 ]);
+const VENICE_CACHE_DIAGNOSTIC_MODEL_KINDS: ReadonlySet<string> = new Set(
+  Object.values(HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS),
+);
 export const HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE =
   "runner.provider_egress_diagnostic";
-const HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION = 1;
+const HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION = 2;
 const OPENAI_CACHE_DIAGNOSTIC_CODEX_TURN_METADATA_HEADER = "x-codex-turn-metadata";
 const OPENAI_CACHE_DIAGNOSTIC_MAX_JSON_BYTES = 6 * 1024 * 1024;
 const OPENAI_CACHE_DIAGNOSTIC_MAX_FULL_FINGERPRINT_BYTES = 256 * 1024;
@@ -413,6 +419,7 @@ const HOSTED_PLATFORM_METERED_PROVIDER_KINDS = new Set([
 ]);
 
 export type HostedOpenAiCacheDiagnosticEndpointKind = "responses" | "responses_compact";
+type HostedResponsesDiagnosticProviderKind = "openai" | "venice";
 type HostedRunnerDiagnosticScalar = boolean | null | number | string;
 export type HostedRunnerDiagnosticJson = Record<
   string,
@@ -1541,19 +1548,63 @@ async function maybeHandleVeniceRequest(input: {
   headers.set("authorization", `Bearer ${token}`);
   headers.set("content-type", "application/json");
 
-  return await fetchAuthorizedProviderUpstream({
-    authorization,
+  const upstreamRequest = await createHostedRunnerUpstreamRequest(
+    input.request,
+    createProviderUpstreamUrl(input.url, pathMatch),
+    headers,
+    { body: upstreamBody },
+  );
+  const diagnosticBody = upstreamRequest.clone();
+  const canonicalModelKind = readHostedResponsesRequestModelKind(body);
+  let response: Response;
+  try {
+    response = await fetchAuthorizedProviderUpstream({
+      authorization,
+      providerKind: "venice",
+      request: input.request,
+      startedAt,
+      upstreamRequest,
+      url: input.url,
+    });
+  } catch (error) {
+    const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
+      canonicalModelKind,
+      ctx: input.ctx ?? null,
+      endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
+      env: input.env,
+      providerKind: "venice",
+      providerResponseTtfbMs: Date.now() - startedAt,
+      providerTransportFailed: true,
+      request: input.request,
+      upstreamRequestBody: diagnosticBody,
+      userId: authorization.userId,
+      writeFence: authorization.writeFence,
+    });
+    await scheduleOrAwaitHostedProviderDiagnostic({
+      ctx: input.ctx ?? null,
+      promise: diagnosticPromise,
+    });
+    throw error;
+  }
+
+  const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
+    canonicalModelKind,
+    ctx: input.ctx ?? null,
+    endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
+    env: input.env,
     providerKind: "venice",
+    providerResponseTtfbMs: Date.now() - startedAt,
     request: input.request,
-    startedAt,
-    upstreamRequest: await createHostedRunnerUpstreamRequest(
-      input.request,
-      createProviderUpstreamUrl(input.url, pathMatch),
-      headers,
-      { body: upstreamBody },
-    ),
-    url: input.url,
+    response,
+    upstreamRequestBody: diagnosticBody,
+    userId: authorization.userId,
+    writeFence: authorization.writeFence,
   });
+  await scheduleOrAwaitHostedProviderDiagnostic({
+    ctx: input.ctx ?? null,
+    promise: diagnosticPromise,
+  });
+  return response;
 }
 
 async function maybeHandleElevenLabsRequest(input: {
@@ -1936,6 +1987,25 @@ function readOpenAiCacheDiagnosticEndpointKind(
   return null;
 }
 
+function readVeniceCacheDiagnosticEndpointKind(
+  pathnameSuffix: string,
+): HostedOpenAiCacheDiagnosticEndpointKind {
+  return pathnameSuffix === "/responses/compact"
+    ? "responses_compact"
+    : "responses";
+}
+
+function readHostedResponsesRequestModelKind(body: ArrayBuffer): string | null {
+  try {
+    const parsed = JSON.parse(OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(body));
+    return isHostedOpenAiDiagnosticRecord(parsed)
+      ? readStringRecordProperty(parsed, "model")
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   pathnameSuffix: string;
   request: Request;
@@ -1956,11 +2026,31 @@ async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   );
 }
 
+async function scheduleOrAwaitHostedProviderDiagnostic(input: {
+  ctx: HostedRunnerOutboundContext | null;
+  promise: Promise<void>;
+}): Promise<void> {
+  if (typeof input.ctx?.waitUntil !== "function") {
+    await input.promise;
+    return;
+  }
+  try {
+    input.ctx.waitUntil(input.promise);
+  } catch {
+    await input.promise;
+  }
+}
+
 async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
+  canonicalModelKind?: string | null;
   ctx: HostedRunnerOutboundContext | null;
   endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
   env: RunnerOutboundEnvironmentSource;
+  providerKind?: HostedResponsesDiagnosticProviderKind;
+  providerResponseTtfbMs?: number;
+  providerTransportFailed?: boolean;
   request: Request;
+  response?: Response;
   upstreamRequestBody: HostedRunnerDiagnosticBodySource;
   userId: string | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
@@ -1969,13 +2059,22 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
   try {
     const requestBytes = new Uint8Array(await input.upstreamRequestBody.arrayBuffer());
     diagnostic = await buildHostedOpenAiCacheDiagnostic({
+      canonicalModelKind: input.canonicalModelKind ?? null,
       endpointKind: input.endpointKind,
       fingerprintSecret: readOpenAiCacheDiagnosticFingerprintSecret(input.env),
       method: input.request.method,
+      providerKind: input.providerKind ?? "openai",
       requestBytes,
       turnMetadataHeader: input.request.headers.get(
         OPENAI_CACHE_DIAGNOSTIC_CODEX_TURN_METADATA_HEADER,
       ),
+    });
+    appendProviderResponseDiagnostics({
+      diagnostic,
+      providerKind: input.providerKind ?? "openai",
+      providerResponseTtfbMs: input.providerResponseTtfbMs,
+      providerTransportFailed: input.providerTransportFailed ?? false,
+      response: input.response,
     });
   } catch (error) {
     emitHostedExecutionStructuredLog({
@@ -1983,10 +2082,11 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       details: {
         diagnosticCaptured: false,
         endpointKind: input.endpointKind,
+        providerKind: input.providerKind ?? "openai",
       },
       error,
       level: "warn",
-      message: "Hosted runner OpenAI cache diagnostic capture failed.",
+      message: "Hosted runner provider request diagnostic capture failed.",
       phase: "wake.running",
     });
     return;
@@ -2001,7 +2101,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       runtimeLogScheduled,
       ...diagnostic,
     },
-    message: "Hosted runner OpenAI cache diagnostic captured.",
+    message: "Hosted runner provider request diagnostic captured.",
     phase: "wake.running",
   });
 
@@ -2020,20 +2120,23 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       component: "runner",
       details: {
         endpointKind: input.endpointKind,
+        providerKind: input.providerKind ?? "openai",
         runtimeLogScheduled,
       },
       error,
       level: "warn",
-      message: "Hosted runner OpenAI cache diagnostic runtime-log write failed.",
+      message: "Hosted runner provider request diagnostic runtime-log write failed.",
       phase: "wake.running",
     });
   });
 }
 
 export async function buildHostedOpenAiCacheDiagnostic(input: {
+  canonicalModelKind?: string | null;
   endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
   fingerprintSecret?: string | null;
   method: string;
+  providerKind?: HostedResponsesDiagnosticProviderKind;
   requestBytes: Uint8Array;
   turnMetadataHeader?: string | null;
 }): Promise<HostedRunnerDiagnosticJson> {
@@ -2047,11 +2150,12 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
     jsonType: "unknown",
     jsonValid: false,
     methodKind: readOpenAiDiagnosticMethodKind(input.method),
-    providerKind: "openai",
+    providerKind: input.providerKind ?? "openai",
     requestBytes: input.requestBytes.byteLength,
   };
-  appendCodexTurnMetadataDiagnostics({
+  await appendCodexTurnMetadataDiagnostics({
     diagnostic,
+    fingerprintKey,
     turnMetadataHeader: input.turnMetadataHeader ?? null,
   });
 
@@ -2082,7 +2186,13 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
   }
 
   diagnostic.requestFieldCount = Object.keys(parsed).length;
-  diagnostic.modelKind = readOpenAiDiagnosticModelKind(readStringRecordProperty(parsed, "model"));
+  const requestModel = readStringRecordProperty(parsed, "model");
+  diagnostic.modelKind = readOpenAiDiagnosticModelKind(
+    input.canonicalModelKind ?? requestModel,
+  );
+  if ((input.providerKind ?? "openai") === "venice") {
+    diagnostic.upstreamModelKind = readVeniceDiagnosticModelKind(requestModel);
+  }
   diagnostic.cacheRetentionKind = readOpenAiCacheRetentionKind(parsed.prompt_cache_retention);
 
   const cacheNamespace = readStringRecordProperty(parsed, "prompt_cache_key");
@@ -2141,6 +2251,62 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
   return diagnostic;
 }
 
+function appendProviderResponseDiagnostics(input: {
+  diagnostic: HostedRunnerDiagnosticJson;
+  providerKind: HostedResponsesDiagnosticProviderKind;
+  providerResponseTtfbMs?: number;
+  providerTransportFailed: boolean;
+  response?: Response;
+}): void {
+  if (input.providerResponseTtfbMs !== undefined) {
+    input.diagnostic.providerResponseTtfbMs = Math.max(
+      0,
+      Math.trunc(input.providerResponseTtfbMs),
+    );
+  }
+  if (input.providerTransportFailed) {
+    input.diagnostic.providerResponseOutcomeKind = "transport_error";
+    return;
+  }
+  if (!input.response) {
+    return;
+  }
+
+  input.diagnostic.providerResponseOk = input.response.ok;
+  input.diagnostic.providerResponseOutcomeKind = input.response.ok
+    ? "accepted"
+    : "rejected";
+  input.diagnostic.providerResponseStatus = input.response.status;
+  input.diagnostic.providerResponseContentKind = readResponseContentKind(
+    input.response.headers.get("content-type"),
+  );
+
+  if (input.providerKind !== "venice") {
+    return;
+  }
+  const cloudflareRay = readSafeCloudflareRay(input.response.headers.get("cf-ray"));
+  if (cloudflareRay) {
+    input.diagnostic.providerResponseCloudflareRay = cloudflareRay;
+  }
+  const responseModelKind = readVeniceDiagnosticModelKind(
+    input.response.headers.get("x-venice-model-id"),
+  );
+  input.diagnostic.providerResponseModelKind = responseModelKind;
+  const requestModelKind = input.diagnostic.upstreamModelKind;
+  input.diagnostic.providerResponseModelMatchesRequest =
+    typeof requestModelKind === "string"
+    && requestModelKind !== "missing"
+    && requestModelKind !== "other"
+    && responseModelKind === requestModelKind;
+
+  const retryCount = readBoundedProviderRetryCount(
+    input.response.headers.get("x-retry-count"),
+  );
+  if (retryCount !== null) {
+    input.diagnostic.providerResponseRetryCount = retryCount;
+  }
+}
+
 async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
   diagnostic: HostedRunnerDiagnosticJson;
   env: RunnerOutboundEnvironmentSource;
@@ -2161,7 +2327,11 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
           component: "runner",
           eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
           ...(writeFence ? { leaseGeneration: writeFence.leaseGeneration } : {}),
-          level: "debug",
+          level:
+            input.diagnostic.providerResponseOutcomeKind === "rejected"
+              || input.diagnostic.providerResponseOutcomeKind === "transport_error"
+              ? "warn"
+              : "debug",
           phase: "fetch",
           redactedJson: input.diagnostic,
           ...(writeFence?.workspaceVersion ? { workspaceVersion: writeFence.workspaceVersion } : {}),
@@ -2186,7 +2356,7 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
   );
 
   if (!response.ok) {
-    throw new Error(`Hosted OpenAI cache diagnostic runtime-log write returned HTTP ${response.status}.`);
+    throw new Error(`Hosted provider request diagnostic runtime-log write returned HTTP ${response.status}.`);
   }
   await drainHostedRunnerMetadataResponse(response);
 }
@@ -2236,7 +2406,13 @@ async function appendFingerprintDiagnostics(input: {
 }
 
 async function appendSensitiveIdentifierFingerprint(input: {
-  fieldPrefix: "cacheNamespace" | "previousResponse";
+  fieldPrefix:
+    | "cacheNamespace"
+    | "codexSession"
+    | "codexThread"
+    | "codexTurn"
+    | "codexWindow"
+    | "previousResponse";
   fingerprintKey: CryptoKey | null;
   output: HostedRunnerDiagnosticJson;
   value: string;
@@ -2278,6 +2454,25 @@ function readOpenAiDiagnosticModelKind(value: string | null): string {
     return "missing";
   }
   return OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS.has(normalized) ? normalized : "other";
+}
+
+function readVeniceDiagnosticModelKind(value: string | null): string {
+  const normalized = value?.split(":", 1)[0]?.trim() ?? "";
+  if (!normalized) {
+    return "missing";
+  }
+  return VENICE_CACHE_DIAGNOSTIC_MODEL_KINDS.has(normalized)
+    ? normalized
+    : "other";
+}
+
+function readBoundedProviderRetryCount(value: string | null): number | null {
+  const normalized = value?.trim() ?? "";
+  if (!/^\d{1,3}$/u.test(normalized)) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  return parsed <= 100 ? parsed : null;
 }
 
 function readOpenAiCacheRetentionKind(value: unknown): string {
@@ -2328,10 +2523,11 @@ function readStringRecordProperty(record: Record<string, unknown>, key: string):
   return normalized.length > 0 ? normalized : null;
 }
 
-function appendCodexTurnMetadataDiagnostics(input: {
+async function appendCodexTurnMetadataDiagnostics(input: {
   diagnostic: HostedRunnerDiagnosticJson;
+  fingerprintKey: CryptoKey | null;
   turnMetadataHeader: string | null;
-}): void {
+}): Promise<void> {
   const header = input.turnMetadataHeader?.trim();
   if (!header) {
     return;
@@ -2356,6 +2552,43 @@ function appendCodexTurnMetadataDiagnostics(input: {
     output: input.diagnostic,
     value: parsed.request_kind,
   });
+
+  const sessionId = readStringRecordProperty(parsed, "session_id");
+  if (sessionId) {
+    await appendSensitiveIdentifierFingerprint({
+      fieldPrefix: "codexSession",
+      fingerprintKey: input.fingerprintKey,
+      output: input.diagnostic,
+      value: sessionId,
+    });
+  }
+  const threadId = readStringRecordProperty(parsed, "thread_id");
+  if (threadId) {
+    await appendSensitiveIdentifierFingerprint({
+      fieldPrefix: "codexThread",
+      fingerprintKey: input.fingerprintKey,
+      output: input.diagnostic,
+      value: threadId,
+    });
+  }
+  const turnId = readStringRecordProperty(parsed, "turn_id");
+  if (turnId) {
+    await appendSensitiveIdentifierFingerprint({
+      fieldPrefix: "codexTurn",
+      fingerprintKey: input.fingerprintKey,
+      output: input.diagnostic,
+      value: turnId,
+    });
+  }
+  const windowId = readStringRecordProperty(parsed, "window_id");
+  if (windowId) {
+    await appendSensitiveIdentifierFingerprint({
+      fieldPrefix: "codexWindow",
+      fingerprintKey: input.fingerprintKey,
+      output: input.diagnostic,
+      value: windowId,
+    });
+  }
 
   const compaction = parsed.compaction;
   if (!isHostedOpenAiDiagnosticRecord(compaction)) {
