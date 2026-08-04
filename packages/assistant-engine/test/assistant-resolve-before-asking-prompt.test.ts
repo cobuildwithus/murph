@@ -25,23 +25,35 @@ function buildPrompt(conversationScope: AssistantConversationScope): string {
 }
 
 describe('assistant resolve-before-asking guidance', () => {
-  it('uses permitted sources for objective blockers in verified direct and group turns', () => {
-    for (const conversationScope of ['direct', 'group'] as const) {
-      const prompt = buildPrompt(conversationScope)
+  it('keeps direct resolution in the canonical turn-priority policy', () => {
+    const prompt = buildPrompt('direct')
 
-      expect(prompt).toContain(
-        'Do not turn a retrievable objective detail into user homework.',
-      )
-      expect(prompt).toContain(
-        'Use the conversation and the narrowest source or tool already authorized for this audience and task',
-      )
-      expect(prompt).toContain(
-        'Ask only when permitted sources cannot produce one sufficiently reliable answer',
-      )
-      expect(prompt).toContain(
-        'Never broaden a lookup beyond the task, invent a match, treat retrieved data as consent, or expose private-source information across audience boundaries.',
-      )
-    }
+    expect(prompt).toContain(
+      'Resolve ambiguity with available context first: recent conversation, vault reads, attached files, local evidence, connected device or wearable data, and lookup tools when they could materially answer the question.',
+    )
+    expect(prompt).toContain(
+      'Prefer using available sources over giving the user busywork',
+    )
+    expect(prompt).toContain(
+      'Ask only for missing subjective context, ambiguous details, consent, or facts no available source can answer.',
+    )
+    expect(prompt).not.toContain(
+      'Do not turn a retrievable objective detail into user homework.',
+    )
+  })
+
+  it('keeps group resolution within the canonical shared-source boundary', () => {
+    const prompt = buildPrompt('group')
+
+    expect(prompt).toContain(
+      "Resolve ambiguity only from the current conversation, public sources, group-owned state, and server-approved shared projections. Never inspect the room vault for a participant's personal evidence.",
+    )
+    expect(prompt).toContain(
+      'Ask one narrow question only when missing detail materially changes safety, attribution, the group-owned write target, or the answer.',
+    )
+    expect(prompt).not.toContain(
+      'Do not turn a retrievable objective detail into user homework.',
+    )
   })
 
   it('does not add account-backed resolution guidance to an unverified external audience', () => {

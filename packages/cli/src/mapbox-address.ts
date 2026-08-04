@@ -15,7 +15,7 @@ const MAX_CITY_LENGTH = 200
 const MAX_PROVIDER_STRING_LENGTH = 512
 const MAX_MATCH_VALUE_LENGTH = 32
 const US_POSTAL_CODE_PATTERN = /^\d{5}(?:-\d{4})?$/u
-const US_POSTAL_CODE_SEARCH_PATTERN = /\b(\d{5})(?:-\d{4})?\b/u
+const US_POSTAL_CODE_SEARCH_PATTERN = /\b(\d{5}(?:-\d{4})?)\b/u
 const US_STATE_CODE_PATTERN = /^[A-Z]{2}$/u
 const US_STATE_CODES = new Set([
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA',
@@ -24,8 +24,30 @@ const US_STATE_CODES = new Set([
   'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX',
   'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
 ])
+const US_STATE_NAMES_TO_CODES = new Map([
+  ['alabama', 'AL'], ['alaska', 'AK'], ['arizona', 'AZ'], ['arkansas', 'AR'],
+  ['california', 'CA'], ['colorado', 'CO'], ['connecticut', 'CT'],
+  ['delaware', 'DE'], ['district of columbia', 'DC'], ['florida', 'FL'],
+  ['georgia', 'GA'], ['hawaii', 'HI'], ['idaho', 'ID'], ['illinois', 'IL'],
+  ['indiana', 'IN'], ['iowa', 'IA'], ['kansas', 'KS'], ['kentucky', 'KY'],
+  ['louisiana', 'LA'], ['maine', 'ME'], ['maryland', 'MD'],
+  ['massachusetts', 'MA'], ['michigan', 'MI'], ['minnesota', 'MN'],
+  ['mississippi', 'MS'], ['missouri', 'MO'], ['montana', 'MT'],
+  ['nebraska', 'NE'], ['nevada', 'NV'], ['new hampshire', 'NH'],
+  ['new jersey', 'NJ'], ['new mexico', 'NM'], ['new york', 'NY'],
+  ['north carolina', 'NC'], ['north dakota', 'ND'], ['ohio', 'OH'],
+  ['oklahoma', 'OK'], ['oregon', 'OR'], ['pennsylvania', 'PA'],
+  ['rhode island', 'RI'], ['south carolina', 'SC'], ['south dakota', 'SD'],
+  ['tennessee', 'TN'], ['texas', 'TX'], ['utah', 'UT'], ['vermont', 'VT'],
+  ['virginia', 'VA'], ['washington', 'WA'], ['west virginia', 'WV'],
+  ['wisconsin', 'WI'], ['wyoming', 'WY'],
+] as const)
 const SECONDARY_ADDRESS_PREFIX_PATTERN =
   /^(?:#|apt\b|apartment\b|bldg\b|building\b|fl\b|floor\b|ste\b|suite\b|unit\b)/iu
+const SECONDARY_ADDRESS_COMPONENT_PATTERN =
+  /(?:\b(?:apt(?:artment)?|bldg|building|fl(?:oor)?|ste|suite|unit)\.?\s*[A-Za-z0-9-]+\b|#\s*[A-Za-z0-9-]+\b)/iu
+const TRAILING_US_COUNTRY_PATTERN =
+  /(?:,\s*|\s+)\b(?:united states(?: of america)?|u\.?s\.?(?:a\.?)?)\s*$/iu
 
 const isoCountryCodeSchema = z.string().trim().regex(/^[A-Za-z]{2}$/u)
 const nullableAddressLineSchema = z
@@ -190,7 +212,9 @@ type ProviderAddressFeature = z.infer<typeof providerAddressFeatureSchema>
 
 type ExplicitMailingHints = {
   city: string | null
+  localityPrefix: string | null
   postalCode: string | null
+  secondaryAddress: string | null
   state: string | null
 }
 type ResolvedAddressCandidate = {
@@ -342,6 +366,7 @@ function buildCandidate(
   const suppliedMailingHintsMatch = mailingHintsMatchCandidate(
     explicitMailingHints,
     candidate,
+    match,
   )
   const countryDidNotConflict =
     normalizeLowercase(match?.country) !== 'unmatched'
@@ -363,39 +388,26 @@ function buildCandidate(
 }
 
 function readExplicitMailingHints(query: string): ExplicitMailingHints {
-  const parts = query
+  const postalCode = US_POSTAL_CODE_SEARCH_PATTERN.exec(query)?.[1] ?? null
+  const withoutCountry = query.replace(TRAILING_US_COUNTRY_PATTERN, '').trim()
+  const withoutPostalCode = postalCode
+    ? withoutCountry
+        .replace(new RegExp(`${escapeRegExp(postalCode)}\\s*$`, 'u'), '')
+        .replace(/[\s,]+$/u, '')
+    : withoutCountry
+  const trailingState = findTrailingState(withoutPostalCode)
+  const beforeState = trailingState
+    ? withoutPostalCode
+        .slice(0, trailingState.index)
+        .replace(/[\s,]+$/u, '')
+    : withoutPostalCode
+  const parts = beforeState
     .split(',')
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
-  const postalCode = US_POSTAL_CODE_SEARCH_PATTERN.exec(query)?.[1] ?? null
   let city: string | null = null
-  let state: string | null = null
-  let statePartIndex = -1
-
-  for (let index = parts.length - 1; index >= 1; index -= 1) {
-    const part = parts[index] ?? ''
-    const stateMatch = findStateCode(part)
-    if (!stateMatch) {
-      continue
-    }
-
-    state = stateMatch.code
-    statePartIndex = index
-    const cityInStatePart = part.slice(0, stateMatch.index).trim()
-    if (cityInStatePart && !looksLikeSecondaryAddress(cityInStatePart)) {
-      city = cityInStatePart
-    }
-    break
-  }
-
-  if (!city && statePartIndex > 1) {
-    const precedingPart = parts[statePartIndex - 1] ?? ''
-    if (!looksLikeSecondaryAddress(precedingPart)) {
-      city = precedingPart
-    }
-  }
-  if (!city && statePartIndex === -1 && parts.length === 2) {
-    const lastPart = parts[1] ?? ''
+  if (parts.length >= 2) {
+    const lastPart = parts.at(-1) ?? ''
     if (
       !looksLikeSecondaryAddress(lastPart) &&
       !US_POSTAL_CODE_SEARCH_PATTERN.test(lastPart)
@@ -406,20 +418,41 @@ function readExplicitMailingHints(query: string): ExplicitMailingHints {
 
   return {
     city: normalizeComparableText(city),
+    localityPrefix: trailingState && parts.length === 1
+      ? normalizeComparableText(
+          beforeState.replace(SECONDARY_ADDRESS_COMPONENT_PATTERN, ' '),
+        )
+      : null,
     postalCode,
-    state,
+    secondaryAddress: normalizeComparableText(
+      SECONDARY_ADDRESS_COMPONENT_PATTERN.exec(query)?.[0],
+    ),
+    state: trailingState?.code ?? null,
   }
 }
 
-function findStateCode(value: string): { code: string; index: number } | null {
-  const matches = value.matchAll(/\b([A-Za-z]{2})\b/gu)
-  for (const match of matches) {
-    const code = match[1]?.toUpperCase()
-    if (code && US_STATE_CODES.has(code)) {
-      return {
-        code,
-        index: match.index ?? 0,
-      }
+function findTrailingState(
+  value: string,
+): { code: string; index: number } | null {
+  const normalized = value.trim()
+  const labels = [
+    ...US_STATE_NAMES_TO_CODES.entries(),
+    ...[...US_STATE_CODES].map((code) => [code.toLowerCase(), code] as const),
+  ].sort(([left], [right]) => right.length - left.length)
+
+  for (const [label, code] of labels) {
+    const match = new RegExp(
+      `(?:^|[\\s,])(${escapeRegExp(label)})$`,
+      'iu',
+    ).exec(normalized)
+    const matchedLabel = match?.[1]
+    if (!match || !matchedLabel) {
+      continue
+    }
+
+    return {
+      code,
+      index: match.index + match[0].lastIndexOf(matchedLabel),
     }
   }
 
@@ -429,24 +462,70 @@ function findStateCode(value: string): { code: string; index: number } | null {
 function mailingHintsMatchCandidate(
   hints: ExplicitMailingHints,
   candidate: MapboxAddressCandidate,
+  match: NonNullable<ProviderAddressFeature['properties']>['match_code'],
 ): boolean {
   if (
     hints.postalCode &&
-    candidate.postalCode?.slice(0, 5) !== hints.postalCode
+    (
+      candidate.postalCode !== hints.postalCode ||
+      normalizeLowercase(match?.postcode) === 'unmatched'
+    )
   ) {
     return false
   }
-  if (hints.state && candidate.state !== hints.state) {
+  if (
+    hints.state &&
+    (
+      candidate.state !== hints.state ||
+      normalizeLowercase(match?.region) === 'unmatched'
+    )
+  ) {
     return false
   }
   if (
     hints.city &&
-    normalizeComparableText(candidate.city) !== hints.city
+    (
+      normalizeComparableText(candidate.city) !== hints.city ||
+      normalizeLowercase(match?.place) === 'unmatched'
+    )
   ) {
+    return false
+  }
+  if (hints.localityPrefix) {
+    const addressLine1 = normalizeComparableText(candidate.addressLine1)
+    const city = normalizeComparableText(candidate.city)
+    if (!addressLine1 || hints.localityPrefix !== addressLine1) {
+      if (
+        !addressLine1 ||
+        !city ||
+        !hints.localityPrefix.startsWith(`${addressLine1} `) ||
+        hints.localityPrefix.slice(addressLine1.length + 1) !== city ||
+        normalizeLowercase(match?.place) === 'unmatched'
+      ) {
+        return false
+      }
+    }
+  }
+
+  const candidateSecondaryAddress = normalizeComparableText(
+    candidate.addressLine2,
+  )
+  if (hints.secondaryAddress) {
+    if (
+      candidateSecondaryAddress !== hints.secondaryAddress ||
+      normalizeLowercase(match?.secondary_address) !== 'matched'
+    ) {
+      return false
+    }
+  } else if (candidateSecondaryAddress) {
     return false
   }
 
   return true
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
 }
 
 function looksLikeSecondaryAddress(value: string): boolean {

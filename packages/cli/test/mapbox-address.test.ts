@@ -195,6 +195,168 @@ describe('resolveMapboxAddress', () => {
     })
   })
 
+  it('accepts matching uncommaed locality, full state name, and ZIP+4', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        features: [
+          addressFeature({
+            city: 'Sampleton',
+            placeMatch: 'matched',
+            postalCode: '30303-1234',
+            postcodeMatch: 'matched',
+            regionMatch: 'matched',
+            state: 'GA',
+            streetAddress: '42 Example Lane',
+          }),
+        ],
+      }),
+    )
+
+    const result = await resolveMapboxAddress(
+      {
+        query: '42 Example Lane Sampleton Georgia 30303-1234',
+        country: ['US'],
+      },
+      dependencies(fetchImpl),
+    )
+
+    expect(result.recommendedCandidate).toEqual({
+      addressLine1: '42 Example Lane',
+      city: 'Sampleton',
+      state: 'GA',
+      postalCode: '30303-1234',
+    })
+  })
+
+  it('does not recommend a primary result that drops a supplied unit', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        features: [
+          addressFeature({
+            city: 'Sampleton',
+            postalCode: '30303',
+            state: 'GA',
+            streetAddress: '42 Example Lane',
+          }),
+        ],
+      }),
+    )
+
+    const result = await resolveMapboxAddress(
+      {
+        query: '42 Example Lane Apt 5',
+        country: ['US'],
+      },
+      dependencies(fetchImpl),
+    )
+
+    expect(result.candidates).toEqual([
+      {
+        addressLine1: '42 Example Lane',
+        city: 'Sampleton',
+        state: 'GA',
+        postalCode: '30303',
+      },
+    ])
+    expect(result.recommendedCandidate).toBeNull()
+    expect(result.warnings).toEqual([
+      'The mailing-address match was not strong enough to fill automatically.',
+    ])
+  })
+
+  it('does not replace a supplied full state name', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        features: [
+          addressFeature({
+            city: 'Sampleton',
+            placeMatch: 'matched',
+            postalCode: '30303',
+            postcodeMatch: 'matched',
+            regionMatch: 'unmatched',
+            state: 'NY',
+            streetAddress: '42 Example Lane',
+          }),
+        ],
+      }),
+    )
+
+    const result = await resolveMapboxAddress(
+      {
+        query: '42 Example Lane, Sampleton, Georgia 30303',
+        country: ['US'],
+      },
+      dependencies(fetchImpl),
+    )
+
+    expect(result.recommendedCandidate).toBeNull()
+    expect(result.warnings).toEqual([
+      'The mailing-address match was not strong enough to fill automatically.',
+    ])
+  })
+
+  it('does not replace a supplied uncommaed locality', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        features: [
+          addressFeature({
+            city: 'Correct City',
+            placeMatch: 'unmatched',
+            postalCode: '30303',
+            postcodeMatch: 'matched',
+            regionMatch: 'matched',
+            state: 'GA',
+            streetAddress: '42 Example Lane',
+          }),
+        ],
+      }),
+    )
+
+    const result = await resolveMapboxAddress(
+      {
+        query: '42 Example Lane Wrong City GA 30303',
+        country: ['US'],
+      },
+      dependencies(fetchImpl),
+    )
+
+    expect(result.recommendedCandidate).toBeNull()
+    expect(result.warnings).toEqual([
+      'The mailing-address match was not strong enough to fill automatically.',
+    ])
+  })
+
+  it('does not drop or change a supplied ZIP+4 suffix', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        features: [
+          addressFeature({
+            city: 'Sampleton',
+            placeMatch: 'matched',
+            postalCode: '30303',
+            postcodeMatch: 'unmatched',
+            regionMatch: 'matched',
+            state: 'GA',
+            streetAddress: '42 Example Lane',
+          }),
+        ],
+      }),
+    )
+
+    const result = await resolveMapboxAddress(
+      {
+        query: '42 Example Lane, Sampleton, GA 30303-1234',
+        country: ['US'],
+      },
+      dependencies(fetchImpl),
+    )
+
+    expect(result.recommendedCandidate).toBeNull()
+    expect(result.warnings).toEqual([
+      'The mailing-address match was not strong enough to fill automatically.',
+    ])
+  })
+
   it('does not replace explicitly supplied conflicting state or ZIP values', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       jsonResponse({

@@ -67,9 +67,12 @@ The command returns a `recommendedCandidate` only when deduplication leaves one
 candidate, the provider classifies it as a strong address result, the supplied
 house number and street matched, any secondary-address component matched rather
 than being extrapolated, and every field fits the existing physical-note
-recipient schema. Any additional candidate, weaker component match, incomplete
-US mailing field, or overlong send field leaves the recommendation empty and
-requires one narrow clarification.
+recipient schema. Every supplied delivery component must survive the lookup:
+city, state names or codes, the complete five- or nine-digit ZIP, and any unit,
+suite, floor, or building value must agree with the candidate and the provider's
+component match. Any additional candidate, weaker or conflicting component
+match, incomplete US mailing field, or overlong send field leaves the
+recommendation empty and requires one narrow clarification.
 
 Address completion may fill only the destination the requester already supplied.
 It cannot identify a recipient, discover where a person lives, choose between
