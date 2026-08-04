@@ -20,10 +20,9 @@ import { getPrisma } from "@/src/lib/prisma";
 
 export const HOSTED_PRODUCT_SUPPORT_EMAIL = "support@withmurph.ai";
 export const HOSTED_PRODUCT_SUPPORT_EMAILS_PER_MEMBER_UTC_DAY_MAX = 3;
-// The support alert and its member-linked marker carry only server-authored
-// text because that path deliberately sends identity to an operator. Ordinary
-// stored feedback may be linked to a private member, but stays bounded and
-// sanitized and is never emailed beside that identity by this service.
+// Keep the member-linked marker server-authored. The bounded product issue
+// remains owned by the separate anonymous detail row and is read back from
+// there when an authorized support alert is formatted.
 export const HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY =
   "Support escalation: member-requested product support escalation.";
 
@@ -130,7 +129,7 @@ export async function recordHostedProductFeedback(input: {
       ],
       skipDuplicates: true,
     });
-    const row = await tx.hostedProductFeedback.findUnique({
+    const rows = await tx.hostedProductFeedback.findMany({
       select: {
         createdAt: true,
         id: true,
@@ -139,8 +138,16 @@ export async function recordHostedProductFeedback(input: {
         relatedChangelogItemIdsJson: true,
         summary: true,
       },
-      where: { id: feedbackId },
+      where: {
+        id: {
+          in: [feedbackId, detailFeedbackId],
+        },
+      },
     });
+    const row = rows.find((candidate) => candidate.id === feedbackId);
+    const detailRow = rows.find(
+      (candidate) => candidate.id === detailFeedbackId,
+    );
 
     if (
       !row
@@ -148,6 +155,11 @@ export async function recordHostedProductFeedback(input: {
       || row.kind !== feedback.kind
       || row.summary !== HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY
       || !isEmptyJsonArray(row.relatedChangelogItemIdsJson)
+      || !detailRow
+      || detailRow.memberId !== null
+      || detailRow.kind !== feedback.kind
+      || detailRow.summary !== detailSummary
+      || !isEmptyJsonArray(detailRow.relatedChangelogItemIdsJson)
     ) {
       throw hostedOnboardingError({
         code: "HOSTED_PRODUCT_SUPPORT_IDEMPOTENCY_CONFLICT",
@@ -185,6 +197,7 @@ export async function recordHostedProductFeedback(input: {
     });
 
     return {
+      emailIssueSummary: detailRow.summary,
       recorded: created.count > 0,
       shouldSendEmail:
         ordinal <= HOSTED_PRODUCT_SUPPORT_EMAILS_PER_MEMBER_UTC_DAY_MAX,
@@ -214,6 +227,7 @@ export async function recordHostedProductFeedback(input: {
       subject: `${HOSTED_PRODUCT_SUPPORT_SUBJECT} — ${feedbackId}`,
       text: formatHostedProductSupportEmail({
         feedbackId,
+        issueSummary: persistence.emailIssueSummary,
         memberId,
       }),
       to: emailConfig.recipients,
@@ -302,16 +316,15 @@ async function persistHostedProductFeedback(input: {
   };
 }
 
-// The email is deliberately metadata-only: model-authored issue text, even
-// after the shared scrub, can retain semantic private details and must never
-// travel beside member identity. The de-identified issue text lives only in
-// the separate anonymous detail row.
 function formatHostedProductSupportEmail(input: {
   feedbackId: string;
+  issueSummary: string;
   memberId: string;
 }): string {
   return [
     "A Murph member explicitly asked to escalate a product issue.",
+    "",
+    `Product issue: ${input.issueSummary}`,
     "",
     `Feedback ID: ${input.feedbackId}`,
     `Member ID: ${input.memberId}`,

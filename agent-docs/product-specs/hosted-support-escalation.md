@@ -1,8 +1,8 @@
 # Hosted support escalation
 
-Last verified: 2026-08-01
+Last verified: 2026-08-04
 
-Implementation plan: `agent-docs/exec-plans/active/2026-08-01-hosted-support-escalation.md`.
+Implementation plan: `agent-docs/exec-plans/completed/2026-08-04-support-escalation-email-summary.md`.
 
 ## User purpose
 
@@ -24,17 +24,18 @@ A member who reaches a Murph-owned product blocker should not be left at a hard 
 ## Data and privacy
 
 - Ordinary feedback remains anonymous.
-- Explicit support escalation is member-linked because support needs to identify the affected private account, but the member-linked row and the support email carry only server-authored text and internal ids — never model-authored free text. The shared redaction pass is best-effort over recognizable shapes, and the repository accepts its residual free-text risk only for anonymous rows, so model-authored summaries must never sit beside member identity in a row, email, or digest.
-- The model-authored de-identified issue text (the content after the reserved prefix) is persisted as a separate anonymous feedback row with a deterministic derived id, where it reaches the product team through the ordinary anonymous digest.
+- Explicit support escalation is member-linked because support needs to identify the affected private account. The member-linked row remains fixed server-authored metadata; model-authored free text never becomes durable beside member identity.
+- The model-authored de-identified issue text (the content after the reserved prefix) is persisted as a separate anonymous feedback row with a deterministic derived id. That row remains the only durable free-text owner and supplies both the ordinary anonymous digest and the immediate support alert.
+- The immediate support alert explicitly pairs that bounded de-identified product-only summary with internal feedback and member ids because the verified private member requested support escalation. The model-facing product-only contract is the primary privacy boundary, and the shared deterministic scrub remains defense in depth over recognizable contact, identifier, secret, network, and exact-health-value shapes.
 - Member-linked support rows are excluded from the daily product-feedback digest; only anonymous rows enter that audience.
-- The support email contains exactly: a fixed escalation sentence, the internal feedback id, and the internal member id.
+- The support email contains exactly: a fixed escalation sentence, the labeled de-identified issue summary without the reserved prefix, the internal feedback id, and the internal member id.
 - Never include raw conversation or voice text, names, handles, email addresses, phone numbers, health facts, measurements, diagnoses, medications, precise locations, secrets, provider payloads, or any other unsanitized context in the support summary or email.
 
 ## Rate and replay behavior
 
 - The first three distinct escalation records for one member in one UTC day are email-eligible. Record timestamps are captured after the member-scoped advisory lock is held, so concurrent same-member escalations rank in lock-acquisition order and cannot overshoot the cap.
 - Later records remain persisted but do not send another email that day.
-- Exact callback replay may retry an eligible provider request with the same Resend idempotency key and must not create a duplicate recipient-visible email.
+- Exact callback replay validates both deterministic feedback rows, formats from the stored anonymous issue detail, and may retry an eligible provider request with the same body and Resend idempotency key. Changed content for the same key fails before provider entry, and exact replay must not create a duplicate recipient-visible email.
 - Ordinary feedback keeps the existing two-second callback bound; only the exact explicit support shape receives a bounded 12-second callback allowance, spent inside the turn where the model can truthfully report the outcome.
 - Murph never retries the model tool in the same turn or attempts to evade the server limit.
 
