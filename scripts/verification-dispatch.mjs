@@ -62,6 +62,21 @@ export function parseVerificationRequest(argv) {
   return { commandArgs, verificationCommand };
 }
 
+function assertTestboxSpendAllowed(env) {
+  if (
+    readBooleanFlag(
+      env.MURPH_ALLOW_TESTBOX_SPEND,
+      "MURPH_ALLOW_TESTBOX_SPEND",
+    )
+  ) {
+    return;
+  }
+
+  throw new Error(
+    "MURPH_VERIFY_EXECUTOR=crabbox creates paid Blacksmith Testbox spend and is disabled by default. Run the canonical command with MURPH_VERIFY_EXECUTOR=local, or route it to the free dedicated worker with MURPH_VERIFY_EXECUTOR=ssh. Set MURPH_ALLOW_TESTBOX_SPEND=1 on a single deliberate invocation to accept the spend.",
+  );
+}
+
 function assertSafeBlacksmithRoutingInputs(env) {
   const leaseId = readOptionalValue(
     env.MURPH_CRABBOX_LEASE_ID,
@@ -121,6 +136,7 @@ export function resolveVerificationExecutor({
   }
 
   if (requestedExecutor === "crabbox") {
+    assertTestboxSpendAllowed(env);
     assertSafeBlacksmithRoutingInputs(env);
   } else {
     readSshRoutingInputs(env);
