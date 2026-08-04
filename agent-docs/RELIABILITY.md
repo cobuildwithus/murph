@@ -344,6 +344,42 @@ Last verified: 2026-07-31
   Starting or retrying the source first attempts target-only provider cleanup;
   a cleanup warning blocks the new link instead of adopting an ambiguous
   linkage or revoking sibling sources.
+  Ordinary hosted removal follows the same target-only provider boundary. Web
+  marks the selected connection-source row with a disconnect fence under the
+  existing connection mutation lock, performs provider revoke outside the
+  transaction, then rechecks the parent, credential, and source epochs before
+  committing only that source as disconnected. The fence rejects late callback
+  admission and hosted-runtime source projection until a fresh explicit connect
+  clears it. Provider failure restores the captured source lifecycle and returns
+  a retryable error; it does not disconnect siblings or the parent account.
+  Connection-wide historical reset remains the explicit broader operation.
+  Repeated removal performs target-only provider cleanup again, and a Link
+  callback rejected after provider completion uses the same two-phase source
+  claim to remove authorization recreated by an obsolete Link. A newer Link is
+  not issued while exact-source cleanup is in progress. A start carries its
+  exact pending source epoch through provider Link creation and rechecks it
+  before OAuth-state persistence and response; a concurrent newer disconnect
+  makes the Link unreachable instead of returning stale authorization.
+  If obsolete provider completion races an in-flight Disconnect or source-start
+  cleanup, it advances that exact operation's source epoch and performs another
+  idempotent target-only revoke. The initiating operation follows the newest
+  same-purpose claim before returning, while separate start-cleanup and user-
+  disconnect phase codes preserve the intended terminal state.
+- Companion Apple Health metadata and WHOOP overnight summaries recheck their
+  exact source inside the health-data admission lock and again before runtime
+  import by rereading the durable source row rather than trusting the queued
+  account snapshot. Explicit Apple Health SDK connect captures the exact source
+  epoch before token mint and creates a pending epoch afterward only when that
+  proof remains current. A signed source-registration lifecycle event with no
+  timestamp instead rereads Junction's live provider list after trace claim: an
+  unchanged pending epoch plus a live target commits connected, while a fenced
+  source or disconnected parent triggers target-only cleanup. Receipt or
+  record-occurrence time is not substituted for registration proof. Source
+  observation runs after the webhook attempt owns its trace so duplicate or
+  losing attempts cannot change authorization. WHOOP summary provenance remains
+  `whoop`, but admission uses the Junction `whoop_v2` lifecycle source. Resume,
+  omitted intent, stale
+  events, and background work never clear the source fence.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate
   intentionally denies receive one assign-once timestamp at the mutating

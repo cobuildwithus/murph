@@ -78,12 +78,14 @@ export function GarminHistoricalDataDialog({
 
 export function ConnectDisconnectDialog({
   errorMessage,
+  inert = false,
   pending,
   source,
   onConfirm,
   onOpenChange,
 }: {
   errorMessage: string | null;
+  inert?: boolean;
   pending: boolean;
   source: ConnectSource | null;
   onConfirm: (source: ConnectSource) => Promise<void>;
@@ -91,7 +93,7 @@ export function ConnectDisconnectDialog({
 }) {
   return (
     <Dialog open={Boolean(source)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md gap-6 p-6 md:p-7">
+      <DialogContent className="max-w-md gap-6 p-6 md:p-7" inert={inert || undefined}>
         <DialogHeader className="pr-10">
           <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
             {resolveDisconnectDialogTitle(source)}
@@ -148,7 +150,7 @@ function resolveDisconnectDialogDescription(source: ConnectSource | null): strin
     return "Murph will stop syncing new data from every source in this connection. Your history is kept.";
   }
 
-  return "Murph will stop syncing new data from this connection. Your history is kept.";
+  return `Murph will stop syncing new data from ${source?.name ?? "this source"}. Your history is kept.`;
 }
 
 export function ConnectRedirectDialog({ sourceName }: { sourceName: string | null }) {

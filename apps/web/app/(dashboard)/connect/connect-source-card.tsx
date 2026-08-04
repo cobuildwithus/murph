@@ -36,7 +36,12 @@ export function SourceCard({
   const connectionOfferEnabled = source.connectionAvailable !== false;
   const historicalReconnectUnavailable = historicalResetIncomplete && !connectionOfferEnabled;
   const showReconnectStateDisconnect = canDisconnect
-    && (reconnectUnavailable || requiresConnectionReset || source.disconnectScope === "junction_account");
+    && (
+      reconnectUnavailable
+      || requiresConnectionReset
+      || source.disconnectScope === "junction_account"
+      || Boolean(source.disconnectSourceProviderSlug)
+    );
   const unavailableMessage = !source.requiresReconnect && !requiresConnectionReset && !isAvailable
     ? source.unavailableMessage
     : undefined;

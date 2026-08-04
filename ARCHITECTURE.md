@@ -1445,7 +1445,46 @@ Explicit disconnect or a newer connection epoch wins the locked recheck,
 fails the stale callback, and leaves the target disconnected. Retry cleanup
 deregisters only the target source; whole-account revoke remains the explicit
 connection-wide disconnect path. Ambiguous target cleanup blocks the new link
-and remains retryable.
+and remains retryable. The hosted Connect surface uses that same split for
+removal: an ordinary Junction source card targets the child source route and
+calls provider-specific revoke without changing the parent connection,
+credentials, or sibling rows. The existing connection-source row carries a
+two-phase disconnect fence so callbacks and hosted-runtime projections captured
+before removal cannot restore the source. A failed provider revoke restores the
+captured source lifecycle and remains retryable; a fresh explicit connect clears
+the completed fence before opening the new provider link. That pending-source
+epoch is carried as an exact proof through provider Link creation and checked
+again before OAuth state is persisted or the URL is returned; a newer
+disconnect therefore makes an already-created Link unreachable instead of
+publishing stale authorization. Historical-export
+reset remains the deliberate connection-wide exception and keeps its broader
+confirmation copy. If an already-open Junction Link completes after removal,
+the rejected callback advances that same source operation and deregisters only
+the obsolete provider authorization, including while the initiating Disconnect
+or source-start cleanup is still in provider I/O. The initiating operation
+follows the newer exact-source claim before it can report success; a new Link
+cannot start while that cleanup is in progress. Repeating Disconnect also
+rechecks provider state instead of treating the local fence as proof of remote
+revocation.
+
+Native companion work uses the same source row. Source-attributed Apple Health
+metadata and WHOOP overnight summaries are admitted only when the exact source
+is absent for first use or connected without a disconnect fence, and the hosted
+runtime rereads that durable source immediately before canonical import; a
+queued job never treats its cached account snapshot as current authorization.
+An explicit Apple Health SDK connect captures the exact source epoch before
+token mint and opens a pending epoch only if that proof is still current after
+mint; an older Connect therefore cannot clear a newer Disconnect. A signed
+source-registration event reconciles that pending epoch against Junction's live
+provider list and can mark it connected without inventing a timestamp. If the
+source or parent was disconnected, the same event performs target-only cleanup
+instead. Receipt time and health-record occurrence time are never synthesized
+as registration proof, and source admission runs only after the webhook attempt
+owns its dedupe trace. Passive SDK resume, omitted
+intent, stale events, background uploads, and queued runtime work cannot clear
+or bypass a completed source disconnect. Companion WHOOP summaries retain the
+`whoop` health-data provenance while authorization is derived from the
+disconnectable Junction `whoop_v2` source row.
 
 The companion Privy bearer rule above is the default, with one authenticated
 extension bridge: `POST /api/device-sync/companion/imessage-mini-app/enrollment`
