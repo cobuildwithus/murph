@@ -1099,46 +1099,49 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
-  it('guides proactive silent structured product feedback capture', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+  it('guides problem-first structured product feedback capture', () => {
+  const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
-    expect(prompt).toContain('Product feedback:')
-    expect(prompt).toContain('`murph.submit_product_feedback`')
-    expect(prompt).toContain(
-      'capture explicit Murph product frustration, feature requests, interest in shipped changelog or feature-catalog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
-    )
-    expect(prompt).toContain(
-      'Treat the current request as a high-confidence inferred feature request when a Murph workflow is blocked, materially degraded, or forced into a manual workaround',
-    )
-    expect(prompt).toContain(
-      'One current-request gap is enough; the user does not need to complain or name the feature',
-    )
-    expect(prompt).toContain(
-      'select the single most material qualifying gap and call the tool at most once in the same turn',
-    )
-    expect(prompt).toContain('Capture it silently without interrupting the workflow')
-    expect(prompt).toContain('do not mention the log or ask permission')
-    expect(prompt).toContain(
-      'Never retry after any tool result, including accepted, already accepted, or unavailable',
-    )
-    expect(prompt).toContain('persistence is best-effort after the reply')
-    expect(prompt).toContain('Continue with the best available fallback')
-    expect(prompt).toContain('purely external or transient failures')
-    expect(prompt).toContain('Use `feature_request` for a missing or unsupported path')
-    expect(prompt).toContain(
-      'Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known',
-    )
-    expect(prompt).toContain('Changelog ids are optional metadata')
-    expect(prompt).toContain('Start inferred summaries with `Speculative:`')
-    expect(prompt).toContain('assistant-observed summaries with `Murph-observed:`')
-    expect(prompt).toContain('Do not log vague low-confidence guesses')
-    expect(prompt).toContain(
-      'Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads',
-    )
-    expect(prompt).not.toContain('structured kind/topic')
-    expect(prompt).not.toContain('feedback tags')
-    expect(prompt).not.toContain('feedbackTags')
-  })
+  expect(prompt).toContain('Product feedback:')
+  expect(prompt).toContain('`murph.submit_product_feedback`')
+  expect(prompt).toContain(
+    'capture explicit Murph product frustration or feature requests, changelog/feature-catalog interest, clear inferred workflow friction, and repeated Murph-observed tool friction',
+  )
+  expect(prompt).toContain(
+    'A blocked, degraded, or manual Murph workflow is a high-confidence inferred feature request even without a complaint',
+  )
+  expect(prompt).toContain(
+    "Treat requests, bugs, and workarounds as clues to the user's goal, underlying problem, and desired outcome—not automatically the thing to build",
+  )
+  expect(prompt).toContain(
+    'If one missing answer would materially change what Murph should build, ask one concise natural follow-up and do not call the tool yet',
+  )
+  expect(prompt).toContain('Ask at most one feedback-discovery question per turn')
+  expect(prompt).toContain('use prior context, never re-ask')
+  expect(prompt).toContain('Still help with the immediate request or best fallback')
+  expect(prompt).toContain(
+    'Otherwise, when the problem is clear or Murph observed the friction, capture it silently',
+  )
+  expect(prompt).toContain(
+    'select the single most material gap and call the tool at most once for the accepted request',
+  )
+  expect(prompt).toContain('Never retry any result')
+  expect(prompt).toContain('persistence is best-effort after the reply')
+  expect(prompt).toContain('external/transient failures')
+  expect(prompt).toContain('Use `feature_request` for a missing path')
+  expect(prompt).toContain(
+    'Record only kind, a concise product-only summary, and relevant changelog ids when known; ids are optional',
+  )
+  expect(prompt).toContain('Prefix inferred summaries `Speculative:`')
+  expect(prompt).toContain('assistant-observed summaries `Murph-observed:`')
+  expect(prompt).toContain('Do not log vague low-confidence guesses')
+  expect(prompt).toContain(
+    'raw user wording or conversation text, health details, identifiers, contact details, secrets, or provider payloads',
+  )
+  expect(prompt).not.toContain('structured kind/topic')
+  expect(prompt).not.toContain('feedback tags')
+  expect(prompt).not.toContain('feedbackTags')
+})
 
   it('keeps only Murph-specific behavior outside the Codex base kernel', () => {
     const text = buildAssistantExecutionBehaviorText({
