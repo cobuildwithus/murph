@@ -592,8 +592,17 @@ export function sanitizeJsonLogString(
     .replace(/\bwhsec_[A-Z0-9]+\b/giu, "<redacted-secret>")
     .replace(/\bfile:\/\/\S+/giu, "<redacted-path>")
     .replace(/\bhttps?:\/\/\S+/giu, "<redacted-url>")
+    // A scheme is a formatting choice, not a sensitivity boundary: `www.host/x`
+    // leaks exactly what `https://www.host/x` would.
+    .replace(/\bwww\.\S+/giu, "<redacted-url>")
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")
     .replace(/\+\d[\d().\s-]{7,}\d/gu, "<redacted-phone>")
+    // Same number without the country prefix. External text we do not control
+    // (provider failure reasons especially) writes phone numbers in national
+    // format far more often than E.164, so matching only `+` left the common
+    // case readable. Over-matching a phone-shaped identifier here is the safe
+    // direction: only the number is replaced, not the surrounding wording.
+    .replace(/(?:\(\d{3}\)\s*|\b\d{3}[.\s-])\d{3}[.\s-]\d{4}\b/gu, "<redacted-phone>")
     .replace(/(^|[\s(])\/[^\s)]+/gu, "$1<redacted-path>")
     .replace(/\b[A-Z]:\\[^\s]+/gu, "<redacted-path>");
 
