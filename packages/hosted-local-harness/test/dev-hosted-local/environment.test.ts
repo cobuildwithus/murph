@@ -371,6 +371,7 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
     expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
+    expect(merged.HOSTED_R2_WRITE_ADMISSION).toBe("open");
     expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
   });
@@ -428,6 +429,7 @@ describe("mergeCloudflareLocalEnv", () => {
         HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:9000",
         HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:9000",
         HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
+        HOSTED_R2_WRITE_ADMISSION: "paused",
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
       },
     });
@@ -437,6 +439,7 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT).toBe("1");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
     expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
+    expect(merged.HOSTED_R2_WRITE_ADMISSION).toBe("paused");
     expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT).toBe("http://127.0.0.1:9000");
     expect(merged.HOSTED_R2_PRESIGN_ENDPOINT).toBe("http://host.docker.internal:9000");
@@ -1697,6 +1700,10 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(config.ai).toEqual({ binding: "AI" });
     expect(config.send_email).toEqual([{ name: "HOSTED_EMAIL" }]);
     expect(config.version_metadata).toEqual({ binding: "CF_VERSION_METADATA" });
+    expect((config.vars as Record<string, string>).HOSTED_R2_WRITE_ADMISSION).toBe("open");
+    expect((buildWranglerLocalDevConfig({
+      HOSTED_R2_WRITE_ADMISSION: "paused",
+    }).vars as Record<string, string>).HOSTED_R2_WRITE_ADMISSION).toBe("paused");
   });
 
   it("omits the Workers AI binding for hosted-local test routes so the fake binding composes", () => {

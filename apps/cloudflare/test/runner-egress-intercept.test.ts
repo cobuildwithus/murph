@@ -2476,9 +2476,6 @@ describe("hostedRunnerIntercept", () => {
       providerKind: "venice",
     });
     const env = createInterceptEnv({
-      HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
-      HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
-      HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
       VENICE_API_KEY: "venice-worker-secret",
       validateRuntimeProviderEgressCredential,
     });
@@ -2518,7 +2515,7 @@ describe("hostedRunnerIntercept", () => {
     await expect(forwardedRequest.json()).resolves.toEqual({
       input: "hello",
       model:
-        "zai-org-glm-4.7:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+        "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
       stream: true,
     });
   });
@@ -2535,9 +2532,6 @@ describe("hostedRunnerIntercept", () => {
       providerKind: "venice",
     });
     const env = createInterceptEnv({
-      HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
-      HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
-      HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
       VENICE_API_KEY: "venice-worker-secret",
       validateRuntimeProviderEgressCredential,
     });
@@ -2588,7 +2582,7 @@ describe("hostedRunnerIntercept", () => {
     await expect(forwardedRequest.json()).resolves.toEqual({
       input: standardInput,
       model:
-        "zai-org-glm-4.7:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+        "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
       parallel_tool_calls: false,
       stream: true,
       tool_choice: "auto",
@@ -2608,9 +2602,6 @@ describe("hostedRunnerIntercept", () => {
       providerKind: "venice",
     });
     const env = createInterceptEnv({
-      HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
-      HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
-      HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
       VENICE_API_KEY: "venice-worker-secret",
       validateRuntimeProviderEgressCredential,
     });
@@ -7715,9 +7706,6 @@ function createInterceptEnv(input: {
   MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED?: string;
   MURPH_HOSTED_LOCAL_PROFILE?: string;
   OPENAI_API_KEY?: string;
-  HOSTED_VENICE_LUNA_MODEL?: string;
-  HOSTED_VENICE_SOL_MODEL?: string;
-  HOSTED_VENICE_TERRA_MODEL?: string;
   readActiveRuntimeUserFence?: () => Promise<WorkerActiveRuntimeUserFenceResult>;
   readDeploySmokeLiveModelTurnFence?: () => Promise<{
     active: boolean;
@@ -7765,9 +7753,6 @@ function createInterceptEnv(input: {
       input.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED,
     MURPH_HOSTED_LOCAL_PROFILE: input.MURPH_HOSTED_LOCAL_PROFILE,
     OPENAI_API_KEY: input.OPENAI_API_KEY,
-    HOSTED_VENICE_LUNA_MODEL: input.HOSTED_VENICE_LUNA_MODEL,
-    HOSTED_VENICE_SOL_MODEL: input.HOSTED_VENICE_SOL_MODEL,
-    HOSTED_VENICE_TERRA_MODEL: input.HOSTED_VENICE_TERRA_MODEL,
     RUNNER_CONTAINER: {
       get: () => ({
         readActiveRuntimeUserFence:

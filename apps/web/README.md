@@ -782,7 +782,7 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
+- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows by canonical model and recorded provider into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. OpenAI and Venice GPT-5.6 usage therefore use their respective documented input, cache-read, cache-write, and output rates. Settings discloses Venice's higher provider-rate capacity use both while it is selected as a pending choice and after it is saved. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
 - Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog, including the active Family owner's authorized own-seat target. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
@@ -1396,6 +1396,67 @@ machine: 4 vCPUs, 8 GB RAM, and 32 GB disk. The CI guard currently observes the
 production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
+The production build launches the parent Next process explicitly through Node
+with `--max-old-space-size=1024` while appending
+`--max-old-space-size=3072` to `NODE_OPTIONS`. Node gives the direct CLI flag
+precedence in the parent. Next 16.2.6 reconstructs its non-isolated TypeScript
+worker options from the parent arguments followed by `NODE_OPTIONS`, so the
+mandatory generated-contract validation receives the 3 GiB limit. Next removes
+that option from its isolated static workers. The existing caller options are
+preserved. The shared script is used by the Vercel package build and the CI
+memory-observation lane. This bounds the compile parent without starving the
+later validation worker or changing the compiled application. Repeated
+forced-cold Standard previews remain the direct acceptance evidence, and a Next
+upgrade must revalidate this worker boundary.
+
+Production builds explicitly use Next's supported `--webpack` fallback with
+`experimental.webpackBuildWorker=true` and
+`experimental.webpackMemoryOptimizations=true`. The Workflow integration
+contributes custom Webpack configuration, so the worker is opted in explicitly
+instead of relying on Next's automatic selection. The worker isolates Webpack
+compilation to reduce build-memory pressure, while the memory-optimization mode
+trades some compile speed for a lower peak. Local development remains on
+Turbopack by default.
+
+Next 16.2.6 accepts `experimental.turbopackMemoryLimit` at the JavaScript/native
+boundary but discards the `_memory_limit` argument when creating its native
+backend. The option is therefore omitted rather than documented or tested as a
+4 GiB governor that does not exist. A Next upgrade must re-audit that behavior
+before reintroducing the option.
+
+A 2 GiB parent-old-space candidate passed one forced-cold Standard preview but
+the next identical build was still killed by the 8 GB container OOM boundary.
+Single global limits of 1 GiB and 1.5 GiB completed compilation but
+deterministically exhausted V8 old space in Next's generated-contract
+TypeScript validation. A split with 1 GiB for the parent and 2 GiB for that
+worker failed at the same boundary; the 1 GiB / 3 GiB split completed the full
+local build. Either a V8 heap failure or a container OOM invalidates it rather
+than justifying weaker checks.
+
+The first forced-cold Standard preview with that split still exhausted the
+container during Turbopack compilation. Compile-graph profiling found the
+underlying multiplier: the top-level `/design` catalog was a Client Component
+only to manage its `tab` query parameter, so every catalog study and its
+transitive server imports entered one browser compilation graph. The route now
+parses the query on the server and uses URL-backed tab links. Client components
+reachable from catalog studies also use narrow client-safe public imports
+instead of server-heavy barrels, while the three synthetic studies that pass
+callback props declare their own local client boundaries. With the same heap
+split, a cold local Turbopack build then compiled in 57 seconds instead of
+roughly 4.4 minutes and completed all 229 static pages. Exact-head forced-cold
+Standard previews remain the external acceptance proof. The next exact-head
+preview nevertheless OOM-killed Turbopack, so the catalog correction is kept
+for its proven boundary and graph improvement but is not claimed as sufficient
+capacity relief.
+
+The memory-optimized Webpack worker compiled the complete application within
+the local heap policy and enforced stricter route contracts. It exposed a
+browser-vault parser re-export through a server-heavy cursor, an extra helper
+export from a page module, optional page props, and one synchronous route-param
+compatibility union. Those boundaries now use their narrow owners and Next 16
+route signatures; validation remains enabled. A complete local Webpack build
+then passed TypeScript and generated all 229 pages.
+
 The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
 machine model minus a 0.8 GB reserve for OS/container overhead outside the build
 cgroup at the ceiling. The legacy-named
@@ -1417,20 +1478,25 @@ across all build workers plus page cache. A fully working Linux CI run on
 2026-07-06 proved the mismatch: a 6,000,000,000-byte cgroup cap OOM-killed a
 build that the real 8 GB Vercel Standard machine accepts.
 
-Linux CI defaults to wrapping the `apps/web verify` production `next build` step
-with `apps/web/scripts/build-memory-guard.sh`. Privileged operations are limited
+Linux CI defaults to wrapping the shared production Next-build script with
+`apps/web/scripts/build-memory-guard.sh`. Privileged operations are limited
 to creating/removing that measured cgroup and moving the build process into it;
 the build itself still runs as the invoking user with its normal environment,
 working directory, and stdio.
 
-Enforcement is deferred because live CI on 2026-07-07 showed the cold-build
-multi-process anonymous-memory ramp is not governed by the Turbopack heap limit:
+Enforcement remains deferred because live CI on 2026-07-07 showed the cold-build
+multi-process anonymous-memory ramp was unchanged by the ignored Turbopack option:
 with `turbopackMemoryLimit=3GiB`, anon climbed about 2.9 GB at 12 seconds, 5.5
 GB at 27 seconds, and 6.9 GB at 42 seconds before an OOM-group kill, matching
-the prior 4 GiB run. Any hard cgroup limit that leaves a meaningful reserve on
-the 8 GB machine would currently false-fail the cold build. Cold-build memory
-optimization is the follow-up work; production config should not carry
-unproven heap-limit churn from the 3 GiB trial.
+the prior 4 GiB-configured run. Any hard cgroup limit that leaves a meaningful reserve on
+the 8 GB machine would false-fail that historical cold build. The later
+compile-graph correction addresses the active Standard-build candidate, but
+the guard must remain observe-only until exact-head CI accounting supports a
+safe enforced budget.
+
+That failed 3 GiB trial changed only a discarded configuration input, not a
+native Turbopack target. Keep it distinct from the enforced Node old-space
+policy when profiling or changing the build.
 
 The guard samples cgroup `memory.current` and selected `memory.stat` fields
 about every 3 seconds during the build, prints trajectory lines about every 15

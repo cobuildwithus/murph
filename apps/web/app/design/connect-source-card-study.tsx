@@ -1,6 +1,10 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
+import { ConnectDisconnectDialog } from "@/app/(dashboard)/connect/connect-page-dialogs";
+import { markLocallyDisconnectedSources } from "@/app/(dashboard)/connect/connect-page-helpers";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 
 type ConnectSourceCardStudyCase = {
@@ -17,6 +21,7 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
       description: "Workouts, sleep, stress, heart rate, and body battery.",
       connected: true,
       disconnectConnectionId: "design-garmin-connection",
+      disconnectSourceProviderSlug: "garmin",
       id: "garmin",
       logo: {
         className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
@@ -113,27 +118,118 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   },
 ];
 
+const DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES: ConnectSourceCardStudyCase[] = [
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      connected: true,
+      connectTarget: "garmin",
+      description: "Workouts, sleep, stress, heart rate, and body battery.",
+      disconnectConnectionId: "design-shared-junction",
+      disconnectSourceProviderSlug: "garmin",
+      id: "garmin-disconnect-journey",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/garmin.png",
+        width: 128,
+      },
+      name: "Garmin",
+      requiresReconnect: true,
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      connected: true,
+      description: "Sleep, readiness, activity, heart rate, and temperature trends.",
+      disconnectConnectionId: "design-shared-junction",
+      disconnectSourceProviderSlug: "oura",
+      id: "oura-disconnect-journey",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/oura.png",
+        width: 128,
+      },
+      name: "Oura",
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      connected: true,
+      description: "Recovery, strain, sleep, heart rate, and daily readiness.",
+      disconnectConnectionId: "design-shared-junction",
+      disconnectSourceProviderSlug: "whoop_v2",
+      id: "whoop-disconnect-journey",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/whoop.svg",
+        width: 128,
+      },
+      name: "Whoop",
+    },
+  },
+];
+
+const DESIGN_SOURCE_DISCONNECT_SUCCESS_SOURCES = markLocallyDisconnectedSources(
+  DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.map(({ source }) => source),
+  new Set(),
+  new Set(["garmin-disconnect-journey"]),
+);
+
 export function ConnectSourceCardStudy() {
+  const searchParams = useSearchParams();
+  const studyState = searchParams?.get("connectDisconnectStudy") ?? null;
+  const disconnectDialogSource = studyState === "source"
+    ? DESIGN_CONNECT_SOURCE_CASES[0]?.source ?? null
+    : null;
+  const studyCases = studyState === "source-reconnect"
+    ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES
+    : studyState === "source-success"
+      ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.map((studyCase, index) => ({
+          ...studyCase,
+          source: DESIGN_SOURCE_DISCONNECT_SUCCESS_SOURCES[index] ?? studyCase.source,
+        }))
+      : DESIGN_CONNECT_SOURCE_CASES;
+
   return (
-    <div
-      className="rounded-3xl border border-border bg-background px-4 py-8 sm:px-8"
-      data-design-study="connect-source-card-actions"
-      id="connect-source-card-actions"
-    >
-      <div className="grid items-stretch gap-4 lg:grid-cols-3">
-        {DESIGN_CONNECT_SOURCE_CASES.map(({ authenticated, errorMessage, source }) => (
-          <SourceCard
-            key={source.id}
-            authenticated={authenticated}
-            errorMessage={errorMessage}
-            pending={false}
-            pendingDisconnect={false}
-            source={source}
-            onDisconnectTargetChange={() => {}}
-            onStartConnection={() => Promise.resolve()}
-          />
-        ))}
+    <>
+      <div
+        className="rounded-3xl border border-border bg-background px-4 py-8 sm:px-8"
+        data-design-study="connect-source-card-actions"
+        id="connect-source-card-actions"
+        inert
+      >
+        <div className="grid items-stretch gap-4 lg:grid-cols-3">
+          {studyCases.map(({ authenticated, errorMessage, source }) => (
+            <SourceCard
+              key={source.id}
+              authenticated={authenticated}
+              errorMessage={errorMessage}
+              pending={false}
+              pendingDisconnect={false}
+              source={source}
+              onDisconnectTargetChange={() => {}}
+              onStartConnection={() => Promise.resolve()}
+            />
+          ))}
+        </div>
       </div>
-    </div>
+
+      <ConnectDisconnectDialog
+        errorMessage={null}
+        inert
+        pending={false}
+        source={disconnectDialogSource}
+        onConfirm={() => Promise.resolve()}
+        onOpenChange={() => {}}
+      />
+    </>
   );
 }

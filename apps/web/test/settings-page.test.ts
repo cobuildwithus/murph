@@ -509,7 +509,7 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  await expect(SettingsPage()).rejects.toThrow("NEXT_REDIRECT:/");
+  await expect(SettingsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("NEXT_REDIRECT:/");
 
   expect(mocks.getPrisma).not.toHaveBeenCalled();
   expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
@@ -757,7 +757,7 @@ test("SettingsPage treats a surviving claim as inert without the marked return",
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  const markup = renderToStaticMarkup(await SettingsPage());
+  const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.readHostedPulseTrialContinuationCookie).not.toHaveBeenCalled();
   expect(mocks.PulseTrialBillingContinuation).not.toHaveBeenCalled();
@@ -1686,7 +1686,7 @@ test("SettingsPage keeps a frozen active purchase visible when current offers ar
   );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -1749,7 +1749,7 @@ test("SettingsPage keeps a frozen personal purchase recoverable after Family act
   const { default: SettingsPage } = await import(
     "../app/(dashboard)/settings/page"
   );
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -1821,7 +1821,7 @@ test.each([
   );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -2099,7 +2099,7 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  const markup = renderToStaticMarkup(await SettingsPage());
+  const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Hosted account settings \+15550100003/);
   expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
@@ -2155,7 +2155,7 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.CustomizeMurphSettings).toHaveBeenCalledWith(expect.objectContaining({
     voiceTestContactOption: null,
@@ -2191,7 +2191,7 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
     missions: [],
     missionsEnabled: true,
   });
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
   expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith(
     expect.objectContaining({
       activity: expect.objectContaining({
@@ -2218,7 +2218,7 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
     }],
     missionsEnabled: true,
   });
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
   expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith(
     expect.objectContaining({
       activity: expect.objectContaining({
@@ -2258,7 +2258,7 @@ test("SettingsPage exposes Start Pulse recovery for a paused Pulse Trial subscri
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
@@ -2359,7 +2359,7 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     canStartFamily: true,
@@ -2403,7 +2403,7 @@ test("SettingsPage keeps Family settings available when the top-up catalog is un
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
     expect.objectContaining({
       usageTopUpOffers: [],
@@ -2495,7 +2495,7 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
   try {
     const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-    renderToStaticMarkup(await SettingsPage());
+    renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
     expect(maxDatabaseReadsInFlight).toBe(1);
     expect(databaseReadOrder).toEqual([
@@ -2557,7 +2557,7 @@ test("SettingsPage preserves billing when optional usage and Privy reads fail", 
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -2588,7 +2588,7 @@ test("SettingsPage renders fallback values without reading settings data when th
   try {
     const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-    renderToStaticMarkup(await SettingsPage());
+    renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
     expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
     expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
@@ -2667,7 +2667,7 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
     snapshot: accountSnapshot,

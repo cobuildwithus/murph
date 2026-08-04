@@ -465,6 +465,45 @@ describe("deploy preflight helpers", () => {
     );
   });
 
+  it("requires a supported R2 write-admission state", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_WRITE_ADMISSION: "draining",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_WRITE_ADMISSION must be open or paused.",
+    );
+  });
+
+  it("restricts the temporary paused canary digest to destination-active paused deploys", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "not-a-digest",
+      HOSTED_R2_WRITE_ADMISSION: "paused",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be a lowercase SHA-256 hex digest.",
+    );
+
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
+      HOSTED_R2_WRITE_ADMISSION: "open",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
+    );
+
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
+      HOSTED_R2_WRITE_ADMISSION: "paused",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
+    );
+
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
+      HOSTED_R2_WRITE_ADMISSION: "paused",
+    }), { deployWorker: true })).not.toContain(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
+    );
+  });
+
   it("requires the direct-R2 presign account to match the Cloudflare deploy account", () => {
     expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
       HOSTED_R2_PRESIGN_ACCOUNT_ID: "other-account",
@@ -642,39 +681,6 @@ describe("deploy preflight helpers", () => {
     ).not.toContain(
       "Junction runtime env must set JUNCTION_API_KEY, JUNCTION_CLIENT_USER_ID_SECRET, JUNCTION_ENV, JUNCTION_REGION together.",
     );
-  });
-
-  it("requires Venice runtime env to be configured all-or-none", () => {
-    const error =
-      "Venice runtime env must set VENICE_API_KEY, HOSTED_VENICE_LUNA_MODEL, HOSTED_VENICE_TERRA_MODEL, HOSTED_VENICE_SOL_MODEL together.";
-
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv({
-          HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
-        }),
-        { deployWorker: true },
-      ),
-    ).toContain(error);
-
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv({
-          HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
-          HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
-          HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
-          VENICE_API_KEY: "venice-key",
-        }),
-        { deployWorker: true },
-      ),
-    ).not.toContain(error);
-
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv(),
-        { deployWorker: true },
-      ),
-    ).not.toContain(error);
   });
 
   it("requires an explicitly priced hosted assistant model for worker deploys", () => {

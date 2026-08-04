@@ -1,14 +1,7 @@
-import { BROWSER_VAULT_REPLICA_SCHEMA } from "@murphai/contracts/browser-vault";
 import {
-  parseHostedDataKeyEnvelope,
   parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef,
 } from "@murphai/runtime-state";
 
-import {
-  HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
-  type HostedBrowserVaultReplicaCursorRef,
-  type HostedBrowserVaultReplicaRef,
-} from "../contracts.ts";
 import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
@@ -24,8 +17,6 @@ import {
 } from "../workspace-snapshot-v2.ts";
 import {
   requireObject,
-  requireNumber,
-  requireString,
   readNullableStringValue,
 } from "./assertions.ts";
 import {
@@ -159,6 +150,8 @@ export function buildHostedExecutionWorkingSnapshotRef(input: {
   };
 }
 
+export { parseHostedBrowserVaultReplicaRef } from "../browser-vault.ts";
+
 function requireHostedExecutionLayeredSnapshotField(
   record: Record<string, unknown>,
   field: "base" | "hot",
@@ -188,64 +181,4 @@ function parseRequiredHostedExecutionBundleRef(
     throw new TypeError(`${label} must be a hosted execution bundle ref.`);
   }
   return parsed;
-}
-
-export function parseHostedBrowserVaultReplicaRef(
-  value: unknown,
-  label = "Hosted browser vault replica ref",
-): HostedBrowserVaultReplicaCursorRef {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  const record = requireObject(value, label);
-  const schema = requireString(record.schema, `${label}.schema`);
-  const replicaSchema = requireString(record.replicaSchema, `${label}.replicaSchema`);
-
-  if (schema !== HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA) {
-    throw new TypeError(`${label}.schema must be ${HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA}.`);
-  }
-  if (replicaSchema !== BROWSER_VAULT_REPLICA_SCHEMA) {
-    throw new TypeError(`${label}.replicaSchema must be ${BROWSER_VAULT_REPLICA_SCHEMA}.`);
-  }
-  const dataKeyEnvelope = record.dataKeyEnvelope === undefined
-    ? undefined
-    : parseHostedDataKeyEnvelope(
-        record.dataKeyEnvelope,
-        `${label}.dataKeyEnvelope`,
-      );
-
-  return {
-    byteLength: requireNumber(record.byteLength, `${label}.byteLength`),
-    ...(dataKeyEnvelope === undefined ? {} : { dataKeyEnvelope }),
-    dataVersion: requireString(record.dataVersion, `${label}.dataVersion`),
-    generatedAt: requireIsoTimestampString(record.generatedAt, `${label}.generatedAt`),
-    ...(record.generation === undefined
-      ? {}
-      : { generation: requirePositiveSafeInteger(record.generation, `${label}.generation`) }),
-    keyId: requireString(record.keyId, `${label}.keyId`),
-    objectKey: requireString(record.objectKey, `${label}.objectKey`),
-    replicaSchema,
-    schema,
-    runtimeRootKeyId: requireString(record.runtimeRootKeyId, `${label}.runtimeRootKeyId`),
-    sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
-  } satisfies HostedBrowserVaultReplicaRef;
-}
-
-function requirePositiveSafeInteger(value: unknown, label: string): number {
-  const parsed = requireNumber(value, label);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new TypeError(`${label} must be a positive safe integer.`);
-  }
-  return parsed;
-}
-
-function requireIsoTimestampString(value: unknown, label: string): string {
-  const text = requireString(value, label);
-  const timestamp = Date.parse(text);
-  if (Number.isNaN(timestamp) || new Date(timestamp).toISOString() !== text) {
-    throw new TypeError(`${label} must be a valid ISO-8601 timestamp in canonical UTC form.`);
-  }
-
-  return text;
 }

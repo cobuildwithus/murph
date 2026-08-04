@@ -15,9 +15,7 @@ import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser
 import { TogetherSection } from "@/src/components/homepage/together-section";
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
-import { HostedInferenceConnectionPane } from "@/src/components/settings/hosted-inference-connection-settings";
 import { Separator } from "@/src/components/ui/separator";
-import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
@@ -37,6 +35,7 @@ import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-s
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
+import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
 import {
   GroupUsageFundingStudy,
@@ -65,7 +64,10 @@ function StudySection({
 
 export function SectionsContent() {
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-16 px-5 py-12 sm:px-8 lg:px-12">
+    <div
+      className="mx-auto flex max-w-7xl flex-col gap-16 px-5 py-12 sm:px-8 lg:px-12"
+      data-design-section="catalog-navigation"
+    >
       <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">
         Sections
       </h1>
@@ -129,10 +131,11 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings model choice with compact provider and save controls">
+      <StudySection title="Settings model choice with provider usage disclosure">
         <div
           id="settings-model-provider-save-controls"
           data-design-section="settings-compact-provider-control"
+          className="max-w-5xl"
           inert
         >
           <HostedAssistantModelSettings
@@ -151,102 +154,7 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Settings custom inference connection">
-        <div
-          id="settings-custom-inference"
-          className="flex flex-col gap-8"
-          data-design-section="settings-custom-inference"
-          inert
-        >
-          <div
-            className="flex flex-col gap-8"
-            data-design-variant="managed-venice-disabled"
-          >
-            <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
-              Managed route · verified endpoint inactive
-            </p>
-            <section className="flex flex-col gap-4">
-              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                AI model
-              </div>
-              <HostedAssistantModelSettings
-                canUpgradeToEdge={false}
-                chatCompletionsAvailable
-                configurationAvailable
-                customInferenceAvailable
-                initialConnection={{
-                  ...DESIGN_INFERENCE_CONNECTION,
-                  selected: false,
-                }}
-                initialDormantSolPreference={false}
-                initialModel="gpt-5.6-terra"
-                initialProvider="openai"
-                solAvailable
-                veniceAvailable={false}
-              />
-            </section>
-          </div>
-          <Separator />
-          <div
-            className="flex flex-col gap-8"
-            data-design-variant="custom-venice-enabled"
-          >
-            <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
-              Endpoint route · Venice available
-            </p>
-            <section className="flex flex-col gap-4">
-              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                AI model
-              </div>
-              <HostedAssistantModelSettings
-                canUpgradeToEdge={false}
-                chatCompletionsAvailable
-                configurationAvailable
-                customInferenceAvailable
-                initialConnection={{
-                  ...DESIGN_INFERENCE_CONNECTION,
-                  selected: true,
-                }}
-                initialDormantSolPreference={false}
-                initialModel="gpt-5.6-terra"
-                initialProvider="venice"
-                solAvailable
-                veniceAvailable
-              />
-            </section>
-          </div>
-          <Separator />
-          <div
-            className="flex flex-col gap-8"
-            data-design-variant="endpoint-pane"
-          >
-            <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
-              Endpoint pane · setup form
-            </p>
-            <HostedInferenceConnectionPane
-              chatCompletionsAvailable
-              configurationAvailable
-              connection={null}
-              onConnectionChange={() => {}}
-              selected={false}
-            />
-          </div>
-          <Separator />
-          <div
-            className="flex flex-col gap-8"
-            data-design-variant="endpoint-pane-verified"
-          >
-            <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
-              Endpoint pane · verified connection
-            </p>
-            <HostedInferenceConnectionPane
-              chatCompletionsAvailable
-              configurationAvailable
-              connection={DESIGN_INFERENCE_CONNECTION}
-              onConnectionChange={() => {}}
-              selected
-            />
-          </div>
-        </div>
+        <SettingsCustomInferenceStudy />
       </StudySection>
 
       <Separator />
@@ -333,7 +241,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Connect source card actions">
+      <StudySection title="Connect source actions and disconnect lifecycle">
         <ConnectSourceCardStudy />
       </StudySection>
 

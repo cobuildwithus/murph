@@ -52,8 +52,8 @@ import BiomarkersPage, {
 import { BiomarkerLayoutClient } from "../app/(dashboard)/biomarkers/[biomarkerId]/biomarker-layout-client";
 import LabBiomarkerResultPage, {
   metadata as biomarkerResultMetadata,
-  resolveLabBiomarkerContext,
 } from "../app/(dashboard)/biomarkers/results/[metricKey]/page";
+import { resolveLabBiomarkerContext } from "../app/(dashboard)/biomarkers/results/[metricKey]/lab-biomarker-context";
 import PitchPage, { metadata as pitchMetadata } from "../app/pitch/page";
 import { resolveHealthCommonsBiomarkerShell } from "../src/lib/health-commons/biomarker-projections";
 

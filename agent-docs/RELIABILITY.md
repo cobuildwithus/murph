@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-31
+Last verified: 2026-08-04
 
 ## Current Guardrails
 
@@ -32,14 +32,20 @@ Last verified: 2026-07-31
   scheduled selection and wake admission both exclude explicit revocation; and
   queued model work rechecks authority before usage is consumed. Renewal is a
   new durable grant, not an implicit cleanup rollback.
-- Venice core inference is an all-or-none operator configuration: one Worker
-  secret plus fixed Luna/Terra/Sol mappings. Deploy preflight rejects partial
-  configuration, and Web keeps Venice hidden and projects OpenAI until the
-  Worker/runner deployment has been verified. Missing or invalid mappings,
-  unsupported paths/models, malformed JSON, and request bodies above 20 MiB
+- Venice core inference requires one optional Worker secret. The regular
+  Venice GPT-5.6 Luna/Terra/Sol mapping is code-owned and derived at egress;
+  there are no duplicate model vars that can become partial or mismatched.
+  Web keeps Venice hidden and projects OpenAI until the Worker/runner
+  deployment has been verified. Unsupported paths/models, malformed JSON, and
+  request bodies above 20 MiB
   fail closed before provider egress. Rollback removes Web exposure first; it
   does not add a queue, repair pass, provider fallback, or second preference
   owner.
+- Web selects immutable allowance rates from both the canonical product model
+  and recorded provider. Venice standard usage uses Venice's documented
+  input, cache-read, cache-write, and output rates and records the provider
+  model and pricing source in the snapshot; unknown non-Venice standard
+  provider evidence retains the existing OpenAI-compatible behavior.
 - An authenticated Settings provider change commits Postgres first and then
   sends the payload-free `runtime_wake_requested` Temporal signal. The per-user
   workflow coalesces duplicate wakes as one boolean and calls the existing
@@ -355,6 +361,42 @@ Last verified: 2026-07-31
   Starting or retrying the source first attempts target-only provider cleanup;
   a cleanup warning blocks the new link instead of adopting an ambiguous
   linkage or revoking sibling sources.
+  Ordinary hosted removal follows the same target-only provider boundary. Web
+  marks the selected connection-source row with a disconnect fence under the
+  existing connection mutation lock, performs provider revoke outside the
+  transaction, then rechecks the parent, credential, and source epochs before
+  committing only that source as disconnected. The fence rejects late callback
+  admission and hosted-runtime source projection until a fresh explicit connect
+  clears it. Provider failure restores the captured source lifecycle and returns
+  a retryable error; it does not disconnect siblings or the parent account.
+  Connection-wide historical reset remains the explicit broader operation.
+  Repeated removal performs target-only provider cleanup again, and a Link
+  callback rejected after provider completion uses the same two-phase source
+  claim to remove authorization recreated by an obsolete Link. A newer Link is
+  not issued while exact-source cleanup is in progress. A start carries its
+  exact pending source epoch through provider Link creation and rechecks it
+  before OAuth-state persistence and response; a concurrent newer disconnect
+  makes the Link unreachable instead of returning stale authorization.
+  If obsolete provider completion races an in-flight Disconnect or source-start
+  cleanup, it advances that exact operation's source epoch and performs another
+  idempotent target-only revoke. The initiating operation follows the newest
+  same-purpose claim before returning, while separate start-cleanup and user-
+  disconnect phase codes preserve the intended terminal state.
+- Companion Apple Health metadata and WHOOP overnight summaries recheck their
+  exact source inside the health-data admission lock and again before runtime
+  import by rereading the durable source row rather than trusting the queued
+  account snapshot. Explicit Apple Health SDK connect captures the exact source
+  epoch before token mint and creates a pending epoch afterward only when that
+  proof remains current. A signed source-registration lifecycle event with no
+  timestamp instead rereads Junction's live provider list after trace claim: an
+  unchanged pending epoch plus a live target commits connected, while a fenced
+  source or disconnected parent triggers target-only cleanup. Receipt or
+  record-occurrence time is not substituted for registration proof. Source
+  observation runs after the webhook attempt owns its trace so duplicate or
+  losing attempts cannot change authorization. WHOOP summary provenance remains
+  `whoop`, but admission uses the Junction `whoop_v2` lifecycle source. Resume,
+  omitted intent, stale
+  events, and background work never clear the source fence.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate
   intentionally denies receive one assign-once timestamp at the mutating
@@ -652,6 +694,12 @@ Last verified: 2026-07-31
   consented-member requests remain checkpoint-gated. Completion ordering uses
   the existing pending-input occurrence proof, and incomplete or invalid index
   evidence rejects the shortcut without repairing state.
+- The temporary R2 cutover write-admission pause is a Worker-route gate before
+  UserRunner dispatch, not a second queue or persisted state owner. A paused
+  signed Temporal ensure returns a one-minute `retry_later`; a paused direct
+  web hint schedules no Durable Object work. Already-accepted inbound remains
+  in the encrypted mailbox, existing invocations drain normally, and service
+  resumes by deploying admission `open` after destination canaries pass.
 - One-time current-sender Assistant Ask reuses the same mailbox lifecycle,
   deterministic request identity, ten-minute expiry, isolated reviewed
   personal read, completion append, and exact-origin group delivery. Exact
@@ -696,7 +744,7 @@ Last verified: 2026-07-31
 - Automatic meal-photo uploads are replay-safe only through the capture id derived by the enrolled installation. Each staging attempt must own a distinct object. Under the per-capture mailbox lock, the first accepted item chooses the canonical object for exact duplicates; later attempts delete only their own losing object. Failed or ambiguous appends must reconcile the mailbox claim before cleanup so they never delete an accepted object's bytes. Web must reject conflicting reuse, re-signal exact mailbox duplicates, lock the hosted member and active sponsorship source rows before rechecking final upload authority, and acknowledge an upload only after private object staging and canonical mailbox append both succeed. Runtime import must check the canonical external reference before writing, verify staged length and SHA-256 before import, and delete staging only through a post-checkpoint effect; cleanup derives the user-namespaced object path without requiring encryption-context rediscovery. After failed cleanup, the R2 lifecycle rule makes staging eligible for asynchronous deletion at 31 days, one day beyond mailbox recovery retention, rather than guaranteeing deletion at that exact age. A missing control client, staged object, write fence, mailbox append, or runtime read is a visible retryable failure rather than a successful setup/upload.
 - Environment voice upload uses the same single-owner staging pattern without becoming a messaging flow. The authenticated Web route validates origin, active membership, allowlisted audio container signature, byte cap, capture hash, and rejects only invalid or materially future capture times before staging; an old capture time is metadata and must not prevent a first-seen retry after an interrupted upload. A first-seen capture must pass the existing read-first AI-usage gate. Under the member lock, Web admits at most one unconsumed Environment recording per member, while an exact capture retry bypasses those new-work gates and resolves to the existing canonical claim. Each attempt owns a distinct application-encrypted R2 object; the per-capture mailbox claim selects one canonical object and cleanup deletes only a losing attempt. Runtime verifies the canonical byte count and SHA-256, then forces audio through ffmpeg with a three-minute output cap before transcription instead of trusting caller duration metadata. It then runs one Habitat-only silent maintenance turn. Processing failure leaves the mailbox item and staged bytes retryable. Successful fact extraction records audio deletion as a post-checkpoint effect, so audio is never deleted before the mutated vault is durable; deletion failure retains that effect for retry. The 24-hour lifecycle rule is an asynchronous recovery backstop, not proof that deletion happened at the exact deadline.
 - Automatic meal import is complete only after the stable 9pm managed automation exists. Capture enrollment and upload require a current active private route, including a verified email fallback, which Web includes in the private mailbox envelope. The import writes the canonical meal first, then idempotently ensures that automation from the envelope route; if the upsert fails, the mailbox item stays retryable. Direct email delivery replaces the saved address with the current verified address through the existing signed Web-control boundary before every provider call, and fails closed when Web no longer returns one. Reconciliation evaluates engagement and AI usage for runnable model work even when system lag is present, while blocked model work can still admit deterministic import-only processing. System-only import must checkpoint the generic cron projection from the mutated vault before running post-checkpoint staging cleanup; a projection read failure leaves the import uncheckpointed for retry. An accepted meal capture is member-wide engagement under the existing 28-day automation policy, so ordinary due automations may resume; it does not bypass AI-usage authorization. Authorized fresh conversation owns the ordinary foreground pass so a retryable system item cannot starve it. A same-workspace retry finds the existing meal, while a retry from the last checkpoint safely repeats the deterministic canonical write before ensuring the missing postcondition. The automation uses the ordinary cron planner and delivery path. `meal closeout-work` derives one bounded batch directly from canonical meals: same-occurrence removal revisions first, then the oldest retained automatic-capture photos. The photos remain the only pending-work queue, so old captures eventually drain without a cursor or another state store. If the provider fails after cleanup begins, a photo-removal revision recorded at or after the scheduled occurrence instant remains evidence only for that occurrence's retry; remaining photos and those revisions reconstruct partial work, while a later occurrence cannot resend the completed one. Photo cleanup is a canonical, idempotent meal mutation that fails closed on changed bytes, mismatched manifest ownership, ordinary meal photos, or partial writes.
-- Daily nutrition response cards remain one outbox-owned immutable effect. The runtime retains the V1 parser for existing outbox and checkpoint state, while V2 adds canonical fiber plus nullable goal snapshots. The closeout copies every total from the immediately preceding canonical meal-totals read. It may copy a target only after a bounded active-goal read proves a complete result with exactly one qualifying record for that daily metric and unit; a saturated result, zero matches, or multiple matches leaves the target null. Missing or partial totals can carry only an `unavailable` status, and an assessed status must not point opposite the frozen total and target. The semantic target status is frozen presentation context for the one message, not durable goal progress and not a threshold recomputed by iOS. Deploy and physically verify the backward-compatible iOS reader before the backend emits V2. After the first V2 card-bearing state or effect, the V2-capable Worker and runner are the rollback floor.
+- Daily nutrition response cards remain one outbox-owned immutable effect. The runtime retains the V1 parser for existing outbox and checkpoint state, while V2 adds canonical fiber plus nullable goal snapshots. Ordinary private-direct interactive turns and the managed meal closeout use the same attachment tool; other scheduled turns do not receive it. Because a card replaces the whole final response, it is eligible only when the card alone completely satisfies the current request. New accepted input in the same live turn invalidates an earlier card-only decision, and attachment is rejected after the delivery context advances. Every card copies each total from the immediately preceding single-date canonical meal-totals read. It may copy a target only after a bounded active-goal read proves a complete result with exactly one qualifying record for that daily metric and unit; a saturated result, zero matches, or multiple matches leaves the target null. Missing or partial totals can carry only an `unavailable` status, and an assessed status must not point opposite the frozen total and target. The semantic target status is frozen presentation context for the one message, not durable goal progress and not a threshold recomputed by iOS. Deploy and physically verify the backward-compatible iOS reader before the backend emits V2. After the first V2 card-bearing state or effect, the V2-capable Worker and runner are the rollback floor.
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
 - Assistant product-feedback capture accepts at most one in-memory candidate during a successful provider turn. The assistant execution context can only hand that candidate to its hosted invocation synchronously; the existing web-control write remains at the foreground delivery owner and starts only after a current-turn member-channel send succeeds. Failed provider attempts discard their candidate, invocations without a successful foreground send may abandon it, feedback never counts as a provider side effect for transport retry safety, and persistence remains best-effort with a two-second maximum deadline, no retry queue, and no user-visible delivery state. The accepted-input-derived idempotency key remains the ambiguity fence when a timed-out post-reply write may already have reached Web.
 - The daily product-feedback digest is an internal read-and-email projection,
