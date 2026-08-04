@@ -284,9 +284,7 @@ describe("hosted Linq observability stores", () => {
           eventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
           eventType: "message.failed",
           failureCode: "30007",
-          // The provider's wording is the operator's evidence for why the send
-          // failed, so it survives; the phone number inside it does not.
-          failureReason: "carrier filtered <redacted-phone> provider_msg_123 private text",
+          failureReason: "[redacted]",
         }),
         skipDuplicates: true,
       }),
@@ -299,7 +297,7 @@ describe("hosted Linq observability stores", () => {
         data: expect.objectContaining({
           healthStatus: "warning",
           lastFailureCode: "30007",
-          lastFailureReason: "carrier filtered <redacted-phone> provider_msg_123 private text",
+          lastFailureReason: "[redacted]",
           lastReceiptEventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
           totalFailedCount: { increment: 1 },
         }),
@@ -309,7 +307,7 @@ describe("hosted Linq observability stores", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           failureCode: "30007",
-          failureReason: "carrier filtered <redacted-phone> provider_msg_123 private text",
+          failureReason: "[redacted]",
           status: "failed",
         }),
         where: expect.objectContaining({

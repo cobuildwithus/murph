@@ -64,12 +64,13 @@ describe("sendPendingHostedLinqAlertsBestEffort", () => {
     });
 
     const text = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)).text as string;
-    // Without these the alert says only that a send failed, which is what made
-    // the original message_failed alerts impossible to act on.
-    expect(text).toContain("Failure code: 30007");
-    expect(text).toContain("Failure reason: carrier filtered the message");
-    expect(text).toContain("Provider reason: recipient carrier rejected the send");
+    // What makes the alert actionable is the masked line plus the bounded
+    // provider code. The reason fields stay presence-only, so the email must
+    // never carry provider prose.
     expect(text).toContain("Line: ***0000");
+    expect(text).toContain("Failure code: 30007");
+    expect(text).toContain("Failure reason: [redacted]");
+    expect(text).not.toContain("carrier filtered the message");
   });
 
   it("marks alerts failed without throwing when Resend rejects the send", async () => {
@@ -186,10 +187,9 @@ function createAlertEmailPrismaFixture(input?: {
         eventIdSuffix: "led_123",
         eventType: "message.failed",
         failureCode: "30007",
-        failureReason: "carrier filtered the message",
+        failureReason: "[redacted]",
         line: "***0000",
         providerCreatedAt: "2026-03-26T12:00:00.000Z",
-        providerReason: "recipient carrier rejected the send",
       },
       eventId: "evt_failed_123",
       id: "hla_message_failed_123",

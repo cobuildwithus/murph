@@ -230,15 +230,60 @@ describe("parseHostedLinqProviderEvent", () => {
       deliveryStatus: "failed",
       eventType: "message.failed",
       failureCode: "30007",
-      failureReason: "carrier filtered <redacted-phone> provider_msg_123 private text",
+      failureReason: "[redacted]",
       phoneNumberRole: "line",
     });
+    expect(JSON.stringify(failed)).not.toContain("provider_msg_123");
     expect(JSON.stringify(failed)).not.toContain("+15551234567");
-    // `data.message` is chat text, not a failure reason: it must never be
-    // promoted into the reason, and the payload copies stay shape-only.
-    expect(JSON.stringify(failed)).not.toContain("raw chat text");
-    expect(JSON.stringify(failed?.payloadSanitizedJson)).not.toContain("provider_msg_123");
-    expect(JSON.stringify(failed?.payloadShapeJson)).not.toContain("provider_msg_123");
+    expect(JSON.stringify(failed)).not.toContain("private text");
+    expect(JSON.stringify(failed?.payloadSanitizedJson)).not.toContain("raw chat text");
+    expect(JSON.stringify(failed?.payloadShapeJson)).not.toContain("raw chat text");
+  });
+
+  it("keeps provider reason text out of the parsed event whatever the provider embeds", () => {
+    // Pattern-based scrubbing cannot recognize these: a national-format phone
+    // number, a schemeless URL, a person's name, and a health statement all
+    // survive `sanitizeJsonLogString`. Presence-only redaction is what actually
+    // holds the boundary, so assert against the leak vectors directly.
+    const leaky = [
+      "undeliverable to 415-555-2671",
+      "see www.example.test/help",
+      "blocked after member reported chest pain",
+      "recipient handle rejected the send",
+    ];
+
+    for (const reason of leaky) {
+      const failed = parseHostedLinqProviderEvent({
+        event: buildGenericEvent({
+          data: {
+            error: { code: "30007", message: reason },
+            message_id: "msg_failed_leak",
+            phone_number: "+15550000000",
+          },
+          eventType: "message.failed",
+        }),
+      });
+      const status = parseHostedLinqProviderEvent({
+        event: buildGenericEvent({
+          data: {
+            phone_number: "+15550000000",
+            reason,
+            status: "flagged",
+          },
+          eventType: "phone_number.status_updated",
+        }),
+      });
+
+      expect(failed?.failureReason).toBe("[redacted]");
+      expect(status?.providerReason).toBe("[redacted]");
+      for (const parsed of [failed, status]) {
+        const serialized = JSON.stringify(parsed);
+        expect(serialized).not.toContain("415-555-2671");
+        expect(serialized).not.toContain("www.example.test");
+        expect(serialized).not.toContain("chest pain");
+        expect(serialized).not.toContain("recipient handle");
+      }
+    }
   });
 
   it("parses reaction events for join-offer dispatch without persisting raw handles", () => {
@@ -430,7 +475,7 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(persistedSanitizedPayload).not.toContain("private nested provider text");
   });
 
-  it("keeps free-form provider status reasons but scrubs contact details", () => {
+  it("redacts free-form provider status reasons before persistence", () => {
     const parsed = parseHostedLinqProviderEvent({
       event: buildGenericEvent({
         data: {
@@ -444,15 +489,11 @@ describe("parseHostedLinqProviderEvent", () => {
 
     expect(parsed).toMatchObject({
       eventType: "phone_number.status_updated",
-      providerReason: "carrier review for <redacted-phone> provider_msg_123",
+      providerReason: "[redacted]",
       providerStatus: "flagged",
     });
-    // The reason keeps its wording so an operator can act on it; the phone
-    // number inside it is still scrubbed, and the raw payload copies below
-    // remain shape-only.
     expect(JSON.stringify(parsed)).not.toContain("+15551234567");
-    expect(JSON.stringify(parsed?.payloadShapeJson)).not.toContain("provider_msg_123");
-    expect(JSON.stringify(parsed?.payloadSanitizedJson)).not.toContain("provider_msg_123");
+    expect(JSON.stringify(parsed)).not.toContain("provider_msg_123");
   });
 
   it("keeps phone-number service and reputation status independent", () => {
