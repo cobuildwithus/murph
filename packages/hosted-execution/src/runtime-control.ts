@@ -2748,6 +2748,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.wake_projection_failed",
   "mailbox.appended",
   "mailbox.dedupe_conflict",
+  "mailbox.foreground_probe",
   "mailbox.imported",
   "mailbox.linq_attachment_download_finished",
   "mailbox.parser_drain_failed",

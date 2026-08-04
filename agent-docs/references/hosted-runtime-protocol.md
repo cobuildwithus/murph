@@ -2155,6 +2155,14 @@ aborts that pre-publication work, unwinds the snapshot session and temporary
 archive, and returns to foreground import. Once canonical publication begins,
 the checkpoint completes and the consumed wake is retained for immediate
 post-commit foreground handling.
+If an interrupting runtime notification's immediate mailbox probe finds neither
+runnable conversation work nor system mailbox work that explains the
+notification, that single empty probe is not checkpoint authority. The runtime
+retains the notification and restarts the existing idle checkpoint quiet window
+so a later causal mailbox wake can enter foreground admission first. It records
+only the probe outcome, counts, lane watermarks, and checkpoint-deferral
+decision; message contents and item identifiers remain out of runtime
+diagnostics.
 Retryable mailbox import blocks are mailbox-continuation checkpoints even when
 an earlier assistant or device wake wins the projected `nextWakeReason`; web
 uses the redacted `hostedMailboxRetryableBlockedCount` as the explicit signal.

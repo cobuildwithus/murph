@@ -117,6 +117,10 @@ import {
   readHostedMailboxImportState,
 } from "./hosted-runtime/mailbox-state.ts";
 import {
+  buildHostedRuntimeLogContextFields,
+  writeHostedRuntimeLogBestEffort,
+} from "./hosted-runtime/runtime-logs.ts";
+import {
   offerHostedVaultShareProjectionBestEffort,
 } from "./hosted-runtime/vault-share-projection.ts";
 import { createHostedGroupSharedReader } from "./hosted-runtime/group-shared-reader.ts";
@@ -537,30 +541,36 @@ async function createHostedForegroundMailboxPrefetch(input: {
   });
 }
 
-async function hostedMailboxPrefetchContainsOnlyPreCheckpointSafeSystemWakes(
+async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   prefetch: HostedMailboxPrefixPrefetch,
-): Promise<boolean> {
+): Promise<{
+  containsOnlySafeSystemWakes: boolean;
+  hasSystemWork: boolean;
+}> {
   const response = await prefetch.response;
-  return response.items.length > 0
-    && response.items.every((item) =>
-      item.lane === "system"
-      && (
-        item.kind === "runtime.pending-effects-reconcile-requested"
-        || item.kind === "assistant.ask.requested"
-        || item.kind === "assistant.ask.completed"
-        || (
-          item.kind === "assistant.notification.requested"
-          && (
-            item.dedupeKey.startsWith(
-              "assistant.notification.requested:phone-call-result:",
-            )
-            || item.dedupeKey.startsWith(
-              "assistant.notification.requested:usage-referral-reward:",
+  return {
+    containsOnlySafeSystemWakes: response.items.length > 0
+      && response.items.every((item) =>
+        item.lane === "system"
+        && (
+          item.kind === "runtime.pending-effects-reconcile-requested"
+          || item.kind === "assistant.ask.requested"
+          || item.kind === "assistant.ask.completed"
+          || (
+            item.kind === "assistant.notification.requested"
+            && (
+              item.dedupeKey.startsWith(
+                "assistant.notification.requested:phone-call-result:",
+              )
+              || item.dedupeKey.startsWith(
+                "assistant.notification.requested:usage-referral-reward:",
+              )
             )
           )
         )
-      )
-    );
+      ),
+    hasSystemWork: response.items.some((item) => item.lane === "system"),
+  };
 }
 
 function isHostedInitialBootstrapPending(input: {
@@ -3031,6 +3041,48 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
           await stageMailboxImportWake(mailboxImport);
         };
+        const deferCheckpointAfterEmptyForegroundProbe = (
+          mailboxImport: HostedMailboxImportCheckpointResult,
+        ): void => {
+          if (
+            input.requestIdKind !== "checkpoint-interrupt"
+            || input.latencySeed === null
+            || !shouldContinue()
+          ) {
+            return;
+          }
+
+          markIdleCheckpointTimerAfterDirtyWork();
+          const importResult = mailboxImport.importResult;
+          void writeHostedRuntimeLogBestEffort({
+            entry: {
+              ...buildHostedRuntimeLogContextFields(runtimeLogContext),
+              component: "mailbox",
+              eventCode: "mailbox.foreground_probe",
+              level: "info",
+              phase: "checkpoint",
+              redactedJson: {
+                assistantInputPresent:
+                  (importResult.assistantInputIds?.length ?? 0) > 0,
+                blockedCount: importResult.blocked.length,
+                checkpointDeferred: true,
+                conversationImportedCount:
+                  importResult.conversationImportedCount ?? 0,
+                conversationSeqEnd: mailboxImport.state.watermarks.conversation,
+                conversationSeqStart:
+                  mailboxImport.previousState.watermarks.conversation,
+                fetchedCount: importResult.fetchedCount,
+                foregroundProbeOutcome: "no_runnable_work",
+                idleCheckpointTimerRearmed: true,
+                importedCount: importResult.importedCount,
+                runtimeWakePresent: true,
+                stateChanged: mailboxImport.stateChanged,
+              },
+            },
+            now: baseRunnerInput.now,
+            platform: baseRunnerInput.platform,
+          });
+        };
         const runForegroundPassAfterMailboxImport = async (
           wakeInput: Parameters<typeof runForegroundPass>[0],
         ): Promise<HostedWorkspaceRunnerResult> => {
@@ -3150,15 +3202,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           return true;
         }
-        const shouldImportSystemMailbox =
-          input.systemMailboxAdmission === "all"
-          || (
-            runtimeStateDirtyBeforeMailboxImport
-            && await hostedMailboxPrefetchContainsOnlyPreCheckpointSafeSystemWakes(
-              initialMailboxPrefetch,
-            )
-          );
+        const preCheckpointSystemPrefetch =
+          input.systemMailboxAdmission === "pre_checkpoint_safe"
+          && runtimeStateDirtyBeforeMailboxImport
+            ? await inspectHostedPreCheckpointSystemMailboxPrefetch(
+                initialMailboxPrefetch,
+              )
+            : null;
+        const shouldImportSystemMailbox = input.systemMailboxAdmission === "all"
+          || preCheckpointSystemPrefetch?.containsOnlySafeSystemWakes === true;
         if (!shouldImportSystemMailbox) {
+          if (preCheckpointSystemPrefetch?.hasSystemWork !== true) {
+            deferCheckpointAfterEmptyForegroundProbe(conversationImport);
+          }
           await finishMailboxImportWithoutAssistant(conversationImport);
           return false;
         }

@@ -15598,6 +15598,142 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("unresolved checkpoint wakes keep the foreground window open for a later mailbox wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_snapshot_wake_window_001",
+        laneSeq: "1",
+      }),
+    ];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxPort = createMailboxPort({
+      events,
+      fetchRequests,
+      items: mailboxItems,
+    });
+    const fetchMailbox = mailboxPort.fetch.bind(mailboxPort);
+    let conversationFetchCount = 0;
+    let lateWakeTimer: ReturnType<typeof setTimeout> | null = null;
+    mailboxPort.fetch = async (request) => {
+      const response = await fetchMailbox(request);
+      if (request.lanes.some((lane) => lane.lane === "conversation")) {
+        conversationFetchCount += 1;
+        if (conversationFetchCount === 2) {
+          lateWakeTimer = setTimeout(() => {
+            mailboxItems.push(createMailboxItem({
+              id: "mailbox_item_entrypoint_snapshot_wake_window_002",
+              laneSeq: "2",
+            }));
+            runtimeWakeSignal.notify({ notifiedAtEpochMs: Date.now() });
+          }, 100);
+        }
+      }
+      return response;
+    };
+    let snapshotAttempt = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_idle_checkpoint_wake_window",
+            idleCheckpointDelayMs: 250,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            snapshotAttempt += 1;
+            events.push(`snapshot:${snapshotAttempt}:${snapshotInput.reason}`);
+            if (snapshotAttempt === 1) {
+              throw new HostedRuntimeCheckpointInterruptedByWakeError({
+                notification: { notifiedAtEpochMs: Date.now() },
+              });
+            }
+            return {
+              snapshotRef: createBundleRef({
+                hash: `${snapshotAttempt}`.repeat(64).slice(0, 64),
+                key:
+                  "users/bundles/member-synthetic/"
+                  + `runtime-idle-checkpoint-wake-window-${snapshotAttempt}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            events,
+            logRequests,
+            mailboxPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
+        "snapshot:1:idle_shutdown",
+        "snapshot:2:idle_shutdown",
+      ]);
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_snapshot_wake_window_002",
+        ) < requireEventIndex(events, "snapshot:2:idle_shutdown"),
+        events.join(","),
+      );
+      assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), [
+        "4",
+      ]);
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "2",
+      );
+      const foregroundProbeLogs = logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) => entry.eventCode === "mailbox.foreground_probe");
+      assert.deepEqual(foregroundProbeLogs.map((entry) => entry.redactedJson), [
+        {
+          assistantInputPresent: false,
+          blockedCount: 0,
+          checkpointDeferred: true,
+          conversationImportedCount: 0,
+          conversationSeqEnd: "1",
+          conversationSeqStart: "1",
+          fetchedCount: 0,
+          foregroundProbeOutcome: "no_runnable_work",
+          idleCheckpointTimerRearmed: true,
+          importedCount: 0,
+          runtimeWakePresent: true,
+          stateChanged: false,
+        },
+      ]);
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
+      assert.equal(result.status, "idle");
+    } finally {
+      if (lateWakeTimer) {
+        clearTimeout(lateWakeTimer);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("successful checkpoint conversation input hints immediately run the foreground path", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
