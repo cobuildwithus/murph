@@ -1,0 +1,33 @@
+name: Apply explicit signup referral links
+
+on:
+  push:
+    branches:
+      - feat/explicit-signup-referral-links
+    paths:
+      - .github/scripts/apply-explicit-signup-referral-links.py
+      - .github/workflows/apply-explicit-signup-referral-links.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: startsWith(github.event.head_commit.message, 'chore: apply signup referral patch')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Apply patch
+        run: python3 .github/scripts/apply-explicit-signup-referral-links.py
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps packages
+          git commit -m "feat: add explicit signup referral links"
+          git push
