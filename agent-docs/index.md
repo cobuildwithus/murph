@@ -26,6 +26,12 @@ and its provider-aware immutable allowance pricing are jointly specified by
 `agent-docs/product-specs/hosted-plan-usage.md`, and the Web and Cloudflare app
 docs.
 
+Daily nutrition response-card request eligibility, multi-input live-turn
+invalidation, whole-response semantics, and delivery ownership are specified by
+`ARCHITECTURE.md`,
+`agent-docs/RELIABILITY.md`, and
+`agent-docs/operations/imessage-deliverability.md`.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
