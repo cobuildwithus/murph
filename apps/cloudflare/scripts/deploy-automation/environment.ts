@@ -208,6 +208,27 @@ function assertHostedR2FixedRoleConfiguration(input: {
   if (phase !== "source_active" && phase !== "destination_active") {
     throw new TypeError("HOSTED_R2_CUTOVER_PHASE must be source_active or destination_active.");
   }
+  const writeAdmission = input.workerVars.HOSTED_R2_WRITE_ADMISSION;
+  if (writeAdmission !== "open" && writeAdmission !== "paused") {
+    throw new TypeError("HOSTED_R2_WRITE_ADMISSION must be open or paused.");
+  }
+  const pausedCanaryUserIdSha256 = input.workerVars.HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256;
+  if (
+    pausedCanaryUserIdSha256 !== undefined
+    && !/^[a-f0-9]{64}$/u.test(pausedCanaryUserIdSha256)
+  ) {
+    throw new TypeError(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be a lowercase SHA-256 hex digest.",
+    );
+  }
+  if (
+    pausedCanaryUserIdSha256 !== undefined
+    && (phase !== "destination_active" || writeAdmission !== "paused")
+  ) {
+    throw new TypeError(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
+    );
+  }
   if (input.workerVars.HOSTED_R2_PRESIGN_BUCKET_NAME !== input.bundlesBucketName) {
     throw new TypeError(
       "HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET while roles are fixed.",

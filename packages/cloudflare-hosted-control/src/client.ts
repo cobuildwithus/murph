@@ -26,10 +26,17 @@ import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import type {
+  HostedHealthDataConsentState,
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 
+import {
+  parseCloudflareHostedInferenceVerificationRequest,
+  parseCloudflareHostedInferenceVerificationResult,
+  type CloudflareHostedInferenceVerificationRequest,
+  type CloudflareHostedInferenceVerificationResult,
+} from "./inference-verification.ts";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER,
@@ -41,9 +48,11 @@ import {
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlEnvironmentVoiceDeletePath,
   buildCloudflareHostedControlEnvironmentVoiceStagePath,
+  buildCloudflareHostedControlInferenceVerificationPath,
   buildCloudflareHostedControlMealPhotoDeletePath,
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
+  buildCloudflareHostedControlRuntimeHealthDataConsentPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -84,6 +93,15 @@ export interface CloudflareHostedControlUserDataDeletionResult {
     supported: boolean;
     userScopedSkipReason: string | null;
   };
+  userId: string;
+}
+
+export interface CloudflareHostedControlRuntimeHealthDataConsentResult {
+  activeInvocationPreempted: boolean;
+  consentState: HostedHealthDataConsentState;
+  processingAllowed: boolean;
+  runnerContainerDestroyAttempted: boolean;
+  runnerContainerDestroyOk: boolean;
   userId: string;
 }
 
@@ -139,7 +157,14 @@ export interface CloudflareHostedControlClient {
     orchestrationAttemptId: string;
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
+  reconcileRuntimeHealthDataConsent(
+    userId: string,
+  ): Promise<CloudflareHostedControlRuntimeHealthDataConsentResult>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+  verifyInferenceConnection(input: {
+    request: CloudflareHostedInferenceVerificationRequest;
+    userId: string;
+  }): Promise<CloudflareHostedInferenceVerificationResult>;
   sendTelegramUsageLimitNotice(input: {
     onRequestAttempted?: () => Promise<void> | void;
     request: CloudflareHostedControlTelegramUsageLimitNoticeRequest;
@@ -354,6 +379,33 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+    reconcileRuntimeHealthDataConsent(userId) {
+      const expectedUserId = requireCloudflareHostedControlUserId(userId);
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: expectedUserId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "runtime health-data consent reconciliation",
+        parse: (value) =>
+          parseCloudflareHostedControlRuntimeHealthDataConsentResult(
+            value,
+            expectedUserId,
+          ),
+        path: buildCloudflareHostedControlRuntimeHealthDataConsentPath(
+          expectedUserId,
+        ),
+        request: {
+          body: "{}",
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
     getRunnerStatus(userId) {
       const expectedUserId = requireCloudflareHostedControlUserId(userId);
 
@@ -366,6 +418,30 @@ export function createCloudflareHostedControlClient(
         parse: (value) => parseHostedRunnerStatusForExpectedUser(value, expectedUserId),
         path: buildCloudflareHostedControlUserStatusPath(expectedUserId),
         request: { method: "GET" },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    verifyInferenceConnection(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const request = parseCloudflareHostedInferenceVerificationRequest(
+        input.request,
+      );
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "custom inference verification",
+        parse: parseCloudflareHostedInferenceVerificationResult,
+        path: buildCloudflareHostedControlInferenceVerificationPath(userId),
+        request: {
+          body: JSON.stringify(request),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
         timeoutMs: options.timeoutMs,
       });
     },
@@ -848,6 +924,66 @@ function parseCloudflareHostedControlUserDataDeletionResult(
         ? userScopedSkipReason
         : null,
     },
+    userId,
+  };
+}
+
+function parseCloudflareHostedControlRuntimeHealthDataConsentResult(
+  value: unknown,
+  expectedUserId: string,
+): CloudflareHostedControlRuntimeHealthDataConsentResult {
+  const record = requireRecord(
+    value,
+    "Cloudflare runtime health-data consent result",
+  );
+  const userId = requireString(
+    record.userId,
+    "Cloudflare runtime health-data consent result userId",
+  );
+  assertMatchingString(
+    userId,
+    expectedUserId,
+    "Cloudflare runtime health-data consent result userId",
+    "the requested userId",
+  );
+  const rawConsentState = requireString(
+    record.consentState,
+    "Cloudflare runtime health-data consent result consentState",
+  );
+  if (
+    rawConsentState !== "granted"
+    && rawConsentState !== "revoked"
+    && rawConsentState !== "missing"
+  ) {
+    throw new TypeError(
+      "Cloudflare runtime health-data consent result consentState is invalid.",
+    );
+  }
+  const processingAllowed = requireBoolean(
+    record.processingAllowed,
+    "Cloudflare runtime health-data consent result processingAllowed",
+  );
+  if (processingAllowed !== (rawConsentState !== "revoked")) {
+    throw new TypeError(
+      "Cloudflare runtime health-data consent result processingAllowed did not match consentState.",
+    );
+  }
+
+  return {
+    activeInvocationPreempted: requireBoolean(
+      record.activeInvocationPreempted,
+      "Cloudflare runtime health-data consent result activeInvocationPreempted",
+    ),
+    consentState: rawConsentState,
+    processingAllowed,
+    runnerContainerDestroyAttempted: requireBoolean(
+      record.runnerContainerDestroyAttempted,
+      "Cloudflare runtime health-data consent result runnerContainerDestroyAttempted",
+    ),
+    runnerContainerDestroyOk: requireBoolean(
+      record.runnerContainerDestroyOk,
+      "Cloudflare runtime health-data consent result runnerContainerDestroyOk",
+    ),
     userId,
   };
 }

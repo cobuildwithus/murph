@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-30
+Last verified: 2026-08-04
 Status: Implemented current-state contract
 
 ## Goal
@@ -323,6 +323,13 @@ surface labels the 30-day retention boundary instead of presenting those rows
 as lifetime history. The trailing seven-day total and daily average use the
 same mailbox source. All-time priced AI usage is derived from immutable counted
 `HostedAiUsage` rows.
+
+Token allowance pricing is provider-aware at ingestion time. OpenAI rows use
+the OpenAI GPT-5.6 rate table, while rows with recorded provider `venice` use
+Venice's documented regular GPT-5.6 input, cache-read, cache-write, and output
+rates for the canonical Luna/Terra/Sol tier. The immutable pricing snapshot
+records the provider source and matching provider model id. Historical rows
+are not repriced when provider pricing changes.
 
 A reset targets exactly one current allowance period. The table and reset both
 resolve that period through the canonical allowance gate, so Family-sponsored,

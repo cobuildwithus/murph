@@ -4,6 +4,7 @@ import {
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
+  JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
 import type {
@@ -13,6 +14,7 @@ import type {
   DeviceSyncWebhookAcceptanceMode,
   ProviderConnectionResult,
   PublicDeviceSyncAccount,
+  StartConnectionSourceLifecycleProof,
 } from "@murphai/device-syncd/types";
 import {
   shapeHostedDeviceSyncJobHintPayload,
@@ -53,10 +55,19 @@ import {
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
+import { readHostedHealthDataConsentState } from "../legal/consent";
 import {
   buildHostedDeviceSyncWake,
 } from "./wake";
+import {
+  HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
+  HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  isHostedConnectionSourceAdmitted,
+  isHostedSourceDisconnectFenced,
+} from "./connection-source-lifecycle";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
+import type { HostedDeviceConnectionSource } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
 import {
   normalizeNullableString,
@@ -70,6 +81,881 @@ const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
   + "Remove the connection in the provider account before reconnecting.";
+
+export async function disconnectHostedDeviceSyncConnectionSource(input: {
+  connectionId: string;
+  registry: DeviceSyncRegistry;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<{ sourceProviderSlug: string; status: "disconnected" }> {
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  if (!sourceProviderSlug) {
+    throw deviceSyncError({
+      code: "CONNECTION_SOURCE_INVALID",
+      message: "Hosted device-sync source was invalid.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  const target = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
+    if (!connection) {
+      throw connectionSourceNotFoundError();
+    }
+    if (connection.provider !== "junction" || connection.status === "disconnected") {
+      throw connectionSourceNotFoundError();
+    }
+
+    const source = await findHostedConnectionSource({
+      connectionId: input.connectionId,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
+    if (!source) {
+      throw connectionSourceNotFoundError();
+    }
+    if (
+      source.lastErrorCode === HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+      || source.lastErrorCode === HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE
+    ) {
+      connectionChangedDuringDisconnectError();
+    }
+
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    const revokeSourceAccess = input.registry.get("junction")?.connectionHandler?.revokeSourceAccess;
+    if (!storedAccount || !revokeSourceAccess) {
+      throw sourceDisconnectUnavailableError();
+    }
+
+    const claimAt = nextHostedSourceLifecycleAt(source.lastSeenAt);
+
+    await writeHostedConnectionSourceLifecycle({
+      errorCode: HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+      errorMessage: null,
+      now: claimAt,
+      source,
+      status: source.status,
+      store: input.store,
+      tx,
+    });
+
+    return {
+      claimAt,
+      connection,
+      revokeSourceAccess,
+      source,
+      storedAccount,
+    };
+  });
+
+  let completedByConcurrentCleanup = false;
+  try {
+    await target.revokeSourceAccess(target.storedAccount, sourceProviderSlug);
+  } catch {
+    completedByConcurrentCleanup = await input.store.withConnectionMutationLock(
+      input.connectionId,
+      async (tx) => {
+        const current = await readCurrentSourceDisconnectTarget({
+          connection: target.connection,
+          connectionId: input.connectionId,
+          source: target.source,
+          sourceProviderSlug,
+          storedAccount: target.storedAccount,
+          store: input.store,
+          tx,
+          userId: input.userId,
+        });
+        if (
+          current.status === "disconnected"
+          && current.lastErrorCode === HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE
+        ) {
+          if (target.source.lastErrorCode !== HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE) {
+            await input.store.createSignal({
+              userId: input.userId,
+              connectionId: input.connectionId,
+              provider: target.connection.provider,
+              kind: "source_disconnected",
+              occurredAt: current.lastSeenAt,
+              sourceProviderSlug,
+              reason: "user_disconnect",
+              createdAt: current.lastSeenAt,
+              tx,
+            });
+          }
+          return true;
+        }
+        if (
+          current.lastErrorCode !== HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+          || current.lastSeenAt !== target.claimAt
+        ) {
+          return false;
+        }
+        await writeHostedConnectionSourceLifecycle({
+          errorCode: target.source.lastErrorCode,
+          errorMessage: target.source.lastErrorMessage,
+          now: target.source.lastSeenAt,
+          source: current,
+          status: target.source.status,
+          store: input.store,
+          tx,
+        });
+        return false;
+      },
+    );
+    if (!completedByConcurrentCleanup) {
+      throw sourceDisconnectUnavailableError();
+    }
+  }
+
+  let ownedClaimAt = target.claimAt;
+  while (!completedByConcurrentCleanup) {
+    const outcome = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+      const current = await readCurrentSourceDisconnectTarget({
+        connection: target.connection,
+        connectionId: input.connectionId,
+        source: target.source,
+        sourceProviderSlug,
+        storedAccount: target.storedAccount,
+        store: input.store,
+        tx,
+        userId: input.userId,
+      });
+      if (
+        current.status === "disconnected"
+        && current.lastErrorCode === HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE
+      ) {
+        if (target.source.lastErrorCode !== HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE) {
+          await input.store.createSignal({
+            userId: input.userId,
+            connectionId: input.connectionId,
+            provider: target.connection.provider,
+            kind: "source_disconnected",
+            occurredAt: current.lastSeenAt,
+            sourceProviderSlug,
+            reason: "user_disconnect",
+            createdAt: current.lastSeenAt,
+            tx,
+          });
+        }
+        return { complete: true as const, disconnectedAt: current.lastSeenAt };
+      }
+      if (current.lastErrorCode !== HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE) {
+        connectionChangedDuringDisconnectError();
+      }
+      if (current.lastSeenAt !== ownedClaimAt) {
+        return { complete: false as const, claimAt: current.lastSeenAt };
+      }
+
+      const disconnectedAt = nextHostedSourceLifecycleAt(current.lastSeenAt);
+      await writeHostedConnectionSourceLifecycle({
+        errorCode: HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+        errorMessage: null,
+        now: disconnectedAt,
+        source: current,
+        status: "disconnected",
+        store: input.store,
+        tx,
+      });
+      if (target.source.lastErrorCode !== HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE) {
+        await input.store.createSignal({
+          userId: input.userId,
+          connectionId: input.connectionId,
+          provider: target.connection.provider,
+          kind: "source_disconnected",
+          occurredAt: disconnectedAt,
+          sourceProviderSlug,
+          reason: "user_disconnect",
+          createdAt: disconnectedAt,
+          tx,
+        });
+      }
+      return { complete: true as const, disconnectedAt };
+    });
+
+    if (outcome.complete) {
+      completedByConcurrentCleanup = true;
+      break;
+    }
+
+    ownedClaimAt = outcome.claimAt;
+    try {
+      await target.revokeSourceAccess(target.storedAccount, sourceProviderSlug);
+    } catch {
+      throw sourceDisconnectUnavailableError();
+    }
+  }
+
+  return { sourceProviderSlug, status: "disconnected" };
+}
+
+/**
+ * Opens one exact native-SDK source epoch after a successful explicit token
+ * mint. Passive resume and missing intent never call this owner.
+ */
+export interface HostedDeviceSyncConnectionSourceReconnectProof {
+  connection: PublicDeviceSyncAccount;
+  source: HostedDeviceConnectionSource | null;
+  sourceProviderSlug: string;
+}
+
+export async function captureHostedDeviceSyncConnectionSourceReconnect(input: {
+  connectionId: string;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<HostedDeviceSyncConnectionSourceReconnectProof> {
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  if (!sourceProviderSlug) {
+    throw connectionSourceNotFoundError();
+  }
+
+  return input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
+    if (
+      !connection
+      || connection.provider !== "junction"
+      || !isEstablishedDeviceSyncConnection(connection)
+    ) {
+      throw connectionSourceNotFoundError();
+    }
+
+    const source = await findHostedConnectionSource({
+      connectionId: input.connectionId,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
+    if (
+      source?.lastErrorCode === HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+      || source?.lastErrorCode === HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE
+    ) {
+      connectionChangedDuringDisconnectError();
+    }
+
+    return { connection, source, sourceProviderSlug };
+  });
+}
+
+export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
+  proof: HostedDeviceSyncConnectionSourceReconnectProof;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<void> {
+  const { connection: expectedConnection, source: expectedSource } = input.proof;
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.proof.sourceProviderSlug);
+  if (!sourceProviderSlug) {
+    throw connectionSourceNotFoundError();
+  }
+
+  await input.store.withConnectionMutationLock(expectedConnection.id, async (tx) => {
+    const connection = await input.store.getConnectionForUser(
+      input.userId,
+      expectedConnection.id,
+      tx,
+    );
+    const source = await findHostedConnectionSource({
+      connectionId: expectedConnection.id,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
+    if (
+      !connection
+      || !publicAccountMatchesDisconnectTarget(expectedConnection, connection)
+      || !isEstablishedDeviceSyncConnection(connection)
+      || !hostedConnectionSourceMatchesReconnectProof(expectedSource, source)
+    ) {
+      connectionChangedDuringDisconnectError();
+    }
+    if (
+      source?.status === "connected"
+      && !isHostedSourceDisconnectFenced(source)
+    ) {
+      return;
+    }
+
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: expectedConnection.id,
+      sourceProviderSlug,
+    });
+    if (!sourceInstanceKey) {
+      throw connectionSourceNotFoundError();
+    }
+    const sourceStartedAt = nextHostedSourceLifecycleAt(source?.lastSeenAt ?? null);
+    await input.store.upsertConnectionSource({
+      connectionId: expectedConnection.id,
+      sourceInstanceKey,
+      sourceProviderSlug,
+      status: "disconnected",
+      firstSeenAt: sourceStartedAt,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: sourceStartedAt,
+      tx,
+    });
+  });
+}
+
+function hostedConnectionSourceMatchesReconnectProof(
+  expected: HostedDeviceConnectionSource | null,
+  current: HostedDeviceConnectionSource | null,
+): boolean {
+  if (!expected || !current) {
+    return expected === current;
+  }
+  return expected.id === current.id
+    && expected.lastErrorCode === current.lastErrorCode
+    && expected.lastErrorMessage === current.lastErrorMessage
+    && expected.lastSeenAt === current.lastSeenAt
+    && expected.sourceInstanceKey === current.sourceInstanceKey
+    && expected.status === current.status;
+}
+
+/**
+ * Reconciles a signed Junction source-registration event against live provider
+ * state. The source row is captured before the provider read and revalidated
+ * before either admission or target-only cleanup.
+ */
+export async function reconcileHostedDeviceSyncConnectionSourceRegistration(input: {
+  account: PublicDeviceSyncAccount;
+  registry: DeviceSyncRegistry;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+}): Promise<"admitted" | "not_ready" | "removed"> {
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const userId = await input.store.getConnectionOwnerId(input.account.id);
+  if (!sourceProviderSlug || !userId) {
+    return "not_ready";
+  }
+
+  const target = await input.store.withConnectionMutationLock(input.account.id, async (tx) => {
+    const connection = await input.store.getConnectionForUser(userId, input.account.id, tx);
+    const source = await findHostedConnectionSource({
+      connectionId: input.account.id,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      userId,
+      input.account.id,
+      tx,
+    );
+    const handler = input.registry.get("junction")?.connectionHandler;
+    if (
+      !connection
+      || !publicAccountMatchesDisconnectTarget(input.account, connection)
+      || !source
+      || !storedAccount
+      || !handler?.isSourceAccessActive
+    ) {
+      throw sourceRegistrationReconciliationUnavailableError();
+    }
+    return { connection, source, storedAccount, isSourceAccessActive: handler.isSourceAccessActive };
+  });
+
+  const sourceAccessActive = await target.isSourceAccessActive(
+    target.storedAccount,
+    sourceProviderSlug,
+  );
+
+  const outcome = await input.store.withConnectionMutationLock(input.account.id, async (tx) => {
+    const connection = await input.store.getConnectionForUser(userId, input.account.id, tx);
+    const source = await findHostedConnectionSource({
+      connectionId: input.account.id,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      userId,
+      input.account.id,
+      tx,
+    );
+    if (
+      !connection
+      || !publicAccountMatchesDisconnectTarget(target.connection, connection)
+      || !storedAccountMatchesDisconnectTarget(target.storedAccount, storedAccount)
+      || !source
+      || source.id !== target.source.id
+    ) {
+      connectionChangedDuringDisconnectError();
+    }
+
+    if (
+      sourceAccessActive
+      && isEstablishedDeviceSyncConnection(connection)
+      && hostedConnectionSourceMatchesReconnectProof(target.source, source)
+    ) {
+      if (source.status === "connected" && !isHostedSourceDisconnectFenced(source)) {
+        return "admitted" as const;
+      }
+      if (source.status === "disconnected" && source.lastErrorCode === null) {
+        await input.store.upsertConnectionSource({
+          connectionId: input.account.id,
+          sourceInstanceKey: source.sourceInstanceKey,
+          sourceProviderSlug,
+          status: "connected",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: nextHostedSourceLifecycleAt(source.lastSeenAt),
+          tx,
+        });
+        return "admitted" as const;
+      }
+    }
+
+    if (
+      !isEstablishedDeviceSyncConnection(connection)
+      || isHostedSourceDisconnectFenced(source)
+    ) {
+      return "cleanup" as const;
+    }
+    return "stale" as const;
+  });
+
+  if (outcome === "admitted") {
+    return "admitted";
+  }
+  if (outcome === "cleanup") {
+    await cleanupRejectedHostedDeviceSyncConnectionSource({
+      account: input.account,
+      connectionStartedAt: "1970-01-01T00:00:00.000Z",
+      registry: input.registry,
+      sourceProviderSlug,
+      store: input.store,
+    });
+    return "removed";
+  }
+  return "not_ready";
+}
+
+/**
+ * Deregisters the exact target before issuing a new browser Link and leaves a
+ * pending source epoch. Existing source mutations are fenced across provider
+ * I/O so a stale-callback cleanup cannot overlap the newly issued Link.
+ */
+export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
+  connectionId: string;
+  registry: DeviceSyncRegistry;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<StartConnectionSourceLifecycleProof> {
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  if (!sourceProviderSlug) {
+    throw sourceStartCleanupUnavailableError();
+  }
+
+  const target = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
+    if (!connection || connection.provider !== "junction" || connection.status === "disconnected") {
+      throw sourceStartCleanupUnavailableError();
+    }
+    const source = await findHostedConnectionSource({
+      connectionId: input.connectionId,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
+    if (
+      source?.lastErrorCode === HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+      || source?.lastErrorCode === HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE
+    ) {
+      throw sourceStartCleanupUnavailableError();
+    }
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    const revokeSourceAccess = input.registry.get("junction")?.connectionHandler?.revokeSourceAccess;
+    if (!storedAccount || !revokeSourceAccess) {
+      throw sourceStartCleanupUnavailableError();
+    }
+
+    if (!source) {
+      return {
+        claimAt: null,
+        connection,
+        revokeSourceAccess,
+        source: null,
+        storedAccount,
+      };
+    }
+
+    const claimAt = nextHostedSourceLifecycleAt(source.lastSeenAt);
+    await writeHostedConnectionSourceLifecycle({
+      errorCode: HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
+      errorMessage: null,
+      now: claimAt,
+      source,
+      status: source.status,
+      store: input.store,
+      tx,
+    });
+    return { claimAt, connection, revokeSourceAccess, source, storedAccount };
+  });
+
+  try {
+    await target.revokeSourceAccess(target.storedAccount, sourceProviderSlug);
+  } catch {
+    const claimedSource = target.source;
+    const claimAt = target.claimAt;
+    if (claimedSource && claimAt) {
+      await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+        const current = await requireUnchangedSourceDisconnectTarget({
+          claimErrorCode: HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
+          claimAt,
+          connection: target.connection,
+          connectionId: input.connectionId,
+          source: claimedSource,
+          sourceProviderSlug,
+          storedAccount: target.storedAccount,
+          store: input.store,
+          tx,
+          userId: input.userId,
+        });
+        await writeHostedConnectionSourceLifecycle({
+          errorCode: claimedSource.lastErrorCode,
+          errorMessage: claimedSource.lastErrorMessage,
+          now: claimedSource.lastSeenAt,
+          source: current,
+          status: claimedSource.status,
+          store: input.store,
+          tx,
+        });
+      });
+    }
+    throw sourceStartCleanupUnavailableError();
+  }
+
+  if (target.source && target.claimAt) {
+    const claimedSource = target.source;
+    let ownedClaimAt = target.claimAt;
+    while (true) {
+      const outcome = await input.store.withConnectionMutationLock(
+        input.connectionId,
+        async (tx) => {
+          const source = await readCurrentSourceDisconnectTarget({
+            connection: target.connection,
+            connectionId: input.connectionId,
+            source: claimedSource,
+            sourceProviderSlug,
+            storedAccount: target.storedAccount,
+            store: input.store,
+            tx,
+            userId: input.userId,
+          });
+          if (
+            source.status === "disconnected"
+            && source.lastErrorCode === null
+            && source.lastSeenAt !== ownedClaimAt
+          ) {
+            return { complete: true as const, source };
+          }
+          if (source.lastErrorCode !== HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE) {
+            connectionChangedDuringDisconnectError();
+          }
+          if (source.lastSeenAt !== ownedClaimAt) {
+            return { complete: false as const, claimAt: source.lastSeenAt };
+          }
+
+          const sourceStartedAt = nextHostedSourceLifecycleAt(source.lastSeenAt);
+          const preparedSource = await input.store.upsertConnectionSource({
+            connectionId: input.connectionId,
+            sourceInstanceKey: source.sourceInstanceKey,
+            sourceProviderSlug,
+            status: "disconnected",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: sourceStartedAt,
+            tx,
+          });
+          return { complete: true as const, source: preparedSource };
+        },
+      );
+      if (outcome.complete) {
+        return {
+          connectionId: input.connectionId,
+          lastSeenAt: outcome.source.lastSeenAt,
+          sourceInstanceKey: outcome.source.sourceInstanceKey,
+          sourceProviderSlug,
+        };
+      }
+      ownedClaimAt = outcome.claimAt;
+      try {
+        await target.revokeSourceAccess(target.storedAccount, sourceProviderSlug);
+      } catch {
+        throw sourceStartCleanupUnavailableError();
+      }
+    }
+  }
+
+  return input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    const source = await findHostedConnectionSource({
+      connectionId: input.connectionId,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
+    if (
+      !connection
+      || !publicAccountMatchesDisconnectTarget(target.connection, connection)
+      || !storedAccountMatchesDisconnectTarget(target.storedAccount, storedAccount)
+      || source
+    ) {
+      connectionChangedDuringDisconnectError();
+    }
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: input.connectionId,
+      sourceProviderSlug,
+    });
+    if (!sourceInstanceKey) {
+      throw sourceStartCleanupUnavailableError();
+    }
+    const sourceStartedAt = nextHostedSourceLifecycleAt(null);
+    const preparedSource = await input.store.upsertConnectionSource({
+      connectionId: input.connectionId,
+      sourceInstanceKey,
+      sourceProviderSlug,
+      status: "disconnected",
+      firstSeenAt: sourceStartedAt,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: sourceStartedAt,
+      tx,
+    });
+    return {
+      connectionId: input.connectionId,
+      lastSeenAt: preparedSource.lastSeenAt,
+      sourceInstanceKey: preparedSource.sourceInstanceKey,
+      sourceProviderSlug,
+    };
+  });
+}
+
+/**
+ * Removes provider authorization recreated by an obsolete Junction Link after
+ * hosted exact-source admission rejected it. The source-row epoch is the sole
+ * claim, so cleanup cannot cross a newer accepted reconnect.
+ */
+export async function cleanupRejectedHostedDeviceSyncConnectionSource(input: {
+  account: PublicDeviceSyncAccount;
+  connectionStartedAt: string;
+  registry: DeviceSyncRegistry;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+}): Promise<void> {
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const userId = await input.store.getConnectionOwnerId(input.account.id);
+  if (!sourceProviderSlug || !userId) {
+    return;
+  }
+
+  const target = await input.store.withConnectionMutationLock(input.account.id, async (tx) => {
+    const connection = await input.store.getConnectionForUser(userId, input.account.id, tx);
+    const source = await findHostedConnectionSource({
+      connectionId: input.account.id,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
+    const connectionStartedAtMs = Date.parse(input.connectionStartedAt);
+    const sourceEpochMs = source ? Date.parse(source.lastSeenAt) : Number.NaN;
+    const canObsoleteCallbackOwnCleanup = source !== null
+      && Number.isFinite(connectionStartedAtMs)
+      && Number.isFinite(sourceEpochMs)
+      && sourceEpochMs > connectionStartedAtMs
+      && (source.status === "disconnected" || isHostedSourceDisconnectFenced(source));
+    if (
+      !connection
+      || !publicAccountMatchesDisconnectTarget(input.account, connection)
+      || !canObsoleteCallbackOwnCleanup
+    ) {
+      return null;
+    }
+
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      userId,
+      input.account.id,
+      tx,
+    );
+    const revokeSourceAccess = input.registry.get("junction")?.connectionHandler?.revokeSourceAccess;
+    if (!storedAccount || !revokeSourceAccess) {
+      throw sourceAdmissionCleanupUnavailableError();
+    }
+
+    const claimAt = nextHostedSourceLifecycleAt(source.lastSeenAt);
+    const preserveUserDisconnect =
+      source.lastErrorCode === HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE
+      || source.lastErrorCode === HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE;
+    const claimErrorCode = preserveUserDisconnect
+      ? HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+      : HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE;
+    await writeHostedConnectionSourceLifecycle({
+      errorCode: claimErrorCode,
+      errorMessage: null,
+      now: claimAt,
+      source,
+      status: "disconnected",
+      store: input.store,
+      tx,
+    });
+
+    return {
+      claimAt,
+      claimErrorCode,
+      connection,
+      preserveUserDisconnect,
+      revokeSourceAccess,
+      source,
+      storedAccount,
+      userId,
+    };
+  });
+  if (!target) {
+    return;
+  }
+
+  try {
+    await target.revokeSourceAccess(target.storedAccount, sourceProviderSlug);
+  } catch {
+    const anotherCleanupOwnsResult = await input.store.withConnectionMutationLock(
+      input.account.id,
+      async (tx) => {
+        const current = await readCurrentSourceDisconnectTarget({
+          connection: target.connection,
+          connectionId: input.account.id,
+          source: target.source,
+          sourceProviderSlug,
+          storedAccount: target.storedAccount,
+          store: input.store,
+          tx,
+          userId: target.userId,
+        });
+        if (target.preserveUserDisconnect) {
+          return current.lastErrorCode === HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE
+            || (
+              current.lastErrorCode === HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+              && current.lastSeenAt !== target.claimAt
+            );
+        }
+        if (
+          current.status === "disconnected"
+          && current.lastErrorCode === null
+          && current.lastSeenAt !== target.claimAt
+        ) {
+          return true;
+        }
+        if (
+          current.lastErrorCode === HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE
+          && current.lastSeenAt !== target.claimAt
+        ) {
+          return true;
+        }
+        if (
+          current.lastErrorCode !== target.claimErrorCode
+          || current.lastSeenAt !== target.claimAt
+        ) {
+          return false;
+        }
+        await writeHostedConnectionSourceLifecycle({
+          errorCode: target.source.lastErrorCode,
+          errorMessage: target.source.lastErrorMessage,
+          now: target.source.lastSeenAt,
+          source: current,
+          status: target.source.status,
+          store: input.store,
+          tx,
+        });
+        return false;
+      },
+    );
+    if (!anotherCleanupOwnsResult) {
+      throw sourceAdmissionCleanupUnavailableError();
+    }
+    return;
+  }
+
+  await input.store.withConnectionMutationLock(input.account.id, async (tx) => {
+    const current = await readCurrentSourceDisconnectTarget({
+      connection: target.connection,
+      connectionId: input.account.id,
+      source: target.source,
+      sourceProviderSlug,
+      storedAccount: target.storedAccount,
+      store: input.store,
+      tx,
+      userId: target.userId,
+    });
+    if (target.preserveUserDisconnect) {
+      if (current.lastErrorCode === HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE) {
+        return;
+      }
+      if (
+        current.lastErrorCode === HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+        && current.lastSeenAt !== target.claimAt
+      ) {
+        return;
+      }
+    } else {
+      if (
+        current.status === "disconnected"
+        && current.lastErrorCode === null
+        && current.lastSeenAt !== target.claimAt
+      ) {
+        return;
+      }
+      if (
+        current.lastErrorCode === HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE
+        && current.lastSeenAt !== target.claimAt
+      ) {
+        return;
+      }
+    }
+    if (
+      current.lastErrorCode !== target.claimErrorCode
+      || current.lastSeenAt !== target.claimAt
+    ) {
+      connectionChangedDuringDisconnectError();
+    }
+    const restorePendingStart =
+      target.source.lastErrorCode === HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE;
+    await writeHostedConnectionSourceLifecycle({
+      errorCode: target.preserveUserDisconnect
+        ? HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE
+        : restorePendingStart ? null : target.source.lastErrorCode,
+      errorMessage:
+        target.preserveUserDisconnect || restorePendingStart
+          ? null
+          : target.source.lastErrorMessage,
+      now: target.preserveUserDisconnect || restorePendingStart
+        ? nextHostedSourceLifecycleAt(current.lastSeenAt)
+        : target.source.lastSeenAt,
+      source: current,
+      status:
+        target.preserveUserDisconnect || restorePendingStart
+          ? "disconnected"
+          : target.source.status,
+      store: input.store,
+      tx,
+    });
+  });
+}
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -407,6 +1293,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     scopes: string[];
     status: PublicDeviceSyncAccount["status"];
   };
+  connectionStartedAt?: string | null;
   sourceProviderSlug?: string | null;
   connection: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
   now: string;
@@ -445,7 +1332,8 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     source: "connection-established",
     userId: ownerId,
   });
-  const mailboxAppend = await input.store.withConnectionMutationLock(
+  const mailboxAppend = await input.store.withHealthDataAdmissionLock(
+    ownerId,
     input.account.id,
     async (tx) => {
       const current = await input.store.getConnectionForUser(ownerId, input.account.id, tx);
@@ -467,6 +1355,24 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         sourceProviderSlug: input.sourceProviderSlug ?? null,
       });
       if (linkedSource) {
+        const currentSource = (await input.store.listConnectionSources(input.account.id, tx))
+          .find((source) => source.sourceInstanceKey === linkedSource.sourceInstanceKey);
+        if (
+          currentSource
+          && (
+            isHostedSourceDisconnectFenced(currentSource)
+            || (
+              currentSource.status === "disconnected"
+              && input.connectionStartedAt
+              && isHostedSourceConnectionStartOlder(
+                input.connectionStartedAt,
+                currentSource.lastSeenAt,
+              )
+            )
+          )
+        ) {
+          throw connectionEstablishmentStaleError();
+        }
         await input.store.upsertConnectionSource({
           connectionId: input.account.id,
           sourceInstanceKey: linkedSource.sourceInstanceKey,
@@ -514,6 +1420,188 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
   ) {
     await startHostedDeviceSyncWakeWorkflow(mailboxAppend.item.id);
   }
+}
+
+async function findHostedConnectionSource(input: {
+  connectionId: string;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+}): Promise<HostedDeviceConnectionSource | null> {
+  const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: input.connectionId,
+    sourceProviderSlug: input.sourceProviderSlug,
+  });
+  if (!sourceInstanceKey) {
+    return null;
+  }
+
+  return (await input.store.listConnectionSources(input.connectionId, input.tx))
+    .find((source) => source.sourceInstanceKey === sourceInstanceKey) ?? null;
+}
+
+async function readCurrentSourceDisconnectTarget(input: {
+  connection: PublicDeviceSyncAccount;
+  connectionId: string;
+  source: HostedDeviceConnectionSource;
+  sourceProviderSlug: string;
+  storedAccount: NonNullable<Awaited<ReturnType<PrismaDeviceSyncControlPlaneStore["getStoredConnectionAccountForUser"]>>>;
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+  userId: string;
+}): Promise<HostedDeviceConnectionSource> {
+  const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, input.tx);
+  const storedAccount = await input.store.getStoredConnectionAccountForUser(
+    input.userId,
+    input.connectionId,
+    input.tx,
+  );
+  const source = await findHostedConnectionSource({
+    connectionId: input.connectionId,
+    sourceProviderSlug: input.sourceProviderSlug,
+    store: input.store,
+    tx: input.tx,
+  });
+
+  if (
+    !connection
+    || !publicAccountMatchesDisconnectTarget(input.connection, connection)
+    || !storedAccountMatchesDisconnectTarget(input.storedAccount, storedAccount)
+    || !source
+    || source.id !== input.source.id
+  ) {
+    connectionChangedDuringDisconnectError();
+  }
+
+  return source;
+}
+
+async function requireUnchangedSourceDisconnectTarget(input: {
+  claimAt: string;
+  claimErrorCode: string;
+  connection: PublicDeviceSyncAccount;
+  connectionId: string;
+  source: HostedDeviceConnectionSource;
+  sourceProviderSlug: string;
+  storedAccount: NonNullable<Awaited<ReturnType<PrismaDeviceSyncControlPlaneStore["getStoredConnectionAccountForUser"]>>>;
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+  userId: string;
+}): Promise<HostedDeviceConnectionSource> {
+  const source = await readCurrentSourceDisconnectTarget(input);
+  if (
+    source.lastErrorCode !== input.claimErrorCode
+    || source.lastSeenAt !== input.claimAt
+  ) {
+    connectionChangedDuringDisconnectError();
+  }
+  return source;
+}
+
+async function writeHostedConnectionSourceLifecycle(input: {
+  errorCode: string | null;
+  errorMessage: string | null;
+  now: string;
+  source: HostedDeviceConnectionSource;
+  status: HostedDeviceConnectionSource["status"];
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+}): Promise<void> {
+  await input.store.upsertConnectionSource({
+    connectionId: input.source.connectionId,
+    sourceInstanceKey: input.source.sourceInstanceKey,
+    sourceProviderSlug: input.source.sourceProviderSlug,
+    status: input.status,
+    lastErrorCode: input.errorCode,
+    lastErrorMessage: input.errorMessage,
+    lastSeenAt: input.now,
+    tx: input.tx,
+  });
+}
+
+function connectionSourceNotFoundError(): never {
+  throw deviceSyncError({
+    code: "CONNECTION_SOURCE_NOT_FOUND",
+    message: "Hosted device-sync source was not found for this connection.",
+    retryable: false,
+    httpStatus: 404,
+  });
+}
+
+function sourceDisconnectUnavailableError(): never {
+  throw deviceSyncError({
+    cause: {
+      errorObservabilityClass: "provider_cleanup",
+      errorPhase: "browser_disconnect",
+    },
+    code: "CONNECTION_SOURCE_DISCONNECT_FAILED",
+    message: "Murph could not disconnect this source right now. Retry in a moment.",
+    retryable: true,
+    httpStatus: 503,
+  });
+}
+
+function sourceAdmissionCleanupUnavailableError(): never {
+  throw deviceSyncError({
+    cause: {
+      errorObservabilityClass: "provider_cleanup",
+      errorPhase: "browser_callback_source_cleanup",
+    },
+    code: "CONNECTION_SOURCE_CLEANUP_FAILED",
+    message: "Murph could not finish cleaning up this source. Start the connection again.",
+    retryable: true,
+    httpStatus: 503,
+  });
+}
+
+function sourceRegistrationReconciliationUnavailableError(): never {
+  throw deviceSyncError({
+    code: "CONNECTION_SOURCE_REGISTRATION_RECONCILIATION_UNAVAILABLE",
+    message: "Current device source registration could not be reconciled. Retry shortly.",
+    retryable: true,
+    httpStatus: 503,
+  });
+}
+
+function sourceStartCleanupUnavailableError(): never {
+  throw deviceSyncError({
+    cause: {
+      errorObservabilityClass: "provider_cleanup",
+      errorPhase: "browser_oauth_start",
+    },
+    code: "JUNCTION_PENDING_LINK_CLEANUP_FAILED",
+    message: "Murph could not clear the earlier device connection attempt. Retry before opening another connection link.",
+    retryable: true,
+    httpStatus: 503,
+  });
+}
+
+function nextHostedSourceLifecycleAt(previous: string | null): string {
+  const previousMs = previous === null ? Number.NaN : Date.parse(previous);
+  return toIsoTimestamp(new Date(Math.max(
+    Date.now(),
+    Number.isFinite(previousMs) ? previousMs + 1 : 0,
+  )));
+}
+
+function isHostedSourceConnectionStartOlder(
+  connectionStartedAt: string,
+  sourceEpoch: string,
+): boolean {
+  const connectionStartedAtMs = Date.parse(connectionStartedAt);
+  const sourceEpochMs = Date.parse(sourceEpoch);
+  return !Number.isFinite(connectionStartedAtMs)
+    || !Number.isFinite(sourceEpochMs)
+    || connectionStartedAtMs < sourceEpochMs;
+}
+
+function connectionEstablishmentStaleError(): never {
+  throw deviceSyncError({
+    code: "CONNECTION_ESTABLISHMENT_STALE",
+    message: "Device connection changed during completion. Start the connection again.",
+    retryable: false,
+    httpStatus: 409,
+  });
 }
 
 function resolveHostedJunctionLinkedSource(input: {
@@ -695,95 +1783,117 @@ async function persistHostedDeviceSyncCompanionResource(input: {
   wakeReason: string;
 }): Promise<void> {
   const result = await retryHostedDirtyStateContention(async () =>
-    input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
-      const connection = await input.store.getConnectionForUser(
-        input.userId,
-        input.connectionId,
-        tx,
-      );
-      if (
-        !connection
-        || connection.provider !== "junction"
-        || connection.status !== "active"
-        || (
-          input.setupRequirement === "established"
-          && !isEstablishedDeviceSyncConnection(connection)
-        )
-      ) {
-        throw deviceSyncError({
-          code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
-          message: "Finish companion health setup before syncing health data.",
-          retryable: false,
-          httpStatus: 409,
-        });
-      }
+    input.store.withHealthDataAdmissionLock(
+      input.userId,
+      input.connectionId,
+      async (tx) => {
+        const connection = await input.store.getConnectionForUser(
+          input.userId,
+          input.connectionId,
+          tx,
+        );
+        if (
+          !connection
+          || connection.provider !== "junction"
+          || connection.status !== "active"
+          || (
+            input.setupRequirement === "established"
+            && !isEstablishedDeviceSyncConnection(connection)
+          )
+        ) {
+          throw deviceSyncError({
+            code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
+            message: "Finish companion health setup before syncing health data.",
+            retryable: false,
+            httpStatus: 409,
+          });
+        }
 
-      const dirtyUpdate = await input.store.upsertDirtyConnection({
-        connectionId: connection.id,
-        dirtyAt: input.occurredAt,
-        eventType: input.eventType,
-        provider: connection.provider,
-        resourceCategory: input.resourceCategory,
-        resources: [input.resource],
-        tx,
-        userId: input.userId,
-      });
-      // Insert/no-op first so an exact replay at the cap remains a successful
-      // no-op. A net-new 17th payload rolls back, preserving the bounded queue.
-      const pendingPayloadCount = await tx.deviceSyncDirtyPayload.count({
-        where: {
-          connectionId: connection.id,
-          userId: input.userId,
-        },
-      });
-      if (pendingPayloadCount > COMPANION_HEALTH_MAX_PENDING_PAYLOADS) {
-        throw deviceSyncError({
-          code: "COMPANION_HEALTH_BACKLOG_FULL",
-          message: "Companion health sync is still processing. Retry later.",
-          retryable: true,
-          httpStatus: 429,
-        });
-      }
-      if (!dirtyUpdate.shouldRequestWake) {
-        return { wakeMailboxItemId: null };
-      }
+        const sourceProviderSlug = normalizeJunctionProviderSlug(
+          input.resource.resource === COMPANION_HRV_RMSSD_RESOURCE
+            ? JUNCTION_COMPANION_HRV_SOURCE_PROVIDER
+            : input.resource.sourceProviderSlug,
+        );
+        const sources = await input.store.listConnectionSources(connection.id, tx);
+        if (
+          !sourceProviderSlug
+          || !isHostedConnectionSourceAdmitted(sources, sourceProviderSlug)
+        ) {
+          throw deviceSyncError({
+            code: "COMPANION_HEALTH_SOURCE_REQUIRED",
+            message: "Reconnect this health source before syncing health data.",
+            retryable: false,
+            httpStatus: 409,
+          });
+        }
 
-      const wake = buildHostedDeviceSyncWake({
-        connectionId: connection.id,
-        eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
+        const dirtyUpdate = await input.store.upsertDirtyConnection({
           connectionId: connection.id,
-          dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
-          expectedConnectedAt: connection.connectedAt,
-          provider: connection.provider,
-          userId: input.userId,
-        }),
-        expectedConnectedAt: connection.connectedAt,
-        hint: {
+          dirtyAt: input.occurredAt,
           eventType: input.eventType,
-          occurredAt: input.occurredAt,
-          reason: input.wakeReason,
+          provider: connection.provider,
           resourceCategory: input.resourceCategory,
-        },
-        occurredAt: input.occurredAt,
-        provider: connection.provider,
-        source: "webhook-hint",
-        userId: input.userId,
-      });
-      const mailboxAppend = await appendHostedMailboxEnvelopeTx({
-        envelope: wake,
-        tx,
-      });
-      if (mailboxAppend.dedupeConflict) {
-        throw deviceSyncError({
-          code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
-          httpStatus: 503,
-          message: "Hosted device-sync dirty wake conflicted with an existing wake identity.",
-          retryable: true,
+          resources: [input.resource],
+          tx,
+          userId: input.userId,
         });
-      }
+        // Insert/no-op first so an exact replay at the cap remains a successful
+        // no-op. A net-new 17th payload rolls back, preserving the bounded queue.
+        const pendingPayloadCount = await tx.deviceSyncDirtyPayload.count({
+          where: {
+            connectionId: connection.id,
+            userId: input.userId,
+          },
+        });
+        if (pendingPayloadCount > COMPANION_HEALTH_MAX_PENDING_PAYLOADS) {
+          throw deviceSyncError({
+            code: "COMPANION_HEALTH_BACKLOG_FULL",
+            message: "Companion health sync is still processing. Retry later.",
+            retryable: true,
+            httpStatus: 429,
+          });
+        }
+        if (!dirtyUpdate.shouldRequestWake) {
+          return { wakeMailboxItemId: null };
+        }
 
-      return { wakeMailboxItemId: mailboxAppend.item.id };
-    }));
+        const wake = buildHostedDeviceSyncWake({
+          connectionId: connection.id,
+          eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
+            connectionId: connection.id,
+            dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
+            expectedConnectedAt: connection.connectedAt,
+            provider: connection.provider,
+            userId: input.userId,
+          }),
+          expectedConnectedAt: connection.connectedAt,
+          hint: {
+            eventType: input.eventType,
+            occurredAt: input.occurredAt,
+            reason: input.wakeReason,
+            resourceCategory: input.resourceCategory,
+          },
+          occurredAt: input.occurredAt,
+          provider: connection.provider,
+          source: "webhook-hint",
+          userId: input.userId,
+        });
+        const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+          envelope: wake,
+          tx,
+        });
+        if (mailboxAppend.dedupeConflict) {
+          throw deviceSyncError({
+            code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
+            httpStatus: 503,
+            message: "Hosted device-sync dirty wake conflicted with an existing wake identity.",
+            retryable: true,
+          });
+        }
+
+        return { wakeMailboxItemId: mailboxAppend.item.id };
+      },
+    ));
 
   if (result.wakeMailboxItemId) {
     await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {
@@ -823,6 +1933,8 @@ export async function appendHostedDeviceSyncManualReconcileWake(input: {
     userId: input.userId,
   });
   const appendResult = await persistHostedDeviceSyncWake({
+    healthDataConnectionId: input.connectionId,
+    healthDataUserId: input.userId,
     wake,
     store,
     persist: async () => {},
@@ -850,6 +1962,19 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
   userId: string;
 }): Promise<HostedDeviceSyncReconcileWakeResult> {
   const prisma = getPrisma();
+  if (await readHostedHealthDataConsentState({
+    memberId: input.userId,
+    prisma,
+  }) === "revoked") {
+    return {
+      reason: "health_data_consent_withdrawn",
+      wakeAccepted: false,
+      wakeAppended: false,
+      wakeDuplicate: false,
+      wakeInserted: false,
+    };
+  }
+
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma,
   });
@@ -873,6 +1998,8 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
     userId: input.userId,
   });
   const appendResult = await persistHostedDeviceSyncWake({
+    healthDataConnectionId: input.connectionId,
+    healthDataUserId: input.userId,
     signalFailureMode: "throw",
     wake,
     store,
@@ -922,6 +2049,8 @@ export function buildHostedDeviceSyncScheduledReconcileWakeEventId(input: {
 }
 
 async function persistHostedDeviceSyncWake(input: {
+  healthDataConnectionId?: string;
+  healthDataUserId?: string;
   wake: HostedExecutionWake;
   signalFailureMode?: "best_effort" | "throw";
   startWorkflowOnDuplicate?: boolean;
@@ -942,7 +2071,7 @@ async function persistHostedDeviceSyncWake(input: {
     result: null,
   };
 
-  await input.store.prisma.$transaction(async (tx) => {
+  const persistInTransaction = async (tx: HostedPrismaTransactionClient) => {
     await input.persist(tx);
     const mailboxAppend = await appendHostedMailboxEnvelopeTx({
       envelope: input.wake,
@@ -951,7 +2080,16 @@ async function persistHostedDeviceSyncWake(input: {
     mailboxItemId = mailboxAppend.item.id;
     mailboxAppendState.result = mailboxAppend;
     await input.persistAfterAppend?.(tx, mailboxAppend);
-  });
+  };
+  if (input.healthDataUserId && input.healthDataConnectionId) {
+    await input.store.withHealthDataAdmissionLock(
+      input.healthDataUserId,
+      input.healthDataConnectionId,
+      persistInTransaction,
+    );
+  } else {
+    await input.store.prisma.$transaction(persistInTransaction);
+  }
 
   const mailboxAppendResult = mailboxAppendState.result;
   if (!mailboxItemId || !mailboxAppendResult) {
@@ -1049,7 +2187,10 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   userId: string;
 }): Promise<void> {
   const result = await retryHostedDirtyStateContention(async () =>
-    input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    input.store.withHealthDataAdmissionLock(
+      input.userId,
+      input.connectionId,
+      async (tx) => {
       const current = await input.store.getConnectionForUser(
         input.userId,
         input.connectionId,
@@ -1074,16 +2215,13 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
           httpStatus: 503,
         });
       }
-      const sourceProviderSlug = normalizeNullableString(input.sourceProviderSlug);
+      const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
       if (sourceProviderSlug) {
         const matchingSources = await input.store.listConnectionSources({
           connectionId: input.connectionId,
           sourceProviderSlug,
         }, tx);
-        if (
-          matchingSources.length > 0
-          && !matchingSources.some((source) => source.status === "connected")
-        ) {
+        if (!isHostedConnectionSourceAdmitted(matchingSources, sourceProviderSlug)) {
           throw deviceSyncError({
             code: "WEBHOOK_SOURCE_NOT_READY",
             message: "Device source setup changed before webhook work could be committed.",
@@ -1178,7 +2316,8 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       return {
         wakeMailboxItemId,
       };
-    }));
+      },
+    ));
 
   if (result.wakeMailboxItemId) {
     await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {

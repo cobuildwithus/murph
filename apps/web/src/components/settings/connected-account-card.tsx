@@ -89,10 +89,12 @@ export function SettingsContactAction(props: {
 type SettingsStatusTone = "neutral" | "success" | "destructive";
 
 export function SettingsStatusLine(props: {
+  announce?: boolean;
   message: string | null;
   tone: SettingsStatusTone;
   className?: string;
 }) {
+  const announce = props.announce ?? true;
   const toneClass =
     props.tone === "destructive"
       ? "text-destructive"
@@ -102,8 +104,10 @@ export function SettingsStatusLine(props: {
 
   return (
     <p
-      role={props.tone === "destructive" ? "alert" : undefined}
-      aria-live="polite"
+      role={announce && props.tone === "destructive" ? "alert" : undefined}
+      aria-live={announce
+        ? props.tone === "destructive" ? "assertive" : "polite"
+        : undefined}
       className={cn("min-h-[1.25rem] text-xs leading-snug", toneClass, props.className)}
     >
       {props.message}

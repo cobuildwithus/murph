@@ -40,11 +40,11 @@ type RuntimeLatencySearchParams = {
 export default async function RuntimeLatencyOpsPage({
   searchParams,
 }: {
-  searchParams?: Promise<RuntimeLatencySearchParams>;
-} = {}) {
+  searchParams: Promise<RuntimeLatencySearchParams>;
+}) {
   await getHostedDashboardPageAuthSnapshot();
   await requireHostedRuntimeLatencyOpsAccess();
-  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const resolvedSearchParams = await searchParams;
   const dashboard = await readHostedIngressLatencyDashboard({
     limit: readPositiveIntegerSearchParam(resolvedSearchParams.limit, 20),
     source: readRuntimeLatencySourceSearchParam(resolvedSearchParams.source),

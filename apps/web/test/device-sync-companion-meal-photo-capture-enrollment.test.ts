@@ -6,6 +6,7 @@ import {
   assertCurrentMealPhotoCaptureEnrollmentTx,
   issueMealPhotoCaptureEnrollment,
   requireActiveMealPhotoCaptureEnrollment,
+  revokeAllMealPhotoCaptureEnrollmentsForMember,
   revokeMealPhotoCaptureEnrollmentForMember,
   revokeMealPhotoCaptureEnrollmentForScopedToken,
 } from "../src/lib/device-sync/meal-photo-capture";
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   lockHostedMemberSponsoredAccessRows: vi.fn(),
+  readHostedHealthDataConsentState: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
@@ -25,6 +27,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 vi.mock("@/src/lib/legal/consent", () => ({
   assertHostedHistoricalLaunchConsentGranted: mocks.assertHostedHistoricalLaunchConsentGranted,
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+  readHostedHealthDataConsentState: mocks.readHostedHealthDataConsentState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => {
@@ -68,6 +71,7 @@ describe("meal photo capture enrollment credentials", () => {
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.lockHostedMemberSponsoredAccessRows.mockResolvedValue(undefined);
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
   });
 
   it("persists only hashed bearer/installation values and an encrypted secret", async () => {
@@ -144,6 +148,52 @@ describe("meal photo capture enrollment credentials", () => {
     expect(second.uploadToken).not.toBe(first.uploadToken);
     expect(second.idempotencySecret).not.toBe(first.idempotencySecret);
     expect(prisma.getRecord()).toMatchObject({ revokedAt: null, revokeReason: null });
+  });
+
+  it("revokes every active enrollment when health-data consent is withdrawn", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    const now = new Date("2026-07-30T12:00:00.000Z");
+
+    await expect(revokeAllMealPhotoCaptureEnrollmentsForMember({
+      memberId: MEMBER_ID,
+      now,
+      prisma: prisma.client,
+    })).resolves.toEqual({ revokedCount: 1 });
+
+    expect(prisma.getRecord()).toMatchObject({
+      revokeReason: "health_data_consent_withdrawn",
+      revokedAt: now,
+      updatedAt: now,
+    });
+    expect(mocks.lockHostedMemberRow).toHaveBeenLastCalledWith(
+      prisma.tx,
+      MEMBER_ID,
+    );
+  });
+
+  it("does not let deferred withdrawal cleanup revoke a renewed enrollment", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    mocks.readHostedHealthDataConsentState.mockResolvedValueOnce("granted");
+
+    await expect(revokeAllMealPhotoCaptureEnrollmentsForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+    })).resolves.toEqual({ revokedCount: 0 });
+
+    expect(prisma.getRecord()).toMatchObject({
+      revokeReason: null,
+      revokedAt: null,
+    });
   });
 
   it("locks scoped revocation to the enrollment member", async () => {

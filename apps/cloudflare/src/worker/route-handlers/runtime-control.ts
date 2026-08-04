@@ -35,6 +35,12 @@ import {
   type WorkerRouteContext,
 } from "../../worker-routes/shared.ts";
 import {
+  createHostedR2WriteAdmissionPausedResponse,
+  isHostedR2PausedCanaryUser,
+  readHostedR2PausedCanaryConfigured,
+  readHostedR2WriteAdmission,
+} from "../../r2-cutover.ts";
+import {
   readPresentedWorkerRouteAuthorization,
   requireBoundInternalRouteUser,
 } from "../auth.ts";
@@ -72,6 +78,32 @@ const runtimeEnsureProcessingRoute = {
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
+const runtimeHealthDataConsentRoute = {
+  authorizeBeforeMethod: true,
+  authorization: "vercel-oidc",
+  beforeMethod(context, params) {
+    return requireBoundInternalRouteUser(
+      context,
+      params,
+      "runtime-health-data-consent",
+    );
+  },
+  async handle(context, params) {
+    return handleRuntimeHealthDataConsentRoute(context, params.userId);
+  },
+  match: (pathname) => matchCloudflareHostedControlUserRoutePath(
+    "runtimeHealthDataConsentReconcile",
+    pathname,
+  ),
+  methods: [
+    CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS
+      .runtimeHealthDataConsentReconcile.method,
+  ],
+  name: "runtime-health-data-consent",
+  signatureBodyLimitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+  wrongMethodResponse: "method-not-allowed",
+} satisfies DeclarativeRoute<WorkerRouteContext>;
+
 const userStatusRoute = {
   authorizeBeforeMethod: true,
   authorization: "vercel-oidc",
@@ -89,6 +121,7 @@ const userStatusRoute = {
 
 export const runtimeProcessingRoutes = [
   runtimeEnsureProcessingRoute,
+  runtimeHealthDataConsentRoute,
 ] as const;
 
 export const userStatusRoutes = [
@@ -101,7 +134,19 @@ export async function handleStatusRoute(
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
   const stub = await resolveUserRunnerStub(context.env, userId);
-  return json(await stub.runnerStatus(readHostedStatusRouteOptions(context.url)));
+  const status = await stub.runnerStatus(readHostedStatusRouteOptions(context.url));
+  return json({
+    ...status,
+    ...(status.r2Cutover
+      ? {
+          r2Cutover: {
+            ...status.r2Cutover,
+            pausedCanaryConfigured: readHostedR2PausedCanaryConfigured(context.env),
+            writeAdmission: readHostedR2WriteAdmission(context.env),
+          },
+        }
+      : {}),
+  });
 }
 
 function readHostedStatusRouteOptions(url: URL): { logLimit?: number } | undefined {
@@ -153,6 +198,12 @@ export async function handleRuntimeEnsureProcessingRoute(
       // caller-supplied body fields.
       authorizationKind === "vercel-oidc",
     );
+    const writeAdmission = readHostedR2WriteAdmission(context.env);
+    const admitPausedCanary = authorizationKind === "web-callback-signature"
+      && await isHostedR2PausedCanaryUser(context.env, userId);
+    if (writeAdmission === "paused" && !admitPausedCanary) {
+      return json(createHostedR2WriteAdmissionPausedResponse());
+    }
     if (authorizationKind === "vercel-oidc") {
       const executionCtx = context.executionCtx;
       if (!executionCtx) {
@@ -210,6 +261,29 @@ export async function handleRuntimeEnsureProcessingRoute(
     orchestration,
     userId,
   }));
+}
+
+export async function handleRuntimeHealthDataConsentRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const payload = await readCachedRequestText(context, {
+    limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+  });
+  const body = requireJsonObject(payload.trim() ? JSON.parse(payload) : {});
+  if (Object.keys(body).length > 0) {
+    throw new TypeError(
+      "Hosted runtime health-data consent request must be empty.",
+    );
+  }
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  if (!stub.reconcileRuntimeHealthDataConsentForUser) {
+    throw new Error(
+      "Hosted runtime health-data consent reconciliation is unavailable.",
+    );
+  }
+  return json(await stub.reconcileRuntimeHealthDataConsentForUser(userId));
 }
 
 function runRuntimeEnsureProcessingForUser(input: {

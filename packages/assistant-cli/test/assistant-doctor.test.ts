@@ -199,6 +199,7 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   sentAt: '2026-04-08T00:01:05.000Z',
   attemptCount: 1,
   status: 'sent',
+  card: null,
   media: [],
   message: 'hello',
   operation: null,

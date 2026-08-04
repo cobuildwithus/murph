@@ -16,6 +16,7 @@ import type {
   HostedUsageTopUpReturn,
 } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
+import { HostedHealthDataConsentSettings } from "@/src/components/settings/hosted-health-data-consent-settings";
 import { SettingsAuthRequired } from "./settings-auth-required";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
@@ -39,6 +40,13 @@ import {
   resolveVisibleHostedBillingPlanCodes,
 } from "@/src/lib/hosted-onboarding/billing-plan-eligibility";
 import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
+import {
+  isHostedCustomChatCompletionsEnabled,
+  isHostedCustomInferenceEnabled,
+} from "@/src/lib/hosted-inference/feature";
+import {
+  readHostedInferenceConnectionView,
+} from "@/src/lib/hosted-inference/connection-store";
 import { readHostedPulseTrialContinuationCookie } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
 import {
   HOSTED_START_PAID_GROUP_RETURN_PARAM,
@@ -66,6 +74,9 @@ import {
 import {
   isHostedBillingPlanSelectionAvailable,
 } from "@/src/lib/hosted-onboarding/runtime";
+import {
+  readHostedConsentStatus,
+} from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -108,9 +119,9 @@ const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams?: Promise<SettingsSearchParams>;
-} = {}) {
-  const resolvedSearchParams = searchParams ? await searchParams : {};
+  searchParams: Promise<SettingsSearchParams>;
+}) {
+  const resolvedSearchParams = await searchParams;
   const openEmailLink =
     readFirstSearchParamValue(resolvedSearchParams.addEmail) === "true";
   const addUsageTarget = readOnlySearchParamValue(resolvedSearchParams.addUsage);
@@ -170,6 +181,7 @@ export default async function SettingsPage({
       })
     : null;
   const settingsSnapshot = settingsData?.settingsSnapshot ?? null;
+  const consentStatus = settingsData?.consentStatus ?? null;
   const freshPrivySession = settingsData?.freshPrivySession ?? null;
   const familyOwner = settingsData?.familyOwner ?? null;
   const familyAccess = settingsData?.familyAccess ?? null;
@@ -182,6 +194,7 @@ export default async function SettingsPage({
   const usageTopUpOfferCodes = settingsData?.usageTopUpOfferCodes ?? [];
   const usageTopUpActivePurchase = settingsData?.usageTopUpActivePurchase ?? null;
   const usageTopUpReturnTarget = settingsData?.usageTopUpReturnTarget ?? null;
+  const inferenceConnection = settingsData?.inferenceConnection ?? null;
   const account = settingsSnapshot?.account ?? null;
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
@@ -515,12 +528,17 @@ export default async function SettingsPage({
         </div>
         <HostedAssistantModelSettings
           canUpgradeToEdge={canUpgradeToEdge}
+          chatCompletionsAvailable={isHostedCustomChatCompletionsEnabled()}
           configurationAvailable={account?.assistant?.configurationAvailable === true}
+          customInferenceAvailable={isHostedCustomInferenceEnabled()}
           expectedCurrentPlanCode={
             currentPlanCode === "launch_group_monthly"
             || currentPlanCode === "launch_monthly"
               ? currentPlanCode
               : undefined
+          }
+          initialConnection={
+            isHostedCustomInferenceEnabled() ? inferenceConnection : null
           }
           initialDormantSolPreference={
             account?.assistant?.dormantSolPreference === true
@@ -610,7 +628,14 @@ export default async function SettingsPage({
             <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               Data & privacy
             </div>
-            <HostedDataPrivacySettings authenticated={authenticated} authorizationEnabled />
+            <HostedHealthDataConsentSettings
+              authenticated={authenticated}
+              initialStatus={consentStatus}
+            />
+            <HostedDataPrivacySettings
+              authenticated={authenticated}
+              authorizationEnabled
+            />
           </section>
         </>
       ) : (
@@ -618,7 +643,14 @@ export default async function SettingsPage({
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
             Data & privacy
           </div>
-          <HostedDataPrivacySettings authenticated={authenticated} authorizationEnabled={false} />
+          <HostedHealthDataConsentSettings
+            authenticated={authenticated}
+            initialStatus={consentStatus}
+          />
+          <HostedDataPrivacySettings
+            authenticated={authenticated}
+            authorizationEnabled={false}
+          />
         </section>
       )}
     </div>
@@ -652,6 +684,16 @@ async function readSettingsPageData(input: {
     memberId,
     prisma,
   });
+  const inferenceConnection = isHostedCustomInferenceEnabled()
+    ? await readHostedInferenceConnectionView({
+        memberId,
+        prisma,
+      })
+    : null;
+  const consentStatus = await readHostedConsentStatus({
+    memberId,
+    prisma,
+  }).catch(() => null);
   const familyOwner = await readHostedFamilyOwnerSnapshotForMember({
     memberId,
     prisma,
@@ -709,10 +751,12 @@ async function readSettingsPageData(input: {
       }).catch(() => null)
     : null;
   return {
+    consentStatus,
     familyAccess,
     familyOwner,
     groupPlanAvailable,
     hasConfirmedGroupMembership,
+    inferenceConnection,
     freshPrivySession: await freshPrivySessionPromise,
     secureApprovalStatus: await secureApprovalStatusPromise,
     settingsSnapshot,

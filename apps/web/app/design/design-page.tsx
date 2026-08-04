@@ -1,6 +1,4 @@
-"use client";
-
-import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { BrandContent } from "./brand-content";
 import { ComponentsContent } from "./components-content";
 import { ConsentContent } from "./consent-content";
@@ -15,14 +13,9 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-export function DesignPage() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const activeTab = (searchParams.get("tab") as TabId) || "brand";
-
-  function setTab(tab: TabId) {
-    router.replace(`/design?tab=${tab}`, { scroll: false });
-  }
+export function DesignPage({ activeTab = "brand" }: { activeTab?: string }) {
+  const selectedTab: TabId =
+    TABS.find((tab) => tab.id === activeTab)?.id ?? "brand";
 
   return (
     <main className="min-h-screen bg-[#f5f0e8] antialiased">
@@ -30,32 +23,35 @@ export function DesignPage() {
       <div className="sticky top-0 z-30 overflow-x-auto border-b border-[#e5e1d8] bg-[#f5f0e8]/95 backdrop-blur-sm">
         <div
           className={`mx-auto flex min-w-max items-center gap-1 py-3 ${
-            activeTab === "sections"
+            selectedTab === "sections"
               ? "max-w-7xl px-5 sm:px-8 lg:px-12"
               : "max-w-5xl px-6 sm:px-10 lg:px-16"
           }`}
         >
           {TABS.map((tab) => (
-            <button
+            <Link
+              aria-current={selectedTab === tab.id ? "page" : undefined}
+              href={`/design?tab=${tab.id}`}
               key={tab.id}
-              onClick={() => setTab(tab.id)}
+              replace
+              scroll={false}
               className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                activeTab === tab.id
+                selectedTab === tab.id
                   ? "bg-[#1A1F16] text-[#FAF8F4]"
                   : "text-[#5C5A52] hover:bg-[#e5e1d8]"
               }`}
             >
               {tab.label}
-            </button>
+            </Link>
           ))}
         </div>
       </div>
 
-      {activeTab === "brand" ? (
+      {selectedTab === "brand" ? (
         <BrandContent />
-      ) : activeTab === "sections" ? (
+      ) : selectedTab === "sections" ? (
         <SectionsContent />
-      ) : activeTab === "consent" ? (
+      ) : selectedTab === "consent" ? (
         <ConsentContent />
       ) : (
         <ComponentsContent />

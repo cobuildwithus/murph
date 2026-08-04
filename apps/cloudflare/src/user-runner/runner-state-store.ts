@@ -89,8 +89,10 @@ export type RunnerProviderEgressTokenValidationResult =
     }
   | {
       attemptId: string;
+      customInferenceEnvelope?: string;
       leaseGeneration: string;
       owns: true;
+      platformAiUsageAllowed?: boolean;
       record: RunnerStateRecord;
       userId: string;
       workspaceVersion: string | null;
@@ -106,6 +108,7 @@ export type RunnerProviderEgressCredentialValidationResult =
       attemptId: string;
       leaseGeneration: string;
       owns: true;
+      platformAiUsageAllowed?: boolean;
       record: RunnerStateRecord;
       userId: string;
       workspaceVersion: string | null;
@@ -202,6 +205,8 @@ export class RunnerStateStore {
     meta.active_generation = nextGeneration;
     meta.active_kind = kind;
     meta.active_provider_egress_token_hash = providerEgressTokenHash;
+    meta.active_custom_inference_envelope = null;
+    meta.active_platform_ai_allowed = null;
     meta.active_reason = processingMode;
     meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
     meta.active_started_at = startedAt;
@@ -223,7 +228,10 @@ export class RunnerStateStore {
     };
   }
 
-  async bindWriteFenceWorkspaceVersion(input: {
+  async bindWriteFenceInvocationFacts(input: {
+    customInferenceEnvelope: string | null;
+    platformAiUsageAllowed: boolean | null;
+    processingMode?: RunnerRuntimeProcessingMode | null;
     token: RunnerWriteFenceToken;
     workspaceVersion: string;
   }): Promise<RunnerWriteFenceToken> {
@@ -233,11 +241,35 @@ export class RunnerStateStore {
     }
 
     meta.active_workspace_version = requireWorkspaceVersion(input.workspaceVersion);
+    meta.active_custom_inference_envelope = normalizeCustomInferenceEnvelopeOrNull(
+      input.customInferenceEnvelope,
+    );
+    meta.active_platform_ai_allowed = input.platformAiUsageAllowed === null
+      ? null
+      : input.platformAiUsageAllowed
+        ? 1
+        : 0;
+    if (input.processingMode !== undefined) {
+      meta.active_reason = readRunnerRuntimeProcessingMode(input.processingMode);
+    }
     this.writeMetaRowSync(meta);
     return {
       ...input.token,
+      processingMode: readRunnerRuntimeProcessingMode(meta.active_reason),
       workspaceVersion: meta.active_workspace_version,
     };
+  }
+
+  async bindWriteFenceWorkspaceVersion(input: {
+    token: RunnerWriteFenceToken;
+    workspaceVersion: string;
+  }): Promise<RunnerWriteFenceToken> {
+    return await this.bindWriteFenceInvocationFacts({
+      customInferenceEnvelope: null,
+      platformAiUsageAllowed: null,
+      token: input.token,
+      workspaceVersion: input.workspaceVersion,
+    });
   }
 
   async clearWriteFenceAfterCompletion(input: {
@@ -359,9 +391,10 @@ export class RunnerStateStore {
     };
   }
 
-  async clearWriteFenceForUserDeletion(userId: string): Promise<{
+  async clearWriteFenceForUserControl(userId: string): Promise<{
     attemptId: string | null;
     cleared: boolean;
+    runnerContainerName: string | null;
   }> {
     const meta = this.selectMetaRowSync();
     if (meta && meta.user_id !== userId) {
@@ -372,17 +405,48 @@ export class RunnerStateStore {
       return {
         attemptId: null,
         cleared: false,
+        runnerContainerName: normalizeRunnerContainerNameOrNull(
+          meta?.active_runner_container_name,
+        ),
       };
     }
 
     const attemptId = meta.active_attempt_id;
+    const runnerContainerName = normalizeRunnerContainerNameOrNull(
+      meta.active_runner_container_name,
+    ) ?? userId;
     this.clearActiveRunMetaSync(meta);
+    meta.active_runner_container_name = runnerContainerName;
     this.writeMetaRowSync(meta);
 
     return {
       attemptId,
       cleared: true,
+      runnerContainerName,
     };
+  }
+
+  async clearStoppedRunnerContainerForUserControl(input: {
+    runnerContainerName: string;
+    userId: string;
+  }): Promise<boolean> {
+    const meta = this.selectMetaRowSync();
+    if (meta && meta.user_id !== input.userId) {
+      throw new Error("Hosted runner Durable Object is bound to a different user.");
+    }
+
+    if (
+      !meta
+      || meta.active_attempt_id
+      || normalizeRunnerContainerNameOrNull(meta.active_runner_container_name)
+        !== input.runnerContainerName
+    ) {
+      return false;
+    }
+
+    meta.active_runner_container_name = null;
+    this.writeMetaRowSync(meta);
+    return true;
   }
 
   async readWriteFenceToken(): Promise<RunnerWriteFenceToken | null> {
@@ -475,8 +539,14 @@ export class RunnerStateStore {
 
     return {
       attemptId: token.attemptId,
+      ...(meta.active_custom_inference_envelope
+        ? { customInferenceEnvelope: meta.active_custom_inference_envelope }
+        : {}),
       leaseGeneration: token.leaseGeneration,
       owns: true,
+      ...(meta.active_platform_ai_allowed === null
+        ? {}
+        : { platformAiUsageAllowed: meta.active_platform_ai_allowed === 1 }),
       record: this.readStateFromMetaSync(meta),
       userId: token.userId,
       workspaceVersion: token.workspaceVersion,
@@ -543,6 +613,9 @@ export class RunnerStateStore {
       attemptId: token.attemptId,
       leaseGeneration: token.leaseGeneration,
       owns: true,
+      ...(meta.active_platform_ai_allowed === null
+        ? {}
+        : { platformAiUsageAllowed: meta.active_platform_ai_allowed === 1 }),
       record: this.readStateFromMetaSync(meta),
       userId: token.userId,
       workspaceVersion: token.workspaceVersion,
@@ -597,6 +670,8 @@ export class RunnerStateStore {
         active_generation,
         active_kind,
         active_provider_egress_token_hash,
+        active_custom_inference_envelope,
+        active_platform_ai_allowed,
         active_runner_container_name,
         active_reason,
         active_started_at,
@@ -625,6 +700,8 @@ export class RunnerStateStore {
         active_generation,
         active_kind,
         active_provider_egress_token_hash,
+        active_custom_inference_envelope,
+        active_platform_ai_allowed,
         active_runner_container_name,
         active_reason,
         active_started_at,
@@ -633,13 +710,15 @@ export class RunnerStateStore {
         last_error_at,
         last_error_code,
         last_invocation_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_attempt_id,
       normalizeNonNegativeInteger(meta.active_generation),
       meta.active_kind,
       meta.active_provider_egress_token_hash,
+      meta.active_custom_inference_envelope,
+      meta.active_platform_ai_allowed,
       meta.active_runner_container_name,
       meta.active_reason,
       meta.active_started_at,
@@ -672,6 +751,8 @@ export class RunnerStateStore {
     meta.active_attempt_id = null;
     meta.active_kind = null;
     meta.active_provider_egress_token_hash = null;
+    meta.active_custom_inference_envelope = null;
+    meta.active_platform_ai_allowed = null;
     meta.active_reason = null;
     meta.active_runner_container_name = null;
     meta.active_started_at = null;
@@ -750,6 +831,21 @@ function normalizeProviderKindOrNull(value: unknown): string | null {
   return typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(value.trim())
     ? value.trim()
     : null;
+}
+
+function normalizeCustomInferenceEnvelopeOrNull(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (
+    typeof value !== "string"
+    || !value
+    || value !== value.trim()
+    || value.length > 16_384
+  ) {
+    throw new TypeError("Hosted custom inference envelope is invalid.");
+  }
+  return value;
 }
 
 function createRuntimeWriteAttemptId(): string {

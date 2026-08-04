@@ -1,5 +1,7 @@
-import { act, createElement } from "react";
+import { act, createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 
 import { renderClientComponent } from "./render-client-component";
 
@@ -48,6 +50,15 @@ vi.mock("@privy-io/react-auth", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth-support", () => ({
   finalizeHostedPhoneLink: mocks.finalizeHostedPhoneLink,
+}));
+
+vi.mock("@/src/components/ui/dialog", () => ({
+  Dialog: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
+    open ? createElement("div", { "data-dialog": "open" }, children) : null,
+  DialogContent: "div",
+  DialogDescription: "p",
+  DialogHeader: "div",
+  DialogTitle: "h2",
 }));
 
 let cleanupRender: (() => Promise<void>) | null = null;
@@ -860,6 +871,94 @@ describe("HostedPhoneSettings", () => {
     expect(supportLink?.getAttribute("href")).toContain("subject=Help+linking+my+phone");
     expect(supportLink?.getAttribute("href")).not.toContain("privy-user-a");
     expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
+  });
+
+  it("offers support without retrying a terminal transferred-source conflict", async () => {
+    mocks.providerPhoneNumber = "+15550100002";
+    mocks.finalizeHostedPhoneLink.mockRejectedValue(new HostedOnboardingApiError({
+      code: "PRIVY_PHONE_TRANSFER_SOURCE_STILL_ACTIVE",
+      message:
+        "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
+      retryable: false,
+    }));
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        initialPhoneNumber: null,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      findButton(container, "Change phone")?.dispatchEvent(
+        new Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain(
+        "That phone moved from another Murph account",
+      );
+    });
+
+    expect(findButton(container, "Change phone")).toBeUndefined();
+    expect(container.textContent).toContain("Contact support");
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
+    expect(mocks.linkPhone).not.toHaveBeenCalled();
+    expect(mocks.updatePhone).not.toHaveBeenCalled();
+  });
+
+  it("makes an auto-open transferred-source conflict terminal after Privy exits", async () => {
+    mocks.providerPhoneNumber = "+15550100001";
+    mocks.finalizeHostedPhoneLink.mockRejectedValue(new HostedOnboardingApiError({
+      code: "PRIVY_PHONE_TRANSFER_SOURCE_STILL_ACTIVE",
+      message:
+        "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
+      retryable: false,
+    }));
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        autoOpen: true,
+        initialPhoneNumber: "+15550100001",
+      }),
+      { requireButton: false },
+    );
+    cleanupRender = cleanup;
+
+    await vi.waitFor(() => {
+      expect(mocks.updatePhone).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      mocks.updateAccountCallbacks?.onError?.("account_transfer_required", {
+        linkMethod: "sms",
+      });
+      mocks.updateAccountCallbacks?.onError?.("exited_update_flow", {
+        linkMethod: "sms",
+      });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain(
+        "That phone moved from another Murph account",
+      );
+    });
+
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledWith({
+      expectation: {
+        kind: "changed-from",
+        phoneNumber: "+15550100001",
+      },
+      onLinked: expect.any(Function),
+    });
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
+    expect(mocks.updatePhone).toHaveBeenCalledTimes(1);
+    expect(mocks.linkPhone).not.toHaveBeenCalled();
+    expect(findButton(container, "Try again")).toBeUndefined();
+    expect(container.textContent).toContain("Contact support");
   });
 
   it("does not infer an update flow from linked-account projections alone", async () => {

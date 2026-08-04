@@ -22,11 +22,11 @@ type RecordsSearchParams = {
 export default async function RecordsPage({
   searchParams,
 }: {
-  searchParams?: Promise<RecordsSearchParams>;
-} = {}) {
+  searchParams: Promise<RecordsSearchParams>;
+}) {
   const [auth, resolvedSearchParams] = await Promise.all([
     getHostedDashboardPageAuthSnapshot(),
-    searchParams ?? Promise.resolve<RecordsSearchParams>({}),
+    searchParams,
   ]);
   const member = auth.authenticatedMember;
   let initialConnections: readonly ClinicalRecordConnectionContract[] = [];

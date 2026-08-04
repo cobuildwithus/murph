@@ -1,3 +1,5 @@
+"use client";
+
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
 import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";

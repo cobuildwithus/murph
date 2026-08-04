@@ -185,6 +185,8 @@ describe("hosted runtime internal web routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED;
+    delete process.env.HOSTED_CUSTOM_INFERENCE_ENABLED;
     delete process.env.HOSTED_VENICE_ENABLED;
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
       buildRuntimeMailboxAccessRecord(),
@@ -1653,6 +1655,140 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload.hostedAssistantProviderOverride).toBeUndefined();
+  });
+
+  it("projects the current platform usage decision for a managed route", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(
+      buildWorkspaceRecord({ version: "4" }),
+    );
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
+      status: "denied",
+    });
+
+    const response = await workspaceRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-workspace",
+    ));
+    const payload = parseHostedWorkspaceReadResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.platformAiUsageAllowed).toBe(false);
+    expect(payload.hostedAssistantCustomInferenceOverride).toBeUndefined();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "read_only",
+      prisma: expect.any(Object),
+      userId: "member_routes_1",
+    });
+  });
+
+  it("projects a selected custom route without managed inference facts", async () => {
+    process.env.HOSTED_CUSTOM_INFERENCE_ENABLED = "1";
+    mocks.readHostedWorkspace.mockResolvedValue(
+      buildWorkspaceRecord({ version: "4" }),
+    );
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
+      customInferenceReverificationRequired: false,
+      customInferenceSelected: true,
+      hostedAssistantCustomInferenceOverride: {
+        contextWindowTokens: 131_072,
+        modelAlias: "murph-custom-r3",
+        protocol: "responses",
+        revision: 3,
+        supportsImages: false,
+        verificationProfile:
+          "murph-codex-0.145.0-portable-responses-v1",
+      },
+      hostedAssistantModelOverride: "gpt-5.6-sol",
+      hostedAssistantProviderOverride: "venice",
+      hostedAssistantReasoningEffortOverride: "high",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+      solAvailable: true,
+    });
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
+      status: "denied",
+    });
+
+    const response = await workspaceRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-workspace"
+        + "?customInferenceVersion=1",
+    ));
+    const payload = parseHostedWorkspaceReadResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      hostedAssistantCustomInferenceOverride: {
+        modelAlias: "murph-custom-r3",
+        protocol: "responses",
+        revision: 3,
+      },
+      platformAiUsageAllowed: false,
+    });
+    expect(payload.hostedAssistantModelOverride).toBeUndefined();
+    expect(payload.hostedAssistantProviderOverride).toBeUndefined();
+    expect(payload.hostedAssistantReasoningEffortOverride).toBeUndefined();
+  });
+
+  it("fails closed when the runtime cannot consume a selected custom route", async () => {
+    process.env.HOSTED_CUSTOM_INFERENCE_ENABLED = "1";
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
+      customInferenceReverificationRequired: false,
+      customInferenceSelected: true,
+      hostedAssistantCustomInferenceOverride: {
+        contextWindowTokens: 131_072,
+        modelAlias: "murph-custom-r3",
+        protocol: "responses",
+        revision: 3,
+        supportsImages: false,
+        verificationProfile:
+          "murph-codex-0.145.0-portable-responses-v1",
+      },
+      model: "gpt-5.6-terra",
+      solAvailable: false,
+    });
+
+    const response = await workspaceRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-workspace",
+    ));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_CUSTOM_INFERENCE_CONSUMER_UNSUPPORTED",
+      },
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a selected Chat route is not enabled", async () => {
+    process.env.HOSTED_CUSTOM_INFERENCE_ENABLED = "1";
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
+      customInferenceReverificationRequired: false,
+      customInferenceSelected: true,
+      hostedAssistantCustomInferenceOverride: {
+        contextWindowTokens: 131_072,
+        modelAlias: "murph-custom-r3",
+        protocol: "chat_completions",
+        revision: 3,
+        supportsImages: false,
+        verificationProfile:
+          "murph-codex-0.145.0-portable-responses-v1",
+      },
+      model: "gpt-5.6-terra",
+      solAvailable: false,
+    });
+
+    const response = await workspaceRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-workspace"
+        + "?customInferenceVersion=1",
+    ));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_CUSTOM_CHAT_COMPLETIONS_UNAVAILABLE",
+      },
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {

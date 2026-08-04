@@ -73,6 +73,7 @@ const mocks = vi.hoisted(() => ({
   HostedAssistantModelSettings: vi.fn((props: {
     canUpgradeToEdge: boolean;
     configurationAvailable: boolean;
+    customInferenceAvailable: boolean;
     initialDormantSolPreference: boolean;
     initialModel: string;
     initialProvider: string;
@@ -115,8 +116,15 @@ const mocks = vi.hoisted(() => ({
       `Hosted billing settings ${String(props.authenticated)} ${String(props.canUpgradeToEdge ?? false)} ${String(props.currentBillingPlanCode ?? "")}`,
       props.usageActivityDetail,
     )),
-  HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
+  HostedDataPrivacySettings: vi.fn((props: {
+    authenticated: boolean;
+  }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
+  HostedHealthDataConsentSettings: vi.fn((props: {
+    authenticated: boolean;
+    initialStatus: unknown;
+  }) =>
+    React.createElement("div", null, `Hosted health data consent ${String(props.authenticated)}`)),
   HostedFamilySettings: vi.fn(() => React.createElement("div", null, "Hosted family settings")),
   HostedPasskeySettings: vi.fn((props: {
     authenticated: boolean;
@@ -142,6 +150,7 @@ const mocks = vi.hoisted(() => ({
     },
   },
   readHostedAccountSettingsPageSnapshot: vi.fn(),
+  readHostedConsentStatus: vi.fn(),
   readHostedActiveUsageCreditPurchaseForPayer: vi.fn(),
   readHostedAiUsageActivity: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
@@ -202,6 +211,16 @@ vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
     mocks.readHostedAccountSettingsPageSnapshot,
   withServerApprovedPrivyAccountHints: mocks.withServerApprovedPrivyAccountHints,
 }));
+
+vi.mock("@/src/lib/legal/consent", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/legal/consent")>(
+    "@/src/lib/legal/consent",
+  );
+  return {
+    ...actual,
+    readHostedConsentStatus: mocks.readHostedConsentStatus,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
   getHostedPrivySession: mocks.getHostedPrivySession,
@@ -267,6 +286,10 @@ vi.mock("@/src/components/settings/hosted-data-privacy-settings", () => ({
   HostedDataPrivacySettings: mocks.HostedDataPrivacySettings,
 }));
 
+vi.mock("@/src/components/settings/hosted-health-data-consent-settings", () => ({
+  HostedHealthDataConsentSettings: mocks.HostedHealthDataConsentSettings,
+}));
+
 vi.mock("@/src/components/settings/hosted-family-settings", () => ({
   HostedFamilySettings: mocks.HostedFamilySettings,
 }));
@@ -310,12 +333,31 @@ function mockSettingsPageSnapshot(input: {
   });
 }
 
+const GRANTED_HEALTH_DATA_CONSENT_STATUS = {
+  documents: [],
+  generatedAt: "2026-07-30T12:00:00.000Z",
+  launchGranted: true,
+  launchScopes: [],
+  ok: true,
+  schema: "murph.hosted-consent-status.v1",
+  scopes: [{
+    grant: {
+      scope: "launch.health-data",
+      status: "granted",
+    },
+    scope: "launch.health-data",
+  }],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
   mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
+  mocks.readHostedConsentStatus.mockResolvedValue(
+    GRANTED_HEALTH_DATA_CONSENT_STATUS,
+  );
   mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(null);
   mocks.readHostedConfiguredUsageCreditOfferCodes.mockReturnValue([
     "usage_5_usd",
@@ -415,7 +457,7 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  await expect(SettingsPage()).rejects.toThrow("NEXT_REDIRECT:/");
+  await expect(SettingsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("NEXT_REDIRECT:/");
 
   expect(mocks.getPrisma).not.toHaveBeenCalled();
   expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
@@ -602,7 +644,7 @@ test("SettingsPage treats a surviving claim as inert without the marked return",
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  const markup = renderToStaticMarkup(await SettingsPage());
+  const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.readHostedPulseTrialContinuationCookie).not.toHaveBeenCalled();
   expect(mocks.PulseTrialBillingContinuation).not.toHaveBeenCalled();
@@ -807,8 +849,11 @@ test("SettingsPage reads the app session and persisted account settings into the
     }), undefined);
     expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
       canUpgradeToEdge: true,
+      chatCompletionsAvailable: false,
       configurationAvailable: true,
+      customInferenceAvailable: false,
       expectedCurrentPlanCode: "launch_monthly",
+      initialConnection: null,
       initialDormantSolPreference: false,
       initialModel: "gpt-5.6-sol",
       initialProvider: "openai",
@@ -816,6 +861,10 @@ test("SettingsPage reads the app session and persisted account settings into the
       veniceAvailable: false,
     }, undefined);
     expect(mocks.readHostedAccountSettingsPageSnapshot).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
+    });
+    expect(mocks.readHostedConsentStatus).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prisma,
     });
@@ -940,6 +989,24 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
     }), undefined);
+    expect(mocks.HostedHealthDataConsentSettings).toHaveBeenCalledWith({
+      authenticated: true,
+      initialStatus: GRANTED_HEALTH_DATA_CONSENT_STATUS,
+    }, undefined);
+
+    mocks.HostedDataPrivacySettings.mockClear();
+    mocks.HostedHealthDataConsentSettings.mockClear();
+    mocks.readHostedConsentStatus.mockRejectedValueOnce(new Error("consent read unavailable"));
+    renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(mocks.HostedHealthDataConsentSettings).toHaveBeenCalledWith({
+      authenticated: true,
+      initialStatus: null,
+    }, undefined);
+    expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
+      authenticated: true,
+      authorizationEnabled: true,
+    }, undefined);
   } finally {
     if (originalPrivyAppId === undefined) {
       delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
@@ -1506,7 +1573,7 @@ test("SettingsPage keeps a frozen active purchase visible when current offers ar
   );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -1569,7 +1636,7 @@ test("SettingsPage keeps a frozen personal purchase recoverable after Family act
   const { default: SettingsPage } = await import(
     "../app/(dashboard)/settings/page"
   );
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -1641,7 +1708,7 @@ test.each([
   );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -1919,7 +1986,7 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  const markup = renderToStaticMarkup(await SettingsPage());
+  const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Hosted account settings \+15550100003/);
   expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
@@ -1975,7 +2042,7 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.CustomizeMurphSettings).toHaveBeenCalledWith(expect.objectContaining({
     voiceTestContactOption: null,
@@ -2011,7 +2078,7 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
     missions: [],
     missionsEnabled: true,
   });
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
   expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith(
     expect.objectContaining({
       activity: expect.objectContaining({
@@ -2038,7 +2105,7 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
     }],
     missionsEnabled: true,
   });
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
   expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith(
     expect.objectContaining({
       activity: expect.objectContaining({
@@ -2078,7 +2145,7 @@ test("SettingsPage exposes Start Pulse recovery for a paused Pulse Trial subscri
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
@@ -2179,7 +2246,7 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     canStartFamily: true,
@@ -2223,7 +2290,7 @@ test("SettingsPage keeps Family settings available when the top-up catalog is un
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
     expect.objectContaining({
       usageTopUpOffers: [],
@@ -2315,7 +2382,7 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
   try {
     const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-    renderToStaticMarkup(await SettingsPage());
+    renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
     expect(maxDatabaseReadsInFlight).toBe(1);
     expect(databaseReadOrder).toEqual([
@@ -2377,7 +2444,7 @@ test("SettingsPage preserves billing when optional usage and Privy reads fail", 
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -2408,7 +2475,7 @@ test("SettingsPage renders fallback values without reading settings data when th
   try {
     const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-    renderToStaticMarkup(await SettingsPage());
+    renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
     expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
     expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
@@ -2487,7 +2554,7 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
     snapshot: accountSnapshot,

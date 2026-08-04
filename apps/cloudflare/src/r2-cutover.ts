@@ -6,16 +6,23 @@ import type { R2BucketLike } from "./bundle-store.ts";
 
 export const HOSTED_R2_CUTOVER_PHASE_ENV = "HOSTED_R2_CUTOVER_PHASE";
 export const HOSTED_R2_CUTOVER_PROTOCOL_VERSION = "r2-oc-enam-v1";
+export const HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256_ENV =
+  "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256";
+export const HOSTED_R2_WRITE_ADMISSION_ENV = "HOSTED_R2_WRITE_ADMISSION";
+export const HOSTED_R2_WRITE_ADMISSION_RETRY_DELAY_MS = 60_000;
 
 const cutoverContextByEnvironment = new WeakMap<object, HostedR2CutoverContext>();
 
 export type HostedR2BucketRole = "destination" | "source";
 export type HostedR2CutoverPhase = "destination_active" | "source_active";
+export type HostedR2WriteAdmission = "open" | "paused";
 
 export interface HostedR2CutoverEnvironmentSource extends Readonly<Record<string, unknown>> {
   BUNDLES: R2BucketLike;
   BUNDLES_ENAM?: R2BucketLike;
   HOSTED_R2_CUTOVER_PHASE?: unknown;
+  HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256?: unknown;
+  HOSTED_R2_WRITE_ADMISSION?: unknown;
 }
 
 export interface HostedR2CutoverContext {
@@ -100,6 +107,45 @@ export function readHostedR2CutoverStatus(
     coexisting: context.coexisting,
     phase: context.phase,
     protocolVersion: HOSTED_R2_CUTOVER_PROTOCOL_VERSION,
+  };
+}
+
+export function readHostedR2WriteAdmission(
+  source: Readonly<Record<string, unknown>>,
+): HostedR2WriteAdmission {
+  const value = readOptionalString(source.HOSTED_R2_WRITE_ADMISSION) ?? "open";
+  if (value !== "open" && value !== "paused") {
+    throw new TypeError(`${HOSTED_R2_WRITE_ADMISSION_ENV} must be open or paused.`);
+  }
+  return value;
+}
+
+export function readHostedR2PausedCanaryConfigured(
+  source: Readonly<Record<string, unknown>>,
+): boolean {
+  return readHostedR2PausedCanaryUserIdSha256(source) !== null;
+}
+
+export async function isHostedR2PausedCanaryUser(
+  source: Readonly<Record<string, unknown>>,
+  userId: string,
+): Promise<boolean> {
+  if (
+    readHostedR2WriteAdmission(source) !== "paused"
+    || readOptionalString(source.HOSTED_R2_CUTOVER_PHASE) !== "destination_active"
+  ) {
+    return false;
+  }
+  const expectedSha256 = readHostedR2PausedCanaryUserIdSha256(source);
+  return expectedSha256 !== null && await sha256Hex(userId) === expectedSha256;
+}
+
+export function createHostedR2WriteAdmissionPausedResponse(
+  nowMs = Date.now(),
+): { kind: "retry_later"; retryAt: string } {
+  return {
+    kind: "retry_later",
+    retryAt: new Date(nowMs + HOSTED_R2_WRITE_ADMISSION_RETRY_DELAY_MS).toISOString(),
   };
 }
 
@@ -275,4 +321,23 @@ function readOptionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
     : null;
+}
+
+function readHostedR2PausedCanaryUserIdSha256(
+  source: Readonly<Record<string, unknown>>,
+): string | null {
+  const value = readOptionalString(source.HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256);
+  if (value !== null && !/^[a-f0-9]{64}$/u.test(value)) {
+    throw new TypeError(
+      `${HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256_ENV} must be a lowercase SHA-256 hex digest.`,
+    );
+  }
+  return value;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
+  );
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

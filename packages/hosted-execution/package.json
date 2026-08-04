@@ -22,6 +22,10 @@
       "types": "./dist/auth.d.ts",
       "default": "./dist/auth.js"
     },
+    "./assistant-inference": {
+      "types": "./dist/assistant-inference.d.ts",
+      "default": "./dist/assistant-inference.js"
+    },
     "./assistant-usage": {
       "types": "./dist/assistant-usage.d.ts",
       "default": "./dist/assistant-usage.js"

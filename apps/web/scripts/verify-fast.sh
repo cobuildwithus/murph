@@ -293,7 +293,7 @@ run_next_build() {
   local build_contact_privacy_keys
   local build_hosted_mailbox_fingerprint_key
   local build_privy_app_id
-  local next_build_command=(next build)
+  local next_build_command=(bash "$script_dir/run-production-next-build.sh")
 
   wait_for_acceptance_cli_coverage
 

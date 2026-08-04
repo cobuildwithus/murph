@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     label: "test-prisma",
   },
   readHostedExecutionControlClientIfConfigured: vi.fn(),
+  readHostedHealthDataConsentState: vi.fn(),
   readHostedWorkspace: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
@@ -69,6 +70,7 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 
 vi.mock("@/src/lib/legal/consent", () => ({
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+  readHostedHealthDataConsentState: mocks.readHostedHealthDataConsentState,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -121,6 +123,7 @@ describe("browser vault session route", () => {
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.hasPendingDirtyConnectionForUser.mockResolvedValue(false);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("granted");
     mocks.assertBrowserVaultMemberAuthority.mockResolvedValue(undefined);
     mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       member: {
@@ -305,6 +308,112 @@ describe("browser vault session route", () => {
     ).toBeGreaterThan(createBrowserVaultSession.mock.invocationCallOrder[0]);
   });
 
+  it("exports the latest available replica after health-data withdrawal", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
+    mocks.hasPendingDirtyConnectionForUser.mockResolvedValueOnce(true);
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("b"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "2",
+    });
+    mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue("c".repeat(64));
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef,
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      deviceSyncImportPending: true,
+      freshness: "stale",
+      refreshPending: true,
+      state: "ready",
+    });
+  });
+
+  it("does not wake processing when consent is withdrawn during export authorization", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    mocks.readHostedHealthDataConsentState
+      .mockResolvedValueOnce("granted")
+      .mockResolvedValueOnce("revoked");
+    mocks.hasPendingDirtyConnectionForUser.mockResolvedValueOnce(true);
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      createdAt: "2026-04-20T08:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatusJson: {},
+      snapshotRef: createSnapshotRef("c"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "3",
+    });
+    mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue("d".repeat(64));
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession: vi.fn().mockResolvedValue({
+        encryptedReplica: createReplicaEnvelope(),
+        replicaAad: createReplicaAad(),
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef,
+        state: "ready",
+      }),
+    });
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedHealthDataConsentState).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      deviceSyncImportPending: true,
+      freshness: "stale",
+      refreshPending: true,
+      state: "ready",
+    });
+  });
+
   it("refuses Settings vault export sessions without consuming the challenge when the replica is missing", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();
@@ -327,6 +436,35 @@ describe("browser vault session route", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "BROWSER_VAULT_SESSION_NOT_FRESH",
+        retryable: true,
+      },
+    });
+  });
+
+  it("returns a truthful retained-replica error without waking withdrawn processing", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession: vi.fn(),
+    });
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BROWSER_VAULT_RETAINED_REPLICA_UNAVAILABLE",
+        message: expect.stringContaining("retained dashboard export"),
         retryable: true,
       },
     });

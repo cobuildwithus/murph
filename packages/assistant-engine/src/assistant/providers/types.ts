@@ -12,6 +12,9 @@ import type {
   AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
 import type {
+  AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
+import type {
   AssistantProviderProgressEvent as SharedAssistantProviderProgressEvent,
 } from '../provider-progress.js'
 import type {
@@ -236,6 +239,8 @@ export interface AssistantProviderTurnExecutionResult {
   finalAction?: AssistantNoReplyDisposition
   reactions?: readonly AssistantTargetedMessageReactionAction[] | null
   response: string
+  /** Final provider-authored text before runtime-owned presentation transforms. */
+  providerAuthoredResponse?: string | null
   /** Capability-free semantic response persisted into model-visible history. */
   transcriptResponse: string | null
   // Completed final answers that were followed by a steered user message and
@@ -244,11 +249,12 @@ export interface AssistantProviderTurnExecutionResult {
   // render every completed agent message.
   precedingResponseSegments?: readonly AssistantProviderResponseSegment[]
   productFeedbackCandidate?: HostedRuntimeProductFeedbackRecord | null
-  /** Accepted-input ordinal whose delivery context owns `response` and `responseMedia`. */
+  /** Accepted-input ordinal whose delivery context owns the final response presentation. */
   responseDeliveryContextOrdinal: number
   /** Accepted input selected as the native target for this response, if any. */
   targetInputId?: string | null
   responseMedia?: readonly AssistantResponseMedia[] | null
+  responseCard?: AssistantResponseCard | null
   stderr: string
   stdout: string
   usage?: AssistantProviderUsage | null

@@ -2,6 +2,7 @@ import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import {
   isDeviceSyncConnectionSetupPending,
+  isDeviceSyncSourceAdmitted,
   isEstablishedDeviceSyncConnection,
 } from "./public-account.ts";
 import { resolveDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
@@ -493,6 +494,15 @@ function connectionFlowRequiresCallbackUrl(
   return connectionKind === "oauth2" || connectionKind === "external_link";
 }
 
+function connectionSourceStartStaleError(): never {
+  throw deviceSyncError({
+    code: "CONNECTION_SOURCE_START_STALE",
+    message: "Device source state changed while its connection link was starting. Retry.",
+    retryable: true,
+    httpStatus: 409,
+  });
+}
+
 export class DeviceSyncPublicIngress {
   readonly publicBaseUrl: string;
   readonly allowedReturnOrigins: string[];
@@ -624,7 +634,11 @@ export class DeviceSyncPublicIngress {
             sourceProviderSlug,
           })
         : null;
-      if (sourceInstanceKey && sourceProviderSlug) {
+      if (
+        sourceInstanceKey
+        && sourceProviderSlug
+        && !(reusedEstablishedJunctionAccount && input.sourceLifecycleProof)
+      ) {
         await this.store.upsertConnectionSource({
           connectionId: seededAccount.id,
           sourceInstanceKey,
@@ -646,7 +660,39 @@ export class DeviceSyncPublicIngress {
       stateMetadata = setSeededConnectionStateMetadata(stateMetadata, seededAccount);
     }
 
+    const requirePreparedSourceLifecycleCurrent = async () => {
+      const proof = input.sourceLifecycleProof ?? null;
+      if (!proof) {
+        return;
+      }
+      if (
+        !reusedEstablishedJunctionAccount
+        || !seededAccount
+        || !sourceProviderSlug
+        || proof.connectionId !== seededAccount.id
+        || normalizeString(proof.sourceProviderSlug) !== sourceProviderSlug
+      ) {
+        connectionSourceStartStaleError();
+      }
+      const sources = await this.store.listConnectionSources({
+        connectionId: seededAccount.id,
+        sourceProviderSlug,
+      });
+      const source = sources.find(
+        (candidate) => candidate.sourceInstanceKey === proof.sourceInstanceKey,
+      );
+      if (
+        !source
+        || source.lastSeenAt !== proof.lastSeenAt
+        || source.lastErrorCode !== null
+        || source.status !== "disconnected"
+      ) {
+        connectionSourceStartStaleError();
+      }
+    };
+
     try {
+      await requirePreparedSourceLifecycleCurrent();
       await this.store.createOAuthState({
         state,
         provider: provider.provider,
@@ -656,6 +702,7 @@ export class DeviceSyncPublicIngress {
         expiresAt,
         metadata: stateMetadata,
       });
+      await requirePreparedSourceLifecycleCurrent();
     } catch (error) {
       if (seededAccount && !reusedEstablishedJunctionAccount) {
         await this.markSeededConnectionSetupFailed(
@@ -882,15 +929,26 @@ export class DeviceSyncPublicIngress {
     }
 
     if (!canReuseExistingAccount && shouldRunSdkConnectionEstablishedHook(previousAccount)) {
-      await this.runSdkConnectionEstablishedHook({
-        account,
-        connection: {
-          ...connection,
-          ...(initialJobs ? { initialJobs } : {}),
-        },
-        provider,
-        now,
-      });
+      try {
+        await this.runSdkConnectionEstablishedHook({
+          account,
+          connection: {
+            ...connection,
+            ...(initialJobs ? { initialJobs } : {}),
+          },
+          provider,
+          now,
+        });
+      } catch (error) {
+        await this.cleanupPersistedOAuthConnection(
+          provider,
+          account,
+          connection,
+          now,
+          error,
+        );
+        throw error;
+      }
     }
 
     return {
@@ -940,17 +998,7 @@ export class DeviceSyncPublicIngress {
   private async runSdkConnectionEstablishedHook(
     input: DeviceSyncPublicIngressConnectionEstablishedInput,
   ): Promise<void> {
-    try {
-      await this.hooks.onConnectionEstablished?.(input);
-    } catch (error) {
-      this.logger.warn?.("Device sync SDK sign-in established hook failed; continuing token mint.", {
-        provider: input.provider.provider,
-        accountId: input.account.id,
-        externalAccountIdHash: hashExternalAccountIdForLogs(input.connection.externalAccountId),
-        failureCode: "DEVICE_SYNC_SDK_SIGN_IN_ESTABLISHED_HOOK_FAILED",
-        error: summarizePublicIngressError(error),
-      });
-    }
+    await this.hooks.onConnectionEstablished?.(input);
   }
 
   async handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult> {
@@ -1214,6 +1262,7 @@ export class DeviceSyncPublicIngress {
 
       const establishment = await this.hooks.onConnectionEstablished?.({
         account,
+        connectionStartedAt: stateRecord.createdAt,
         ...(connectSourceId ? { connectSourceId } : {}),
         ...(connectTarget ? { connectTarget } : {}),
         ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
@@ -1251,9 +1300,25 @@ export class DeviceSyncPublicIngress {
     } catch (error) {
       if (reusedEstablishedJunctionAccount) {
         // Never apply account-wide cleanup to a source-scoped Link attempt.
-        // The established hook owns target admission with its durable wake:
-        // before that commit the seeded row stays disconnected; afterward the
-        // connected source and its work are already durable.
+        // Provider completion precedes hosted source admission, so a rejected
+        // obsolete Link can have recreated the exact provider registration.
+        // The hosted hook owns source-epoch-aware target cleanup; it is the
+        // only safe place to remove that registration without touching the
+        // established parent or a newer accepted source epoch.
+        const cleanupAccount = account ?? seededAccount;
+        if (connection && cleanupAccount && sourceProviderSlug) {
+          try {
+            await this.hooks.onConnectionSourceAdmissionRejected?.({
+              account: cleanupAccount,
+              connectionStartedAt: stateRecord.createdAt,
+              sourceProviderSlug,
+              provider,
+              now,
+            });
+          } catch (cleanupError) {
+            throw attachOAuthCallbackContext(cleanupError, callbackContext);
+          }
+        }
       } else if (connection) {
         try {
           if (connectionPersisted && account) {
@@ -1339,56 +1404,6 @@ export class DeviceSyncPublicIngress {
 
     const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
     const webhookSourceProviderSlug = normalizeString(webhook.sourceProviderSlug);
-
-    if (
-      account
-      && account.status === "active"
-      && !isDeviceSyncConnectionSetupPending(account)
-      && webhookSourceProviderSlug
-    ) {
-      const matchingSources = await this.store.listConnectionSources({
-        connectionId: account.id,
-        sourceProviderSlug: webhookSourceProviderSlug,
-      });
-      if (
-        matchingSources.length > 0
-        && !matchingSources.some((source) => source.status === "connected")
-      ) {
-        throw deviceSyncError({
-          code: "WEBHOOK_SOURCE_NOT_READY",
-          message: "Device source setup must finish before its webhook can be accepted.",
-          retryable: true,
-          httpStatus: 503,
-        });
-      }
-    }
-
-    if (
-      account
-      && account.status === "active"
-      && !isDeviceSyncConnectionSetupPending(account)
-      && webhook.acceptanceMode === "level_dirty_hint"
-    ) {
-      // Only provider-declared level hints can be satisfied by committed dirty state.
-      // Exact webhook work must pass through trace claim and durable acceptance.
-      const alreadySatisfied = await this.hooks.onLevelDirtyWebhookAlreadySatisfied?.({
-        account,
-        traceId,
-        webhook,
-        provider,
-        now,
-      });
-
-      if (alreadySatisfied?.accepted === true) {
-        return {
-          accepted: true,
-          duplicate: false,
-          provider: provider.provider,
-          eventType: webhook.eventType,
-          traceId,
-        };
-      }
-    }
 
     const traceClaim = await claimWebhookTrace();
 
@@ -1476,6 +1491,86 @@ export class DeviceSyncPublicIngress {
         retryable: true,
         httpStatus: 503,
       });
+    }
+
+    try {
+      // A dirty row proves only that import invalidation is queued. Await exact-
+      // source lifecycle work before dirty coalescing can complete this trace.
+      if (webhookSourceProviderSlug) {
+        const matchingSources = await this.store.listConnectionSources({
+          connectionId: account.id,
+          sourceProviderSlug: webhookSourceProviderSlug,
+        });
+        if (
+          matchingSources.length > 0
+          && !isDeviceSyncSourceAdmitted(matchingSources, webhookSourceProviderSlug)
+        ) {
+          const sourceObservation = await this.hooks.onConnectionSourceObserved?.({
+            account,
+            eventType: webhook.eventType,
+            sourceProviderSlug: webhookSourceProviderSlug,
+            provider,
+            now,
+          });
+          if (
+            sourceObservation
+            && "sourceRegistrationRemoved" in sourceObservation
+            && sourceObservation.sourceRegistrationRemoved === true
+          ) {
+            await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
+            return {
+              accepted: true,
+              duplicate: false,
+              provider: provider.provider,
+              eventType: webhook.eventType,
+              traceId,
+            };
+          }
+          if (
+            account.status === "active"
+            && !isDeviceSyncConnectionSetupPending(account)
+            && (
+              !sourceObservation
+              || !("sourceAdmissionCommitted" in sourceObservation)
+              || sourceObservation.sourceAdmissionCommitted !== true
+            )
+          ) {
+            throw deviceSyncError({
+              code: "WEBHOOK_SOURCE_NOT_READY",
+              message: "Device source setup must finish before its webhook can be accepted.",
+              retryable: true,
+              httpStatus: 503,
+            });
+          }
+        }
+      }
+
+      if (
+        account.status === "active"
+        && !isDeviceSyncConnectionSetupPending(account)
+        && webhook.acceptanceMode === "level_dirty_hint"
+      ) {
+        const alreadySatisfied = await this.hooks.onLevelDirtyWebhookAlreadySatisfied?.({
+          account,
+          traceId,
+          webhook,
+          provider,
+          now,
+        });
+        if (alreadySatisfied?.accepted === true) {
+          await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
+          return {
+            accepted: true,
+            duplicate: false,
+            provider: provider.provider,
+            eventType: webhook.eventType,
+            traceId,
+          };
+        }
+      }
+    } catch (error) {
+      await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
+      throw error;
     }
 
     if (

@@ -56,6 +56,13 @@ through `scripts/verification-dispatch.mjs`:
   either CLI is unavailable. No remote failure silently duplicates work
   locally. The `:local` package aliases exist only for executor diagnosis
   because canonical automatic execution is already local.
+- The `crabbox` executor is the only lane that creates paid Blacksmith spend, so
+  it is disabled by default and fails closed with a message naming the free
+  alternatives. A single deliberate invocation accepts the cost by also setting
+  `MURPH_ALLOW_TESTBOX_SPEND=1`. The flag is per-invocation on purpose: do not
+  export it into a shell profile, a worktree env file, or an agent's ambient
+  environment, because that silently restores the unbounded lane. It gates only
+  the paid executor and never widens `local` or `ssh`.
 - The Testbox hydration workflow must exist on the repository default branch
   before GitHub accepts a delegated `workflow_dispatch`. The change that first
   introduces or moves `.github/workflows/crabbox-bounded.yml` therefore uses
@@ -199,16 +206,26 @@ offering the Mac by disabling Remote Login or removing its authorized key.
 Measure time spent waiting for the exclusive local shared-host slot separately
 from active verification time. If a required canonical command has waited 10
 continuous minutes without acquiring that slot, stop only the exact waiting
-process tree owned by the current task and rerun the same command through
-Crabbox:
+process tree owned by the current task and rerun the same command on a free
+executor first. Prefer the dedicated SSH worker when it is configured and idle,
+because it runs the same canonical command without creating spend:
 
 ```bash
-MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff <path ...>
-MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
+MURPH_VERIFY_EXECUTOR=ssh pnpm test:diff <path ...>
+MURPH_VERIFY_EXECUTOR=ssh pnpm verify:acceptance
 ```
 
-If the dedicated SSH worker is configured and idle, it may run that same
-canonical command without creating spend. Otherwise the paid forced executor
+Only when no free executor can run the command does the paid Testbox lane
+apply, and it must be opted into per invocation:
+
+```bash
+MURPH_ALLOW_TESTBOX_SPEND=1 MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff <path ...>
+MURPH_ALLOW_TESTBOX_SPEND=1 MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
+```
+
+Report the spend when you take that lane: name the Testbox ID and the reason no
+free executor was usable. A slow local slot is a reason to wait or to use the
+SSH worker, not by itself a reason to spend. The paid forced executor
 creates a fresh one-shot Testbox through the fully pinned route. Crabbox stops
 every newly acquired delegated Testbox when the one-shot command exits unless
 `--keep` is passed; the dispatcher never passes `--keep` or
@@ -497,10 +514,42 @@ cgroup-v2 child for accounting only, moves the build process into that cgroup,
 and then execs the build as the invoking user with the caller's environment,
 working directory, and stdio unchanged. In the current observe-only state it
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`. The
-advisory budget is a cgroup-unit machine model for Vercel Standard's 8 GB build
-machine: 7.2 GB available to the build cgroup, with a 0.8 GB reserve for
-OS/container overhead outside it at the ceiling. The legacy-named guard budget
-override must stay strictly greater than the 6,000,000,000-byte cgroup floor
+Vercel package build starts the parent Next process with a direct 1 GiB
+old-space flag and appends a 3 GiB old-space flag to `NODE_OPTIONS`. Node applies
+the direct flag to the parent; Next 16.2.6 rebuilds its non-isolated TypeScript
+worker options from the parent arguments followed by `NODE_OPTIONS`, so the
+mandatory generated-contract validation receives 3 GiB. Next removes the flag
+from isolated static workers. The same script owns the Vercel package build and
+CI memory-observation invocation. This bounds the compile parent without
+weakening validation, but only repeated forced-cold Standard previews prove the
+real Vercel boundary. A 2 GiB parent-bound candidate passed one forced-cold
+preview but the next identical build was still killed by the 8 GB container
+OOM boundary. Single
+global 1 GiB and 1.5 GiB limits starved Next's generated-contract TypeScript
+worker, and a 1 GiB parent / 2 GiB worker split did the same. A 1 GiB parent /
+3 GiB worker split completed the full local build. Either failure mode still
+invalidates the candidate. The first forced-cold Standard preview with that
+split still exhausted the container during Turbopack compilation. Profiling
+then found that `/design` made the entire catalog a client graph solely to own
+its `tab` query parameter. Moving query parsing to the route Server Component,
+using URL-backed tab links, and routing reachable client modules through narrow
+client-safe public imports keeps the catalog shell server-owned; only the three
+synthetic studies that pass callback props declare local client boundaries. A
+cold local Turbopack compile then fell from roughly 4.4 minutes to 57 seconds
+and completed all 229 static pages with the same heap policy. Repeated
+exact-head Standard previews remain the external acceptance proof. The
+next exact-head Standard preview still OOM-killed Turbopack, so the catalog
+correction remains a boundary fix but is not sufficient capacity proof.
+Production builds now use Next's supported `--webpack` fallback with the
+explicit Webpack build worker and memory optimizations. Explicit opt-in is
+required because the Workflow integration contributes custom Webpack config;
+local development stays on Turbopack. The worker build retains the same heap
+policy and all route/type validation and completed all 229 pages locally. The
+advisory budget is a cgroup-unit machine model
+for Vercel Standard's 8 GB build machine: 7.2 GB available to the build cgroup,
+with a 0.8 GB reserve for OS/container overhead outside it at the ceiling. The
+legacy-named guard budget override must stay strictly greater than the
+6,000,000,000-byte cgroup floor
 and less than or equal to 7,200,000,000 bytes, which preserves at least a 0.8 GB
 reserve under that model. The floor comes from a fully working Linux CI run on
 2026-07-06 where a 6.0 GB cgroup cap OOM-killed a build that the real Vercel 8
@@ -509,10 +558,13 @@ PR #349's 5.34 GB passing and 6.18 GB exit-137 failure numbers are historical
 single-process RSS measurements only; they are not comparable to cgroup
 accounting, which includes anonymous memory across all build workers plus page
 cache. Live CI on 2026-07-07 showed enforcement cannot ship green yet:
-`turbopackMemoryLimit=3GiB` produced the same cold-build anon ramp as 4 GiB
+`turbopackMemoryLimit=3GiB` produced the same cold-build anon ramp as the 4 GiB
 (about 2.9 GB at 12 seconds, 5.5 GB at 27 seconds, and 6.9 GB at 42 seconds)
-before an OOM-group kill. Cold-build memory optimization is explicit follow-up
-work. The guard samples cgroup `memory.current` and selected `memory.stat`
+before an OOM-group kill. That historical result still prevents enabling the
+hard cap until exact-head CI accounting proves a safe enforced budget. Next
+16.2.6 discards that option when creating its native backend, so the experiment
+changed no enforced target. The no-op option is now omitted. The
+guard samples cgroup `memory.current` and selected `memory.stat`
 fields about every 3 seconds, prints trajectory lines about every 15 seconds,
 then reports sampled maxima before cgroup `memory.peak`, `memory.events`, and
 selected final-read `memory.stat` values. If sampled max anon or `memory.peak`
@@ -622,8 +674,14 @@ the advisory budget.
 - GitHub Actions host-support CI now runs `.github/workflows/host-support.yml`, which exercises the focused CLI setup/inbox host-support suite on both `ubuntu-latest` and `macos-latest`. Its Ubuntu release gate preserves the `pnpm release:check` surface but splits it into parallel jobs for release metadata, clean workspace build, typecheck, artifact hygiene, doc gardening, package coverage shards, app verification, and fixture coverage, with a final `Release checks (ubuntu)` aggregator so required-check naming stays stable. The Ubuntu app-verification shard alone provisions loopback PostgreSQL 17 and injects the dedicated supplement-search test database variable; this runs the transactional 100+ case search corpus in PR and `main` CI without changing the unreachable hosted-web build database placeholder used by the rest of the app verification.
 - Repo-local source-resolved workspace aliases are intentionally limited to the package allowlists exported from `config/workspace-source-resolution.ts`; within those allowlists, Vitest subpaths resolve only through explicit workspace entries plus package-declared public exports rather than wildcarding arbitrary internals. Packages outside that helper stay on their existing emitted-JS-shaped import conventions until a caller explicitly opts them into source resolution.
 - `packages/device-syncd` exposes the local HTTP control plane for wearable OAuth/webhook/reconcile flows, binds `127.0.0.1` by default unless `DEVICE_SYNC_HOST` overrides it, rejects non-loopback control-route callers, requires a bearer token for `/providers/*`, `/accounts/*`, and other control routes, can expose only `/oauth/*/callback` plus `/webhooks/*` on a separate `DEVICE_SYNC_PUBLIC_HOST`/`PORT` listener when public ingress is needed, stores tokens outside the vault, serializes active jobs per account to avoid refresh-token races, and only allows cross-origin post-connect redirects when `DEVICE_SYNC_ALLOWED_RETURN_ORIGINS` includes the requesting origin. Murph's CLI-managed launcher may provide the default control token, state DB path, and loopback base URL for the selected vault, but it still talks to the daemon strictly over that localhost HTTP boundary.
-- The hosted integration control-plane entrypoint lives under `apps/web`; Prisma CLI configuration now lives in `apps/web/prisma.config.ts` for Prisma 7, the hosted Next build now runs on Next.js' default Turbopack path with repo-local source-resolution compatibility configured in `next.config.ts`, interactive hosted `next dev` uses `apps/web/.next-dev`, cold-boot smoke uses `apps/web/.next-smoke`, hosted-web modules that import the shared Prisma client now require `DATABASE_URL` at module load so missing DB env fails fast, package and app typecheck bootstrap the exact tracked Next route-type stub import before `tsc` so clean clones do not depend on leftover generated files, browser-authenticated device-sync routes trust only short-lived request-bound signed assertions from a trusted auth edge/proxy and consume each assertion nonce once to reject replay, hosted onboarding uses Privy as fresh proof for login, linking, and security-sensitive identity operations while successful completion mints a first-party opaque app session stored by hashed token in `HostedWebSession`; settings, account, billing, export, and deletion use that Murph app session, and identity sync routes require both the app session and fresh same-member Privy proof. Hosted onboarding stores only invite/member/billing metadata plus embedded-wallet linkage rather than canonical health data, hosted onboarding Checkout uses subscription mode while authenticated direct paid Pulse/Edge members may separately create fixed one-time usage-credit Checkout Sessions in Settings, hosted Stripe webhook ingress records minimal event receipts before authoritative subscription or usage-credit reconciliation, imports successful hosted assistant usage rows into `hosted_ai_usage` after the hosted commit succeeds so Postgres remains the canonical usage and append-only credit-ledger owner with no active Stripe meter cron, and blocks subsequent usage-bearing work when included plus purchased capacity is exhausted, hosted onboarding Linq ingress stores chat and recipient-line routing in `HostedMemberRouting`, records quota counters in `HostedLinqDailyState`, and appends canonical `conversation.message` ingress instead of using legacy `/api/linq` binding/event queues, and every Cloudflare-bound hosted execution mutation now appends canonical external ingress in the same transaction as the originating onboarding and device-sync state change so ordering, dedupe, mailbox sequencing, and checkpoint fencing stay web-owned instead of flowing through `execution_outbox`. Repo-local Next/Vitest resolution for workspace packages is centralized in `config/workspace-source-resolution.ts` and intentionally limited to the helper's explicit package lists plus package-declared public export entries.
+- The hosted integration control-plane entrypoint lives under `apps/web`; Prisma CLI configuration now lives in `apps/web/prisma.config.ts` for Prisma 7, the hosted production Next build uses the supported Webpack fallback with its explicit build worker and memory optimizations while interactive development remains on Turbopack, interactive hosted `next dev` uses `apps/web/.next-dev`, cold-boot smoke uses `apps/web/.next-smoke`, hosted-web modules that import the shared Prisma client now require `DATABASE_URL` at module load so missing DB env fails fast, package and app typecheck bootstrap the exact tracked Next route-type stub import before `tsc` so clean clones do not depend on leftover generated files, browser-authenticated device-sync routes trust only short-lived request-bound signed assertions from a trusted auth edge/proxy and consume each assertion nonce once to reject replay, hosted onboarding uses Privy as fresh proof for login, linking, and security-sensitive identity operations while successful completion mints a first-party opaque app session stored by hashed token in `HostedWebSession`; settings, account, billing, export, and deletion use that Murph app session, and identity sync routes require both the app session and fresh same-member Privy proof. Hosted onboarding stores only invite/member/billing metadata plus embedded-wallet linkage rather than canonical health data, hosted onboarding Checkout uses subscription mode while authenticated direct paid Pulse/Edge members may separately create fixed one-time usage-credit Checkout Sessions in Settings, hosted Stripe webhook ingress records minimal event receipts before authoritative subscription or usage-credit reconciliation, imports successful hosted assistant usage rows into `hosted_ai_usage` after the hosted commit succeeds so Postgres remains the canonical usage and append-only credit-ledger owner with no active Stripe meter cron, and blocks subsequent usage-bearing work when included plus purchased capacity is exhausted, hosted onboarding Linq ingress stores chat and recipient-line routing in `HostedMemberRouting`, records quota counters in `HostedLinqDailyState`, and appends canonical `conversation.message` ingress instead of using legacy `/api/linq` binding/event queues, and every Cloudflare-bound hosted execution mutation now appends canonical external ingress in the same transaction as the originating onboarding and device-sync state change so ordering, dedupe, mailbox sequencing, and checkpoint fencing stay web-owned instead of flowing through `execution_outbox`. Repo-local Next/Vitest resolution for workspace packages is centralized in `config/workspace-source-resolution.ts` and intentionally limited to the helper's explicit package lists plus package-declared public export entries.
 - The hosted execution runner entrypoint lives under `apps/cloudflare`; it verifies callback-signed Temporal ensure-processing requests plus Vercel OIDC-authenticated browser-vault, deletion, and status control requests, coordinates per-user invocations through Durable Objects, stores encrypted hosted workspace checkpoint refs in object storage through direct R2 presigned PUT upload sessions, stores legacy encrypted artifact objects only for restore compatibility, stores per-user runner env overrides in a separate encrypted hosted object, restores a temporary local execution context for hosted workspace invocations, starts the native Cloudflare container attached to the per-user Durable Object, authenticates worker-side control routes with HMAC signatures instead of static worker control tokens, routes worker-side ensure-processing/status/browser-vault calls into direct Durable Object methods, keeps the runner container warm for its configured idle lifecycle after successful invocations while still destroying it on failed, stale, deploy-smoke, explicit-cleanup, or ambiguous cleanup paths, restores v2 direct-R2 snapshots plus legacy full/base workspace bundles and legacy working `{base, delta}` commits, imports mailbox items into the local runtime, keeps dirty foreground runtime state local until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint writes the updated workspace through web-owned CAS, treats RunnerContainer activity expiry as cleanup-only, drains the local outbox after checkpoint, records hosted assistant usage directly to the web-owned usage ledger through the injected runtime platform, decrypts stored snapshot/bundle/artifact/journal objects by their envelope `keyId` through the configured keyring so older ciphertext can remain readable during staged rotation, builds direct runtime config from an explicit frozen supervisor env while keeping supervisor-only secrets out of runtime env, and launches each hosted job in-process with per-user warm workspace roots and invocation-local writable cache/temp roots. Runtime internal-host requests use normal virtual hosts such as `results.worker` and `web-control.worker`; Cloudflare Container outbound interception dispatches those requests to Worker handlers and runtime write-fence headers prove invocation authority. Durable Object alarms are write-fence alarm cleanup only; Temporal reads hosted web reconciliation facts and owns runtime-returned `nextWakeAt` sleeps instead of Cloudflare rereading hosted web workspace status to decide whether runtime work is due. The Durable Object now keeps execution coordination, direct-R2 upload sessions, and opaque runtime residue only; canonical mailbox ordering, mailbox import watermarks, and workspace checkpoint fences remain web-owned.
+- R2 write-admission changes require focused proof that `paused` returns a valid
+  Temporal `retry_later` response before UserRunner dispatch, suppresses the
+  direct OIDC `waitUntil` hint, and is visible in current Worker status. Also
+  validate hosted-execution parsing, deploy rendering/preflight, and
+  hosted-local defaults. Local proof cannot replace the runbook's live
+  100-percent rollout, per-runner `inFlight=false`, and capability-drain checks.
 - The hosted Temporal worker entrypoint, Workflows, Activities, production
   bundle, replay gates, and Render deployment live in private
   `cobuildwithus/murph-cloud`. Public root scripts retain

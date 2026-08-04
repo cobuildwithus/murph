@@ -64,6 +64,9 @@ import type {
   AssistantResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import type {
+  AssistantResponseCard,
+} from "@murphai/operator-config/assistant-response-cards";
+import type {
   HostedBrowserVaultReplicaRef,
   HostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution/contracts";
@@ -156,6 +159,21 @@ export class HostedRuntimeArtifactReadError extends Error {
       { cause: input.cause },
     );
     this.name = "HostedRuntimeArtifactReadError";
+    this.retryable = input.retryable;
+  }
+}
+
+export class HostedRuntimeArtifactWriteError extends Error {
+  readonly retryable: boolean;
+
+  constructor(input: { cause: unknown; retryable: boolean }) {
+    super(
+      input.cause instanceof Error
+        ? input.cause.message
+        : "Hosted runtime artifact write failed.",
+      { cause: input.cause },
+    );
+    this.name = "HostedRuntimeArtifactWriteError";
     this.retryable = input.retryable;
   }
 }
@@ -258,6 +276,7 @@ export function parseHostedRuntimeAssistantResponseMedia(
 }
 
 export interface HostedRuntimeLinqSendRequest {
+  card?: AssistantResponseCard | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -268,9 +287,11 @@ export interface HostedRuntimeLinqSendRequest {
   replyToMessageId?: string | null;
   target: string;
   targetKind?: HostedRuntimeProviderTargetKind | null;
+  threadIsDirect?: boolean | null;
 }
 
 export interface HostedRuntimeLinqSendResponse {
+  idempotencyKey?: string | null;
   providerMessageId?: string | null;
   providerMessageIds?: string[] | null;
   providerThreadId?: string | null;
