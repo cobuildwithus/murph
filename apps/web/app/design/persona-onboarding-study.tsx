@@ -40,6 +40,7 @@ export function PersonaOnboardingStudy() {
         onOpenChange={setOpen}
         open={open}
         savePreference={preservePreviewPreferences}
+        skipPreference={preservePreviewSkip}
       />
     </div>
   );
@@ -49,4 +50,8 @@ function preservePreviewPreferences(
   preferences: MurphPersonaPreferences,
 ): Promise<MurphPersonaPreferences> {
   return Promise.resolve(preferences);
+}
+
+function preservePreviewSkip(): Promise<void> {
+  return Promise.resolve();
 }
