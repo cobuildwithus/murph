@@ -23,7 +23,7 @@ Done:
 - Moved endpoint metadata into a subordinate line, gave Change a 40px hit target, normalized export-dialog spacing inside the reusable production content, and regrouped paused health-data copy into one left-aligned column.
 - Updated the real design studies with stable proof selectors and captured synthetic desktop/mobile states for all three provider labels, export ready, and processing paused.
 - Passed 69 focused component/design tests, hosted Web typecheck, scoped ESLint, the frontend design-proof tests, and native-resolution visual inspection.
-- Confirmed the first remote design-proof failure was metadata-only: the guard requires a top-level catalog registry diff and a relative `/design?tab=…` PR link. Registered the revised headings in both catalog owners; no production behavior changed.
+- Confirmed the first remote design-proof failure was metadata-only: the guard requires a top-level catalog registry diff and a `Design page:` list item containing a visible `/design?tab=…` route. Registered the revised headings in both catalog owners; no production behavior changed.
 
 Now:
 - Commit and push the exact rendered candidate, open the PR, and run the required frontend/product/coverage specialist review plus the Claude UI double-check.
