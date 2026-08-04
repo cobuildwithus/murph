@@ -940,6 +940,124 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalled();
   });
 
+  it("recovers a changed principal through shared completion when phone auth is inferred first", async () => {
+    const oldPrivyUserId = "did:privy:previous_email_owner";
+    const replacementPrivyUserId = "did:privy:replacement_email_owner";
+    const emailAddress = "recovery@example.com";
+    const existingMember = makeMember({
+      id: "member_email_recovery",
+      phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
+      phoneNumberVerifiedAt: NOW,
+      privyUserId: oldPrivyUserId,
+    });
+    const activeInvite = makeInvite(existingMember, {
+      channel: "web",
+      id: "invite_email_recovery",
+      inviteCode: "invite-email-recovery",
+      memberId: existingMember.id,
+    });
+    const storedIdentity = await readMemberIdentity(existingMember);
+    if (!storedIdentity) {
+      throw new Error("Expected the email-recovery identity fixture.");
+    }
+    const emailAuthorization = {
+      directPublicSenderAddressEncrypted: null,
+      directPublicSenderAuthorizedAt: null,
+      directPublicSenderLookupKey: null,
+      memberId: existingMember.id,
+      verifiedEmailAddressEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-email-authorization.verified-email",
+        memberId: existingMember.id,
+        value: emailAddress,
+      }),
+      verifiedEmailLookupKey: createHostedEmailLookupKey(emailAddress),
+      verifiedEmailVerifiedAt: NOW,
+    };
+    const identityUpsert = vi.fn(async ({
+      create,
+      update,
+    }: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => ({
+      ...create,
+      ...update,
+    }));
+    const lockQuery = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ memberId: existingMember.id }]);
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      $queryRaw: lockQuery,
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === existingMember.id ? existingMember : null
+        )),
+      },
+      hostedMemberEmailAuthorization: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => (
+          where?.memberId === existingMember.id
+          || where?.verifiedEmailLookupKey === emailAuthorization.verifiedEmailLookupKey
+            ? emailAuthorization
+            : null
+        )),
+        upsert: vi.fn(async ({
+          create,
+          update,
+        }: {
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => ({
+          ...emailAuthorization,
+          ...create,
+          ...update,
+        })),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn(async ({ where }: { where: Record<string, unknown> }) => (
+          where.memberId === existingMember.id
+          || where.phoneLookupKey === DEFAULT_PHONE_LOOKUP_KEY
+          || where.privyUserLookupKey === createHostedPrivyUserLookupKey(oldPrivyUserId)
+            ? storedIdentity
+            : null
+        )),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(completeHostedPrivyVerification({
+      identity: makeIdentity({
+        email: {
+          address: emailAddress,
+          verifiedAt: 1_743_064_200,
+        },
+        userId: replacementPrivyUserId,
+      }),
+      now: NOW,
+      prisma,
+    })).resolves.toMatchObject({
+      inviteCode: "invite-email-recovery",
+      memberId: existingMember.id,
+      messagingSetupRequired: false,
+      stage: "checkout",
+    });
+
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(lockQuery).toHaveBeenCalledTimes(2);
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        privyUserIdEncrypted: expect.any(String),
+        privyUserLookupKey: createHostedPrivyUserLookupKey(replacementPrivyUserId),
+      }),
+    }));
+  });
+
   it("resolves an existing active direct Privy member without creating a duplicate", async () => {
     const existingMember = makeMember({
       billingStatus: HostedBillingStatus.active,

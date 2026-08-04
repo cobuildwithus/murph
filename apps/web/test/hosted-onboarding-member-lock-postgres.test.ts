@@ -3,21 +3,27 @@ import { randomUUID } from "node:crypto";
 import {
   HostedBillingStatus,
   HostedStripeEventStatus,
-  type Prisma,
+  Prisma,
   type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
-import { createHostedPrivyUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedEmailLookupKey,
+  createHostedPrivyUserLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   HostedMemberStripeMutationLockBusyError,
   withHostedMemberStripeMutationLockForOps,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { issueHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
-import { ensureHostedMemberForPrivyIdentityResolutionTx } from "@/src/lib/hosted-onboarding/member-identity-service";
+import {
+  ensureHostedMemberForPrivyIdentityResolutionTx,
+  reconcileHostedPrivyIdentityOnMemberTx,
+} from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
   suspendHostedMemberForBillingReversalTx,
   writeHostedMemberStripeBillingTx,
@@ -1265,6 +1271,221 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 );
 
 describe.skipIf(!runPostgresConcurrencyProof)(
+  "hosted verified-email Privy rebinding PostgreSQL concurrency",
+  () => {
+    it("rebinds the existing member without creating another member", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_email_rebind_${fixtureId}`;
+      const emailAddress = `rebind-${fixtureId}@example.test`;
+      const oldPrivyUserId = `did:privy:old-${fixtureId}`;
+      const replacementPrivyUserId = `did:privy:replacement-${fixtureId}`;
+
+      installPassthroughHostedSecureBoxTestCodec();
+      const member = await seedVerifiedEmailRebindingMember({
+        emailAddress,
+        memberId,
+        oldPrivyUserId,
+        prisma: observer,
+      });
+      const memberCountBefore = await observer.hostedMember.count();
+      const emailAuthorizationBefore =
+        await observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
+          where: { memberId },
+        });
+
+      try {
+        await expect(writer.$transaction((tx) =>
+          reconcileHostedPrivyIdentityOnMemberTx({
+            authMethod: "email",
+            identity: makeVerifiedEmailRebindingIdentity({
+              emailAddress,
+              privyUserId: replacementPrivyUserId,
+            }),
+            member,
+            now: new Date("2026-08-03T12:00:00.000Z"),
+            prisma: tx,
+          }), { timeout: transactionTimeoutMs })).resolves.toMatchObject({
+          id: memberId,
+        });
+
+        await expect(observer.hostedMember.count()).resolves.toBe(memberCountBefore);
+        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          memberId,
+          privyUserIdEncrypted: replacementPrivyUserId,
+          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
+        });
+        await expect(observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toEqual(emailAuthorizationBefore);
+      } finally {
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await disconnectClients([observer, writer]);
+      }
+    });
+
+    it("holds verified-email authority through the identity replacement commit", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const rebindingClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const emailWriter = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_email_rebind_lock_${fixtureId}`;
+      const emailAddress = `rebind-lock-${fixtureId}@example.test`;
+      const oldPrivyUserId = `did:privy:old-lock-${fixtureId}`;
+      const replacementPrivyUserId = `did:privy:replacement-lock-${fixtureId}`;
+      const rebindingReachedIdentityWrite = createDeferred();
+      const allowRebindingIdentityWrite = createDeferred();
+      let rebinding: Promise<unknown> | null = null;
+      let emailMove: Promise<unknown> | null = null;
+
+      installPassthroughHostedSecureBoxTestCodec();
+      const member = await seedVerifiedEmailRebindingMember({
+        emailAddress,
+        memberId,
+        oldPrivyUserId,
+        prisma: observer,
+      });
+
+      try {
+        rebinding = rebindingClient.$transaction((tx) =>
+          reconcileHostedPrivyIdentityOnMemberTx({
+            authMethod: "email",
+            identity: makeVerifiedEmailRebindingIdentity({
+              emailAddress,
+              privyUserId: replacementPrivyUserId,
+            }),
+            member,
+            now: new Date("2026-08-03T12:00:00.000Z"),
+            prisma: pauseBeforeHostedIdentityUpsert({
+              allowIdentityWrite: allowRebindingIdentityWrite,
+              identityWriteReached: rebindingReachedIdentityWrite,
+              tx,
+            }),
+          }), { timeout: transactionTimeoutMs });
+
+        await rebindingReachedIdentityWrite.promise;
+        const [emailWriterBackend] = await emailWriter.$queryRaw<Array<{ pid: number }>>(
+          Prisma.sql`SELECT pg_backend_pid()::int AS pid`,
+        );
+        if (!emailWriterBackend) {
+          throw new Error("Expected the email-writer PostgreSQL backend id.");
+        }
+        emailMove = emailWriter.$transaction(async (tx) => {
+          await tx.hostedMemberEmailAuthorization.update({
+            data: {
+              verifiedEmailLookupKey: null,
+              verifiedEmailVerifiedAt: null,
+            },
+            where: { memberId },
+          });
+        }, { timeout: transactionTimeoutMs });
+
+        await waitForPostgresLock({
+          observer,
+          pid: emailWriterBackend.pid,
+        });
+        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          privyUserLookupKey: requirePrivyUserLookupKey(oldPrivyUserId),
+        });
+
+        allowRebindingIdentityWrite.resolve();
+        await expect(rebinding).resolves.toMatchObject({ id: memberId });
+        await expect(emailMove).resolves.toBeUndefined();
+        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
+        });
+        await expect(observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          verifiedEmailLookupKey: null,
+          verifiedEmailVerifiedAt: null,
+        });
+      } finally {
+        allowRebindingIdentityWrite.resolve();
+        await Promise.allSettled([
+          ...(rebinding ? [rebinding] : []),
+          ...(emailMove ? [emailMove] : []),
+        ]);
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await disconnectClients([observer, rebindingClient, emailWriter]);
+      }
+    });
+
+    it("rolls back the old binding when the replacement principal belongs to another member", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_email_rebind_conflict_${fixtureId}`;
+      const conflictingMemberId = `hbm_email_rebind_owner_${fixtureId}`;
+      const emailAddress = `rebind-conflict-${fixtureId}@example.test`;
+      const oldPrivyUserId = `did:privy:old-conflict-${fixtureId}`;
+      const replacementPrivyUserId = `did:privy:owned-${fixtureId}`;
+
+      installPassthroughHostedSecureBoxTestCodec();
+      const member = await seedVerifiedEmailRebindingMember({
+        emailAddress,
+        memberId,
+        oldPrivyUserId,
+        prisma: observer,
+      });
+      await observer.hostedMember.create({ data: { id: conflictingMemberId } });
+      await observer.hostedMemberIdentity.create({
+        data: {
+          memberId: conflictingMemberId,
+          privyUserIdEncrypted: replacementPrivyUserId,
+          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
+        },
+      });
+
+      try {
+        await expect(writer.$transaction((tx) =>
+          reconcileHostedPrivyIdentityOnMemberTx({
+            authMethod: "email",
+            identity: makeVerifiedEmailRebindingIdentity({
+              emailAddress,
+              privyUserId: replacementPrivyUserId,
+            }),
+            member,
+            now: new Date("2026-08-03T12:00:00.000Z"),
+            prisma: tx,
+          }), { timeout: transactionTimeoutMs })).rejects.toMatchObject({
+          code: "PRIVY_IDENTITY_CONFLICT",
+          httpStatus: 409,
+        });
+
+        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          privyUserIdEncrypted: oldPrivyUserId,
+          privyUserLookupKey: requirePrivyUserLookupKey(oldPrivyUserId),
+        });
+        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+          where: { memberId: conflictingMemberId },
+        })).resolves.toMatchObject({
+          privyUserIdEncrypted: replacementPrivyUserId,
+          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
+        });
+      } finally {
+        await observer.hostedMember.deleteMany({
+          where: { id: { in: [memberId, conflictingMemberId] } },
+        });
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await disconnectClients([observer, writer]);
+      }
+    });
+  },
+);
+
+describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted first web session PostgreSQL concurrency",
   () => {
     it("reports exactly one first member session across concurrent issuance", async () => {
@@ -1349,6 +1570,120 @@ function pauseBeforeAccountDeletionReceiptRead(input: {
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
+}
+
+function pauseBeforeHostedIdentityUpsert(input: {
+  allowIdentityWrite: Deferred<void>;
+  identityWriteReached: Deferred<void>;
+  tx: Prisma.TransactionClient;
+}): Prisma.TransactionClient {
+  const hostedMemberIdentity = new Proxy(input.tx.hostedMemberIdentity, {
+    get(target, property) {
+      if (property === "upsert") {
+        return async (args: Prisma.HostedMemberIdentityUpsertArgs) => {
+          input.identityWriteReached.resolve();
+          await input.allowIdentityWrite.promise;
+          return target.upsert(args);
+        };
+      }
+
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+
+  return new Proxy<Prisma.TransactionClient>(input.tx, {
+    get(target, property) {
+      if (property === "hostedMemberIdentity") {
+        return hostedMemberIdentity;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+async function seedVerifiedEmailRebindingMember(input: {
+  emailAddress: string;
+  memberId: string;
+  oldPrivyUserId: string;
+  prisma: PrismaClient;
+}) {
+  const verifiedEmailLookupKey = createHostedEmailLookupKey(input.emailAddress);
+  if (!verifiedEmailLookupKey) {
+    throw new Error("Expected a verified-email lookup key for the rebinding fixture.");
+  }
+
+  const member = await input.prisma.hostedMember.create({
+    data: { id: input.memberId },
+  });
+  await input.prisma.hostedMemberIdentity.create({
+    data: {
+      memberId: input.memberId,
+      privyUserIdEncrypted: input.oldPrivyUserId,
+      privyUserLookupKey: requirePrivyUserLookupKey(input.oldPrivyUserId),
+    },
+  });
+  await input.prisma.hostedMemberEmailAuthorization.create({
+    data: {
+      memberId: input.memberId,
+      verifiedEmailLookupKey,
+      verifiedEmailVerifiedAt: new Date("2026-08-03T11:00:00.000Z"),
+    },
+  });
+  return member;
+}
+
+function makeVerifiedEmailRebindingIdentity(input: {
+  emailAddress: string;
+  privyUserId: string;
+}) {
+  return {
+    email: {
+      address: input.emailAddress,
+      verifiedAt: 1_754_218_800,
+    },
+    phone: null,
+    telegram: null,
+    userId: input.privyUserId,
+  };
+}
+
+function requirePrivyUserLookupKey(privyUserId: string): string {
+  const lookupKey = createHostedPrivyUserLookupKey(privyUserId);
+  if (!lookupKey) {
+    throw new Error("Expected a Privy-user lookup key for the rebinding fixture.");
+  }
+  return lookupKey;
+}
+
+function installPassthroughHostedSecureBoxTestCodec(): void {
+  setHostedSecureBoxStringTestCodecForTests({
+    decrypt: ({ value }) => value,
+    encrypt: ({ value }) => value,
+  });
+}
+
+async function waitForPostgresLock(input: {
+  observer: PrismaClient;
+  pid: number;
+}): Promise<void> {
+  const deadline = Date.now() + memberLockAcquisitionTimeoutMs;
+  while (Date.now() < deadline) {
+    const [activity] = await input.observer.$queryRaw<
+      Array<{ waitEventType: string | null }>
+    >(Prisma.sql`
+      SELECT wait_event_type AS "waitEventType"
+      FROM pg_stat_activity
+      WHERE pid = ${input.pid}
+    `);
+    if (activity?.waitEventType === "Lock") {
+      return;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error("Expected the concurrent email writer to wait on the row lock.");
 }
 
 async function requireBillingSnapshot(
