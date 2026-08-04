@@ -2,9 +2,9 @@
 
 ## Goal
 
-Make source-side hosted-local session minting use the same cookie contract as a
-production-built Next artifact, without adding a test-only authentication path
-or weakening the production `__Host-` cookie boundary.
+Make hosted-local session minting follow the Web process the harness actually
+launched, without making a dist-directory selector an auth authority, adding a
+test-only authentication path, or weakening the production `__Host-` boundary.
 
 ## Proven failure
 
@@ -24,15 +24,22 @@ or weakening the production `__Host-` cookie boundary.
 - Current private interactive turns advertise `attach_response_card`, but two
   hosted-local assertions retained the older gated-tool expectation after the
   on-demand response-card contract shipped on `main`.
+- The first correction treated `NEXT_DIST_DIR_MODE=smoke` as production auth
+  mode. A clean E2E source fallback also sets that selector for build-output
+  isolation, so it minted `__Host-murph-session` while its development Web
+  process emitted `murph-device-sync-junction`. The Junction journey then
+  failed before callback completion. The same selector is also used by normal
+  hosted-local development worktrees.
 
 ## Success criteria
 
-- One shared boolean selects both the hosted session cookie name and its
-  `Secure` attribute.
-- That boolean is true for ordinary production runtime and for the explicit
-  hosted-local smoke-artifact mode.
-- Development and ordinary test lanes retain the non-secure `murph-session`
-  contract.
+- Production auth keeps `NODE_ENV=production` as its sole secure-cookie
+  authority; a build-output selector does not change runtime authentication.
+- The test harness records whether it actually selected an existing production
+  Web artifact, and that one fact selects both the app-session fixture name and
+  expected callback-proof name.
+- Source-development, worktree, and ordinary test lanes retain the non-secure
+  `murph-session` contract.
 - Session validation, HMAC binding, revocation, and route authentication are
   unchanged; no compatibility cookie or bypass is introduced.
 - Focused tests prove production, smoke-artifact, and ordinary test behavior,
@@ -41,16 +48,18 @@ or weakening the production `__Host-` cookie boundary.
 
 ## Implementation
 
-1. Extend the existing hosted app-session owner with one shared secure-cookie
-   mode derived from production runtime or explicit smoke-artifact mode.
-2. Use that mode for both cookie-name selection and `Secure` serialization.
-3. Add focused regression coverage for smoke-artifact mode and preserve the
-   existing production and test assertions.
+1. Keep the production app-session cookie contract derived only from
+   `NODE_ENV=production`.
+2. Reuse the hosted-local harness's existing production-start decision and
+   expose it as a test-only process-mode fact.
+3. Have the source-side session fixture adapt only the cookie name to that fact;
+   token signing, storage, expiry, revocation, and route verification remain
+   production code.
 4. Keep the Junction hosted-local journey on the provider redirect URL emitted
    by production code instead of reconstructing a removed callback route.
 5. Make the dual-mode Junction scenario expect the callback-proof cookie name
-   matching its issued app session, and align affected dynamic-tool assertions
-   with the shipped private-interactive response-card contract.
+   from the same explicit process-mode fact, and align affected dynamic-tool
+   assertions with the shipped private-interactive response-card contract.
 6. Run focused Web and hosted-local proof, then push the coordinated public
    branch so the paired private integration PR can select the exact fix.
 7. Complete the required specialist, final ReviewGPT, CI, and parent-review
@@ -58,9 +67,21 @@ or weakening the production `__Host-` cookie boundary.
 
 ## Verification
 
-- Focused hosted app-session Vitest coverage for production, smoke-artifact,
+- Final focused hosted app-session Vitest coverage passed 17/17 for production
   and ordinary test modes.
-- Hosted Web typecheck or the truthful focused diff lane.
-- Production-built hosted-local browser/session scenario proving the real
-  consent route accepts the minted cookie.
-- Exact-head public CI and the paired private integration workflow.
+- Hosted Web typecheck, Cloudflare typecheck, changed-Web-file ESLint, and the
+  hosted-local harness suites passed; the harness suites covered 29/29 tests.
+- A fresh no-`BUILD_ID` source fallback first reproduced the mismatched
+  callback-proof cookie failure, then passed after the harness-mode correction,
+  including authenticated consent, current callback GET, and durable connected
+  state against the paired private worker package.
+- Public CI passed on the prior reviewed head
+  `d9d1896464090ed1db1125fa86bdf5e8905d3174`.
+- Paired private production-artifact workflow run `30950657103` passed on that
+  prior head on
+  attempt 2. One first-attempt media completion timeout passed locally 3/3 and
+  passed on exact-job retry without a code change; the aggregate Temporal gate
+  then passed.
+- Exact-head public and paired private CI must rerun after the accepted review
+  correction. Preliminary specialist and final ReviewGPT completion results
+  remain pending.

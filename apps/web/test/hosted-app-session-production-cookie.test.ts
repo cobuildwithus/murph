@@ -38,8 +38,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 describe("hosted app session production cookie", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.resetModules();
-    vi.unstubAllEnvs();
+    vi.stubEnv("NODE_ENV", "production");
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.prismaClient.$transaction.mockImplementation(
       async (callback: (tx: typeof mocks.transactionClient) => Promise<unknown>) =>
@@ -59,23 +58,7 @@ describe("hosted app session production cookie", () => {
     mocks.transactionClient.$queryRaw.mockResolvedValue([{ "?column?": 1 }]);
   });
 
-  it.each([
-    {
-      label: "production runtime",
-      nextDistDirMode: "",
-      nodeEnv: "production",
-    },
-    {
-      label: "hosted-local smoke artifact mode",
-      nextDistDirMode: "smoke",
-      nodeEnv: "test",
-    },
-  ])("uses the __Host cookie name and Secure flag in $label", async ({
-    nextDistDirMode,
-    nodeEnv,
-  }) => {
-    vi.stubEnv("NEXT_DIST_DIR_MODE", nextDistDirMode);
-    vi.stubEnv("NODE_ENV", nodeEnv);
+  it("uses the __Host cookie name and Secure flag in production", async () => {
     const {
       issueHostedAppSession,
       revokeHostedAppSessionFromRequest,

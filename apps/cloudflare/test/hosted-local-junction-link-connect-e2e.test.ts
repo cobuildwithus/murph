@@ -137,7 +137,7 @@ describe("hosted local junction link connect e2e", () => {
 
     const callbackProofCookie = readSetCookiePair(
       startResponse,
-      session.cookieName.startsWith("__Host-")
+      session.secureCookieMode
         ? "__Host-murph-device-sync-junction"
         : "murph-device-sync-junction",
     );

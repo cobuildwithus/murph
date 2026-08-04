@@ -46,11 +46,8 @@ interface HostedAppSessionToken {
   sessionId: string;
 }
 
-const HOSTED_APP_SESSION_SECURE_COOKIE_MODE =
-  process.env.NODE_ENV === "production"
-  || process.env.NEXT_DIST_DIR_MODE === "smoke";
 const HOSTED_APP_SESSION_COOKIE_NAME =
-  HOSTED_APP_SESSION_SECURE_COOKIE_MODE
+  process.env.NODE_ENV === "production"
     ? HOSTED_APP_SESSION_COOKIE_NAME_PRODUCTION
     : HOSTED_APP_SESSION_COOKIE_NAME_DEVELOPMENT;
 
@@ -472,6 +469,6 @@ function buildCookie(input: {
     "HttpOnly",
     "SameSite=Lax",
     `Max-Age=${Math.max(0, Math.floor(input.maxAgeSeconds))}`,
-    HOSTED_APP_SESSION_SECURE_COOKIE_MODE ? "Secure" : null,
+    process.env.NODE_ENV === "production" ? "Secure" : null,
   ].filter((part): part is string => Boolean(part)).join("; ");
 }
