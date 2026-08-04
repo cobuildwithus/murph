@@ -49,7 +49,7 @@ Treat every calorie or macro estimate as two separate questions:
 Do not let vision or memory answer both. For every numeric meal estimate—including
 interactive meal logs, user-sent photos, automatic-meal-capture enrichment, and
 scheduled closeouts—resolve nutrient density from the hosted food-label database
-whenever each material component is identifiable. Use the photo, description,
+for every identifiable material component. Use the photo, description,
 and conversation to estimate identity, quantity, and preparation; use returned
 label or USDA facts for calories and macros. If another meal skill says to
 estimate visible ingredients or portions, that means estimate those quantities
