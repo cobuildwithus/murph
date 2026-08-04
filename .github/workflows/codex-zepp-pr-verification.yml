@@ -1,0 +1,94 @@
+name: Verify Zepp Apple Health relay patch
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: codex-zepp-apple-health-relay
+  cancel-in-progress: false
+
+jobs:
+  patch-and-verify:
+    if: ${{ github.event.pull_request.head.ref == 'codex/zepp-apple-health-relay' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout task branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/zepp-apple-health-relay
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Apply focused patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f apps/web/src/lib/device-sync/zepp-apple-health-setup-guide.ts ]]; then
+            echo "Zepp patch is already present; continuing to verification."
+            exit 0
+          fi
+
+          ruby -ryaml -e '
+            workflow = YAML.unsafe_load_file(".github/workflows/codex-zepp-apple-health-relay.yml")
+            step = workflow.fetch("jobs").fetch("patch-and-verify").fetch("steps").find do |candidate|
+              candidate["name"] == "Apply focused patch"
+            end
+            raise "Patch step not found" unless step && step["run"]
+            File.write("/tmp/apply-zepp-patch.sh", "set -euo pipefail\n#{step.fetch("run")}")
+          '
+          bash /tmp/apply-zepp-patch.sh
+
+      - name: Install dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Focused web tests
+        run: >-
+          pnpm exec vitest run
+          --config apps/web/vitest.workspace.ts
+          --no-coverage
+          apps/web/test/connect-page.test.ts
+          apps/web/test/device-sync-completion-dialog-client.test.ts
+
+      - name: Focused assistant prompt tests
+        run: >-
+          pnpm exec vitest run
+          --config packages/assistant-engine/vitest.config.ts
+          --no-coverage
+          packages/assistant-engine/test/model-behavior.test.ts
+
+      - name: Typecheck affected packages
+        run: |
+          pnpm --dir packages/device-syncd typecheck
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir apps/web typecheck
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+      - name: Commit verified patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -f --ignore-unmatch .github/workflows/codex-zepp-apple-health-relay.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No patch changes to commit."
+            exit 0
+          fi
+          git commit -m "feat: add Zepp Apple Health setup [zepp-patch-applied]"
+          git push origin HEAD:codex/zepp-apple-health-relay
