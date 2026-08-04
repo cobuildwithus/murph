@@ -351,9 +351,12 @@ export function listHostedDeployEnvironmentInvariantErrors(
       "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be a lowercase SHA-256 hex digest.",
     );
   }
-  if (r2PausedCanaryUserIdSha256 && r2WriteAdmission !== "paused") {
+  if (
+    r2PausedCanaryUserIdSha256
+    && (r2CutoverPhase !== "destination_active" || r2WriteAdmission !== "paused")
+  ) {
     errors.push(
-      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_WRITE_ADMISSION=paused.",
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
     );
   }
   const cloudflareAccountId = normalizeOptionalString(source.CLOUDFLARE_ACCOUNT_ID);

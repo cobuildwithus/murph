@@ -506,8 +506,9 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
-- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` only during the bounded paused
-  cutover canary; use a lowercase SHA-256 digest, never a raw member ID
+- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` only after the destination Worker and
+  every relevant Durable Object have converged while paused; use a lowercase
+  SHA-256 digest of a quiescent operator-controlled member, never a raw member ID
 - `HOSTED_R2_WRITE_ADMISSION=open` normally; set `paused` only for the bounded
   OC-to-ENAM drain in `R2_BUNDLES_ENAM_MIGRATION.md`
 
@@ -710,10 +711,14 @@ Core execution tuning:
   Object call; deploy it to 100 percent and drain every reported in-flight
   invocation before starting the direct-upload capability timer.
 - `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` is temporary and must be unset while
-  admission is open. During `destination_active+paused`, only the matching
-  callback-signed Temporal request can reach UserRunner; source-active pauses,
-  other members, and direct OIDC hints remain fenced. Status exposes only
-  `pausedCanaryConfigured`, never the digest or raw member ID.
+  admission is open or the source is active. Keep it unset through the initial
+  `destination_active+paused` deployment and every Durable Object convergence
+  check. After convergence, configure it only for a quiescent
+  operator-controlled member with no pending mailbox work, retry/recheck/wake,
+  alarm, or member-facing ingress. It opens a per-member callback-signed window,
+  not a one-shot request; source-active pauses, other members, and direct OIDC
+  hints remain fenced. Status exposes only `pausedCanaryConfigured`, never the
+  digest or raw member ID.
 - `HOSTED_R2_PRESIGN_ENDPOINT` optionally overrides the default account-scoped
   R2 S3 endpoint for direct snapshot presign URLs. Normally leave it unset. If
   set for deploys, it must be `https://<account-id>.r2.cloudflarestorage.com`.

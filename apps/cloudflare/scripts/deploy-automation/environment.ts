@@ -221,9 +221,12 @@ function assertHostedR2FixedRoleConfiguration(input: {
       "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be a lowercase SHA-256 hex digest.",
     );
   }
-  if (pausedCanaryUserIdSha256 !== undefined && writeAdmission !== "paused") {
+  if (
+    pausedCanaryUserIdSha256 !== undefined
+    && (phase !== "destination_active" || writeAdmission !== "paused")
+  ) {
     throw new TypeError(
-      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_WRITE_ADMISSION=paused.",
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
     );
   }
   if (input.workerVars.HOSTED_R2_PRESIGN_BUCKET_NAME !== input.bundlesBucketName) {

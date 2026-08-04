@@ -2435,7 +2435,7 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
-    it("admits only the configured callback-signed canary after destination promotion", async () => {
+    it("keeps a scheduled retry fenced until destination convergence and the canary digest deploy", async () => {
       const canaryUserId = "test-canary";
       const stub = createUserRunnerStub({
         ensureRuntimeProcessingForUser: vi.fn(async () => ({
@@ -2445,7 +2445,17 @@ describe("cloudflare worker routes", () => {
           runtimeAttemptId: "runtime-attempt-canary",
         })),
       });
-      const env = createWorkerEnv(stub, {
+      const sourcePausedEnv = createWorkerEnv(stub, {
+        BUNDLES_ENAM: createBucketStore().api,
+        HOSTED_R2_CUTOVER_PHASE: "source_active",
+        HOSTED_R2_WRITE_ADMISSION: "paused",
+      });
+      const destinationConvergingEnv = createWorkerEnv(stub, {
+        BUNDLES_ENAM: createBucketStore().api,
+        HOSTED_R2_CUTOVER_PHASE: "destination_active",
+        HOSTED_R2_WRITE_ADMISSION: "paused",
+      });
+      const destinationCanaryEnv = createWorkerEnv(stub, {
         BUNDLES_ENAM: createBucketStore().api,
         HOSTED_R2_CUTOVER_PHASE: "destination_active",
         HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256:
@@ -2453,13 +2463,16 @@ describe("cloudflare worker routes", () => {
         HOSTED_R2_WRITE_ADMISSION: "paused",
       });
 
-      const response = await worker.fetch(
+      const sendCallbackEnsure = async (
+        env: WorkerTestEnv,
+        orchestrationAttemptId: string,
+      ): Promise<Response> => await worker.fetch(
         await signWebCallbackControlRequest(
           new Request(
             `https://runner.example.test/internal/users/${canaryUserId}/runtime/ensure-processing`,
             {
               body: JSON.stringify({
-                orchestrationAttemptId: "orchestration-attempt-canary",
+                orchestrationAttemptId,
               }),
               headers: {
                 "content-type": "application/json; charset=utf-8",
@@ -2472,15 +2485,35 @@ describe("cloudflare worker routes", () => {
         env,
       );
 
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({
+      const sourceRetry = await sendCallbackEnsure(
+        sourcePausedEnv,
+        "orchestration-attempt-scheduled-retry",
+      );
+      const destinationRetryBeforeConvergence = await sendCallbackEnsure(
+        destinationConvergingEnv,
+        "orchestration-attempt-scheduled-retry",
+      );
+
+      await expect(sourceRetry.json()).resolves.toMatchObject({ kind: "retry_later" });
+      await expect(destinationRetryBeforeConvergence.json()).resolves.toMatchObject({
+        kind: "retry_later",
+      });
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+
+      const explicitCanary = await sendCallbackEnsure(
+        destinationCanaryEnv,
+        "orchestration-attempt-explicit-canary",
+      );
+
+      expect(explicitCanary.status).toBe(200);
+      await expect(explicitCanary.json()).resolves.toMatchObject({
         kind: "runtime_processing_accepted",
         runtimeAttemptId: "runtime-attempt-canary",
       });
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledOnce();
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith(
         expect.objectContaining({
-          orchestrationAttemptId: "orchestration-attempt-canary",
+          orchestrationAttemptId: "orchestration-attempt-explicit-canary",
           userId: canaryUserId,
         }),
       );

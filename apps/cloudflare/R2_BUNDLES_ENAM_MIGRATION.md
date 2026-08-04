@@ -146,17 +146,15 @@ objects may continue to appear in OC and are handled by the final delta.
 
 ### 3. Pause and drain runtime writes
 
-Select one active hosted member with a current snapshot and derive the lowercase
-SHA-256 digest of its member ID in the private operator process. Set only that
-digest as `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256`; never place the raw member ID
-in deploy configuration, logs, or artifacts. Set
+Keep `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` unset. Set
 `HOSTED_R2_WRITE_ADMISSION=paused`, deploy the Worker version to 100 percent,
 and require every status response to report `writeAdmission=paused` and
-`pausedCanaryConfigured=true`. Start a 30-minute pre-promotion deadline when the
-paused version reaches 100 percent.
+`pausedCanaryConfigured=false`. Start a 30-minute pre-promotion deadline when
+the paused version reaches 100 percent. Deploy preflight rejects a canary digest
+while the source remains active.
 The Worker-level check must return `retry_later` for both signed Temporal calls
-including the selected canary, and for Vercel OIDC direct latency hints, without
-calling UserRunner while the phase remains `source_active`. Inbound messages
+and Vercel OIDC direct latency hints without calling UserRunner while the phase
+remains `source_active`. Inbound messages
 remain accepted in the web-owned encrypted mailbox. An invocation already in
 flight may finish work it accepted before the pause; after every runner reports
 `inFlight=false`, Murph replies and other new runtime effects wait until
@@ -199,8 +197,9 @@ migration credential, run direct destination PUT, HEAD, GET, and delete smokes.
 The 30-minute deadline is fail-safe, not an estimate to extend. If every
 pre-promotion requirement cannot pass before it expires, or any requirement
 fails, keep `HOSTED_R2_CUTOVER_PHASE=source_active`, deploy
-`HOSTED_R2_WRITE_ADMISSION=open`, require the source-active/open version at 100
-percent, and prove a queued mailbox item is consumed. Do not promote. Reconcile
+`HOSTED_R2_WRITE_ADMISSION=open` with the canary digest still unset, require the
+source-active/open version at 100 percent, and prove a queued mailbox item is
+consumed. Do not promote. Reconcile
 or quarantine the non-authoritative destination and retry the final delta in a
 later bounded window. Keep account deletion in maintenance only until any
 outstanding managed jobs are terminal and the destination disposition is known,
@@ -212,20 +211,35 @@ Deploy the same bridge with:
 
 ```text
 HOSTED_R2_CUTOVER_PHASE=destination_active
-HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256=<lowercase-sha256-digest>
 HOSTED_R2_WRITE_ADMISSION=paused
 ```
 
 Require the destination-active Worker version at 100 percent and query every
 relevant Durable Object until it reports the current bridge protocol and
 destination-active phase. Every response must still report
-`pausedCanaryConfigured=true` and `writeAdmission=paused`.
+`pausedCanaryConfigured=false` and `writeAdmission=paused`. An already scheduled
+retry for any member must still receive `retry_later` with zero UserRunner calls
+during this convergence deploy.
 
-Wake the selected member through the existing explicit runtime-maintenance path.
-Its callback-signed Temporal ensure is the only request permitted through the
-paused gate. A wrong or absent digest, every other member, and every direct OIDC
-hint must still receive `retry_later` without a UserRunner call. While global
-write admission remains closed, prove:
+Only after every relevant Durable Object has converged, select a dedicated,
+operator-controlled hosted member with a current snapshot. Through the existing
+mailbox, runner-status, and Temporal inspection paths, prove that member has no
+in-flight work, mailbox lag, pending retry/recheck/wake, scheduled alarm, or
+member-facing ingress during the canary window. Derive the lowercase SHA-256
+digest of its member ID in the private operator process; never place the raw ID
+in deploy configuration, logs, or artifacts. Deploy the digest as
+`HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` while remaining
+`destination_active+paused`, wait for the route configuration to reach 100
+percent, and repeat the quiescence proof before issuing the explicit
+runtime-maintenance wake.
+
+The digest is a temporary per-member callback window, not a one-shot request:
+every callback-signed Temporal ensure or recheck for the matching member can
+pass while it is configured. Quiescence and closed member-facing ingress make
+the explicit maintenance wake the only callback in that window. A wrong or
+absent digest, every other member, and every direct OIDC hint must still receive
+`retry_later` without a UserRunner call. While global write admission remains
+closed, prove:
 
 1. a copied pre-switch snapshot cold-restores;
 2. a canary writes directly to ENAM;
