@@ -1,4 +1,4 @@
-name: Debug explicit signup referral bundle
+name: Apply explicit signup referral runtime fix
 
 on:
   push:
@@ -8,45 +8,89 @@ on:
       - .github/workflows/debug-explicit-signup-referral-bundle.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  bundle:
+  apply:
+    if: "${{ startsWith(github.event.head_commit.message, 'chore: apply signup referral runtime fix') }}"
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          persist-credentials: false
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Capture production runner bundle output
-        shell: bash
+      - name: Apply exhaustive email-group response handling
         run: |
-          set +e
-          pnpm --dir apps/cloudflare runner:bundle > runner-bundle.log 2>&1
-          printf '%s\n' "$?" > runner-bundle.exit-code
-          exit 0
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Upload production runner bundle output
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: explicit-signup-referral-runner-bundle-log
-          path: |
-            runner-bundle.log
-            runner-bundle.exit-code
-          retention-days: 1
+          source_path = Path("packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts")
+          source = source_path.read_text()
+          source_needle = '''    case "preflight_set_chat_avatar":
+              case "set_chat_avatar":
+              case "share_contact_card":
+              case "leave_membership":
+              case "post_disclosure_request":'''.replace("              ", "    ")
+          source_replacement = '''    case "create_signup_referral_link":
+              case "preflight_set_chat_avatar":
+              case "set_chat_avatar":
+              case "share_contact_card":
+              case "leave_membership":
+              case "post_disclosure_request":'''.replace("              ", "    ")
+          if source.count(source_needle) != 1:
+              raise SystemExit("workspace assistant response anchor did not match exactly once")
+          source_path.write_text(source.replace(source_needle, source_replacement, 1))
 
-      - name: Preserve bundle result
-        shell: bash
-        run: exit "$(cat runner-bundle.exit-code)"
+          test_path = Path("packages/assistant-runtime/test/hosted-runtime-group-tool-linq-context.test.ts")
+          test = test_path.read_text()
+          old_title = '  it("denies referral actions on group email where the human sender is not authoritative", async () => {'
+          new_title = '  it("denies referral and signup-link actions on group email without an authoritative sender", async () => {'
+          if test.count(old_title) != 1:
+              raise SystemExit("email-group test title anchor did not match exactly once")
+          test = test.replace(old_title, new_title, 1)
+          test_needle = '''    await expect(groupTool.request({
+              action: "read_usage_referral",
+            })).resolves.toEqual({
+              action: "read_usage_referral",
+              result: {
+                referral: null,
+                status: "unavailable",
+                unavailableReason: "authenticated_sender_required",
+              },
+            });
+            expect(request).not.toHaveBeenCalled();'''.replace("            ", "    ")
+          test_replacement = '''    await expect(groupTool.request({
+              action: "read_usage_referral",
+            })).resolves.toEqual({
+              action: "read_usage_referral",
+              result: {
+                referral: null,
+                status: "unavailable",
+                unavailableReason: "authenticated_sender_required",
+              },
+            });
+            await expect(groupTool.request({
+              action: "create_signup_referral_link",
+            })).resolves.toEqual({
+              action: "create_signup_referral_link",
+              result: {
+                status: "unavailable",
+                unavailableReason: "authenticated_sender_required",
+              },
+            });
+            expect(request).not.toHaveBeenCalled();'''.replace("            ", "    ")
+          if test.count(test_needle) != 1:
+              raise SystemExit("email-group test body anchor did not match exactly once")
+          test_path.write_text(test.replace(test_needle, test_replacement, 1))
+
+          Path(".github/workflows/debug-explicit-signup-referral-bundle.yml").unlink()
+          PY
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+      - name: Commit runtime fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/assistant-runtime .github/workflows/debug-explicit-signup-referral-bundle.yml
+          git commit -m "fix: handle signup referral links in email group turns"
+          git push
