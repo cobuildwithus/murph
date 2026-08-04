@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => {
     upsertDirtyConnection: vi.fn(),
     upsertConnectionSource: vi.fn(),
     withConnectionMutationLock: vi.fn(),
+    withHealthDataAdmissionLock: vi.fn(),
     prismaTx: {
       __tx: true,
       $queryRaw: vi.fn(),
@@ -48,6 +49,9 @@ const mocks = vi.hoisted(() => {
     },
     prisma: {
       $transaction: vi.fn(),
+      hostedConsentGrant: {
+        findUnique: vi.fn(),
+      },
     },
     signalHostedDeviceSyncMailboxRuntime: vi.fn(),
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
@@ -322,6 +326,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     upsertDirtyConnection = mocks.upsertDirtyConnection;
     upsertConnectionSource = mocks.upsertConnectionSource;
     withConnectionMutationLock = mocks.withConnectionMutationLock;
+    withHealthDataAdmissionLock = mocks.withHealthDataAdmissionLock;
     prisma = mocks.prisma;
   },
   generateHostedAgentBearerToken: vi.fn(),
@@ -447,7 +452,9 @@ describe("hosted device-sync wakes", () => {
             scopes: ["heartrate"],
           },
           now: "2026-03-26T12:00:00.000Z",
-          provider: {},
+          provider: {
+            provider: "oura",
+          },
           claimToken: "claim-token",
           traceId: "trace_123",
           webhook: {
@@ -495,6 +502,10 @@ describe("hosted device-sync wakes", () => {
     });
     mocks.prismaTx.deviceSyncSignal.create.mockResolvedValue({ id: 8 });
     mocks.completeWebhookTrace.mockResolvedValue(true);
+    mocks.prisma.hostedConsentGrant.findUnique.mockResolvedValue({
+      scope: "launch.health-data",
+      status: "granted",
+    });
     mocks.signalHostedDeviceSyncMailboxRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:user-123",
@@ -524,6 +535,11 @@ describe("hosted device-sync wakes", () => {
     mocks.registryGet.mockReturnValue(undefined);
     mocks.registryList.mockReturnValue([]);
     mocks.withConnectionMutationLock.mockImplementation(async (
+      _connectionId: string,
+      callback: (tx: typeof mocks.prismaTx) => Promise<unknown>,
+    ) => callback(mocks.prismaTx));
+    mocks.withHealthDataAdmissionLock.mockImplementation(async (
+      _userId: string,
       _connectionId: string,
       callback: (tx: typeof mocks.prismaTx) => Promise<unknown>,
     ) => callback(mocks.prismaTx));
@@ -799,6 +815,32 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("does not append scheduled reconcile work after explicit consent withdrawal", async () => {
+    mocks.prisma.hostedConsentGrant.findUnique.mockResolvedValueOnce({
+      scope: "launch.health-data",
+      status: "revoked",
+    });
+
+    await expect(appendHostedDeviceSyncScheduledReconcileWake({
+      connectionId: "dsc_123",
+      createdAt: "2026-03-26T12:01:00.000Z",
+      eventId: "device-sync:scheduled-reconcile:abc123",
+      expectedConnectedAt: "2026-03-26T12:00:00.000Z",
+      nextReconcileAt: "2026-03-26T12:00:00.000Z",
+      provider: "oura",
+      userId: "user-123",
+    })).resolves.toEqual({
+      reason: "health_data_consent_withdrawn",
+      wakeAccepted: false,
+      wakeAppended: false,
+      wakeDuplicate: false,
+      wakeInserted: false,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+  });
+
   it("returns queued after a manual reconcile commits even when its wake signal fails", async () => {
     mocks.signalHostedDeviceSyncMailboxRuntime.mockRejectedValueOnce(
       new Error("Temporal unavailable"),
@@ -974,6 +1016,31 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("completes but does not process claimed webhooks after consent withdrawal", async () => {
+    mocks.prisma.hostedConsentGrant.findUnique.mockResolvedValueOnce({
+      scope: "launch.health-data",
+      status: "revoked",
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura", Buffer.from("{}"))).resolves.toEqual({
+      accepted: true,
+    });
+
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
+      "oura",
+      "trace_123",
+      "claim-token",
+    );
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
   it("preserves the sole Junction source on webhook receipt signals", async () => {
     const connection = buildHostedConnection({ provider: "junction" });
     mocks.getConnectionForUser.mockResolvedValue(connection);
@@ -1109,7 +1176,8 @@ describe("hosted device-sync wakes", () => {
       connection.id,
       mocks.prismaTx,
     );
-    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
       connection.id,
       expect.any(Function),
     );
@@ -2419,7 +2487,11 @@ describe("hosted device-sync wakes", () => {
 
     await controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" });
 
-    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
+      "dsc_123",
+      expect.any(Function),
+    );
     expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
       "user-123",
       "dsc_123",
@@ -2555,7 +2627,11 @@ describe("hosted device-sync wakes", () => {
       retryable: false,
     });
 
-    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
+      "dsc_123",
+      expect.any(Function),
+    );
     expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
       "user-123",
       "dsc_123",
@@ -2581,7 +2657,7 @@ describe("hosted device-sync wakes", () => {
       retryable: false,
     });
 
-    expect(mocks.withConnectionMutationLock).not.toHaveBeenCalled();
+    expect(mocks.withHealthDataAdmissionLock).not.toHaveBeenCalled();
     expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
@@ -2987,7 +3063,8 @@ describe("hosted device-sync wakes", () => {
       accepted: true,
     });
 
-    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
       "dsc_123",
       expect.any(Function),
     );
@@ -3364,7 +3441,8 @@ describe("hosted device-sync wakes", () => {
       retryable: false,
     });
 
-    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
       establishedConnection.id,
       expect.any(Function),
     );
@@ -4247,7 +4325,8 @@ describe("hosted device-sync wakes", () => {
       "claim-token",
       mocks.prismaTx,
     );
-    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
       "dsc_123",
       expect.any(Function),
     );

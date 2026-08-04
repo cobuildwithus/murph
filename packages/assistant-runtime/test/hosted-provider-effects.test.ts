@@ -412,6 +412,230 @@ describe("hosted provider effects", () => {
     );
   });
 
+  it("persists hosted app-card text fallback before its provider send", async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({ available: false }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({
+        message: { id: "fallback-message" },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-07-31",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "hosted-card-fallback",
+      message: "Nutrition summary",
+      target: "direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      idempotencyKey: "hosted-card-fallback",
+      providerMessageId: "fallback-message",
+    });
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: "hosted-card-fallback",
+    });
+    expect(persistAppCardTextFallback.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[1]!,
+    );
+  });
+
+  it("returns the promoted identity after a direct app-card text fallback", async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({ available: true }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const body = typeof init?.body === "string"
+        ? JSON.parse(init.body) as {
+            message?: { parts?: Array<{ type?: string }> };
+          }
+        : {};
+      if (body.message?.parts?.[0]?.type === "imessage_app") {
+        return new Response(JSON.stringify({ error: "unsupported app card" }), {
+          headers: { "content-type": "application/json" },
+          status: 400,
+        });
+      }
+      return new Response(JSON.stringify({
+        message: { id: "direct-fallback-message" },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-07-31",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "hosted-card-rejected",
+      message: "Nutrition summary",
+      target: "direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      persistAppCardTextFallback,
+    })).resolves.toEqual({
+      idempotencyKey: "hosted-card-rejected:fallback",
+      providerMessageId: "direct-fallback-message",
+      providerThreadId: null,
+      target: "direct-chat",
+    });
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: "hosted-card-rejected:fallback",
+    });
+  });
+
+  it.each([
+    {
+      capabilityAvailable: false,
+      expectedIdempotencyKey: "hosted-stale-card",
+      name: "capability fallback",
+    },
+    {
+      capabilityAvailable: true,
+      expectedIdempotencyKey: "hosted-stale-card:fallback",
+      name: "definitive app-card rejection",
+    },
+  ])("recovers a stale Linq thread after $name using the persisted text identity", async ({
+    capabilityAvailable,
+    expectedIdempotencyKey,
+  }) => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const providerRequests: Array<{
+      body: Record<string, unknown>;
+      url: string;
+    }> = [];
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      const body = typeof init?.body === "string"
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : {};
+      providerRequests.push({ body, url });
+      if (url.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({ available: capabilityAvailable }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/chats/stale-chat/messages")) {
+        const message = body.message as {
+          parts?: Array<{ type?: string }>;
+        } | undefined;
+        if (message?.parts?.[0]?.type === "imessage_app") {
+          return new Response(JSON.stringify({ error: "unsupported app card" }), {
+            headers: { "content-type": "application/json" },
+            status: 400,
+          });
+        }
+        return new Response(JSON.stringify({
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 404,
+        });
+      }
+      if (url.endsWith("/chats")) {
+        return new Response(JSON.stringify({
+          chat: {
+            id: "recovered-card-chat",
+            message: { id: "recovered-card-message" },
+          },
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(null, { status: 500 });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-07-31",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
+      idempotencyKey: "hosted-stale-card",
+      message: "Nutrition summary",
+      target: "stale-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      persistAppCardTextFallback,
+    })).resolves.toEqual({
+      idempotencyKey: expectedIdempotencyKey,
+      providerMessageId: "recovered-card-message",
+      providerThreadId: "recovered-card-chat",
+      target: "recovered-card-chat",
+    });
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledOnce();
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: expectedIdempotencyKey,
+    });
+    const createChatRequest = providerRequests.find(({ url }) =>
+      url.endsWith("/chats")
+    );
+    expect(createChatRequest?.body).toMatchObject({
+      message: {
+        idempotency_key: expectedIdempotencyKey,
+        parts: [{ type: "text", value: "Nutrition summary" }],
+      },
+      to: ["+15550001"],
+    });
+    expect(providerRequests.filter(({ url }) =>
+      url.endsWith("/chats/stale-chat/messages")
+    )).toHaveLength(capabilityAvailable ? 2 : 1);
+  });
+
   it("does not re-home a stale Linq thread without fallback authority", async () => {
     const fetchMock = vi.fn(async (
       input: RequestInfo | URL,
@@ -801,6 +1025,7 @@ describe("hosted provider effects", () => {
       },
       fetchImplementation: fetchMock as typeof fetch,
     })).resolves.toEqual({
+      idempotencyKey: "assistant-outbox:intent_1",
       providerMessageId: "materialized-message",
       providerThreadId: "materialized-chat",
       target: "materialized-chat",

@@ -11,6 +11,7 @@ import type {
 
 import type { HostedExecutionEnvironment } from "../env.js";
 import {
+  destroyHostedExecutionContainer,
   type HostedExecutionContainerNamespaceLike,
 } from "../runner-container.js";
 import {
@@ -70,6 +71,12 @@ export type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
   orchestration?: RuntimeProcessingOrchestrationDiagnostics | null;
   userId: string;
 };
+
+export interface RuntimeHealthDataConsentStopResult {
+  activeInvocationPreempted: boolean;
+  runnerContainerDestroyAttempted: boolean;
+  runnerContainerDestroyOk: boolean;
+}
 
 type RuntimeProcessingOrchestrationDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
@@ -176,6 +183,87 @@ export class RuntimeProcessingController {
       input: processingInput,
       runtimeWakeStartedAt,
     });
+  }
+
+  async stopForHealthDataConsentWithdrawal(
+    userId: string,
+  ): Promise<RuntimeHealthDataConsentStopResult> {
+    await this.input.stateStore.bindUser(userId);
+    const preemption =
+      await this.input.stateStore.clearWriteFenceForUserControl(userId);
+    const runnerContainerName = preemption.runnerContainerName
+      ? readActiveRuntimeRunnerContainerName({
+        activeRuntime: {
+          attemptId: preemption.attemptId ?? "user-control-stop",
+          leaseGeneration: "0",
+          userId,
+        },
+        runnerContainerName: preemption.runnerContainerName,
+        runnerRuntimeEnvSource: this.input.runnerRuntimeEnvSource,
+      })
+      : resolveHostedExecutionRunnerContainerName({
+        source: this.input.runnerRuntimeEnvSource,
+        userId,
+      });
+
+    if (!runnerContainerName) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          activeInvocationPreempted: preemption.cleared,
+          runnerContainerDestroyAttempted: false,
+          runnerContainerDestroyOk: false,
+          workspaceAttemptId: preemption.attemptId,
+        },
+        level: "error",
+        message: "Hosted runner stop target was invalid after health-data consent withdrawal.",
+        phase: "failed",
+        userId,
+      });
+      throw new HostedRuntimeHealthDataConsentStopError();
+    }
+
+    const destroyed = await destroyHostedExecutionContainer({
+      runnerContainerName,
+      runnerContainerNamespace: this.input.runnerContainerNamespace,
+      userId,
+    });
+    const pendingStopTargetCleared = !preemption.runnerContainerName
+      || (
+        destroyed.ok
+        && await this.input.stateStore.clearStoppedRunnerContainerForUserControl({
+          runnerContainerName: preemption.runnerContainerName,
+          userId,
+        })
+      );
+    const stopped = destroyed.ok && pendingStopTargetCleared;
+
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        activeInvocationPreempted: preemption.cleared,
+        pendingStopTargetCleared,
+        runnerContainerDestroyAttempted: destroyed.attempted,
+        runnerContainerDestroyOk: destroyed.ok,
+        workspaceAttemptId: preemption.attemptId,
+      },
+      level: stopped ? "info" : "error",
+      message: stopped
+        ? "Hosted runner stopped after health-data consent withdrawal."
+        : "Hosted runner could not stop after health-data consent withdrawal.",
+      phase: stopped ? "wake.running" : "failed",
+      userId,
+    });
+
+    if (!stopped) {
+      throw new HostedRuntimeHealthDataConsentStopError();
+    }
+
+    return {
+      activeInvocationPreempted: preemption.cleared,
+      runnerContainerDestroyAttempted: destroyed.attempted,
+      runnerContainerDestroyOk: destroyed.ok,
+    };
   }
 
   computeRuntimeProcessingRetryAt(reason: RuntimeProcessingRetryReason): string {
@@ -1057,6 +1145,13 @@ export class RuntimeProcessingController {
       return false;
     }
     return Date.now() - startedAtMs < RUNTIME_PROCESSING_STARTUP_GRACE_MS;
+  }
+}
+
+class HostedRuntimeHealthDataConsentStopError extends Error {
+  constructor() {
+    super("Hosted runner container cleanup failed after health-data consent withdrawal.");
+    this.name = "HostedRuntimeHealthDataConsentStopError";
   }
 }
 

@@ -21,11 +21,15 @@ import {
   MURPH_COMPUTER_OPEN_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  MURPH_SEND_PHYSICAL_NOTE_TOOL,
+} from '../src/assistant-codex/dynamic-tools/physical-notes.ts'
 import {
   MURPH_CONNECTED_APPS_SEARCH_TOOL,
 } from '../src/assistant-codex/dynamic-tools/connected-apps.ts'
@@ -60,6 +64,9 @@ import {
 import type {
   AssistantTurnProductFeedbackRecorder,
 } from '../src/assistant/turn-progress.ts'
+import type {
+  AssistantHostedToolContext,
+} from '../src/assistant/hosted-tool-context.ts'
 import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
 import type {
   AssistantProviderDynamicTool,
@@ -2256,6 +2263,194 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
   )
 })
 
+describeRealCodex('real Codex proactive physical-note address e2e', () => {
+  it(
+    'resolves before drafting, preserves group authority, and stops on ambiguity',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const scenarios = [
+        {
+          addressResult: buildPhysicalNoteAddressResult({
+            recommended: true,
+          }),
+          conversationScope: 'direct' as const,
+          expectGeneration: true,
+          prompt: [
+            `Message ref: ain_${'1'.repeat(32)}`,
+            'Send one short thank-you note to Casey at 42 Example Lane for helping with the move.',
+            'This is an explicit request to mail it, not to preview a draft.',
+          ].join('\n\n'),
+        },
+        {
+          addressResult: buildPhysicalNoteAddressResult({
+            recommended: true,
+          }),
+          conversationScope: 'group' as const,
+          expectGeneration: true,
+          prompt: [
+            `Accepted message from participant-a, ref ain_${'2'.repeat(32)}: Send one short thank-you note to Casey at 42 Example Lane for helping our room with the move. Mail it without a draft preview.`,
+            `Later accepted message from participant-b, ref ain_${'3'.repeat(32)}: Sounds good.`,
+            'The first message is the exact authorizing request. The later participant did not create or replace send authority.',
+          ].join('\n\n'),
+        },
+        {
+          addressResult: buildPhysicalNoteAddressResult({
+            recommended: false,
+          }),
+          conversationScope: 'direct' as const,
+          expectGeneration: false,
+          prompt: [
+            `Message ref: ain_${'4'.repeat(32)}`,
+            'Send one short thank-you note to Casey at 42 Example Lane for helping with the move.',
+            'This is an explicit request to mail it, not to preview a draft.',
+          ].join('\n\n'),
+        },
+      ] as const
+
+      try {
+        for (const scenario of scenarios) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), 'murph-physical-note-address-e2e-'),
+          )
+          const skillsRoot = path.join(workingDirectory, 'skills')
+          const binDirectory = path.join(workingDirectory, 'bin')
+          await materializePhysicalNoteSkill({ skillsRoot })
+          await materializePhysicalNoteAddressVaultCli({
+            binDirectory,
+            result: scenario.addressResult,
+          })
+          const originMessageRef = scenario.conversationScope === 'group'
+            ? `ain_${'2'.repeat(32)}`
+            : scenario.expectGeneration
+              ? `ain_${'1'.repeat(32)}`
+              : `ain_${'4'.repeat(32)}`
+          const latestMessageRef = scenario.conversationScope === 'group'
+            ? `ain_${'3'.repeat(32)}`
+            : originMessageRef
+          const launchedOperationIds: string[] = []
+          const hostedToolContext = {
+            computerToolsAvailable: false,
+            currentAssistantInputId: () => latestMessageRef,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: scenario.conversationScope === 'group'
+                ? [originMessageRef, latestMessageRef]
+                : [originMessageRef],
+              conversationId: `conversation-${scenario.conversationScope}`,
+              conversationScope: scenario.conversationScope,
+              inboundMailboxItemIds: ['mailbox-physical-note'],
+              originSessionId: 'session-physical-note',
+              recipientKey: `recipient-${scenario.conversationScope}`,
+            }),
+            imageGenerationLauncher: {
+              launch(input) {
+                launchedOperationIds.push(input.operationId)
+                return 'started' as const
+              },
+            },
+            sendVaultFile: async () => ({
+              filename: 'unused',
+              status: 'denied' as const,
+            }),
+            vaultFileSendAvailable: false,
+          } satisfies AssistantHostedToolContext
+          const result = await executeRealCodexAppServerTurn({
+            approvalPolicy: 'never',
+            authorizeAcceptedMessageTarget:
+              scenario.conversationScope === 'group'
+                ? async ({ messageRef }) => messageRef === originMessageRef
+                  ? {
+                      participant: {
+                        assistantInputId: originMessageRef,
+                        senderHandle: 'participant-a',
+                        source: 'linq' as const,
+                      },
+                      targetInputId: originMessageRef,
+                    }
+                  : null
+                : null,
+            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+            codexCommand:
+              normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+              ?? undefined,
+            codexHome: config.codexHome,
+            developerInstructions: scenario.conversationScope === 'group'
+              ? buildGroupPointOfViewDeveloperInstructions({
+                  hostedRuntime: true,
+                })
+              : buildDirectConversationDeveloperInstructions(),
+            dynamicTools: resolveMurphDynamicTools({
+              messageTargetingAvailable:
+                scenario.conversationScope === 'group',
+              physicalNotesAvailable: true,
+            }),
+            env: {
+              ...config.env,
+              [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+              PATH: [binDirectory, config.env.PATH]
+                .filter((value): value is string => Boolean(value))
+                .join(path.delimiter),
+            },
+            excludeResumeTurns: true,
+            hostedToolContext,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            prompt: scenario.prompt,
+            reasoningEffort: 'low',
+            sandbox: 'workspace-write',
+            workingDirectory,
+          })
+          const actions = readCapabilityRoutingActions(result.jsonEvents)
+          const addressResolution = actions.find((action) =>
+            action.kind === 'command'
+            && action.command.includes('route resolve-address')
+          )
+          const imageCalls = actions.filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+          )
+          const physicalNoteCalls = actions.filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
+          )
+
+          expect(addressResolution, 'address resolution command').toBeDefined()
+          expect(physicalNoteCalls).toHaveLength(0)
+          expect(result.finalMessage).not.toMatch(/return address/iu)
+
+          if (scenario.expectGeneration) {
+            expect(imageCalls).toHaveLength(1)
+            const imageCall = imageCalls[0]
+            if (imageCall?.kind !== 'dynamic') {
+              throw new Error('Expected a physical-note image tool call.')
+            }
+            expect(imageCall.argumentsValue).toMatchObject({
+              message_ref: originMessageRef,
+              outputFormat: 'jpeg',
+              quality: 'high',
+              size: '1024x1536',
+            })
+            expect(launchedOperationIds).toHaveLength(1)
+            expect(result.finalMessage).toMatch(/making|creating|working/iu)
+            expect(result.finalMessage).not.toMatch(
+              /(?:city|state|zip|draft).{0,80}\?/iu,
+            )
+          } else {
+            expect(imageCalls).toHaveLength(0)
+            expect(launchedOperationIds).toHaveLength(0)
+            expect(result.finalMessage).toContain('?')
+            expect(result.finalMessage).toMatch(/address|city|state|zip|which/iu)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex product-feedback summary e2e', () => {
   it(
     'emits specific, non-invented, product-only feedback at the dynamic-tool boundary',
@@ -3442,6 +3637,88 @@ function buildHabitatVoiceE2ePrompt(transcript: string): string {
     '',
     `Return exactly {"kind":"skip","privateSummary":${JSON.stringify(HABITAT_VOICE_PRIVATE_SUMMARY)}}.`,
   ].join('\n')
+}
+
+function buildPhysicalNoteAddressResult(input: {
+  recommended: boolean
+}) {
+  const recommendedCandidate = {
+    addressLine1: '42 Example Lane',
+    city: 'Sampleton',
+    postalCode: '30303',
+    state: 'GA',
+  }
+  const alternateCandidate = {
+    addressLine1: '42 Example Lane',
+    city: 'Exampleville',
+    postalCode: '10001',
+    state: 'NY',
+  }
+  const candidates = input.recommended
+    ? [recommendedCandidate]
+    : [recommendedCandidate, alternateCandidate]
+
+  return {
+    candidates,
+    privacy: {
+      candidateCount: candidates.length,
+      geocodingStorage: 'temporary',
+      persistedByTool: false,
+      tokenSource: 'env',
+    },
+    provider: {
+      geocodingApiVersion: 'v6',
+      name: 'mapbox',
+    },
+    recommendedCandidate: input.recommended ? recommendedCandidate : null,
+    warnings: input.recommended
+      ? []
+      : ['More than one mailing-address candidate was returned.'],
+  }
+}
+
+async function materializePhysicalNoteSkill(input: {
+  skillsRoot: string
+}): Promise<void> {
+  const targetDirectory = path.join(input.skillsRoot, 'physical-notes')
+  const sourcePath = fileURLToPath(
+    new URL('../skills/physical-notes/SKILL.md', import.meta.url),
+  )
+  await mkdir(targetDirectory, { recursive: true })
+  await writeFile(
+    path.join(targetDirectory, 'SKILL.md'),
+    await readFile(sourcePath, 'utf8'),
+    'utf8',
+  )
+}
+
+async function materializePhysicalNoteAddressVaultCli(input: {
+  binDirectory: string
+  result: ReturnType<typeof buildPhysicalNoteAddressResult>
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"route resolve-address"*)',
+      `    printf '%s\\n' '${JSON.stringify(input.result)}'`,
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"error":"unexpected command"}\' >&2',
+      '    exit 1',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    {
+      encoding: 'utf8',
+      mode: 0o700,
+    },
+  )
+  await chmod(executablePath, 0o700)
 }
 
 async function materializeHabitatVoiceVaultCli(input: {

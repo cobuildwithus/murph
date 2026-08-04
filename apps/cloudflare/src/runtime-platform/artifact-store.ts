@@ -1,6 +1,7 @@
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import {
   HostedRuntimeArtifactReadError,
+  HostedRuntimeArtifactWriteError,
   type HostedRuntimePlatform,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
@@ -20,6 +21,7 @@ import {
 import {
   HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS,
   HostedRuntimeControlPlaneFetchError,
+  shouldPreserveHostedRuntimeFetchError,
   shouldRetryHostedRuntimeReplaySafeRead,
   sleepHostedReplaySafeReadRetryDelay,
 } from "./control-plane-fetch.ts";
@@ -138,7 +140,13 @@ export function createCloudflareArtifactStore(input: {
         phase: "checkpoint",
         userId: null,
       });
-      throw error;
+      if (shouldPreserveHostedRuntimeFetchError(error)) {
+        throw error;
+      }
+      throw new HostedRuntimeArtifactWriteError({
+        cause: error,
+        retryable: true,
+      });
     }
 
     emitHostedExecutionStructuredLog({
@@ -156,7 +164,17 @@ export function createCloudflareArtifactStore(input: {
       phase: "checkpoint",
       userId: null,
     });
-    assertHostedOk(response, "Hosted artifact upload");
+    try {
+      assertHostedOk(response, "Hosted artifact upload");
+    } catch (error) {
+      if (shouldPreserveHostedRuntimeFetchError(error)) {
+        throw error;
+      }
+      throw new HostedRuntimeArtifactWriteError({
+        cause: error,
+        retryable: isRetryableHostedArtifactWriteStatus(response.status),
+      });
+    }
     emitHostedExecutionStructuredLog({
       component: "hosted.runtime.artifact-store",
       details: {
@@ -408,6 +426,10 @@ export function createCloudflareArtifactStore(input: {
       await putArtifactOnce({ bytes, sha256 });
     },
   };
+}
+
+function isRetryableHostedArtifactWriteStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
 }
 
 function assertHostedArtifactFetchLive(

@@ -1,12 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const mocks = vi.hoisted(() => ({
-  fetchHostedWebControlPlaneJson: vi.fn(),
-}));
-
-vi.mock("../src/runtime-platform/web-control-transport.ts", () => ({
-  fetchHostedWebControlPlaneJson: mocks.fetchHostedWebControlPlaneJson,
-}));
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
@@ -17,12 +9,19 @@ import {
 import {
   readHostedRunnerWebControlPolicy,
 } from "../src/runner-outbound/shared-web-control-policy.ts";
+import {
+  startHostedWebControlStub,
+  type HostedWebControlStub,
+} from "./helpers/hosted-web-control-support.js";
+
+let webControl: HostedWebControlStub | null = null;
+
+afterEach(async () => {
+  await webControl?.stop();
+  webControl = null;
+});
 
 describe("hosted iMessage contact tool port", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it("allows only the exact bounded POST route", () => {
     expect(readHostedRunnerWebControlPolicy({
       method: "POST",
@@ -45,18 +44,21 @@ describe("hosted iMessage contact tool port", () => {
     }).allowed).toBe(false);
   });
 
-  it("binds the request to the runtime member and validates the response", async () => {
-    mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
-      phoneNumber: "+15550100001",
-      status: "assigned",
-      verifiedSenderPhoneHint: "*** 0009",
+  it("binds one signed HTTP request to the runtime member and validates the response", async () => {
+    webControl = await startHostedWebControlStub({
+      respond: () => ({
+        body: {
+          phoneNumber: "+15550100001",
+          status: "assigned",
+          verifiedSenderPhoneHint: "*** 0009",
+        },
+      }),
     });
-    const fetchImpl = vi.fn<typeof fetch>();
     const port = createHostedRuntimeIMessageContactToolPort({
       boundUserId: "member_bound",
-      fetchImpl,
+      fetchImpl: fetch,
       timeoutMs: 2_000,
-      transport: { mode: "proxy" },
+      transport: webControl.transport,
     });
     const request = {
       assistantInputId: `ain_${"a".repeat(32)}`,
@@ -67,28 +69,32 @@ describe("hosted iMessage contact tool port", () => {
       status: "assigned",
       verifiedSenderPhoneHint: "*** 0009",
     });
-    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith({
-      body: request,
-      boundUserId: "member_bound",
-      description: "Hosted iMessage contact tool",
-      fetchImpl,
-      path: HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
-      timeoutMs: 2_000,
-      transport: { mode: "proxy" },
+
+    expect(webControl.observedRequests).toHaveLength(1);
+    expect(webControl.observedRequests[0]).toMatchObject({
+      body: JSON.stringify(request),
+      keyId: "v1",
+      method: "POST",
+      url: HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
+      userId: "member_bound",
     });
   });
 
   it("rejects an invalid control-plane response", async () => {
-    mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
-      phoneNumber: "+15550100001",
-      status: "unavailable",
-      verifiedSenderPhoneHint: null,
+    webControl = await startHostedWebControlStub({
+      respond: () => ({
+        body: {
+          phoneNumber: "+15550100001",
+          status: "unavailable",
+          verifiedSenderPhoneHint: null,
+        },
+      }),
     });
     const port = createHostedRuntimeIMessageContactToolPort({
       boundUserId: "member_bound",
       fetchImpl: fetch,
       timeoutMs: 2_000,
-      transport: { mode: "proxy" },
+      transport: webControl.transport,
     });
 
     await expect(port.ensure({

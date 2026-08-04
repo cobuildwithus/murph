@@ -174,11 +174,55 @@ On a scheduled run:
    replaces retained image bytes with a privacy tombstone. Any removal failure
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
-6. Send one compact closeout covering the selected dates. Include supported
-   calorie and macro totals by default; label partial totals as partial. Never
-   surface numbers in intuitive-eating, eating-disorder-risk, or number-sensitive
-   context, and never attach the photos. Suppress the message only when neither
-   a retained photo nor a same-occurrence removal revision is selected.
+6. After inspection, enrichment, read-back, and photo cleanup, consider current
+   nutrition targets only from canonical active goals. Run `vault-cli goal list
+   --status active --limit 200 --format json`, then `vault-cli goal show
+   <goal-id> --format json` for only the records that may contain an explicit
+   daily calorie, protein, carbohydrate, fat, or fiber target. If the list
+   returns 200 records, its bounded result may be incomplete: skip goal detail
+   reads and leave every card goal `null`. Otherwise, inspect the complete
+   returned set and use a target for a metric only when exactly one qualifying
+   active record unambiguously names that daily nutrition metric, unit, and
+   target value. Zero matches, multiple matches (even if their values agree),
+   range-like targets, conflicting candidates, and goals for another unit or
+   time window all leave that metric's card goal `null`. Never infer a target
+   from the day's total or generic health advice. Then run the exact canonical
+   `vault-cli meal totals --from <date> --to <date>` read for the selected date
+   range. Run it immediately before any response-card attachment; do not reuse
+   an earlier total or calculate nutrition independently.
+7. When the run covers exactly one local date, the canonical read includes a
+   calorie total, and numerical output is permitted for the member, call
+   `murph.attach_response_card` with this exact mapping:
+   `card: { kind: "daily_nutrition", version: 2, localDate: <the single
+   selected date>, mealCount: <top-level mealCount>, totals: { calories,
+   proteinGrams, carbsGrams, fatGrams, fiberGrams }, goals: { calories,
+   proteinGrams, carbsGrams, fatGrams, fiberGrams } }`. Copy every metric's
+   complete `{ total, mealCount }` pair unchanged from the canonical read,
+   including `fiberGrams`. Each goal entry is either `null` or
+   `{ target: <exact canonical daily target>, status: <assessment> }`. Use only
+   an eligible target found in step 6. The assessment must be one of
+   `far_under_target`, `under_target`, `on_target`, `over_target`,
+   `far_over_target`, or `unavailable`. A metric whose total is missing or whose
+   `mealCount` is below the top-level `mealCount` must use `unavailable`; do not
+   color an incomplete total as under, on, or over target. Use the member's
+   explicit tolerance, intensity, or goal wording when present. Otherwise make
+   a forgiving, context-aware assessment: broadly aligned is `on_target`, a
+   modest miss is `under_target` or `over_target`, and only a clearly material
+   miss is `far_under_target` or `far_over_target`. There is no universal
+   percentage threshold. Use `unavailable` when a valid target exists but the
+   day's total cannot support an assessment. Use `null` when no trustworthy
+   target exists; never fabricate one merely to color the card. After the tool
+   succeeds,
+   return a `send_message` decision without repeating nutrition values in its
+   text; the runtime replaces that text with the deterministic closeout derived
+   from the card. Do not author a second nutrition summary. The runtime labels
+   partial totals as partial and identifies missing or under-supported
+   nutrition honestly. For
+   multi-date catch-up, missing calories, or intuitive-eating,
+   eating-disorder-risk, or number-sensitive suppression, retain the current
+   compact text or suppression behavior. Never attach the photos. Suppress the
+   message only when neither a retained photo nor a same-occurrence removal
+   revision is selected.
 
 ## Handle edge cases
 

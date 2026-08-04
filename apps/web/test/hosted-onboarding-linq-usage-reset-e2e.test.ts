@@ -748,7 +748,9 @@ function createUsageResetPrismaFixture(input: {
     hostedMember: {
       findUnique: vi.fn(async () => ({
         ...activeMember,
+        accountGroupMemberships: [],
         billingRef: null,
+        consentGrants: [],
         threadContainer: null,
       })),
     },

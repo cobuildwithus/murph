@@ -774,6 +774,7 @@ describe('outbound channel runtime', () => {
           kind: 'thread',
           target: 'thread-1',
         },
+        card: null,
         deliverySource: null,
         explicitTarget: 'thread-2',
         idempotencyKey: 'idem-1',
