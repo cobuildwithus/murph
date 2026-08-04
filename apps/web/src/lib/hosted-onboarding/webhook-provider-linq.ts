@@ -86,6 +86,7 @@ import {
   buildFallbackSignupLinkResponse,
   buildFamilyInviteAcceptedResponse,
   buildGroupLineRecoveryResponse,
+  buildGroupSetupRequiredResponse,
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
   buildSignupLinkResponse,
@@ -860,7 +861,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
       ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
       context,
       event: input.event,
+      firstContactAdmissionDecision: input.firstContactAdmissionDecision,
       prisma: input.prisma,
+      requireFirstContactAdmission: input.requireFirstContactAdmission,
       threadRouteAccountLookupKeys,
     });
   }
@@ -1252,6 +1255,90 @@ export async function planHostedOnboardingLinqWebhook(input: {
     }
   }
 
+  const groupJoinContext = participantPhoneNumber
+    ? await readHostedGroupJoinOutreachReplyContextTx({
+        linqChatId: summary.chatId,
+        participantMemberId: existingMember?.id ?? null,
+        participantPhoneNumber,
+        recipientPhoneNumber,
+        replyToMessageId:
+          messageEvent.data.message.reply_to?.message_id ?? null,
+        sourceEventId: input.event.event_id,
+        tx: input.prisma,
+      })
+    : null;
+  const groupJoinMemberHomeRoute = existingMember && groupJoinContext
+    ? await readHostedMemberRoutingState({
+        memberId: existingMember.id,
+        prisma: input.prisma,
+      })
+    : null;
+  const groupJoinMemberHasHomeRoute = Boolean(
+    groupJoinMemberHomeRoute?.linqChatId
+      || groupJoinMemberHomeRoute?.linqRecipientPhone,
+  );
+
+  // An accepted opener is a narrow, reply-gated authority for this exact chat,
+  // participant, and group. Honor it before ordinary billing and home-route
+  // branches when the member already has a durable home route; route-free
+  // recipients retain the existing first-contact binding and recovery path.
+  if (
+    existingMember
+    && groupJoinContext
+    && groupJoinMemberHasHomeRoute
+  ) {
+    // A correlation proves which opener owns a qualifying reply; it never
+    // overrides recipient control. Keep that decision inside this one ordered
+    // branch so opt-out wins before the group link, which wins before generic
+    // billing and home-route handling below.
+    if (hostedLinqFirstContactContainsBlockedContent({
+      event: messageEvent,
+      participantContact,
+    })) {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildIgnoredLinqWebhookPlan("blocked-first-contact-content"),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          existingMemberActive: existingMemberEffectiveActive,
+          existingMemberMatch,
+          reason: "blocked-first-contact-content",
+          routeStage: "ignored-group-join-blocked-first-contact-content",
+        }),
+      );
+    }
+    const dailyState = await incrementHostedLinqInboundDailyState({
+      memberId: existingMember.id,
+      occurredAt,
+      prisma: input.prisma,
+    });
+    const invite = await issueHostedInviteTx({
+      channel: "linq",
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildSignupLinkResponse({
+        chatId: summary.chatId,
+        groupJoinCode: groupJoinContext.joinCode,
+        groupJoinOutreachId: groupJoinContext.outreachId,
+        inviteCode: invite.inviteCode,
+        inviteId: invite.id,
+        memberId: existingMember.id,
+        messageId: summary.messageId,
+        occurredAt,
+        service: messageEvent.data.service ?? null,
+        sourceEventId: input.event.event_id,
+        threadIsDirect: resolveHostedLinqThreadIsDirect(messageEvent),
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        dailyInboundCount: dailyState.inboundCount,
+        existingMemberActive: Boolean(existingMemberEffectiveActive),
+        existingMemberMatch,
+        reason: "sent-signup-link",
+        routeStage: "routed-member-group-join-link",
+      }),
+    );
+  }
+
   // A member who already owns billing can never be onboarded as a first contact
   // on their own bound home chat: the pending-bind write would hit the home-route
   // race guard and 503 on every retry, forever. Answer from their access decision
@@ -1301,19 +1388,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
     }
   }
-
-  const groupJoinContext = participantPhoneNumber
-    ? await readHostedGroupJoinOutreachReplyContextTx({
-        linqChatId: summary.chatId,
-        participantMemberId: existingMember?.id ?? null,
-        participantPhoneNumber,
-        recipientPhoneNumber,
-        replyToMessageId:
-          messageEvent.data.message.reply_to?.message_id ?? null,
-        sourceEventId: input.event.event_id,
-        tx: input.prisma,
-      })
-    : null;
 
   if (existingMember && existingMemberEffectiveActive) {
     if (!groupJoinContext) {
@@ -2423,6 +2497,7 @@ const HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES = new Set([
 ]);
 
 type HostedLinqNewGroupAdmissionIgnoreReason =
+  | "blocked-first-contact-content"
   | "empty-message-parts"
   | "local-inbound-not-allowlisted"
   | "own-message"
@@ -2437,7 +2512,8 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "recipient-line-structurally-unavailable"
   | "sender-contact-unresolved"
   | "sender-identity-unresolved"
-  | "sender-inactive";
+  | "sender-inactive"
+  | "suspended-member";
 
 /**
  * Group chats with no explicit thread route stay ignored unless the sender is
@@ -2453,7 +2529,9 @@ async function planHostedLinqGroupChatWebhook(input: {
   affirmativeReaction?: boolean;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
+  firstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecision | null;
   prisma: Prisma.TransactionClient;
+  requireFirstContactAdmission?: boolean;
   threadRouteAccountLookupKeys: readonly string[];
 }): Promise<HostedOnboardingLinqDirectPlan> {
   const {
@@ -2514,20 +2592,33 @@ async function planHostedLinqGroupChatWebhook(input: {
         address: participantContact.value,
         prisma: input.prisma,
       });
-  const sender = senderLookup?.core ?? null;
-  if (!sender) {
-    return ignored("sender-identity-unresolved");
-  }
-  const senderIdentityMatch: HostedLinqExistingMemberMatch =
-    participantContact.kind === "phone" ? "phone-identity" : "verified-email";
-  if (
-    isHostedMemberSuspended(sender.suspendedAt)
-    || !(await readHostedRuntimeAiAccessDecision({
-      memberId: sender.id,
-      prisma: input.prisma,
-    })).allowed
-  ) {
-    return ignored("sender-inactive", senderIdentityMatch);
+  const pendingSenderLookup = senderLookup
+    ? null
+    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+        contact: participantContact,
+        linqChatId: summary.chatId,
+        prisma: input.prisma,
+        recipientPhone: incomingRecipientPhone,
+      });
+  const sender = senderLookup?.core ?? pendingSenderLookup?.core ?? null;
+  const senderIdentityMatch: HostedLinqExistingMemberMatch = senderLookup
+    ? participantContact.kind === "phone"
+      ? "phone-identity"
+      : "verified-email"
+    : pendingSenderLookup
+      ? "pending-contact"
+      : "none";
+  const senderSuspended = sender !== null
+    && isHostedMemberSuspended(sender.suspendedAt);
+  const senderAccessAllowed = sender && !senderSuspended
+    ? (await readHostedRuntimeAiAccessDecision({
+        memberId: sender.id,
+        prisma: input.prisma,
+      })).allowed
+    : false;
+
+  if (senderSuspended) {
+    return ignored("suspended-member", senderIdentityMatch);
   }
 
   const lineState = await readHostedLinqIncomingLineState({
@@ -2561,6 +2652,77 @@ async function planHostedLinqGroupChatWebhook(input: {
       "recipient-line-degraded-unavailable",
       senderIdentityMatch,
       "group-chat-line-unavailable",
+    );
+  }
+
+  if (
+    (!sender || !senderAccessAllowed)
+    && hostedLinqFirstContactContainsBlockedContent({
+      event: messageEvent,
+      participantContact,
+    })
+  ) {
+    return ignored("blocked-first-contact-content", senderIdentityMatch);
+  }
+
+  if (!sender || !senderAccessAllowed) {
+    if (lineState.kind !== "assignable") {
+      return ignored(
+        "recipient-line-not-assigned",
+        senderIdentityMatch,
+        "group-chat-line-unavailable",
+      );
+    }
+
+    // A setup link is a reply to a stranger, so it goes through the same
+    // first-contact admission gate that screens unknown direct senders rather
+    // than running a second, looser policy. The service layer acts on the
+    // returned request and re-plans with the decision.
+    if (
+      sender === null
+      && input.requireFirstContactAdmission === true
+      && input.firstContactAdmissionDecision?.kind !== "allow"
+    ) {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildFirstContactAdmissionRequiredPlan({
+          participantContact,
+          request: buildHostedLinqFirstContactAdmissionRequest({
+            context: input.context,
+            event: input.event,
+            participantContact,
+          }),
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+          existingMemberActive: false,
+          existingMemberMatch: senderIdentityMatch,
+          reason: "first-contact-admission-required",
+          routeStage: "first-contact-admission-required",
+        }),
+      );
+    }
+
+    const reason = sender
+      ? "sender-inactive"
+      : "sender-identity-unresolved";
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildGroupSetupRequiredResponse({
+        chatId: summary.chatId,
+        messageId: summary.messageId,
+        occurredAt,
+        ...(sender === null
+          && participantContact.kind === "email"
+          && isHostedLinqIMessageService(messageEvent.data.service)
+            ? { participantEmail: participantContact.value }
+            : {}),
+        recipientPhone: incomingRecipientPhone,
+        sourceEventId: input.event.event_id,
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+        existingMemberActive: false,
+        existingMemberMatch: senderIdentityMatch,
+        reason,
+        routeStage: "new-group-setup-planned",
+      }),
     );
   }
   if (

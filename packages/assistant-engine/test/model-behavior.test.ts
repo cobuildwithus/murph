@@ -1625,7 +1625,7 @@ describe('assistant consumption lookup guidance', () => {
       'Relevant personal records are core evidence. Read them before answering from general knowledge. Do not repeat reads or add work that cannot change the outcome.',
     )
     expect(instructionStack).toContain(
-      'a narrow internal canonical write as part of the requested product behavior',
+      'may define a narrow internal canonical write',
     )
     expect(instructionStack).toContain(
       'treat that as consent to save the recoverable health data and source provenance in the vault unless they clearly ask not to retain it or ask for explicitly ephemeral analysis only',

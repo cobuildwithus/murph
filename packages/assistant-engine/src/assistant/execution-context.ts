@@ -242,6 +242,9 @@ export interface AssistantHostedProductFeedbackCandidateSink {
   acceptProductFeedbackCandidate(
     feedback: HostedRuntimeProductFeedbackRecord,
   ): void
+  deliverProductSupportEscalation?(
+    feedback: HostedRuntimeProductFeedbackRecord,
+  ): Promise<{ recorded: boolean }>
 }
 
 export interface AssistantHostedFamilyPlanTool {
@@ -777,6 +780,12 @@ function normalizeAssistantProductFeedbackCandidateSink(
   return {
     acceptProductFeedbackCandidate:
       input.acceptProductFeedbackCandidate.bind(input),
+    ...(typeof input.deliverProductSupportEscalation === 'function'
+      ? {
+          deliverProductSupportEscalation:
+            input.deliverProductSupportEscalation.bind(input),
+        }
+      : {}),
   }
 }
 

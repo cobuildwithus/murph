@@ -134,7 +134,8 @@ describe("startHostedDeviceSyncConnection", () => {
       code: "DEVICE_SYNC_PUBLIC_BASE_URL_HOST_MISMATCH",
       httpStatus: 500,
       message:
-        "Hosted browser OAuth callbacks must use the same hostname as the first-party hosted app session. "
+        "Hosted browser OAuth callbacks must use the same hostname as the first-party hosted app session "
+        + "(app session hostname app.example.test, callback hostname device-sync.example.test). "
         + "Align DEVICE_SYNC_PUBLIC_BASE_URL with the hosted Web public URL.",
       retryable: false,
     });

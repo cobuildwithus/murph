@@ -10390,6 +10390,7 @@ describe('assistant codex runtime', () => {
         actionKind: 'mcp.tool.call',
         durationMsBucket: 'unknown',
         outputBytesBucket: 'lt_1kb',
+        tool: 'search_query',
       },
     })
 
@@ -10399,6 +10400,8 @@ describe('assistant codex runtime', () => {
         item: {
           id: 'dynamic-1',
           type: 'dynamicToolCall',
+          namespace: 'murph',
+          tool: 'connected_apps_execute',
           success: false,
           arguments: {
             prompt: 'private prompt',
@@ -10423,6 +10426,8 @@ describe('assistant codex runtime', () => {
         actionKind: 'dynamic.tool.call',
         durationMsBucket: 'unknown',
         outputBytesBucket: 'lt_1kb',
+        // Names the failing surface without the arguments or output around it.
+        tool: 'connected_apps_execute',
       },
     })
 

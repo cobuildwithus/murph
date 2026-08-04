@@ -207,6 +207,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v2",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
       HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
+      HOSTED_PHYSICAL_NOTES_ENABLED: "true",
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
       HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -385,6 +386,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS).toBe("30000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS).toBe("60000");
+    expect(config.vars.HOSTED_PHYSICAL_NOTES_ENABLED).toBe("true");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toContain("cryptoKeyVersions/1");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toContain("BEGIN PUBLIC KEY");
     expect(config.vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID).toBe("cloudflare-automation:v2");

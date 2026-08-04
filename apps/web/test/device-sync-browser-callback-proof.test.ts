@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedDeviceSyncCallbackProof,
-  buildHostedDeviceSyncCallbackProofClearCookie,
   readHostedDeviceSyncCallbackState,
   verifyHostedDeviceSyncCallbackProof,
 } from "@/src/lib/device-sync/browser-callback-proof";
@@ -95,15 +94,12 @@ describe("hosted device-sync browser callback proof", () => {
       sessionId: "session_a",
       state: STATE,
     });
-    const cleared = buildHostedDeviceSyncCallbackProofClearCookie("junction");
 
     expect(cookie).toMatch(/^__Host-murph-device-sync-junction=/u);
     expect(cookie).toContain("Path=/");
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("SameSite=Lax");
     expect(cookie).toContain("Secure");
-    expect(cleared).toMatch(/^__Host-murph-device-sync-junction=;/u);
-    expect(cleared).toContain("Max-Age=0");
   });
 
   it("accepts only bounded callback-state query values", () => {

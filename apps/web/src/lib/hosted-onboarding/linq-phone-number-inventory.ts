@@ -1,8 +1,12 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
+import { createHostedPhoneLookupKeyReadCandidates } from "./contact-privacy-core";
 import { hostedOnboardingError } from "./errors";
-import { upsertHostedLinqLineForPhoneTx } from "./linq-line-store";
+import {
+  acquireHostedLinqInventoryApplyLockTx,
+  upsertHostedLinqLineForPhoneTx,
+} from "./linq-line-store";
 import {
   projectHostedLinqLineProviderStateTx,
 } from "./linq-provider-health-store";
@@ -38,25 +42,83 @@ export async function syncHostedLinqPhoneNumberInventory(input: {
     signal: input.signal,
   });
   const observedAt = input.observedAt ?? new Date();
+
+  // The contact-card and health crons both trigger this sync at minute zero,
+  // and the per-phone upsert locks cannot order two whole-snapshot
+  // applications that touch different phones. Apply each validated snapshot
+  // under one inventory-wide advisory lock inside one transaction: concurrent
+  // applications serialize instead of interleaving (so a moved id can never
+  // race the unique provider-id index), and a mid-application failure rolls
+  // the whole replacement back. Two overlapping runs may still commit in
+  // either order; the hourly cadence converges any stale winner on the next
+  // run.
+  if ("$transaction" in input.prisma && typeof input.prisma.$transaction === "function") {
+    const prisma = input.prisma;
+    return prisma.$transaction((tx) => applyHostedLinqPhoneNumberInventorySnapshot({
+      lines,
+      observedAt,
+      prisma: tx,
+    }));
+  }
+
+  return applyHostedLinqPhoneNumberInventorySnapshot({
+    lines,
+    observedAt,
+    prisma: input.prisma,
+  });
+}
+
+async function applyHostedLinqPhoneNumberInventorySnapshot(input: {
+  lines: HostedLinqProviderInventoryLine[];
+  observedAt: Date;
+  prisma: HostedLinqInventoryClient;
+}): Promise<{ syncedCount: number }> {
+  const { lines, observedAt } = input;
   let syncedCount = 0;
 
-  // A successful inventory read is a complete snapshot (failed, malformed,
-  // and over-limit reads all throw before this point), so an id the provider
-  // no longer reports marks a relinquished line. Revoke its inventory backing
-  // so ownership-gated consumers (contact-card and backup-number candidacy)
-  // stop treating it as account-owned; revoke before the upserts so a moved
-  // id cannot collide with the unique provider-id index.
-  await input.prisma.hostedLinqLine.updateMany({
-    data: { providerPhoneNumberId: null },
-    where: {
-      providerPhoneNumberId: {
-        not: null,
-        notIn: lines
-          .map((line) => line.providerPhoneNumberId)
-          .filter((id): id is string => id !== null),
-      },
+  await acquireHostedLinqInventoryApplyLockTx({ prisma: input.prisma });
+
+  // A validated read is a complete identity snapshot (failed, malformed,
+  // over-limit, and identity-lossy reads all throw before this point), so any
+  // stored phone-to-provider-id pairing the snapshot does not confirm marks a
+  // relinquished or moved line. Revoke exactly those pairings before the
+  // upserts: relinquished ids stop qualifying as account-owned for
+  // ownership-gated consumers (contact-card and backup-number candidacy), and
+  // a moved id is released before its new row claims it, so the unique
+  // provider-id index cannot collide.
+  const confirmedLookupKeysById = new Map<string, Set<string>>();
+  for (const line of lines) {
+    if (line.providerPhoneNumberId) {
+      confirmedLookupKeysById.set(
+        line.providerPhoneNumberId,
+        new Set(createHostedPhoneLookupKeyReadCandidates(line.phoneNumber)),
+      );
+    }
+  }
+  const heldRows = await input.prisma.hostedLinqLine.findMany({
+    where: { providerPhoneNumberId: { not: null } },
+    select: {
+      phoneNumberLookupKey: true,
+      providerPhoneNumberId: true,
     },
   });
+  const staleLookupKeys = heldRows
+    .filter((row) => {
+      const confirmed = row.providerPhoneNumberId
+        ? confirmedLookupKeysById.get(row.providerPhoneNumberId)
+        : undefined;
+      return !confirmed || !confirmed.has(row.phoneNumberLookupKey);
+    })
+    .map((row) => row.phoneNumberLookupKey);
+  if (staleLookupKeys.length > 0) {
+    await input.prisma.hostedLinqLine.updateMany({
+      data: {
+        providerInventoryConfirmedAt: null,
+        providerPhoneNumberId: null,
+      },
+      where: { phoneNumberLookupKey: { in: staleLookupKeys } },
+    });
+  }
 
   for (const line of lines) {
     const storedLine = await upsertHostedLinqLineForPhoneTx({
@@ -65,6 +127,13 @@ export async function syncHostedLinqPhoneNumberInventory(input: {
       prisma: input.prisma,
       providerPhoneNumberId: line.providerPhoneNumberId,
       source: "provider",
+    });
+    // Freshness watermark for ownership-gated consumers. Stamped only here,
+    // inside the same transaction that applied a validated snapshot, so it
+    // can never be advanced by chat-health or status projection.
+    await input.prisma.hostedLinqLine.updateMany({
+      data: { providerInventoryConfirmedAt: observedAt },
+      where: { phoneNumberLookupKey: storedLine.phoneNumberLookupKey },
     });
     await projectHostedLinqLineProviderStateTx({
       observedAt,
@@ -121,8 +190,56 @@ export async function listHostedLinqPhoneNumberInventory(input: {
   }
 
   const payload = await response.json();
-  return parseHostedLinqPhoneNumberInventory(payload, {
+  return requireHostedLinqPhoneNumberInventorySnapshot(payload, {
     maxLines: input.maxLines,
+  });
+}
+
+/**
+ * Parse an inventory payload as an authoritative identity snapshot. The
+ * lenient parser tolerates dropped records for display-style consumers, but a
+ * snapshot that feeds ownership reconciliation must not be lossy: a malformed
+ * collection or a record with a missing, invalid, or duplicate identity would
+ * otherwise read as a smaller account and revoke legitimate ownership.
+ */
+export function requireHostedLinqPhoneNumberInventorySnapshot(
+  payload: unknown,
+  input: {
+    maxLines?: number;
+  } = {},
+): HostedLinqProviderInventoryLine[] {
+  if (!isRecord(payload) || !Array.isArray(payload.phone_numbers)) {
+    throw invalidInventorySnapshotError(
+      "Linq phone-number inventory response did not contain a phone_numbers array.",
+    );
+  }
+
+  const lines = parseHostedLinqPhoneNumberInventory(payload, input);
+  if (lines.length !== payload.phone_numbers.length) {
+    throw invalidInventorySnapshotError(
+      "Linq phone-number inventory contained records without a valid unique phone number.",
+    );
+  }
+
+  const seenIds = new Set<string>();
+  for (const line of lines) {
+    if (!line.providerPhoneNumberId || seenIds.has(line.providerPhoneNumberId)) {
+      throw invalidInventorySnapshotError(
+        "Linq phone-number inventory contained records without a valid unique provider id.",
+      );
+    }
+    seenIds.add(line.providerPhoneNumberId);
+  }
+
+  return lines;
+}
+
+function invalidInventorySnapshotError(message: string): Error {
+  return hostedOnboardingError({
+    code: "LINQ_PHONE_NUMBER_INVENTORY_INVALID",
+    httpStatus: 502,
+    message,
+    retryable: true,
   });
 }
 

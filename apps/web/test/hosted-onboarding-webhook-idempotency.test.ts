@@ -1029,6 +1029,56 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      "suspended member",
+      "member_suspended",
+      "ignored-linq-group-join-offer-member-suspended",
+    ],
+    [
+      "target-group member",
+      "already_group_member",
+      "ignored-linq-group-join-offer-already-member",
+    ],
+  ] as const)(
+    "consumes a %s join reaction without ordinary fallthrough",
+    async (_label, reactionReason, responseReason) => {
+      mocks.handleHostedGroupJoinOfferReaction.mockResolvedValueOnce({
+        reason: reactionReason,
+        status: "ignored",
+      });
+      const prisma = createPrismaStub();
+      mocks.getPrisma.mockReturnValue(prisma);
+
+      await expect(
+        handleHostedOnboardingLinqWebhook({
+          rawBody: buildLinqProviderWebhookBody({
+            data: {
+              chat_id: "chat_group_1",
+              from_handle: { handle: "+15551234567", service: "iMessage" },
+              line: { phone_number: "+15550000000" },
+              message_id: "msg_offer_123",
+              reaction_type: "like",
+            },
+            eventId: `evt_reaction_${reactionReason}`,
+            eventType: "reaction.added",
+          }),
+          signature: null,
+          timestamp: null,
+        }),
+      ).resolves.toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: responseReason,
+      });
+
+      expect(mocks.buildHostedLinqAffirmativeReactionMessageEvent)
+        .not.toHaveBeenCalled();
+      expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    },
+  );
+
   it("consumes an unsupported-region join reaction without staging group work", async () => {
     // The refusal is a decided outcome for a reaction that targeted the canonical
     // offer, so the webhook must stop here rather than fall through to the generic

@@ -5,6 +5,10 @@ import {
 import {
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  isHostedProductSupportEscalationFeedback,
+  type HostedRuntimeProductFeedbackRecord,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   fetchHostedWebControlPlaneJson,
@@ -12,6 +16,7 @@ import {
 } from "./web-control-transport.ts";
 
 const HOSTED_PRODUCT_FEEDBACK_RECORD_TIMEOUT_MS = 2_000;
+const HOSTED_PRODUCT_SUPPORT_RECORD_TIMEOUT_MS = 12_000;
 const HOSTED_PRODUCT_FEEDBACK_RESPONSE_MAX_BYTES = 4 * 1024;
 
 export function createHostedRuntimeProductFeedbackPort(input: {
@@ -22,10 +27,10 @@ export function createHostedRuntimeProductFeedbackPort(input: {
 }): NonNullable<HostedRuntimePlatform["productFeedbackPort"]> {
   return {
     async recordProductFeedback(feedback) {
-      const timeoutMs = Math.min(
-        input.timeoutMs,
-        HOSTED_PRODUCT_FEEDBACK_RECORD_TIMEOUT_MS,
-      );
+      const timeoutMs = resolveHostedProductFeedbackRecordTimeoutMs({
+        feedback,
+        timeoutMs: input.timeoutMs,
+      });
       const payload = await fetchHostedWebControlPlaneJson({
         body: { feedback },
         boundUserId: input.boundUserId,
@@ -49,4 +54,18 @@ export function createHostedRuntimeProductFeedbackPort(input: {
       }
     },
   };
+}
+
+export function resolveHostedProductFeedbackRecordTimeoutMs(input: {
+  feedback: Pick<
+    HostedRuntimeProductFeedbackRecord,
+    "kind" | "relatedChangelogItemIds" | "summary"
+  >;
+  timeoutMs: number;
+}): number {
+  const operationTimeoutMs = isHostedProductSupportEscalationFeedback(input.feedback)
+    ? HOSTED_PRODUCT_SUPPORT_RECORD_TIMEOUT_MS
+    : HOSTED_PRODUCT_FEEDBACK_RECORD_TIMEOUT_MS;
+
+  return Math.min(input.timeoutMs, operationTimeoutMs);
 }

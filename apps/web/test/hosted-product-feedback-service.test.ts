@@ -3,12 +3,16 @@ import { HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH } from "@murphai/hosted-exec
 
 const prismaMocks = vi.hoisted(() => ({
   createMany: vi.fn(),
+  findThreadContainer: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({
     hostedProductFeedback: {
       createMany: prismaMocks.createMany,
+    },
+    hostedThreadContainer: {
+      findUnique: prismaMocks.findThreadContainer,
     },
   }),
 }));
@@ -22,6 +26,7 @@ import {
 describe("recordHostedProductFeedback", () => {
   beforeEach(() => {
     prismaMocks.createMany.mockReset();
+    prismaMocks.findThreadContainer.mockReset().mockResolvedValue(null);
   });
 
   it("stores anonymous feedback by default and is idempotent by runtime key", async () => {
@@ -50,6 +55,7 @@ describe("recordHostedProductFeedback", () => {
     expect(first.feedbackId).toBe(second.feedbackId);
     expect(first.recorded).toBe(true);
     expect(second.recorded).toBe(false);
+    expect(prismaMocks.findThreadContainer).not.toHaveBeenCalled();
     expect(prismaMocks.createMany).toHaveBeenCalledTimes(2);
     expect(prismaMocks.createMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
       data: [
@@ -63,7 +69,7 @@ describe("recordHostedProductFeedback", () => {
     }));
   });
 
-  it("does not encode an optional member link into the feedback id", async () => {
+  it("links a private member without encoding the member id into the feedback id", async () => {
     const insertedIds = new Set<string>();
     prismaMocks.createMany.mockImplementation(async (args: {
       data: Array<{ id: string }>;
@@ -90,6 +96,10 @@ describe("recordHostedProductFeedback", () => {
     expect(first.feedbackId).toBe(second.feedbackId);
     expect(first.recorded).toBe(true);
     expect(second.recorded).toBe(false);
+    expect(prismaMocks.findThreadContainer).toHaveBeenCalledWith({
+      select: { memberId: true },
+      where: { memberId: "member_explicitly_linked" },
+    });
     expect(prismaMocks.createMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -106,6 +116,31 @@ describe("recordHostedProductFeedback", () => {
         ],
       }),
     );
+  });
+
+  it("keeps synthetic group-runtime feedback anonymous", async () => {
+    prismaMocks.findThreadContainer.mockResolvedValue({
+      memberId: "member_group_runtime",
+    });
+    prismaMocks.createMany.mockResolvedValue({ count: 1 });
+
+    await expect(recordHostedProductFeedback({
+      feedback: makeFeedback({
+        idempotencyKey: "e".repeat(64),
+      }),
+      memberId: "member_group_runtime",
+    })).resolves.toMatchObject({
+      recorded: true,
+    });
+
+    expect(prismaMocks.findThreadContainer).toHaveBeenCalledWith({
+      select: { memberId: true },
+      where: { memberId: "member_group_runtime" },
+    });
+    expect(prismaMocks.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({ memberId: null })],
+      skipDuplicates: true,
+    }));
   });
 
   it("accepts product feedback without changelog ids", async () => {

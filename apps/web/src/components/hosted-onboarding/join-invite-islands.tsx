@@ -19,6 +19,10 @@ import type {
   HostedInviteVerificationMode,
 } from "@/src/lib/hosted-onboarding/types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
+import {
+  consumeHostedGroupStartHandoff,
+  HOSTED_GROUP_START_PATH,
+} from "@/src/lib/hosted-groups/group-start-handoff";
 
 import { ConsentSkeleton, HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
 import { useHostedPhoneLinkDiagnostics } from "../settings/hosted-phone-link-diagnostics";
@@ -29,6 +33,7 @@ import {
   HostedIdentitySessionMismatch,
 } from "../settings/hosted-settings-identity-link-dialog";
 import { requestHostedBillingCheckout } from "./client-api";
+import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
 import { HostedEmailAuthButton } from "./hosted-email-auth-button";
 import { logoutHostedAppSession } from "./hosted-app-session-client";
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
@@ -281,24 +286,21 @@ export function JoinInviteMessagingSetupIsland({
   }
 
   return (
-    <div className="space-y-5">
-      <HostedPhoneSettings
-        diagnosticReporterFactory={createPhoneDiagnosticReporter}
-        onLinked={refresh}
-      />
-
-      <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-        <span className="h-px flex-1 bg-border" />
-        OR
-        <span className="h-px flex-1 bg-border" />
-      </div>
-
-      <ConnectTelegram
-        authenticated={clientSessionMatchesAppSession}
-        initialTelegramAccount={initialTelegramAccount}
-        onSynced={refresh}
-      />
-    </div>
+    <HostedContactChannelChoice
+      phone={
+        <HostedPhoneSettings
+          diagnosticReporterFactory={createPhoneDiagnosticReporter}
+          onLinked={refresh}
+        />
+      }
+      telegram={
+        <ConnectTelegram
+          authenticated={clientSessionMatchesAppSession}
+          initialTelegramAccount={initialTelegramAccount}
+          onSynced={refresh}
+        />
+      }
+    />
   );
 }
 
@@ -400,7 +402,11 @@ export function JoinInviteCheckoutPlanButtonIsland({
     checkoutOutcomeRef.current = null;
     if (!outcome) return;
     if (outcome.kind === "alreadyActive") {
-      router.refresh();
+      if (consumeHostedGroupStartHandoff()) {
+        router.replace(HOSTED_GROUP_START_PATH);
+      } else {
+        router.refresh();
+      }
       return;
     }
 

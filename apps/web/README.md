@@ -912,12 +912,12 @@ Callback auth contract:
 
 - hosted browser start sets one 15-minute host-only callback proof bound to the
   provider, OAuth state, member, and app-session generation
-- callback GET requires that proof and active session but only renders the
-  confirmation or safe failure surface; it never exchanges provider credentials
-- the explicit same-origin confirmation POST passes the exact member as
-  `expectedOwnerId` before shared ingress can consume state or exchange a code
-- a callback without its initiating-browser proof consumes only the OAuth state,
-  preventing later relay into the member's signed-in browser
+- callback GET requires that proof and active session, passes the exact member
+  as `expectedOwnerId` before shared ingress can consume state or exchange a
+  code, and redirects back into the app without an interstitial
+- a callback without its initiating-browser proof consumes only the OAuth state
+  and redirects to Connect, preventing later relay into the member's signed-in
+  browser
 - the provider callback hostname must match the hostname that served the
   authenticated browser start; the `__Host-` app-session and callback-proof
   cookies remain host-only, and Murph does not add a Domain cookie or

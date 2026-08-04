@@ -180,7 +180,9 @@ export async function runHostedWorkspaceInvocation(
       boundUserId,
       commitTimeoutMs: job.runtime?.commitTimeoutMs ?? null,
       physicalNotesEnabled:
-        job.runtime?.platformEnv?.HOSTED_PHYSICAL_NOTES_ENABLED === "true",
+        job.runtime?.platformEnv?.HOSTED_PHYSICAL_NOTES_ENABLED
+          ?.trim()
+          .toLowerCase() === "true",
       privateMediaDeliveryOrigin:
         job.runtime?.platformEnv?.CF_PUBLIC_BASE_URL ?? null,
       preparedSnapshotRestore: job.preparedSnapshotRestore ?? null,

@@ -355,7 +355,7 @@ async function persistUserTurn(
 }
 
 const UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE =
-  "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph."
+  "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph. If you're reporting a Murph product problem, you can also email support@withmurph.ai directly."
 
 async function completeUnverifiedExternalAudienceTurn(input: {
   message: AssistantMessageInput
