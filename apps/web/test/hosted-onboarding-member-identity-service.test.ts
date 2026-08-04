@@ -440,6 +440,130 @@ describe("hosted-onboarding member-identity-service", () => {
     expect(identityUpsert).toHaveBeenCalledTimes(1);
   });
 
+  it("rebinds a changed Privy user when its verified email already belongs to the member", async () => {
+    const lockQuery = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ memberId: "member_123" }]);
+    const identityUpsert = vi.fn(async ({
+      create,
+      update: updateData,
+    }: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => ({
+      ...create,
+      ...updateData,
+    }));
+    const prisma = asRootPrisma({
+      $queryRaw: lockQuery,
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(await makeStoredIdentity({
+          privyUserId: "did:privy:previous_user",
+        })),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      identity: makeIdentity({
+        email: {
+          address: "member@example.com",
+          verifiedAt: 1743933600,
+        },
+        userId: "did:privy:replacement_user",
+      }),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      id: "member_123",
+    });
+
+    expect(lockQuery).toHaveBeenCalledTimes(2);
+    expect(lockQuery.mock.calls[1]?.[0]).toMatchObject({
+      values: [requireHostedEmailLookupKey("member@example.com")],
+    });
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        privyUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
+        privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
+      }),
+    }));
+  });
+
+  it("rejects a changed Privy user when only the phone matches the member", async () => {
+    const identityUpsert = vi.fn();
+    const prisma = asRootPrisma({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(await makeStoredIdentity({
+          privyUserId: "did:privy:previous_user",
+        })),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      identity: makeIdentity({
+        userId: "did:privy:replacement_user",
+      }),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "PRIVY_USER_MISMATCH",
+      httpStatus: 409,
+    });
+
+    expect(identityUpsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects a changed Privy user when its verified email belongs to another member", async () => {
+    const lockQuery = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ memberId: "member_other" }]);
+    const identityUpsert = vi.fn();
+    const prisma = asRootPrisma({
+      $queryRaw: lockQuery,
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(await makeStoredIdentity({
+          privyUserId: "did:privy:previous_user",
+        })),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      identity: makeIdentity({
+        email: {
+          address: "other-member@example.com",
+          verifiedAt: 1743933600,
+        },
+        userId: "did:privy:replacement_user",
+      }),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "PRIVY_USER_MISMATCH",
+      httpStatus: 409,
+    });
+
+    expect(identityUpsert).not.toHaveBeenCalled();
+  });
+
   it("preserves an existing stored wallet by omitting wallet fields from identity updates", async () => {
     const identityUpsert = vi.fn(async ({
       create,
@@ -510,6 +634,36 @@ function makeIdentity(
     telegram: null,
     userId: "did:privy:user_123",
     ...overrides,
+  };
+}
+
+async function makeStoredIdentity(input: {
+  privyUserId: string;
+}) {
+  return {
+    maskedPhoneNumberHint: "*** 4567",
+    memberId: "member_123",
+    phoneLookupKey: "hbidx:phone:v1:existing",
+    phoneNumberEncrypted: await encryptHostedWebNullableString({
+      field: "hosted-member-identity.phone-number",
+      memberId: "member_123",
+      value: "+15551234567",
+    }),
+    phoneNumberVerifiedAt: NOW,
+    privyUserIdEncrypted: await encryptHostedWebNullableString({
+      field: "hosted-member-identity.privy-user-id",
+      memberId: "member_123",
+      value: input.privyUserId,
+    }),
+    privyUserLookupKey: "hbidx:privy-user:v1:existing",
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumberEncrypted: null,
+    walletAddressEncrypted: null,
+    walletChainType: null,
+    walletCreatedAt: null,
+    walletProvider: null,
   };
 }
 

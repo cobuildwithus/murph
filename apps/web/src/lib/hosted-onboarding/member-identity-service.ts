@@ -5,6 +5,7 @@ import {
 } from "@prisma/client";
 
 import {
+  createHostedEmailLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
   createHostedPrivyUserLookupKeyReadCandidates,
 } from "./contact-privacy";
@@ -505,7 +506,18 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     authMethod: input.authMethod,
     identity: input.identity,
   });
-  if (currentIdentity?.privyUserId && currentIdentity.privyUserId !== input.identity.userId) {
+  const privyUserChanged = Boolean(
+    currentIdentity?.privyUserId
+    && currentIdentity.privyUserId !== input.identity.userId,
+  );
+  const verifiedEmailAuthorizesRebinding = privyUserChanged
+    ? await hasHostedVerifiedEmailRebindingAuthorityTx({
+        identity: input.identity,
+        memberId: currentMember.id,
+        prisma: input.prisma,
+      })
+    : false;
+  if (privyUserChanged && !verifiedEmailAuthorizesRebinding) {
     throw hostedOnboardingError({
       code: "PRIVY_USER_MISMATCH",
       message: "This phone number is already linked to a different Privy account.",
@@ -535,6 +547,34 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     signupPhoneNumber: null,
   });
   return currentMember;
+}
+
+async function hasHostedVerifiedEmailRebindingAuthorityTx(input: {
+  identity: HostedPrivyIdentity;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (!input.identity.email?.verifiedAt) {
+    return false;
+  }
+
+  const lookupKeys = createHostedEmailLookupKeyReadCandidates(
+    input.identity.email.address,
+  );
+  if (lookupKeys.length === 0) {
+    return false;
+  }
+
+  const records = await input.prisma.$queryRaw<Array<{ memberId: string }>>(Prisma.sql`
+    SELECT "member_id" AS "memberId"
+    FROM "hosted_member_email_authorization"
+    WHERE "verified_email_lookup_key" IN (${Prisma.join(lookupKeys)})
+      AND "verified_email_verified_at" IS NOT NULL
+    FOR UPDATE
+  `);
+  const matchedMemberIds = new Set(records.map((record) => record.memberId));
+
+  return matchedMemberIds.size === 1 && matchedMemberIds.has(input.memberId);
 }
 
 async function assertHostedPrivyAccountDeletionNotPendingTx(input: {
