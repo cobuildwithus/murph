@@ -59,6 +59,12 @@ jobs:
           content = path.read_text(encoding="utf-8")
           replacements = [
               (
+                  '    setupGuideId: "zepp-apple-health",\\n  },\\n  whoop: {\\n',
+                  '    setupGuideId: "zepp-apple-health" as const,\\n  },\\n  whoop: {\\n',
+                  1,
+                  False,
+              ),
+              (
                   "- Apple Watch/iPhone/Apple Health, WHOOP, and Zepp/Amazfit relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.",
                   "- Apple Watch/iPhone, WHOOP, and Zepp/Amazfit: apply the app-link rule; in Murph, sign in and connect Apple Health.",
                   1,
