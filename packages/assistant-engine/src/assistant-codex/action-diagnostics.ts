@@ -378,10 +378,15 @@ export function buildRuntimeIssueInputForFailedCodexAction(input: {
 
   const durationMs = readItemDurationMs(item)
   const output = measureActionOutput(item)
+  // The sanitized tool name is the difference between "a tool call failed" and
+  // a diagnosable record; without it a failure cannot be traced to a surface
+  // without pulling the web tier's request logs.
+  const toolIdentity = resolveToolDiagnosticIdentity(kind, item)
   const commonDetails = {
     actionKind: kind,
     durationMsBucket: durationMsBucket(durationMs),
     outputBytesBucket: bytesBucket(output.bytesTotal),
+    ...(toolIdentity.tool === null ? {} : { tool: toolIdentity.tool }),
   }
 
   if (kind === 'command.execution') {

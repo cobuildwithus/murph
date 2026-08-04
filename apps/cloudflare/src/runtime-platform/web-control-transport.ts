@@ -77,6 +77,9 @@ export class HostedWebControlPlaneResponseError extends Error {
     status: number;
     statusCode: number;
   };
+  // The control plane's own message, kept apart from the formatted `message` so
+  // a caller can quote it without the transport's description and status prefix.
+  readonly detail: string | undefined;
   readonly requestId: string | undefined;
   readonly retryable: boolean | undefined;
   readonly status: number;
@@ -93,6 +96,7 @@ export class HostedWebControlPlaneResponseError extends Error {
     super(formatHostedWebControlPlaneResponseErrorMessage(input));
     this.name = "HostedWebControlPlaneResponseError";
     this.code = input.code;
+    this.detail = input.message?.trim() || undefined;
     this.requestId = input.requestId;
     this.retryable = input.retryable;
     this.status = input.status;
