@@ -15707,7 +15707,10 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       const foregroundProbeLogs = logRequests
         .flatMap((request) => request.entries)
-        .filter((entry) => entry.eventCode === "mailbox.foreground_probe");
+        .filter((entry) =>
+          entry.eventCode === "mailbox.imported"
+          && entry.redactedJson?.foregroundProbeOutcome === "no_runnable_work"
+        );
       assert.deepEqual(foregroundProbeLogs.map((entry) => entry.redactedJson), [
         {
           assistantInputPresent: false,

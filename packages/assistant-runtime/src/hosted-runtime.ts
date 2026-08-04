@@ -3058,7 +3058,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             entry: {
               ...buildHostedRuntimeLogContextFields(runtimeLogContext),
               component: "mailbox",
-              eventCode: "mailbox.foreground_probe",
+              eventCode: "mailbox.imported",
               level: "info",
               phase: "checkpoint",
               redactedJson: {
