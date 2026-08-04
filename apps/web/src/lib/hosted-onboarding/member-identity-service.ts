@@ -406,10 +406,13 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
       prisma: input.prisma,
       privyUserId: input.identity.userId,
     });
-    await readHostedPrivyUserById(input.identity.userId, {
+    const livePrivyUser = await readHostedPrivyUserById(input.identity.userId, {
       maxRetries: 0,
       timeout: HOSTED_PRIVY_AUTHORITY_TIMEOUT_MS,
     });
+    const identity = input.allowVerifiedEmailRebinding
+      ? resolveHostedPrivyIdentityFromVerifiedUser(livePrivyUser)
+      : input.identity;
     const memberId = generateHostedMemberId();
 
     const createdMember = await createHostedMember({
@@ -422,7 +425,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
       phone: shouldPersistHostedPrivyPhoneIdentity({
         authMethod,
       })
-        ? input.identity.phone
+        ? identity.phone
         : null,
     });
 
@@ -430,7 +433,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
       ...phoneIdentity,
       memberId,
       prisma: input.prisma,
-      privyUserId: input.identity.userId,
+      privyUserId: identity.userId,
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
@@ -438,7 +441,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
     });
     return {
       created: true,
-      identity: input.identity,
+      identity,
       member: createdMember,
     };
   }
@@ -528,7 +531,7 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
     currentIdentity?.privyUserId
     && currentIdentity.privyUserId !== input.identity.userId,
   );
-  const identity = privyUserChanged && input.allowVerifiedEmailRebinding
+  const identity = input.allowVerifiedEmailRebinding
     ? resolveHostedPrivyIdentityFromVerifiedUser(
         await readHostedPrivyUserById(input.identity.userId, {
           maxRetries: 0,

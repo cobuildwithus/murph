@@ -12,15 +12,21 @@ import { describe, expect, it, vi } from "vitest";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import {
   createHostedEmailLookupKey,
+  createHostedPhoneLookupKey,
   createHostedPrivyUserLookupKey,
   createHostedTelegramUserLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
+import { ensureHostedCompanionMemberId } from "@/src/lib/hosted-onboarding/companion-member-access";
 import {
   HostedMemberStripeMutationLockBusyError,
   withHostedMemberStripeMutationLockForOps,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
-import { readHostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import {
+  lookupHostedMemberByVerifiedEmailAddress,
+  readHostedMemberBillingSnapshot,
+  readHostedMemberIdByAuthorizedDirectPublicSenderAddress,
+} from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { issueHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import {
   ensureHostedMemberForPrivyIdentityResolutionTx,
@@ -51,6 +57,7 @@ const privyProvider = vi.hoisted(() => ({
       throw new Error("Privy user no longer exists.");
     }
     const emailAddress = privyProvider.emailByUserId.get(userId);
+    const phoneNumber = privyProvider.phoneByUserId.get(userId);
     const telegramUserId = privyProvider.telegramByUserId.get(userId);
     return {
       id: userId,
@@ -62,6 +69,13 @@ const privyProvider = vi.hoisted(() => ({
             verified_at: 1_775_203_200,
           }]
           : []),
+        ...(phoneNumber
+          ? [{
+              phone_number: phoneNumber,
+              type: "phone",
+              verified_at: 1_775_203_200,
+            }]
+          : []),
         ...(telegramUserId
           ? [{
               telegram_user_id: telegramUserId,
@@ -72,6 +86,7 @@ const privyProvider = vi.hoisted(() => ({
     };
   }),
   missingUserIds: new Set<string>(),
+  phoneByUserId: new Map<string, string>(),
   telegramByUserId: new Map<string, string>(),
 }));
 
@@ -95,6 +110,40 @@ const stripeProvider = vi.hoisted(() => ({
   chargesRetrieve: vi.fn(),
   eventsRetrieve: vi.fn(),
   subscriptionsRetrieve: vi.fn(),
+}));
+
+const companionBoundaries = vi.hoisted(() => ({
+  consentedMemberIds: new Set<string>(),
+  ensureAutoTrial: vi.fn(async () => ({
+    redirectPath: "/home?initialVisit=true",
+    status: "enrolled" as const,
+  })),
+}));
+
+vi.mock("@/src/lib/legal/consent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/legal/consent")>()),
+  assertHostedHistoricalLaunchConsentGranted: vi.fn(async ({
+    memberId,
+  }: {
+    memberId: string;
+  }) => {
+    if (!companionBoundaries.consentedMemberIds.has(memberId)) {
+      throw Object.assign(new Error("Launch consent is required."), {
+        code: "HOSTED_CONSENT_REQUIRED",
+        httpStatus: 403,
+      });
+    }
+  }),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/auto-trial-enrollment-service", () => ({
+  ensureHostedAutoPulseTrialEnrollment: companionBoundaries.ensureAutoTrial,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>()),
+  assertActiveHostedMemberAccessAllowed: vi.fn(async () => undefined),
+  readActiveHostedMemberAccess: vi.fn(async () => false),
 }));
 
 vi.mock("@/src/lib/connected-apps/composio", async (importOriginal) => ({
@@ -1740,6 +1789,152 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await disconnectClients([observer]);
       }
     });
+
+    it("retains one live authority snapshot across the companion consent retry", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_email_rebind_retry_${fixtureId}`;
+      const canonicalEmailAddress = `rebind-retry-live-${fixtureId}@example.test`;
+      const staleTokenEmailAddress = `rebind-retry-stale-${fixtureId}@example.test`;
+      const phoneNumber = "+15551234567";
+      const oldPrivyUserId = `did:privy:old-retry-${fixtureId}`;
+      const replacementPrivyUserId = `did:privy:replacement-retry-${fixtureId}`;
+      const laterEmailOwnerPrivyUserId = `did:privy:later-email-owner-${fixtureId}`;
+      const liveTelegramUserId = `telegram-live-retry-${fixtureId}`;
+      const staleTelegramUserId = `telegram-stale-retry-${fixtureId}`;
+      const liveTelegramLookupKey = createHostedTelegramUserLookupKey(liveTelegramUserId);
+      const staleTelegramLookupKey = createHostedTelegramUserLookupKey(staleTelegramUserId);
+
+      if (!liveTelegramLookupKey || !staleTelegramLookupKey) {
+        throw new Error("Expected Telegram lookup keys for the retry fixture.");
+      }
+
+      installPassthroughHostedSecureBoxTestCodec();
+      privyProvider.exists = true;
+      privyProvider.emailByUserId.set(replacementPrivyUserId, canonicalEmailAddress);
+      privyProvider.phoneByUserId.set(replacementPrivyUserId, phoneNumber);
+      privyProvider.telegramByUserId.set(replacementPrivyUserId, liveTelegramUserId);
+      await seedVerifiedEmailRebindingMember({
+        emailAddress: canonicalEmailAddress,
+        memberId,
+        oldPrivyUserId,
+        phoneNumber,
+        prisma: observer,
+      });
+      const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://join.example.test";
+      clearHostedOnboardingEnvCache();
+      let laterEmailOwnerMemberId: string | null = null;
+      const staleBearerIdentity = {
+        email: {
+          address: staleTokenEmailAddress,
+          verifiedAt: 1_754_218_800,
+        },
+        phone: {
+          number: phoneNumber,
+          verifiedAt: 1_754_218_800,
+        },
+        telegram: {
+          firstName: null,
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: staleTelegramUserId,
+          username: null,
+        },
+        userId: replacementPrivyUserId,
+      };
+
+      try {
+        await expect(ensureHostedCompanionMemberId({
+          identity: staleBearerIdentity,
+          now: new Date("2026-08-03T12:00:00.000Z"),
+          prisma: observer,
+        })).rejects.toMatchObject({
+          code: "HOSTED_CONSENT_REQUIRED",
+          httpStatus: 403,
+        });
+
+        companionBoundaries.consentedMemberIds.add(memberId);
+        await expect(ensureHostedCompanionMemberId({
+          identity: staleBearerIdentity,
+          now: new Date("2026-08-03T12:01:00.000Z"),
+          prisma: observer,
+        })).resolves.toBe(memberId);
+
+        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
+        });
+        await expect(observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          directPublicSenderLookupKey: createHostedEmailLookupKey(canonicalEmailAddress),
+          verifiedEmailLookupKey: createHostedEmailLookupKey(canonicalEmailAddress),
+        });
+        await expect(lookupHostedMemberByVerifiedEmailAddress({
+          address: staleTokenEmailAddress,
+          prisma: observer,
+        })).resolves.toBeNull();
+        await expect(readHostedMemberIdByAuthorizedDirectPublicSenderAddress({
+          address: staleTokenEmailAddress,
+          prisma: observer,
+        })).resolves.toBeNull();
+        await expect(observer.hostedMemberRouting.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          telegramUserLookupKey: liveTelegramLookupKey,
+        });
+        await expect(observer.hostedMemberRouting.count({
+          where: { telegramUserLookupKey: staleTelegramLookupKey },
+        })).resolves.toBe(0);
+        await expect(observer.hostedInvite.count({
+          where: { memberId },
+        })).resolves.toBe(1);
+
+        privyProvider.emailByUserId.set(
+          laterEmailOwnerPrivyUserId,
+          staleTokenEmailAddress,
+        );
+        const laterEmailOwner = await completeHostedPrivyVerification({
+          authMethod: "email",
+          identity: makeVerifiedEmailRebindingIdentity({
+            emailAddress: staleTokenEmailAddress,
+            privyUserId: laterEmailOwnerPrivyUserId,
+          }),
+          now: new Date("2026-08-03T12:02:00.000Z"),
+          prisma: observer,
+        });
+        laterEmailOwnerMemberId = laterEmailOwner.memberId;
+        expect(laterEmailOwner.memberId).not.toBe(memberId);
+        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
+        });
+      } finally {
+        if (previousPublicBaseUrl === undefined) {
+          delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+        } else {
+          process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = previousPublicBaseUrl;
+        }
+        clearHostedOnboardingEnvCache();
+        companionBoundaries.consentedMemberIds.delete(memberId);
+        privyProvider.emailByUserId.delete(replacementPrivyUserId);
+        privyProvider.emailByUserId.delete(laterEmailOwnerPrivyUserId);
+        privyProvider.phoneByUserId.delete(replacementPrivyUserId);
+        privyProvider.telegramByUserId.delete(replacementPrivyUserId);
+        await observer.hostedMember.deleteMany({
+          where: {
+            id: {
+              in: [memberId, ...(laterEmailOwnerMemberId ? [laterEmailOwnerMemberId] : [])],
+            },
+          },
+        });
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await disconnectClients([observer]);
+      }
+    });
   },
 );
 
@@ -1865,6 +2060,7 @@ async function seedVerifiedEmailRebindingMember(input: {
   emailAddress: string;
   memberId: string;
   oldPrivyUserId: string;
+  phoneNumber?: string;
   prisma: PrismaClient;
 }) {
   const verifiedEmailLookupKey = createHostedEmailLookupKey(input.emailAddress);
@@ -1875,9 +2071,22 @@ async function seedVerifiedEmailRebindingMember(input: {
   const member = await input.prisma.hostedMember.create({
     data: { id: input.memberId },
   });
+  const phoneLookupKey = input.phoneNumber
+    ? createHostedPhoneLookupKey(input.phoneNumber)
+    : null;
+  if (input.phoneNumber && !phoneLookupKey) {
+    throw new Error("Expected a phone lookup key for the rebinding fixture.");
+  }
   await input.prisma.hostedMemberIdentity.create({
     data: {
       memberId: input.memberId,
+      ...(input.phoneNumber
+        ? {
+            phoneLookupKey,
+            phoneNumberEncrypted: input.phoneNumber,
+            phoneNumberVerifiedAt: new Date("2026-08-03T11:00:00.000Z"),
+          }
+        : {}),
       privyUserIdEncrypted: input.oldPrivyUserId,
       privyUserLookupKey: requirePrivyUserLookupKey(input.oldPrivyUserId),
     },

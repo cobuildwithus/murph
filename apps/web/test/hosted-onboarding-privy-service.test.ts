@@ -75,7 +75,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
+import { completeHostedPrivyVerification as completeHostedPrivyVerificationImpl } from "@/src/lib/hosted-onboarding/authentication-service";
 
 const NOW = new Date("2026-03-26T12:00:00.000Z");
 const DEFAULT_PHONE_NUMBER = "+15551234567";
@@ -84,7 +84,9 @@ const SECONDARY_PHONE_NUMBER = "+15557654321";
 const SECONDARY_PHONE_LOOKUP_KEY = createHostedPhoneLookupKey(SECONDARY_PHONE_NUMBER)!;
 const SYNTHETIC_TEST_WALLET_ADDRESS = "0x00000000000000000000000000000000000000a1";
 const SYNTHETIC_TEST_WALLET_ADDRESS_ALT = "0x00000000000000000000000000000000000000b2";
-type CompleteHostedPrivyVerificationInput = Parameters<typeof completeHostedPrivyVerification>[0];
+type CompleteHostedPrivyVerificationInput = Parameters<
+  typeof completeHostedPrivyVerificationImpl
+>[0];
 type CompleteHostedPrivyVerificationPrisma = CompleteHostedPrivyVerificationInput["prisma"];
 type BaseHostedPrivyIdentity = HostedPrivyIdentity & {
   phone: NonNullable<HostedPrivyIdentity["phone"]>;
@@ -132,6 +134,51 @@ type HostedMemberEmailAuthorizationDelegate = {
     where?: Record<string, unknown>;
   }) => Promise<unknown>;
 };
+const livePrivyUsersById = new Map<string, {
+  id: string;
+  linked_accounts: Array<Record<string, unknown>>;
+}>();
+
+function projectIdentityAsLivePrivyUser(identity: HostedPrivyIdentity) {
+  return {
+    id: identity.userId,
+    linked_accounts: [
+      ...(identity.phone
+        ? [{
+            phone_number: identity.phone.number,
+            type: "phone",
+            verified_at: identity.phone.verifiedAt,
+          }]
+        : []),
+      ...(identity.email?.verifiedAt
+        ? [{
+            address: identity.email.address,
+            type: "email",
+            verified_at: identity.email.verifiedAt,
+          }]
+        : []),
+      ...(identity.telegram?.telegramUserId
+        ? [{
+            telegram_user_id: identity.telegram.telegramUserId,
+            type: "telegram",
+          }]
+        : []),
+    ],
+  };
+}
+
+async function completeHostedPrivyVerification(
+  input: CompleteHostedPrivyVerificationInput,
+) {
+  if (!livePrivyUsersById.has(input.identity.userId)) {
+    livePrivyUsersById.set(
+      input.identity.userId,
+      projectIdentityAsLivePrivyUser(input.identity),
+    );
+  }
+  return completeHostedPrivyVerificationImpl(input);
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -229,10 +276,11 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
 describe("completeHostedPrivyVerification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    livePrivyUsersById.clear();
     Reflect.deleteProperty(globalThis, "__murphHostedPrivyManagementClient");
-    privyManagementMocks.getUser.mockImplementation(async (userId: string) => ({
-      id: userId,
-    }));
+    privyManagementMocks.getUser.mockImplementation(async (userId: string) =>
+      livePrivyUsersById.get(userId) ?? { id: userId }
+    );
     vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
