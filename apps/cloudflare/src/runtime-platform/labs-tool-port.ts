@@ -21,6 +21,8 @@ export function createHostedRuntimeLabsToolPort(input: {
 }): NonNullable<HostedRuntimePlatform["labsToolPort"]> {
   return {
     async request(request, context) {
+      context?.signal?.throwIfAborted();
+
       const payload = await fetchHostedWebControlPlaneJson({
         body: request,
         boundUserId: input.boundUserId,
