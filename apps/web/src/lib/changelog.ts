@@ -340,7 +340,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Murph can turn a generated image and an explicitly approved message into one complimentary physical note from an eligible conversation.",
         details:
-          "Sending requires the postal destination and exact message authority. The address, artwork, note, and image prompt do not get saved as plaintext conversation memory, and a retry cannot silently create another claim.",
+          "Sending requires the postal destination and exact message authority. The physical-note delivery record does not store the postal address, artwork, note text, or image prompt; conversation history follows Murph's existing retention rules, and a retry cannot silently create another claim.",
         relevanceTags: ["notes", "mail", "images", "privacy"],
         sourcePullRequests: [1199, 1248],
       },

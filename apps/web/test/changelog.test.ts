@@ -214,6 +214,15 @@ describe("changelog registry", () => {
       sourcePullRequests: [1261, 1266],
       details: expect.stringContaining("cannot discover where someone lives"),
     });
+    expect(items.get("physical-notes-from-chat")).toMatchObject({
+      sourcePullRequests: [1199, 1248],
+      details: expect.stringContaining(
+        "conversation history follows Murph's existing retention rules",
+      ),
+    });
+    expect(items.get("physical-notes-from-chat")?.details).not.toContain(
+      "plaintext conversation memory",
+    );
     expect(items.get("phone-transfer-recovery")).toMatchObject({
       sourcePullRequests: [1191, 1255, 1267],
       details: expect.stringContaining("stops retrying a terminal transfer"),

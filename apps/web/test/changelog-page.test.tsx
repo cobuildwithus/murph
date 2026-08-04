@@ -90,6 +90,13 @@ describe("ChangelogPage", () => {
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-04#custom-inference-endpoint"',
     );
+    expect(markup).toContain(
+      "The physical-note delivery record does not store the postal address",
+    );
+    expect(markup).toContain(
+      "conversation history follows Murph&#x27;s existing retention rules",
+    );
+    expect(markup).not.toContain("plaintext conversation memory");
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");
   });
