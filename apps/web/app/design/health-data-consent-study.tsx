@@ -1,12 +1,14 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
+import { useState } from "react";
 
 import {
   HostedHealthDataConsentControl,
   HostedHealthDataConsentSettings,
   HostedHealthDataResumeConsent,
-  HostedHealthDataWithdrawalConfirmation,
+  HostedHealthDataWithdrawalDialog,
+  type HealthDataConsentPresentation,
 } from "@/src/components/settings/hosted-health-data-consent-settings";
 import { HostedLaunchConsentPrompt } from "@/src/components/legal/hosted-legal-consent-card";
 import type {
@@ -111,50 +113,46 @@ export function HealthDataConsentWithdrawalFlowStudy() {
   const preview = useSearchParams().get("study");
   const showWithdrawalError = preview === "health-data-withdrawal-error";
   const showWithdrawal =
-    preview === null ||
     preview === "health-data-withdrawal" ||
     showWithdrawalError;
   const showResumePending = preview === "health-data-resume-pending";
   const showResume = preview === "health-data-resume" || showResumePending;
-  const previewStatus = showWithdrawal
-    ? DESIGN_ACTIVE_HEALTH_DATA_CONSENT_STATUS
-    : DESIGN_WITHDRAWN_HEALTH_DATA_CONSENT_STATUS;
+  const [presentation, setPresentation] =
+    useState<HealthDataConsentPresentation>(showWithdrawal ? "active" : "paused");
+  const [withdrawOpen, setWithdrawOpen] = useState(showWithdrawal);
 
   return (
     <div
-      className="grid w-full items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,30rem)] lg:gap-12"
+      className={cn(
+        "grid w-full items-start gap-8",
+        showResume
+          ? "lg:grid-cols-[minmax(0,1fr)_minmax(22rem,30rem)] lg:gap-12"
+          : "mx-auto max-w-2xl",
+      )}
       data-design-section="health-data-consent-withdrawal"
-      inert
     >
       <div className="flex min-w-0 flex-col gap-4 border-y border-border py-5">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          {showWithdrawal ? "Consent active" : "Consent withdrawn"}
+          {presentation === "active" ? "Consent active" : "Consent withdrawn"}
         </p>
-        <HostedHealthDataConsentSettings
-          authenticated
-          initialStatus={previewStatus}
+        <HostedHealthDataConsentControl
+          errorMessage={null}
+          onAction={() => {
+            if (presentation === "active") {
+              setWithdrawOpen(true);
+            }
+          }}
+          pending={false}
+          presentation={presentation}
+          statusPending={false}
         />
       </div>
-      {showWithdrawal || showResume ? (
+      {showResume ? (
         <div
-          className={cn(
-            "mx-auto w-full max-w-lg lg:mx-0 lg:max-w-none",
-            showWithdrawal &&
-              "rounded-3xl bg-popover p-6 ring-1 ring-foreground/10 sm:p-8",
-          )}
+          className="mx-auto w-full max-w-lg lg:mx-0 lg:max-w-none"
+          inert
         >
-          {showWithdrawal ? (
-            <HostedHealthDataWithdrawalConfirmation
-              errorMessage={
-                showWithdrawalError
-                  ? "Murph could not withdraw health data consent right now."
-                  : null
-              }
-              onCancel={() => undefined}
-              onConfirm={() => undefined}
-              pending={false}
-            />
-          ) : showResumePending ? (
+          {showResumePending ? (
             <HostedLaunchConsentPrompt
               documents={DESIGN_HEALTH_DOCUMENTS}
               mode="compact"
@@ -170,6 +168,20 @@ export function HealthDataConsentWithdrawalFlowStudy() {
           )}
         </div>
       ) : null}
+      <HostedHealthDataWithdrawalDialog
+        errorMessage={
+          showWithdrawalError
+            ? "Murph could not withdraw health data consent right now."
+            : null
+        }
+        onConfirm={() => {
+          setPresentation("paused");
+          setWithdrawOpen(false);
+        }}
+        onOpenChange={setWithdrawOpen}
+        open={withdrawOpen}
+        pending={false}
+      />
     </div>
   );
 }

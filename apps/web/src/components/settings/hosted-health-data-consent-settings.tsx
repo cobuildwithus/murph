@@ -44,7 +44,6 @@ export function HostedHealthDataConsentSettings({
   const [resumePending, setResumePending] = useState(false);
   const [statusPending, setStatusPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const cancelWithdrawalRef = useRef<HTMLButtonElement>(null);
   const presentation = resolveHealthDataConsentPresentation(status);
   const handleResumePendingChange = useCallback((nextPending: boolean) => {
     setResumePending(nextPending);
@@ -125,31 +124,13 @@ export function HostedHealthDataConsentSettings({
         statusPending={statusPending}
       />
 
-      <Dialog
+      <HostedHealthDataWithdrawalDialog
+        errorMessage={errorMessage}
+        onConfirm={() => void handleWithdraw()}
+        onOpenChange={setWithdrawOpen}
         open={withdrawOpen}
-        onOpenChange={(open) => {
-          if (!pending) {
-            setWithdrawOpen(open);
-          }
-        }}
-      >
-        <DialogContent
-          aria-busy={pending}
-          aria-describedby="health-data-withdrawal-description"
-          aria-labelledby="health-data-withdrawal-title"
-          className="max-w-lg gap-5 p-6 sm:p-8"
-          initialFocus={cancelWithdrawalRef}
-          showCloseButton={!pending}
-        >
-          <HostedHealthDataWithdrawalConfirmation
-            cancelRef={cancelWithdrawalRef}
-            errorMessage={errorMessage}
-            onCancel={() => setWithdrawOpen(false)}
-            onConfirm={() => void handleWithdraw()}
-            pending={pending}
-          />
-        </DialogContent>
-      </Dialog>
+        pending={pending}
+      />
 
       <Dialog
         open={resumeOpen}
@@ -178,6 +159,50 @@ export function HostedHealthDataConsentSettings({
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+export function HostedHealthDataWithdrawalDialog({
+  errorMessage = null,
+  onConfirm,
+  onOpenChange,
+  open,
+  pending,
+}: {
+  errorMessage?: string | null;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  pending: boolean;
+}) {
+  const cancelWithdrawalRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!pending) {
+          onOpenChange(nextOpen);
+        }
+      }}
+    >
+      <DialogContent
+        aria-busy={pending}
+        aria-describedby="health-data-withdrawal-description"
+        aria-labelledby="health-data-withdrawal-title"
+        className="max-w-lg gap-5 p-6 sm:p-8"
+        initialFocus={cancelWithdrawalRef}
+        showCloseButton={!pending}
+      >
+        <HostedHealthDataWithdrawalConfirmation
+          cancelRef={cancelWithdrawalRef}
+          errorMessage={errorMessage}
+          onCancel={() => onOpenChange(false)}
+          onConfirm={onConfirm}
+          pending={pending}
+        />
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -286,48 +311,47 @@ export function HostedHealthDataWithdrawalConfirmation({
   return (
     <>
       <DialogHeader className="max-w-prose pr-10">
-        <h2
+        <DialogTitle
           className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground"
           id="health-data-withdrawal-title"
         >
           Withdraw health data consent?
-        </h2>
-        <p
+        </DialogTitle>
+        <DialogDescription
           className="text-sm leading-6 text-muted-foreground"
           id="health-data-withdrawal-description"
         >
-          Murph will pause health data processing. Murph will also try to
-          disconnect your health sources; you can review their status in Manage
-          wearables. Your account, existing data, and subscription will not be
-          deleted.
-        </p>
+          Murph will pause health data processing and try to disconnect your
+          health sources. Your account, existing data, and subscription stay
+          unchanged.
+        </DialogDescription>
       </DialogHeader>
       {errorMessage ? (
         <Alert role="alert" variant="destructive">
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       ) : null}
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <div className="flex flex-col gap-2">
         <Button
-          className="w-full sm:w-auto"
-          disabled={pending}
-          onClick={onCancel}
-          ref={cancelRef}
-          size="lg"
-          type="button"
-          variant="outline"
-        >
-          Cancel
-        </Button>
-        <Button
-          className="w-full sm:w-auto"
+          className="w-full"
           disabled={pending}
           onClick={onConfirm}
           size="lg"
           type="button"
-          variant="destructive"
+          variant="secondary"
         >
           {pending ? "Withdrawing..." : "Withdraw consent"}
+        </Button>
+        <Button
+          className="w-full"
+          disabled={pending}
+          onClick={onCancel}
+          ref={cancelRef}
+          size="default"
+          type="button"
+          variant="ghost"
+        >
+          Cancel
         </Button>
       </div>
     </>

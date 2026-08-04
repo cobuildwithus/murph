@@ -60,13 +60,16 @@ test("renders consent status retry states from the production control", () => {
   expect(markup).toContain("text-destructive");
 });
 
-test("renders withdrawal confirmation as the default consent flow study", () => {
+test("renders an interactive, settings-width withdrawal flow study", () => {
+  mocks.study = "health-data-withdrawal";
+
   const markup = renderToStaticMarkup(
     createElement(HealthDataConsentWithdrawalFlowStudy),
   );
 
   expect(markup).toContain("Consent active");
-  expect(markup).toContain("Withdraw health data consent?");
+  expect(markup).toContain("Withdraw consent");
+  expect(markup).toContain("max-w-2xl");
   expect(markup).not.toContain("Use study=");
 });
 

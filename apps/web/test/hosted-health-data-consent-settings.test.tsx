@@ -261,10 +261,10 @@ test("confirms that withdrawal preserves the account, data, and subscription", a
 
   expect(rendered.container.textContent).toContain("Withdraw health data consent?");
   expect(rendered.container.textContent).toContain(
-    "Murph will pause health data processing. Murph will also try to disconnect your health sources",
+    "Murph will pause health data processing and try to disconnect your health sources",
   );
   expect(rendered.container.textContent).toContain(
-    "Your account, existing data, and subscription will not be deleted.",
+    "Your account, existing data, and subscription stay unchanged.",
   );
 });
 
