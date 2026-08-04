@@ -543,7 +543,8 @@ function HostedAssistantModelSettingsForm(
       const enteringCustom = draftRouting === CUSTOM_INFERENCE_ROUTING;
       const providerChanged = veniceAvailable && draftProvider !== currentProvider;
       const modelChanged = draftModel !== currentModel;
-      const replaceDormantSol = dormantSolPreference && !providerChanged;
+      const replaceDormantSol =
+        dormantSolPreference && !routingChanged && !providerChanged;
       const modeChanged = enteringCustom !== (currentRouting === CUSTOM_INFERENCE_ROUTING);
       const managedChanged = modelChanged || replaceDormantSol || providerChanged;
 

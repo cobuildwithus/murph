@@ -487,6 +487,87 @@ test("leaving an active endpoint changes the managed provider before routing", a
   view.cleanup();
 });
 
+test("retrying a failed endpoint exit preserves dormant Sol", async () => {
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce({
+      dormantSolPreference: true,
+      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      ok: true,
+      provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      solAvailable: false,
+      updated: true,
+    })
+    .mockRejectedValueOnce(new Error("temporary failure"))
+    .mockResolvedValueOnce({ mode: "managed", updated: true });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: true,
+      chatCompletionsAvailable: true,
+      configurationAvailable: true,
+      customInferenceAvailable: true,
+      initialConnection: endpointConnection(true),
+      initialDormantSolPreference: true,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: false,
+      veniceAvailable: true,
+    }),
+  );
+
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+  await act(async () => {
+    findProviderRadio(
+      view.document,
+      HOSTED_ASSISTANT_VENICE_PROVIDER,
+    ).click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
+    method: "POST",
+    payload: { provider: HOSTED_ASSISTANT_VENICE_PROVIDER },
+    url: "/api/settings/assistant-model",
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+    method: "POST",
+    payload: { mode: "managed" },
+    url: "/api/settings/assistant",
+  });
+  assert.match(view.container.textContent ?? "", /Sol is still saved/u);
+  assert.equal(findButton(view.container, "Save change").disabled, false);
+
+  await act(async () => {
+    submitForm(view.container);
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(3, {
+    method: "POST",
+    payload: { mode: "managed" },
+    url: "/api/settings/assistant",
+  });
+  for (const [request] of mocks.requestHostedOnboardingJson.mock.calls) {
+    expect(request).not.toMatchObject({
+      payload: { model: HOSTED_ASSISTANT_TERRA_MODEL },
+    });
+  }
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. New core replies use Terra through Venice while Edge is paused; Sol remains saved\./u,
+  );
+
+  view.cleanup();
+});
+
 function endpointConnection(selected: boolean, revision = 4) {
   return {
     contextWindowTokens: 131_072,
