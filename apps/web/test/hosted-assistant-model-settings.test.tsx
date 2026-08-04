@@ -338,15 +338,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
 
 test("one save routes replies to the endpoint and keeps the managed default", async () => {
   mocks.requestHostedOnboardingJson
-    .mockResolvedValueOnce({ mode: "custom", updated: true })
-    .mockResolvedValueOnce({
-      dormantSolPreference: false,
-      model: HOSTED_ASSISTANT_TERRA_MODEL,
-      ok: true,
-      provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
-      solAvailable: true,
-      updated: false,
-    });
+    .mockResolvedValueOnce({ mode: "custom", updated: true });
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
       canUpgradeToEdge: false,
@@ -399,17 +391,13 @@ test("one save routes replies to the endpoint and keeps the managed default", as
     await Promise.resolve();
   });
 
-  // The routing bit commits before the managed model/provider, so a later
-  // failure cannot leave replies pointed somewhere the member did not confirm.
+  // A route-only save touches exactly one owner. The managed-model route
+  // rejects an empty body, so sending one would fail in production.
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
   expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
     method: "POST",
     payload: { mode: "custom" },
     url: "/api/settings/assistant",
-  });
-  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
-    method: "POST",
-    payload: {},
-    url: "/api/settings/assistant-model",
   });
   assert.match(
     view.container.textContent ?? "",
@@ -419,6 +407,198 @@ test("one save routes replies to the endpoint and keeps the managed default", as
     view.container,
     /Saved\. New core replies use your endpoint\. Terra through OpenAI stays your managed default\./u,
   );
+  view.cleanup();
+});
+
+test("leaving an active endpoint changes the managed provider before routing", async () => {
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new Error("temporary failure"))
+    .mockResolvedValueOnce({
+      dormantSolPreference: false,
+      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      ok: true,
+      provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      solAvailable: true,
+      updated: true,
+    })
+    .mockResolvedValueOnce({ mode: "managed", updated: true });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      chatCompletionsAvailable: true,
+      configurationAvailable: true,
+      customInferenceAvailable: true,
+      initialConnection: endpointConnection(true),
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+  await act(async () => {
+    findProviderRadio(
+      view.document,
+      HOSTED_ASSISTANT_VENICE_PROVIDER,
+    ).click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
+    method: "POST",
+    payload: { provider: HOSTED_ASSISTANT_VENICE_PROVIDER },
+    url: "/api/settings/assistant-model",
+  });
+  assert.match(
+    view.container.textContent ?? "",
+    /Core replies switch to Venice after Save\./u,
+  );
+  assert.equal(findButton(view.container, "Save change").disabled, false);
+
+  await act(async () => {
+    submitForm(view.container);
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(3);
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+    method: "POST",
+    payload: { provider: HOSTED_ASSISTANT_VENICE_PROVIDER },
+    url: "/api/settings/assistant-model",
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(3, {
+    method: "POST",
+    payload: { mode: "managed" },
+    url: "/api/settings/assistant",
+  });
+  assert.match(view.container.textContent ?? "", /New core replies use Venice\./u);
+  assert.ok(findButton(view.container, "Save change").disabled);
+
+  view.cleanup();
+});
+
+function endpointConnection(selected: boolean, revision = 4) {
+  return {
+    contextWindowTokens: 131_072,
+    endpointHost: "inference.example.test",
+    model: "example-model",
+    protocol: "responses" as const,
+    revision,
+    selected,
+    supportsImages: false,
+    verificationProfile:
+      "murph-codex-0.145.0-portable-responses-v1" as const,
+    verifiedAt: "2026-07-30T12:00:00.000Z",
+  };
+}
+
+test("the shown route is derived from the durable connection, not a copy", () => {
+  // A replacement is stored deselected, so a render carrying that connection
+  // must show managed routing. Nothing may remember an older "custom" answer.
+  const active = renderToStaticMarkup(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      chatCompletionsAvailable: true,
+      configurationAvailable: true,
+      customInferenceAvailable: true,
+      initialConnection: endpointConnection(true),
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+  const replaced = renderToStaticMarkup(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      chatCompletionsAvailable: true,
+      configurationAvailable: true,
+      customInferenceAvailable: true,
+      initialConnection: endpointConnection(false, 5),
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+
+  assert.match(active, /New core replies use.*your endpoint/su);
+  assert.match(replaced, /New core replies use.*OpenAI/su);
+  assert.doesNotMatch(replaced, /New core replies use.*your endpoint/su);
+});
+
+test("the routing dialog is not inside the settings form", async () => {
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      chatCompletionsAvailable: true,
+      configurationAvailable: true,
+      customInferenceAvailable: true,
+      initialConnection: endpointConnection(false),
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+
+  // The endpoint pane renders its own form. If the dialog sat inside the
+  // settings form's React tree, verifying would also submit the outer form.
+  const dialog = view.container.querySelector('[role="dialog"]');
+  assert.ok(dialog);
+  const form = view.container.querySelector("form");
+  assert.ok(form);
+  assert.equal(form.contains(dialog), false);
+  view.cleanup();
+});
+
+test("a deployment without Venice does not offer it in the routing dialog", async () => {
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      chatCompletionsAvailable: true,
+      configurationAvailable: true,
+      customInferenceAvailable: true,
+      initialConnection: endpointConnection(false),
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: false,
+    }),
+  );
+
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+
+  // Custom inference and Venice are independent flags; offering a provider the
+  // save route would reject is a dead end.
+  assert.ok(findProviderRadio(view.document, HOSTED_ASSISTANT_OPENAI_PROVIDER));
+  assert.equal(
+    view.document.querySelector(
+      `[id="assistant-provider-${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
+    ),
+    null,
+  );
+  assert.match(view.document.body.textContent ?? "", /Your endpoint/u);
   view.cleanup();
 });
 

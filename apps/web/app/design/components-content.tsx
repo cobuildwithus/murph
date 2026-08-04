@@ -2,7 +2,6 @@
 
 import {
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
-  type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
 import { CheckCircle2, ContactRound, Monitor } from "lucide-react";
@@ -1179,12 +1178,12 @@ export function ComponentsContent() {
           <AssistantProviderDialog
             chatCompletionsAvailable
             connection={DESIGN_INFERENCE_CONNECTION}
-            currentRouting={HOSTED_ASSISTANT_OPENAI_PROVIDER}
             customInferenceAvailable
             onOpenChange={setProviderDialogOpen}
             onRoutingChange={setProviderValue}
             open={providerDialogOpen}
             routing={providerValue}
+            veniceAvailable
           />
         </Section>
 

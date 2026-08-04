@@ -168,7 +168,6 @@ interface AssistantProviderDialogProps {
   chatCompletionsAvailable?: boolean;
   configurationAvailable?: boolean;
   connection?: HostedInferenceConnectionView | null;
-  currentRouting?: AssistantRoutingChoice;
   customInferenceAvailable?: boolean;
   onConnectionChange?: (
     connection: HostedInferenceConnectionView | null,
@@ -177,6 +176,7 @@ interface AssistantProviderDialogProps {
   onRoutingChange: (routing: AssistantRoutingChoice) => void;
   open: boolean;
   routing: AssistantRoutingChoice;
+  veniceAvailable?: boolean;
 }
 
 interface AssistantProviderSummaryProps {
@@ -246,13 +246,13 @@ export function AssistantProviderDialog({
   chatCompletionsAvailable = false,
   configurationAvailable = true,
   connection = null,
-  currentRouting,
   customInferenceAvailable = false,
   onConnectionChange,
   onOpenChange,
   onRoutingChange,
   open,
   routing,
+  veniceAvailable = false,
 }: AssistantProviderDialogProps) {
   const [pane, setPane] = useState<"endpoint" | "list">("list");
   const endpointUnsupported =
@@ -290,7 +290,7 @@ export function AssistantProviderDialog({
               configurationAvailable={configurationAvailable}
               connection={connection}
               onConnectionChange={(next) => onConnectionChange?.(next)}
-              selected={currentRouting === CUSTOM_INFERENCE_ROUTING}
+              selected={connection?.selected === true}
             />
             <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
               <Button
@@ -343,7 +343,10 @@ export function AssistantProviderDialog({
                 changeOpen(false);
               }}
             >
-              {PROVIDER_OPTIONS.map((option) => {
+              {PROVIDER_OPTIONS.filter((option) =>
+                option.provider !== HOSTED_ASSISTANT_VENICE_PROVIDER
+                || veniceAvailable
+              ).map((option) => {
                 const titleId = `assistant-provider-${option.provider}-title`;
                 const descriptionId =
                   `assistant-provider-${option.provider}-description`;
@@ -493,15 +496,15 @@ function HostedAssistantModelSettingsForm(
     initialProvider: HostedAssistantProvider;
   },
 ) {
-  const initialRouting: AssistantRoutingChoice = props.initialConnection?.selected
-    ? CUSTOM_INFERENCE_ROUTING
-    : props.initialProvider;
   const [currentModel, setCurrentModel] = useState(props.initialModel);
   const [draftModel, setDraftModel] = useState(props.initialModel);
   const [currentProvider, setCurrentProvider] = useState(props.initialProvider);
   const [connection, setConnection] = useState(props.initialConnection);
-  const [currentRouting, setCurrentRouting] = useState(initialRouting);
-  const [draftRouting, setDraftRouting] = useState(initialRouting);
+  const [draftRouting, setDraftRouting] = useState<AssistantRoutingChoice>(
+    props.initialConnection?.selected
+      ? CUSTOM_INFERENCE_ROUTING
+      : props.initialProvider,
+  );
   const [dormantSolPreference, setDormantSolPreference] = useState(
     props.initialDormantSolPreference,
   );
@@ -517,6 +520,11 @@ function HostedAssistantModelSettingsForm(
   } | null>(null);
   const [saveAnnouncement, setSaveAnnouncement] = useState<string | null>(null);
   const controlsDisabled = isSaving || !props.configurationAvailable;
+  // The durable connection and provider are the only owners of where replies
+  // go; the current route is derived from them so the two can never disagree.
+  const currentRouting: AssistantRoutingChoice = connection?.selected
+    ? CUSTOM_INFERENCE_ROUTING
+    : currentProvider;
   // Selecting the member's own endpoint leaves the saved managed provider
   // untouched so switching back restores it.
   const draftProvider =
@@ -532,84 +540,98 @@ function HostedAssistantModelSettingsForm(
     setSaveAnnouncement(null);
 
     try {
+      const enteringCustom = draftRouting === CUSTOM_INFERENCE_ROUTING;
+      const providerChanged = veniceAvailable && draftProvider !== currentProvider;
       const modelChanged = draftModel !== currentModel;
-      const providerChanged = draftProvider !== currentProvider;
       const replaceDormantSol = dormantSolPreference && !providerChanged;
-      const customChanged =
-        (draftRouting === CUSTOM_INFERENCE_ROUTING)
-          !== (currentRouting === CUSTOM_INFERENCE_ROUTING);
-      // The mode route owns the endpoint routing bit; the model route owns the
-      // managed model and provider. Save the mode first so a failure there
-      // cannot leave replies pointed at an endpoint the member did not confirm.
-      if (customChanged) {
+      const modeChanged = enteringCustom !== (currentRouting === CUSTOM_INFERENCE_ROUTING);
+      const managedChanged = modelChanged || replaceDormantSol || providerChanged;
+
+      // Each owner is called only when its own values changed, so a route-only
+      // save never sends an empty managed-model request the route would reject.
+      const saveMode = async () => {
         await requestHostedOnboardingJson<AssistantModeResponse>({
           method: "POST",
-          payload: {
-            mode: draftRouting === CUSTOM_INFERENCE_ROUTING
-              ? "custom"
-              : "managed",
-          },
+          payload: { mode: enteringCustom ? "custom" : "managed" },
           url: ASSISTANT_MODE_SETTINGS_URL,
         });
-        // Commit the routing locally as soon as it is durable, so a later
-        // model/provider failure cannot report routing as unsaved.
-        setCurrentRouting(draftRouting);
         setConnection((current) =>
-          current
-            ? {
-                ...current,
-                selected: draftRouting === CUSTOM_INFERENCE_ROUTING,
-              }
-            : current
+          current ? { ...current, selected: enteringCustom } : current
         );
-      }
-      const response = await requestHostedOnboardingJson<AssistantModelSettingsResponse>({
-        method: "POST",
-        payload: {
-          ...(modelChanged || replaceDormantSol
-            ? { model: draftModel }
-            : {}),
-          ...(veniceAvailable && providerChanged
-            ? { provider: draftProvider }
-            : {}),
-        },
-        url: ASSISTANT_MODEL_SETTINGS_URL,
-      });
+      };
+      const saveManaged = async () => {
+        const response = await requestHostedOnboardingJson<
+          AssistantModelSettingsResponse
+        >({
+          method: "POST",
+          payload: {
+            ...(modelChanged || replaceDormantSol ? { model: draftModel } : {}),
+            ...(providerChanged ? { provider: draftProvider } : {}),
+          },
+          url: ASSISTANT_MODEL_SETTINGS_URL,
+        });
+        if (
+          !isHostedAssistantProductModel(response.model)
+          || (
+            veniceAvailable
+              ? !isHostedAssistantProvider(response.provider)
+              : response.provider !== undefined
+                && !isHostedAssistantProvider(response.provider)
+          )
+          || typeof response.dormantSolPreference !== "boolean"
+          || typeof response.solAvailable !== "boolean"
+        ) {
+          throw new Error("Assistant model response was invalid.");
+        }
+        const provider = isHostedAssistantProvider(response.provider)
+          ? response.provider
+          : draftProvider;
+        setCurrentModel(response.model);
+        setDraftModel(response.model);
+        setCurrentProvider(provider);
+        setDormantSolPreference(response.dormantSolPreference);
+        setSolAvailable(response.solAvailable);
+        return {
+          dormantSolPreference: response.dormantSolPreference,
+          model: response.model,
+          provider,
+        };
+      };
 
-      if (
-        !isHostedAssistantProductModel(response.model)
-        || (
-          veniceAvailable
-            ? !isHostedAssistantProvider(response.provider)
-            : response.provider !== undefined
-              && !isHostedAssistantProvider(response.provider)
-        )
-        || typeof response.dormantSolPreference !== "boolean"
-        || typeof response.solAvailable !== "boolean"
-      ) {
-        throw new Error("Assistant model response was invalid.");
+      // Direction-aware ordering keeps the endpoint authoritative across a
+      // partial failure: entering custom selects it before the managed default
+      // moves, and leaving custom persists the new managed default before the
+      // endpoint is released.
+      let managed:
+        | {
+            dormantSolPreference: boolean;
+            model: HostedAssistantProductModel;
+            provider: HostedAssistantProvider;
+          }
+        | null = null;
+      if (enteringCustom) {
+        if (modeChanged) await saveMode();
+        if (managedChanged) managed = await saveManaged();
+      } else {
+        if (managedChanged) managed = await saveManaged();
+        if (modeChanged) await saveMode();
       }
-
-      const provider = isHostedAssistantProvider(response.provider)
-        ? response.provider
-        : draftProvider;
-      const savedRouting: AssistantRoutingChoice =
-        draftRouting === CUSTOM_INFERENCE_ROUTING
+      // Adopt the canonical provider the route returned, so the draft cannot
+      // keep proposing a value the server already replaced.
+      setDraftRouting(
+        enteringCustom
           ? CUSTOM_INFERENCE_ROUTING
-          : provider;
-      setCurrentModel(response.model);
-      setDraftModel(response.model);
-      setCurrentProvider(provider);
-      setCurrentRouting(savedRouting);
-      setDraftRouting(savedRouting);
-      setDormantSolPreference(response.dormantSolPreference);
-      setSolAvailable(response.solAvailable);
+          : managed?.provider ?? draftProvider,
+      );
+
+      const savedModel = managed?.model ?? currentModel;
+      const savedProvider = managed?.provider ?? currentProvider;
       setSaveAnnouncement(
-        savedRouting === CUSTOM_INFERENCE_ROUTING
-          ? `Saved. New core replies use your endpoint. ${readProductModelName(response.model)} through ${readProviderName(provider)} stays your managed default.`
-          : response.dormantSolPreference
-          ? `Saved. New core replies use ${readProductModelName(response.model)} through ${readProviderName(provider)} while Edge is paused; Sol remains saved.`
-          : `Saved. ${readProductModelName(response.model)} through ${readProviderName(provider)} is your default.`,
+        enteringCustom
+          ? `Saved. New core replies use your endpoint. ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} stays your managed default.`
+          : (managed?.dormantSolPreference ?? dormantSolPreference)
+          ? `Saved. New core replies use ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} while Edge is paused; Sol remains saved.`
+          : `Saved. ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} is your default.`,
       );
     } catch (error) {
       const solNoLongerAvailable =
@@ -625,7 +647,6 @@ function HostedAssistantModelSettingsForm(
       if (veniceNoLongerAvailable) {
         setCurrentProvider(HOSTED_ASSISTANT_OPENAI_PROVIDER);
         if (draftRouting !== CUSTOM_INFERENCE_ROUTING) {
-          setCurrentRouting(HOSTED_ASSISTANT_OPENAI_PROVIDER);
           setDraftRouting(HOSTED_ASSISTANT_OPENAI_PROVIDER);
         }
         setVeniceAvailable(false);
@@ -651,103 +672,103 @@ function HostedAssistantModelSettingsForm(
   }
 
   return (
-    <form
-      className="flex flex-col items-start gap-5"
-      aria-busy={isSaving}
-      onSubmit={(event) => {
-        event.preventDefault();
-        void saveModel();
-      }}
-    >
-      <p className="max-w-2xl text-sm text-pretty text-muted-foreground">
-        {props.customInferenceAvailable
-          ? "Choose the model Murph uses whenever Murph-managed inference is selected."
-          : "Choose the intelligence behind your personal health assistant."}
-      </p>
-
-      {!props.configurationAvailable ? (
-        <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
-          {veniceAvailable
-            ? "Provider and model choices are read-only until personal Murph access is active."
-            : "Model choices are read-only until personal Murph access is active."}
-        </p>
-      ) : null}
-
-      {dormantSolPreference ? (
-        <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
-          {props.customInferenceAvailable
-            ? "Terra is your managed default while Edge is paused. Sol is still saved and will return with Edge. Choose Luna or save Terra to replace it."
-            : "Terra is active while Edge is paused. Sol is still saved and will return with Edge. Choose Luna or save Terra to replace it."}
-        </p>
-      ) : null}
-
-      <FieldSet
-        className="w-full gap-3"
-        disabled={controlsDisabled}
+    <>
+      <form
+        className="flex flex-col items-start gap-5"
+        aria-busy={isSaving}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveModel();
+        }}
       >
-        <FieldLegend className="sr-only">
+        <p className="max-w-2xl text-sm text-pretty text-muted-foreground">
           {props.customInferenceAvailable
-            ? "Managed default model"
-            : "Default model"}
-        </FieldLegend>
-        <FieldDescription className="sr-only">
-          {props.customInferenceAvailable
-            ? "Choose the saved model for Murph-managed inference."
-            : "Choose one model for new Murph replies."}
-        </FieldDescription>
-        <RadioGroup
-          className="grid gap-3 lg:grid-cols-3"
+            ? "Choose the model Murph uses whenever Murph-managed inference is selected."
+            : "Choose the intelligence behind your personal health assistant."}
+        </p>
+
+        {!props.configurationAvailable ? (
+          <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
+            {veniceAvailable
+              ? "Provider and model choices are read-only until personal Murph access is active."
+              : "Model choices are read-only until personal Murph access is active."}
+          </p>
+        ) : null}
+
+        {dormantSolPreference ? (
+          <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
+            {props.customInferenceAvailable
+              ? "Terra is your managed default while Edge is paused. Sol is still saved and will return with Edge. Choose Luna or save Terra to replace it."
+              : "Terra is active while Edge is paused. Sol is still saved and will return with Edge. Choose Luna or save Terra to replace it."}
+          </p>
+        ) : null}
+
+        <FieldSet
+          className="w-full gap-3"
           disabled={controlsDisabled}
-          value={draftModel}
-          onValueChange={(value) => {
-            if (!isHostedAssistantProductModel(value)) {
-              return;
-            }
-
-            setDraftModel(value);
-            setStatus(null);
-          }}
         >
-          {MODEL_OPTIONS.map((option) => {
-            const selected = draftModel === option.model;
-            const unavailable =
-              option.model === HOSTED_ASSISTANT_SOL_MODEL && !solAvailable;
-            const current = option.model === currentModel;
-            const badge = readModelOptionBadge({
-              current,
-              dormantSolPreference,
-              managedDefaultOnly: props.customInferenceAvailable === true,
-              model: option.model,
-              selected,
-              unavailable,
-            });
+          <FieldLegend className="sr-only">
+            {props.customInferenceAvailable
+              ? "Managed default model"
+              : "Default model"}
+          </FieldLegend>
+          <FieldDescription className="sr-only">
+            {props.customInferenceAvailable
+              ? "Choose the saved model for Murph-managed inference."
+              : "Choose one model for new Murph replies."}
+          </FieldDescription>
+          <RadioGroup
+            className="grid gap-3 lg:grid-cols-3"
+            disabled={controlsDisabled}
+            value={draftModel}
+            onValueChange={(value) => {
+              if (!isHostedAssistantProductModel(value)) {
+                return;
+              }
 
-            return (
-              <ChoiceCard
-                artwork={<AssistantModelArtwork variant={option.artwork} />}
-                badge={badge}
-                className={
-                  ASSISTANT_MODEL_CHOICE_CARD_CLASSES[option.artwork]
-                }
-                description={option.description}
-                disabled={controlsDisabled || unavailable}
-                id={`assistant-model-${option.model}`}
-                key={option.model}
-                meta={
-                  unavailable
-                    ? `${option.usage} · Edge required`
-                    : option.usage
-                }
-                title={option.name}
-                value={option.model}
-              />
-            );
-          })}
-        </RadioGroup>
-      </FieldSet>
+              setDraftModel(value);
+              setStatus(null);
+            }}
+          >
+            {MODEL_OPTIONS.map((option) => {
+              const selected = draftModel === option.model;
+              const unavailable =
+                option.model === HOSTED_ASSISTANT_SOL_MODEL && !solAvailable;
+              const current = option.model === currentModel;
+              const badge = readModelOptionBadge({
+                current,
+                dormantSolPreference,
+                managedDefaultOnly: props.customInferenceAvailable === true,
+                model: option.model,
+                selected,
+                unavailable,
+              });
 
-      {veniceAvailable || props.customInferenceAvailable ? (
-        <>
+              return (
+                <ChoiceCard
+                  artwork={<AssistantModelArtwork variant={option.artwork} />}
+                  badge={badge}
+                  className={
+                    ASSISTANT_MODEL_CHOICE_CARD_CLASSES[option.artwork]
+                  }
+                  description={option.description}
+                  disabled={controlsDisabled || unavailable}
+                  id={`assistant-model-${option.model}`}
+                  key={option.model}
+                  meta={
+                    unavailable
+                      ? `${option.usage} · Edge required`
+                      : option.usage
+                  }
+                  title={option.name}
+                  value={option.model}
+                />
+              );
+            })}
+          </RadioGroup>
+        </FieldSet>
+
+        {veniceAvailable || props.customInferenceAvailable ? (
           <AssistantProviderSummary
             connection={connection}
             currentRouting={currentRouting}
@@ -755,76 +776,77 @@ function HostedAssistantModelSettingsForm(
             draftRouting={draftRouting}
             onChangeClick={() => setProviderDialogOpen(true)}
           />
-          <AssistantProviderDialog
-            chatCompletionsAvailable={props.chatCompletionsAvailable}
-            configurationAvailable={props.configurationAvailable}
-            connection={connection}
-            currentRouting={currentRouting}
-            customInferenceAvailable={props.customInferenceAvailable}
-            onConnectionChange={(next) => {
-              setConnection(next);
-              // A deleted connection cannot stay selected; the mode route
-              // already returned this member to managed inference.
-              if (!next) {
-                setCurrentRouting((current) =>
-                  current === CUSTOM_INFERENCE_ROUTING ? currentProvider : current
-                );
-                setDraftRouting((current) =>
-                  current === CUSTOM_INFERENCE_ROUTING ? currentProvider : current
-                );
-              }
-              setStatus(null);
-            }}
-            onOpenChange={setProviderDialogOpen}
-            onRoutingChange={(routing) => {
-              setDraftRouting(routing);
-              setStatus(null);
-            }}
-            open={providerDialogOpen}
-            routing={draftRouting}
-          />
-        </>
-      ) : null}
-
-      {props.configurationAvailable && !solAvailable ? (
-        <div className="flex w-full flex-col items-start gap-3 px-1 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-pretty text-muted-foreground">
-            Sol requires an active Edge plan.
-          </p>
-          {props.canUpgradeToEdge ? (
-            <UpgradeToEdgeButton
-              expectedCurrentPlanCode={
-                props.expectedCurrentPlanCode ?? "launch_monthly"
-              }
-            >
-              Upgrade to Edge
-            </UpgradeToEdgeButton>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-48">
-        <Button
-          type="submit"
-          disabled={controlsDisabled || !hasChanges}
-          className="w-full sm:w-auto"
-        >
-          {isSaving ? <Spinner aria-hidden="true" /> : null}
-          {isSaving ? "Saving…" : "Save change"}
-        </Button>
-        {status ? (
-          <SettingsStatusLine
-            message={status.message}
-            tone={status.tone}
-          />
         ) : null}
-        <SettingsStatusLine
-          className="sr-only min-h-0"
-          message={saveAnnouncement}
-          tone="neutral"
+
+        {props.configurationAvailable && !solAvailable ? (
+          <div className="flex w-full flex-col items-start gap-3 px-1 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-pretty text-muted-foreground">
+              Sol requires an active Edge plan.
+            </p>
+            {props.canUpgradeToEdge ? (
+              <UpgradeToEdgeButton
+                expectedCurrentPlanCode={
+                  props.expectedCurrentPlanCode ?? "launch_monthly"
+                }
+              >
+                Upgrade to Edge
+              </UpgradeToEdgeButton>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-48">
+          <Button
+            type="submit"
+            disabled={controlsDisabled || !hasChanges}
+            className="w-full sm:w-auto"
+          >
+            {isSaving ? <Spinner aria-hidden="true" /> : null}
+            {isSaving ? "Saving…" : "Save change"}
+          </Button>
+          {status ? (
+            <SettingsStatusLine
+              message={status.message}
+              tone={status.tone}
+            />
+          ) : null}
+          <SettingsStatusLine
+            className="sr-only min-h-0"
+            message={saveAnnouncement}
+            tone="neutral"
+          />
+        </div>
+      </form>
+      {veniceAvailable || props.customInferenceAvailable ? (
+        <AssistantProviderDialog
+          chatCompletionsAvailable={props.chatCompletionsAvailable}
+          configurationAvailable={props.configurationAvailable}
+          connection={connection}
+          customInferenceAvailable={props.customInferenceAvailable}
+          onConnectionChange={(next) => {
+            setConnection(next);
+            // A deleted connection, and a replacement the store saves as
+            // deselected, both return this member to managed inference. The
+            // draft has to follow, or the new revision would look active
+            // without the member ever selecting it.
+            if (!next?.selected) {
+              setDraftRouting((current) =>
+                current === CUSTOM_INFERENCE_ROUTING ? currentProvider : current
+              );
+            }
+            setStatus(null);
+          }}
+          onOpenChange={setProviderDialogOpen}
+          onRoutingChange={(routing) => {
+            setDraftRouting(routing);
+            setStatus(null);
+          }}
+          open={providerDialogOpen}
+          routing={draftRouting}
+          veniceAvailable={veniceAvailable}
         />
-      </div>
-    </form>
+      ) : null}
+    </>
   );
 }
 

@@ -1,7 +1,7 @@
 # Bring Your Own Inference
 
 Status: specified
-Last verified: 2026-07-30
+Last verified: 2026-08-03
 
 ## Outcome
 
@@ -33,10 +33,11 @@ uses.
 
 ## Settings
 
-The existing Assistant settings section presents two modes:
-
-1. **Managed by Murph** — existing OpenAI/Venice and Luna/Terra/Sol controls.
-2. **Your endpoint** — the one saved custom connection.
+The existing Assistant settings section keeps one provider control for where
+new core replies go. Its provider dialog presents OpenAI, Venice when operator
+configuration makes it available, and **Your endpoint** as peers. Choosing
+**Your endpoint** opens connection setup and management in that same dialog.
+Luna, Terra, and Sol remain the saved model choice for managed inference.
 
 The connection form asks for:
 
