@@ -69,11 +69,15 @@ Before calculating a meal total:
   or exact-FDC searches. Because `--generic` applies to the whole batch, split a
   mixed meal into at most two lookups: one generic USDA batch and one normal
   branded/menu/package batch. The default returns one compact nutrition match
-  per component. Increase `--limit` only for an ambiguous match, and use
-  `--full-label` whenever the user needs a fact outside the compact serving,
-  calories, protein, carbohydrate, fat, and fiber response. This includes
-  sugars, saturated fat, cholesterol, sodium or other micronutrients,
-  ingredients, allergens, and contaminant evidence.
+  per component with serving, calories, protein, carbohydrate, fat, fiber, and
+  a bounded exact-product contaminant summary. Read `contaminantSummary` by
+  default: `no_known_product_tests` means evidence is unknown, observations are
+  measured or reported findings rather than verdicts, and truncation means more
+  linked evidence exists. Increase `--limit` only for an ambiguous match, and
+  use `--full-label` whenever the user needs a fact outside that compact
+  response. This includes sugars, saturated fat, cholesterol, sodium or other
+  micronutrients, ingredients, allergens, or complete contaminant observation,
+  sample, source, and threshold details.
 - Prefer an exact visible or user-named product, restaurant item, variant, UPC,
   or FDC id over a nearby generic substitute. Never merge nutrition from
   similarly named variants without evidence that they are the same item.

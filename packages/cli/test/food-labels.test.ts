@@ -160,6 +160,56 @@ const yogurtContaminants = {
   })),
 }
 
+const yogurtContaminantSummary = {
+  status: 'known_product_tests',
+  murphConcernLevel: 'medium',
+  alertCount: 1,
+  alertsTruncated: false,
+  alerts: [
+    {
+      contaminantKey: 'bpa',
+      contaminantName: 'Bisphenol A (BPA)',
+      concernLevel: 'medium',
+      result: {
+        operator: 'eq',
+        value: 0.012,
+        unit: 'ppm',
+        basis: 'product_mass',
+      },
+      threshold: {
+        value: 0.01,
+        unit: 'ppm',
+        basis: 'product_mass',
+        authority: 'Example Authority',
+        name: 'Example screening level',
+      },
+      source: {
+        name: 'Example Source',
+        reportDate: '2024-07-11',
+      },
+    },
+  ],
+  observationCount: 6,
+  observationsTruncated: true,
+  observations: [
+    {
+      contaminantKey: 'bpa',
+      contaminantName: 'Bisphenol A (BPA)',
+      result: {
+        operator: 'range',
+        value: 12,
+        upperValue: 13,
+        unit: 'ng/g',
+        basis: 'product_mass',
+      },
+      source: {
+        name: 'Example Source',
+        reportDate: '2024-07-11',
+      },
+    },
+  ],
+}
+
 describe('foodLabelSearchItemSchema', () => {
   it('accepts regulatory presence findings without lab-measurement metadata', () => {
     const parsed = foodLabelSearchItemSchema.parse({
@@ -289,7 +339,7 @@ describe('searchFoodLabels', () => {
           upc: '012345678905',
           offMarket: false,
           label: yogurtLabel,
-          contaminants: yogurtContaminants,
+          contaminantSummary: yogurtContaminantSummary,
         },
       ],
     }), {
@@ -326,7 +376,7 @@ describe('searchFoodLabels', () => {
           upc: '012345678905',
           offMarket: false,
           label: yogurtLabel,
-          contaminants: yogurtContaminants,
+          contaminantSummary: yogurtContaminantSummary,
         },
       ],
     })

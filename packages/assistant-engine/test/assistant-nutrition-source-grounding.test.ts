@@ -36,13 +36,16 @@ describe('assistant nutrition source grounding', () => {
       'Because `--generic` applies to the whole batch, split a mixed meal into at most two lookups: one generic USDA batch and one normal branded/menu/package batch.',
     )
     expect(food).toContain(
-      'The default returns one compact nutrition match per component. Increase `--limit` only for an ambiguous match',
+      'The default returns one compact nutrition match per component with serving, calories, protein, carbohydrate, fat, fiber, and a bounded exact-product contaminant summary.',
     )
     expect(food).toContain(
-      'use `--full-label` whenever the user needs a fact outside the compact serving, calories, protein, carbohydrate, fat, and fiber response.',
+      'Read `contaminantSummary` by default: `no_known_product_tests` means evidence is unknown',
     )
     expect(food).toContain(
-      'sugars, saturated fat, cholesterol, sodium or other micronutrients, ingredients, allergens, and contaminant evidence.',
+      'use `--full-label` whenever the user needs a fact outside that compact response.',
+    )
+    expect(food).toContain(
+      'complete contaminant observation, sample, source, and threshold details.',
     )
     expect(food).toContain(
       'A database serving is not evidence that the user ate exactly one serving.',

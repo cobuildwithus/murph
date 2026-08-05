@@ -3,24 +3,39 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getFoodById: vi.fn(),
   getFoodByUpc: vi.fn(),
-  searchFoodNutritionSources: vi.fn(),
   searchFoods: vi.fn(),
-  toFoodNutritionSearchItem: vi.fn((item: Record<string, unknown>) => ({
-    ...item,
-    label: {
-      nutrition: {
-        basis: "per_100_g",
-        rows: [],
+  toFoodNutritionSearchItem: vi.fn((item: Record<string, unknown>) => {
+    const identity = Object.fromEntries(
+      Object.entries(item).filter(([key]) =>
+        key !== "contaminants" && key !== "label"),
+    );
+
+    return {
+      ...identity,
+      contaminantSummary: {
+        status: "no_known_product_tests",
+        murphConcernLevel: "unknown",
+        alertCount: 0,
+        alertsTruncated: false,
+        alerts: [],
+        observationCount: 0,
+        observationsTruncated: false,
+        observations: [],
       },
-      serving: null,
-    },
-  })),
+      label: {
+        nutrition: {
+          basis: "per_100_g",
+          rows: [],
+        },
+        serving: null,
+      },
+    };
+  }),
 }));
 
 vi.mock("@/src/lib/foods", () => ({
   getFoodById: mocks.getFoodById,
   getFoodByUpc: mocks.getFoodByUpc,
-  searchFoodNutritionSources: mocks.searchFoodNutritionSources,
   searchFoods: mocks.searchFoods,
   toFoodNutritionSearchItem: mocks.toFoodNutritionSearchItem,
 }));
@@ -224,7 +239,7 @@ describe("foods API route", () => {
     });
   });
 
-  it("returns compact nutrition facts without requesting contaminant evidence", async () => {
+  it("returns compact nutrition facts with exact-label contaminant evidence", async () => {
     const item = {
       id: "fdc:123",
       dataOrigin: "usda_foundation",
@@ -239,7 +254,7 @@ describe("foods API route", () => {
         ],
       },
     };
-    mocks.searchFoodNutritionSources.mockResolvedValue([item]);
+    mocks.searchFoods.mockResolvedValue([item]);
 
     const response = await foodsRoute.GET(
       new Request(
@@ -253,17 +268,26 @@ describe("foods API route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.searchFoodNutritionSources).toHaveBeenCalledWith({
+    expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "example",
       limit: 1,
       includeOffMarket: false,
     });
-    expect(mocks.searchFoods).not.toHaveBeenCalled();
     expect(mocks.toFoodNutritionSearchItem).toHaveBeenCalledWith(item);
     await expect(response.json()).resolves.toEqual({
       items: [
         expect.objectContaining({
           id: "fdc:123",
+          contaminantSummary: {
+            status: "no_known_product_tests",
+            murphConcernLevel: "unknown",
+            alertCount: 0,
+            alertsTruncated: false,
+            alerts: [],
+            observationCount: 0,
+            observationsTruncated: false,
+            observations: [],
+          },
           label: {
             nutrition: {
               basis: "per_100_g",
@@ -333,12 +357,16 @@ describe("foods API route", () => {
       });
       expect(mocks.getFoodById).not.toHaveBeenCalled();
     }
-    expect(mocks.searchFoodNutritionSources).not.toHaveBeenCalled();
     expect(mocks.searchFoods).not.toHaveBeenCalled();
     expect(mocks.toFoodNutritionSearchItem).toHaveBeenCalledWith(item);
     await expect(response.json()).resolves.toEqual({
       item: {
         ...item,
+        contaminantSummary: expect.objectContaining({
+          status: "no_known_product_tests",
+          murphConcernLevel: "unknown",
+          observationCount: 0,
+        }),
         label: {
           nutrition: {
             basis: "per_100_g",
@@ -805,7 +833,7 @@ describe("foods API route", () => {
       label: { nutrientsPer100g: [{ name: "Protein", unit: "g", value: 10 }] },
     };
     mocks.getFoodById.mockResolvedValue(exactItem);
-    mocks.searchFoodNutritionSources.mockResolvedValue([searchItem]);
+    mocks.searchFoods.mockResolvedValue([searchItem]);
 
     const response = await foodsRoute.POST(
       new Request("https://web.example.test/api/foods", {
@@ -826,12 +854,11 @@ describe("foods API route", () => {
       id: "fdc:7090411",
       includeOffMarket: false,
     });
-    expect(mocks.searchFoodNutritionSources).toHaveBeenCalledWith({
+    expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "yogurt",
       limit: 1,
       includeOffMarket: false,
     });
-    expect(mocks.searchFoods).not.toHaveBeenCalled();
     expect(mocks.toFoodNutritionSearchItem).toHaveBeenCalledTimes(2);
     expect(mocks.toFoodNutritionSearchItem).toHaveBeenCalledWith(exactItem);
     expect(mocks.toFoodNutritionSearchItem).toHaveBeenCalledWith(searchItem);
@@ -845,6 +872,11 @@ describe("foods API route", () => {
           items: [
             {
               ...exactItem,
+              contaminantSummary: expect.objectContaining({
+                status: "no_known_product_tests",
+                murphConcernLevel: "unknown",
+                observationCount: 0,
+              }),
               label: {
                 nutrition: { basis: "per_100_g", rows: [] },
                 serving: null,
@@ -857,6 +889,11 @@ describe("foods API route", () => {
           items: [
             {
               ...searchItem,
+              contaminantSummary: expect.objectContaining({
+                status: "no_known_product_tests",
+                murphConcernLevel: "unknown",
+                observationCount: 0,
+              }),
               label: {
                 nutrition: { basis: "per_100_g", rows: [] },
                 serving: null,

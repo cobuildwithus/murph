@@ -103,7 +103,7 @@ export type ProductLabelSearchItem = {
 };
 
 export type ProductLabelDetail = ProductLabelSearchItem;
-export type ProductLabelSourceItem = Omit<
+type ProductLabelSourceItem = Omit<
   ProductLabelSearchItem,
   "contaminants"
 >;
@@ -332,12 +332,6 @@ export type ProductLabelsQueries = {
     limit: number;
     q: string;
   }) => Promise<ProductLabelSearchItem[]>;
-  searchWithoutContaminants: (input: {
-    genericOnly?: boolean;
-    includeOffMarket: boolean;
-    limit: number;
-    q: string;
-  }) => Promise<ProductLabelSourceItem[]>;
 };
 
 export type PublicProductLabelsQueries = {
@@ -549,10 +543,6 @@ export function createProductLabelsQueries(
         tableSql,
         await searchRows(input),
       );
-    },
-
-    async searchWithoutContaminants(input) {
-      return (await searchRows(input)).map(toProductLabelSearchItem);
     },
   };
 }

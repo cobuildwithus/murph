@@ -166,6 +166,50 @@ const hostedDataApiLabelContaminantsSchema = z.object({
   observations: z.array(hostedDataApiLabelContaminantObservationSchema),
 })
 
+const hostedDataApiLabelContaminantSummaryResultSchema = z.object({
+  operator: hostedDataApiLabelContaminantResultOperatorSchema,
+  value: z.number().nonnegative().nullable(),
+  upperValue: z.number().nonnegative().nullable().optional(),
+  unit: z.string().min(1),
+  basis: z.string().min(1),
+})
+
+const hostedDataApiLabelContaminantSummarySourceSchema = z.object({
+  name: z.string().min(1),
+  reportDate: z.string().min(1).nullable(),
+})
+
+const hostedDataApiLabelContaminantSummarySchema = z.object({
+  status: z.enum(['no_known_product_tests', 'known_product_tests']),
+  murphConcernLevel: hostedDataApiLabelContaminantConcernSchema,
+  alertCount: z.number().int().nonnegative(),
+  alertsTruncated: z.boolean(),
+  alerts: z.array(z.object({
+    contaminantKey: z.string().min(1),
+    contaminantName: z.string().min(1),
+    concernLevel: z.enum(['low', 'medium', 'high']),
+    result: hostedDataApiLabelContaminantSummaryResultSchema.extend({
+      value: z.number().nonnegative(),
+    }).omit({ upperValue: true }),
+    threshold: z.object({
+      value: z.number().positive(),
+      unit: z.string().min(1),
+      basis: z.string().min(1),
+      authority: z.string().min(1),
+      name: z.string().min(1),
+    }),
+    source: hostedDataApiLabelContaminantSummarySourceSchema,
+  })).max(5),
+  observationCount: z.number().int().nonnegative(),
+  observationsTruncated: z.boolean(),
+  observations: z.array(z.object({
+    contaminantKey: z.string().min(1),
+    contaminantName: z.string().min(1),
+    result: hostedDataApiLabelContaminantSummaryResultSchema,
+    source: hostedDataApiLabelContaminantSummarySourceSchema,
+  })).max(5),
+})
+
 export const hostedDataApiLabelSearchItemSchema = z.object({
   id: z.string().min(1),
   dataOrigin: z.string().min(1),
@@ -175,6 +219,7 @@ export const hostedDataApiLabelSearchItemSchema = z.object({
   upc: z.string().nullable(),
   offMarket: z.boolean(),
   label: z.json().optional(),
+  contaminantSummary: hostedDataApiLabelContaminantSummarySchema.optional(),
   contaminants: hostedDataApiLabelContaminantsSchema.optional(),
 })
 

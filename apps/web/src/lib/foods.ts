@@ -1,10 +1,10 @@
 import "server-only";
 
 import type {
+  ProductContaminantSummary,
   ProductLabelDetail,
   ProductLabelsQueryClient,
   ProductLabelSearchItem,
-  ProductLabelSourceItem,
   PublicProductLabelRecord,
   PublicProductLabelSearchItem,
   PublicProductTestEvidence,
@@ -22,6 +22,8 @@ const GENERIC_FOOD_DATA_ORIGINS = [
   "usda_fndds",
 ] as const;
 const FOOD_MEAL_NUTRITION_ROW_LIMIT = 16;
+const FOOD_MEAL_CONTAMINANT_ALERT_LIMIT = 5;
+const FOOD_MEAL_CONTAMINANT_OBSERVATION_LIMIT = 5;
 const FOOD_MEAL_NUTRIENT_NAME_PATTERNS = [
   /^(?:calories?|energy)(?:\b|\s*\()/u,
   /^protein\b/u,
@@ -31,16 +33,62 @@ const FOOD_MEAL_NUTRIENT_NAME_PATTERNS = [
 ] as const;
 
 export type FoodSearchItem = ProductLabelSearchItem;
-export type FoodNutritionSourceItem = ProductLabelSourceItem;
 export type FoodDetail = ProductLabelDetail;
 export type FoodNutritionSearchItem = Omit<
   FoodSearchItem,
   "contaminants" | "label"
 > & {
+  contaminantSummary: FoodContaminantSearchSummary;
   label: {
     nutrition: ReturnType<typeof normalizePublicProductLabel>["nutrition"];
     serving: ReturnType<typeof normalizePublicProductLabel>["serving"];
   };
+};
+
+export type FoodContaminantSearchSummary = {
+  status: ProductContaminantSummary["status"];
+  murphConcernLevel: ProductContaminantSummary["murphConcernLevel"];
+  alertCount: number;
+  alertsTruncated: boolean;
+  alerts: Array<{
+    contaminantKey: string;
+    contaminantName: string;
+    concernLevel: "low" | "medium" | "high";
+    result: {
+      operator: ProductContaminantSummary["alerts"][number]["result"]["operator"];
+      value: number;
+      unit: string;
+      basis: string;
+    };
+    threshold: {
+      value: number;
+      unit: string;
+      basis: string;
+      authority: string;
+      name: string;
+    };
+    source: {
+      name: string;
+      reportDate: string | null;
+    };
+  }>;
+  observationCount: number;
+  observationsTruncated: boolean;
+  observations: Array<{
+    contaminantKey: string;
+    contaminantName: string;
+    result: {
+      operator: ProductContaminantSummary["observations"][number]["result"]["operator"];
+      value: number | null;
+      upperValue: number | null;
+      unit: string;
+      basis: string;
+    };
+    source: {
+      name: string;
+      reportDate: string | null;
+    };
+  }>;
 };
 
 let defaultFoodsQueriesInstance: ReturnType<typeof createFoodsQueries> | null =
@@ -64,12 +112,6 @@ export function createFoodsQueries(client: ProductLabelsQueryClient): {
     limit: number;
     q: string;
   }) => Promise<FoodSearchItem[]>;
-  searchFoodNutritionSources: (input: {
-    genericOnly?: boolean;
-    includeOffMarket: boolean;
-    limit: number;
-    q: string;
-  }) => Promise<FoodNutritionSourceItem[]>;
 } {
   const queries = createProductLabelsQueries(client, "foods", {
     genericSearch: {
@@ -81,7 +123,6 @@ export function createFoodsQueries(client: ProductLabelsQueryClient): {
     getFoodById: queries.getById,
     getFoodByUpc: queries.getByUpc,
     searchFoods: queries.search,
-    searchFoodNutritionSources: queries.searchWithoutContaminants,
   };
 }
 
@@ -117,15 +158,6 @@ export async function searchFoods(input: {
   return await defaultFoodsQueries().searchFoods(input);
 }
 
-export async function searchFoodNutritionSources(input: {
-  q: string;
-  limit: number;
-  includeOffMarket: boolean;
-  genericOnly?: boolean;
-}): Promise<FoodNutritionSourceItem[]> {
-  return await defaultFoodsQueries().searchFoodNutritionSources(input);
-}
-
 export async function getFoodById(input: {
   id: string;
   includeOffMarket: boolean;
@@ -141,7 +173,7 @@ export async function getFoodByUpc(input: {
 }
 
 export function toFoodNutritionSearchItem(
-  item: FoodNutritionSourceItem,
+  item: FoodSearchItem,
 ): FoodNutritionSearchItem {
   const normalized = normalizePublicProductLabel({
     kind: "food",
@@ -164,6 +196,7 @@ export function toFoodNutritionSearchItem(
     brand: item.brand,
     upc: item.upc,
     offMarket: item.offMarket,
+    contaminantSummary: toFoodContaminantSearchSummary(item.contaminants),
     label: {
       nutrition: {
         basis: mealNutritionRows.length > 0
@@ -173,6 +206,64 @@ export function toFoodNutritionSearchItem(
       },
       serving: normalized.serving,
     },
+  };
+}
+
+function toFoodContaminantSearchSummary(
+  contaminants: ProductContaminantSummary,
+): FoodContaminantSearchSummary {
+  const alerts = contaminants.alerts
+    .slice(0, FOOD_MEAL_CONTAMINANT_ALERT_LIMIT)
+    .map((alert) => ({
+      contaminantKey: alert.contaminantKey,
+      contaminantName: alert.contaminantName,
+      concernLevel: alert.concernLevel,
+      result: {
+        operator: alert.result.operator,
+        value: alert.result.value,
+        unit: alert.result.unit,
+        basis: alert.result.basis,
+      },
+      threshold: {
+        value: alert.threshold.value,
+        unit: alert.threshold.unit,
+        basis: alert.threshold.basis,
+        authority: alert.threshold.authority,
+        name: alert.threshold.name,
+      },
+      source: {
+        name: alert.source.name,
+        reportDate: alert.source.reportDate,
+      },
+    }));
+  const observations = contaminants.observations
+    .slice(0, FOOD_MEAL_CONTAMINANT_OBSERVATION_LIMIT)
+    .map((observation) => ({
+      contaminantKey: observation.contaminantKey,
+      contaminantName: observation.contaminantName,
+      result: {
+        operator: observation.result.operator,
+        value: observation.result.value,
+        upperValue: observation.result.upperValue ?? null,
+        unit: observation.result.unit,
+        basis: observation.result.basis,
+      },
+      source: {
+        name: observation.source.name,
+        reportDate: observation.source.reportDate,
+      },
+    }));
+
+  return {
+    status: contaminants.status,
+    murphConcernLevel: contaminants.murphConcernLevel,
+    alertCount: contaminants.alertCount,
+    alertsTruncated: contaminants.alertCount > alerts.length,
+    alerts,
+    observationCount: contaminants.observationCount,
+    observationsTruncated:
+      contaminants.observationCount > observations.length,
+    observations,
   };
 }
 
