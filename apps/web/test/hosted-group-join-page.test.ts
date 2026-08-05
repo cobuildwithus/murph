@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   readHostedConsentStatus: vi.fn(),
   readHostedGroupJoinView: vi.fn(),
+  readHostedInitialOnboardingState: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -83,6 +84,10 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/initial-onboarding", () => ({
+  readHostedInitialOnboardingState: mocks.readHostedInitialOnboardingState,
+}));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -93,6 +98,10 @@ beforeEach(() => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
     authenticatedMember: null,
+  });
+  mocks.readHostedInitialOnboardingState.mockResolvedValue({
+    preferences: { persona: "classic", tone: "formal", voice: "murph" },
+    status: "completed",
   });
   mocks.readHostedGroupJoinView.mockResolvedValue({
     activeVaultShareProjectionKinds: [],
@@ -205,7 +214,6 @@ test("forwards a phone-bound invite into the authenticated join form", async () 
 });
 
 test.each([
-  ["initial-visit", "/home?initialVisit=true"],
   ["setup", "/join"],
   ["untrusted", "/home"],
 ] as const)(
@@ -222,14 +230,12 @@ test.each([
     const markup = await renderGroupJoinPage("JOIN123", { postJoin });
 
     expect(markup).toContain(`data-post-join-destination="${destination.replaceAll("&", "&amp;")}"`);
-    // The decline exit must not strip the bounded handoff: the initial-visit
-    // destination is one-shot and unrecoverable after this authentication.
     expect(markup).toContain(`href="${destination.replaceAll("&", "&amp;")}"`);
     expect(markup).toContain("Not now");
   },
 );
 
-test("keeps the initial-visit destination on the legal consent decline exit", async () => {
+test("ignores the obsolete initial-visit marker on the legal consent decline exit", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
     authenticated: true,
     authenticatedMember: { id: "member_123" },
@@ -241,13 +247,10 @@ test("keeps the initial-visit destination on the legal consent decline exit", as
   const markup = await renderGroupJoinPage("JOIN123", { postJoin: "initial-visit" });
 
   expect(markup).toContain('data-legal-consent-gate="true"');
-  expect(markup).toContain('data-not-now-href="/home?initialVisit=true"');
+  expect(markup).toContain('data-not-now-href="/home"');
 });
 
-test("keeps the resolved handoff for an existing group member whose first web auth this is", async () => {
-  // Group membership can be created from a chat thread before any web
-  // authentication, so it must not reinterpret the completion-owned
-  // initial-visit destination.
+test("ignores the obsolete marker for an existing group member", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
     authenticated: true,
     authenticatedMember: { id: "member_123" },
@@ -271,11 +274,11 @@ test("keeps the resolved handoff for an existing group member whose first web au
 
   const markup = await renderGroupJoinPage("JOIN123", { postJoin: "initial-visit" });
 
-  expect(markup).toContain('data-post-join-destination="/home?initialVisit=true"');
+  expect(markup).toContain('data-post-join-destination="/home"');
   expect(markup).toContain('data-membership-id="membership_existing"');
   expect(markup).toContain('data-join-code="JOIN123"');
   expect(markup).toContain("Leave group");
-  expect(markup).toContain('href="/home?initialVisit=true"');
+  expect(markup).toContain('href="/home"');
   expect(markup).toContain("Go home");
 });
 

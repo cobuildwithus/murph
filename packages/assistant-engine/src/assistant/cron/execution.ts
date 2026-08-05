@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { parseAutomationSupportSeriesTag } from '@murphai/contracts'
 import {
   archiveAutomationIfActiveUntilElapsed,
   isVaultError,
@@ -564,6 +565,7 @@ export async function executeClaimedAssistantCronJob(
   let outcome: AssistantCronRunOutcome = 'failed'
   let reason = 'unhandled'
   let pendingDeliveryIntentId: string | null = null
+  let notificationDecision: AssistantCronRunRecord['notificationDecision'] = null
   let newsletterRecoveryAuthorized = false
   let canonicalSourceDisposition: AssistantCronCanonicalSourceDisposition = 'current'
   let canonicalSourceSkipReason: string | null = null
@@ -946,6 +948,16 @@ export async function executeClaimedAssistantCronJob(
               }
             }
           }
+          const recordNotificationDecision = (
+            decision: AssistantNotificationResult['decision'] | null | undefined,
+          ): void => {
+            if (!decision) {
+              return
+            }
+            notificationDecision = decision.kind === 'skip'
+              ? { kind: 'skip', reasonCode: 'provider_skip' }
+              : { kind: 'send_message', reasonCode: 'provider_send_message' }
+          }
           const notificationInput: Parameters<
             typeof sendAssistantNotificationLocal
           >[0] = {
@@ -965,11 +977,14 @@ export async function executeClaimedAssistantCronJob(
               : {}),
             beforeProviderAcceptedInputs: () =>
               assertNotificationStillAuthorized('pre_provider'),
-            beforeDelivery: () =>
-              assertNotificationStillAuthorized('pre_delivery'),
+            beforeDelivery: async (context) => {
+              recordNotificationDecision(context?.decision)
+              await assertNotificationStillAuthorized('pre_delivery')
+            },
             beforeToolExecution: () =>
               assertNotificationStillAuthorized('pre_tool'),
             beforeCommit: async (context) => {
+              recordNotificationDecision(context.decision)
               await assertNotificationStillAuthorized('pre_commit')
               await preemptAssistantCronNotificationCommitForForeground({
                 allowTerminalNoDelivery:
@@ -1037,6 +1052,7 @@ export async function executeClaimedAssistantCronJob(
           }
           const result = await sendAssistantNotificationLocal(notificationInput)
 
+          recordNotificationDecision(result.decision)
           sessionId = result.session.sessionId
           response = result.response ?? result.decision.privateSummary
           notificationDecisionKind = result.decision?.kind ?? null
@@ -1227,6 +1243,8 @@ export async function executeClaimedAssistantCronJob(
     response: truncateAssistantCronResponse(response),
     responseLength: response?.length ?? 0,
     error: errorText,
+    notificationDecision,
+    scheduledOccurrenceAt: occurrenceAt,
   })
 
   const finalized = await withAssistantCronWriteLock(input.paths, async () => {
@@ -1721,10 +1739,38 @@ function buildAssistantCronExecutionInstructions(
           '- Treat this run as the next valid delivery attempt or check-in; do not claim the prior message reached the user.',
         ].join('\n')
   const supportScope = buildAssistantCronSupportScopeInstructions(job)
+  const independentAuthority =
+    buildAssistantCronIndependentAutomationAuthorityInstructions(job)
 
-  return [job.job.prompt, retryEvidence, supportScope]
+  return [job.job.prompt, retryEvidence, independentAuthority, supportScope]
     .filter((section): section is string => section !== null)
     .join('\n\n')
+}
+
+function buildAssistantCronIndependentAutomationAuthorityInstructions(
+  job: ResolvedAssistantCronJob,
+): string | null {
+  if (
+    job.kind !== 'canonical' ||
+    job.source.kind !== 'automation' ||
+    job.source.status !== 'active' ||
+    job.source.supportKind !== null ||
+    resolveMurphManagedAutomationOwnerScope(job.source.automationId) !== null ||
+    job.source.tags.some((tag) =>
+      parseAutomationSupportSeriesTag(tag) !== null ||
+      tag.startsWith('murph-managed:')
+    )
+  ) {
+    return null
+  }
+
+  return [
+    'Independent automation authority (engine-supplied):',
+    '- This active saved automation is a current user request. Related plans and experiments are context, not cancellation authority.',
+    "- Do not treat a related plan or experiment's completion as cancellation unless the saved instructions explicitly make that state a skip condition.",
+    '- Completion of a broader plan is not proof that this occurrence\'s requested action already happened.',
+    '- You may still skip when the saved instructions authorize that outcome or current evidence proves the requested action already happened.',
+  ].join('\n')
 }
 
 function buildAssistantCronSupportScopeInstructions(

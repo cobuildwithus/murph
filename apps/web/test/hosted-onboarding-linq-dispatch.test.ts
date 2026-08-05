@@ -4781,7 +4781,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         trialActive = true;
         invite.instantStartAdmissionEventId = null;
         return {
-          redirectPath: "/home?initialVisit=true",
+          redirectPath: "/home",
           status: "enrolled",
         };
       },
@@ -4937,7 +4937,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         trialActive = true;
         invite.instantStartAdmissionEventId = null;
         return {
-          redirectPath: "/home?initialVisit=true",
+          redirectPath: "/home",
           status: "enrolled",
         };
       },
@@ -5385,7 +5385,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         trialActive = true;
         invite.instantStartAdmissionEventId = null;
         return {
-          redirectPath: "/home?initialVisit=true",
+          redirectPath: "/home",
           status: "enrolled",
         };
       },

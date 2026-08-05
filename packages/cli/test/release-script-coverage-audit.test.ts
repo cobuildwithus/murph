@@ -1477,7 +1477,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('source additions by at least 25 percent')
     expect(prReviewGptLoop).toContain('The retrospective is')
     expect(prReviewGptLoop).toContain('not an automatic merge rejection')
-    expect(prReviewGptLoop).toContain('There is no automatic sixth substantive round')
+    expect(prReviewGptLoop).toContain('There is no automatic eighth substantive round')
     expect(prReviewGptLoop).not.toContain('likely needs structural rework')
     expect(prReviewGptLoop).toContain('current member/event volume')
     expect(prReviewGptLoop).toContain('First try deleting the rollout seam')
@@ -1486,7 +1486,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(prReviewGptLoop).toContain('scripts/review-gpt-pr-head-preflight.sh')
     expect(prReviewGptLoop).toContain('REVIEW_COMPLETE')
-    expect(prReviewGptLoop).toContain('Hard cap: 5 rounds per PR')
+    expect(prReviewGptLoop).toContain('Hard cap: 7 rounds per PR')
     expect(prReviewGptLoop).not.toContain('Hard cap: 15 rounds per PR')
     expect(prReviewGptLoop).toContain(
       'Prompt-primary PRs still run the preliminary specialist prompt',

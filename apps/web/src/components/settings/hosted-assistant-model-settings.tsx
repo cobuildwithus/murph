@@ -118,7 +118,7 @@ const PROVIDER_OPTIONS = [
     provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
   },
   {
-    description: `Privacy-first inference. ${VENICE_USAGE_DISCLOSURE}`,
+    description: "Privacy-first inference.",
     logo: {
       height: 356,
       src: "/brand-logos/assistant-providers/venice-light.svg",

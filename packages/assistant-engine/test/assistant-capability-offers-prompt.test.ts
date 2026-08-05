@@ -140,12 +140,12 @@ describe('assistant capability-offers prompt contract', () => {
   })
 
   it('names newsletter and new-group permission mechanics inside hosted-group guidance', () => {
-    const section = getPromptSection(
-      buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+    const prompt = buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
         assistantHostedAutomationAvailable: true,
         hostedRuntime: true,
-      }))
-        .stableRouteCapabilityPrompt,
+      })).stableRouteCapabilityPrompt
+    const section = getPromptSection(
+      prompt,
       HOSTED_GROUPS_HEADER,
     )
 
@@ -175,6 +175,13 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('Scheduled and detached reads have no current-turn handles')
     expect(section).not.toContain('For running-challenge standings')
     expect(section).toContain('`not_granted`, `granted` plus `missing`, and `available`')
+    expect(prompt).toContain('Deep/REM is stored, not rechecked')
+    expect(prompt).toContain('default v1')
+    expect(prompt).toContain(
+      'use/keep v0 only if source-neutral is explicit',
+    )
+    expect(prompt).toContain('projection/source times/conflicts')
+    expect(prompt).toContain('`selected` score')
     expect(section).toContain('Use `read_current` for membership and permission configuration only')
     expect(section).toContain('Neither path grants Apple Health access')
     expect(section).toContain('Apple does not expose HealthKit read authorization')
@@ -280,17 +287,13 @@ describe('assistant capability-offers prompt contract', () => {
 
     expect(prompt).toContain(HOSTED_GROUPS_HEADER)
     expect(prompt).toContain('`device-sync-status.v0`')
-    expect(prompt).toContain('public health-source labels')
-    expect(prompt).toContain('coarse connection status')
-    expect(prompt).toContain('connection-wide sync-job times')
-    expect(prompt).toContain('raw provider or account identity')
-    expect(prompt).toContain('total/deep/REM sleep minutes')
+    expect(prompt).toContain('public source labels/status/sync times')
+    expect(prompt).toContain('raw provider/account IDs')
+    expect(prompt).toContain('neutral total/deep/REM')
+    expect(prompt).toContain('`workouts.v0`: day-local start/duration/type')
+    expect(prompt).toContain('canonical event zone (vault fallback)')
     expect(prompt).toContain(
-      "`workouts.v0` day records listing each workout's local start time, duration, and type",
-    )
-    expect(prompt).toContain('canonical event zone (validated vault fallback)')
-    expect(prompt).toContain(
-      'it excludes absolute timestamps, routes, location, heart rate, or provider identity',
+      'no timestamp/route/location/HR/provider ID',
     )
   })
 

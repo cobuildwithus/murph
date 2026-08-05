@@ -21,6 +21,7 @@ import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import {
+  AppleHealthRelaySetupStudy,
   ConnectSourceCardStudy,
   ZeppAppleHealthSetupStudy,
 } from "./connect-source-card-study";
@@ -227,7 +228,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Persona onboarding with stacked tone samples">
-        <PersonaOnboardingStudy />
+        <div data-design-section="persona-onboarding">
+          <PersonaOnboardingStudy />
+        </div>
       </StudySection>
 
       <Separator />
@@ -252,6 +255,12 @@ export function SectionsContent() {
 
       <StudySection title="Zepp/Amazfit Apple Health setup">
         <ZeppAppleHealthSetupStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Apple Health relay wearable setup">
+        <AppleHealthRelaySetupStudy />
       </StudySection>
 
       <Separator />
@@ -310,7 +319,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Always-available group sponsorship and contribution">
+      <StudySection title="Group sponsorship and mobile one-time contribution">
         <GroupUsageFundingStudy />
       </StudySection>
 

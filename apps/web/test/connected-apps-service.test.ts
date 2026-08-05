@@ -833,6 +833,126 @@ describe("connected-app service", () => {
     expect(executeFetch).toHaveBeenCalledTimes(1);
   });
 
+  it("reads official OpenWeather alerts through the fixed server-owned route", async () => {
+    vi.stubEnv("OPENWEATHER_API_KEY", "openweather-test-key");
+    installPrismaHarness();
+    const executeFetch = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      expect(parsed.origin).toBe("https://api.openweathermap.org");
+      expect(parsed.pathname).toBe("/data/3.0/onecall");
+      expect(parsed.searchParams.get("lat")).toBe("52.2297");
+      expect(parsed.searchParams.get("lon")).toBe("21.0122");
+      expect(parsed.searchParams.get("exclude")).toBe(
+        "current,minutely,hourly,daily",
+      );
+      expect(parsed.searchParams.get("appid")).toBe("openweather-test-key");
+      expect(init?.method).toBe("GET");
+      return jsonResponse({
+        alerts: [{
+          description: "Extreme heat warning.",
+          end: 1_786_032_000,
+          event: "Extreme heat",
+          sender_name: "National weather service",
+          start: 1_785_945_600,
+          tags: ["Extreme temperature"],
+        }],
+      });
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          arguments: { lat: 52.2297, lon: 21.0122 },
+          toolSlug: "MURPH_OPENWEATHER_GET_NATIONAL_ALERTS",
+        },
+        operation: "execute",
+      },
+    })).resolves.toEqual({
+      alerts: [{
+        description: "Extreme heat warning.",
+        end: 1_786_032_000,
+        event: "Extreme heat",
+        senderName: "National weather service",
+        start: 1_785_945_600,
+        tags: ["Extreme temperature"],
+      }],
+    });
+    expect(executeFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a maximum-shape official-alert projection within the assistant budget", async () => {
+    vi.stubEnv("OPENWEATHER_API_KEY", "openweather-test-key");
+    installPrismaHarness();
+    const alerts = Array.from({ length: 16 }, (_, index) => ({
+      description: `${index}:${"x".repeat(7_998)}`,
+      end: 1_786_032_000 + index,
+      event: `Alert ${index} ${"e".repeat(230)}`,
+      sender_name: `Agency ${index} ${"s".repeat(228)}`,
+      start: 1_785_945_600 + index,
+      tags: Array.from({ length: 16 }, (__, tagIndex) =>
+        `Tag ${tagIndex} ${"t".repeat(112)}`
+      ),
+    }));
+    const executeFetch = vi.fn(async (): Promise<Response> =>
+      jsonResponse({ alerts })
+    );
+
+    const result = await executeHostedConnectedAppsRequest({
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          arguments: { lat: 52.2297, lon: 21.0122 },
+          toolSlug: "MURPH_OPENWEATHER_GET_NATIONAL_ALERTS",
+        },
+        operation: "execute",
+      },
+    });
+
+    expect(result).toMatchObject({ alerts: expect.any(Array) });
+    if (
+      typeof result !== "object"
+      || result === null
+      || !("alerts" in result)
+      || !Array.isArray(result.alerts)
+    ) {
+      throw new Error("Expected a bounded official-alert result.");
+    }
+    expect(result.alerts.length).toBeGreaterThan(0);
+    expect(result.alerts.length).toBeLessThan(16);
+    expect(executeFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects invalid official-alert coordinates before provider execution", async () => {
+    vi.stubEnv("OPENWEATHER_API_KEY", "openweather-test-key");
+    installPrismaHarness();
+    const executeFetch = vi.fn(async (): Promise<Response> => {
+      throw new Error("Invalid coordinates must fail before execution.");
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          arguments: { lat: 91, lon: 21.0122 },
+          toolSlug: "MURPH_OPENWEATHER_GET_NATIONAL_ALERTS",
+        },
+        operation: "execute",
+      },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_REQUEST_INVALID",
+      httpStatus: 400,
+      retryable: false,
+    });
+    expect(executeFetch).not.toHaveBeenCalled();
+  });
+
   it("fails closed before OpenWeather execution when the API key is missing", async () => {
     vi.stubEnv("OPENWEATHER_API_KEY", "");
     installPrismaHarness();

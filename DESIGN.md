@@ -382,8 +382,9 @@ the right edge of the card; do not add a leading radio dot.
 Unavailable choices stay visible but disabled, with the plan or access
 requirement named directly.
 When a choice materially changes cost-weighted included-capacity drawdown,
-state that difference in the choice copy and keep it visible beside the saved
-selection. Do not hide it in a tooltip or only mention it after save.
+state that difference before save and keep it visible beside the saved
+selection. It may appear in the option copy or the immediate pending-selection
+summary; do not hide it in a tooltip or mention it only after save.
 Keyboard focus rings the whole card. Keep actions outside the card label so the
 full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
@@ -409,8 +410,12 @@ the initial $5 activation purchase, whose amount is shown before payment;
 selecting a maximum alone does not charge the card. Keep both funding actions
 available at every current group-capacity state; capacity changes urgency and
 automatic refill timing, not the ability to fund. Keep an explicit one-time
-contribution as the secondary action. Dollar amounts are cost-weighted usage
-credit, never an owned or promised number of messages. Every cap increase
+contribution as the secondary action. On phones, open that contribution in the
+same bottom-drawer pattern as monthly sponsorship; keep the centered dialog on
+larger screens. Customer-facing amount choices say `usage`; cost weighting is
+an accounting detail, not interface copy. Keep the contribution action at the
+drawer's safe-area edge while its body scrolls. Dollar amounts remain usage
+capacity, never an owned or promised number of messages. Every cap increase
 requires fresh payer confirmation. Keep the alias, note, and eligible temporary
 running bit in one collapsible `Add a note` section, open by default, and attach
 them only to the activation or one-time purchase, never to automatic refills.
@@ -454,6 +459,18 @@ DM Mono uppercase with 0.11em tracking. Muted-surface background (`rgba(196, 168
 
 ### Contact Card Avatar Picker
 Post-signup step for adding Murph as a contact (`apps/web/src/components/murph/murph-contact-card-picker.tsx`, spec in `agent-docs/product-specs/murph-contact-card-picker.md`). Drawer under 768px, dialog above. Layout: contact preview (avatar circle + Fraunces "Murph" + mono kicker), then a scroll-capped radiogroup of avatar circles (3 columns, 4 from 380px up) with DM Mono labels (selected = 2px sage ring with offset), then a full-width primary "Add Murph to Contacts" CTA over a ghost "Skip for now". Headshot avatars come from `public/murph-headshots/`; the logo options are dot-grid mark rasters on slate (dark) and cream (light) circles in `public/brand-logos/`; the no-photo option is a sand circle with a serif M initial (Expert Card avatar treatment). The primary CTA downloads the member's real vCard from `/api/murph-contact-card`.
+
+### Cross-platform first-run sequence
+
+The website and native companion present the same ordered content: contact card
+when text routing is available, four numbered personality steps, then the
+welcome state only after this surface wins the completion write. Native uses
+the same warm-desert palette, Fraunces display hierarchy, DM Mono progress
+labels, sage selection treatment, option order, descriptions, and button copy.
+Voice rows always provide a separate, labeled play/stop control. Save failures
+keep selections visible and offer retry; a stale surface closes quietly rather
+than showing a duplicate welcome. The companion may adapt dialog/drawer layout
+to a full-height native screen, but it must not reorder or invent options.
 
 ### About Intro Grid
 A 3-column intro band that sits **above** the route tabs on biomarker (and similar concept) pages. Each column: small Quiver-style icon on the left at `size-8 text-primary/85` (icon style follows "Concept Icon Sets" below), mono uppercase eyebrow above a sans body paragraph on the right. Three slots that map to "Why it matters / How it's measured / What moves it" for biomarkers; the same pattern works for any concept-introduction surface. Body text is `text-muted-foreground`, not foreground — it should match the page summary band's tone, not compete with the H1.

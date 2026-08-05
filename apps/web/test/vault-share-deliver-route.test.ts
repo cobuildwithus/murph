@@ -22,6 +22,7 @@ import {
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
@@ -173,6 +174,55 @@ function workoutsDeliveryBody(workoutsPerDay: number): HostedVaultShareDeliverRe
   };
 }
 
+function sourceAwareSleepDeliveryBody(
+  sourcesPerDay: number,
+): HostedVaultShareDeliverRequest {
+  const projectionScope = hostedVaultShareProjectionKindToScope(
+    "deep-sleep-sources-days.v1",
+  );
+  const publicSources = [
+    { label: "WHOOP", source: "whoop" },
+    { label: "Oura", source: "oura" },
+    { label: "Garmin", source: "garmin" },
+    { label: "fitbit", source: "fitbit" },
+    { label: "Strava", source: "strava" },
+  ] as const;
+  return {
+    projectionKind: projectionScope.projectionKind,
+    projectionScope,
+    records: Array.from(
+      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS },
+      (_, dayIndex): HostedVaultShareDeliveryRecord => {
+        const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+        return {
+          data: {
+            date,
+            metricKey: "deep-sleep-minutes",
+            projectedAt: "2026-07-24T23:59:59.999Z",
+            provisional: true,
+            sources: Array.from({ length: sourcesPerDay }, (_, sourceIndex) => ({
+              label: publicSources[sourceIndex]?.label ?? "unknown",
+              recordedAt: "2026-07-24T23:59:59.999Z",
+              ...(sourceIndex === 0 ? { selected: true as const } : {}),
+              source: publicSources[sourceIndex]?.source ?? "unknown",
+              unit: "minutes",
+              value: 1_000.0000000000001,
+            })),
+            sourcesDisagree: false,
+            unit: "minutes",
+            value: 1_000.0000000000001,
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: date,
+          sourceRevision: "A".repeat(
+            HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+          ),
+        };
+      },
+    ),
+  };
+}
+
 describe("vault-share deliver route", () => {
   beforeAll(async () => {
     deliverRoute = await import(
@@ -208,6 +258,33 @@ describe("vault-share deliver route", () => {
     );
     expect(nextBoundBodyBytes).toBe(19_583);
     expect(nextBoundBodyBytes).toBeGreaterThan(
+      HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
+    );
+  });
+
+  it("keeps the maximum source-aware sleep body within the ingress limit", () => {
+    const body = sourceAwareSleepDeliveryBody(
+      HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES,
+    );
+    const bodyBytes = new TextEncoder().encode(JSON.stringify(body)).byteLength;
+    const nextBoundBody = sourceAwareSleepDeliveryBody(
+      HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES + 1,
+    );
+    const nextBoundBodyBytes = new TextEncoder().encode(
+      JSON.stringify(nextBoundBody),
+    ).byteLength;
+
+    expect(() => parseHostedVaultShareDeliverRequest(body)).not.toThrow();
+    expect(() => parseHostedVaultShareDeliverRequest(nextBoundBody)).toThrow(
+      new RegExp(
+        `1-${HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES} entries`,
+        "u",
+      ),
+    );
+    expect(bodyBytes).toBeLessThanOrEqual(
+      HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
+    );
+    expect(nextBoundBodyBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
     );
   });

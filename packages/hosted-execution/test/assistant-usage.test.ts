@@ -9,6 +9,7 @@ import {
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_USAGE_SCHEMA,
   buildAssistantMaintenanceUsageRecord,
+  buildHostedCodexMemoryUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
   buildHostedXaiSearchUsageRecord,
@@ -82,6 +83,63 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
       },
     }).turnId,
     record.turnId,
+  );
+});
+
+test("native Codex memory usage is exact and replay-idempotent", () => {
+  const input = {
+    apiKeyEnv: "OPENAI_API_KEY",
+    baseUrl: "https://api.openai.com/v1",
+    cacheWriteTokens: 50,
+    cachedInputTokens: 700,
+    inputTokens: 1_500,
+    memberId: "member_123",
+    occurredAt: "2026-04-01T12:00:00.000Z",
+    outputTokens: 180,
+    providerName: "hosted-openai",
+    providerRequestId: "resp_memory_123",
+    providerRequestOutcome: "succeeded" as const,
+    rawUsageJson: {
+      input_tokens: 1_500,
+      input_tokens_details: {
+        cache_write_tokens: 50,
+        cached_tokens: 700,
+      },
+      output_tokens: 180,
+      output_tokens_details: { reasoning_tokens: 40 },
+      total_tokens: 1_680,
+    },
+    reasoningTokens: 40,
+    requestedModel: "gpt-5.6-terra",
+    servedModel: "gpt-5.6-terra-2026-07-30",
+    tokenPricingBasis: "openai-flex" as const,
+    totalTokens: 1_680,
+  };
+
+  const record = buildHostedCodexMemoryUsageRecord(input);
+  assert.deepEqual(parseAssistantUsageRecord({ ...record }), record);
+  assert.match(record.turnId, /^turn_codex_memory_[0-9a-f]{32}$/u);
+  assert.equal(record.usageId, `${record.turnId}.attempt-1`);
+  assert.equal(record.occurredAt, input.occurredAt);
+  assert.equal(record.credentialSource, "platform");
+  assert.equal(record.provider, "codex-cli");
+  assert.equal(record.providerName, "hosted-openai");
+  assert.equal(record.providerRequestId, "resp_memory_123");
+  assert.equal(record.providerRequestOutcome, "succeeded");
+  assert.equal(record.requestedModel, "gpt-5.6-terra");
+  assert.equal(record.servedModel, "gpt-5.6-terra-2026-07-30");
+  assert.equal(record.tokenPricingBasis, "openai-flex");
+  assert.equal(record.cacheWriteTokens, 50);
+  assert.deepEqual(record.rawUsageJson, input.rawUsageJson);
+
+  const duplicate = buildHostedCodexMemoryUsageRecord(input);
+  assert.deepEqual(duplicate, record);
+  assert.notEqual(
+    buildHostedCodexMemoryUsageRecord({
+      ...input,
+      providerRequestId: "resp_memory_456",
+    }).usageId,
+    record.usageId,
   );
 });
 
@@ -680,6 +738,14 @@ test("assistant usage parsing drops out-of-contract turn profiles without failin
     { ...validProfile, requests: [{ cachedInput: 0, input: 10.5, output: 5 }] },
     { ...validProfile, requests: [{ cachedInput: 0, input: 2 ** 53, output: 5 }] },
     { ...validProfile, modelContextWindow: -1 },
+    {
+      ...validProfile,
+      tools: [{ calls: 1, durationMs: 0, failedCalls: -1, label: "tool", outputChars: 1 }],
+    },
+    {
+      ...validProfile,
+      tools: [{ calls: 1, durationMs: 0, failedCalls: 2, label: "tool", outputChars: 1 }],
+    },
     // Series longer than the producer-side caps mean an untrusted producer.
     {
       ...validProfile,
@@ -720,6 +786,46 @@ test("assistant usage parsing drops out-of-contract turn profiles without failin
     assert.equal(parsed.inputTokens, 10);
     assert.equal(parsed.outputTokens, 5);
   }
+});
+
+test("assistant usage parsing preserves optional failed tool counts", () => {
+  const baseRecord = {
+    attemptCount: 1,
+    credentialSource: "platform",
+    inputTokens: 10,
+    occurredAt: "2026-03-29T12:00:00.000Z",
+    outputTokens: 5,
+    provider: "codex-cli",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: "asst_123",
+    turnId: "turn_123",
+    usageId: "turn_123.attempt-1",
+  };
+  const profile = {
+    modelContextWindow: null,
+    requestCount: 0,
+    requests: [],
+    requestsTruncated: false,
+    schema: "murph.assistant-turn-profile.v1",
+    tools: [
+      {
+        calls: 2,
+        durationMs: 100,
+        failedCalls: 1,
+        label: "vault-cli batch food.search-labels-batch",
+        outputChars: 20,
+      },
+    ],
+    toolsTruncated: false,
+  };
+
+  assert.deepEqual(
+    parseAssistantUsageRecord({
+      ...baseRecord,
+      turnProfileJson: profile,
+    }).turnProfileJson,
+    profile,
+  );
 });
 
 test("assistant usage parsing allows only token-count raw usage metadata", () => {
