@@ -2344,7 +2344,10 @@ The same exact recognition predicate guards managed reconciliation, cron scan
 and execution, and queued provider entry. Non-current recognized definitions
 are effect-ineligible until the existing reconciler has durably produced the
 current finite definition; best-effort reconciliation failure therefore cannot
-leave an older due occurrence or queued intent able to reach a provider.
+leave an older due occurrence or queued intent able to reach a provider. The
+blocked due occurrence uses normal retry/backoff without being consumed. A
+terminally stale queued predecessor payload is cleared, while its canonical
+source and pending occurrence remain available to the managed reconciler.
 Those records distinguish a
 persisted onboarding state from the missing-state default and carry only state
 status and timestamps, the last authority gate checked, finite-window and

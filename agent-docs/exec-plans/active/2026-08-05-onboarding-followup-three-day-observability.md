@@ -18,6 +18,9 @@ metadata-only hosted runtime logs.
 - The first correction recognized predecessor definitions during managed
   reconciliation but not at cron or queued effect boundaries, so a failed
   reconciliation could leave an older record executable.
+- The second correction made predecessors effect-ineligible but reused
+  terminal skip/stale finalization, which could consume and archive the
+  one-shot before managed reconciliation recovered it.
 - Existing logs expose schedule and delivery mechanics but not the
   onboarding-state source or a stable lifecycle decision reason.
 
@@ -34,7 +37,8 @@ metadata-only hosted runtime logs.
   original first occurrence through partial-write recovery.
 - Existing active members are not granted an unbounded cadence during rollout.
 - Every exact recognized predecessor is effect-ineligible until the existing
-  reconciler durably produces the current finite definition.
+  reconciler durably produces the current finite definition, and failed
+  reconciliation cannot consume its source or pending occurrence.
 - Logs identify the managed automation, onboarding-state status and source,
   lifecycle action, execution outcome, and safe reason code without member
   identity, transcript text, health data, delivery targets, or local paths.

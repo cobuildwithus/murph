@@ -54,8 +54,11 @@ privacy, authorization, or provider boundaries.
   scheduled send-or-skip work. One exact recognition predicate is shared by
   reconciliation, cron diagnostics/execution, and queued provider-entry
   authority. A recognized predecessor is effect-ineligible until managed
-  reconciliation rewrites it to the current finite definition, so editable
-  slug, tags, title, and instructions confer no onboarding-state authority.
+  reconciliation rewrites it to the current finite definition. A due
+  predecessor enters ordinary retry/backoff without consuming its occurrence;
+  a terminally stale queued predecessor intent is cleared while its source and
+  pending occurrence remain reconcilable. Editable slug, tags, title, and
+  instructions confer no onboarding-state authority.
 - Keep the post-onboarding choice point separate from unfinished-onboarding
   recovery. It is one finite managed one-shot for members who answered
   onboarding, not another collection flow, recurring cadence, or profile.
@@ -589,8 +592,12 @@ reconciliation completes the conversion on a later pass.
 If reconciliation cannot read authority or commit its rewrite, every recognized
 predecessor remains visible in metadata-only cron diagnostics but cannot enter
 the provider, tools, commit, delivery, or queued external-transport boundary.
-This may under-send during a failed migration; it cannot resurrect the older
-cadence or bypass the current three-day authority.
+Its due occurrence remains pending under ordinary cron retry/backoff instead of
+being consumed as a completed one-shot. A terminally stale queued predecessor
+intent is not retried, but delivery reconciliation likewise preserves the
+canonical source and pending occurrence for managed conversion. This may
+under-send during a failed migration; it cannot resurrect the older cadence,
+lose the migration source, or bypass the current three-day authority.
 
 Hosted queue-only delivery carries the automation revision into the existing
 outbox authority fence. Immediately before external provider entry, that owner

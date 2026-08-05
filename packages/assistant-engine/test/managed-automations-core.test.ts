@@ -1761,6 +1761,44 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
+  it('archives the PR 1203 predecessor after onboarding completes', async () => {
+    const vaultRoot = await createVaultRoot()
+    const automationId = 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FC'
+    await upsertAutomation({
+      automationId,
+      continuityPolicy:
+        immediatePreviousOneshotOnboardingFollowupDefinition.continuityPolicy,
+      instructions: immediatePreviousOneshotOnboardingFollowupDefinition.instructions,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: {
+        at: '2026-06-24T13:30:00.000Z',
+        kind: 'at',
+      },
+      slug: immediatePreviousOneshotOnboardingFollowupDefinition.slug,
+      status: 'active',
+      summary: immediatePreviousOneshotOnboardingFollowupDefinition.summary,
+      tags: [...immediatePreviousOneshotOnboardingFollowupDefinition.tags],
+      title: immediatePreviousOneshotOnboardingFollowupDefinition.title,
+      vaultRoot,
+    })
+    await completeAssistantOnboarding({
+      completedAt: '2026-06-23T12:30:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T13:00:00.000Z'),
+      vaultRoot,
+    })
+
+    await expect(showAutomation({ automationId, vaultRoot })).resolves.toMatchObject({
+      status: 'archived',
+    })
+  })
+
   it('migrates the original unmarked onboarding follow-up seed', async () => {
     const vaultRoot = await createVaultRoot()
 
@@ -1849,6 +1887,29 @@ describe('applyMurphManagedAutomations core integration', () => {
         schedule,
         status: 'active',
         updatedAt: created.record.updatedAt,
+      })
+
+      await rm(onboardingStatePath)
+      await applyMurphManagedAutomations({
+        defaultRoute,
+        now: new Date('2026-04-09T18:29:05.000Z'),
+        vaultRoot,
+      })
+
+      await expect(showAutomation({
+        automationId: created.record.automationId,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        activeUntil: expect.any(String),
+        continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+        instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+        schedule: expect.objectContaining({
+          kind: 'dailyLocal',
+        }),
+        status: 'active',
+        summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+        tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
+        title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       })
     },
   )

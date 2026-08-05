@@ -3353,7 +3353,7 @@ describe('assistant outbox runtime', () => {
     async ({ definition, label, schedule }) => {
       vi.useFakeTimers()
       vi.setSystemTime(new Date('2026-07-20T17:31:00.000Z'))
-      const { vaultRoot } = await createInitializedAssistantVault(
+      const { paths, vaultRoot } = await createInitializedAssistantVault(
         `assistant-outbox-onboarding-predecessor-${label.replaceAll(' ', '-')}-`,
       )
       const opaqueSuffix = label.replaceAll(' ', '-')
@@ -3391,6 +3391,21 @@ describe('assistant outbox runtime', () => {
         turnId: `turn-outbox-onboarding-predecessor-${opaqueSuffix}`,
         vault: vaultRoot,
       })
+      const occurrenceAt = schedule.kind === 'at'
+        ? schedule.at
+        : '2026-07-20T17:30:00.000Z'
+      const runtimeRecord = createAssistantCronCanonicalRuntimeRecord({
+        jobId: automation.record.automationId,
+        now: automation.record.updatedAt,
+      })
+      runtimeRecord.updatedAt = automation.record.updatedAt
+      runtimeRecord.state.lastRunAt = occurrenceAt
+      runtimeRecord.state.pendingDeliveryIntentId = queued.intent.intentId
+      runtimeRecord.state.pendingOccurrenceAt = occurrenceAt
+      await writeAssistantCronCanonicalRuntimeStore(paths, {
+        jobs: [runtimeRecord],
+        version: 1,
+      })
       const onboardingStatePath = resolveAssistantOnboardingStatePath(vaultRoot)
       await mkdir(path.dirname(onboardingStatePath), { recursive: true })
       await writeFile(onboardingStatePath, '{not valid json', 'utf8')
@@ -3409,6 +3424,26 @@ describe('assistant outbox runtime', () => {
       await expect(readFile(onboardingStatePath, 'utf8')).resolves.toBe(
         '{not valid json',
       )
+      await expect(showAutomation({
+        automationId: automation.record.automationId,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        instructions: definition.instructions,
+        schedule,
+        status: 'active',
+      })
+      const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+      expect(runtimeStore.jobs).toContainEqual(expect.objectContaining({
+        jobId: automation.record.automationId,
+        state: expect.objectContaining({
+          consecutiveFailures: 1,
+          pendingOccurrenceAt: occurrenceAt,
+          retryAfterAt: expect.any(String),
+        }),
+      }))
+      expect(
+        runtimeStore.jobs[0]?.state.pendingDeliveryIntentId,
+      ).toBeUndefined()
     },
   )
 

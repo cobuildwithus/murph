@@ -1268,21 +1268,39 @@ describe('assistant cron runtime orchestration', () => {
       })
 
       expect(result.run).toMatchObject({
-        outcome: 'skipped_gate',
-        reason: 'lifecycle_precondition',
-        status: 'skipped',
+        outcome: 'failed',
+        reason: 'ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED',
+        status: 'failed',
       })
       expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
       await expect(readFile(onboardingStatePath, 'utf8')).resolves.toBe(
         '{ invalid onboarding json',
       )
+      expect(getVaultAutomationStore(vaultRoot)).toContainEqual(
+        expect.objectContaining({
+          instructions: definition.instructions,
+          schedule,
+          status: 'active',
+        }),
+      )
+      const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+      expect(runtimeStore.jobs).toContainEqual(expect.objectContaining({
+        jobId: claimed.job.jobId,
+        state: expect.objectContaining({
+          consecutiveFailures: 1,
+          lastError:
+            'Assistant onboarding follow-up predecessor is waiting for managed reconciliation.',
+          pendingOccurrenceAt: occurrenceAt,
+          retryAfterAt: expect.any(String),
+        }),
+      }))
       expect(events).toContainEqual(expect.objectContaining({
         failureContext: expect.objectContaining({
           notificationDecisionKind: null,
           onboardingStateReadError: 'invalid-json',
           onboardingStateSource: 'read_error',
           onboardingStateStatus: 'unreadable',
-          runOutcome: 'skipped_gate',
+          runOutcome: 'failed',
         }),
         type: 'onboarding.followup.completed',
       }))

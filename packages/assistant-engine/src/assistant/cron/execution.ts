@@ -175,7 +175,7 @@ const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
 const ASSISTANT_CRON_ONBOARDING_FOLLOWUP_COMPLETED_ERROR =
   'Assistant onboarding follow-up skipped because onboarding is completed.'
 const ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED_ERROR =
-  'Assistant onboarding follow-up predecessor skipped until managed reconciliation completes.'
+  'Assistant onboarding follow-up predecessor is waiting for managed reconciliation.'
 const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
   'murph-managed:weekly-health-insight',
   'murph-managed:monthly-improvement-coach',
@@ -699,8 +699,7 @@ export async function executeClaimedAssistantCronJob(
       if (onboardingFollowup) {
         onboardingFollowupDiagnostic = onboardingFollowup.diagnostic
         if (isAssistantCronOnboardingFollowupPredecessorJob(input.job)) {
-          lifecycleSkipReason =
-            ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED_ERROR
+          throw buildAssistantCronOnboardingFollowupReconciliationRequiredError()
         } else if (onboardingFollowup.error) {
           throw onboardingFollowup.error
         } else if (
@@ -1640,9 +1639,7 @@ async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
   }
 
   if (isAssistantCronOnboardingFollowupPredecessorJob(input.job)) {
-    throw new AssistantCronLifecycleNotificationInvalidatedError(
-      ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED_ERROR,
-    )
+    throw buildAssistantCronOnboardingFollowupReconciliationRequiredError()
   }
 
   const onboardingFollowup =
@@ -2925,6 +2922,14 @@ class AssistantCronLifecycleNotificationInvalidatedError extends VaultCliError {
   constructor(reason: string) {
     super('ASSISTANT_CRON_LIFECYCLE_AUTHORITY_STALE', reason)
   }
+}
+
+function buildAssistantCronOnboardingFollowupReconciliationRequiredError(): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED',
+    ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED_ERROR,
+    { retryable: true },
+  )
 }
 
 class AssistantCronManagedOwnerInvalidatedError extends VaultCliError {
