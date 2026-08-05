@@ -75,10 +75,28 @@ metadata-only hosted runtime logs.
 
 ## Verification
 
-- Focused assistant-engine tests prove three local-day opportunities and the
-  hard terminal boundary.
-- Focused runtime/logging tests prove stable decision fields and reject private
-  payloads.
-- Package typecheck passes for every touched runtime package.
-- Candidate review confirms the diff does not add a state owner or expose
-  member data.
+- The merged-head Assistant Engine focus passed 394 tests with 6 skipped across
+  cron execution, managed reconciliation, outbox authority, finite scheduling,
+  and provider-visible skill policy. The real outbox predecessor scenarios
+  preserve the source occurrence, avoid provider entry, and expose its retry.
+- The merged-head hosted workspace focus passed 273 tests. Direct-thread and
+  participant authority-stale settlement both project a retry wake without a
+  failure-note input; temporary cron-status failure uses the existing 30-second
+  retry. Hosted runtime-control focus passed 32 tests.
+- Assistant Engine, Assistant Runtime, and Hosted Execution package typechecks
+  passed. Before base reconciliation, all 2,038 Assistant Runtime tests with 3
+  skipped and all 476 Hosted Execution tests passed.
+- Exact merged-head GitHub Actions passed both host matrices, release build and
+  typecheck, release app verification, assistant/CLI/platform coverage, release
+  fixtures, repository hygiene, frontend design proof, and viewport overflow.
+- The preliminary specialist pass and five final ReviewGPT rounds found and
+  drove corrections for exact predecessor recognition, crash-safe conversion,
+  gate coverage, queued authority, non-consuming predecessor recovery, hosted
+  ordering, and post-settlement wake ownership. The round-five correction was
+  verified by parent corrected-head review because the configured five-round
+  cap forbids a sixth run. Parent review found no remaining product,
+  architecture, privacy, or implementation issue.
+Status: completed
+Updated: 2026-08-05
+Completed: 2026-08-05
+Completed: 2026-08-05
