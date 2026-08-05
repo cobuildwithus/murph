@@ -221,6 +221,51 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
     ],
   },
   {
+    connectSourceId: "xiaomi-mi-fitness",
+    label: "Xiaomi / Mi Fitness",
+    routes: [
+      unavailableRoute(
+        "Xiaomi and Mi Fitness devices sync supported data through Apple Health in the Murph iOS app.",
+      ),
+    ],
+  },
+  {
+    connectSourceId: "ringconn",
+    label: "RingConn",
+    routes: [
+      unavailableRoute(
+        "RingConn devices sync supported data through Apple Health in the Murph iOS app.",
+      ),
+    ],
+  },
+  {
+    connectSourceId: "coros",
+    label: "COROS",
+    routes: [
+      unavailableRoute(
+        "COROS devices sync supported data through Apple Health in the Murph iOS app.",
+      ),
+    ],
+  },
+  {
+    connectSourceId: "suunto",
+    label: "Suunto",
+    routes: [
+      unavailableRoute(
+        "Suunto devices sync supported data through Apple Health in the Murph iOS app.",
+      ),
+    ],
+  },
+  {
+    connectSourceId: "huawei-health",
+    label: "Huawei Health",
+    routes: [
+      unavailableRoute(
+        "Supported Huawei Health data can sync through Apple Health in the Murph iOS app, depending on device, region, and app version.",
+      ),
+    ],
+  },
+  {
     connectSourceId: "health-connect",
     label: "Health Connect",
     routes: [unavailableRoute("Health Connect is a mobile/local device flow, not hosted Junction Link.")],

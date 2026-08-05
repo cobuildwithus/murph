@@ -277,12 +277,18 @@ const DESIGN_FAMILY_EXHAUSTED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 
 function GroupUsageFundingStudy() {
   const endpoint = "/api/design/group-sponsorship-management";
-  const [activationPreviewOpen, setActivationPreviewOpen] = useState(false);
+  const [previewMode, setPreviewMode] = useState<"monthly" | "one_time" | null>(
+    null,
+  );
 
   useEffect(() => {
     function syncActivationPreview() {
-      setActivationPreviewOpen(
-        window.location.hash === "#group-usage-funding",
+      setPreviewMode(
+        window.location.hash === "#group-usage-funding"
+          ? "monthly"
+          : window.location.hash === "#group-one-time-contribution"
+            ? "one_time"
+            : null,
       );
     }
 
@@ -292,6 +298,10 @@ function GroupUsageFundingStudy() {
       window.removeEventListener("hashchange", syncActivationPreview);
   }, []);
 
+  const previewOpenProps = (mode: "monthly" | "one_time") => ({
+    initialOpen: previewMode === mode,
+  });
+
   const oneTimeContribution = (
     <div className="space-y-4">
       <p className="text-center text-sm text-muted-foreground">
@@ -300,6 +310,8 @@ function GroupUsageFundingStudy() {
       <GroupUsageFundingActions
         oneTimeAction={(
           <GroupSponsorshipDialog
+            {...previewOpenProps("one_time")}
+            key={previewMode === "one_time" ? "open" : "closed"}
             checkoutUrl="/api/design/usage-credit-preview"
             customizationAllowed
             inert
@@ -367,10 +379,10 @@ function GroupUsageFundingStudy() {
               <GroupUsageFundingActions
                 monthlyAction={(
                   <GroupSponsorshipDialog
-                    key={activationPreviewOpen ? "open" : "closed"}
+                    {...previewOpenProps("monthly")}
+                    key={previewMode === "monthly" ? "open" : "closed"}
                     checkoutUrl="/api/design/usage-credit-preview"
                     customizationAllowed
-                    initialOpen={activationPreviewOpen}
                     inert
                     mode="monthly"
                     monthlyCapMinor={1_000}
@@ -403,10 +415,12 @@ function GroupUsageFundingStudy() {
           label="Ordinary sponsored participant + one-time action"
           state="ordinary-sponsored-one-time"
         >
-          <GroupUsageFundingShell
-            action={<div inert>{oneTimeContribution}</div>}
-            groupName="Sunday sleep crew"
-          />
+          <div id="group-one-time-contribution">
+            <GroupUsageFundingShell
+              action={<div inert>{oneTimeContribution}</div>}
+              groupName="Sunday sleep crew"
+            />
+          </div>
         </DesignSponsorshipState>
 
         <DesignSponsorshipState

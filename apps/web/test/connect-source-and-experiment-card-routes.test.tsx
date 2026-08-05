@@ -74,10 +74,18 @@ test("listVisibleConnectSources covers every hosted-visible device source with U
   const { listVisibleConnectSources } = await import("../app/(dashboard)/connect/connect-page-content");
   const { DEVICE_CONNECT_SOURCES } = await import("@murphai/device-syncd/connect-config");
 
+  const displayOnlySourceIds = new Set([
+    "apple-health",
+    "coros",
+    "huawei-health",
+    "ringconn",
+    "suunto",
+    "xiaomi-mi-fitness",
+    "zepp",
+  ]);
   const expectedVisibleSourceIds = DEVICE_CONNECT_SOURCES
     .filter((source) =>
-      source.connectSourceId === "apple-health"
-      || source.connectSourceId === "zepp"
+      displayOnlySourceIds.has(source.connectSourceId)
       || source.routes.some((route) => route.kind === "direct" || route.kind === "junction_link"),
     )
     .map((source) => source.connectSourceId)
