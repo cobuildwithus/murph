@@ -214,6 +214,13 @@ it has been explicitly elevated to a cross-cutting invariant.
   teardown, cleanup, or reconciliation cannot delay delivery. Attempt-bound
   acceptance, staging, local-turn, first-output, and delivery telemetry is
   content-free, best-effort, and nonblocking.
+- Command-level turn telemetry is bounded, content-free, and derived from the
+  command owner's structured completion facts. For a batch, retain only an
+  allowlisted child command family plus numeric call, duration, output-size,
+  and failure aggregates; never persist argv, arguments, queries, paths,
+  stdout, parsed output, or error text. If bounded child attribution is
+  incomplete, mark it truncated instead of reconstructing private command
+  content from shell text.
 
 ## Accepted Work And External Effects
 

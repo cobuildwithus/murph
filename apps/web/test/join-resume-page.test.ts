@@ -278,6 +278,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     assistantToneCausalSeq: null,
     assistantVoice: null,
     assistantVoiceCausalSeq: null,
+    initialOnboardingCompletedAt: null,
     billingStatus: HostedBillingStatus.active,
     createdAt: new Date("2026-06-01T00:00:00.000Z"),
     id: "member_123",

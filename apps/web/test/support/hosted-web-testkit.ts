@@ -71,6 +71,10 @@ const hostedComputerUseStoreModuleSpecifier = new URL(
   "../../src/lib/computer-use/store.ts",
   import.meta.url,
 ).href;
+const hostedConsentModuleSpecifier = new URL(
+  "../../src/lib/legal/consent.ts",
+  import.meta.url,
+).href;
 const hostedTestingHostOnlyEnv = {
   DOCKER_BUILDKIT: process.env.DOCKER_BUILDKIT,
   DOCKER_CONFIG: process.env.DOCKER_CONFIG,
@@ -88,7 +92,25 @@ type HostedTestPrismaClient =
   & HostedRuntimeLatencyAlertForTestPrismaClient
   & HostedLinqWorkspaceIsolationForTestPrismaClient
   & HostedWorkspaceSeedForTestPrismaClient
+  & HostedVaultShareForTestPrismaClient
   & HostedUsageDiagnosticsForTestPrismaClient;
+
+interface HostedVaultShareForTestPrismaClient {
+  hostedVaultShare: {
+    findFirst(args: unknown): Promise<{
+      projectionSnapshotCiphertext: string | null;
+    } | null>;
+  };
+}
+
+interface HostedConsentForTestModule {
+  recordHostedLaunchRequiredConsent(input: {
+    memberId: string;
+    prisma: HostedTestPrismaClient;
+    scope: "launch.health-data" | "launch.legal";
+    source: string;
+  }): Promise<unknown>;
+}
 
 interface HostedTestPrismaFactoryClient {
   $disconnect(): Promise<void>;
@@ -1038,6 +1060,43 @@ export async function seedHostedWorkspaceCheckpointForTest(input: {
       status: checkpoint.status,
       version: checkpoint.workspace?.version ?? workspace.version,
     };
+  });
+}
+
+export async function seedHostedLaunchConsentForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+}): Promise<void> {
+  await withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const consent = await import(hostedConsentModuleSpecifier) as HostedConsentForTestModule;
+    for (const scope of ["launch.legal", "launch.health-data"] as const) {
+      await consent.recordHostedLaunchRequiredConsent({
+        memberId: input.memberId,
+        prisma: deps.prisma,
+        scope,
+        source: "hosted-local-e2e",
+      });
+    }
+  });
+}
+
+export async function readHostedVaultShareProjectionCiphertextForTest(input: {
+  destinationMemberId: string;
+  environment?: NodeJS.ProcessEnv;
+  grantorMemberId: string;
+  projectionKind: string;
+}): Promise<string | null> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const share = await deps.prisma.hostedVaultShare.findFirst({
+      select: { projectionSnapshotCiphertext: true },
+      where: {
+        destinationMemberId: input.destinationMemberId,
+        grantorMemberId: input.grantorMemberId,
+        projectionKind: input.projectionKind,
+        status: "granted",
+      },
+    });
+    return share?.projectionSnapshotCiphertext ?? null;
   });
 }
 

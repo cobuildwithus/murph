@@ -18,6 +18,7 @@ import {
   type WearableSummaryBundle,
 } from "../wearables.ts";
 import { collectWearableDataset } from "../wearables/candidates.ts";
+import { resolveWearablePublicSourceProvider } from "../wearables/origin.ts";
 import type { WearableDataset, WearableMetricSuppressionEvidence } from "../wearables/types.ts";
 import { formatProviderName } from "../wearables/provider-policy.ts";
 import {
@@ -219,6 +220,13 @@ function heartRateZoneMetricEvidence(summary: WearableActivitySummary): Wearable
     const selection = sourceMetric.selection;
     const sourceCandidate = selectWearableSourceCandidate(sourceMetric);
     const provider = selection.provider ?? sourceCandidate?.provider ?? null;
+    const publicProvider = sourceCandidate
+      ? resolveWearablePublicSourceProvider(sourceCandidate, {
+          suppressJunctionSourceInstanceFallback: true,
+        })
+      : provider
+        ? resolveWearablePublicSourceProvider({ provider })
+        : null;
     const rawRefs = uniqueStrings([
       ...selection.paths,
       ...(sourceCandidate?.paths ?? []),
@@ -261,7 +269,9 @@ function heartRateZoneMetricEvidence(summary: WearableActivitySummary): Wearable
         recordIds,
         sourceFamily: "derived",
         sourceKind: "activity-summary",
-        sourceLabel: provider ? formatProviderName(provider) : sourceCandidate?.title ?? "Wearable summary",
+        sourceLabel: publicProvider
+          ? formatProviderName(publicProvider)
+          : sourceCandidate?.title ?? "Wearable summary",
         unit: "minutes",
         value: zone.durationMinutes,
       },
@@ -323,6 +333,13 @@ function metricEvidence(
   const selection = resolved.selection;
   const sourceCandidate = selectWearableSourceCandidate(resolved);
   const provider = selection.provider ?? sourceCandidate?.provider ?? null;
+  const publicProvider = sourceCandidate
+    ? resolveWearablePublicSourceProvider(sourceCandidate, {
+        suppressJunctionSourceInstanceFallback: true,
+      })
+    : provider
+      ? resolveWearablePublicSourceProvider({ provider })
+      : null;
   const rawRefs = uniqueStrings([
     ...selection.paths,
     ...(sourceCandidate?.paths ?? []),
@@ -364,7 +381,9 @@ function metricEvidence(
       recordIds,
       sourceFamily: "derived",
       sourceKind,
-      sourceLabel: provider ? formatProviderName(provider) : sourceCandidate?.title ?? "Wearable summary",
+      sourceLabel: publicProvider
+        ? formatProviderName(publicProvider)
+        : sourceCandidate?.title ?? "Wearable summary",
       unit: selection.unit ?? sourceCandidate?.unit ?? null,
       value: selection.value,
     },

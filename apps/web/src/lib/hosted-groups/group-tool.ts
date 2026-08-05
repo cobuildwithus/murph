@@ -76,6 +76,7 @@ import {
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { handleHostedUsageReferralGroupTool } from "../hosted-growth/usage-referral";
+import { issueHostedSignupReferralLink } from "../hosted-growth/signup-referral";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
@@ -174,6 +175,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   arm_usage_referral: "participant_aware",
   cancel_usage_referral: "participant_aware",
   cancel_next_group: "personal_active",
+  create_signup_referral_link: "participant_aware",
   create_join_link: "owner_active",
   leave_membership: "participant_aware",
   list_memberships: "personal_active",
@@ -269,6 +271,13 @@ export async function handleHostedRuntimeGroupTool(input: {
     return handleHostedRuntimeGroupLeaveMembership({
       memberId: input.memberId,
       membershipId: input.request.membershipId,
+    });
+  }
+
+  if (input.request.action === "create_signup_referral_link") {
+    return handleHostedRuntimeCreateSignupReferralLink({
+      memberId: input.memberId,
+      participant: input.request.participant ?? null,
     });
   }
 
@@ -513,6 +522,71 @@ async function handleHostedRuntimePendingGroupSetup(input: {
     };
   } catch {
     return unavailable("next_group_preparation_unavailable");
+  }
+}
+
+async function handleHostedRuntimeCreateSignupReferralLink(input: {
+  memberId: string;
+  participant: HostedExecutionAcceptedGroupMessageParticipant | null;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "create_signup_referral_link",
+    result: {
+      status: "unavailable",
+      unavailableReason,
+    },
+  });
+  const prisma = getPrisma();
+  const threadContainer = await prisma.hostedThreadContainer.findUnique({
+    select: {
+      memberId: true,
+    },
+    where: {
+      memberId: input.memberId,
+    },
+  });
+  let referrerMemberId = input.memberId;
+
+  if (threadContainer) {
+    if (!input.participant) {
+      return unavailable("requesting_participant_required");
+    }
+    const participantMember =
+      await lookupHostedGroupParticipantMemberByProviderEvidence({
+        participant: input.participant,
+        prisma,
+      });
+    if (
+      !participantMember
+      || !await hasHostedMemberActivationProof({
+        memberId: participantMember.core.id,
+        prisma,
+      })
+    ) {
+      return unavailable("requesting_participant_unavailable");
+    }
+    referrerMemberId = participantMember.core.id;
+  } else if (input.participant) {
+    return unavailable("participant_context_invalid");
+  }
+
+  try {
+    const link = await issueHostedSignupReferralLink({
+      referrerMemberId,
+    });
+    return {
+      action: "create_signup_referral_link",
+      result: {
+        expiresAt: link.expiresAt.toISOString(),
+        signupUrl: link.signupUrl,
+        status: "ok",
+      },
+    };
+  } catch (error) {
+    if (isHostedOnboardingError(error)) {
+      return unavailable("signup_referral_link_unavailable");
+    }
+    throw error;
   }
 }
 
@@ -1587,11 +1661,22 @@ function renderHostedGroupJoinOfferScopeSentence(
   const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
     .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
   const sentence = `your ${formatHumanList(["Murph profile name", ...labels])}`;
+  const disclosures: string[] = [];
   // Nutrition labels (e.g. "daily protein") read as a bare number; disclose that
   // the totals come from the member's meals, connected-app imports included, so a
   // like-to-consent reaction is not materially narrower than what is exported.
-  return projectionScopes.some(isHostedGroupMealNutritionProjectionScope)
-    ? `${sentence} (nutrition totals come from your meals in Murph, including meals imported from connected apps)`
+  if (projectionScopes.some(isHostedGroupMealNutritionProjectionScope)) {
+    disclosures.push(
+      "nutrition totals come from your meals in Murph, including meals imported from connected apps",
+    );
+  }
+  if (projectionScopes.some(isHostedGroupSleepSourceProjectionScope)) {
+    disclosures.push(
+      "by-source sleep includes every available source's value and name, plus when Murph recorded that source value",
+    );
+  }
+  return disclosures.length > 0
+    ? `${sentence} (${disclosures.join("; ")})`
     : sentence;
 }
 
@@ -1602,6 +1687,13 @@ function isHostedGroupMealNutritionProjectionScope(
     getHostedVaultShareDailyMetricProjectionSpec(scope.projectionKind)?.source.kind
       === "meal-nutrition-total"
   );
+}
+
+function isHostedGroupSleepSourceProjectionScope(
+  scope: HostedVaultShareProjectionScope,
+): boolean {
+  return scope.projectionKind === "deep-sleep-sources-days.v1"
+    || scope.projectionKind === "rem-sleep-sources-days.v1";
 }
 
 function formatHostedGroupJoinOfferShareScopeLabel(label: string): string {

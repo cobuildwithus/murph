@@ -10,10 +10,7 @@ import {
 } from "@/src/components/hosted-onboarding/auth-dialog";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
-import {
-  HOSTED_APP_HOME_PATH,
-  HOSTED_APP_INITIAL_VISIT_HOME_PATH,
-} from "@/src/lib/hosted-onboarding/app-routes";
+import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { cn } from "@/src/lib/utils";
@@ -106,13 +103,7 @@ function handleLandingAuthCompleted(
     return;
   }
 
-  const shouldUseInitialVisitHome = payload.initialVisitEligible === true;
-
-  navigateHostedAuthRedirect(
-    shouldUseInitialVisitHome
-      ? HOSTED_APP_INITIAL_VISIT_HOME_PATH
-      : HOSTED_APP_HOME_PATH,
-  );
+  navigateHostedAuthRedirect(HOSTED_APP_HOME_PATH);
 }
 
 function getLandingAuthClasses(

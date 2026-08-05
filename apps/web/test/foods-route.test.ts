@@ -4,12 +4,40 @@ const mocks = vi.hoisted(() => ({
   getFoodById: vi.fn(),
   getFoodByUpc: vi.fn(),
   searchFoods: vi.fn(),
+  toFoodNutritionSearchItem: vi.fn((item: Record<string, unknown>) => {
+    const identity = Object.fromEntries(
+      Object.entries(item).filter(([key]) =>
+        key !== "contaminants" && key !== "label"),
+    );
+
+    return {
+      ...identity,
+      contaminantSummary: {
+        status: "no_known_product_tests",
+        murphConcernLevel: "unknown",
+        alertCount: 0,
+        alertsTruncated: false,
+        alerts: [],
+        observationCount: 0,
+        observationsTruncated: false,
+        observations: [],
+      },
+      label: {
+        nutrition: {
+          basis: "per_100_g",
+          rows: [],
+        },
+        serving: null,
+      },
+    };
+  }),
 }));
 
 vi.mock("@/src/lib/foods", () => ({
   getFoodById: mocks.getFoodById,
   getFoodByUpc: mocks.getFoodByUpc,
   searchFoods: mocks.searchFoods,
+  toFoodNutritionSearchItem: mocks.toFoodNutritionSearchItem,
 }));
 
 type FoodsRouteModule = typeof import("../app/api/foods/route");
@@ -208,6 +236,145 @@ describe("foods API route", () => {
           },
         },
       ],
+    });
+  });
+
+  it("returns compact nutrition facts with exact-label contaminant evidence", async () => {
+    const item = {
+      id: "fdc:123",
+      dataOrigin: "usda_foundation",
+      dataOriginId: "123",
+      name: "Example food",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {
+        nutrientsPer100g: [
+          { name: "Protein", unit: "g", value: 10 },
+        ],
+      },
+    };
+    mocks.searchFoods.mockResolvedValue([item]);
+
+    const response = await foodsRoute.GET(
+      new Request(
+        "https://web.example.test/api/foods?q=example&nutritionOnly=true",
+        {
+          headers: {
+            authorization: "Bearer test-data-api-key",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.searchFoods).toHaveBeenCalledWith({
+      q: "example",
+      limit: 1,
+      includeOffMarket: false,
+    });
+    expect(mocks.toFoodNutritionSearchItem).toHaveBeenCalledWith(item);
+    await expect(response.json()).resolves.toEqual({
+      items: [
+        expect.objectContaining({
+          id: "fdc:123",
+          contaminantSummary: {
+            status: "no_known_product_tests",
+            murphConcernLevel: "unknown",
+            alertCount: 0,
+            alertsTruncated: false,
+            alerts: [],
+            observationCount: 0,
+            observationsTruncated: false,
+            observations: [],
+          },
+          label: {
+            nutrition: {
+              basis: "per_100_g",
+              rows: [],
+            },
+            serving: null,
+          },
+        }),
+      ],
+    });
+  });
+
+  it.each([
+    {
+      lookup: "id" as const,
+      requestQuery: "id=fdc:123",
+      value: "fdc:123",
+    },
+    {
+      lookup: "upc" as const,
+      requestQuery: "upc=123456789012",
+      value: "123456789012",
+    },
+  ])("projects compact nutrition for exact $lookup GET lookups", async ({
+    lookup,
+    requestQuery,
+    value,
+  }) => {
+    const item = {
+      id: "fdc:123",
+      dataOrigin: "usda_branded",
+      dataOriginId: "123",
+      name: "Exact food",
+      brand: "Example Brand",
+      upc: "123456789012",
+      offMarket: false,
+      label: { nutrients: [{ name: "Protein", unit: "g", value: 10 }] },
+    };
+    if (lookup === "id") {
+      mocks.getFoodById.mockResolvedValue(item);
+    } else {
+      mocks.getFoodByUpc.mockResolvedValue(item);
+    }
+
+    const response = await foodsRoute.GET(
+      new Request(
+        `https://web.example.test/api/foods?${requestQuery}&nutritionOnly=true`,
+        {
+          headers: {
+            authorization: "Bearer test-data-api-key",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    if (lookup === "id") {
+      expect(mocks.getFoodById).toHaveBeenCalledWith({
+        id: value,
+        includeOffMarket: false,
+      });
+      expect(mocks.getFoodByUpc).not.toHaveBeenCalled();
+    } else {
+      expect(mocks.getFoodByUpc).toHaveBeenCalledWith({
+        upc: value,
+        includeOffMarket: false,
+      });
+      expect(mocks.getFoodById).not.toHaveBeenCalled();
+    }
+    expect(mocks.searchFoods).not.toHaveBeenCalled();
+    expect(mocks.toFoodNutritionSearchItem).toHaveBeenCalledWith(item);
+    await expect(response.json()).resolves.toEqual({
+      item: {
+        ...item,
+        contaminantSummary: expect.objectContaining({
+          status: "no_known_product_tests",
+          murphConcernLevel: "unknown",
+          observationCount: 0,
+        }),
+        label: {
+          nutrition: {
+            basis: "per_100_g",
+            rows: [],
+          },
+          serving: null,
+        },
+      },
     });
   });
 
@@ -636,6 +803,100 @@ describe("foods API route", () => {
                     unit: "mg",
                   },
                 ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("projects compact exact and text results in one nutrition-only batch", async () => {
+    const exactItem = {
+      id: "fdc:7090411",
+      dataOrigin: "usda_branded",
+      dataOriginId: "7090411",
+      name: "Exact Food",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      label: { fdcId: 7090411 },
+    };
+    const searchItem = {
+      id: "fdc:search",
+      dataOrigin: "usda_foundation",
+      dataOriginId: "search",
+      name: "Search Food",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: { nutrientsPer100g: [{ name: "Protein", unit: "g", value: 10 }] },
+    };
+    mocks.getFoodById.mockResolvedValue(exactItem);
+    mocks.searchFoods.mockResolvedValue([searchItem]);
+
+    const response = await foodsRoute.POST(
+      new Request("https://web.example.test/api/foods", {
+        body: JSON.stringify({
+          queries: ["fdc:7090411", "yogurt"],
+          nutritionOnly: true,
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getFoodById).toHaveBeenCalledWith({
+      id: "fdc:7090411",
+      includeOffMarket: false,
+    });
+    expect(mocks.searchFoods).toHaveBeenCalledWith({
+      q: "yogurt",
+      limit: 1,
+      includeOffMarket: false,
+    });
+    expect(mocks.toFoodNutritionSearchItem).toHaveBeenCalledTimes(2);
+    expect(mocks.toFoodNutritionSearchItem).toHaveBeenCalledWith(exactItem);
+    expect(mocks.toFoodNutritionSearchItem).toHaveBeenCalledWith(searchItem);
+    await expect(response.json()).resolves.toEqual({
+      includeOffMarket: false,
+      limit: 1,
+      nutritionOnly: true,
+      results: [
+        {
+          query: "fdc:7090411",
+          items: [
+            {
+              ...exactItem,
+              contaminantSummary: expect.objectContaining({
+                status: "no_known_product_tests",
+                murphConcernLevel: "unknown",
+                observationCount: 0,
+              }),
+              label: {
+                nutrition: { basis: "per_100_g", rows: [] },
+                serving: null,
+              },
+            },
+          ],
+        },
+        {
+          query: "yogurt",
+          items: [
+            {
+              ...searchItem,
+              contaminantSummary: expect.objectContaining({
+                status: "no_known_product_tests",
+                murphConcernLevel: "unknown",
+                observationCount: 0,
+              }),
+              label: {
+                nutrition: { basis: "per_100_g", rows: [] },
+                serving: null,
               },
             },
           ],

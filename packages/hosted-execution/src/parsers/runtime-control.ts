@@ -1242,6 +1242,25 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  if (action === "create_signup_referral_link") {
+    const label = "Hosted runtime group tool create_signup_referral_link request";
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "participant"]),
+      label,
+    );
+    return {
+      action,
+      ...(record.participant !== undefined && record.participant !== null
+        ? {
+            participant: parseHostedRuntimeGroupToolParticipant(
+              record.participant,
+              `${label} participant`,
+            ),
+          }
+        : {}),
+    };
+  }
   if (action === "read_usage_referral") {
     assertAllowedObjectKeys(
       record,
@@ -3063,6 +3082,47 @@ export function parseHostedRuntimeGroupToolResponse(
             "Hosted runtime group tool list_memberships unavailableReason",
           ),
           memberships: null,
+        },
+      };
+    }
+  }
+
+  if (action === "create_signup_referral_link") {
+    const label = "Hosted runtime group tool create_signup_referral_link response";
+    const result = requireObject(record.result, `${label} result`);
+    const status = requireString(result.status, `${label} status`);
+    if (status === "ok") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["expiresAt", "signupUrl", "status"]),
+        `${label} ok result`,
+      );
+      return {
+        action,
+        result: {
+          expiresAt: parseHostedRuntimeGroupCanonicalTimestamp(
+            result.expiresAt,
+            `${label} expiresAt`,
+          ),
+          signupUrl: requireString(result.signupUrl, `${label} signupUrl`),
+          status,
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        `${label} unavailable result`,
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            `${label} unavailableReason`,
+          ),
         },
       };
     }

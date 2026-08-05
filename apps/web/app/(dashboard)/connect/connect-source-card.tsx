@@ -3,7 +3,10 @@ import Image from "next/image";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 
-import type { ConnectSource } from "./connect-page-types";
+import type {
+  ConnectSource,
+  ConnectSourceSetupGuideId,
+} from "./connect-page-types";
 
 export function SourceCard({
   authenticated,
@@ -12,6 +15,7 @@ export function SourceCard({
   pendingDisconnect,
   source,
   onDisconnectTargetChange,
+  onSetupGuideOpen,
   onStartConnection,
 }: {
   authenticated: boolean;
@@ -20,19 +24,28 @@ export function SourceCard({
   pendingDisconnect: boolean;
   source: ConnectSource;
   onDisconnectTargetChange: (source: ConnectSource | null) => void;
+  onSetupGuideOpen?: (setupGuideId: ConnectSourceSetupGuideId) => void;
   onStartConnection: (source: ConnectSource) => Promise<void>;
 }) {
+  const setupGuideActionLabel = source.setupGuideActionLabel;
+  const setupGuideId = source.setupGuideId;
+  const guideOnly = Boolean(setupGuideId);
   const isAvailable = Boolean(source.connectTarget);
   const canStart = authenticated && isAvailable;
-  const canDisconnect = authenticated && Boolean(source.disconnectConnectionId);
-  const requiresConnectionReset = source.recoveryKind === "connection_reset";
-  const historicalResetIncomplete = source.historicalResetIncomplete === true
+  const canDisconnect = !guideOnly
+    && authenticated
+    && Boolean(source.disconnectConnectionId);
+  const requiresConnectionReset = !guideOnly
+    && source.recoveryKind === "connection_reset";
+  const requiresReconnect = !guideOnly && source.requiresReconnect === true;
+  const historicalResetIncomplete = !guideOnly
+    && source.historicalResetIncomplete === true
     && !source.connected
     && !requiresConnectionReset
-    && !source.requiresReconnect;
-  const actionLabel = source.requiresReconnect ? "Reconnect" : "Connect";
+    && !requiresReconnect;
+  const actionLabel = requiresReconnect ? "Reconnect" : "Connect";
   const disconnectAriaLabel = resolveDisconnectAriaLabel(source);
-  const reconnectUnavailable = source.requiresReconnect && !isAvailable;
+  const reconnectUnavailable = requiresReconnect && !isAvailable;
   const connectionOfferEnabled = source.connectionAvailable !== false;
   const historicalReconnectUnavailable = historicalResetIncomplete && !connectionOfferEnabled;
   const showReconnectStateDisconnect = canDisconnect
@@ -42,29 +55,31 @@ export function SourceCard({
       || source.disconnectScope === "junction_account"
       || Boolean(source.disconnectSourceProviderSlug)
     );
-  const unavailableMessage = !source.requiresReconnect && !requiresConnectionReset && !isAvailable
+  const unavailableMessage = !requiresReconnect && !requiresConnectionReset && !isAvailable
     ? source.unavailableMessage
     : undefined;
   // These branches add message content beside the source details. Stack the
   // card on phone widths so the message and action never squeeze the
   // description into a narrow column.
   const showsSideMessage = requiresConnectionReset
-    || source.requiresReconnect
+    || requiresReconnect
     || historicalResetIncomplete
     || Boolean(unavailableMessage)
     || Boolean(errorMessage);
 
   return (
     <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
-      <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
-        <SourceStatusDot
-          connected={source.connected}
-          historicalResetIncomplete={historicalResetIncomplete}
-          requiresConnectionReset={requiresConnectionReset}
-          requiresReconnect={source.requiresReconnect}
-          sourceName={source.name}
-        />
-      </div>
+      {!guideOnly ? (
+        <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
+          <SourceStatusDot
+            connected={source.connected}
+            historicalResetIncomplete={historicalResetIncomplete}
+            requiresConnectionReset={requiresConnectionReset}
+            requiresReconnect={requiresReconnect}
+            sourceName={source.name}
+          />
+        </div>
+      ) : null}
 
       <div className="mb-3 flex h-11 min-w-0 items-center sm:mb-5 sm:h-14">
         <SourceLogo source={source} />
@@ -86,7 +101,7 @@ export function SourceCard({
           </p>
         </div>
 
-        {source.connected && !source.requiresReconnect ? (
+        {!guideOnly && source.connected && !requiresReconnect ? (
           <div className="ml-auto flex shrink-0 flex-col items-end gap-2 self-end sm:mt-auto sm:shrink">
             {errorMessage ? (
               <p role="alert" className="text-xs leading-snug text-destructive">
@@ -119,7 +134,7 @@ export function SourceCard({
                   ? `${source.name} needs a fresh connection. Disconnect it first, then connect it again.`
                   : `${source.name} needs a fresh connection, but reconnecting is temporarily unavailable. You can disconnect the old connection here.`}
               </p>
-            ) : source.requiresReconnect ? (
+            ) : requiresReconnect ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
                 {reconnectUnavailable
                   ? `${source.name} needs attention from the connected app before Murph can keep syncing it.`
@@ -156,6 +171,23 @@ export function SourceCard({
                 aria-label={`${source.unavailableActionLabel} for ${source.name}`}
               >
                 {source.unavailableActionLabel}
+              </Button>
+            ) : setupGuideId && setupGuideActionLabel && !authenticated ? (
+              <AuthButton
+                aria-label={`Log in or sign up to set up ${source.name}`}
+                className="self-end"
+              >
+                Log in or sign up
+              </AuthButton>
+            ) : setupGuideId && setupGuideActionLabel ? (
+              <Button
+                type="button"
+                disabled={!onSetupGuideOpen}
+                aria-label={`${setupGuideActionLabel} for ${source.name}`}
+                onClick={() => onSetupGuideOpen?.(setupGuideId)}
+                className="self-end"
+              >
+                {setupGuideActionLabel}
               </Button>
             ) : !authenticated ? (
               <AuthButton

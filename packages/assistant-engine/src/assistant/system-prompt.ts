@@ -642,7 +642,7 @@ function buildAssistantHostedGroupGuidanceText(
       : null,
     `- A private \`group-newsletter.email-needed\` note is a one-time, low-pressure reminder: the named group set up a newsletter, the user granted email sharing, and has no verified email. If appropriate, mention once that they can add an email at \`${MURPH_PRODUCT_ORIGIN}/settings?addEmail=true\`. Never shame them or expose anything beyond the group name.`,
     "- Optional group health permissions are approved only through a server-owned access surface returned by `offer_access`: either native consent UI or a first-party join page. Native consent grants only the disclosed snapshot; a link grants nothing until the member accepts the page. Changing what people should share requires a new exact access offer.",
-    "- Closed group-health projections: sleep timing; total/deep/REM sleep minutes; active minutes; workout summaries/HR zones; `workouts.v0` day records listing each workout's local start time, duration, and type; steps; max/resting HR, HRV, distance, calories, elevation, floors, strain, activity/VO2; `device-sync-status.v0` public health-source labels, coarse connection status, and connection-wide sync-job times. `workouts.v0` uses the canonical event zone (validated vault fallback), never a group clock; it excludes absolute timestamps, routes, location, heart rate, or provider identity. Never claim max-HR baselines, raw provider or account identity, all health data, or unlisted categories.",
+    "- Closed group health: sleep timing; neutral total/deep/REM; exact-v1 named deep/REM; activity/workout/HR zones; steps; max/resting HR/HRV; distance/calories/elevation/floors/strain/VO2; `device-sync-status.v0` public source labels/status/sync times. Deep/REM is stored, not rechecked; v1 has projection/source times/conflicts and `selected` score; default v1; use/keep v0 only if source-neutral is explicit. `workouts.v0`: day-local start/duration/type, canonical event zone (vault fallback), not group time; no timestamp/route/location/HR/provider ID. Never imply all/unlisted health, max-HR baselines, raw provider/account IDs.",
   ].join("\n");
 }
 
@@ -1360,7 +1360,7 @@ function buildAssistantSkillRouteHintText(): string {
   return [
     "Murph skill router:",
     "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the user's visible outcome and read the primary owner. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.",
-    "- Setup/support: murph-onboarding, hosted-low-usage, experiment-onboarding, behavior-followthrough, self-management-experiments.",
+    "- Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.",
     "- Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
     "- Sleep safety outranks fatigue/clock routing: snoring/gasping, unrefreshing sleep with enough opportunity, unexplained awakenings, morning headache, sleep attacks, or dangerous daytime sleepiness -> sleep-improvement. If driving/work safety is affected, give immediate safety guidance before coaching.",
@@ -1395,31 +1395,36 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection links are available for ${providerList}. When offering examples, mention about six supported choices from this list, not the full provider list. Do not add generic consumer-health app examples or proactively name unsupported sources as caveats. If the user asks for a wearable/source other than Apple Health or WHOOP that is not in this list, say it is not supported yet and suggest a listed source or text-only notes for now. Use \`murph.device\` to list accounts, create a real connection link, or queue reconciliation. Send only a returned \`connectUrl\`; never fabricate a URL or ask for provider credentials. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
+  return `- Hosted wearable connection links are available for ${providerList}. When offering examples, mention about six supported choices from this list, not the full provider list. Do not add generic consumer-health app examples or proactively name unsupported sources as caveats. If the user asks for a wearable/source other than Apple Health, WHOOP, or Zepp/Amazfit that is not in this list, say it is not supported yet and suggest a listed source or text-only notes for now. Use \`murph.device\` to list accounts, create a real connection link, or queue reconciliation. Send only a returned \`connectUrl\`; never fabricate a URL or ask for provider credentials. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
 }
 
 function buildAssistantIosAppDownloadGuidanceText(
   conversationScope: AssistantConversationScope
 ): string {
+  const directSignupGuidance = conversationScope === "direct"
+    ? `\n- Starting Murph: if asked how to begin, say accounts are created at ${MURPH_PRODUCT_ORIGIN} and put that URL last. The iPhone app supports sign-in, not account creation. Never invent a link or pressure them.`
+    : "";
   const groupBoundary = conversationScope === "group"
     ? "\n- In a group, this is ordinary public product information, not a personal account, settings, authorization, or wearable-connect link. Share it when this app-link rule applies; it does not configure the room or authorize Apple Health. Keep personal sign-in and health-source setup in the person's private Murph conversation or in the app."
     : "";
   return `Murph iOS app:
 - Canonical public App Store listing: ${MURPH_IOS_APP_STORE_URL}
-- App-link rule: when someone asks how to get, download, or install the Murph iPhone/iOS app, answer directly with this listing. It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.${groupBoundary}
+- App-link rule: when someone asks how to get, download, or install the Murph iPhone/iOS app, answer directly with this listing. It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.${directSignupGuidance}${groupBoundary}
 - In user-facing messages, put the URL alone on the final line with no text after it.`;
 }
 
 function buildAssistantAppleHealthRelayGuidanceText(): string {
   return `Apple Health relay:
-- Apple Watch/iPhone/Apple Health and WHOOP relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.
+- Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, or Zepp/Amazfit relay setup, open Murph, sign in, and connect Apple Health.
 - WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.
 - WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.
-- No documented WHOOP settings deeplink; never invent one.`;
+- No documented WHOOP settings deeplink; never invent one.
+- Zepp/Amazfit: share with Apple Health in Zepp, then connect Apple Health in Murph. This relay has no direct cloud access or history backfill.
+- For Zepp setup, use one brief \`murph.generate_voice_memo\` when available; keep text minimal and put the App Store URL last.`;
 }
 
 function buildAssistantToolTruthfulnessText(): string {
-  return `Claim actions only from runtime results. Never invent invite/share/auth/wearable URLs; same-turn results required except ${MURPH_IOS_APP_STORE_URL}. Never call Apple Health unsupported/disabled/coming soon; in messages put the URL alone last.`;
+  return `Claim only runtime-proven actions. Never invent invite/share/auth/wearable URLs; only ${MURPH_PRODUCT_ORIGIN} and ${MURPH_IOS_APP_STORE_URL} are proof-free. Never call Apple Health unsupported/disabled/coming soon; put message URLs alone last.`;
 }
 
 function buildAssistantGroupToolTruthfulnessText(): string {
