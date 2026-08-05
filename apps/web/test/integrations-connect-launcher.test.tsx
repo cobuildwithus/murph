@@ -90,6 +90,106 @@ test("lets the member continue immediately without starting twice", async () => 
   }
 });
 
+test("waits for five visible seconds when mounted in a hidden tab", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async () =>
+    successfulResponse("https://auth.composio.dev/connect/visible"),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    {
+      location: {
+        href: "https://example.test/integrations/connect/test-claim",
+      },
+      visibilityState: "hidden",
+    },
+  );
+
+  try {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    Object.defineProperty(rendered.window.document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    rendered.window.document.dispatchEvent(
+      new rendered.window.Event("visibilitychange"),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_999);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("restarts the five-second interval after the tab becomes visible again", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async () =>
+    successfulResponse("https://auth.composio.dev/connect/resumed"),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    {
+      location: {
+        href: "https://example.test/integrations/connect/test-claim",
+      },
+    },
+  );
+
+  try {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    Object.defineProperty(rendered.window.document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    rendered.window.document.dispatchEvent(
+      new rendered.window.Event("visibilitychange"),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    Object.defineProperty(rendered.window.document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    rendered.window.document.dispatchEvent(
+      new rendered.window.Event("visibilitychange"),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_999);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 function successfulResponse(redirectUrl: string): Response {
   return new Response(JSON.stringify({ redirectUrl }), {
     headers: { "Content-Type": "application/json" },

@@ -79,13 +79,36 @@ export function IntegrationsConnectLauncher({
   }, [claim]);
 
   useEffect(() => {
-    const timeout = window.setTimeout(
-      () => void startConnection(),
-      AUTO_CONTINUE_SECONDS * 1_000,
-    );
+    let timeout: number | null = null;
+
+    const clearPendingTimeout = () => {
+      if (timeout === null) {
+        return;
+      }
+      window.clearTimeout(timeout);
+      timeout = null;
+    };
+
+    const armTimeout = () => {
+      clearPendingTimeout();
+      if (
+        document.visibilityState !== "visible"
+        || hasStartedRef.current
+      ) {
+        return;
+      }
+      timeout = window.setTimeout(
+        () => void startConnection(),
+        AUTO_CONTINUE_SECONDS * 1_000,
+      );
+    };
+
+    armTimeout();
+    document.addEventListener("visibilitychange", armTimeout);
 
     return () => {
-      window.clearTimeout(timeout);
+      document.removeEventListener("visibilitychange", armTimeout);
+      clearPendingTimeout();
       abortControllerRef.current?.abort();
     };
   }, [startConnection]);
