@@ -6,6 +6,7 @@ import {
   type AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  renderAssistantResponseCardTranscriptText,
   renderAssistantResponseCardText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
@@ -1647,6 +1648,9 @@ export async function sendAssistantMessageLocal(
             precedingResponseSegments.push({
               deliveryContext: resolvedDeliveryContext.context,
               response: segment.response,
+              ...(segment.transcriptResponse === undefined
+                ? {}
+                : { transcriptResponse: segment.transcriptResponse }),
               media: segment.media ?? [],
               ...(segment.targetInputId
                 ? {
@@ -1662,7 +1666,7 @@ export async function sendAssistantMessageLocal(
               context: segment.deliveryContext ?? null,
               input: currentInput,
             }),
-            rawResponse: segment.response,
+            rawResponse: segment.transcriptResponse ?? segment.response,
             session: currentSession,
             sharedPlan,
           })
@@ -1697,9 +1701,10 @@ export async function sendAssistantMessageLocal(
               })
         const rawTranscriptResponseText = noReplySelected
           ? null
-          : providerResult.responseCard
-            ? renderAssistantResponseCardText(providerResult.responseCard)
-            : providerResult.transcriptResponse
+          : providerResult.transcriptResponse ??
+            (providerResult.responseCard
+              ? renderAssistantResponseCardTranscriptText(providerResult.responseCard)
+              : null)
         const transcriptResponseText =
           rawTranscriptResponseText === null
             ? null

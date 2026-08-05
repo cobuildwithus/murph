@@ -48,87 +48,120 @@ describe('assistant response cards', () => {
   it('derives the model-facing JSON schema from the runtime contract', () => {
     expect(assistantResponseCardJsonSchema).not.toHaveProperty('$schema')
     expect(assistantResponseCardJsonSchema).toMatchObject({
+      description: expect.stringContaining('compact_table'),
       anyOf: [
         {
-          additionalProperties: false,
-          properties: {
-            goals: {
+          anyOf: [
+            {
+              additionalProperties: false,
               properties: {
-                calories: {
-                  anyOf: [
-                    {
-                      properties: {
-                        status: {
-                          enum: [
-                            'far_under_target',
-                            'under_target',
-                            'on_target',
-                            'over_target',
-                            'far_over_target',
-                            'unavailable',
-                          ],
+                goals: {
+                  properties: {
+                    calories: {
+                      anyOf: [
+                        {
+                          properties: {
+                            status: {
+                              enum: [
+                                'far_under_target',
+                                'under_target',
+                                'on_target',
+                                'over_target',
+                                'far_over_target',
+                                'unavailable',
+                              ],
+                            },
+                            target: { type: 'number' },
+                          },
                         },
-                        target: { type: 'number' },
-                      },
+                        { type: 'null' },
+                      ],
                     },
-                    { type: 'null' },
-                  ],
+                  },
                 },
+                kind: { const: 'daily_nutrition' },
+                totals: {
+                  properties: {
+                    fiberGrams: {
+                      anyOf: [
+                        {
+                          properties: {
+                            total: { type: 'number' },
+                          },
+                        },
+                        {
+                          properties: {
+                            mealCount: { const: 0 },
+                            total: { type: 'null' },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+                version: { const: 2 },
               },
             },
-            kind: { const: 'daily_nutrition' },
-            totals: {
+            {
+              additionalProperties: false,
               properties: {
-                fiberGrams: {
-                  anyOf: [
-                    {
+                kind: { const: 'daily_nutrition' },
+                totals: {
+                  properties: {
+                    calories: {
                       properties: {
                         total: { type: 'number' },
                       },
                     },
-                    {
-                      properties: {
-                        mealCount: { const: 0 },
-                        total: { type: 'null' },
-                      },
+                    proteinGrams: {
+                      anyOf: [
+                        {
+                          additionalProperties: false,
+                          properties: {
+                            total: { type: 'number' },
+                          },
+                        },
+                        {
+                          additionalProperties: false,
+                          properties: {
+                            mealCount: { const: 0 },
+                            total: { type: 'null' },
+                          },
+                        },
+                      ],
                     },
-                  ],
+                  },
                 },
               },
             },
-            version: { const: 2 },
-          },
+          ],
         },
         {
           additionalProperties: false,
           properties: {
-            kind: { const: 'daily_nutrition' },
-            totals: {
-              properties: {
-                calories: {
+            columns: {
+              maxItems: 4,
+              minItems: 1,
+              type: 'array',
+            },
+            kind: { const: 'compact_table' },
+            rows: {
+              maxItems: 8,
+              minItems: 1,
+              type: 'array',
+            },
+            tracking: {
+              anyOf: [
+                {
+                  additionalProperties: false,
                   properties: {
-                    total: { type: 'number' },
+                    kind: { const: 'workout' },
                   },
                 },
-                proteinGrams: {
-                  anyOf: [
-                    {
-                      additionalProperties: false,
-                      properties: {
-                        total: { type: 'number' },
-                      },
-                    },
-                    {
-                      additionalProperties: false,
-                      properties: {
-                        mealCount: { const: 0 },
-                        total: { type: 'null' },
-                      },
-                    },
-                  ],
-                },
-              },
+                { type: 'null' },
+              ],
             },
+            version: { const: 1 },
           },
         },
       ],
@@ -406,7 +439,7 @@ describe('assistant response cards', () => {
       },
     })
     expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
-      'Ask Murph for your nutrition totals in text',
+      'Ask Murph for this card in text',
     )
     expect(LINQ_IMESSAGE_APP_CARD_URL).toBe('https://murph.ai')
     expect(LINQ_IMESSAGE_APP_CARD_URL.length).toBeLessThanOrEqual(2_048)

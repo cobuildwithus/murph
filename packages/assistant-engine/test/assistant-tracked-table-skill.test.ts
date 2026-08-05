@@ -1,0 +1,95 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
+import { describe, expect, it } from 'vitest'
+
+import {
+  assistantResponseCardSchema,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
+
+import {
+  ASSISTANT_SKILLS,
+  resolveAssistantSkillsRoot,
+} from '../src/assistant-skill-assets.js'
+
+const FOUR_SET_CARD = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Live strength session',
+  subtitle: null,
+  rowHeader: 'Exercise',
+  columns: ['Set 1', 'Set 2', 'Set 3', 'Set 4'],
+  rows: [
+    {
+      label: 'Exercise A',
+      values: ['12', '10 (final rep spotted)', '9', '8 (final 2 reps spotted)'],
+    },
+    {
+      label: 'Exercise B',
+      values: ['40 × 8', '45 × 8', '45 × 7', '45 × 6 (final rep spotted)'],
+    },
+  ],
+  footer: null,
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-04T21:30:00.000Z',
+  },
+} satisfies AssistantResponseCard
+
+describe('assistant tracked workout table skill', () => {
+  it('registers direct table and live-workout language with the skill router', () => {
+    const matches = ASSISTANT_SKILLS.filter(
+      ({ slug }) => slug === 'tracked-table',
+    )
+
+    expect(matches).toHaveLength(1)
+    expect(matches[0]?.triggerHint).toContain('workout table')
+    expect(matches[0]?.triggerHint).toContain('structured tracker')
+    expect(matches[0]?.triggerHint).toContain('updated/refreshed table')
+  })
+
+  it('routes strength workout table requests to the native tracked-table skill', async () => {
+    const strengthSkill = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'strength-training', 'SKILL.md'),
+      'utf8',
+    )
+
+    expect(strengthSkill).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md',
+    )
+    expect(strengthSkill).toContain('put a workout log in a table')
+    expect(strengthSkill).toContain('instead of Markdown table syntax')
+  })
+
+  it('keeps set annotations canonical and preserves a fourth set', async () => {
+    const skill = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
+      'utf8',
+    )
+
+    expect(skill).toMatch(/^---\nname: tracked-table\n/)
+    expect(skill).toContain('one to four compact value columns')
+    expect(skill).toContain('Never emit Markdown-table syntax')
+    expect(skill).toContain("that set's canonical `note`")
+    expect(skill).toContain('note=final rep spotted')
+    expect(skill).toContain('Do not collapse or discard the fourth set')
+    expect(skill).toContain('do not silently truncate it')
+    expect(skill).toContain(
+      'single active tracked workout whose table was explicitly established earlier',
+    )
+    expect(skill).toContain(
+      'With no active tracked table, do not invent one from an update-like message',
+    )
+    expect(skill).toContain('ask one narrow disambiguating question')
+    expect(skill).toContain('final 2 reps spotted')
+    expect(skill).toContain('Never leave meaningful notation only in conversation text')
+  })
+
+  it('accepts a synthetic four-set tracked card', () => {
+    expect(assistantResponseCardSchema.parse(FOUR_SET_CARD)).toEqual(
+      FOUR_SET_CARD,
+    )
+  })
+})
