@@ -26,6 +26,7 @@ type RenderClientComponentOptions = {
   location?: Record<string, string>;
   matchMedia?: typeof window.matchMedia;
   sessionStorage?: Storage;
+  visibilityState?: DocumentVisibilityState;
 };
 
 export async function renderClientComponent(
@@ -47,6 +48,10 @@ export async function renderClientComponent(
     "<html><body><div id='root'></div></body></html>",
   );
   installGlobals(window, document);
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: options.visibilityState ?? "visible",
+  });
   const assign = vi.fn();
   const open = vi.fn();
   const reload = vi.fn();
