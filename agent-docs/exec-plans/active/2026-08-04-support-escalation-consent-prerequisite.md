@@ -146,3 +146,22 @@ Updated: 2026-08-05
   Commons and Prisma artifacts, Web typecheck reaches only two pre-existing
   `next.config.ts`/`next-config.test.ts` errors for the unrelated `agentRules`
   NextConfig extension; exact-head CI remains required.
+- After merging the latest base and resolving the documentation, assembled-
+  prompt, and model-behavior test conflicts, exact-head focused proof passes:
+  106 Assistant prompt/tool/scenario tests with 27 credential-gated cases
+  compiled and skipped, the deterministic unverified-audience privacy case, 6
+  hosted product-feedback contract tests, and 26 changelog tests. Assistant
+  Engine and Hosted Execution typechecks pass, docs drift passes, and
+  `git diff --check` is clean.
+- The final paired provider capture compares base `97993b4c2d` with merged head
+  `3305014877` through the pinned real Codex App Server, `gpt-5.6-terra`, low
+  reasoning, production code mode, and `gpt-tokenizer` 3.4.0
+  `o200k_harmony`. The exact provider input adds 297 tokens / 1,393 bytes in
+  both runtimes: direct moves from 27,031 tokens / 123,774 bytes to 27,328 /
+  125,167 (+1.0987%), and group moves from 23,685 / 108,739 to 23,982 /
+  110,132 (+1.2540%). Sequential attribution is +29 tokens / 117 bytes for
+  compact instructions, +17 / 104 for assembled feedback guidance, and +251 /
+  1,172 for the closed product-area/problem schema plus generated guidance.
+  The synthetic capture included `input`, `parallel_tool_calls`, `text`, and
+  `tool_choice`; its ignored temporary harness and generated workspace build
+  outputs were removed or remained outside version control.
