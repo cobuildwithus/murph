@@ -226,7 +226,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
       : props.scope === "group"
         ? groupPaymentMode === "monthly"
           ? "Choose your monthly sponsorship limit."
-          : "Choose one explicit contribution of cost-weighted usage credit for this chat."
+          : "Choose how much usage to add to this chat."
         : null;
   const confirmationIndicator =
     showGroupMessagesAction && statusContent ? (
@@ -415,7 +415,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             className={cn(
               "flex flex-col gap-5",
               props.scope === "group" &&
-                groupPaymentMode === "monthly" &&
+                (groupPaymentMode === "monthly" || !selectionNeedsRecovery) &&
                 "max-md:min-h-full",
             )}
           >
@@ -445,9 +445,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                       }
                       description={
                         <span className="text-sm font-medium text-muted-foreground">
-                          {props.scope === "group"
-                            ? "Cost-weighted usage credit"
-                            : "usage"}
+                          usage
                         </span>
                       }
                     />
@@ -459,7 +457,6 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               disabled: hasAttempt || !controller.requestIdentityReady,
               mobileStickyActionVisible:
                 props.scope === "group" &&
-                groupPaymentMode === "monthly" &&
                 !selectionNeedsRecovery,
               selectedOffer: controller.selectedOffer,
             })}
@@ -544,7 +541,6 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 className={cn(
                   "grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)]",
                   props.scope === "group" &&
-                    groupPaymentMode === "monthly" &&
                     "max-md:sticky max-md:bottom-0 max-md:z-20 max-md:-mx-6 max-md:mt-auto max-md:border-t max-md:bg-popover max-md:px-4 max-md:pt-4 max-md:pb-[max(env(safe-area-inset-bottom),1rem)]",
                 )}
               >
@@ -555,7 +551,6 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                   className={cn(
                     "w-full sm:w-auto",
                     props.scope === "group" &&
-                      groupPaymentMode === "monthly" &&
                       "max-md:hidden",
                   )}
                   onClick={() => controller.handleOpenChange(false)}
@@ -612,8 +607,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
       {triggerLabel}
     </Button>
   );
-  const useMobileDrawer =
-    isMobile && props.scope === "group" && groupPaymentMode === "monthly";
+  const useMobileDrawer = isMobile && props.scope === "group";
 
   if (useMobileDrawer) {
     return (
