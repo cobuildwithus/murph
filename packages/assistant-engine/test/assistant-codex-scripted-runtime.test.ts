@@ -218,7 +218,7 @@ describe('real codex app-server with scripted provider', () => {
       'vault-cli',
     )
     await writeFile(fakeVaultCli, `#!/bin/sh
-printf '%s\\n' "$*" >> "${commandLog}"
+printf '%s\\n' "$*" >> "vault-cli-invocations.log"
 case "$*" in
   *food*search-labels-batch*)
     printf '%s\\n' '{"ok":true,"results":[{"query":"rolled oats","items":[{"id":"fdc:oats-1","name":"Rolled oats","serving":{"amount":100,"unit":"g"},"nutrition":{"basis":"per_100_g","rows":[{"name":"Calories","unit":"kcal","value":389},{"name":"Protein","unit":"g","value":16.9},{"name":"Carbohydrate","unit":"g","value":66.3},{"name":"Fat","unit":"g","value":6.9},{"name":"Fiber","unit":"g","value":10.6}]}}]},{"query":"Example plain kefir","items":[{"id":"fdc:kefir-1","name":"Example plain kefir","serving":{"amount":240,"unit":"g"},"nutrition":{"basis":"per_100_g","rows":[{"name":"Calories","unit":"kcal","value":62.5},{"name":"Protein","unit":"g","value":4.17},{"name":"Carbohydrate","unit":"g","value":5},{"name":"Fat","unit":"g","value":2.08},{"name":"Fiber","unit":"g","value":0}]}}]}]}'
@@ -241,7 +241,7 @@ esac
         customToolCall: {
           input: `
 const result = await tools.exec_command({
-  cmd: ${JSON.stringify(`sed -n '1,150p' ${JSON.stringify(path.join(skillsRoot, 'food-journal', 'SKILL.md'))}`)},
+  cmd: "sed -n '1,150p' skills/food-journal/SKILL.md",
 });
 if (result.exit_code !== 0) throw new Error("scripted skill read failed");
 text(result.output);
@@ -259,7 +259,7 @@ const branded = JSON.stringify(JSON.stringify([
   "food", "search-labels-batch", "--query", "Example plain kefir",
 ]));
 const result = await tools.exec_command({
-  cmd: ${JSON.stringify(fakeVaultCli)} + " batch --compact --format json --command " + generic + " --command " + branded,
+  cmd: "./vault-cli batch --compact --format json --command " + generic + " --command " + branded,
 });
 if (result.exit_code !== 0) throw new Error("scripted food lookup failed");
 text(result.output);
@@ -272,7 +272,7 @@ text(result.output);
         customToolCall: {
           input: `
 const result = await tools.exec_command({
-  cmd: ${JSON.stringify(fakeVaultCli)} + " meal add --note 'Rolled oats and plain kefir' --ingredient 'rolled oats, 50 g' --ingredient 'plain kefir, 240 g' --nutrition-calories 344.5 --nutrition-protein-grams 18.45 --nutrition-carbs-grams 45.15 --nutrition-fat-grams 8.45 --nutrition-fiber-grams 5.3 --nutrition-source database --nutrition-confidence high --nutrition-source-detail 'USDA fdc:oats-1 scaled from 100 g; label fdc:kefir-1 scaled to its 240 g serving'",
+  cmd: "./vault-cli meal add --note 'Rolled oats and plain kefir' --ingredient 'rolled oats, 50 g' --ingredient 'plain kefir, 240 g' --nutrition-calories 344.5 --nutrition-protein-grams 18.45 --nutrition-carbs-grams 45.15 --nutrition-fat-grams 8.45 --nutrition-fiber-grams 5.3 --nutrition-source database --nutrition-confidence high --nutrition-source-detail 'USDA fdc:oats-1 scaled from 100 g; label fdc:kefir-1 scaled to its 240 g serving'",
 });
 if (result.exit_code !== 0) throw new Error("scripted meal save failed");
 text(result.output);
