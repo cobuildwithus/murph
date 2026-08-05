@@ -1527,23 +1527,22 @@ function buildAssistantCronExecutionInstructions(
     buildAssistantCronIndependentAutomationAuthorityInstructions(job)
   const overlays = [retryEvidence, independentAuthority, supportScope]
     .filter((section): section is string => section !== null)
+  const providerSafeBase =
+    stripAutomationAvailabilityConflictEvidenceForProvider(job.job.prompt)
+  let availabilityBlock: string | null = null
 
   try {
-    const { base, block } = splitAutomationAvailabilityConflictBlock(
+    availabilityBlock = splitAutomationAvailabilityConflictBlock(
       job.job.prompt,
-    )
-    return [base, ...overlays, block]
-      .filter((section): section is string => section !== null)
-      .join('\n\n')
+    ).block
   } catch {
-    // Malformed evidence remains fail-open for delivery. Strip its untrusted
-    // suffix before appending trusted overlays so the notification boundary
-    // cannot truncate those overlays along with the evidence.
-    return [
-      stripAutomationAvailabilityConflictEvidenceForProvider(job.job.prompt),
-      ...overlays,
-    ].join('\n\n')
+    // Malformed evidence remains fail-open for delivery and provider-private.
+    // Only a structurally valid block retains host skip authority below.
   }
+
+  return [providerSafeBase, ...overlays, availabilityBlock]
+    .filter((section): section is string => section !== null)
+    .join('\n\n')
 }
 
 function buildAssistantCronIndependentAutomationAuthorityInstructions(

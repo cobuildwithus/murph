@@ -2889,7 +2889,34 @@ describe('assistant cron runtime orchestration', () => {
     },
   )
 
-  it('keeps independent authority provider-visible when recurring availability evidence is malformed', async () => {
+  it.each([
+    [
+      'missing end marker',
+      'missing-end',
+      'independent',
+      'Independent automation authority (engine-supplied):',
+    ],
+    [
+      'markerless snapshot',
+      'markerless',
+      'independent',
+      'Independent automation authority (engine-supplied):',
+    ],
+    [
+      'duplicate start marker with support scope',
+      'duplicate-start',
+      'support',
+      'Accepted support scope (engine-supplied;',
+    ],
+    [
+      'misplaced end marker with retry evidence',
+      'misplaced-end',
+      'retry',
+      'Delivery integrity evidence (engine-supplied):',
+    ],
+  ] as const)(
+    'keeps trusted overlays provider-visible for recurring availability evidence with a %s',
+    async (_label, evidenceKind, overlayKind, expectedOverlay) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -2906,18 +2933,49 @@ describe('assistant cron runtime orchestration', () => {
     if (!canonicalAutomation) {
       throw new Error('Expected the canonical automation to exist.')
     }
-    canonicalAutomation.instructions = [
+    const baseInstructions = [
       'Send one flexible reminder.',
       'Availability conflict policy: skip-when-busy',
       'Availability source policy: calendar-only',
       'Availability calendar account: googlecalendar / calendar-account',
-      '',
+    ]
+    const snapshotLines = [
       AVAILABILITY_CONFLICT_BLOCK_START,
       'Availability conflict snapshot:',
       '- generatedAt: 2026-04-08T09:00:00.000Z',
       '- expiresAt: 2026-04-09T09:00:00.000Z',
       '- 2026-04-08T09:30:00.000Z / 2026-04-08T10:30:00.000Z',
+      AVAILABILITY_CONFLICT_BLOCK_END,
+    ]
+    const malformedSnapshot = evidenceKind === 'missing-end'
+      ? snapshotLines.slice(0, -1)
+      : evidenceKind === 'markerless'
+        ? snapshotLines.slice(1, -1)
+        : evidenceKind === 'duplicate-start'
+          ? [AVAILABILITY_CONFLICT_BLOCK_START, ...snapshotLines]
+          : [AVAILABILITY_CONFLICT_BLOCK_END, ...snapshotLines]
+    canonicalAutomation.instructions = [
+      ...baseInstructions,
+      '',
+      ...malformedSnapshot,
     ].join('\n')
+    if (overlayKind === 'support') {
+      canonicalAutomation.supportKind = 'reminder'
+    }
+    if (overlayKind === 'retry') {
+      await updateCanonicalRuntimeState(
+        vaultRoot,
+        canonicalJob.jobId,
+        (record) => ({
+          ...record,
+          state: {
+            ...record.state,
+            lastFailedAt: '2026-04-08T09:45:00.000Z',
+            lastSucceededAt: null,
+          },
+        }),
+      )
+    }
     const providerStarted = vi.fn()
     const deliveryAttempted = vi.fn()
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
@@ -2955,14 +3013,15 @@ describe('assistant cron runtime orchestration', () => {
         stripAutomationAvailabilityConflictEvidenceForProvider(
           input.instructions,
         )
-      expect(providerInstructions).toContain(
-        'Independent automation authority (engine-supplied):',
-      )
+      expect(providerInstructions).toContain(expectedOverlay)
       expect(providerInstructions).not.toContain(
         AVAILABILITY_CONFLICT_BLOCK_START,
       )
       expect(providerInstructions).not.toContain(
         '2026-04-08T09:30:00.000Z',
+      )
+      expect(providerInstructions).not.toContain(
+        'Availability conflict snapshot:',
       )
       const context = {
         decision: {
@@ -2996,7 +3055,8 @@ describe('assistant cron runtime orchestration', () => {
       },
       status: 'succeeded',
     })
-  })
+    },
+  )
 
   it.each([
     [
