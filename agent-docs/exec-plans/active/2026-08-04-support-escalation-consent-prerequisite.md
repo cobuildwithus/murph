@@ -80,15 +80,16 @@ Updated: 2026-08-04
 - Focused prompt, prompt-budget, tool-contract, and real-model scenario suites
   pass 99 tests; 25 credential-gated live-provider cases compile and skip.
   Assistant Engine typecheck, docs drift, and diff checks pass. The compact
-  execution kernel measures 2,970 characters against its strict sub-3,000
-  ratchet.
+  execution-kernel runtime literal is 2,975 characters / 2,979 UTF-8 bytes and
+  passes its strict sub-3,000-byte ratchet.
 - The original production App Server paired capture plus exact serialized-field
   correction measurement uses `gpt-5.6-terra`, low reasoning, the exact support
   tool, identical direct/group fixtures, and `gpt-tokenizer` 3.4.0
   `o200k_harmony`. Direct moves from 22,938 tokens / 106,468 bytes to 23,020 /
   106,951 (+82 tokens, +0.3575%; +483 bytes, +0.4537%). Group moves from 19,504
   / 91,094 to 19,586 / 91,577 (+82 tokens, +0.4204%; +483 bytes, +0.5302%).
-  Attribution is +2 tokens/+8 bytes for compact base support guidance,
+  Attribution is +22 tokens/+116 bytes for compact base support guidance
+  (the first-reviewed +20/+108 plus correction +2/+8),
   +30/+190 for the ordinary-feedback exception, and +30/+177 for the
   support-aware tool description; schema and other provider fields are zero.
 - Preliminary specialist ReviewGPT found three valid gaps: phase-one completion
@@ -103,6 +104,9 @@ Updated: 2026-08-04
   without relaunching the audit. The correction uses maximum disclosure before
   approval and a completion claim valid for metadata-only delivery, later
   detailed delivery, daily-cap suppression, and replay.
-- Exact-head CI is pending on `c85a380a47`. Production fingerprint convergence
-  remains a post-merge deployment prerequisite, so the stacked Web PR stays
-  draft.
+- Correction-verification ReviewGPT round 2 at `755e6cbb9c` returned `PASS`
+  with no findings. Its documentation discrepancies were reconciled: runtime
+  kernel size, complete provider attribution, and potential rather than definite
+  linkage in the architecture/security owners. Exact-head CI passed before this
+  explanatory doc correction. Production fingerprint convergence remains a
+  post-merge deployment prerequisite, so the stacked Web PR stays draft.
