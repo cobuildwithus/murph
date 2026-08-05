@@ -80,6 +80,9 @@ const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const SLEEP_DURATION_SCOPE = hostedVaultShareProjectionKindToScope("sleep-duration-days.v0");
+const DEEP_SLEEP_SOURCES_SCOPE = hostedVaultShareProjectionKindToScope(
+  "deep-sleep-sources-days.v1",
+);
 const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
 
 const JOIN_POLICY = {
@@ -1143,6 +1146,41 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     // the current-version gate stays on web joins only.
     expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledTimes(1);
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+  });
+
+  it("grants only the exact by-source sleep scope bound to a reaction offer", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      offerProjectionKinds: ["deep-sleep-sources-days.v1"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now,
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({
+      grantedVaultShareProjectionScopes: [PROFILE_SCOPE, DEEP_SLEEP_SOURCES_SCOPE],
+      selectedVaultShareProjectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
+    });
+
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      tx,
+    });
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
+      expect.objectContaining({ projectionScope: SLEEP_SCOPE }),
+    );
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
+      expect.objectContaining({ projectionScope: SLEEP_DURATION_SCOPE }),
+    );
   });
 
   it("fails a join offer closed when launch consent was never granted", async () => {

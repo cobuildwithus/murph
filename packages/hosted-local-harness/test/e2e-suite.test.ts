@@ -208,6 +208,7 @@ describe("hosted-local E2E suite preparation", () => {
     expect(vitestCalls[3]).toEqual(expect.objectContaining({
       args: expect.arrayContaining([
         "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
+        "apps/cloudflare/test/hosted-local-group-sleep-source-sharing-e2e.test.ts",
         "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
         "apps/cloudflare/test/hosted-local-linq-group-route-drift-e2e.test.ts",
         "apps/cloudflare/test/hosted-local-linq-home-line-reroute-retry-e2e.test.ts",
