@@ -1586,6 +1586,18 @@ readiness is overlapped, a failed preparation may still leave a best-effort
 warm shell behind; write-fence
 ownership remains the only authority to invoke or commit runtime work. The Temporal
 caller sends its existing ensure-processing HTTP timeout as an internal header.
+An expected managed AI usage denial observed by the workspace read is not a
+transport preparation failure. Cloudflare binds the denied allowance to the
+fresh write fence and narrows a default invocation to the existing
+`system_mailbox` path, which imports eligible model-free system work and exits
+before foreground assistant admission. It binds that effective processing mode
+into the same fence so controller priority, preemption, and the container job
+cannot diverge; the fence also rejects all metered provider egress if the runtime
+reaches one unexpectedly. Explicit media
+retention remains model-free, and custom inference keeps its selected route.
+This keeps a racing payloadless direct wake from manufacturing `runtime_error`
+state or mutating restored assistant recovery while Web and Temporal remain the
+usage-policy and durable-reconciliation owners.
 Cloudflare treats that value as an operational hint only: the foreground
 pre-accept budget is clamped by Cloudflare's configured web-control timeout, and
 workspace read/readiness steps are capped by the remaining budget. Accepted
@@ -2173,6 +2185,14 @@ aborts that pre-publication work, unwinds the snapshot session and temporary
 archive, and returns to foreground import. Once canonical publication begins,
 the checkpoint completes and the consumed wake is retained for immediate
 post-commit foreground handling.
+If an interrupting runtime notification's immediate mailbox probe finds neither
+runnable conversation work nor system mailbox work that explains the
+notification, that single empty probe is not checkpoint authority. The runtime
+retains the notification and restarts the existing idle checkpoint quiet window
+so a later causal mailbox wake can enter foreground admission first. It records
+only the probe outcome, counts, lane watermarks, and checkpoint-deferral
+decision; message contents and item identifiers remain out of runtime
+diagnostics.
 Retryable mailbox import blocks are mailbox-continuation checkpoints even when
 an earlier assistant or device wake wins the projected `nextWakeReason`; web
 uses the redacted `hostedMailboxRetryableBlockedCount` as the explicit signal.

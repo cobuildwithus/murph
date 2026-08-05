@@ -78,14 +78,18 @@ export function markCallbackConnectedSource(
 export function markLocallyDisconnectedSources(
   sources: readonly ConnectSource[],
   disconnectedConnectionIds: ReadonlySet<string>,
+  disconnectedSourceIds: ReadonlySet<string> = new Set(),
 ): readonly ConnectSource[] {
-  if (disconnectedConnectionIds.size === 0) {
+  if (disconnectedConnectionIds.size === 0 && disconnectedSourceIds.size === 0) {
     return sources;
   }
 
   return sources.map((source) => {
     const connectionId = source.disconnectConnectionId;
-    if (!connectionId || !disconnectedConnectionIds.has(connectionId)) {
+    if (
+      !disconnectedSourceIds.has(source.id)
+      && (!connectionId || !disconnectedConnectionIds.has(connectionId))
+    ) {
       return source;
     }
 
@@ -94,6 +98,7 @@ export function markLocallyDisconnectedSources(
       connectProvider,
       disconnectConnectionId,
       disconnectScope,
+      disconnectSourceProviderSlug,
       recoveryKind,
       requiresReconnect,
       ...locallyDisconnectedSource
@@ -102,6 +107,7 @@ export function markLocallyDisconnectedSources(
     void connectProvider;
     void disconnectConnectionId;
     void disconnectScope;
+    void disconnectSourceProviderSlug;
     void recoveryKind;
     void requiresReconnect;
 

@@ -2,6 +2,8 @@ import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { normalizeJunctionResourceName } from "@murphai/importers/device-providers/junction-resources";
 
 export { normalizeJunctionResourceName };
+/** Exact Junction connection-source owner for companion WHOOP HRV uploads. */
+export const JUNCTION_COMPANION_HRV_SOURCE_PROVIDER = "whoop_v2";
 export const JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE =
   "JUNCTION_COMPANION_HRV_OBSERVATION_INVALID";
 export {

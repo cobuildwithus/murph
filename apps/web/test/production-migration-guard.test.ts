@@ -1130,6 +1130,10 @@ describe("hosted web production migration guard", () => {
       path.join(appRoot, "scripts", "verify-fast.sh"),
       "utf8",
     );
+    const productionNextBuildScript = await readFile(
+      path.join(appRoot, "scripts", "run-production-next-build.sh"),
+      "utf8",
+    );
 
     const scripts = packageJson.scripts ?? {};
     const buildScript = scripts.build ?? "";
@@ -1144,6 +1148,8 @@ describe("hosted web production migration guard", () => {
 
     assert.match(buildScript, /pnpm prisma:generate/u);
     assert.match(buildScript, /pnpm typecheck:prepared/u);
+    assert.match(buildScript, /bash scripts\/run-production-next-build\.sh/u);
+    assert.doesNotMatch(buildScript, /&& next build &&/u);
     assert.equal(
       typecheckScript,
       "pnpm health-commons:generate && pnpm prisma:generate && pnpm typecheck:prepared",
@@ -1158,23 +1164,43 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       buildScript,
-      /pnpm typecheck:prepared && next build/u,
+      /pnpm typecheck:prepared && bash scripts\/run-production-next-build\.sh/u,
     );
     assert.match(
       buildScript,
       /^node \.\.\/\.\.\/scripts\/run-with-host-verification-slot\.mjs 'apps\/web build' -- bash -c /u,
     );
-    assert.match(buildScript, /next build/u);
+    assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
+    assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
+    assert.match(productionNextBuildScript, /typecheck_worker_old_space_mb=3072/u);
+    assert.match(
+      productionNextBuildScript,
+      /sed -E 's\/\(\^\|\[\[:space:\]\]\)--max\[-_\]old\[-_\]space\[-_\]size/u,
+    );
+    assert.match(
+      productionNextBuildScript,
+      /require\.resolve\("next\/dist\/bin\/next"\)/u,
+    );
+    assert.match(
+      productionNextBuildScript,
+      /exec node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
+    );
+    assert.match(
+      verifyFastScript,
+      /local next_build_command=\(bash "\$script_dir\/run-production-next-build\.sh"\)/u,
+    );
     assert.doesNotMatch(buildScript, /migrate:production/u);
     assert.doesNotMatch(buildScript, /release:production:contract-migrate/u);
     assert.doesNotMatch(buildScript, /release:production:migrate/u);
     assert.doesNotMatch(buildScript, /run-production-migrations/u);
     assert.ok(
-      buildScript.indexOf("pnpm prisma:generate") < buildScript.indexOf("next build"),
+      buildScript.indexOf("pnpm prisma:generate") <
+        buildScript.indexOf("run-production-next-build.sh"),
       "non-mutating build prep must finish before next build",
     );
     assert.ok(
-      buildScript.indexOf("pnpm typecheck:prepared") < buildScript.indexOf("next build"),
+      buildScript.indexOf("pnpm typecheck:prepared") <
+        buildScript.indexOf("run-production-next-build.sh"),
       "the TypeScript 7 source check must finish before Next validates its generated contracts",
     );
     assert.match(verifyFastScript, /^set -euo pipefail$/mu);

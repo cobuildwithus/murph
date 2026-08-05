@@ -231,6 +231,7 @@ export class RunnerStateStore {
   async bindWriteFenceInvocationFacts(input: {
     customInferenceEnvelope: string | null;
     platformAiUsageAllowed: boolean | null;
+    processingMode?: RunnerRuntimeProcessingMode | null;
     token: RunnerWriteFenceToken;
     workspaceVersion: string;
   }): Promise<RunnerWriteFenceToken> {
@@ -248,9 +249,13 @@ export class RunnerStateStore {
       : input.platformAiUsageAllowed
         ? 1
         : 0;
+    if (input.processingMode !== undefined) {
+      meta.active_reason = readRunnerRuntimeProcessingMode(input.processingMode);
+    }
     this.writeMetaRowSync(meta);
     return {
       ...input.token,
+      processingMode: readRunnerRuntimeProcessingMode(meta.active_reason),
       workspaceVersion: meta.active_workspace_version,
     };
   }

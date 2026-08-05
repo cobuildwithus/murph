@@ -110,7 +110,6 @@ import {
   resolveHostedMemberRoutingByTelegramUserId,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-store";
-import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
   prepareHostedCryptoDomainRootCandidates,
   provisionActiveHostedDomainRootEnvelopeForUserOnly,
@@ -2590,31 +2589,15 @@ function buildHostedFamilyDirectPaidSubscriptionItems(
     input.currentPriceId,
   );
 
-  if (!recurringItem) {
+  if (!recurringItem || input.subscription.items.data.length !== 1) {
     throw buildHostedFamilyDirectPaidSubscriptionItemsUnsupportedError();
   }
 
-  const items: Stripe.SubscriptionUpdateParams.Item[] = [{
+  return [{
     id: recurringItem.id,
     price: input.targetPriceId,
     quantity: input.seatCount,
   }];
-
-  for (const item of input.subscription.items.data) {
-    if (item.id === recurringItem.id) {
-      continue;
-    }
-    if (isHostedStripeLegacyAiUsageMeteredItem(item)) {
-      items.push({
-        deleted: true,
-        id: item.id,
-      });
-      continue;
-    }
-    throw buildHostedFamilyDirectPaidSubscriptionItemsUnsupportedError();
-  }
-
-  return items;
 }
 
 async function normalizeHostedFamilyDirectPaidSubscriptionMetadata(input: {

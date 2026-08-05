@@ -21,6 +21,7 @@ import { SettingsAuthRequired } from "./settings-auth-required";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
 import { PulseTrialBillingContinuation } from "@/src/components/settings/hosted-start-paid-pulse-button";
+import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
 import { Watch } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
@@ -58,6 +59,10 @@ import {
   HOSTED_START_PAID_PULSE_RETURN_PARAM,
   HOSTED_START_PAID_PULSE_RETURN_VALUE,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
+import {
+  HOSTED_BILLING_PLAN_CHANGE_CANCELED_RETURN_VALUE,
+  parseHostedBillingPlanChangeReturnValue,
+} from "@/src/lib/hosted-onboarding/billing-plan-change-contract";
 import { hasHostedMemberOwnActiveBilling } from "@/src/lib/hosted-onboarding/entitlement";
 import {
   readHostedFamilyAccessForMember,
@@ -107,6 +112,7 @@ type SettingsSearchParams = {
   signature?: string | string[] | undefined;
   startPulse?: string | string[] | undefined;
   startGroup?: string | string[] | undefined;
+  planUpdate?: string | string[] | undefined;
   usageCheckout?: string | string[] | undefined;
   usageFamily?: string | string[] | undefined;
   usageMember?: string | string[] | undefined;
@@ -119,9 +125,9 @@ const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams?: Promise<SettingsSearchParams>;
-} = {}) {
-  const resolvedSearchParams = searchParams ? await searchParams : {};
+  searchParams: Promise<SettingsSearchParams>;
+}) {
+  const resolvedSearchParams = await searchParams;
   const openEmailLink =
     readFirstSearchParamValue(resolvedSearchParams.addEmail) === "true";
   const addUsageTarget = readOnlySearchParamValue(resolvedSearchParams.addUsage);
@@ -136,6 +142,9 @@ export default async function SettingsPage({
     readFirstSearchParamValue(
       resolvedSearchParams[HOSTED_START_PAID_GROUP_RETURN_PARAM],
     ) === HOSTED_START_PAID_GROUP_RETURN_VALUE;
+  const planChangeReturn = parseHostedBillingPlanChangeReturnValue(
+    readOnlySearchParamValue(resolvedSearchParams.planUpdate),
+  );
   const { authenticated, authenticatedMember, session } =
     await getHostedDashboardPageAuthSnapshot();
   // Stripe sends the payment-method return here unsigned-in when the member
@@ -145,7 +154,11 @@ export default async function SettingsPage({
   const pulseTrialPaymentReturn = readPulseTrialPaymentReturn(resolvedSearchParams);
 
   if (!authenticated) {
-    if (pulseTrialPaymentReturn === null && !groupPaymentMethodSaved) {
+    if (
+      pulseTrialPaymentReturn === null
+      && !groupPaymentMethodSaved
+      && planChangeReturn === null
+    ) {
       redirect("/");
     }
     return <SettingsAuthRequired />;
@@ -155,6 +168,9 @@ export default async function SettingsPage({
   // session-bound cookie, so hand the now-authenticated visitor back to it.
   if (pulseTrialPaymentReturn) {
     redirect(pulseTrialPaymentReturn);
+  }
+  if (planChangeReturn === HOSTED_BILLING_PLAN_CHANGE_CANCELED_RETURN_VALUE) {
+    redirect("/settings#subscription");
   }
 
   const pulseTrialBillingContinuationAction =
@@ -296,6 +312,14 @@ export default async function SettingsPage({
   const currentPlanCode = parseHostedBillingPlanCode(
     billingRef?.currentBillingPlanCode,
   );
+  const directPlanUpdateTarget =
+    planChangeReturn === "launch_edge_monthly"
+      || planChangeReturn === "launch_monthly"
+      ? planChangeReturn
+      : null;
+  const planChangePending =
+    directPlanUpdateTarget !== null
+    && currentPlanCode !== directPlanUpdateTarget;
   const scheduledPlanCode = parseHostedBillingPlanCode(
     billingRef?.scheduledBillingPlanCode,
   );
@@ -444,6 +468,12 @@ export default async function SettingsPage({
             action={pulseTrialBillingContinuationAction}
           />
         ) : null}
+        {directPlanUpdateTarget ? (
+          <HostedPlanUpdateReturn
+            active={currentPlanCode === directPlanUpdateTarget}
+            targetPlanCode={directPlanUpdateTarget}
+          />
+        ) : null}
         <HostedBillingSettings
           authenticated={authenticated}
           billingStatus={authenticatedMember?.billingStatus}
@@ -451,6 +481,7 @@ export default async function SettingsPage({
           canSwitchToGroup={canSwitchToGroup}
           familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
           groupPaymentMethodSaved={groupPaymentMethodSaved}
+          planChangePending={planChangePending}
           pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
           canStartPaidPulse={
             !hasScheduledPlanChange &&
@@ -527,7 +558,7 @@ export default async function SettingsPage({
           AI model
         </div>
         <HostedAssistantModelSettings
-          canUpgradeToEdge={canUpgradeToEdge}
+          canUpgradeToEdge={canUpgradeToEdge && !planChangePending}
           chatCompletionsAvailable={isHostedCustomChatCompletionsEnabled()}
           configurationAvailable={account?.assistant?.configurationAvailable === true}
           customInferenceAvailable={isHostedCustomInferenceEnabled()}

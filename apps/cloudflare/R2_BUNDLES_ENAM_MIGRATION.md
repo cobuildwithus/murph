@@ -1,806 +1,293 @@
-# Hosted R2 bundles: OC to ENAM migration
+# Hosted R2 bundles: OC to ENAM with Super Slurper
 
-> **Emergency frozen-window fallback only.** This command requires a fully
-> fenced source, exact mirror parity, and a writer-exclusive destination. It
-> must not be used for the live two-bucket bridge or after ENAM accepts writes.
-> The zero-user-visible-downtime operator sequence is documented in
-> `R2_BUNDLES_ENAM_ONLINE_CUTOVER.md`; its separate online command never prunes
-> destination-native data.
+This runbook moves hosted bundle data with Cloudflare-managed
+[Super Slurper](https://developers.cloudflare.com/r2/data-migration/super-slurper/).
+There is no application-owned copier, copy journal, queue, or migration state.
 
-This temporary operator runbook moves the hosted `BUNDLES` data from Oceania
-(`OC`) to Eastern North America (`ENAM`). Delete it and the migration command
-after the old buckets are retired.
+The temporary runtime bridge remains in place until the ENAM destination is
+active and the OC source has completed its fallback and URL drain. Promotion
+changes `HOSTED_R2_CUTOVER_PHASE`; it does not transpose the fixed bucket
+bindings.
 
-The application already reads one bucket binding and one matching presign
-bucket. The move therefore needs no dual-read runtime, fallback, or data-model
-change: create dedicated ENAM buckets, copy and prove them, then switch the
-existing configuration in one immediate deploy.
+## Fixed roles
 
-The entire copy happens inside a single maintenance window. There is no live
-pre-seed, so the copy is not racing a running product. The source is still not
-assumed to be immutable: ordinary snapshot cleanup can delete an object at any
-time, including a platform retry of an attempt that failed before the window,
-and no operator control can prevent that. The migration therefore converges on
-the source as it actually is — it copies what is there and removes destination
-objects the source no longer has — instead of aborting the window whenever the
-source moves.
+- `BUNDLES` and `HOSTED_R2_PRESIGN_BUCKET_NAME` name the OC source.
+- `BUNDLES_ENAM` and `HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME` name the ENAM
+  destination.
+- `HOSTED_R2_CUTOVER_PHASE=source_active` keeps reads, writes, and new direct
+  uploads on OC.
+- `HOSTED_R2_CUTOVER_PHASE=destination_active` makes ENAM authoritative while
+  retaining ENAM-to-OC read fallback and dual-bucket deletion.
+- `HOSTED_R2_WRITE_ADMISSION=open` admits normal runtime starts and wakes.
+  `paused` makes the Worker return `retry_later` before any UserRunner Durable
+  Object call, so the existing encrypted mailbox remains the only durable
+  backlog while current invocations drain.
+- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` is a temporary lowercase SHA-256
+  digest of one operator-selected member ID. It never contains the raw member
+  ID. It can admit only that member's callback-signed Temporal ensure while the
+  phase is `destination_active` and write admission is `paused`; source-active
+  pauses, every other member, and every Vercel OIDC hint remain fenced.
 
-## Safety contract
+Deploy preflight verifies that both source bindings report OC, both destination
+bindings report ENAM, and every bucket uses Standard storage. Keep these roles
+fixed until a later ENAM-only cleanup removes the bridge.
 
-- Run the migration only inside the fence. The command requires
-  `--source-frozen` in both its read-only and `--apply` forms; there is no
-  phase that is safe to run against a live source.
-- Before the destination exists, close account-deletion admission, retire every
-  predecessor invocation, and prove every frozen source object belongs to a
-  current canonical hosted-member namespace or is an exact legacy bundle key
-  reached from that member's canonical workspace snapshot reference. Unknown
-  or unowned placement blocks the migration without printing its key.
-- The OC source remains authoritative until the binding switch and remains the
-  rollback source until the first durable ENAM checkpoint. The tool never
-  deletes from the OC source.
-- The destination must equal the source exactly when a run ends. A destination
-  object the source no longer has is expected drift, not corruption, and is
-  removed by an explicit `--prune <count>` whose count must match what the
-  read-only gate reported. Without `--prune` the run still fails closed.
-- The prune is the only delete this tool can issue. It can name only the
-  destination bucket, only runs under `--apply`, requires the pair marker,
-  requires an exact operator-supplied count, and re-reads the source to confirm
-  each key is still absent before removing it. It can never name the source.
-- Aborting is free before the first ENAM checkpoint. Nothing at the source has
-  changed and no configuration has moved. Recovery is the abandonment procedure
-  below, then a fresh destination and another run. Never delete or recreate an
-  OC source.
-- Keep the production ENAM destination unbound and writer-exclusive until
-  cutover. Use a temporary Object Read & Write key scoped only to the exact
-  bucket pair.
-- The run lists the source, then issues bounded, explicit `CopyObject`
-  requests. Each request uses R2's required leading-slash source, the listed
-  source ETag as a precondition, metadata `COPY`, and Standard storage. There
-  is no `sync` heuristic or multipart path.
-- R2 does not implement `x-amz-checksum-algorithm` for `CopyObject`, and
-  SHA-256 `FULL_OBJECT` is not an implemented R2 checksum combination. For this
-  migration, a destination `ChecksumSHA256` returned after `CopyObject` is
-  diagnostic only. The representative proof streams both objects under their
-  exact ETags and requires both body digests and copied `encryptedsha256`
-  metadata to equal the canonical v2 snapshot reference.
-- Objects at the single-copy limit, non-Standard objects, and multipart or
-  non-MD5 ETags fail closed, as does any object still staged under a
-  lifecycle-managed prefix.
-- The first run against an empty destination reads back its lifecycle rules,
-  conditionally creates one zero-byte marker bound to the exact pair, and
-  proves that marker is the only object before copying. Every later run against
-  that destination requires that exact marker.
-- Every run ends with the same read-only proof: two stable inventory reads, the
-  exact marker, and exact key, size, ETag, and storage-class parity with zero
-  destination-only objects. The proof reports both divergence directions
-  together, so a mixed result never presents as a pure one. Running the command
-  without `--apply` performs only that proof, which is how the post-deploy gates
-  in section 7 work.
-- `--source-frozen` is an operator assertion that ordinary writers are paused,
-  not a claim that nothing can delete. Keep the external fence active through
-  the copy, variable readback, both deploys, the post-deploy proofs, direct
-  smokes, and both controlled restore wakes.
+## Managed-copy contract
 
-### Abandoning a destination
+- The OC source is read-only to migration tooling. Never delete, rename, or
+  overwrite a source object.
+- Use temporary R2 credentials scoped to the required source and destination
+  only. Keep credentials in the operator session; never print, persist, or pass
+  them in command arguments.
+- Do not overwrite destination objects. An existing destination object must
+  already have the expected byte size.
+- Copy only the approved immutable manifest. Exclude mutable fixed keys,
+  unknown or unowned placement, legacy global placement, and lifecycle-managed
+  raw email, private-media, and meal-photo objects.
+- Verify exact object-key and byte-size parity. Do not require ETag parity:
+  Super Slurper may use multipart transfer and produce a different destination
+  ETag for identical bytes.
+- Never promote a quarantined destination. A failed destination may be retained
+  as evidence, but a new attempt uses a fresh ENAM bucket.
 
-This is the recovery path for every pre-commit failure, so it must be a real
-procedure rather than an intention. It applies only to an ENAM destination that
-is still unbound and writer-exclusive, and therefore contains nothing but
-copies of the source and the pair marker. Confirm both facts before starting:
-the bucket name must not appear in any of the three production variables, and
-the migration key must still be the pair-scoped one.
+## Ownership and recovery decision
 
-**Mint a destination-only credential first. Do not use the pair-scoped
-migration key for this.** A recursive delete is the one command in this runbook
-that can destroy the authoritative dataset, and the pair-scoped key is
-authorized for the source as well, so a stale, unset, or transposed bucket
-variable would be enough to erase OC. Shell-variable discipline is not an
-adequate guard for that outcome; the credential must make it impossible.
+This is one indivisible, one-time managed migration transition:
 
-Issue a temporary Object Read & Write key scoped to `$DESTINATION_BUCKET`
-alone and load it into `R2_MIGRATION_ACCESS_KEY_ID` and
-`R2_MIGRATION_SECRET_ACCESS_KEY` in place of the pair-scoped key. Run the
-whole abandonment as one fail-closed block. It removes every ambient AWS
-credential source, binds the destination-only key explicitly, proves the exact
-pair marker exists in the named destination, and requires the source probe to
-fail specifically with `AccessDenied` before either destructive command runs:
+- Cloudflare Super Slurper owns every copy mutation, job state, and transfer
+  retry.
+- The operator owns the private, read-only ownership query, in-memory approved
+  manifest, exact-key job batches, terminal-job reconciliation, and two fresh
+  key-and-size parity reads. Keep the exact keys and private identifiers out of
+  repository artifacts; retain only aggregate evidence in the private change
+  record.
+- The application owns only the fixed-role deploy check and the temporary
+  runtime cutover safety bridge.
 
-```bash
-(
-  set -euo pipefail
-  test -n "$SOURCE_BUCKET"
-  test -n "$DESTINATION_BUCKET"
-  test "$DESTINATION_BUCKET" != "$SOURCE_BUCKET"
-  test -n "$R2_MIGRATION_ACCESS_KEY_ID"
-  test -n "$R2_MIGRATION_SECRET_ACCESS_KEY"
+No repository-executable migration verifier remains. Keeping one would turn a
+completed one-time transition into a permanent production-database and object-
+inventory integration. The managed rehearsal already proved the same operator
+procedure against the real service. Production repeats it under the write
+fence, using the authoritative read-only database path and independent R2
+inventories described below. The operator must be able to reproduce the
+manifest and both parity comparisons from a clean process before promotion; a
+dashboard progress total alone is never sufficient proof.
 
-  unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
-  unset AWS_ROLE_ARN AWS_ROLE_SESSION_NAME AWS_WEB_IDENTITY_TOKEN_FILE
-  unset AWS_CONTAINER_CREDENTIALS_FULL_URI AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
-  export AWS_ACCESS_KEY_ID="$R2_MIGRATION_ACCESS_KEY_ID"
-  export AWS_SECRET_ACCESS_KEY="$R2_MIGRATION_SECRET_ACCESS_KEY"
-  export AWS_EC2_METADATA_DISABLED=true
-  export AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null
-  R2_ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+Recovery is intentionally narrow. Before promotion, any unresolved job result,
+key classification, ownership change, or parity mismatch quarantines the whole
+destination and restarts with a fresh bucket. After ENAM accepts production
+writes, recovery is forward-only and limited to identified missing approved
+objects; broad copying and OC-only rollback are unsupported. There is no frozen-
+window fallback or application-owned abnormal-stop command.
 
-  MARKER_KEY="$(node -e '
-    const { createHash } = require("node:crypto");
-    const [source, destination] = process.argv.slice(1);
-    const pair = createHash("sha256").update(`${source}\0${destination}`).digest("hex");
-    process.stdout.write(`_murph/r2-bundles-migration/${pair}.marker`);
-  ' "$SOURCE_BUCKET" "$DESTINATION_BUCKET")"
-  aws s3api head-object --bucket "$DESTINATION_BUCKET" --key "$MARKER_KEY" \
-    --endpoint-url "$R2_ENDPOINT" --region auto --no-cli-pager >/dev/null
+The runtime bridge remains because old direct-upload capabilities, warm Durable
+Objects, lifecycle-managed objects, and deletion retries can legitimately refer
+to either fixed bucket after transfer finishes. Remove it only after the URL,
+lifecycle, fallback-observation, cold-restore, and OC-retirement gates at the end
+of this runbook all pass.
 
-  ABANDONMENT_TMP_DIR="$(mktemp -d)"
-  SOURCE_PROBE_ERROR="$ABANDONMENT_TMP_DIR/source-probe.err"
-  trap 'rm -f "$SOURCE_PROBE_ERROR"; rmdir "$ABANDONMENT_TMP_DIR"' EXIT
-  if aws s3api list-objects-v2 --bucket "$SOURCE_BUCKET" --max-items 1 \
-    --endpoint-url "$R2_ENDPOINT" --region auto --no-cli-pager \
-    >/dev/null 2>"$SOURCE_PROBE_ERROR"; then
-    echo "Destination-only credential can read the source; stop." >&2
-    exit 1
-  fi
-  if ! grep -q 'AccessDenied' "$SOURCE_PROBE_ERROR"; then
-    echo "Source probe did not fail with AccessDenied; stop." >&2
-    exit 1
-  fi
+## Dashboard wizard or jobs API
 
-  aws s3 rm "s3://$DESTINATION_BUCKET" --recursive \
-    --endpoint-url "$R2_ENDPOINT" --region auto --no-cli-pager
-  pnpm --dir apps/cloudflare exec wrangler r2 bucket delete "$DESTINATION_BUCKET"
-)
+The dashboard wizard is the preferred whole-bucket path when a frozen source
+inventory is exactly the approved migration manifest.
+
+The production OC bucket may also contain excluded lifecycle, legacy, mutable,
+or unowned objects. In that case, the whole-bucket wizard is unsafe. Use the
+same managed Super Slurper service through its jobs API and provide exact
+`source.keys` batches. Super Slurper accepts at most 10,000 explicit keys per
+job; smaller byte-balanced batches make progress and recovery easier to audit.
+Generate the manifest in memory from authoritative current ownership and
+canonical snapshot state. Do not write keys or private identifiers to logs or
+repository files.
+
+## Production sequence
+
+### 1. Deploy and prove the bridge
+
+Deploy the two fixed bindings with `HOSTED_R2_CUTOVER_PHASE=source_active` and
+`HOSTED_R2_WRITE_ADMISSION=open`.
+Require current runner status from every relevant Durable Object and wait for
+pre-bridge Worker and Durable Object invocations to drain. Ordinary reads,
+writes, lists, and new direct uploads must still resolve to OC.
+
+### 2. Stabilize ownership and prove the warm baseline while admission stays open
+
+Enable the account-deletion maintenance control at both admission and effect
+boundaries so the approved ownership set cannot shrink during the managed copy.
+Keep `HOSTED_R2_CUTOVER_PHASE=source_active` and
+`HOSTED_R2_WRITE_ADMISSION=open`: messages and ordinary runtime work continue
+against OC throughout the bulk transfer.
+
+An already-completed warm transfer that ran before account-deletion maintenance
+is copy progress only, not an approved baseline checkpoint. After maintenance is
+active, rebuild the approved manifest and inventory ENAM. If ENAM contains an
+object outside that current manifest, quarantine the destination and restart
+with a fresh destination; never delete or mutate OC to reconcile it. Otherwise
+copy only currently approved missing keys and continue with baseline parity.
+
+Read current hosted ownership and canonical workspace snapshot state through
+the authorized read-only production path. Admit immutable user-scoped bundle,
+artifact, browser-vault replica, and unique workspace-snapshot keys owned by
+current hosted members. Fail closed on mutable fixed keys, pre-v2 canonical
+snapshots, unknown placement, lifecycle-managed placement, or ownership changes
+during the read. Record aggregate counts and bytes only.
+
+Use the dashboard wizard only when the whole source inventory exactly equals
+the approved manifest. Otherwise create managed jobs with exact key batches and
+destination overwrite disabled. Wait for every baseline job to reach a terminal
+state. If a job stalls or reports a failure, reconcile that job's submitted keys
+against the destination by exact key and size. Retry only missing or mismatched
+keys in a new managed job. Do not infer failure solely from a stale progress
+counter, and do not change the source to recover a destination problem.
+
+Prove exact key-and-size parity for the baseline manifest while runtime writes
+remain open. This is a warm-copy checkpoint, not promotion proof: new immutable
+objects may continue to appear in OC and are handled by the final delta.
+
+### 3. Pause and drain runtime writes
+
+Keep `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` unset. Set
+`HOSTED_R2_WRITE_ADMISSION=paused`, deploy the Worker version to 100 percent,
+and require every status response to report `writeAdmission=paused` and
+`pausedCanaryConfigured=false`. Start a 30-minute pre-promotion deadline when
+the paused version reaches 100 percent. Deploy preflight rejects a canary digest
+while the source remains active.
+The Worker-level check must return `retry_later` for both signed Temporal calls
+and Vercel OIDC direct latency hints without calling UserRunner while the phase
+remains `source_active`. Inbound messages
+remain accepted in the web-owned encrypted mailbox. An invocation already in
+flight may finish work it accepted before the pause; after every runner reports
+`inFlight=false`, Murph replies and other new runtime effects wait until
+admission reopens.
+
+Query every relevant UserRunner until `inFlight=false`. Do not terminate an
+invocation: let it finish its ordinary checkpoint. Record the last completion
+time only after the paused Worker version is at 100 percent. Cloudflare Worker
+versions include their bindings and configuration, but Worker and Durable
+Object code updates are eventually consistent, so the route-level pause and
+explicit per-runner drain are both required:
+[versions and deployments](https://developers.cloudflare.com/workers/versions-and-deployments/),
+[Durable Object lifecycle](https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/).
+
+The production direct-PUT URL lifetime is ten minutes and the upload request
+has a separate conservative ten-minute completion bound. Wait both intervals
+after the last runner becomes idle, then prove there is no in-flight write,
+ticket issuance, or completion. This drain and every remaining pre-promotion
+step must fit inside the same 30-minute deadline.
+
+### 4. Copy and prove the final delta
+
+Build a fresh approved manifest from a clean process after the write drain.
+Inventory both buckets and submit only approved keys that are absent from ENAM;
+an existing destination key must already have the exact source byte size. Wait
+for every delta job to reach a terminal state and reconcile its exact submitted
+keys.
+
+After all jobs finish, inventory both buckets again under the same write fence.
+Require:
+
+- the source inventory and approved manifest are unchanged;
+- every approved key exists in ENAM with the exact byte size;
+- ENAM contains no unapproved migration object; and
+- aggregate object and byte counts match.
+
+Repeat the comparison from another clean operator process. Before revoking the
+migration credential, run direct destination PUT, HEAD, GET, and delete smokes.
+
+The 30-minute deadline is fail-safe, not an estimate to extend. If every
+pre-promotion requirement cannot pass before it expires, or any requirement
+fails, keep `HOSTED_R2_CUTOVER_PHASE=source_active`, deploy
+`HOSTED_R2_WRITE_ADMISSION=open` with the canary digest still unset, require the
+source-active/open version at 100 percent, and prove a queued mailbox item is
+consumed. Do not promote. Reconcile
+or quarantine the non-authoritative destination and retry the final delta in a
+later bounded window. Keep account deletion in maintenance only until any
+outstanding managed jobs are terminal and the destination disposition is known,
+then re-enable it.
+
+### 5. Promote ENAM
+
+Deploy the same bridge with:
+
+```text
+HOSTED_R2_CUTOVER_PHASE=destination_active
+HOSTED_R2_WRITE_ADMISSION=paused
 ```
 
-Prove the bucket is gone afterwards through an authenticated bucket listing,
-then revoke the destination-only key. Do not compare the source count with
-section 1: ordinary cleanup is allowed to remove source objects throughout the
-window, so count equality is not a source-safety proof. The mechanically bound
-destination-only credential, exact pair marker, and denied source probe are the
-proof that abandonment had no authority over OC.
-
-Then release the deletion window before reopening anything. Once the
-destination is gone, OC is the sole authoritative bucket again and deletion is
-safe, so leaving the control set would disable a privacy-critical flow for no
-reason:
-
-1. remove `HOSTED_ACCOUNT_DELETION_MAINTENANCE` from the Vercel production
-   environment and deploy;
-2. prove an authenticated `account.delete` challenge request succeeds again and
-   that the delete route no longer returns `503`; and
-3. only then reopen ordinary writers and rebook.
-
-If the operation aborted before section 5 set the control, there is nothing to
-clear here; confirm it is unset rather than assuming it.
-
-### Account deletion is deferred for the window
-
-From the moment the copy starts until OC is retired, two buckets hold the
-member's objects and either one can still become the active bucket. The runtime
-deletion path only ever targets the currently active bucket, so a deletion
-accepted inside that period could not be completed everywhere: restoring OC
-after a deletion served by ENAM would republish that member's data, and there
-is no durable record of a deleted member to repair it from afterwards.
-
-Rather than accept a deletion we cannot honour completely, the operation
-declines it for the length of the window and tells the member exactly when to
-come back. This is a deliberate product decision, not a technical fallback:
-statutory response windows are measured in days, this deferral is measured in
-hours, and the alternative is a privacy failure that cannot be detected or
-repaired after the fact.
-
-`HOSTED_ACCOUNT_DELETION_MAINTENANCE=1` lives in the Vercel production
-environment for the `murph` web project. It is not read from a file and a bare
-shell assignment does nothing: setting or clearing it requires a production
-environment change followed by a deployment that picks it up.
-
-**One rule owns the window.** The control is set before the destination exists
-so it can close admission while every predecessor invocation retires and the
-frozen source is joined to canonical hosted-member ownership. It remains set
-while an ENAM bucket holds copies that could still become live, and is cleared
-the moment OC is the sole authority again. The cutover owner owns both edges:
-
-| Point in the operation | Control |
-| --- | --- |
-| Section 4 | Unset. |
-| Activation, predecessor retirement, and active-owner gate | Set. The destination does not exist yet. |
-| Activation or owner-gate failure | Cleared by a production environment change and deployment before the operation is rebooked. No destination cleanup is needed. |
-| Copy, cutover, proofs, canary | Set. |
-| Any pre-commit abandonment or overrun | Cleared by the abandonment procedure, before writers reopen. |
-| Successful retirement | Cleared in section 8. |
-
-Do not create the destination until activation, the absolute predecessor wait,
-and the active-owner gate all pass. If a later setup step fails before the copy
-tool creates the pair marker, leave the empty, unbound destination in place,
-revoke its temporary key, clear the control, and rebook. Once the pair marker
-exists, use the mechanically guarded abandonment procedure. No ordinary exit
-leaves the control set.
-
-The message makes no timing promise, not even a relative one. This window runs
-from before the copy until OC retirement, which section 8 permits as late as 24
-hours after cutover and extends when a retirement check fails, so any duration
-the copy named could expire while the window was still open. It tells members
-to try again after maintenance instead; the table above is what bounds the
-window.
-
-Set it as directed in section 5:
-
-```bash
-vercel env add HOSTED_ACCOUNT_DELETION_MAINTENANCE production   # 1
-```
-
-Redeploy production, then prove all three checks before copying:
-`POST /api/settings/sensitive-action-challenge` with `account.delete` and
-`POST /api/settings/privacy/delete` must each return `503` with
-`account_deletion_maintenance`, and `vault.export` must still return `200`.
-
-The challenge route is the one members hit first, so declining there means a
-member who tries during the window is told before any passkey approval and
-before any browser-vault teardown, with the dialog still open and an unspent
-authorization. The delete route keeps the same guard as the effect boundary, so
-a direct request cannot bypass the window.
-
-The whole control — module, one variable, and both call sites — is deleted with
-the runbook.
-
-References: [R2 data location][data-location], [R2 consistency][consistency],
-[R2 authentication][r2-auth], [R2 S3 compatibility][s3-api], and [R2's current
-leading-slash `CopyObject` example][copy-object]. The cutover ordering also
-accounts for [Worker version deployment semantics][worker-versions], [Durable
-Object code-update skew][do-updates], [Durable Object alarms][do-alarms],
-[AWS CLI automatic pagination][aws-cli-pagination],
-[Vercel Function duration limits][vercel-function-duration], and
-[Vercel Skew Protection][vercel-skew-protection].
-
-[data-location]: https://developers.cloudflare.com/r2/reference/data-location/
-[consistency]: https://developers.cloudflare.com/r2/reference/consistency/
-[r2-auth]: https://developers.cloudflare.com/r2/api/tokens/
-[s3-api]: https://developers.cloudflare.com/r2/api/s3/api/
-[copy-object]: https://developers.cloudflare.com/r2/buckets/storage-classes/
-[worker-versions]: https://developers.cloudflare.com/workers/versions-and-deployments/
-[do-updates]: https://developers.cloudflare.com/durable-objects/platform/known-issues/#code-updates
-[do-alarms]: https://developers.cloudflare.com/durable-objects/api/alarms/
-[aws-cli-pagination]: https://docs.aws.amazon.com/cli/latest/userguide/cli-usage-pagination.html
-[vercel-function-duration]: https://vercel.com/docs/functions/configuring-functions/duration
-[vercel-skew-protection]: https://vercel.com/docs/skew-protection
-
-## 1. Size the window before booking it
-
-The fence must cover the whole copy, so book from measured volume and a
-measured rate rather than an assumption.
-
-```bash
-SOURCE_BUCKET="$(gh variable get CF_BUNDLES_BUCKET --env production)"
-pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$SOURCE_BUCKET" --json
-```
-
-Record the reported object count and payload size. Take the copy rate from the
-timed preview rehearsal in section 2, which uses the same account, the same
-command, and the same OC-to-ENAM path. Book the fence with margin over the
-extrapolated copy time plus the fixed cost of section 4's ten-minute PUT drain,
-the cutover deploy, the post-deploy proofs, and both restore canaries. Add
-margin for one prune-and-reprove cycle.
-
-Account deletion stays declined from the start of the copy until section 8
-clears the control after OC retirement, which cannot happen until at least an
-hour after cutover and may be later. Size the operation knowing that. The
-member-facing copy makes no timing promise, so a longer run leaves nothing to
-correct or re-announce.
-
-An overrun is not a data risk. If the copy or any proof does not finish inside
-the booked window, take the abandonment path in the safety contract, which
-clears the deletion window before writers reopen, and rebook. Nothing at the
-source has changed.
-
-## 2. Rehearse the exact copy path on real R2
-
-Move the existing OC preview bucket first; this is both the real R2 rehearsal
-and the preview-bucket migration. Create a distinct ENAM preview destination.
-Bucket location cannot be changed after creation.
-
-```bash
-PREVIEW_SOURCE_BUCKET="$(gh variable get CF_BUNDLES_PREVIEW_BUCKET --env production)"
-PREVIEW_DESTINATION_BUCKET='<new-preview-enam-bucket>'
-pnpm --dir apps/cloudflare exec wrangler r2 bucket create "$PREVIEW_DESTINATION_BUCKET" --location enam
-pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$PREVIEW_SOURCE_BUCKET" --json
-pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$PREVIEW_DESTINATION_BUCKET" --json
-```
-
-If the preview source is empty, first use the existing OC staging Worker to
-write a representative v2 checkpoint; the migration intentionally refuses an
-empty source because it cannot prove a real restore path.
-
-Issue a temporary R2 key limited to that pair. Load it without echoing the
-secret or placing it in an argument:
-
-```bash
-read -r CLOUDFLARE_ACCOUNT_ID
-read -r R2_MIGRATION_ACCESS_KEY_ID
-read -r -s R2_MIGRATION_SECRET_ACCESS_KEY
-export CLOUDFLARE_ACCOUNT_ID R2_MIGRATION_ACCESS_KEY_ID R2_MIGRATION_SECRET_ACCESS_KEY
-```
-
-Stop staging writers, wait ten minutes after the last possible presigned PUT,
-then run the copy and record its wall time. Rerun the read-only form to prove
-the mirror a second time:
-
-```bash
-time pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --source "$PREVIEW_SOURCE_BUCKET" --destination "$PREVIEW_DESTINATION_BUCKET" \
-  --source-frozen --confirm-destination "$PREVIEW_DESTINATION_BUCKET" --apply
-
-pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --source "$PREVIEW_SOURCE_BUCKET" --destination "$PREVIEW_DESTINATION_BUCKET" \
-  --source-frozen
-```
-
-The `Copy plan` line reports the object and byte counts actually copied. Divide
-the recorded wall time by those counts to get the per-object and per-byte rates
-that section 1 extrapolates from.
-
-Deploy a distinct staging Worker through the manual preview path in
-`apps/cloudflare/DEPLOY.md`. Set its binding, presign bucket, and preview bucket
-to `PREVIEW_DESTINATION_BUCKET`, then run both commands:
-
-```bash
-pnpm --dir apps/cloudflare deploy:worker
-pnpm --dir apps/cloudflare deploy:smoke
-```
-
-Before production, require all three proofs:
-
-1. HEAD the same representative v2 snapshot in both buckets. Compare length,
-   ETag, custom metadata, supported HTTP metadata, every returned checksum
-   field other than `ChecksumSHA256`, and checksum type. Then stream both
-   objects under their exact ETags and require each body SHA-256 plus both
-   copied `encryptedsha256` metadata values to equal
-   `snapshotRef.archive.encryptedObjectSha256` from the canonical workspace.
-   Also require the source `ChecksumSHA256` to encode that canonical digest.
-   Do not compare the destination `ChecksumSHA256`: R2 does not implement the
-   checksum-selection field for `CopyObject`, and its reported destination
-   value is not the body-integrity authority for this copy.
-2. Cold-restore that copied snapshot through the staging Worker.
-3. Write and cold-restore a fresh staging checkpoint from ENAM.
-
-Enter the private object key and the canonical reference's lowercase
-`archive.encryptedObjectSha256` without terminal echo. This emits no key,
-metadata, object bytes, or digest; do not use shell tracing:
-
-```bash
-(
-  set -euo pipefail
-  umask 077
-  read -r -s SNAPSHOT_KEY
-  read -r -s EXPECTED_ENCRYPTED_SHA256
-  case "$EXPECTED_ENCRYPTED_SHA256" in
-    (''|*[!0-9a-f]*)
-      echo "Canonical encrypted object SHA-256 must be 64 lowercase hex characters." >&2
-      exit 1
-      ;;
-  esac
-  test "${#EXPECTED_ENCRYPTED_SHA256}" -eq 64
-
-  R2_ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-  head_snapshot() {
-    AWS_ACCESS_KEY_ID="$R2_MIGRATION_ACCESS_KEY_ID" \
-    AWS_SECRET_ACCESS_KEY="$R2_MIGRATION_SECRET_ACCESS_KEY" \
-      aws s3api head-object --bucket "$1" --key "$SNAPSHOT_KEY" \
-        --checksum-mode ENABLED --endpoint-url "$R2_ENDPOINT" --region auto \
-        --output json --no-cli-pager | jq -Sc '.'
-  }
-  stable_copy_head() {
-    jq -Sc \
-      '{CacheControl,ChecksumCRC32,ChecksumCRC32C,ChecksumSHA1,ChecksumType,ContentDisposition,ContentEncoding,ContentLanguage,ContentLength,ContentType,ETag,Expires,Metadata}'
-  }
-  get_snapshot() {
-    AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED \
-    AWS_ACCESS_KEY_ID="$R2_MIGRATION_ACCESS_KEY_ID" \
-    AWS_SECRET_ACCESS_KEY="$R2_MIGRATION_SECRET_ACCESS_KEY" \
-      aws s3api get-object --bucket "$1" --key "$SNAPSHOT_KEY" \
-        --if-match "$2" --endpoint-url "$R2_ENDPOINT" --region auto \
-        --no-cli-pager "$3" >/dev/null
-  }
-  hash_file() {
-    node -e '
-      const { createHash } = require("node:crypto");
-      const { createReadStream } = require("node:fs");
-      const hash = createHash("sha256");
-      const stream = createReadStream(process.argv[1]);
-      stream.on("data", (chunk) => hash.update(chunk));
-      stream.on("error", (error) => {
-        console.error(error.message);
-        process.exitCode = 1;
-      });
-      stream.on("end", () => process.stdout.write(hash.digest("hex")));
-    ' "$1"
-  }
-
-  SOURCE_HEAD="$(head_snapshot "$PREVIEW_SOURCE_BUCKET")"
-  DESTINATION_HEAD="$(head_snapshot "$PREVIEW_DESTINATION_BUCKET")"
-  test -n "$SOURCE_HEAD"
-  test -n "$DESTINATION_HEAD"
-  test "$(stable_copy_head <<<"$SOURCE_HEAD")" \
-    = "$(stable_copy_head <<<"$DESTINATION_HEAD")"
-
-  SOURCE_ETAG="$(jq -er '.ETag | strings | select(length > 0)' <<<"$SOURCE_HEAD")"
-  DESTINATION_ETAG="$(
-    jq -er '.ETag | strings | select(length > 0)' <<<"$DESTINATION_HEAD"
-  )"
-  test "$SOURCE_ETAG" = "$DESTINATION_ETAG"
-
-  SOURCE_METADATA_SHA256="$(
-    jq -er \
-      '.Metadata.encryptedsha256 | ascii_downcase | select(test("^[0-9a-f]{64}$"))' \
-      <<<"$SOURCE_HEAD"
-  )"
-  DESTINATION_METADATA_SHA256="$(
-    jq -er \
-      '.Metadata.encryptedsha256 | ascii_downcase | select(test("^[0-9a-f]{64}$"))' \
-      <<<"$DESTINATION_HEAD"
-  )"
-  test "$SOURCE_METADATA_SHA256" = "$EXPECTED_ENCRYPTED_SHA256"
-  test "$DESTINATION_METADATA_SHA256" = "$EXPECTED_ENCRYPTED_SHA256"
-
-  EXPECTED_CHECKSUM_BASE64="$(
-    node -e \
-      'process.stdout.write(Buffer.from(process.argv[1], "hex").toString("base64"))' \
-      "$EXPECTED_ENCRYPTED_SHA256"
-  )"
-  SOURCE_CHECKSUM_SHA256="$(
-    jq -er '.ChecksumSHA256 | strings | select(length > 0)' <<<"$SOURCE_HEAD"
-  )"
-  test "$SOURCE_CHECKSUM_SHA256" = "$EXPECTED_CHECKSUM_BASE64"
-
-  PROOF_DIR="$(mktemp -d)"
-  trap 'rm -rf -- "$PROOF_DIR"' EXIT
-  get_snapshot "$PREVIEW_SOURCE_BUCKET" "$SOURCE_ETAG" "$PROOF_DIR/source.enc"
-  get_snapshot \
-    "$PREVIEW_DESTINATION_BUCKET" \
-    "$DESTINATION_ETAG" \
-    "$PROOF_DIR/destination.enc"
-  SOURCE_BODY_SHA256="$(hash_file "$PROOF_DIR/source.enc")"
-  DESTINATION_BODY_SHA256="$(hash_file "$PROOF_DIR/destination.enc")"
-  test "$SOURCE_BODY_SHA256" = "$EXPECTED_ENCRYPTED_SHA256"
-  test "$DESTINATION_BODY_SHA256" = "$EXPECTED_ENCRYPTED_SHA256"
-
-  # Close the HEAD-to-GET race: neither object may change during the proof.
-  test "$(head_snapshot "$PREVIEW_SOURCE_BUCKET")" = "$SOURCE_HEAD"
-  test "$(head_snapshot "$PREVIEW_DESTINATION_BUCKET")" = "$DESTINATION_HEAD"
-)
-```
-
-After all three preview proofs pass, revoke the preview-pair migration key. The
-new ENAM preview bucket is now owned by the staging Worker, not an unowned copy.
-
-## 3. Pre-stage rollback-safe runtime credentials
-
-Create a distinct runtime credential scoped exactly to OC and ENAM. Before
-putting it in GitHub, use a unique, self-cleaning probe key to prove that exact
-credential can PUT, HEAD, and delete in both buckets. Do not print the key,
-credential, or response metadata.
-
-Update these two production GitHub secrets without revoking the old key:
-
-- `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`
-- `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`
-
-Use `gh secret list --env production --json name,updatedAt` to record that both
-names changed in the intended maintenance preparation. Secret values must not
-be read back or copied into a file.
-
-While all bucket variables still point to OC, dispatch a separate immediate
-deployment and require the canonical direct-R2 smoke. This proves the exact
-new secret pair, signer, OC binding, and variables-back rollback path before
-the maintenance window. Keep the old key valid for outstanding URLs.
-
-## 4. Establish the production write fence
-
-One cutover owner must prove every item below. Abort if any item is uncertain.
-
-1. Freeze hosted GitHub environment edits and deploy dispatches; prove no
-   hosted deploy is queued or running.
-2. Pause message and browser-vault admission, Cloudflare Email Routing,
-   meal-photo intake, automations, Temporal and cron wakes, and operator jobs
-   that can write BUNDLES.
-3. Confirm every runner has no invocation in flight and the mailbox is drained.
-4. Record the last possible presigned PUT time and wait ten full minutes.
-5. Do not set the deletion-window control yet. Section 5 activates and proves
-   it before creating the destination, so an abort anywhere in this section
-   leaves nothing to unwind.
-6. Do not claim that `HostedUserRunner` cleanup alarms are stopped. They fire on
-   schedule with no invocation, and the platform retries an attempt that failed
-   earlier, so one can delete a source object at any point in the window. That
-   is handled by `--prune` in section 5 rather than prevented. Every other
-   deleter — bundle-transition GC and replaced legacy snapshot cleanup — runs
-   only on a write path and is already fenced by items 1 and 2.
-
-Keep the fence through section 7.
-
-## 5. Close deletion admission, prove source ownership, and copy
-
-Vercel runtime logs are diagnostic only. Their filters, result limit, and
-retention do not provide a complete-enumeration or bounded-indexing contract,
-so no log query, request count, status, cursor, or flush delay can authorize
-destination creation.
-
-First confirm Skew Protection is enabled. Also confirm this project uses Fluid
-Compute and its ordinary Function default remains 300 seconds; the delete route
-pins the maintenance-bearing version to that same duration:
-
-```bash
-pnpm --dir apps/web exec vercel api /v9/projects/murph --raw 2>/dev/null |
-  jq -e '
-    (.skewProtectionMaxAge | type == "number" and . > 0)
-    and .defaultResourceConfig.fluid == true
-    and .defaultResourceConfig.functionDefaultTimeout == 300
-  ' >/dev/null
-```
-
-Set `HOSTED_ACCOUNT_DELETION_MAINTENANCE=1`, deploy it to 100 percent, prove
-the three route checks from the deferral section, and record its exact
-deployment ID as `MAINTENANCE_DEPLOYMENT_ID`. In that deployment's Vercel menu,
-advance the [Skew Protection Threshold][vercel-skew-protection] to
-`MAINTENANCE_DEPLOYMENT_ID`.
-
-The later of the 100-percent deployment confirmation and the threshold
-confirmation is the single admission-closing instant. Traffic percentage alone
-is not sufficient because Skew Protection can still address an older
-deployment. Once the threshold is set, no new request can resolve to an older
-unset-guard deployment and every request on the maintenance deployment rejects
-before consuming its sensitive-action challenge.
-
-Wait Vercel's current absolute Node.js Function maximum, not a runtime-log
-flush interval and not merely this route's current 300-second setting. This
-retires any already-running predecessor even if a historical deployment had a
-larger explicit duration:
-
-```bash
-test -n "$MAINTENANCE_DEPLOYMENT_ID"
-export VERCEL_ABSOLUTE_FUNCTION_MAX_SECONDS=1800
-export DELETION_ADMISSION_CLOSED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-sleep "$VERCEL_ABSOLUTE_FUNCTION_MAX_SECONDS"
-```
-
-The wait proves only that no pre-threshold Web invocation remains active. It
-does not infer whether a prior deletion completed. That outcome is derived
-from the two existing durable owners instead: the frozen source R2 inventory
-and canonical Postgres `hosted_member` rows.
-
-Before creating the destination, require the lifecycle-managed
-`hosted-email/messages/`, `hosted-private-media/images/`, and
-`hosted-meal-photos/images/` prefixes to contain zero objects. Copying one would
-restart its deletion backstop in ENAM, while dropping one could lose a pending
-import or an in-flight Linq avatar fetch. If any prefix cannot be emptied,
-rebook rather than copying or dropping its contents.
-
-Issue a temporary Object Read-only key scoped only to the OC source. Load it
-without terminal echo, then run the active-owner gate:
-
-```bash
-command -v murph-prod-psql-ro >/dev/null
-read -r CLOUDFLARE_ACCOUNT_ID
-read -r R2_MIGRATION_ACCESS_KEY_ID
-read -r -s R2_MIGRATION_SECRET_ACCESS_KEY
-export CLOUDFLARE_ACCOUNT_ID R2_MIGRATION_ACCESS_KEY_ID R2_MIGRATION_SECRET_ACCESS_KEY
-
-pnpm --dir apps/cloudflare r2:bundles:active-owners -- \
-  --source "$SOURCE_BUCKET" --source-frozen
-
-unset R2_MIGRATION_ACCESS_KEY_ID R2_MIGRATION_SECRET_ACCESS_KEY CLOUDFLARE_ACCOUNT_ID
-```
-
-Revoke that source-only key immediately. The gate performs two stable,
-paginated source inventories and one complete Keychain-backed read-only query
-of each current `hosted_member.id` and its left-joined
-`hosted_workspace.snapshot_ref`. It derives the deterministic `hsn_` namespace
-ids in memory and reuses the runtime's canonical snapshot parser to extract the
-exact base, hot, or delta bundle keys from any supported pre-v2 reference. It
-requires every current canonical checkpoint object to exist in the frozen
-source, reports counts only, and refuses every source object that is neither
-under a current hosted-member namespace nor exactly referenced by one of those
-canonical legacy snapshots. It never prints or writes a member id, namespace
-id, snapshot reference, object key, or database URL.
-
-A request hidden from or delayed in Vercel logs cannot evade this proof. If it
-removed its member row but left even one R2 object, that namespace is unowned
-and every legacy snapshot reference disappeared through the existing cascade,
-so destination creation fails. If it completed R2 cleanup, there is no object
-to copy. A dormant current member's supported legacy full, layered, or working
-checkpoint remains copyable only through its exact canonical reference; a
-different or unreferenced legacy key remains ambiguous. An empty owner result,
-missing canonical checkpoint object, unknown key placement, malformed canonical
-snapshot reference, unstable inventory, failed automatic pagination, malformed
-AWS output, failed Postgres query, or unowned object all fail closed.
-
-Any failure keeps OC authoritative and the destination nonexistent. Preserve
-the source, clear the maintenance variable through a production deployment,
-and investigate an unowned-object result as a privacy incident before
-rebooking. Do not delete an ambiguous source object or substitute logs,
-elapsed time, a retrying scan, or a manual count.
-
-The external write fence remains active after this gate. An account deletion
-cannot start, and ordinary writers cannot create another namespace. A
-previously scheduled cleanup may still delete a source object; the migration's
-explicit prune-and-reprove path safely converges that deletion.
-
-Only now define the authoritative production pair, create its dedicated ENAM
-bucket, and issue a new pair-scoped migration key as in section 2. Never reuse
-the revoked source-only owner-gate key:
-
-```bash
-test "$(gh variable get HOSTED_R2_PRESIGN_BUCKET_NAME --env production)" = "$SOURCE_BUCKET"
-DESTINATION_BUCKET='<new-production-enam-bucket>'
-pnpm --dir apps/cloudflare exec wrangler r2 bucket create "$DESTINATION_BUCKET" --location enam
-pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$SOURCE_BUCKET" --json
-pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$DESTINATION_BUCKET" --json
-```
-
-Run the copy, then the read-only proof immediately before editing variables:
-
-```bash
-pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET" \
-  --source-frozen --confirm-destination "$DESTINATION_BUCKET" --apply
-
-pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET" --source-frozen
-```
-
-The copy run may be interrupted and rerun; a partially copied destination is
-still a subset of the source, so the rerun resumes rather than restarts.
-
-If either run reports `N unexpected destination object(s) the source no longer
-has`, ordinary cleanup removed something after it was copied. That is expected
-and converges — it does not cost the window. Re-run the copy with the exact
-count the gate reported, then re-prove:
-
-```bash
-pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET" \
-  --source-frozen --confirm-destination "$DESTINATION_BUCKET" --apply --prune <count>
-
-pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET" --source-frozen
-```
-
-The count must match exactly; a stale count fails closed rather than deleting a
-different set. Record every reported prune count in the private change record.
-Repeat until the read-only proof passes with no divergence in either direction.
-
-## 6. Switch and read back all configuration
-
-Run the GitHub variable commands from the private Murph Cloud checkout or set
-`GH_REPO=cobuildwithus/murph-cloud`; production deploy configuration no longer
-lives in public Murph.
-
-Capture the three current production values and prove the active source before
-changing anything:
-
-```bash
-OLD_CF_BUNDLES_BUCKET="$(gh variable get CF_BUNDLES_BUCKET --env production)"
-OLD_CF_BUNDLES_PREVIEW_BUCKET="$(gh variable get CF_BUNDLES_PREVIEW_BUCKET --env production)"
-OLD_HOSTED_R2_PRESIGN_BUCKET_NAME="$(gh variable get HOSTED_R2_PRESIGN_BUCKET_NAME --env production)"
-test "$OLD_CF_BUNDLES_BUCKET" = "$SOURCE_BUCKET"
-test "$OLD_CF_BUNDLES_PREVIEW_BUCKET" = "$PREVIEW_SOURCE_BUCKET"
-test "$OLD_HOSTED_R2_PRESIGN_BUCKET_NAME" = "$SOURCE_BUCKET"
-```
-
-Set `CF_BUNDLES_BUCKET` and `HOSTED_R2_PRESIGN_BUCKET_NAME` to the exact ENAM
-production destination. Set `CF_BUNDLES_PREVIEW_BUCKET` to the rehearsed ENAM
-preview destination. Do not dispatch between edits. Read back and compare all
-three values before the single immediate deploy:
-
-```bash
-gh variable set CF_BUNDLES_BUCKET --env production --body "$DESTINATION_BUCKET"
-gh variable set CF_BUNDLES_PREVIEW_BUCKET --env production --body "$PREVIEW_DESTINATION_BUCKET"
-gh variable set HOSTED_R2_PRESIGN_BUCKET_NAME --env production --body "$DESTINATION_BUCKET"
-test "$(gh variable get CF_BUNDLES_BUCKET --env production)" = "$DESTINATION_BUCKET"
-test "$(gh variable get CF_BUNDLES_PREVIEW_BUCKET --env production)" = "$PREVIEW_DESTINATION_BUCKET"
-test "$(gh variable get HOSTED_R2_PRESIGN_BUCKET_NAME --env production)" = "$DESTINATION_BUCKET"
-gh workflow run deploy-cloudflare-hosted.yml \
-  --repo cobuildwithus/murph-cloud \
-  --ref main \
-  -f environment=production \
-  -f sync_worker_secrets=true \
-  -f deploy_worker=true \
-  -f container_rollout=immediate \
-  -f live_model_turn=true \
-  -f skip_predeploy_e2e=true
-```
-
-Do not use a gradual rollout. Wait for the exact workflow run to finish; it must
-report one Worker version at 100% and complete its version-pinned,
-self-cleaning direct-R2 smoke. The transition credential was already proven on
-both buckets, so rollback before the first durable ENAM write is the three old
-values plus one immediate deploy. Record the workflow run, deployed head SHA,
-Worker version, container fingerprint, and smoke result in the private change
-record.
-
-## 7. Prove production before reopening writers
-
-While the fence remains active, require the exact Worker version and container
-fingerprint plus the immediate rollout's self-cleaning direct-R2 PUT, binding
-HEAD, size check, and delete against ENAM. Then run the read-only proof twice,
-still before any user canary:
-
-```bash
-for _ in 1 2; do
-  pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-    --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET" --source-frozen
-done
-```
-
-If either proof fails, do not wake the canary. Restore all three captured OC
-values, deploy immediately, and require the exact rollback workflow and OC
-direct-R2 smoke before reopening writers.
-
-Rollback is unconditionally safe here because account deletion is deferred for
-the whole window: no member can have deleted data from one bucket that the
-other still holds, so restoring OC cannot republish anything. Cloudflare can
-briefly run old Durable Object code during an update; these proofs are the gate
-that catches an OC or ENAM orphan cleanup in the binding-switch window. Cleanup
-re-reads the current snapshot before deleting, so it cannot remove the
-referenced checkpoint.
-
-Next use the existing ops runtime-maintenance wake for exactly one controlled
-operator-owned member while all other ingress stays fenced:
-
-1. record its current workspace version and checkpoint time, then wake it and
-   prove an existing copied v2 snapshot restored;
-2. let it write the first durable ENAM checkpoint, require both recorded values
-   to advance, prove the new object readable in ENAM, and prove no work remains
-   in flight;
-3. redeploy the same protected private `main` SHA and unchanged ENAM
-   configuration through the private workflow with
-   `container_rollout=immediate` and `skip_predeploy_e2e=true`;
-4. require a new Worker version at 100%, distinct from the first cutover
-   version, with the same expected head and container fingerprint; and
-5. wake exactly the same member again. Runner names include the Worker version,
-   so require the new versioned instance name, `container.ready` with
-   `startMode: "cold"`, successful restore of the fresh checkpoint, another
-   strict workspace version/checkpoint-time advance, and no in-flight work.
-
-Keep the canary identifier and exact instance name in the private change record
-only. If the second wake uses the first version's instance or lacks cold-start
-evidence, stop and keep writers fenced; do not use broad container deletion.
-
-The first canary checkpoint is the commit point. Before it, restore the old
-variables and deploy immediately on any failure. After it, the operation is
-forward-only; OC is a bounded retirement safety copy, not an automatic
-rollback target. Reopen ordinary writers only after the same-head redeploy and
-fresh cold restore pass.
-
-## 8. Retire OC and remove temporary controls
-
-Keep the OC buckets, lifecycle rules, old signing key, and transition runtime
-credential until old one-hour GET URLs expire and the canary is signed off:
-at least one hour after cutover, and within 24 hours. Extend the named owner
-and deadline if a retirement check fails; keep the safety copy in place rather
-than removing a control on a deadline.
-
-Use a separate, explicitly reviewed destructive operation to delete the exact
-pair markers from the two ENAM destinations, prove each reserved marker prefix
-empty, and retire only the matching production and preview OC buckets. Then:
-
-1. mint an ENAM-only runtime credential;
-2. update the two runtime secrets, record their names and `updatedAt` values,
-   deploy immediately, and require the ENAM direct-R2 smoke;
-3. revoke the transition, old runtime, and production pair-scoped migration
-   credentials;
-4. remove `HOSTED_ACCOUNT_DELETION_MAINTENANCE` from the Vercel production
-   environment, deploy, and prove both an `account.delete` challenge request and
-   the delete route reach the application again; and
-5. delete this runbook, migration script, tests, package command, and the
-   account-deletion maintenance module and its call site in one cleanup PR.
-
-Retirement does not require OC/ENAM parity after the commit point: new ENAM
-checkpoints and orphan cleanup legitimately diverge them. It does require all
-three bucket variables to still read back as ENAM, the intended Worker version
-to be the sole 100% deployment, and the fresh ENAM checkpoint/cold restore proof
-to remain accepted before any OC credential or bucket is removed.
-
-Finally remove operator-shell credentials without printing them:
-
-```bash
-unset R2_MIGRATION_ACCESS_KEY_ID R2_MIGRATION_SECRET_ACCESS_KEY CLOUDFLARE_ACCOUNT_ID
-```
+Require the destination-active Worker version at 100 percent and query every
+relevant Durable Object until it reports the current bridge protocol and
+destination-active phase. Every response must still report
+`pausedCanaryConfigured=false` and `writeAdmission=paused`. An already scheduled
+retry for any member must still receive `retry_later` with zero UserRunner calls
+during this convergence deploy.
+
+Only after every relevant Durable Object has converged, select a dedicated,
+operator-controlled hosted member with a current snapshot. Through the existing
+mailbox, runner-status, and Temporal inspection paths, prove that member has no
+in-flight work, mailbox lag, pending retry/recheck/wake, scheduled alarm, or
+member-facing ingress during the canary window. Derive the lowercase SHA-256
+digest of its member ID in the private operator process; never place the raw ID
+in deploy configuration, logs, or artifacts. Deploy the digest as
+`HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` while remaining
+`destination_active+paused`, wait for the route configuration to reach 100
+percent, and repeat the quiescence proof before issuing the explicit
+runtime-maintenance wake.
+
+The digest is a temporary per-member callback window, not a one-shot request:
+every callback-signed Temporal ensure or recheck for the matching member can
+pass while it is configured. Quiescence and closed member-facing ingress make
+the explicit maintenance wake the only callback in that window. A wrong or
+absent digest, every other member, and every direct OIDC hint must still receive
+`retry_later` without a UserRunner call. While global write admission remains
+closed, prove:
+
+1. a copied pre-switch snapshot cold-restores;
+2. a canary writes directly to ENAM;
+3. the ENAM checkpoint cold-restores through a fresh current-version runner;
+4. ENAM PUT, HEAD, GET, and delete smokes pass; and
+5. source fallback occurs only after a definitive ENAM miss.
+
+If any approved OC object is absent from ENAM, keep writes closed and repair
+forward. Do not restart copying broadly or return to OC-only authority after
+ENAM accepts production writes.
+
+### 6. Resume service
+
+Unset `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` and deploy
+`HOSTED_R2_WRITE_ADMISSION=open` only after promotion checks pass. Require the
+destination-active Worker version at 100 percent, every status response to
+report `pausedCanaryConfigured=false`, and confirm newly admitted work consumes
+durable mailbox input and checkpoints to ENAM. Deploy preflight rejects the
+temporary canary digest on an open-admission version. The paused `retry_later`
+response gives Temporal the continuation owner; the direct web hint remains
+optional and performs no retry.
+
+Re-enable account
+deletion only after its race canary proves the bridge deletes from both
+concrete buckets and retains state for retry after a partial failure.
+
+Promotion is the irreversible boundary. A failure after ENAM becomes
+authoritative keeps admission paused and repairs forward; it must be declared as
+an active service incident rather than silently extending the pre-promotion
+deadline or returning to OC-only writes.
+
+Keep OC, the second binding, upload-session bucket affinity, dual deletion, and
+ENAM-to-OC fallback through:
+
+- expiry of every valid OC GET or PUT capability;
+- empty OC lifecycle-managed prefixes;
+- a bounded zero-fallback observation window covering retry and alarm cycles;
+  and
+- successful cold restores of both pre-switch and post-switch snapshots.
+
+## Retire OC
+
+OC retirement is a separate reviewed destructive operation. Before it, prove
+that live configuration is ENAM-only, no valid OC credential or URL remains,
+no source-only approved object exists, lifecycle-managed prefixes are empty,
+account deletion is green against ENAM, and fallback stayed unused for the
+approved soak.
+
+Only after OC is retired should a follow-up change remove the second binding,
+phase handling, read fallback, dual deletion, upload-session bucket affinity,
+account-deletion maintenance control, and this runbook.

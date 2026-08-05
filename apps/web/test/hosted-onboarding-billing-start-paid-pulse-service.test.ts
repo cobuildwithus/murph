@@ -4,10 +4,6 @@ import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type Stripe from "stripe";
 
-import {
-  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY,
-  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
-} from "@/src/lib/hosted-onboarding/legacy-usage-price";
 
 const mocks = vi.hoisted(() => ({
   assertHostedBillingPlanSelectable: vi.fn(),
@@ -816,7 +812,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
   });
 
-  test("keeps ambiguous failure pending when reconciliation still shows the pre-mutation legacy trial", async () => {
+  test("rejects a retired metered companion before trial conversion", async () => {
     const preMutationTrial = makeSubscription({
       items: [
         makeSubscriptionItem({
@@ -832,34 +828,18 @@ describe("startHostedPulseTrialPaidPlan", () => {
       ],
     });
     mocks.stripe.subscriptions.retrieve
-      .mockResolvedValueOnce(preMutationTrial)
       .mockResolvedValueOnce(preMutationTrial);
-    mocks.stripe.subscriptions.update.mockRejectedValueOnce({
-      requestId: "req_123",
-      statusCode: 500,
-      type: "StripeAPIError",
-    });
 
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
-    })).resolves.toEqual({
-      billingPlanCode: "launch_monthly",
-      status: "billing_pending",
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
     });
 
-    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
-    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
-    expect(mocks.stripe.subscriptions.update.mock.calls[0]?.[1]).toEqual({
-      expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
-      items: [{
-        deleted: true,
-        id: "si_price_pulse_usage",
-      }],
-      metadata: { murphTrialExtensionTargetTrialEnd: "" },
-      payment_behavior: "allow_incomplete",
-      trial_end: "now",
-    });
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
     expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
   });
@@ -1189,18 +1169,6 @@ describe("startHostedPulseTrialPaidPlan", () => {
         defaultPaymentMethod: "pm_customer_123",
         defaultSource: null,
       }),
-      items: [
-        makeSubscriptionItem({
-          priceId: "price_pulse_recurring",
-          quantity: 1,
-          usageType: "licensed",
-        }),
-        makeSubscriptionItem({
-          priceId: "price_pulse_usage",
-          quantity: null,
-          usageType: "metered",
-        }),
-      ],
       status: "paused",
       trialEnd: null,
     }));
@@ -1239,12 +1207,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       "sub_123",
       {
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
-        items: [{
-          deleted: true,
-          id: "si_price_pulse_usage",
-        }],
         metadata: { murphTrialExtensionTargetTrialEnd: "" },
-        proration_behavior: "none",
       },
       {
         idempotencyKey: expect.stringMatching(
@@ -1369,7 +1332,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       .toBe(mocks.stripe.subscriptions.resume.mock.calls[1]?.[2]?.idempotencyKey);
   });
 
-  test("canonical-reconciles an ambiguous paused cleanup without resuming", async () => {
+  test("canonical-reconciles an ambiguous paused metadata cleanup without resuming", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValueOnce({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
@@ -1380,29 +1343,17 @@ describe("startHostedPulseTrialPaidPlan", () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
       currentBillingPhase: null,
     }));
-    const pausedLegacySubscription = makeSubscription({
+    const pausedSubscription = makeSubscription({
       customer: makeCustomer({
         defaultPaymentMethod: "pm_customer_123",
         defaultSource: null,
       }),
-      items: [
-        makeSubscriptionItem({
-          priceId: "price_pulse_recurring",
-          quantity: 1,
-          usageType: "licensed",
-        }),
-        makeSubscriptionItem({
-          priceId: "price_pulse_usage",
-          quantity: null,
-          usageType: "metered",
-        }),
-      ],
       status: "paused",
       trialEnd: null,
     });
     mocks.stripe.subscriptions.retrieve
-      .mockResolvedValueOnce(pausedLegacySubscription)
-      .mockResolvedValueOnce(pausedLegacySubscription);
+      .mockResolvedValueOnce(pausedSubscription)
+      .mockResolvedValueOnce(pausedSubscription);
     mocks.stripe.subscriptions.update.mockRejectedValueOnce({
       requestId: "req_paused_cleanup",
       statusCode: 500,
@@ -1433,23 +1384,11 @@ describe("startHostedPulseTrialPaidPlan", () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
       currentBillingPhase: null,
     }));
-    const pausedLegacySubscription = makeSubscription({
+    const pausedSubscription = makeSubscription({
       customer: makeCustomer({
         defaultPaymentMethod: "pm_customer_123",
         defaultSource: null,
       }),
-      items: [
-        makeSubscriptionItem({
-          priceId: "price_pulse_recurring",
-          quantity: 1,
-          usageType: "licensed",
-        }),
-        makeSubscriptionItem({
-          priceId: "price_pulse_usage",
-          quantity: null,
-          usageType: "metered",
-        }),
-      ],
       status: "paused",
       trialEnd: null,
     });
@@ -1459,7 +1398,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       trialEnd: null,
     });
     mocks.stripe.subscriptions.retrieve
-      .mockResolvedValueOnce(pausedLegacySubscription);
+      .mockResolvedValueOnce(pausedSubscription);
     mocks.stripe.subscriptions.update.mockResolvedValueOnce(cleanedPausedSubscription);
     mocks.stripe.subscriptions.resume.mockRejectedValueOnce({
       statusCode: 400,
@@ -2078,7 +2017,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
   });
 
-  test("drops legacy metered usage items when ending the trial", async () => {
+  test("rejects retired metered usage items before ending the trial", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       items: [
         makeSubscriptionItem({
@@ -2097,23 +2036,12 @@ describe("startHostedPulseTrialPaidPlan", () => {
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
-    })).resolves.toEqual({
-      billingPlanCode: "launch_monthly",
-      status: "billing_pending",
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
     });
 
-    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
-      "sub_123",
-      expect.objectContaining({
-        items: [
-          {
-            deleted: true,
-            id: "si_price_pulse_usage",
-          },
-        ],
-      }),
-      expect.any(Object),
-    );
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
   test("rejects metered usage items with unsupported quantities", async () => {
@@ -2293,12 +2221,7 @@ function makeSubscriptionItem(input: {
     object: "subscription_item",
     price: {
       id: input.priceId,
-      metadata: input.priceId === "price_pulse_usage"
-        ? {
-            [HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY]:
-              HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
-          }
-        : {},
+      metadata: {},
       object: "price",
       recurring: {
         interval: "month",

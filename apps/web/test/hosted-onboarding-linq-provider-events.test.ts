@@ -241,6 +241,48 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(JSON.stringify(failed?.payloadShapeJson)).not.toContain("provider_msg_123");
   });
 
+  it("masks contact identifiers a provider embeds in a failure or status reason", () => {
+    // The reason keeps its wording, so every contact shape the provider can
+    // write has to be masked on the way through the parser — this is the last
+    // point before the value is persisted and emailed.
+    const failed = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        data: {
+          error: {
+            code: "30007",
+            message: "bounced for alice@www.example.test at 415-555-2671, see www.example.test/help",
+          },
+          message_id: "msg_failed_contacts",
+          phone_number: "+15550000000",
+        },
+        eventType: "message.failed",
+      }),
+    });
+    const status = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        data: {
+          phone_number: "+15550000000",
+          reason: "review requested by alice@www.example.test at 415-555-2671",
+          status: "flagged",
+        },
+        eventType: "phone_number.status_updated",
+      }),
+    });
+
+    expect(failed?.failureReason).toBe(
+      "bounced for <redacted-email> at <redacted-phone>, see <redacted-url>",
+    );
+    expect(status?.providerReason).toBe(
+      "review requested by <redacted-email> at <redacted-phone>",
+    );
+    for (const parsed of [failed, status]) {
+      const serialized = JSON.stringify(parsed);
+      expect(serialized).not.toContain("alice");
+      expect(serialized).not.toContain("example.test");
+      expect(serialized).not.toContain("415-555-2671");
+    }
+  });
+
   it("parses reaction events for join-offer dispatch without persisting raw handles", () => {
     const parsed = parseHostedLinqProviderEvent({
       event: buildGenericEvent({

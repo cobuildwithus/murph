@@ -506,6 +506,11 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
+- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` only after the destination Worker and
+  every relevant Durable Object have converged while paused; use a lowercase
+  SHA-256 digest of a quiescent operator-controlled member, never a raw member ID
+- `HOSTED_R2_WRITE_ADMISSION=open` normally; set `paused` only for the bounded
+  OC-to-ENAM drain in `R2_BUNDLES_ENAM_MIGRATION.md`
 
 `CF_PUBLIC_BASE_URL` is a required non-secret Worker variable as well as the standard deploy-and-smoke target. Private-media capability creation uses that exact deployment origin, and hosted Web validates capabilities against its matching `HOSTED_EXECUTION_CONTROL_URL` origin. Production preflight pins both sides to `https://murph-hosted.cobuildwithus.workers.dev`; preview uses its isolated staging Worker origin and must reject production-origin capabilities. Change the production pin and deploy invariant together before moving the production origin. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
 `HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the Worker R2 binding. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
@@ -536,23 +541,27 @@ The production smoke also runs one real `gpt-5.6-terra` model turn inside the de
 
 Venice is an optional core-inference provider, not a replacement for the fleet
 default or specialized tool providers. Configure the selected GitHub
-Environment with these four values as one group:
+Environment with this secret:
 
 - secret `VENICE_API_KEY`
-- vars `HOSTED_VENICE_LUNA_MODEL`, `HOSTED_VENICE_TERRA_MODEL`, and
-  `HOSTED_VENICE_SOL_MODEL`
 
-Deploy preflight rejects a partial group. Keep the hosted Web
+The Worker derives the regular Venice Luna/Terra/Sol provider ids from one
+code-owned mapping; do not add model vars. Keep the hosted Web
 `HOSTED_VENICE_ENABLED` flag off while applying the nullable member migration
 and deploying the compatible Web reader. Then deploy Cloudflare and the runner
-with `container_rollout=immediate`, require the exact runner fingerprint, and
-exercise a controlled core turn that reaches Venice through the Worker
-intercept without exposing the key to the container. Only after that proof
-should Web enable the flag and redeploy so Settings can offer Venice.
+with `container_rollout=immediate` and require the exact runner fingerprint.
+Before Web enables the flag, use that exact candidate bundle to exercise Luna,
+Terra, and Sol through Venice. For each tier, prove a direct streamed reply, a
+tool-bearing turn, and a compact request through the Worker intercept without
+exposing the key to the container. Confirm completed streams and usage
+snapshots identify `venice` plus the expected code-owned provider model. A
+static translation test or one successful tier is not sufficient activation
+proof. Only after the full matrix passes should Web enable the flag and
+redeploy so Settings can offer Venice.
 
 Rollback in the opposite exposure order: disable the Web flag and redeploy Web
 first, verify new workspace reads omit the Venice override, and only then
-remove the Venice secret/mappings or roll Cloudflare back. The nullable stored
+remove the Venice secret or roll Cloudflare back. The nullable stored
 preference may remain; while the flag is off it resolves to OpenAI.
 
 ## Custom Inference Activation
@@ -701,6 +710,19 @@ Core execution tuning:
   direct/local artifact rendering. The manual deploy workflow derives it from
   the selected `preview` or `production` target; do not configure a conflicting
   GitHub Environment value.
+- `HOSTED_R2_WRITE_ADMISSION` defaults to `open`. `paused` returns a bounded
+  `retry_later` from `runtime/ensure-processing` before any UserRunner Durable
+  Object call; deploy it to 100 percent and drain every reported in-flight
+  invocation before starting the direct-upload capability timer.
+- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` is temporary and must be unset while
+  admission is open or the source is active. Keep it unset through the initial
+  `destination_active+paused` deployment and every Durable Object convergence
+  check. After convergence, configure it only for a quiescent
+  operator-controlled member with no pending mailbox work, retry/recheck/wake,
+  alarm, or member-facing ingress. It opens a per-member callback-signed window,
+  not a one-shot request; source-active pauses, other members, and direct OIDC
+  hints remain fenced. Status exposes only `pausedCanaryConfigured`, never the
+  digest or raw member ID.
 - `HOSTED_R2_PRESIGN_ENDPOINT` optionally overrides the default account-scoped
   R2 S3 endpoint for direct snapshot presign URLs. Normally leave it unset. If
   set for deploys, it must be `https://<account-id>.r2.cloudflarestorage.com`.
@@ -736,13 +758,17 @@ Hosted assistant config:
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
-- Optional all-or-none Venice model mappings: `HOSTED_VENICE_LUNA_MODEL`,
-  `HOSTED_VENICE_TERRA_MODEL`, and `HOSTED_VENICE_SOL_MODEL`, paired with the
-  `VENICE_API_KEY` GitHub Environment secret.
+- Optional Venice core inference uses the `VENICE_API_KEY` GitHub Environment
+  secret. The regular provider model ids are code-owned rather than deploy
+  variables.
 
 When changing hosted assistant model pricing or allowance enforcement, deploy the
-Cloudflare Worker/runner model config before or atomically with the hosted web
+Cloudflare Worker/runner model contract before or atomically with the hosted web
 allowance logic so runtime usage callbacks keep using an allowance-priced model.
+For the Venice provider-aware pricing rollout, deploy Cloudflare first so the
+exact upstream mappings are active, complete the all-tier direct/tool/compact
+proof above, then deploy Web so new immutable usage rows select the Venice rate
+table. Historical immutable usage rows are not repriced.
 
 Vault-share selector-scope production deploys must also use
 `container_rollout=immediate` until the distance/count selector-scope runner

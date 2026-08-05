@@ -472,6 +472,7 @@ export async function startHostedLocalFullStackScenario(input: {
           }),
           memberId: sessionInput.memberId,
           privyUserId: sessionInput.privyUserId,
+          secureCookieMode: scenarioHarness.webUsesProductionArtifact,
         }),
       readHostedDeviceSyncConnection: async (connectionInput) =>
         await readHostedDeviceSyncConnectionForTest({
