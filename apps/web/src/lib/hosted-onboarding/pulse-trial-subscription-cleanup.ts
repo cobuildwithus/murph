@@ -12,10 +12,6 @@ import {
 import {
   createHostedStripeSubscriptionLookupKeyReadCandidates,
 } from "./contact-privacy";
-import {
-  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY,
-  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
-} from "./legacy-usage-price";
 import { hostedOnboardingError } from "./errors";
 import {
   withHostedMemberStripeMutationLock,
@@ -144,6 +140,9 @@ export function isHostedPulseTrialSubscriptionForKnownPolicy(input: {
     return false;
   }
   const items = input.subscription.items.data;
+  if (items.length !== 1) {
+    return false;
+  }
   const baseItems = items.filter((item) => item.price?.id === input.priceId);
   const baseItem = baseItems[0];
   if (
@@ -157,29 +156,7 @@ export function isHostedPulseTrialSubscriptionForKnownPolicy(input: {
     return false;
   }
 
-  return items.every((item) =>
-    item.id === baseItem.id || isHostedPulseTrialLegacyMeteredItem(item)
-  );
-}
-
-function isHostedPulseTrialLegacyMeteredItem(item: {
-  price?: {
-    metadata?: Record<string, string> | null;
-    recurring?: {
-      interval?: string;
-      interval_count?: number;
-      usage_type?: string;
-    } | null;
-  } | null;
-  quantity?: number | null;
-}): boolean {
-  const recurring = item.price?.recurring;
-  return recurring?.interval === "month" &&
-    (recurring.interval_count ?? 1) === 1 &&
-    recurring.usage_type === "metered" &&
-    item.price?.metadata?.[HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY] ===
-      HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE &&
-    !(typeof item.quantity === "number" && Number.isFinite(item.quantity));
+  return baseItem.id === items[0]?.id;
 }
 
 export async function cancelHostedPulseTrialLoserSubscriptionsForMember(input: {

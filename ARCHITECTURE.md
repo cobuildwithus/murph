@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-31
+Last verified: 2026-08-04
 
 ## Accepted-Message Targeting
 
@@ -725,8 +725,18 @@ policy requires the explicit exact choice. Web then re-derives current
 eligibility and delegates only continue-Pulse,
 start-Pulse-now, or upgrade-to-Edge choices to the existing billing services.
 Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal
-handoff when payment is required; a pending Edge change uses Customer Portal
-without a separate invoice lookup. This path adds no subscription table,
+handoff when payment is required. Immediate paid-plan upgrades create a
+Customer Portal `subscription_update_confirm` flow for the exact owned
+Subscription Item and allowlisted target Price. Stripe owns proration display,
+payment collection, payment-method recovery, and authentication before
+redirecting to Settings; Stripe webhooks remain the only normal owner that
+projects the applied plan into Postgres. The existing Settings authentication
+handoff preserves only the allowlisted direct-plan completion or cancellation
+return marker when Stripe opens outside the member's signed-in browser; it does
+not read billing truth before sign-in, and cancellation is stripped after the
+authenticated return. Retired hosted-AI metered items must be
+removed by the guarded operator migration before this one-item Portal flow is
+enabled. This path adds no subscription table,
 scheduler, trial-ending webhook, custom checkout, App Clip, or automatic model
 change.
 
@@ -1292,8 +1302,12 @@ accepted input in the same live turn invalidates an earlier card-only decision,
 and attachment is rejected after the delivery context advances. Every
 card copies the immediately preceding single-date canonical meal-totals read.
 Both versions use the same deterministic text fallback, Linq capability
-boundary, inline URL size bound, and existing outbox idempotency lifecycle. No
-card API, database, auth path, cleanup owner, or second queue exists.
+boundary, inline URL size bound, and existing outbox idempotency lifecycle.
+Linq owns the always-visible static transcript layout, which marks partial
+totals without exposing their values; tapping the card passes the same inline
+URL to the offline iOS reader. The installed extension does not own initial
+balloon visibility. No card API, database, auth path, cleanup owner, or second
+queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a

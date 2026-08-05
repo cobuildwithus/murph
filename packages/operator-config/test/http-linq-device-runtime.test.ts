@@ -36,13 +36,22 @@ import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 const NUTRITION_CARD = {
   kind: 'daily_nutrition',
+  version: 2,
   localDate: '2026-07-28',
-  mealCount: 3,
+  mealCount: 4,
   totals: {
     calories: { total: 1_490.25, mealCount: 3 },
     proteinGrams: { total: 94.5, mealCount: 3 },
     carbsGrams: { total: 193.125, mealCount: 3 },
     fatGrams: { total: 34.75, mealCount: 3 },
+    fiberGrams: { total: 26.5, mealCount: 3 },
+  },
+  goals: {
+    calories: null,
+    proteinGrams: null,
+    carbsGrams: null,
+    fatGrams: null,
+    fiberGrams: null,
   },
 } as const
 
@@ -424,11 +433,12 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
             team_id: 'G9DJH2XUMK',
           },
           fallback_text: 'Open your Murph nutrition summary',
-          interactive: true,
+          interactive: false,
           layout: {
             caption: 'Murph',
             subcaption: 'Nutrition summary',
             trailing_caption: 'OPEN',
+            trailing_subcaption: 'PARTIAL TOTALS',
           },
           type: 'imessage_app',
           url: expect.stringMatching(/^data:application\/json;base64,/u),

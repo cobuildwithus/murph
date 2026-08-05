@@ -19978,6 +19978,23 @@ describe('steered final segments', () => {
     }])
   })
 
+  it('keeps a response card when the model finishes without authored text', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        card: DAILY_NUTRITION_RESPONSE_CARD,
+        expectedText: 'response card attached',
+        id: 87,
+        kind: 'attach-response-card',
+      },
+    ], { responseCardsAvailable: true })
+
+    expect(result.responseCard).toEqual(DAILY_NUTRITION_RESPONSE_CARD)
+    expect(result.providerAuthoredFinalMessage).toBe('')
+    expect(result.finalMessage).toBe(
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals.',
+    )
+  })
+
   it('invalidates a card-only response when a live steer adds accepted work', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
