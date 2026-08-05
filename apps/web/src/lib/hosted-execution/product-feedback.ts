@@ -7,7 +7,9 @@ import {
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   isHostedProductSupportEscalationFeedback,
   isHostedProductSupportEscalationSummary,
+  parseHostedProductSupportEscalationSummary,
   sanitizeHostedProductFeedbackSummary,
+  type HostedProductSupportIssue,
   type HostedRuntimeProductFeedbackRecord,
   type HostedRuntimeProductFeedbackRecordResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -49,11 +51,14 @@ export async function recordHostedProductFeedback(input: {
   const feedbackId = buildHostedProductFeedbackId({
     feedback: input.feedback,
   });
-  const supportEscalation = isHostedProductSupportEscalationSummary(
+  const supportIssue = parseHostedProductSupportEscalationSummary(
     feedback.summary,
   );
 
-  if (!supportEscalation) {
+  if (!supportIssue) {
+    if (feedback.summary.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)) {
+      rejectHostedProductSupportEscalation();
+    }
     return await persistHostedProductFeedback({
       feedback,
       feedbackId,
@@ -79,9 +84,7 @@ export async function recordHostedProductFeedback(input: {
     throw new RangeError("Product support escalation time must be valid.");
   }
   const detailFeedbackId = buildHostedProductSupportDetailFeedbackId(feedbackId);
-  const detailSummary = feedback.summary
-    .slice(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX.length)
-    .trim();
+  const detailSummary = feedback.summary;
 
   const persistence = await getPrisma().$transaction(async (tx) => {
     await tx.$executeRaw`
@@ -148,6 +151,9 @@ export async function recordHostedProductFeedback(input: {
     const detailRow = rows.find(
       (candidate) => candidate.id === detailFeedbackId,
     );
+    const storedIssue = parseHostedProductSupportEscalationSummary(
+      detailRow?.summary,
+    );
 
     if (
       !row
@@ -158,7 +164,7 @@ export async function recordHostedProductFeedback(input: {
       || !detailRow
       || detailRow.memberId !== null
       || detailRow.kind !== feedback.kind
-      || !isValidStoredHostedProductSupportDetailSummary(detailRow.summary)
+      || !storedIssue
       || !isEmptyJsonArray(detailRow.relatedChangelogItemIdsJson)
     ) {
       throw hostedOnboardingError({
@@ -197,7 +203,7 @@ export async function recordHostedProductFeedback(input: {
     });
 
     return {
-      emailIssueSummary: detailRow.summary,
+      emailIssue: storedIssue,
       recorded: created.count > 0,
       shouldSendEmail:
         ordinal <= HOSTED_PRODUCT_SUPPORT_EMAILS_PER_MEMBER_UTC_DAY_MAX,
@@ -227,7 +233,7 @@ export async function recordHostedProductFeedback(input: {
       subject: `${HOSTED_PRODUCT_SUPPORT_SUBJECT} — ${feedbackId}`,
       text: formatHostedProductSupportEmail({
         feedbackId,
-        issueSummary: persistence.emailIssueSummary,
+        issue: persistence.emailIssue,
         memberId,
       }),
       to: emailConfig.recipients,
@@ -318,17 +324,28 @@ async function persistHostedProductFeedback(input: {
 
 function formatHostedProductSupportEmail(input: {
   feedbackId: string;
-  issueSummary: string;
+  issue: HostedProductSupportIssue;
   memberId: string;
 }): string {
   return [
     "A Murph member explicitly asked to escalate a product issue.",
     "",
-    `Product issue: ${input.issueSummary}`,
+    `Product issue: ${formatHostedProductSupportIssue(input.issue)}`,
     "",
     `Feedback ID: ${input.feedbackId}`,
     `Member ID: ${input.memberId}`,
   ].join("\n");
+}
+
+function formatHostedProductSupportIssue(
+  issue: HostedProductSupportIssue,
+): string {
+  return `${formatHostedProductSupportCode(issue.area)} — ${formatHostedProductSupportCode(issue.problem).toLowerCase()}.`;
+}
+
+function formatHostedProductSupportCode(value: string): string {
+  const words = value.replaceAll("_", " ");
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }
 
 export function buildHostedProductSupportDetailFeedbackId(
@@ -357,16 +374,6 @@ function resolveUtcDayWindow(value: Date): {
 
 function isEmptyJsonArray(value: unknown): boolean {
   return Array.isArray(value) && value.length === 0;
-}
-
-function isValidStoredHostedProductSupportDetailSummary(
-  value: string | null,
-): value is string {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH
-    && sanitizeHostedProductFeedbackSummary(value) === value
-    && !isHostedProductSupportEscalationSummary(value);
 }
 
 function rejectHostedProductSupportEscalation(): never {

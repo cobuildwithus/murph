@@ -23,6 +23,27 @@ const SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS = 60_000;
 const HOSTED_LOCAL_E2E_TEST_CONTROLS_ENV =
   "MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS";
 const FINAL_RUNNER_CLEANUP_TIMEOUT_MS = 60_000;
+const JUNCTION_WEARABLE_LIVE_ENV = "MURPH_E2E_JUNCTION_WEARABLE_LIVE";
+const JUNCTION_WEARABLE_RETIRED_ENV_KEYS = [
+  "MURPH_E2E_OURA_PASSWORD",
+] as const;
+const JUNCTION_WEARABLE_LIVE_ENV_KEYS = [
+  "JUNCTION_API_KEY",
+  "JUNCTION_CLIENT_USER_ID_SECRET",
+  "JUNCTION_ENV",
+  "JUNCTION_REGION",
+  JUNCTION_WEARABLE_LIVE_ENV,
+  "MURPH_E2E_JUNCTION_OURA_MEMBER_ID",
+  "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
+  "MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID",
+  "MURPH_E2E_OURA_EMAIL",
+  "MURPH_E2E_OURA_OTP",
+  "MURPH_E2E_WHOOP_EMAIL",
+  "MURPH_E2E_WHOOP_OTP",
+  "MURPH_E2E_WHOOP_PASSWORD",
+  "MURPH_E2E_WEARABLE_HEADLESS",
+  "MURPH_E2E_WEARABLE_TIMEOUT_MS",
+] as const;
 
 interface HostedLocalE2eRunnerCleanupOptions {
   ignoreRunnerCleanupErrors: boolean;
@@ -421,16 +442,48 @@ export function listHostedLocalE2eScenarios(): readonly HostedLocalE2eScenario[]
   return hostedLocalE2eScenarios;
 }
 
+function partitionLiveWearableEnvironment(input: {
+  env: NodeJS.ProcessEnv;
+  scenarios: readonly HostedLocalE2eScenario[];
+}): {
+  genericEnv: NodeJS.ProcessEnv;
+  vitestEnvOverlay: NodeJS.ProcessEnv;
+} {
+  if (input.env[JUNCTION_WEARABLE_LIVE_ENV] !== "1") {
+    return { genericEnv: input.env, vitestEnvOverlay: {} };
+  }
+  if (input.scenarios.length !== 1 || input.scenarios[0]?.name !== "device-connect") {
+    throw new Error(
+      "Run the live Junction wearable browser proof by itself: pnpm hosted-local e2e device-connect.",
+    );
+  }
+
+  const genericEnv = { ...input.env };
+  const vitestEnvOverlay: NodeJS.ProcessEnv = {};
+  for (const key of JUNCTION_WEARABLE_RETIRED_ENV_KEYS) {
+    delete genericEnv[key];
+  }
+  for (const key of JUNCTION_WEARABLE_LIVE_ENV_KEYS) {
+    const value = genericEnv[key];
+    if (value !== undefined) {
+      vitestEnvOverlay[key] = value;
+    }
+    delete genericEnv[key];
+  }
+  return { genericEnv, vitestEnvOverlay };
+}
+
 export async function runHostedLocalE2eSuite(
   input: HostedLocalE2eSuiteInput = {},
 ): Promise<HostedLocalE2eSuiteResult> {
   const env = sanitizeHostedLocalGenericEnvironment(input.env ?? process.env);
   removeHostedLocalWebAuthorityFromProcessEnvironment();
   const scenarios = resolveHostedLocalE2eScenarios(input.scenario ?? "all");
+  const liveWearableEnvironment = partitionLiveWearableEnvironment({ env, scenarios });
   const prepareRunnerBundle = input.prepareRunnerBundle !== false;
   const injectSkipRunnerBundleEnv = input.injectSkipRunnerBundleEnv !== false;
   const suiteEnv = buildHostedLocalE2eSuiteEnv({
-    env,
+    env: liveWearableEnvironment.genericEnv,
     injectSkipRunnerBundleEnv,
   });
   let terminationSignal: NodeJS.Signals | null = null;
@@ -486,6 +539,7 @@ export async function runHostedLocalE2eSuite(
           assertWorkAdmission,
           env: suiteEnv,
           scenarios,
+          vitestEnvOverlay: liveWearableEnvironment.vitestEnvOverlay,
         });
       });
     } catch (error) {
@@ -598,6 +652,7 @@ async function runHostedLocalVitest(input: {
   assertWorkAdmission: () => void;
   env: NodeJS.ProcessEnv;
   scenarios: readonly HostedLocalE2eScenario[];
+  vitestEnvOverlay: NodeJS.ProcessEnv;
 }): Promise<void> {
   if (input.scenarios.length === 1) {
     const [scenario] = input.scenarios;
@@ -609,7 +664,7 @@ async function runHostedLocalVitest(input: {
     input.assertWorkAdmission();
     try {
       await runHostedLocalVitestForScenarios({
-        env: input.env,
+        env: { ...input.env, ...input.vitestEnvOverlay },
         label: [
           "Hosted local full-stack e2e scenario",
           `1/${input.scenarios.length}`,
@@ -639,10 +694,13 @@ async function runHostedLocalVitest(input: {
       const scenarios = batches[index] ?? [];
       input.assertWorkAdmission();
       await runHostedLocalVitestForScenarios({
-        env: buildHostedLocalVitestBatchEnv({
-          env: input.env,
-          scenarios,
-        }),
+        env: {
+          ...buildHostedLocalVitestBatchEnv({
+            env: input.env,
+            scenarios,
+          }),
+          ...input.vitestEnvOverlay,
+        },
         label: formatHostedLocalVitestBatchLabel({
           batchCount: batches.length,
           batchIndex: index,

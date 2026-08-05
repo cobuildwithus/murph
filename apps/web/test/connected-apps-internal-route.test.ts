@@ -148,6 +148,37 @@ describe("internal connected-apps route", () => {
     expect(mocks.executeHostedConnectedAppsRequest).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the direct-only official-alert read out of synthetic groups", async () => {
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_group");
+    mocks.getPrisma.mockReturnValue(createPrisma({
+      accountGroupMemberships: [],
+      billingStatus: "active",
+      id: "member_group",
+      suspendedAt: null,
+      threadContainer: true,
+    }));
+
+    const response = await route.POST(new Request(
+      "https://join.example.test/api/internal/connected-apps",
+      {
+        body: JSON.stringify({
+          input: {
+            arguments: { lat: 52.2297, lon: 21.0122 },
+            toolSlug: "MURPH_OPENWEATHER_GET_NATIONAL_ALERTS",
+          },
+          operation: "execute",
+        }),
+        method: "POST",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "CONNECTED_APPS_PERSONAL_MEMBER_REQUIRED" },
+    });
+    expect(mocks.executeHostedConnectedAppsRequest).not.toHaveBeenCalled();
+  });
+
   it("rejects personal connected-account operations from a synthetic group container", async () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_group");
     const prisma = createPrisma({

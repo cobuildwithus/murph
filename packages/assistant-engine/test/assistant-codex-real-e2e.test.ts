@@ -31,6 +31,7 @@ import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
 } from '../src/assistant-codex/dynamic-tools/physical-notes.ts'
 import {
+  MURPH_CONNECTED_APPS_EXECUTE_TOOL,
   MURPH_CONNECTED_APPS_SEARCH_TOOL,
 } from '../src/assistant-codex/dynamic-tools/connected-apps.ts'
 import {
@@ -55,6 +56,7 @@ import type {
 } from '../src/assistant/execution-context.ts'
 import {
   MURPH_MANAGED_AUTOMATIONS,
+  MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
@@ -1140,6 +1142,248 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     360_000,
+  )
+})
+
+describeRealCodex('real Codex official weather-alert context e2e', () => {
+  it(
+    'uses one fixed alert read, falls back on failure, and keeps alert-only outreach quiet',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const weeklyHealthDigest = MURPH_MANAGED_AUTOMATIONS.find(
+        (automation) =>
+          automation.automationId
+          === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      )
+      if (!weeklyHealthDigest) {
+        throw new Error('Expected the managed weekly health digest automation.')
+      }
+      const probes = [
+        {
+          alertFailure: null,
+          kind: 'direct-success',
+          prompt: [
+            'I woke with a mild headache and had planned outdoor intervals today in Phoenix.',
+            'What is a sensible plan for today? Check current official local alert context if it matters.',
+          ].join(' '),
+          scheduled: false,
+        },
+        {
+          alertFailure: 'transient',
+          kind: 'direct-failure',
+          prompt: [
+            'I woke with a mild headache and had planned outdoor intervals today in Phoenix.',
+            'What is a sensible plan for today? Check current official local alert context if it matters, but still help if that check fails.',
+          ].join(' '),
+          scheduled: false,
+        },
+        {
+          alertFailure: null,
+          kind: 'scheduled-alert-only',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence for this focused run:',
+            '- The member has a routine outdoor walk in Phoenix, but all tracked recovery, sleep, symptoms, and behavior are stable.',
+            '- Complete the relevant official-alert check for the known location before deciding.',
+            '- The alert is the only possible new context.',
+          ].join('\n\n'),
+          scheduled: true,
+        },
+        {
+          alertFailure: 'permanent',
+          kind: 'scheduled-alert-failure',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence for this focused run:',
+            '- The member has a routine outdoor walk in Phoenix, but all tracked recovery, sleep, symptoms, and behavior are stable.',
+            '- Complete the relevant official-alert check for the known location before deciding.',
+            '- The alert is the only possible new context.',
+          ].join('\n\n'),
+          scheduled: true,
+        },
+      ] as const
+
+      try {
+        for (const probe of probes) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), `murph-weather-alert-${probe.kind}-e2e-`),
+          )
+          const connectedAppRequests: Array<{
+            input: Record<string, unknown>
+            operation: string
+          }> = []
+
+          try {
+            const skillsRoot = path.join(workingDirectory, 'skills')
+            await materializeAssistantSkill({
+              skillsRoot,
+              slug: 'connected-apps',
+            })
+            const result = await executeRealCodexAppServerTurn({
+              allowFinishWithoutReply: probe.scheduled,
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildWeatherAlertDeveloperInstructions(probe.scheduled),
+              dynamicTools: [
+                MURPH_CONNECTED_APPS_SEARCH_TOOL,
+                MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+                ...(probe.scheduled ? [MURPH_FINISH_WITHOUT_REPLY_TOOL] : []),
+              ],
+              env: {
+                ...config.env,
+                [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+              },
+              excludeResumeTurns: true,
+              hostedToolContext: {
+                computerToolsAvailable: false,
+                connectedApps: {
+                  request: async (request) => {
+                    connectedAppRequests.push({
+                      input: request.input,
+                      operation: request.operation,
+                    })
+                    if (request.operation === 'search') {
+                      return {
+                        result: {
+                          success: true,
+                          tool_schemas: {
+                            OPENWEATHER_API_GET_GEOCODING_DIRECT: {
+                              input_schema: {
+                                additionalProperties: false,
+                                properties: {
+                                  limit: { type: 'number' },
+                                  q: { type: 'string' },
+                                },
+                                required: ['q'],
+                                type: 'object',
+                              },
+                            },
+                          },
+                        },
+                      }
+                    }
+                    if (request.operation !== 'execute') {
+                      throw new Error('Unexpected connected-app operation.')
+                    }
+                    if (
+                      request.input.toolSlug
+                      === 'OPENWEATHER_API_GET_GEOCODING_DIRECT'
+                    ) {
+                      return {
+                        result: [{
+                          country: 'US',
+                          lat: 33.4484,
+                          lon: -112.074,
+                          name: 'Phoenix',
+                        }],
+                      }
+                    }
+                    if (
+                      request.input.toolSlug
+                      === 'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS'
+                    ) {
+                      if (probe.alertFailure) {
+                        throw Object.assign(
+                          new Error('Hosted connected apps failed with HTTP 503.'),
+                          {
+                            code: 'CONNECTED_APPS_PROVIDER_UNAVAILABLE',
+                            detail: 'Connected apps are temporarily unavailable.',
+                            retryable: probe.alertFailure === 'transient',
+                            status: 503,
+                          },
+                        )
+                      }
+                      return {
+                        result: {
+                          alerts: [{
+                            description:
+                              'Dangerously hot conditions are expected during the afternoon.',
+                            end: 1_786_032_000,
+                            event: 'Extreme Heat Warning',
+                            senderName: 'National Weather Service',
+                            start: 1_785_945_600,
+                            tags: ['Extreme temperature'],
+                          }],
+                        },
+                      }
+                    }
+                    throw new Error('Unexpected connected-app request.')
+                  },
+                },
+                currentHostedDeliveryContext: () => null,
+                currentHostedMailboxItemIds: () => [],
+                sendVaultFile: async () => {
+                  throw new Error('Vault file sends are unavailable in this test.')
+                },
+                vaultFileSendAvailable: false,
+              },
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: probe.prompt,
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
+            const executeRequests = connectedAppRequests.filter(
+              (request) => request.operation === 'execute',
+            )
+            const executeSlugs = executeRequests.map((request) =>
+              readString(request.input.toolSlug)
+            )
+            const alertRequests = executeRequests.filter((request) =>
+              request.input.toolSlug
+              === 'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS'
+            )
+            expect(executeSlugs, probe.kind).toEqual([
+              'OPENWEATHER_API_GET_GEOCODING_DIRECT',
+              'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS',
+            ])
+            expect(alertRequests, probe.kind).toHaveLength(1)
+            expect(alertRequests[0]?.input.arguments).toEqual({
+              lat: 33.4484,
+              lon: -112.074,
+            })
+
+            const actions = readCapabilityRoutingActions(result.jsonEvents)
+            if (probe.kind === 'direct-success') {
+              expect(result.finalMessage).toMatch(/official|warning/iu)
+              expect(result.finalMessage).toMatch(/heat|hot/iu)
+              expect(result.finalMessage).not.toMatch(
+                /(?:heat|warning).{0,40}(?:caused|explains|is why)/iu,
+              )
+            } else if (probe.kind === 'direct-failure') {
+              expect(result.finalMessage.trim().length).toBeGreaterThan(0)
+              expect(result.finalMessage).not.toMatch(
+                /(?:there is|under|active).{0,30}(?:official alert|heat warning)/iu,
+              )
+            } else {
+              const finishCalls = actions.filter((action) =>
+                action.kind === 'dynamic'
+                && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+              )
+              expect(finishCalls.length).toBeLessThanOrEqual(1)
+              if (result.finalMessage !== '') {
+                expect(JSON.parse(result.finalMessage.trim())).toEqual({
+                  kind: 'skip',
+                  privateSummary:
+                    'No weekly digest cleared the memorability bar.',
+                })
+              }
+            }
+          } finally {
+            await removeRealCodexTemporaryPath(workingDirectory)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
   )
 })
 
@@ -2688,6 +2932,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
           ...commonInput,
           developerInstructions:
             buildDirectConversationDeveloperInstructions(),
+          hostedToolContext: createRealCodexSupportHostedToolContext('direct'),
           productFeedbackRecorder: createRealCodexFeedbackRecorder(),
           prompt: [
             'My relative\'s diabetes readings from a glucose sensor vanished after syncing at a clinic, and the Murph connection still says it succeeded.',
@@ -2703,14 +2948,12 @@ describeRealCodex('real Codex support escalation e2e', () => {
         }
         expect(privateCall.argumentsValue.kind).toBe('frustration')
         expect(privateCall.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
-        const privateSummary = readString(privateCall.argumentsValue.summary)
-        expect(privateSummary).not.toBeNull()
-        if (!privateSummary) {
-          throw new Error('Expected a support-escalation summary.')
-        }
-        expect(privateSummary).toMatch(/^Support escalation:\s*\S/u)
-        expect(privateSummary).toMatch(/connected source|connection/iu)
-        expect(privateSummary).not.toMatch(
+        expect(privateCall.argumentsValue.summary).toBe('Support escalation')
+        expect(privateCall.argumentsValue.supportArea).toBe('connected_source')
+        expect(['connection_failed', 'data_missing']).toContain(
+          privateCall.argumentsValue.supportProblem,
+        )
+        expect(JSON.stringify(privateCall.argumentsValue)).not.toMatch(
           /relative|diabetes|glucose|clinic/iu,
         )
         const privateText = privateResult.finalMessage.trim()
@@ -2731,6 +2974,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
           ...commonInput,
           developerInstructions:
             buildGroupPointOfViewDeveloperInstructions(),
+          hostedToolContext: createRealCodexSupportHostedToolContext('group'),
           productFeedbackRecorder: createRealCodexFeedbackRecorder(),
           prompt: [
             '[@Trainer_User] Murph keeps dropping my workout photos in here.',
@@ -2743,9 +2987,8 @@ describeRealCodex('real Codex support escalation e2e', () => {
         ).filter(
           (action) =>
             action.kind === 'dynamic'
-            && readString(action.argumentsValue.summary)?.startsWith(
-              'Support escalation:',
-            ),
+            && (action.argumentsValue.summary === 'Support escalation'
+              || action.argumentsValue.supportArea !== undefined),
         )
         expect(
           groupSupportCalls,
@@ -2762,6 +3005,73 @@ describeRealCodex('real Codex support escalation e2e', () => {
         await removeRealCodexTemporaryPaths([
           privateWorkingDirectory,
           groupWorkingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+
+  it(
+    'reports direct notification failure without retry',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-support-escalation-failure-e2e-'),
+      )
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
+          env: config.env,
+          hostedToolContext: createRealCodexSupportHostedToolContext('direct'),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          productFeedbackRecorder: createFailingRealCodexFeedbackRecorder(),
+          prompt: [
+            'Murph has no way to export my saved goals to CSV.',
+            'I need Murph human support to take this over.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+          (action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+        )
+        expect(calls, 'one failed support escalation call').toHaveLength(1)
+        const call = calls[0]
+        if (call?.kind !== 'dynamic') {
+          throw new Error('Expected one failed support-escalation tool call.')
+        }
+        expect(call.argumentsValue.kind).toBe('frustration')
+        expect(call.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
+        expect(call.argumentsValue.summary).toBe('Support escalation')
+        expect(call.argumentsValue.supportArea).toBe('data')
+        expect(call.argumentsValue.supportProblem).toBe('feature_missing')
+
+        const response = result.finalMessage.trim()
+        expect(response).toMatch(/direct notification failed/iu)
+        expect(response).toMatch(
+          /can still|continue|help|next step|try|troubleshoot|work through/iu,
+        )
+        expect(response).not.toContain('support@withmurph.ai')
+        expect(response).not.toMatch(
+          /account-linked escalation.{0,80}(?:saved|recorded)|(?:issue|summary).{0,80}(?:saved|recorded)|email (?:was|has been) (?:sent|delivered|received)|ticket|case number/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
           ...config.temporaryPaths,
         ])
       }
@@ -3612,10 +3922,45 @@ async function executeRealCodexAppServerTurn(
   }
 }
 
+function createRealCodexSupportHostedToolContext(
+  conversationScope: 'direct' | 'group',
+): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    currentUserActionScope: () => ({
+      acceptedInputIds: ['assistant_input_support'],
+      conversationId: `conversation-support-${conversationScope}`,
+      conversationScope,
+      inboundMailboxItemIds: ['mailbox-support'],
+      originSessionId: `session-support-${conversationScope}`,
+      recipientKey: `recipient-support-${conversationScope}`,
+    }),
+    sendVaultFile: async () => ({
+      filename: 'unused',
+      status: 'denied',
+    }),
+    vaultFileSendAvailable: false,
+  }
+}
+
 function createRealCodexFeedbackRecorder(): AssistantTurnProductFeedbackRecorder {
   return {
     async recordProductFeedback() {
       return { recorded: true }
+    },
+    discardProductFeedback() {},
+    readProductFeedback() {
+      return null
+    },
+  }
+}
+
+function createFailingRealCodexFeedbackRecorder(): AssistantTurnProductFeedbackRecorder {
+  return {
+    async recordProductFeedback() {
+      throw new Error('support callback timed out')
     },
     discardProductFeedback() {},
     readProductFeedback() {
@@ -4398,6 +4743,28 @@ function buildDenseReminderScheduledDeveloperInstructions(): string {
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: 'automation-cron',
+  })
+}
+
+function buildWeatherAlertDeveloperInstructions(scheduled: boolean): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-07-30',
+    currentTimeZone: 'America/Phoenix',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: scheduled ? 'automation-cron' : null,
   })
 }
 

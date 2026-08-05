@@ -394,6 +394,8 @@ describe("hosted-local harness", () => {
         HOSTED_MEMBER_ID: "member-123",
         LINQ_CHAT_ID: "chat-123",
         MURPH_DEV_SKIP_WEB: "1",
+        MURPH_E2E_WHOOP_OTP: "654321",
+        MURPH_E2E_OURA_OTP: "765432",
         TELEGRAM_MESSAGE_TEXT: "hello from fixture",
       },
       profile,
@@ -407,6 +409,8 @@ describe("hosted-local harness", () => {
       expect(text).not.toContain("hello from fixture");
       expect(text).not.toContain("sk_test_fixture");
       expect(text).not.toContain("split-token-fixture");
+      expect(text).not.toContain("654321");
+      expect(text).not.toContain("765432");
       expect(text).not.toContain(authorizationHeaderSecret);
       expect(text).not.toContain(authorizationFlagSecret);
       expect(text).not.toContain(process.cwd());

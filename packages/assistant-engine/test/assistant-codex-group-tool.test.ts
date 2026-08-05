@@ -116,6 +116,7 @@ describe("murph.group dynamic tool", () => {
       "read_usage_referral",
       "arm_usage_referral",
       "cancel_usage_referral",
+      "create_signup_referral_link",
       "list_memberships",
       "leave_membership",
       "update_display_name",
@@ -405,6 +406,7 @@ describe("murph.group dynamic tool", () => {
 
     for (const action of [
       "ask_current_sender",
+      "create_signup_referral_link",
       "revoke_own_email_share",
     ] as const) {
       expect(readMurphDynamicToolRequest(groupToolCall({
@@ -427,6 +429,196 @@ describe("murph.group dynamic tool", () => {
         message_ref: FRESH_ASSISTANT_INPUT_ID,
       }))).toMatchObject({ kind: "invalid-group-arguments" });
     }
+  });
+
+  it("creates a direct signup link only from fresh user input and returns the exact server result", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "create_signup_referral_link",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected signup referral request.");
+    }
+    const response = {
+      action: "create_signup_referral_link" as const,
+      result: {
+        expiresAt: "2026-08-06T12:00:00.000Z",
+        signupUrl: "https://www.withmurph.ai/join/server-issued",
+        status: "ok" as const,
+      },
+    };
+    const groupRequest = vi.fn<GroupToolRequest>(async () => response);
+    const currentUserActionScope = () => ({
+      acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+      conversationId: "conversation_private",
+      conversationScope: "direct" as const,
+      inboundMailboxItemIds: ["mailbox_private"],
+      originSessionId: "session_private",
+      recipientKey: "recipient_private",
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope,
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "create_signup_referral_link",
+    });
+    expect(readGroupToolPayload(result)).toEqual(response);
+
+    const rejectedRequest = vi.fn<GroupToolRequest>();
+    const rejected = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => null,
+        groupRequest: rejectedRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(rejected.rpcResult.success).toBe(false);
+    expect(rejectedRequest).not.toHaveBeenCalled();
+
+    const unverifiedRequest = vi.fn<GroupToolRequest>();
+    const unverified = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_external",
+          conversationScope: "unverified-external",
+          inboundMailboxItemIds: ["mailbox_external"],
+          originSessionId: "session_external",
+          recipientKey: "recipient_external",
+        }),
+        groupRequest: unverifiedRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(unverified.rpcResult.success).toBe(false);
+    expect(unverifiedRequest).not.toHaveBeenCalled();
+  });
+
+  it("binds a group signup link to the request-bearing accepted message", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "create_signup_referral_link",
+      message_ref: FRESH_ASSISTANT_INPUT_ID,
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected signup referral request.");
+    }
+    const participant = {
+      assistantInputId: FRESH_ASSISTANT_INPUT_ID,
+      senderHandle: "+15551110003",
+      source: "linq" as const,
+    };
+    const authorizeAcceptedMessageTarget: AssistantAcceptedMessageTargetAuthorizer =
+      vi.fn(async ({ messageRef }) =>
+        messageRef === FRESH_ASSISTANT_INPUT_ID
+          ? { participant, targetInputId: FRESH_ASSISTANT_INPUT_ID }
+          : null);
+    const response = {
+      action: "create_signup_referral_link" as const,
+      result: {
+        expiresAt: "2026-08-06T12:00:00.000Z",
+        signupUrl: "https://www.withmurph.ai/join/group-server-issued",
+        status: "ok" as const,
+      },
+    };
+    const groupRequest = vi.fn<GroupToolRequest>(async () => response);
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [EARLIER_ASSISTANT_INPUT_ID, FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group",
+          inboundMailboxItemIds: ["mailbox_one", "mailbox_two"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledWith({
+      action: "participant-effect",
+      deliveryContextOrdinal: 0,
+      messageRef: FRESH_ASSISTANT_INPUT_ID,
+    });
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "create_signup_referral_link",
+      participant,
+    });
+    expect(readGroupToolPayload(result)).toEqual(response);
+  });
+
+  it.each([
+    ["no message ref", undefined],
+    ["a ref outside the accepted input set", EARLIER_ASSISTANT_INPUT_ID],
+  ])("rejects a group signup link with %s", async (_case, messageRef) => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "create_signup_referral_link",
+      ...(messageRef ? { message_ref: messageRef } : {}),
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected signup referral request.");
+    }
+    const authorizeAcceptedMessageTarget = vi.fn();
+    const groupRequest = vi.fn<GroupToolRequest>();
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group",
+          inboundMailboxItemIds: ["mailbox_group"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(authorizeAcceptedMessageTarget).not.toHaveBeenCalled();
+    expect(groupRequest).not.toHaveBeenCalled();
   });
 
   it("binds a group referral read to the request-bearing accepted message", async () => {

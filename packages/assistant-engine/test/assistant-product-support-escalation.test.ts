@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { buildHostedProductSupportEscalationSummary } from "@murphai/hosted-execution/runtime-control";
+
 import {
   buildAssistantProductFeedbackIdempotencyKey,
   createAssistantProductFeedbackRecorder,
@@ -31,8 +33,10 @@ describe("assistant product support escalation", () => {
     const supportFeedback = {
       kind: "frustration" as const,
       relatedChangelogItemIds: [],
-      summary:
-        "Support escalation: a connected source reports success but Murph does not finish the connection.",
+      summary: buildHostedProductSupportEscalationSummary({
+        area: "connected_source",
+        problem: "connection_failed",
+      }),
     };
     await expect(
       recorder.recordProductFeedback(supportFeedback),
@@ -62,7 +66,10 @@ describe("assistant product support escalation", () => {
     const first = {
       kind: "frustration" as const,
       relatedChangelogItemIds: [],
-      summary: "Support escalation: the device connection did not finish.",
+      summary: buildHostedProductSupportEscalationSummary({
+        area: "connected_source",
+        problem: "connection_failed",
+      }),
     };
 
     await expect(recorder.recordProductFeedback(first)).resolves.toEqual({
@@ -70,7 +77,10 @@ describe("assistant product support escalation", () => {
     });
     await expect(recorder.recordProductFeedback({
       ...first,
-      summary: "Support escalation: a later rewrite must not replace it.",
+      summary: buildHostedProductSupportEscalationSummary({
+        area: "data",
+        problem: "data_missing",
+      }),
     })).resolves.toEqual({ recorded: false });
 
     expect(recorder.readProductFeedback()?.summary).toBe(first.summary);
@@ -96,7 +106,10 @@ describe("assistant product support escalation", () => {
     const supportFeedback = {
       kind: "frustration" as const,
       relatedChangelogItemIds: [],
-      summary: "Support escalation: the device connection did not finish.",
+      summary: buildHostedProductSupportEscalationSummary({
+        area: "connected_source",
+        problem: "connection_failed",
+      }),
     };
 
     await expect(recorder.recordProductFeedback(supportFeedback)).resolves.toEqual({
@@ -144,7 +157,10 @@ describe("assistant product support escalation", () => {
     await expect(recorder.recordProductFeedback({
       kind: "frustration",
       relatedChangelogItemIds: [],
-      summary: "Support escalation: the connected-source flow does not complete.",
+      summary: buildHostedProductSupportEscalationSummary({
+        area: "connected_source",
+        problem: "action_failed",
+      }),
     })).resolves.toEqual({ recorded: true });
 
     expect(deliverProductSupportEscalation).toHaveBeenCalledOnce();
@@ -171,7 +187,10 @@ describe("assistant product support escalation", () => {
     await expect(recorder.recordProductFeedback({
       kind: "frustration",
       relatedChangelogItemIds: [],
-      summary: "Support escalation: the device connection did not finish.",
+      summary: buildHostedProductSupportEscalationSummary({
+        area: "connected_source",
+        problem: "connection_failed",
+      }),
     })).rejects.toThrow("callback timed out");
 
     expect(recorder.readProductFeedback()).toBeNull();

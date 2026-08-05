@@ -129,18 +129,25 @@ describe("assistant product feedback", () => {
     expect(description).toContain("current accepted request");
     expect(description).toContain("optional related changelog item ids");
     expect(description).toContain("accepted, already accepted, or unavailable");
-    expect(description).toContain("Ordinary feedback is best-effort after the reply");
+    expect(description).toContain("Ordinary feedback uses a concise product-only summary");
     expect(description).toContain(
-      'A summary beginning "Support escalation:" is reserved for an explicit human-support request from a verified private member',
+      'Explicit verified-private human support uses kind "frustration", summary "Support escalation", empty changelog ids',
     );
-    expect(description).toContain("that mode waits for the durable callback");
+    expect(description).toContain("required supportArea and supportProblem enums");
+    expect(description).toContain("waits for the durable callback");
     expect(description).toContain("do not retry after any result");
     expect(schema).toContain('"minItems":0');
     expect(schema).toContain('"feature_interest"');
     expect(schema).toContain('"summary"');
-    expect(schema).toContain('Use feature_request for a missing or unsupported Murph path');
+    expect(schema).toContain('For ordinary feedback, use feature_request for a missing or unsupported Murph path');
+    expect(schema).toContain('Reserved support escalation always uses frustration');
     expect(schema).toContain('Make it actionable without the conversation');
-    expect(schema).toContain('Concise de-identified, product-only summary');
+    expect(schema).toContain('concise de-identified, product-only summary');
+    expect(schema).toContain('exact literal \\"Support escalation\\"');
+    expect(schema).toContain('"supportArea"');
+    expect(schema).toContain('"connected_source"');
+    expect(schema).toContain('"supportProblem"');
+    expect(schema).toContain('"connection_failed"');
     expect(schema).toContain('generic actor');
     expect(schema).toContain('expected versus observed result');
     expect(schema).toContain('concrete product constraint the source established');
@@ -309,15 +316,25 @@ describe("assistant product feedback", () => {
     }
 
     for (const malformedArguments of [
+      { kind: "frustration", summary: "Support escalation" },
       { kind: "frustration", summary: "Support escalation:" },
       {
         kind: "feature_request",
-        summary: "Support escalation: the connection flow does not finish.",
+        summary: "Support escalation",
+        supportArea: "connected_source",
+        supportProblem: "connection_failed",
       },
       {
         kind: "frustration",
         relatedChangelogItemIds: ["native-message-formatting"],
-        summary: "Support escalation: the connection flow does not finish.",
+        summary: "Support escalation",
+        supportArea: "connected_source",
+        supportProblem: "connection_failed",
+      },
+      {
+        kind: "frustration",
+        summary: "Support escalation",
+        supportArea: "connected_source",
       },
     ]) {
       const request = readMurphDynamicToolRequest({
@@ -344,7 +361,7 @@ describe("assistant product feedback", () => {
         success: false,
         contentItems: [{
           type: "inputText",
-          text: expect.stringContaining("support escalation rejected"),
+          text: "invalid product feedback arguments",
         }],
       });
     }
@@ -371,7 +388,9 @@ describe("assistant product feedback", () => {
       params: {
         arguments: {
           kind: "frustration",
-          summary: "Support escalation: the connection flow does not finish.",
+          summary: "Support escalation",
+          supportArea: "connected_source",
+          supportProblem: "connection_failed",
         },
         namespace: "murph",
         tool: "submit_product_feedback",
@@ -446,7 +465,9 @@ describe("assistant product feedback", () => {
       params: {
         arguments: {
           kind: "frustration",
-          summary: "Support escalation: the connection flow does not finish.",
+          summary: "Support escalation",
+          supportArea: "connected_source",
+          supportProblem: "connection_failed",
         },
         namespace: "murph",
         tool: "submit_product_feedback",

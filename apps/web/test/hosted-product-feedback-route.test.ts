@@ -1,5 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  buildHostedProductSupportEscalationSummary,
+} from "@murphai/hosted-execution/runtime-control";
+
 const mocks = vi.hoisted(() => ({
   recordHostedProductFeedback: vi.fn(),
   requireHostedCloudflareCallbackJsonRequest: vi.fn(),
@@ -79,8 +83,10 @@ describe("hosted product feedback record route", () => {
       idempotencyKey: "b".repeat(64),
       kind: "frustration",
       relatedChangelogItemIds: [],
-      summary:
-        "Support escalation: a connected source reports success but Murph does not finish the connection.",
+      summary: buildHostedProductSupportEscalationSummary({
+        area: "connected_source",
+        problem: "connection_failed",
+      }),
     };
     const response = await route.POST(
       new Request(

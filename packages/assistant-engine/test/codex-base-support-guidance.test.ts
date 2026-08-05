@@ -13,25 +13,28 @@ describe("Murph Codex base support guidance", () => {
       "murph.submit_product_feedback",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "do not volunteer contact details",
+      "don't volunteer contact details",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "de-identified summary not beginning `Support escalation:`",
+      "de-identified non-`Support escalation:` summary",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "say it was flagged",
+      "Keep ordinary feedback silent",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Give support@withmurph.ai only when explicitly asked.",
+      "Give support@withmurph.ai only when asked.",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "explicit verified-private human-support request",
+      "Explicit verified-private human support",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "de-identified summary beginning `Support escalation:`",
+      'kind: "frustration"`, summary `Support escalation`, no changelog IDs',
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "do not show the summary or ask for separate approval",
+      "supportArea/supportProblem; tool builds the safe issue",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "Don't show or seek approval",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "issue saved for triage and account-linked escalation recorded",
@@ -40,10 +43,10 @@ describe("Murph Codex base support guidance", () => {
       "Never claim email delivery/receipt",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "promise ticket, response, fix, follow-up, or timing",
+      "promise a ticket/response/fix/follow-up/timing",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "never retry",
+      "or retry",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       "For Murph product problems, give support@withmurph.ai directly",
@@ -56,6 +59,9 @@ describe("Murph Codex base support guidance", () => {
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       "disclose potential account linkage",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
+      "say it was flagged",
     );
   });
 

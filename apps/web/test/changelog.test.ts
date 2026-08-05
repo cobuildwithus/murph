@@ -37,6 +37,24 @@ describe("changelog registry", () => {
     expect(invalidItems).toEqual([]);
   });
 
+  it("keeps support escalation private and contact disclosure opt-in", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "direct-product-support-escalation",
+    );
+
+    expect(item).toMatchObject({
+      details: expect.stringContaining(
+        "shares the support address in conversation only when asked for it",
+      ),
+    });
+    expect(item?.details).toContain(
+      "Group or unverified support requests move to private Murph",
+    );
+    expect(item?.details).not.toContain(
+      "Group conversations receive the support email",
+    );
+  });
+
   it("bounds direct-chat access recovery to shared billing states", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "recognized-members-always-get-an-answer",
@@ -242,13 +260,32 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through August 4 shipment set", () => {
+  it("keeps official local alerts contextual and non-triggering", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "official-local-alert-health-context",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1307],
+      summary: expect.stringContaining("official alert for your location"),
+      details: expect.stringContaining("does not trigger outreach"),
+    });
+    expect(item?.details).toContain(
+      "instead of applying one temperature or air-quality threshold everywhere",
+    );
+  });
+
+  it("publishes the complete July 20 through August 5 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 16).map((edition) => ({
+      listChangelogEditions().slice(0, 17).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-08-05",
+        itemIds: ["official-local-alert-health-context"],
+      },
       {
         id: "2026-08-04",
         itemIds: [
@@ -626,8 +663,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-04");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-29");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-05");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-30");
   });
 
   it("resolves only known canonical edition cursors", () => {
