@@ -63,6 +63,32 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-08-05",
+    publishedOn: "2026-08-05",
+    title: "Local alerts can shape health advice",
+    summary:
+      "Murph can now use official local heat, cold, and outdoor-air-quality alerts when they matter to your health, recovery, or activity plans.",
+    items: [
+      {
+        id: "official-local-alert-health-context",
+        kind: "feature",
+        priority: 5,
+        title: "Murph can account for official local alerts",
+        summary:
+          "When heat, cold, or outdoor air quality matters, Murph can check the official alert for your location and use it as added health context.",
+        details:
+          "Murph uses the provider's location-specific alert instead of applying one temperature or air-quality threshold everywhere. An alert alone does not trigger outreach, unrelated hazards stay out of health reasoning, and a failed check does not block the rest of the answer.",
+        relevanceTags: ["assistant", "weather", "air-quality", "recovery"],
+        sourcePullRequests: [1307],
+        tryIt: {
+          label: "Ask about today's conditions",
+          prompt:
+            "I feel more tired than usual and planned an outdoor workout today. Check whether an official local alert should change my plan.",
+        },
+      },
+    ],
+  },
+  {
     id: "2026-08-04",
     publishedOn: "2026-08-04",
     title: "More control over data, models, and connections",

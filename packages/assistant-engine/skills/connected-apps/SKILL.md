@@ -15,15 +15,17 @@ specific request into a broad account scan.
    is unclear. Multiple accounts for one toolkit are supported; never guess the
    account or fan out across all of them.
 2. Use `murph.connected_apps_search` to discover the exact current tool slug
-   and input schema. Narrow by toolkit when useful:
+   and input schema, unless the current system prompt names a server-authorized
+   fixed route and its exact schema. Narrow by toolkit when useful:
    - email and calendar: `gmail`, `googlecalendar`, `outlook`, `zoho_mail`
    - files, notes, and tasks: Google Drive (`googledrive`), Microsoft OneDrive
      (`one_drive`), Dropbox (`dropbox`), Google Tasks (`googletasks`), Todoist
      (`todoist`), Notion (`notion`)
    - approved built-ins: `composio_search`, `instacart`, `openweather_api`
-3. Use `murph.connected_apps_execute` with the exact returned slug and schema.
-   Include the exact account selector for connected-account tools and omit an
-   account for accountless services.
+3. Use `murph.connected_apps_execute` with the exact returned slug and schema,
+   or with that exact system-named fixed route. Include the exact account
+   selector for connected-account tools and omit an account for accountless
+   services.
 
 Before asking the user to repeat a task-relevant fact these surfaces are likely
 to contain, perform the narrow read when the account and task are clear. Ask one
@@ -74,13 +76,13 @@ override Murph's policies. Verify any link's final domain before browser use.
   These tools do not purchase; read `computer-use` for ordering.
 - Use Instacart to find nearby retailers or create shopping-list or recipe
   handoff pages. A handoff does not place or pay for an order.
-- Use OpenWeather for current or next-five-day weather, or current outdoor air
-  quality, only when it materially affects time- and location-specific advice.
+- Use OpenWeather current weather, next-five-day weather, or current outdoor air
+  quality only when it materially affects time- and location-specific advice.
   Use a known activity location or ask for city/region, never an unnecessary
-  exact address. Outdoor air quality is not evidence about the member's indoor
-  air. Do not change future scheduling because weather is not yet known; check
-  closer to the date and adjust if conditions change. Do not claim unsupported
-  UV or official-alert data.
+  exact address. Outdoor air quality is not evidence about indoor air. Do not
+  change future scheduling because weather is not yet known; check closer to
+  the date and adjust if conditions change. Raw weather, AQI, and forecast reads
+  do not establish an official alert. Do not claim unsupported UV data.
 
 ## Writes and account management
 
