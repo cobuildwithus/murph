@@ -103,7 +103,11 @@ export type ProductLabelSearchItem = {
 };
 
 export type ProductLabelDetail = ProductLabelSearchItem;
-type ProductLabelSearchRow = Omit<ProductLabelSearchItem, "contaminants"> & {
+type ProductLabelSourceItem = Omit<
+  ProductLabelSearchItem,
+  "contaminants"
+>;
+type ProductLabelSearchRow = ProductLabelSourceItem & {
   canonicalKey?: string | null;
 };
 
@@ -396,6 +400,59 @@ export function createProductLabelsQueries(
     }
   }
 
+  async function searchRows(input: {
+    genericOnly?: boolean;
+    includeOffMarket: boolean;
+    limit: number;
+    q: string;
+  }): Promise<ProductLabelSearchRow[]> {
+    const q = brandScoping
+      ? normalizeProductLabelSearchInput(input.q)
+      : input.q.trim();
+    const searchQ = removeWeakProductLabelQueryTokens(q, weakQueryTokens);
+    const genericOnly =
+      input.genericOnly === true && genericSearchDataOrigins !== null;
+
+    if (!q || !searchQ) {
+      return [];
+    }
+
+    if (brandScoping && !genericOnly) {
+      const brandScopes = findProductLabelBrandScopes(await getBrandIndex(), q);
+
+      if (brandScopes.length > 0) {
+        const rows = await searchBrandScopedProductLabels(client, tableSql, {
+          ...input,
+          brandScopes,
+          excludedDataOrigins: [],
+          productQ: buildBrandScopedProductLabelQuery(searchQ, brandScopes),
+          projection: "private",
+          q: searchQ,
+        });
+
+        // An exclusive brand scope can come up empty when an
+        // ingredient-shaped brand hijacks the query or the scoped brand has
+        // no such product; fall back to the generic path instead of
+        // returning nothing.
+        if (rows.length > 0) {
+          return rows;
+        }
+      }
+    }
+
+    return await searchGenericProductLabels(client, tableSql, {
+      ...input,
+      excludedDataOrigins: [],
+      genericSearchDataOrigins:
+        genericOnly && genericSearchDataOrigins
+          ? genericSearchDataOrigins
+          : null,
+      projection: "private",
+      q: searchQ,
+      stemmedSearch,
+    });
+  }
+
   return {
     async getById(input) {
       const id = input.id.trim();
@@ -481,53 +538,11 @@ export function createProductLabelsQueries(
     },
 
     async search(input) {
-      const q = brandScoping
-        ? normalizeProductLabelSearchInput(input.q)
-        : input.q.trim();
-      const searchQ = removeWeakProductLabelQueryTokens(q, weakQueryTokens);
-      const genericOnly =
-        input.genericOnly === true && genericSearchDataOrigins !== null;
-
-      if (!q || !searchQ) {
-        return [];
-      }
-
-      if (brandScoping && !genericOnly) {
-        const brandScopes = findProductLabelBrandScopes(await getBrandIndex(), q);
-
-        if (brandScopes.length > 0) {
-          const rows = await searchBrandScopedProductLabels(client, tableSql, {
-            ...input,
-            brandScopes,
-            excludedDataOrigins: [],
-            productQ: buildBrandScopedProductLabelQuery(searchQ, brandScopes),
-            projection: "private",
-            q: searchQ,
-          });
-
-          // An exclusive brand scope can come up empty when an
-          // ingredient-shaped brand hijacks the query or the scoped brand has
-          // no such product; fall back to the generic path instead of
-          // returning nothing.
-          if (rows.length > 0) {
-            return await attachProductContaminantSummaries(client, tableSql, rows);
-          }
-        }
-      }
-
-      const rows = await searchGenericProductLabels(client, tableSql, {
-        ...input,
-        excludedDataOrigins: [],
-        genericSearchDataOrigins:
-          genericOnly && genericSearchDataOrigins
-            ? genericSearchDataOrigins
-            : null,
-        projection: "private",
-        q: searchQ,
-        stemmedSearch,
-      });
-
-      return await attachProductContaminantSummaries(client, tableSql, rows);
+      return await attachProductContaminantSummaries(
+        client,
+        tableSql,
+        await searchRows(input),
+      );
     },
   };
 }
@@ -858,6 +873,16 @@ async function attachProductContaminantSummaries(
   );
 
   return rows.map((row) => ({
+    ...toProductLabelSearchItem(row),
+    contaminants:
+      summaries.get(row.id) ?? createEmptyProductContaminantSummary(),
+  }));
+}
+
+function toProductLabelSearchItem(
+  row: ProductLabelSearchRow,
+): ProductLabelSourceItem {
+  return {
     id: row.id,
     dataOrigin: row.dataOrigin,
     dataOriginId: row.dataOriginId,
@@ -866,9 +891,7 @@ async function attachProductContaminantSummaries(
     upc: row.upc,
     offMarket: row.offMarket,
     label: row.label,
-    contaminants:
-      summaries.get(row.id) ?? createEmptyProductContaminantSummary(),
-  }));
+  };
 }
 
 async function loadProductContaminantSummaries(

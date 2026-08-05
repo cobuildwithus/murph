@@ -143,6 +143,32 @@ describe("normalizePublicProductLabel", () => {
     ]);
   });
 
+  it("reads USDA portion grams for generic food serving context", () => {
+    const result = normalizePublicProductLabel({
+      kind: "food",
+      label: {
+        nutrientsPer100g: [
+          { name: "Protein", unit: "g", value: 10 },
+        ],
+        portions: [
+          {
+            amount: 1,
+            description: "slice",
+            gramWeight: 28,
+          },
+        ],
+      },
+      servingGrams: null,
+    });
+
+    expect(result.serving).toEqual({
+      amount: 1,
+      description: "slice",
+      grams: 28,
+      unit: null,
+    });
+  });
+
   it("normalizes curated food rows without inferring missing values", () => {
     const result = normalizePublicProductLabel({
       kind: "food",
