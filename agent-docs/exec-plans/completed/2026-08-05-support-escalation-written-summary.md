@@ -28,11 +28,10 @@ feedback sanitizer and privacy contract.
 1. Replace the lossy area/problem-only payload with Murph's bounded,
    de-identified product explanation after the reserved prefix.
 2. Update direct tool, callback, privacy, replay, and prompt tests.
-3. Restack the detailed-email PR so it reads the stored anonymous detail and
-   includes that exact validated explanation beside the escalation metadata.
-4. Run focused tests and typechecks, update both PR contracts, complete the
-   required ReviewGPT correction gate and exact-head CI, then merge in stack
-   order.
+3. Keep this prerequisite PR's Web effect metadata-only while preserving the
+   stored anonymous detail for the stacked email formatter to reuse.
+4. Run focused tests and package typechecks, then prepare the exact candidate
+   head for the required PR review and CI gates.
 
 ## Deployment
 
@@ -40,3 +39,5 @@ Merge the runner-policy PR first, then merge the Web email PR. Deploy the runner
 before Web so the receiving formatter never sees an older unsupported payload.
 Use the existing immediate container rollout and fingerprint smoke; no schema,
 queue, migration, feature flag, compatibility state, or replay owner is added.
+Status: completed
+Completed: 2026-08-05
