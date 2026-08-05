@@ -1,6 +1,6 @@
 # Pending attachment progress handling
 
-Status: active
+Status: completed
 Created: 2026-08-04
 Updated: 2026-08-04
 
@@ -68,7 +68,12 @@ Updated: 2026-08-04
 ## Verification
 
 - `pnpm exec vitest run packages/assistant-engine/test/assistant-automation-prompt-builder.test.ts --no-coverage`
-- Direct readback of a descriptor-only `projectionStatus: "pending"` prompt.
+  passed (49 tests).
+- `pnpm --dir packages/assistant-engine typecheck` passed.
+- `pnpm --filter @murphai/assistant-engine... build` passed for the
+  assistant-engine dependency closure.
+- Direct readback of a descriptor-only `projectionStatus: "pending"` prompt
+  passed through the focused regression.
 - Pinned Codex App Server complete first-request capture with synthetic direct
   and group PDF fixtures, `gpt-5.6-terra`, low reasoning, code mode, and
   `gpt-tokenizer` 3.4.0 `o200k_harmony`: direct 30,679 to 30,794 tokens and
@@ -78,6 +83,9 @@ Updated: 2026-08-04
   `parallel_tool_calls`, `text`, and `tool_choice`; only transport controls were
   excluded identically. The temporary capture harness was removed.
 - `git diff --check`
+- Required GitHub Actions passed on behavior candidate `b1eed8e1970c`,
+  including assistant/platform/CLI coverage, release build and app verification,
+  frontend design proof, artifact checks, and marketing overflow proof.
 
 ## Preliminary specialist disposition
 
@@ -110,3 +118,4 @@ Updated: 2026-08-04
   the same turn. A real-model delayed-projection journey remains an evidence
   gap, so the PR is intentionally described as best effort rather than a
   guaranteed projection barrier.
+Completed: 2026-08-04
