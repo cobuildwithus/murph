@@ -1,3 +1,7 @@
+import { normalizeMarkdownTablesForMessage } from './message-table-fallback.js'
+
+export { normalizeMarkdownTablesForMessage } from './message-table-fallback.js'
+
 export type MessageTextDecorationStyle =
   | 'bold'
   | 'italic'
@@ -44,7 +48,9 @@ const MARKDOWN_DECORATION_TOKENS: readonly MarkdownDecorationToken[] = [
 ]
 
 export function renderMarkdownMessageText(value: string): DecoratedMessageText {
-  value = sanitizeUserFacingMessageLinks(value)
+  value = normalizeMarkdownTablesForMessage(
+    sanitizeUserFacingMessageLinks(value),
+  )
 
   let text = ''
   const decorations: MessageTextDecoration[] = []

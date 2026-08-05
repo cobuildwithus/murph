@@ -10142,6 +10142,11 @@
                             "failure"
                           ]
                         },
+                        "note": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 400
+                        },
                         "reps": {
                           "type": "integer",
                           "minimum": 0

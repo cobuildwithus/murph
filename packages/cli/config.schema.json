@@ -5870,7 +5870,7 @@
                           }
                         },
                         "workoutSet": {
-                          "description": "Compact workoutSet grammar: exercise=...;order=... plus optional set fields. Shell-quote each semicolon-separated value. Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
+                          "description": "Compact workoutSet grammar: exercise=...;order=... plus optional set fields. Shell-quote each semicolon-separated value. Supported keys: exercise, order, type, weightUnit, note, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -6223,7 +6223,7 @@
                           }
                         },
                         "workoutSet": {
-                          "description": "Attach replacement sets with the compact workoutSet grammar: exercise=...;order=... plus optional set fields. Shell-quote each semicolon-separated value. Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
+                          "description": "Attach replacement sets with the compact workoutSet grammar: exercise=...;order=... plus optional set fields. Shell-quote each semicolon-separated value. Supported keys: exercise, order, type, weightUnit, note, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
                           "type": "array",
                           "items": {
                             "type": "string",
