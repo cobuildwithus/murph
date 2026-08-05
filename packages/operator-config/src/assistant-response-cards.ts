@@ -1,6 +1,9 @@
+import { Buffer } from 'node:buffer'
+
 import {
   assistantResponseCardSchema,
   type AssistantResponseCard,
+  type CompactTableResponseCardV1,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
   type NutritionCardGoalSnapshot,
@@ -37,8 +40,16 @@ const NUTRITION_CARD_GOAL_STATUS_LABELS = {
 } as const satisfies Record<NutritionCardGoalStatus, string>
 
 export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
-  'Ask Murph for your nutrition totals in text'
+  'Ask Murph for this card in text'
 export const LINQ_IMESSAGE_APP_CARD_URL = 'https://murph.ai'
+const COMPACT_TABLE_APP_CARD_URL_PREFIX =
+  `${LINQ_IMESSAGE_APP_CARD_URL}/#murph-card=`
+const LINQ_IMESSAGE_APP_CARD_URL_MAX_LENGTH = 2_048
+
+export type AppCardEnvelopeV3 = {
+  schemaVersion: 3
+  card: Omit<CompactTableResponseCardV1, 'tracking'>
+}
 
 export type LinqIMessageAppLayout = {
   caption: string
@@ -50,11 +61,18 @@ export type LinqIMessageAppLayout = {
 export {
   assistantResponseCardSchema,
   assistantResponseCardV1Bounds,
+  compactTableCardV1Bounds,
+  compactTableResponseCardV1Schema,
+  compactTableRowV1Schema,
+  compactTableTrackingSourceV1Schema,
   dailyNutritionResponseCardV1Schema,
   dailyNutritionResponseCardV2Schema,
   dailyNutritionResponseCardSchema,
   nutritionCardGoalStatusValues,
   type AssistantResponseCard,
+  type CompactTableResponseCardV1,
+  type CompactTableRowV1,
+  type CompactTableTrackingSourceV1,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV1,
   type DailyNutritionResponseCardV2,
@@ -66,6 +84,10 @@ export {
 export const assistantResponseCardJsonSchema =
   createAssistantResponseCardJsonSchema()
 
+/**
+ * User-visible semantic text used by non-native routes and definitive native
+ * card fallback. Internal tracking references must never appear here.
+ */
 export function renderAssistantResponseCardText(
   card: AssistantResponseCard,
 ): string {
@@ -73,6 +95,25 @@ export function renderAssistantResponseCardText(
   switch (parsed.kind) {
     case 'daily_nutrition':
       return renderDailyNutritionResponseCardText(parsed)
+    case 'compact_table':
+      return renderCompactTableResponseCardText(parsed, false)
+  }
+}
+
+/**
+ * Durable model-context representation. A tracked table keeps its exact
+ * canonical source here so a later turn can reopen the workout without making
+ * the user-facing text fallback expose an internal id.
+ */
+export function renderAssistantResponseCardTranscriptText(
+  card: AssistantResponseCard,
+): string {
+  const parsed = assistantResponseCardSchema.parse(card)
+  switch (parsed.kind) {
+    case 'daily_nutrition':
+      return renderDailyNutritionResponseCardText(parsed)
+    case 'compact_table':
+      return renderCompactTableResponseCardText(parsed, true)
   }
 }
 
@@ -80,6 +121,14 @@ export function buildLinqIMessageAppLayout(
   card: AssistantResponseCard,
 ): LinqIMessageAppLayout {
   const parsed = assistantResponseCardSchema.parse(card)
+  if (parsed.kind === 'compact_table') {
+    return {
+      caption: 'Murph',
+      subcaption: parsed.tracking === null ? 'Table' : 'Workout table',
+      trailing_caption: 'OPEN',
+    }
+  }
+
   const mealLabel = parsed.mealCount === 1 ? 'meal' : 'meals'
   const calorieTotal = readRequiredCalorieTotal(parsed)
   const partial = renderPartialNutritionLabel(parsed) !== null
@@ -115,6 +164,59 @@ export function buildLinqIMessageAppLayout(
       ? {}
       : { trailing_subcaption: trailingSubcaption.join(' · ') }),
   }
+}
+
+export function buildLinqIMessageAppCardUrl(
+  card: AssistantResponseCard,
+): string {
+  const parsed = assistantResponseCardSchema.parse(card)
+  return parsed.kind === 'compact_table'
+    ? encodeCompactTableAppCardUrl(parsed)
+    : LINQ_IMESSAGE_APP_CARD_URL
+}
+
+export function encodeCompactTableAppCardUrl(
+  card: CompactTableResponseCardV1,
+): string {
+  const parsed = assistantResponseCardSchema.parse(card)
+  if (parsed.kind !== 'compact_table') {
+    throw new TypeError('Expected a compact table response card.')
+  }
+  const { tracking: _tracking, ...presentationCard } = parsed
+  const envelope: AppCardEnvelopeV3 = {
+    schemaVersion: 3,
+    card: presentationCard,
+  }
+  const encoded = Buffer.from(JSON.stringify(envelope), 'utf8')
+    .toString('base64url')
+  const url = `${COMPACT_TABLE_APP_CARD_URL_PREFIX}${encoded}`
+  if (url.length >= LINQ_IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
+    throw new TypeError('The encoded app card exceeds the inline size limit.')
+  }
+  return url
+}
+
+function renderCompactTableResponseCardText(
+  card: CompactTableResponseCardV1,
+  includeTracking: boolean,
+): string {
+  const heading = card.subtitle === null
+    ? card.title
+    : `${card.title} — ${card.subtitle}`
+  const rows = card.rows.map((row) => {
+    const values = row.values.map((value, index) =>
+      `${card.columns[index]}: ${value}`
+    )
+    return `${row.label}: ${values.join(' · ')}`
+  })
+  const footer = card.footer === null ? [] : ['', card.footer]
+  const tracking = !includeTracking || card.tracking === null
+    ? []
+    : [
+        '',
+        `[Murph tracked workout source: ${card.tracking.entityId}; snapshot: ${card.tracking.snapshotAt}]`,
+      ]
+  return [heading, '', ...rows, ...footer, ...tracking].join('\n')
 }
 
 function renderDailyNutritionResponseCardText(
@@ -249,5 +351,9 @@ function createAssistantResponseCardJsonSchema() {
     $schema: _dialect,
     ...portableSchema
   } = z.toJSONSchema(assistantResponseCardSchema)
-  return portableSchema
+  return {
+    ...portableSchema,
+    description:
+      'One closed Murph response card: daily_nutrition for a canonical daily meal summary, or compact_table for a bounded one-off table or a refreshed snapshot backed by one canonical workout event.',
+  }
 }

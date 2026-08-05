@@ -150,6 +150,7 @@ const workoutAddSetFields = new Set([
   'order',
   'type',
   'weightUnit',
+  'note',
   'reps',
   'weight',
   'durationSeconds',
@@ -282,7 +283,7 @@ function parseWorkoutAddSetEntry(entry: string): {
     order: requireCompactInteger(fields, 'order', 'workout-set', invalidWorkoutAddOption),
   }
 
-  for (const key of ['type', 'weightUnit']) {
+  for (const key of ['type', 'weightUnit', 'note']) {
     if (fields.has(key)) {
       set[key] = fields.get(key)
     }
