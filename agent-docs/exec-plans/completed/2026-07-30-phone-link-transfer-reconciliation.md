@@ -1,8 +1,8 @@
 # Repair phone-transfer reconciliation
 
-Status: active
+Status: completed
 Created: 2026-07-30
-Updated: 2026-07-30
+Updated: 2026-08-04
 
 ## Goal
 
@@ -86,8 +86,8 @@ Updated: 2026-07-30
    regressions.
 4. [x] Reconcile a provider-confirmed transfer by retiring only a proven unused
    source scaffold through the canonical account-deletion owner.
-5. [ ] Complete scoped verification, parent review, commit, push, and PR evidence.
-6. [ ] Resolve the five-round ReviewGPT cap after exact-head CI and live proof;
+5. [x] Complete scoped verification, parent review, commit, push, and PR evidence.
+6. [x] Resolve the five-round ReviewGPT cap after exact-head CI and live proof;
    do not start round 6 without an explicit continuation decision.
 
 ## Decisions
@@ -124,6 +124,20 @@ Updated: 2026-07-30
 - Final ReviewGPT round 5 found and reproduced a stale old-phone writer that
   could cross source deletion. The dual-phone lock correction is pushed; the
   five-round cap requires an explicit decision before any round 6.
-- Browser proof of the final already-transferred phone reconciliation remains
-  pending.
-- Final parent review, exact-head review, and CI evidence remain pending.
+- The phone-transfer corrections and terminal recovery UI shipped through PRs
+  #1191 and #1267. Four synthetic design-catalog captures cover the shared card
+  and Settings dialog at desktop and mobile viewports without member data.
+- PR #1267 exact-head CI passed every required check. Final ReviewGPT accepted
+  one disclosure-only finding, the PR intent contract was corrected, and the
+  unchanged patch then received `ROUND_OUTCOME: PASS` with verified model
+  evidence.
+- The preliminary specialist pass found no production, product-experience,
+  prompt, or frontend defect. Its sole accepted coverage finding is resolved by
+  a production-path component regression that exercises the auto-open Settings
+  transfer callbacks and proves the terminal dialog has support but no retry.
+  The focused suite passes 19 tests; hosted-web typecheck and scoped lint pass.
+- A bounded read-only production inspection found no persisted member or web
+  session write for the older reported email-to-phone incident. Historical
+  request evidence is unavailable, so no speculative authentication change was
+  made.
+Completed: 2026-08-04

@@ -259,6 +259,7 @@ export async function maybeStartHostedLocalMinio(input: {
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       HOSTED_R2_PRESIGN_BUCKET_NAME: HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
       HOSTED_R2_CUTOVER_PHASE: "source_active",
+      HOSTED_R2_WRITE_ADMISSION: "open",
       HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: HOSTED_LOCAL_R2_PRESIGN_ENAM_BUCKET_NAME,
       HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: `http://${formatHostedLocalMinioUrlHost(controlHost)}:${port}`,
       HOSTED_R2_PRESIGN_ENDPOINT: `http://${formatHostedLocalMinioUrlHost(endpointHost)}:${port}`,

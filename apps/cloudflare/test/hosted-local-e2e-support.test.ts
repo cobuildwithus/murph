@@ -514,6 +514,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
       && name !== "murph.newsletter"
+      && name !== "murph.send_physical_note"
       && name !== "murph.send_vault_file"
       && name !== "murph.ask_grok"
       && name !== "murph.attach_response_card"
@@ -528,6 +529,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.create_phone_call");
     expect(allToolNames).toContain("murph.group_room_model");
     expect(allToolNames).toContain("murph.imessage_contact");
+    expect(allToolNames).toContain("murph.send_physical_note");
     expect(allToolNames).toContain("murph.send_progress_update");
     expect(allToolNames).toContain("murph.ask_grok");
     expect(allToolNames).toContain("murph.attach_response_card");
@@ -559,6 +561,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         imessageContactAvailable: true,
         messageTargetingAvailable: true,
         newsletterAvailable: true,
+        physicalNotesAvailable: true,
         phoneCallsAvailable: true,
         progressUpdatesAvailable: true,
         responseCardAvailable: true,

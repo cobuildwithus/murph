@@ -56,6 +56,8 @@ const ASSISTANT_MODEL_SETTINGS_URL = "/api/settings/assistant-model";
 const ASSISTANT_MODE_SETTINGS_URL = "/api/settings/assistant";
 const SOL_REQUIRES_EDGE_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
 const VENICE_UNAVAILABLE_ERROR_CODE = "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE";
+const VENICE_USAGE_DISCLOSURE =
+  "Venice’s higher provider rates use included AI capacity faster.";
 
 /**
  * Where new core replies go. Murph-managed providers and the member's own
@@ -116,7 +118,7 @@ const PROVIDER_OPTIONS = [
     provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
   },
   {
-    description: "Privacy-first inference.",
+    description: `Privacy-first inference. ${VENICE_USAGE_DISCLOSURE}`,
     logo: {
       height: 356,
       src: "/brand-logos/assistant-providers/venice-light.svg",
@@ -238,6 +240,11 @@ export function AssistantProviderSummary({
       >
         Change
       </Button>
+      {draftRouting === HOSTED_ASSISTANT_VENICE_PROVIDER ? (
+        <p className="basis-full text-xs/5 text-pretty text-muted-foreground">
+          {VENICE_USAGE_DISCLOSURE}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -399,8 +406,9 @@ export function AssistantProviderDialog({
               ) : null}
             </RadioGroup>
             <p className="px-1 text-xs/5 text-pretty text-muted-foreground">
-              This only changes core replies. Image generation, voice, search,
-              and other tools still use their specialized providers.
+              The selected provider handles core replies. Image generation,
+              voice, search, and other tools still use their specialized
+              providers.
             </p>
           </>
         )}

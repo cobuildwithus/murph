@@ -228,6 +228,7 @@ export class RuntimeInvocationService {
         })
       : null;
     let platformAiUsageAllowed: boolean | null = null;
+    let invocationProcessingMode = input.input.processingMode ?? null;
     if (hostedAssistantCustomInferenceOverride) {
       if (typeof workspaceRead.platformAiUsageAllowed !== "boolean") {
         throw new Error(
@@ -236,16 +237,17 @@ export class RuntimeInvocationService {
       }
       platformAiUsageAllowed = workspaceRead.platformAiUsageAllowed;
     } else if (workspaceRead.platformAiUsageAllowed === false) {
-      if (input.input.processingMode !== "inbox_media_retention") {
-        throw new Error(
-          "Hosted managed inference was no longer allowed during invocation preparation.",
-        );
-      }
-      // Inbox media retention deletes expired private media without any model
-      // call, so a denied managed allowance must not block it. Binding the
-      // denial into the write fence keeps every metered provider egress
-      // rejected for the run anyway.
+      // A payloadless direct wake can win the race with Temporal's usage-block
+      // reconciliation. Keep that expected product block out of transport
+      // failure state and keep restored assistant work out of provider-failure
+      // handling: the existing system-mailbox path exits before foreground
+      // assistant admission, while the bound fence rejects every metered
+      // provider egress if one is reached unexpectedly. Explicit retention-only
+      // work can also proceed because it needs no model call.
       platformAiUsageAllowed = false;
+      if ((invocationProcessingMode ?? "default") === "default") {
+        invocationProcessingMode = "system_mailbox";
+      }
     }
     const customInferenceEnvelope = customInferenceTarget
       ? await sealHostedInferenceRuntimeTarget({
@@ -256,6 +258,7 @@ export class RuntimeInvocationService {
     const token = await this.input.stateStore.bindWriteFenceInvocationFacts({
       customInferenceEnvelope,
       platformAiUsageAllowed,
+      processingMode: invocationProcessingMode,
       token: input.token,
       workspaceVersion,
     });
@@ -271,7 +274,7 @@ export class RuntimeInvocationService {
         workspaceRead.hostedAssistantProviderOverride ?? null,
       hostedAssistantReasoningEffortOverride:
         workspaceRead.hostedAssistantReasoningEffortOverride ?? null,
-      processingMode: input.input.processingMode ?? null,
+      processingMode: invocationProcessingMode,
       token,
       userId: input.input.userId,
       workspace: workspaceRead.workspace,

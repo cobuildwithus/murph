@@ -1,10 +1,5 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import {
-  resolveHealthCommonsBiomarkerEntityKey,
-} from "@murphai/health-commons/biomarker-entity-mappings";
-import type { HealthCommonsWebBiomarkerFallbackRange } from "@murphai/health-commons/runtime";
-import { resolveLabResultMetricDefinition } from "@murphai/health-metrics";
 
 import {
   LabBiomarkerChatAction,
@@ -15,10 +10,10 @@ import {
   UploadLabsMurphContactAction,
 } from "@/src/components/home/upload-labs-action";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { getGeneratedBiomarkerIndex } from "@/src/lib/health-commons/generated-biomarker-artifacts";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { LabBiomarkerDetailClient } from "./lab-biomarker-detail-client";
+import { resolveLabBiomarkerContext } from "./lab-biomarker-context";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Biomarker history — Murph",
@@ -55,33 +50,4 @@ export default async function LabBiomarkerResultPage({
       }
     />
   );
-}
-
-export function resolveLabBiomarkerContext(metricKey: string): {
-  displayName: string;
-  fallbackRanges: HealthCommonsWebBiomarkerFallbackRange[];
-  summary: string | null;
-} {
-  const normalizedMetricKey = metricKey.trim().toLowerCase();
-  const definition = resolveLabResultMetricDefinition(normalizedMetricKey);
-  const entityKeys = new Set([
-    definition?.biomarkerKey,
-    ...(definition?.biomarkerAliases ?? []),
-  ]
-    .filter((value): value is string => Boolean(value))
-    .map((value) => resolveHealthCommonsBiomarkerEntityKey(value)));
-  const entry = getGeneratedBiomarkerIndex().biomarkers.find((candidate) =>
-    entityKeys.has(candidate.key)
-      || candidate.routeId === normalizedMetricKey
-      || candidate.aliases.includes(normalizedMetricKey)
-  );
-
-  return {
-    displayName: definition?.displayName
-      ?? entry?.shortName
-      ?? entry?.title
-      ?? normalizedMetricKey.replaceAll("-", " "),
-    fallbackRanges: entry?.fallbackRanges ?? [],
-    summary: entry?.summary ?? null,
-  };
 }

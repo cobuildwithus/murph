@@ -137,7 +137,9 @@ describe("hosted local junction link connect e2e", () => {
 
     const callbackProofCookie = readSetCookiePair(
       startResponse,
-      "murph-device-sync-junction",
+      session.secureCookieMode
+        ? "__Host-murph-device-sync-junction"
+        : "murph-device-sync-junction",
     );
 
     // The redirect_url Murph handed Junction carries the murph_state the
@@ -148,21 +150,15 @@ describe("hosted local junction link connect e2e", () => {
     const murphState = redirectUrl.searchParams.get("murph_state");
     expect(murphState).toMatch(/^[A-Za-z0-9_-]{16,128}$/u);
 
-    // Simulate the provider redirect back: the callback page posts to the
-    // complete route with the Link outcome query params.
-    const completeUrl = new URL(
-      "/api/device-sync/connect/junction/callback/complete",
-      webBaseUrl,
-    );
-    completeUrl.searchParams.set("murph_state", murphState ?? "");
-    completeUrl.searchParams.set("user_id", stub.junctionUserId);
-    completeUrl.searchParams.set("success", "true");
-    const completeResponse = await fetch(completeUrl, {
+    // Simulate the provider redirect back through the exact callback URL
+    // Murph handed Junction. The callback GET owns completion directly; there
+    // is no browser confirmation page or secondary POST route.
+    redirectUrl.searchParams.set("user_id", stub.junctionUserId);
+    redirectUrl.searchParams.set("success", "true");
+    const completeResponse = await fetch(redirectUrl, {
       headers: {
         cookie: `${sessionCookie}; ${callbackProofCookie}`,
-        origin: webBaseUrl,
       },
-      method: "POST",
       redirect: "manual",
     });
     const completeLocation = completeResponse.headers.get("location") ?? "";

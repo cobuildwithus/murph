@@ -283,7 +283,11 @@ Use Stripe as the source of truth, but do not use Customer Portal plan switching
 
 Stripe Customer Portal supports scheduled downgrades in general, but the app keeps this in-product switch explicit so pending state, schedule compatibility, and allowance reconciliation stay under Murph control.
 
-`subscription_update_confirm` is also not a fit because Stripe currently allows only one item in that flow and says subscriptions with multiple items cannot be updated through it.
+`subscription_update_confirm` owns immediate paid-plan upgrades after the
+retired hosted-AI metered items are removed and each eligible direct
+subscription has one licensed item. It does not own the scheduled transitions
+in this spec: Stripe Subscription Schedules remain the correct primitive for
+end-of-period downgrades and Group switches.
 
 Stripe Subscription Schedules are the correct Stripe-owned primitive for this behavior. They are designed for future subscription changes, including downgrades, and phase metadata updates the underlying subscription metadata when a phase starts.
 
