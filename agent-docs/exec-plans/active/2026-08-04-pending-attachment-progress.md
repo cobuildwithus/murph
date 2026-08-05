@@ -71,10 +71,23 @@ Updated: 2026-08-04
 - Direct readback of a descriptor-only `projectionStatus: "pending"` prompt.
 - Pinned Codex App Server complete first-request capture with synthetic direct
   and group PDF fixtures, `gpt-5.6-terra`, low reasoning, code mode, and
-  `gpt-tokenizer` 3.4.0 `o200k_harmony`: direct 30,667 to 30,706 tokens and
-  140,486 to 140,684 bytes (+39 tokens, +0.1272%, +198 bytes); group 26,919
-  to 26,958 tokens and 124,005 to 124,203 bytes (+39 tokens, +0.1449%, +198
+  `gpt-tokenizer` 3.4.0 `o200k_harmony`: direct 30,679 to 30,772 tokens and
+  140,479 to 140,917 bytes (+93 tokens, +0.3031%, +438 bytes); group 26,931
+  to 27,024 tokens and 123,998 to 124,436 bytes (+93 tokens, +0.3453%, +438
   bytes). The complete provider-visible fields were `include`, `input`,
   `parallel_tool_calls`, `text`, and `tool_choice`; only transport controls were
   excluded identically. The temporary capture harness was removed.
 - `git diff --check`
+
+## Preliminary specialist disposition
+
+- Accepted the prompt-level tool/stop-rule finding. Progress delivery is now
+  conditional on tool availability; the same turn uses existing local shell
+  access to check `raw/inbox/**` for a new descriptor-matching file for at most
+  30 seconds, rejects stale or unrelated files, and falls back truthfully.
+- Did not accept the proposed runtime admission gate or its runtime-integration
+  coverage expansion. Those suggestions would replace the explicitly selected
+  prompt-primary, best-effort behavior with new selection/wake behavior outside
+  this task. The PR does not claim prompt wording makes projection readiness a
+  runtime guarantee; stronger gating remains a separate product decision.
+- No coverage patch artifact was supplied.

@@ -1841,16 +1841,19 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result.prompt).toContain('- raw evidence: not_attempted')
     expect(result.prompt).not.toContain('- parser output:')
     expect(result.prompt).toContain(
-      'immediately call `murph.send_progress_update` once with a brief acknowledgment',
+      'If the request depends on it and `murph.send_progress_update` is available, call it once with a brief acknowledgment.',
     )
     expect(result.prompt).toContain(
-      'continue the same turn: wait briefly and recheck for readable attachment evidence',
+      'Keep this turn active for up to 30 seconds total',
     )
     expect(result.prompt).toContain(
-      'Do not finalize, claim inspection, or escalate product feedback solely because hydration is still pending.',
+      'recheck `raw/inbox/**` for a newly readable file matching this input\'s descriptor metadata',
     )
     expect(result.prompt).toContain(
-      'Once readable, inspect the storedPath and complete the request.',
+      'If it does not appear within 30 seconds, say the attachment is not yet available.',
+    )
+    expect(result.prompt).toContain(
+      'Do not claim inspection or escalate product feedback solely because hydration is still pending.',
     )
     expect(result.prompt).not.toContain(
       'respond using any other available message context',
