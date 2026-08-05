@@ -21,6 +21,7 @@ import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import {
+  AppleHealthRelaySetupStudy,
   ConnectSourceCardStudy,
   ZeppAppleHealthSetupStudy,
 } from "./connect-source-card-study";
@@ -254,6 +255,12 @@ export function SectionsContent() {
 
       <StudySection title="Zepp/Amazfit Apple Health setup">
         <ZeppAppleHealthSetupStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Apple Health relay wearable setup">
+        <AppleHealthRelaySetupStudy />
       </StudySection>
 
       <Separator />
