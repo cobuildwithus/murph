@@ -165,6 +165,68 @@ test("renders optional sharing cards with visible keyboard focus treatment", asy
   expect(markup).toContain('type="checkbox"');
 });
 
+test("discloses and submits source-aware sleep metadata on the link-only join page", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: false,
+      expectedMembershipId: null,
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      permissions: [
+        {
+          description:
+            "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+          label: "Deep sleep by source",
+          projectionScope: { projectionKind: "deep-sleep-sources-days.v1" as const },
+          projectionScopeKey: "deep-sleep-sources-days.v1",
+        },
+        {
+          description:
+            "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
+          label: "REM sleep by source",
+          projectionScope: { projectionKind: "rem-sleep-sources-days.v1" as const },
+          projectionScopeKey: "rem-sleep-sources-days.v1",
+        },
+      ],
+      postJoinContactOption: null,
+      postJoinDestination: "/home",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  expect(container.textContent).toContain(
+    "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+  );
+  expect(container.textContent).toContain(
+    "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
+  );
+  expect(Array.from(container.querySelectorAll<HTMLInputElement>(
+    'input[type="checkbox"]',
+  )).every((checkbox) => checkbox.checked)).toBe(true);
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      expectedMembershipId: null,
+      selectedVaultShareProjectionScopes: [
+        { projectionKind: "deep-sleep-sources-days.v1" },
+        { projectionKind: "rem-sleep-sources-days.v1" },
+      ],
+    },
+    url: "/api/groups/join/JOIN123/accept",
+  });
+});
+
 test("groups the four macro nutrients into one Daily macros card, calories separate", async () => {
   const { groupJoinPermissionsForDisplay } = await import(
     "@/src/components/hosted-groups/group-join-permission-groups"
