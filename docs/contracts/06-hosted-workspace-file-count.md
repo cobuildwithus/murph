@@ -221,14 +221,19 @@ landing; record the chosen posture here so the decision is reviewable.
   add at most one small map entry; retries of the same tool identity update no
   file count and either reuse the saved capture or return the deleted outcome.
   The index is one file per workspace, not one sidecar per image. Lookup-backed
-  generated-image capture events are immutable after creation except for
-  `deleteEvent`, so each entry can store the original event shard and primary raw
-  media ref without scanning the event ledger. The map grows with user-created
-  generated-image captures, matching the product-owned raw capture history, and
-  deletion intentionally keeps the entry so a retry cannot resurrect deleted
-  media. No rotation is planned while the file stays a single compact owner
-  document; future retention for generated captures must prune the capture event,
-  raw media, and matching lookup entry in one core-owned repair flow.
+  generated-image capture events are immutable after creation except for a
+  standard deleted revision, so each entry can store the original event shard
+  and primary raw media ref without scanning the event ledger. Assistant-generated image bytes
+  are retained for 14 days from the original capture `recordedAt`. Hosted idle
+  maintenance then runs one bounded core-owned canonical batch: it receipt-checks
+  the lookup, event, raw manifest, and image; replaces the image at its existing
+  raw path with a small privacy tombstone; updates the manifest receipt; appends
+  the standard deleted event revision when needed; and marks the lookup entry
+  `retiredAt`. Keeping that compact lookup tombstone is intentional: replay of
+  the original stable tool identity returns deleted and cannot regenerate or
+  resurrect expired media. The map therefore remains one accepted-unbounded
+  small owner document while the large generated payloads have bounded lifetime;
+  the cleanup adds no scheduler, queue, sidecar, or persisted cursor.
 
 - `assistant-state/hosted-provider-cleanup.json`
   (`murph.hosted-provider-cleanup.v1`) is compact durable operational-continuity

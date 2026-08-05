@@ -29,10 +29,13 @@ vi.mock("../src/hosted-runtime/pending-input-index.ts", () => ({
     runHostedPendingAssistantInputContentRetention(input),
 }));
 const archiveClosedIntegrationIngestShards = vi.fn();
+const runGeneratedImageCaptureRetention = vi.fn();
 vi.mock("@murphai/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@murphai/core")>()),
   archiveClosedIntegrationIngestShards: (input: unknown) =>
     archiveClosedIntegrationIngestShards(input),
+  runGeneratedImageCaptureRetention: (input: unknown) =>
+    runGeneratedImageCaptureRetention(input),
 }));
 
 import {
@@ -101,6 +104,14 @@ beforeEach(() => {
     repairedShardCount: 0,
     scannedShardCount: 0,
     sourceByteCount: 0,
+  });
+  runGeneratedImageCaptureRetention.mockReset();
+  runGeneratedImageCaptureRetention.mockResolvedValue({
+    hasMoreEligibleCaptures: false,
+    nextEligibleAt: null,
+    retiredByteCount: 0,
+    retiredCaptureCount: 0,
+    scannedCaptureCount: 0,
   });
 });
 
@@ -417,6 +428,50 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       protectedStoredPaths: ["raw/inbox/linq/self/2026/06/cap_pending/attachments/01__photo.webp"],
       signal: expect.any(AbortSignal),
       vaultRoot: "/vault",
+    });
+    expect(runGeneratedImageCaptureRetention).toHaveBeenCalledWith({
+      protectedCaptureIds: ["cap_pending"],
+      protectedStoredPaths: ["raw/inbox/linq/self/2026/06/cap_pending/attachments/01__photo.webp"],
+      signal: expect.any(AbortSignal),
+      vaultRoot: "/vault",
+    });
+  });
+
+  it("schedules generated-image cleanup on the shared retention wake", async () => {
+    runGeneratedImageCaptureRetention.mockResolvedValue({
+      hasMoreEligibleCaptures: false,
+      nextEligibleAt: "2026-07-10T00:00:00.000Z",
+      retiredByteCount: 0,
+      retiredCaptureCount: 0,
+      scannedCaptureCount: 1,
+    });
+    runInboxMediaRetention.mockResolvedValue({
+      expiredAttachments: 0,
+      expiredBytes: 0,
+      hasMoreEligibleAttachments: false,
+      nextEligibleAt: "2026-07-20T00:00:00.000Z",
+      records: [],
+    });
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    await expect(runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      pendingWork: false,
+      providerName: "hosted-openai",
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    })).resolves.toMatchObject({
+      nextWakeAt: "2026-07-10T00:00:00.000Z",
+      nextWakeReason: "inbox_media_retention",
     });
   });
 
@@ -1118,6 +1173,13 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         materializeCandidatePaths: undefined,
         maxAttachments: 1,
         protectedAttachmentIds: undefined,
+        protectedCaptureIds: ["cap_pending"],
+        protectedStoredPaths: undefined,
+        signal: expect.any(AbortSignal),
+        vaultRoot: "/vault",
+      });
+      expect(runGeneratedImageCaptureRetention).toHaveBeenCalledWith({
+        maxCaptures: 1,
         protectedCaptureIds: ["cap_pending"],
         protectedStoredPaths: undefined,
         signal: expect.any(AbortSignal),

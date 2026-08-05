@@ -9,6 +9,9 @@ import {
   addCaptureWithLookup,
   deterministicContractId,
   findCaptureByLookup,
+  GENERATED_IMAGE_CAPTURE_PROVENANCE_SCHEMA,
+  GENERATED_IMAGE_CAPTURE_SOURCE,
+  GENERATED_IMAGE_CAPTURE_TAGS,
   ID_PREFIXES,
   isVaultError,
 } from '@murphai/core'
@@ -73,7 +76,6 @@ type GenerateImageUsageExtractionSourcePath =
 
 const LOCAL_GENERATED_IMAGES_DIR = 'generated_images'
 const MAX_GENERATED_IMAGE_BYTES = 10 * 1024 * 1024
-const GENERATED_IMAGE_CAPTURE_SOURCE = 'murph.generate_image'
 
 interface SavedGeneratedImageCapture {
   captureId: string
@@ -418,7 +420,7 @@ async function saveGeneratedImageCapture(input: {
           draft: {
             occurredAt,
             source: 'derived',
-            tags: ['assistant-generated-image', 'generated-image'],
+            tags: [...GENERATED_IMAGE_CAPTURE_TAGS],
             title: 'Generated image',
             note: 'Assistant-generated image saved for later visual reuse.',
           },
@@ -446,7 +448,7 @@ async function saveGeneratedImageCapture(input: {
                 ...(input.referenceImages.length > 0
                   ? { referenceImageSetHash: hashReferenceImageSet(input.referenceImages) }
                   : {}),
-                schema: 'murph.generated-image.v1',
+                schema: GENERATED_IMAGE_CAPTURE_PROVENANCE_SCHEMA,
                 size: input.args.size,
               },
               mediaCount: 1,
@@ -458,7 +460,7 @@ async function saveGeneratedImageCapture(input: {
           draft: {
             occurredAt,
             source: 'derived',
-            tags: ['assistant-generated-image', 'generated-image'],
+            tags: [...GENERATED_IMAGE_CAPTURE_TAGS],
             title: 'Generated image',
             note: 'Assistant-generated image saved for later visual reuse.',
           },
@@ -485,7 +487,7 @@ async function saveGeneratedImageCapture(input: {
                 ...(input.referenceImages.length > 0
                   ? { referenceImageSetHash: hashReferenceImageSet(input.referenceImages) }
                   : {}),
-                schema: 'murph.generated-image.v1',
+                schema: GENERATED_IMAGE_CAPTURE_PROVENANCE_SCHEMA,
                 size: input.args.size,
               },
               mediaCount: 1,

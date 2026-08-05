@@ -23,7 +23,9 @@ import {
 } from "@murphai/hosted-execution";
 import {
   archiveClosedIntegrationIngestShards,
+  runGeneratedImageCaptureRetention,
   type ArchiveClosedIntegrationIngestShardsResult,
+  type RunGeneratedImageCaptureRetentionResult,
 } from "@murphai/core";
 import {
   runInboxMediaRetention,
@@ -162,6 +164,17 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         retentionWake = mergeInboxRetentionWakes(
           retentionWake,
           resolveInboxMediaRetentionWake(retentionResult),
+        );
+        const generatedImageRetention = await runGeneratedImageCaptureRetention({
+          ...(input.pendingWork ? { maxCaptures: 1 } : {}),
+          protectedCaptureIds: input.protectedCaptureIds,
+          protectedStoredPaths: input.protectedStoredPaths,
+          signal: abortController.signal,
+          vaultRoot: input.vaultRoot,
+        });
+        retentionWake = mergeInboxRetentionWakes(
+          retentionWake,
+          resolveGeneratedImageRetentionWake(generatedImageRetention),
         );
         const envelopeMigration = await runInboxEnvelopeMigration({
           apply: true,
@@ -468,6 +481,16 @@ function resolveInboxTextRetentionWake(
   }
 
   return {};
+}
+
+function resolveGeneratedImageRetentionWake(
+  result: RunGeneratedImageCaptureRetentionResult,
+): HostedIdleMaintenanceWake {
+  if (result.hasMoreEligibleCaptures) {
+    return resolveInboxMediaRetentionImmediateWake();
+  }
+
+  return resolveAssistantTranscriptRetentionWake(result.nextEligibleAt);
 }
 
 function resolveAssistantTranscriptRetentionWake(
