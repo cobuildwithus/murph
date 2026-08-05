@@ -17,10 +17,6 @@ import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
-  HOSTED_ASSISTANT_LUNA_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
-} from "@murphai/hosted-execution/assistant-model";
-import {
   MURPH_GROUP_READ_PERMISSION_PROFILE,
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
@@ -87,17 +83,10 @@ const EXPECTED_SUBAGENT_USAGE_HINT = [
 
 test("hosted Codex memory diagnostics expose only safe config metadata", () => {
   assert.deepEqual(HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS, {
-    codexOperatorMemoryDisableOnExternalContext: false,
-    codexOperatorMemoryFeatureEnabled: true,
-    codexOperatorMemoryGenerateMemories: true,
-    codexOperatorMemoryMaxRawMemoriesForConsolidation: 128,
-    codexOperatorMemoryMaxRolloutAgeDays: 10,
-    codexOperatorMemoryMaxRolloutsPerStartup: 1,
-    codexOperatorMemoryMaxUnusedDays: 30,
-    codexOperatorMemoryMinRateLimitRemainingPercent: 25,
-    codexOperatorMemoryMinRolloutIdleHours: 1,
-    codexOperatorMemoryMode: "codex-native-operator-context",
-    codexOperatorMemoryUseMemories: true,
+    codexOperatorMemoryFeatureEnabled: false,
+    codexOperatorMemoryGenerateMemories: false,
+    codexOperatorMemoryMode: "disabled",
+    codexOperatorMemoryUseMemories: false,
   });
 });
 
@@ -183,17 +172,12 @@ test("hosted Codex runtime config writes Venice Responses config without secret 
   assert.match(config, /wire_api = "responses"/u);
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.doesNotMatch(config, /signed-venice-egress-credential/u);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.match(
     config,
-    new RegExp(`^extract_model = "${HOSTED_ASSISTANT_LUNA_MODEL}"$`, "mu"),
+    /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
   );
-  assert.match(
-    config,
-    new RegExp(
-      `^consolidation_model = "${HOSTED_ASSISTANT_TERRA_MODEL}"$`,
-      "mu",
-    ),
-  );
+  assert.doesNotMatch(config, /^(?:extract|consolidation)_model = /mu);
 });
 
 test("hosted Codex runtime config preserves capabilities with custom inference", async () => {
@@ -227,13 +211,14 @@ test("hosted Codex runtime config preserves capabilities with custom inference",
   assert.match(config, /^stream_max_retries = 0$/mu);
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.doesNotMatch(config, /^model_reasoning_effort = /mu);
-  assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.match(config, /\[features\.multi_agent_v2\]\nenabled = true/u);
   assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
   assert.match(
     config,
-    /\[memories\]\nuse_memories = true\ngenerate_memories = true\nextract_model = "murph-custom-r7"\nconsolidation_model = "murph-custom-r7"/u,
+    /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
   );
+  assert.doesNotMatch(config, /^(?:extract|consolidation)_model = /mu);
   assert.equal(
     new Set<string>(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)
       .has("MURPH_CUSTOM_INFERENCE_API_KEY"),
@@ -320,7 +305,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
       "u",
     ),
   );
-  assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.doesNotMatch(config, /direct_only_tool_namespaces/u);
   assert.match(
     config,
@@ -343,7 +328,11 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.doesNotMatch(config, /This mode remains active until/u);
   assert.match(
     config,
-    /\[memories\]\nuse_memories = true\ngenerate_memories = true\nextract_model = "gpt-5\.6-luna"\nconsolidation_model = "gpt-5\.6-terra"\ndisable_on_external_context = false\nmin_rollout_idle_hours = 1\nmax_rollouts_per_startup = 1\nmax_rollout_age_days = 10\nmin_rate_limit_remaining_percent = 25\nmax_raw_memories_for_consolidation = 128\nmax_unused_days = 30/u,
+    /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
+  );
+  assert.doesNotMatch(
+    config,
+    /^(?:extract_model|consolidation_model|disable_on_external_context|min_rollout_idle_hours|max_rollouts_per_startup|max_rollout_age_days|min_rate_limit_remaining_percent|max_raw_memories_for_consolidation|max_unused_days) = /mu,
   );
   assert.doesNotMatch(config, /^plugins = true$/mu);
   assert.match(config, /\[skills\]\ninclude_instructions = false/u);
@@ -653,8 +642,12 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.match(config, /^stream_max_retries = 0$/mu);
   assert.doesNotMatch(config, /chatgpt-access-token/u);
   assert.match(config, /model_reasoning_effort = "low"/u);
-  assert.match(config, /^extract_model = "gpt-5\.6-sol"$/mu);
-  assert.match(config, /^consolidation_model = "gpt-5\.6-sol"$/mu);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
+  assert.match(
+    config,
+    /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
+  );
+  assert.doesNotMatch(config, /^(?:extract|consolidation)_model = /mu);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /\[shell_environment_policy\]/u);
   assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
@@ -1629,7 +1622,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
       "[features]",
       "plugins = false",
-      "memories = true",
+      "memories = false",
       "",
       "[features.current_time_reminder]",
       "enabled = true",
@@ -1647,22 +1640,13 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       `multi_agent_mode_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_MODE_HINT)}`,
       `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
       "",
-      "# Codex-native operator memory remains enabled. Platform-funded generation",
-      "# is pinned to Murph's Luna/Terra policy and metered from exact terminal usage.",
-      "# Member-owned credentials and endpoints follow the configured foreground model.",
+      "# Codex-native memory generation and use stay disabled. The feature gate stops",
+      "# startup processing of previously eligible rollouts, while the explicit values",
+      "# keep newly created threads ineligible if the feature is toggled independently.",
       "# Murph product memory remains canonical in the vault.",
       "[memories]",
-      "use_memories = true",
-      "generate_memories = true",
-      "extract_model = \"gpt-5.6-luna\"",
-      "consolidation_model = \"gpt-5.6-terra\"",
-      "disable_on_external_context = false",
-      "min_rollout_idle_hours = 1",
-      "max_rollouts_per_startup = 1",
-      "max_rollout_age_days = 10",
-      "min_rate_limit_remaining_percent = 25",
-      "max_raw_memories_for_consolidation = 128",
-      "max_unused_days = 30",
+      "use_memories = false",
+      "generate_memories = false",
       "",
       "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
       "# runner paths change on each wake and break provider prefix caching.",
@@ -1705,7 +1689,7 @@ test("hosted Codex shell policy includes the image-pinned Health Commons package
   );
 });
 
-test("hosted Codex config keeps skill instructions disabled while enabling operator memory", () => {
+test("hosted Codex config keeps skill instructions and native memory disabled", () => {
   const config = buildHostedCodexConfigToml({
     model: "gpt-5.6-terra",
     provider: {
@@ -1722,7 +1706,7 @@ test("hosted Codex config keeps skill instructions disabled while enabling opera
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
   assert.match(config, /\[features\]\nplugins = false/u);
   assert.doesNotMatch(config, /^multi_agent_v2 = true$/mu);
-  assert.match(config, /^memories = true$/mu);
+  assert.match(config, /^memories = false$/mu);
   assert.match(config, /^\[features\.multi_agent_v2\]$/mu);
   assert.match(config, /^enabled = true$/mu);
   assert.doesNotMatch(config, /^expose_spawn_agent_model_overrides/mu);
@@ -1738,12 +1722,10 @@ test("hosted Codex config keeps skill instructions disabled while enabling opera
   ));
   assert.doesNotMatch(config, /Non-blocking delegation:/u);
   assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
-  assert.match(config, /\[memories\]\nuse_memories = true/u);
-  assert.match(config, /^generate_memories = true$/mu);
-  assert.match(config, /^extract_model = "gpt-5\.6-luna"$/mu);
-  assert.match(config, /^consolidation_model = "gpt-5\.6-terra"$/mu);
-  assert.match(config, /^disable_on_external_context = false$/mu);
-  assert.match(config, /^max_rollouts_per_startup = 1$/mu);
+  assert.match(config, /\[memories\]\nuse_memories = false/u);
+  assert.match(config, /^generate_memories = false$/mu);
+  assert.doesNotMatch(config, /^(?:extract|consolidation)_model = /mu);
+  assert.doesNotMatch(config, /^max_rollouts_per_startup = /mu);
   assert.match(config, /^check_for_update_on_startup = false$/mu);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
