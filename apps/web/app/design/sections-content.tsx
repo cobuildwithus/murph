@@ -220,7 +220,7 @@ export function SectionsContent() {
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
-          <SiteFooter />
+          <SiteFooter id="design-site-footer-preview" />
         </div>
       </StudySection>
 
