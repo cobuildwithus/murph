@@ -1,13 +1,15 @@
-# Hosted R2 bundles: OC to ENAM with Super Slurper
+# Hosted R2 bundles: live OC to ENAM cutover with Super Slurper
 
 This runbook moves hosted bundle data with Cloudflare-managed
 [Super Slurper](https://developers.cloudflare.com/r2/data-migration/super-slurper/).
 There is no application-owned copier, copy journal, queue, or migration state.
+Healthy execution keeps Murph replies, workspace checkpoints, and direct uploads
+available throughout the cutover.
 
 The temporary runtime bridge remains in place until the ENAM destination is
-active and the OC source has completed its fallback and URL drain. Promotion
-changes `HOSTED_R2_CUTOVER_PHASE`; it does not transpose the fixed bucket
-bindings.
+active and the OC source has completed its writer, fallback, lifecycle, and URL
+drain. Promotion changes `HOSTED_R2_CUTOVER_PHASE`; it does not transpose the
+fixed bucket bindings.
 
 ## Fixed roles
 
@@ -18,15 +20,16 @@ bindings.
   uploads on OC.
 - `HOSTED_R2_CUTOVER_PHASE=destination_active` makes ENAM authoritative while
   retaining ENAM-to-OC read fallback and dual-bucket deletion.
-- `HOSTED_R2_WRITE_ADMISSION=open` admits normal runtime starts and wakes.
-  `paused` makes the Worker return `retry_later` before any UserRunner Durable
-  Object call, so the existing encrypted mailbox remains the only durable
-  backlog while current invocations drain.
-- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` is a temporary lowercase SHA-256
-  digest of one operator-selected member ID. It never contains the raw member
-  ID. It can admit only that member's callback-signed Temporal ensure while the
-  phase is `destination_active` and write admission is `paused`; source-active
-  pauses, every other member, and every Vercel OIDC hint remain fenced.
+- `HOSTED_R2_WRITE_ADMISSION=open` admits normal runtime starts and wakes. Keep
+  it `open` throughout the healthy migration and live promotion.
+- `HOSTED_R2_WRITE_ADMISSION=paused` is incident containment, not a planned
+  migration step. It makes the Worker return `retry_later` before any UserRunner
+  Durable Object call, so the encrypted mailbox remains the durable backlog
+  while current invocations drain.
+- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` is an emergency-only lowercase
+  SHA-256 digest of one operator-selected member ID. It never contains the raw
+  member ID and is valid only while the phase is `destination_active` and write
+  admission is `paused`.
 
 Deploy preflight verifies that both source bindings report OC, both destination
 bindings report ENAM, and every bucket uses Standard storage. Keep these roles
@@ -36,17 +39,20 @@ fixed until a later ENAM-only cleanup removes the bridge.
 
 - The OC source is read-only to migration tooling. Never delete, rename, or
   overwrite a source object.
-- Use temporary R2 credentials scoped to the required source and destination
-  only. Keep credentials in the operator session; never print, persist, or pass
-  them in command arguments.
+- Use temporary R2 credentials scoped to read-only source access and read/write
+  destination access. Keep credentials in the operator session; never print,
+  persist, or pass them in command arguments.
 - Do not overwrite destination objects. An existing destination object must
   already have the expected byte size.
 - Copy only the approved immutable manifest. Exclude mutable fixed keys,
   unknown or unowned placement, legacy global placement, and lifecycle-managed
   raw email, private-media, and meal-photo objects.
-- Verify exact object-key and byte-size parity. Do not require ETag parity:
-  Super Slurper may use multipart transfer and produce a different destination
-  ETag for identical bytes.
+- Before promotion, prove exact key-and-size inclusion for the current approved
+  source manifest. After promotion, prove the stable approved source manifest is
+  a key-and-size-matching subset of ENAM. Legitimate post-promotion ENAM writes
+  make whole-bucket equality invalid. Do not require ETag parity: Super Slurper
+  may use multipart transfer and produce a different destination ETag for
+  identical bytes.
 - Never promote a quarantined destination. A failed destination may be retained
   as evidence, but a new attempt uses a fresh ENAM bucket.
 
@@ -57,8 +63,8 @@ This is one indivisible, one-time managed migration transition:
 - Cloudflare Super Slurper owns every copy mutation, job state, and transfer
   retry.
 - The operator owns the private, read-only ownership query, in-memory approved
-  manifest, exact-key job batches, terminal-job reconciliation, and two fresh
-  key-and-size parity reads. Keep the exact keys and private identifiers out of
+  manifest, exact-key job batches, terminal-job reconciliation, and clean
+  key-and-size inventories. Keep exact keys and private identifiers out of
   repository artifacts; retain only aggregate evidence in the private change
   record.
 - The application owns only the fixed-role deploy check and the temporary
@@ -66,30 +72,29 @@ This is one indivisible, one-time managed migration transition:
 
 No repository-executable migration verifier remains. Keeping one would turn a
 completed one-time transition into a permanent production-database and object-
-inventory integration. The managed rehearsal already proved the same operator
-procedure against the real service. Production repeats it under the write
-fence, using the authoritative read-only database path and independent R2
-inventories described below. The operator must be able to reproduce the
-manifest and both parity comparisons from a clean process before promotion; a
-dashboard progress total alone is never sufficient proof.
+inventory integration. The managed rehearsal proved the operator procedure
+against the real service. Production repeats it while normal runtime admission
+stays open, using the authoritative read-only database path and independent R2
+inventories described below. A dashboard progress total is never sufficient
+proof.
 
 Recovery is intentionally narrow. Before promotion, any unresolved job result,
-key classification, ownership change, or parity mismatch quarantines the whole
-destination and restarts with a fresh bucket. After ENAM accepts production
-writes, recovery is forward-only and limited to identified missing approved
-objects; broad copying and OC-only rollback are unsupported. There is no frozen-
-window fallback or application-owned abnormal-stop command.
+key classification, ownership change, or manifest-inclusion mismatch
+quarantines the destination and restarts with a fresh bucket. After ENAM accepts
+production writes, recovery is forward-only and limited to identified missing
+approved objects; broad copying and OC-only rollback are unsupported. There is
+no application-owned abnormal-stop command.
 
 The runtime bridge remains because old direct-upload capabilities, warm Durable
 Objects, lifecycle-managed objects, and deletion retries can legitimately refer
 to either fixed bucket after transfer finishes. Remove it only after the URL,
-lifecycle, fallback-observation, cold-restore, and OC-retirement gates at the end
-of this runbook all pass.
+lifecycle, fallback-observation, cold-restore, and OC-retirement gates at the
+end of this runbook all pass.
 
 ## Dashboard wizard or jobs API
 
-The dashboard wizard is the preferred whole-bucket path when a frozen source
-inventory is exactly the approved migration manifest.
+The dashboard wizard is suitable only when the whole source inventory exactly
+equals the approved migration manifest.
 
 The production OC bucket may also contain excluded lifecycle, legacy, mutable,
 or unowned objects. In that case, the whole-bucket wizard is unsafe. Use the
@@ -105,25 +110,26 @@ repository files.
 ### 1. Deploy and prove the bridge
 
 Deploy the two fixed bindings with `HOSTED_R2_CUTOVER_PHASE=source_active` and
-`HOSTED_R2_WRITE_ADMISSION=open`.
-Require current runner status from every relevant Durable Object and wait for
-pre-bridge Worker and Durable Object invocations to drain. Ordinary reads,
-writes, lists, and new direct uploads must still resolve to OC.
+`HOSTED_R2_WRITE_ADMISSION=open`. Require current bridge protocol status from
+every relevant Durable Object and wait for pre-bridge Worker and Durable Object
+invocations to drain. Ordinary reads, writes, lists, and new direct uploads must
+still resolve to OC.
 
-### 2. Stabilize ownership and prove the warm baseline while admission stays open
+### 2. Stabilize ownership and warm-copy while admission stays open
 
 Enable the account-deletion maintenance control at both admission and effect
 boundaries so the approved ownership set cannot shrink during the managed copy.
-Keep `HOSTED_R2_CUTOVER_PHASE=source_active` and
-`HOSTED_R2_WRITE_ADMISSION=open`: messages and ordinary runtime work continue
-against OC throughout the bulk transfer.
+This is the only planned product restriction. Keep
+`HOSTED_R2_CUTOVER_PHASE=source_active` and
+`HOSTED_R2_WRITE_ADMISSION=open`: messages, checkpoints, and direct uploads
+continue against OC throughout the bulk transfer.
 
-An already-completed warm transfer that ran before account-deletion maintenance
-is copy progress only, not an approved baseline checkpoint. After maintenance is
+An earlier transfer that ran before account-deletion maintenance is copy
+progress only, not an approved baseline checkpoint. After maintenance is
 active, rebuild the approved manifest and inventory ENAM. If ENAM contains an
-object outside that current manifest, quarantine the destination and restart
-with a fresh destination; never delete or mutate OC to reconcile it. Otherwise
-copy only currently approved missing keys and continue with baseline parity.
+object outside that current approved manifest before promotion, quarantine the
+destination and restart with a fresh destination; never delete or mutate OC to
+reconcile it. Otherwise copy only currently approved missing keys.
 
 Read current hosted ownership and canonical workspace snapshot state through
 the authorized read-only production path. Admit immutable user-scoped bundle,
@@ -140,145 +146,146 @@ against the destination by exact key and size. Retry only missing or mismatched
 keys in a new managed job. Do not infer failure solely from a stale progress
 counter, and do not change the source to recover a destination problem.
 
-Prove exact key-and-size parity for the baseline manifest while runtime writes
-remain open. This is a warm-copy checkpoint, not promotion proof: new immutable
-objects may continue to appear in OC and are handled by the final delta.
+Prove exact key-and-size inclusion for a fresh approved source manifest while
+runtime writes remain open. This is a warm-copy checkpoint, not a frozen
+promotion boundary: new immutable objects may continue to appear in OC and are
+handled by the post-promotion tail copy.
 
-### 3. Pause and drain runtime writes
+### 3. Prove live-promotion readiness
 
-Keep `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` unset. Set
-`HOSTED_R2_WRITE_ADMISSION=paused`, deploy the Worker version to 100 percent,
-and require every status response to report `writeAdmission=paused` and
-`pausedCanaryConfigured=false`. Start a 30-minute pre-promotion deadline when
-the paused version reaches 100 percent. Deploy preflight rejects a canary digest
-while the source remains active.
-The Worker-level check must return `retry_later` for both signed Temporal calls
-and Vercel OIDC direct latency hints without calling UserRunner while the phase
-remains `source_active`. Inbound messages
-remain accepted in the web-owned encrypted mailbox. An invocation already in
-flight may finish work it accepted before the pause; after every runner reports
-`inFlight=false`, Murph replies and other new runtime effects wait until
-admission reopens.
+Keep `HOSTED_R2_WRITE_ADMISSION=open` and
+`HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` unset. From clean operator processes:
 
-Query every relevant UserRunner until `inFlight=false`. Do not terminate an
-invocation: let it finish its ordinary checkpoint. Record the last completion
-time only after the paused Worker version is at 100 percent. Cloudflare Worker
-versions include their bindings and configuration, but Worker and Durable
-Object code updates are eventually consistent, so the route-level pause and
-explicit per-runner drain are both required:
-[versions and deployments](https://developers.cloudflare.com/workers/versions-and-deployments/),
-[Durable Object lifecycle](https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/).
+1. Rebuild the approved manifest and prove every included key is already in
+   ENAM with the exact source byte size.
+2. Prove every submitted managed job is terminal and reconcile the exact keys
+   from any failed or stale job.
+3. Inventory ENAM and prove it contains no object outside the current approved
+   manifest while OC remains authoritative.
+4. Run direct ENAM PUT, HEAD, GET, and delete smokes using a disposable key.
+5. Deploy bridge protocol `r2-oc-enam-v2` with `source_active+open`, require that
+   status from every relevant runner, and confirm account deletion remains
+   maintenance-fenced before changing the phase. Account deletion is the only
+   runtime path that lists user prefixes; all ordinary reads use explicit keys,
+   prefer the phase-active bucket, and consult the other bucket only after a
+   definitive miss. This pre-deploy is what makes a source-active invocation
+   able to consume a new ENAM-only email, staged upload, or checkpoint during
+   phase rollout.
 
-The production direct-PUT URL lifetime is ten minutes and the upload request
-has a separate conservative ten-minute completion bound. Wait both intervals
-after the last runner becomes idle, then prove there is no in-flight write,
-ticket issuance, or completion. This drain and every remaining pre-promotion
-step must fit inside the same 30-minute deadline.
+A new OC object after either manifest read does not invalidate readiness. It
+will remain readable after promotion and becomes part of the bounded tail-copy
+loop. Any unknown key, incorrect byte size, non-terminal managed job, failed
+ENAM smoke, pre-v2 runner, or bridge-status gap blocks promotion without
+pausing service.
 
-### 4. Copy and prove the final delta
+### 4. Promote ENAM with runtime admission open
 
-Build a fresh approved manifest from a clean process after the write drain.
-Inventory both buckets and submit only approved keys that are absent from ENAM;
-an existing destination key must already have the exact source byte size. Wait
-for every delta job to reach a terminal state and reconcile its exact submitted
-keys.
-
-After all jobs finish, inventory both buckets again under the same write fence.
-Require:
-
-- the source inventory and approved manifest are unchanged;
-- every approved key exists in ENAM with the exact byte size;
-- ENAM contains no unapproved migration object; and
-- aggregate object and byte counts match.
-
-Repeat the comparison from another clean operator process. Before revoking the
-migration credential, run direct destination PUT, HEAD, GET, and delete smokes.
-
-The 30-minute deadline is fail-safe, not an estimate to extend. If every
-pre-promotion requirement cannot pass before it expires, or any requirement
-fails, keep `HOSTED_R2_CUTOVER_PHASE=source_active`, deploy
-`HOSTED_R2_WRITE_ADMISSION=open` with the canary digest still unset, require the
-source-active/open version at 100 percent, and prove a queued mailbox item is
-consumed. Do not promote. Reconcile
-or quarantine the non-authoritative destination and retry the final delta in a
-later bounded window. Keep account deletion in maintenance only until any
-outstanding managed jobs are terminal and the destination disposition is known,
-then re-enable it.
-
-### 5. Promote ENAM
-
-Deploy the same bridge with:
+Only after every relevant runner reports `r2-oc-enam-v2` with
+`source_active+open`, deploy that same bridge to 100 percent with:
 
 ```text
 HOSTED_R2_CUTOVER_PHASE=destination_active
-HOSTED_R2_WRITE_ADMISSION=paused
+HOSTED_R2_WRITE_ADMISSION=open
+HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256=<unset>
 ```
 
-Require the destination-active Worker version at 100 percent and query every
-relevant Durable Object until it reports the current bridge protocol and
-destination-active phase. Every response must still report
-`pausedCanaryConfigured=false` and `writeAdmission=paused`. An already scheduled
-retry for any member must still receive `retry_later` with zero UserRunner calls
-during this convergence deploy.
+New current-version runtime writes and direct-upload tickets now target ENAM.
+During Cloudflare's Worker and Durable Object convergence, a v2 source-active
+runner may still consume work while a destination-active Worker writes its
+payload to ENAM, and a source-active runner or already-issued source-bucket
+upload ticket may still write OC. Phase-active explicit reads fall back in
+either direction only after a definitive miss, so both rollout directions stay
+readable. Do not treat either write as corruption, terminate an invocation, or
+revoke a valid upload capability.
 
-Only after every relevant Durable Object has converged, select a dedicated,
-operator-controlled hosted member with a current snapshot. Through the existing
-mailbox, runner-status, and Temporal inspection paths, prove that member has no
-in-flight work, mailbox lag, pending retry/recheck/wake, scheduled alarm, or
-member-facing ingress during the canary window. Derive the lowercase SHA-256
-digest of its member ID in the private operator process; never place the raw ID
-in deploy configuration, logs, or artifacts. Deploy the digest as
-`HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` while remaining
-`destination_active+paused`, wait for the route configuration to reach 100
-percent, and repeat the quiescence proof before issuing the explicit
-runtime-maintenance wake.
+While either coexistence phase is configured, runner dispatch omits the pre-
+dispatch snapshot URL because that optimization is fixed to the OC bucket. A
+cold container instead uses the existing write-fenced `/presign-get` route;
+the route validates the snapshot ref, locates its exact object with the same
+phase-ordered miss-only fallback, and presigns the concrete bucket that holds
+it. This is deletion of an unsafe shortcut, not a second restore protocol.
 
-The digest is a temporary per-member callback window, not a one-shot request:
-every callback-signed Temporal ensure or recheck for the matching member can
-pass while it is configured. Quiescence and closed member-facing ingress make
-the explicit maintenance wake the only callback in that window. A wrong or
-absent digest, every other member, and every direct OIDC hint must still receive
-`retry_later` without a UserRunner call. While global write admission remains
-closed, prove:
+Poll every relevant UserRunner until it reports the current bridge protocol,
+`phase=destination_active`, `writeAdmission=open`, and no paused canary. Confirm
+newly admitted mailbox work continues to be consumed and checkpoints directly
+to ENAM. Through one operator-controlled hosted member with a current snapshot,
+prove an ordinary wake can cold-restore a copied pre-switch snapshot, write an
+ENAM checkpoint, and cold-restore that checkpoint through a fresh
+current-version runner. Also prove a known source-only object is readable only
+through the definitive-miss fallback and compose one destination-only email or
+staged upload with a source-active v2 consumer. The source-active v2 cold-
+restore proof must also resolve and presign a destination-only checkpoint.
 
-1. a copied pre-switch snapshot cold-restores;
-2. a canary writes directly to ENAM;
-3. the ENAM checkpoint cold-restores through a fresh current-version runner;
-4. ENAM PUT, HEAD, GET, and delete smokes pass; and
-5. source fallback occurs only after a definitive ENAM miss.
+Promotion becomes irreversible when ENAM accepts its first production write.
+From that point, repair forward; do not return to OC-only authority.
 
-If any approved OC object is absent from ENAM, keep writes closed and repair
-forward. Do not restart copying broadly or return to OC-only authority after
-ENAM accepts production writes.
+### 5. Drain source writers and converge with bounded tail copies
 
-### 6. Resume service
+Record the last time any runner reports source-active and the last time a
+source-bucket direct-upload ticket can have been issued. Require all relevant
+runners to remain destination-active and let every already-issued OC capability
+expire: the production PUT URL lifetime is ten minutes and its upload request
+has a separate conservative ten-minute completion bound. The timer begins only
+after the last possible OC ticket issuance. Existing invocations finish
+normally while users continue to receive service.
 
-Unset `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` and deploy
-`HOSTED_R2_WRITE_ADMISSION=open` only after promotion checks pass. Require the
-destination-active Worker version at 100 percent, every status response to
-report `pausedCanaryConfigured=false`, and confirm newly admitted work consumes
-durable mailbox input and checkpoints to ENAM. Deploy preflight rejects the
-temporary canary digest on an open-admission version. The paused `retry_later`
-response gives Temporal the continuation owner; the direct web hint remains
-optional and performs no retry.
+After that writer drain, rebuild the approved OC manifest and inventory both
+buckets from a clean process. Submit exact-key, overwrite-disabled jobs only for
+approved OC keys absent from ENAM. An existing destination key must already
+have the exact source byte size. Reconcile every submitted job to terminal state
+and repeat the inventories. If the approved OC manifest changed, restart the
+bounded observation and tail-copy loop; never broaden the job to excluded
+prefixes.
 
-Re-enable account
-deletion only after its race canary proves the bridge deletes from both
-concrete buckets and retains state for retry after a partial failure.
+Convergence requires all of the following twice from clean operator processes:
 
-Promotion is the irreversible boundary. A failure after ENAM becomes
-authoritative keeps admission paused and repairs forward; it must be declared as
-an active service incident rather than silently extending the pre-promotion
-deadline or returning to OC-only writes.
+- the approved OC manifest is unchanged across the observation interval;
+- every approved OC key exists in ENAM with the exact byte size;
+- every ENAM-only key is classified as a legitimate current destination write
+  or lifecycle-managed object, not an unapproved migration mutation;
+- every current canonical workspace reference is readable through the bridge;
+- every managed job is terminal; and
+- aggregate evidence contains no unknown key or unresolved ownership change.
+
+R2 provides strong consistency for object writes and listings, so fresh stable
+inventories are authoritative after the application-level writer drain:
+[R2 consistency](https://developers.cloudflare.com/r2/reference/consistency/).
+Do not require equal bucket counts or bytes after promotion; live ENAM writes
+make equality both impossible and incorrect.
+
+### 6. Validate live operation and restore account deletion
+
+While global admission remains open, prove ordinary members continue to consume
+mailbox work and checkpoint to ENAM with no migration-correlated error or lag
+increase. Repeat direct ENAM PUT, HEAD, GET, and delete smokes. Inspect source-
+fallback observations: any remaining fallback must map to a known drained OC
+object or trigger an exact-key forward repair.
+
+Re-enable account deletion only after its race canary proves the bridge deletes
+from both concrete buckets and retains state for retry after a partial failure.
 
 Keep OC, the second binding, upload-session bucket affinity, dual deletion, and
-ENAM-to-OC fallback through:
+both definitive-miss fallback directions through:
 
 - expiry of every valid OC GET or PUT capability;
 - empty OC lifecycle-managed prefixes;
 - a bounded zero-fallback observation window covering retry and alarm cycles;
   and
 - successful cold restores of both pre-switch and post-switch snapshots.
+
+## Failure handling
+
+Before promotion, keep `source_active+open`, quarantine or reconcile the
+non-authoritative destination, and retry later without interrupting service.
+
+After ENAM accepts a production write, retain `destination_active` and repair
+identified missing objects forward. Keep admission open while reads, writes,
+and fallback remain correct. If those correctness guarantees become unavailable,
+`HOSTED_R2_WRITE_ADMISSION=paused` is the explicit incident-containment lever:
+declare an active service incident, allow current invocations to drain, and use
+the optional hashed canary only for a quiescent forward-repair validation. Never
+silently turn the emergency pause into the normal migration procedure, and
+never roll back to OC-only writes.
 
 ## Retire OC
 
@@ -290,4 +297,5 @@ approved soak.
 
 Only after OC is retired should a follow-up change remove the second binding,
 phase handling, read fallback, dual deletion, upload-session bucket affinity,
-account-deletion maintenance control, and this runbook.
+account-deletion maintenance control, emergency pause/canary support, and this
+runbook.

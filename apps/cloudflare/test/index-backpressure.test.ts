@@ -164,7 +164,7 @@ describe("cloudflare worker queue backpressure routes", () => {
       r2Cutover: {
         coexisting: true,
         phase: "destination_active",
-        protocolVersion: "r2-oc-enam-v1",
+        protocolVersion: "r2-oc-enam-v2",
       },
       userId: "member_123",
     });
