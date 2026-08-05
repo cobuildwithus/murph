@@ -22,7 +22,8 @@ Updated: 2026-08-05
 ## Scope
 
 - In scope: the hosted Web production build runner, its focused contract test,
-  an exact task-branch commit, and one forced-cold Vercel preview deployment.
+  one exact branch-only Vercel deployment allow, an exact task-branch commit,
+  and one forced-cold Vercel preview deployment.
 - Out of scope: production deployment, changing the Vercel machine tier,
   enabling persistent Turbopack build caching before the cold proof, TypeScript
   or lint-tool migration, and product behavior changes.
@@ -59,6 +60,9 @@ Updated: 2026-08-05
 
 - Keep persistent Turbopack build caching disabled until a cold build first
   proves that the compiler fits the Standard machine.
+- Keep the repository-wide preview catch-all disabled. Allow only the exact
+  experimental branch because the first CLI deployment was blocked before a
+  build started by the checked-in `git.deploymentEnabled` policy.
 
 ## Verification
 

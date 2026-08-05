@@ -1520,6 +1520,22 @@ describe("hosted web production migration guard", () => {
     assert.ok(!cronPaths.includes("/api/internal/device-sync/dirty-sweeper/cron"));
   });
 
+  test("enables only production and the explicit Turbopack preview branch", async () => {
+    const vercelJson = JSON.parse(
+      await readFile(path.join(appRoot, "vercel.json"), "utf8"),
+    ) as {
+      git?: {
+        deploymentEnabled?: Record<string, boolean>;
+      };
+    };
+
+    assert.deepEqual(vercelJson.git?.deploymentEnabled, {
+      main: true,
+      "agent/web-build-critical-path": true,
+      "*": false,
+    });
+  });
+
   test("generates Prisma before direct local Next dev starts", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(appRoot, "package.json"), "utf8"),
