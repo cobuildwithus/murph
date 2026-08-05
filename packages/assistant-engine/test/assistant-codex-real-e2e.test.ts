@@ -2740,6 +2740,14 @@ describeRealCodex('real Codex support escalation e2e', () => {
           throw new Error('Expected a support-escalation summary.')
         }
         expect(privateSummary).toMatch(/^Support escalation:\s*\S/u)
+        const approvedSummary = privateSummary.replace(
+          /^Support escalation:\s*/u,
+          '',
+        )
+        expect(
+          offerText,
+          'submitted summary exactly matches the approved offer',
+        ).toContain(approvedSummary)
         expect(privateSummary).toMatch(/connected source|connection/iu)
         expect(privateSummary).not.toMatch(
           /relative|diabetes|glucose|clinic/iu,
@@ -2748,8 +2756,11 @@ describeRealCodex('real Codex support escalation e2e', () => {
         expect(privateText, 'support address given').toContain(
           'support@withmurph.ai',
         )
-        expect(privateText, 'account-linked summary confirmation').toMatch(
-          /saved.{0,80}(?:account-linked|linked to (?:your|the) (?:Murph )?account)|(?:account-linked|linked to (?:your|the) (?:Murph )?account).{0,80}saved/iu,
+        expect(privateText, 'saved product issue confirmation').toMatch(
+          /(?:product issue|summary).{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}(?:product issue|summary)/iu,
+        )
+        expect(privateText, 'account-linked escalation confirmation').toMatch(
+          /account-linked escalation.{0,80}(?:saved|recorded)|(?:saved|recorded).{0,80}account-linked escalation/iu,
         )
         expect(privateText, 'no invented promise').not.toMatch(
           /ticket|case number|will (?:fix|resolve|respond|reply|follow up)|within \d+|has (?:read|seen|received)/iu,

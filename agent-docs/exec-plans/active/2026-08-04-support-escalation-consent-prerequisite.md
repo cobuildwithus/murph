@@ -6,15 +6,15 @@ Updated: 2026-08-04
 
 ## Goal
 
-- Make the hosted runner show the exact de-identified product-only summary and
-  disclose its Murph-account linkage, then wait for affirmative approval before
-  submitting a support escalation.
+- Make the hosted runner show the exact de-identified product-only summary,
+  disclose that it may be included in an account-linked support escalation,
+  then wait for affirmative approval before submitting.
 
 ## Success criteria
 
 - A generic escalation request produces no tool call.
-- The member sees the exact safe summary, account-linkage disclosure, direct
-  support address, and a natural approval question.
+- The member sees the exact safe summary, maximum account-linkage disclosure,
+  direct support address, and a natural approval question.
 - An affirmative continuation submits that same product-only summary once.
 - Group, unverified, or semantically unsafe contexts receive the direct support
   route without an account-linked tool call.
@@ -40,6 +40,10 @@ Updated: 2026-08-04
    Mitigation: land this behavior separately, deploy Cloudflare/runner with
    immediate rollout, and require exact bundle-fingerprint smoke before the
    follow-up Web PR may merge.
+3. Risk: rollout-compatible completion copy can overstate delivery while Web
+   still sends metadata only or suppresses email above the daily cap.
+   Mitigation: confirm only that the product issue was saved for triage and the
+   account-linked escalation was recorded; never claim the issue was emailed.
 
 ## Tasks
 
@@ -58,6 +62,12 @@ Updated: 2026-08-04
   added.
 - The existing Cloudflare source/bundle fingerprint admission and
   managed-container smoke prove runner convergence.
+- Maximum disclosure says the approved summary may be included with the
+  account-linked escalation. That is informed consent for the follow-up while
+  remaining truthful during the metadata-only prerequisite window.
+- Ordinary feedback remains silent and best-effort; the assembled developer
+  prompt and tool description explicitly exclude reserved support escalation
+  from that policy and route it to disclosed approval plus durable completion.
 
 ## Verification
 

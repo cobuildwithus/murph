@@ -22,7 +22,7 @@ describe("Murph Codex base support guidance", () => {
       "show the exact de-identified product-only summary",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "support will receive it linked to their Murph account",
+      "it may be included in an internal support escalation linked to their Murph account",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "A generic request does not approve unseen linkage or summary; wait for affirmative approval.",
@@ -31,7 +31,10 @@ describe("Murph Codex base support guidance", () => {
       "If no safe summary exists, or outside private direct chat, give the address and do not call.",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "account-linked summary is saved",
+      "the product issue was saved for triage and an account-linked escalation was recorded",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "Never claim the issue was emailed or seen",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       "a de-identified report is queued",
