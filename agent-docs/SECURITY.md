@@ -670,6 +670,10 @@ Last verified: 2026-08-04
   and dedicated Oura and WHOOP test accounts. Keep those six credentials
   exclusively in the `junction-wearable-canary` GitHub Environment, restrict it to
   protected `main`, and never duplicate them as repository secrets. The
+  `JUNCTION_CLIENT_USER_ID_SECRET` is Murph-owned rather than Junction-issued:
+  generate it once with a cryptographically secure random source, keep it
+  stable, and treat rotation as an identity remap that requires deliberate
+  cleanup of the prior derived Junction users.
   workflow may run only after a push to protected `main` or by manual dispatch
   from protected `main`, with read-only repository permission and one
   non-canceling concurrency slot.
