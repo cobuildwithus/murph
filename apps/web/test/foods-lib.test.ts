@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createFoodsQueries,
   createPublicFoodsQueries,
+  toFoodNutritionSearchItem,
 } from "../src/lib/foods";
 import {
   createProductLabelsQueries,
@@ -25,6 +26,212 @@ function isProductTestsQuery(text: string): boolean {
 }
 
 describe("foods query helpers", () => {
+  it("projects meal nutrition and bounded contaminant evidence without unrelated payloads", () => {
+    const projected = toFoodNutritionSearchItem({
+      id: "fdc:123",
+      dataOrigin: "usda_foundation",
+      dataOriginId: "123",
+      name: "Example food",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {
+        nutrientsPer100g: [
+          { name: "Energy", unit: "kcal", value: 120 },
+          { name: "Protein", unit: "g", value: 10 },
+          { name: "Sodium", unit: "mg", value: 400 },
+        ],
+        portions: [
+          { amount: 1, description: "slice", gramWeight: 28 },
+        ],
+        unrelatedSourcePayload: "x".repeat(500_000),
+      },
+      contaminants: {
+        status: "known_product_tests",
+        murphConcernLevel: "medium",
+        alertCount: 1,
+        alerts: [
+          {
+            contaminantKey: "lead",
+            contaminantName: "Lead",
+            concernLevel: "medium",
+            result: {
+              operator: "eq",
+              value: 0.2,
+              unit: "ppm",
+              basis: "product_mass",
+            },
+            threshold: {
+              value: 0.1,
+              unit: "ppm",
+              basis: "product_mass",
+              authority: "Example Authority",
+              name: "Example screening level",
+              url: "https://example.test/threshold",
+            },
+            source: {
+              key: "example_source",
+              name: "Example Source",
+              url: "https://example.test/report",
+              reportTitle: "Example report",
+              reportDate: "2026-01-02",
+            },
+            testedProduct: {
+              name: "Example food",
+              brand: null,
+              upc: null,
+              sourceProductId: "sample-1",
+              matchMethod: "manual_confirmed",
+            },
+          },
+        ],
+        observationCount: 6,
+        observations: Array.from({ length: 6 }, (_, index) => ({
+          contaminantKey: `analyte_${index + 1}`,
+          contaminantName: `Analyte ${index + 1}`,
+          result: {
+            operator: "eq" as const,
+            value: index + 1,
+            unit: "ng/g",
+            basis: "product_mass",
+          },
+          normalizedResult: null,
+          source: {
+            key: "example_source",
+            name: "Example Source",
+            url: "https://example.test/report",
+            reportTitle: "x".repeat(100_000),
+            reportDate: "2026-01-02",
+          },
+          testedProduct: {
+            name: "Example food",
+            brand: null,
+            upc: null,
+            sourceProductId: `sample-${index + 1}`,
+            matchMethod: "manual_confirmed" as const,
+          },
+        })),
+      },
+    });
+
+    expect(projected.label).toEqual({
+      nutrition: {
+        basis: "per_100_g",
+        rows: [
+          {
+            name: "Energy",
+            amount: { display: "120", unit: "kcal", value: 120 },
+            dailyValuePercent: null,
+            basis: "per_100_g",
+          },
+          {
+            name: "Protein",
+            amount: { display: "10", unit: "g", value: 10 },
+            dailyValuePercent: null,
+            basis: "per_100_g",
+          },
+        ],
+      },
+      serving: {
+        amount: 1,
+        description: "slice",
+        grams: 28,
+        unit: null,
+      },
+    });
+    expect(projected.contaminantSummary).toEqual({
+      status: "known_product_tests",
+      murphConcernLevel: "medium",
+      alertCount: 1,
+      alertsTruncated: false,
+      alerts: [
+        {
+          contaminantKey: "lead",
+          contaminantName: "Lead",
+          concernLevel: "medium",
+          result: {
+            operator: "eq",
+            value: 0.2,
+            unit: "ppm",
+            basis: "product_mass",
+          },
+          threshold: {
+            value: 0.1,
+            unit: "ppm",
+            basis: "product_mass",
+            authority: "Example Authority",
+            name: "Example screening level",
+          },
+          source: {
+            name: "Example Source",
+            reportDate: "2026-01-02",
+          },
+        },
+      ],
+      observationCount: 6,
+      observationsTruncated: true,
+      observations: Array.from({ length: 5 }, (_, index) => ({
+        contaminantKey: `analyte_${index + 1}`,
+        contaminantName: `Analyte ${index + 1}`,
+        result: {
+          operator: "eq",
+          value: index + 1,
+          upperValue: null,
+          unit: "ng/g",
+          basis: "product_mass",
+        },
+        source: {
+          name: "Example Source",
+          reportDate: "2026-01-02",
+        },
+      })),
+    });
+    const serialized = JSON.stringify(projected);
+    expect(serialized).not.toContain("unrelatedSourcePayload");
+    expect(serialized).not.toContain("reportTitle");
+    expect(serialized).not.toContain("testedProduct");
+    expect(serialized.length).toBeLessThan(3_000);
+  });
+
+  it("loads exact contaminant summaries for compact food searches", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
+        return {
+          rows: [
+            {
+              id: "fdc:123",
+              dataOrigin: "usda_foundation",
+              dataOriginId: "123",
+              name: "Example food",
+              brand: null,
+              upc: null,
+              offMarket: false,
+              label: { nutrientsPer100g: [] },
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    const rows = await queries.searchFoods({
+      q: "example food",
+      limit: 1,
+      includeOffMarket: false,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.contaminants).toEqual(emptyContaminants);
+    expect(calls).toHaveLength(2);
+    expect(isProductTestsQuery(calls[0]!.text)).toBe(false);
+    expect(isProductTestsQuery(calls[1]!.text)).toBe(true);
+    expect(calls[1]!.values).toEqual([["fdc:123"]]);
+  });
+
   it("normalizes shared labels database connection strings for pg", () => {
     expect(
       normalizeProductLabelsConnectionString(
@@ -775,6 +982,33 @@ describe("foods query helpers", () => {
       3.714286,
       6,
     );
+    if (!result) {
+      throw new Error("expected exact food result");
+    }
+
+    const compact = toFoodNutritionSearchItem(result);
+    expect(
+      compact.contaminantSummary.alerts[0]?.screeningPolicy,
+    ).toMatchObject({
+      id: "adult_one_serving_per_day_v1",
+      assumedBodyWeightKg: 70,
+      assumedServingsPerDay: 1,
+      servingGrams: 52,
+      exposure: {
+        unit: "ng/kg_bw/day",
+        basis: "oral_total_dietary_exposure",
+      },
+    });
+    expect(
+      compact.contaminantSummary.alerts[0]?.screeningPolicy?.exposure.value,
+    ).toBeCloseTo(0.742857, 6);
+    expect(
+      compact.contaminantSummary.alerts[0]?.screeningPolicy?.ratio,
+    ).toBeCloseTo(3.714286, 6);
+    const compactJson = JSON.stringify(compact);
+    expect(compactJson).not.toContain("sourceReportTitle");
+    expect(compactJson).not.toContain("testedProduct");
+    expect(compactJson.length).toBeLessThan(3_000);
   });
 
   it("keeps daily-exposure guidance unknown when serving mass is missing", async () => {

@@ -4,6 +4,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
 
+import {
+  VAULT_CLI_BATCH_RESULT_SCHEMA,
+} from '@murphai/operator-config/vault-cli-contracts'
+
 import { runMurphCliAction } from '../src/cli-entry.ts'
 
 async function runCli(argv: string[]): Promise<string> {
@@ -80,11 +84,14 @@ test('batch runs multiple vault-cli argv arrays in one process', async () => {
         argv: string[]
         data?: unknown
         ok: boolean
+        outputChars: number
         stdout: string
       }>
+      schema: string
       vault: string
     }
 
+    assert.equal(result.schema, VAULT_CLI_BATCH_RESULT_SCHEMA)
     assert.equal(result.vault, vault)
     assert.equal(result.count, 2)
     assert.equal(result.failed, 0)
@@ -94,6 +101,14 @@ test('batch runs multiple vault-cli argv arrays in one process', async () => {
     assert.equal(result.commands[0]?.argv.includes('--format'), true)
     assert.equal(typeof result.commands[0]?.stdout, 'string')
     assert.equal(typeof result.commands[1]?.stdout, 'string')
+    assert.equal(
+      result.commands[0]?.outputChars,
+      result.commands[0]?.stdout.length,
+    )
+    assert.equal(
+      result.commands[1]?.outputChars,
+      result.commands[1]?.stdout.length,
+    )
     assert.equal(typeof result.commands[0]?.data, 'object')
     assert.equal(typeof result.commands[1]?.data, 'object')
     assert.deepEqual(JSON.parse(result.commands[0]?.stdout ?? ''), result.commands[0]?.data)
@@ -129,12 +144,17 @@ test('batch compact mode removes duplicate parsed JSON bytes without changing th
       commands: Array<{
         data?: unknown
         ok: boolean
+        outputChars: number
         stdout: string
       }>
     }
 
     assert.deepEqual(result.commands.map((command) => command.ok), [true, true])
     assert.deepEqual(result.commands.map((command) => command.stdout), ['', ''])
+    assert.equal(
+      result.commands.every((command) => command.outputChars > 0),
+      true,
+    )
     assert.equal(typeof result.commands[0]?.data, 'object')
     assert.equal(typeof result.commands[1]?.data, 'object')
 
