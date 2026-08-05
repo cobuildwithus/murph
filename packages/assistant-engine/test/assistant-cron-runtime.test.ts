@@ -342,6 +342,11 @@ beforeEach(() => {
     },
   })
   cronMocks.sendAssistantMessageLocal.mockReset().mockResolvedValue({
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Prepared scheduled check-in.',
+      text: 'Completed scheduled check-in.',
+    },
     response: 'Completed scheduled check-in.',
     session: {
       sessionId: 'session-default',
@@ -1852,8 +1857,13 @@ describe('assistant cron runtime orchestration', () => {
       runs: [
         expect.objectContaining({
           error: null,
+          notificationDecision: {
+            kind: 'skip',
+            reasonCode: 'provider_skip',
+          },
           outcome: 'no_op',
           reason: 'no_delivery',
+          scheduledOccurrenceAt: '2026-04-08T08:59:30.000Z',
           status: 'succeeded',
         }),
       ],
@@ -2584,7 +2594,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(canonicalAutomation).toBeDefined()
     canonicalAutomation?.tags.push('system:assistant-require-send')
 
-    await runAssistantCronJobNow({
+    const result = await runAssistantCronJobNow({
       job: canonicalJob.jobId,
       vault: vaultRoot,
     })
@@ -2592,11 +2602,64 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         deliveryDedupeToken: null,
-        instructions: 'Check in for raw-prompt-shape',
+        instructions: expect.stringContaining('Check in for raw-prompt-shape'),
         responsePolicy: { kind: 'require_send' },
         turnTrigger: 'automation-cron',
       }),
     )
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | { instructions?: string }
+      | undefined
+    expect(providerInput?.instructions).toContain(
+      'Independent automation authority (engine-supplied):',
+    )
+    expect(providerInput?.instructions).toContain(
+      "Do not treat a related plan or experiment's completion as cancellation",
+    )
+    expect(providerInput?.instructions).toContain(
+      'You may still skip when the saved instructions authorize that outcome or current evidence proves the requested action already happened.',
+    )
+    expect(result.run).toMatchObject({
+      notificationDecision: {
+        kind: 'send_message',
+        reasonCode: 'provider_send_message',
+      },
+      scheduledOccurrenceAt: canonicalJob.state.nextRunAt,
+    })
+  })
+
+  it('keeps an active unowned reminder independent from related plan lifecycle', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-independent-reminder-ownership-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'garden reminder',
+    )
+
+    const result = await runAssistantCronJobNow({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: expect.stringContaining(
+          'Independent automation authority (engine-supplied):',
+        ),
+        responsePolicy: null,
+      }),
+    )
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | { instructions?: string }
+      | undefined
+    expect(providerInput?.instructions).toContain(
+      "Completion of a broader plan is not proof that this occurrence's requested action already happened.",
+    )
+    expect(result.run.notificationDecision).toEqual({
+      kind: 'send_message',
+      reasonCode: 'provider_send_message',
+    })
   })
 
   it.each([
@@ -2668,6 +2731,9 @@ describe('assistant cron runtime orchestration', () => {
       }
       expect(providerInput?.instructions).toContain(
         'this overrides any broader repair or follow-up option above',
+      )
+      expect(providerInput?.instructions).not.toContain(
+        'Independent automation authority (engine-supplied):',
       )
     },
   )
@@ -6331,7 +6397,7 @@ describe('assistant cron runtime orchestration', () => {
         deliveryDedupeToken: expect.stringContaining(
           `assistant-cron|${canonicalJob.jobId}|2026-04-08T09:00:00.000Z`,
         ),
-        instructions: 'First-session prep reminder.',
+        instructions: expect.stringContaining('First-session prep reminder.'),
         turnTrigger: 'automation-cron',
       }),
     )
@@ -6387,7 +6453,7 @@ describe('assistant cron runtime orchestration', () => {
         deliveryDedupeToken: expect.stringContaining(
           `assistant-cron|${canonicalJob.jobId}|2026-04-08T09:00:00.000Z`,
         ),
-        instructions: 'First-session prep reminder.',
+        instructions: expect.stringContaining('First-session prep reminder.'),
         turnTrigger: 'automation-cron',
       }),
     )
@@ -6818,7 +6884,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        instructions: 'Check in for stale-canonical',
+        instructions: expect.stringContaining('Check in for stale-canonical'),
       }),
     )
 
@@ -9284,7 +9350,9 @@ describe('assistant cron runtime orchestration', () => {
         ),
         deliveryKind: 'thread',
         deliveryTarget: null,
-        instructions: 'Send the red light glasses before bed reminder.',
+        instructions: expect.stringContaining(
+          'Send the red light glasses before bed reminder.',
+        ),
         participantId: null,
         sessionId: null,
         threadId,
