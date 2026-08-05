@@ -98,6 +98,7 @@ it("passes host-only web overrides with the harness process pid", async () => {
   const harness = await startHostedLocalDevHarness({
     env: {
       DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
       NEXT_DIST_DIR_MODE: "smoke",
     },
     persistDirPrefix: "murph-hosted-local-test-",

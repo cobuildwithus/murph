@@ -75,13 +75,27 @@ test-only authentication path, or weakening the production `__Host-` boundary.
   callback-proof cookie failure, then passed after the harness-mode correction,
   including authenticated consent, current callback GET, and durable connected
   state against the paired private worker package.
-- Public CI passed on the prior reviewed head
-  `d9d1896464090ed1db1125fa86bdf5e8905d3174`.
-- Paired private production-artifact workflow run `30950657103` passed on that
-  prior head on
-  attempt 2. One first-attempt media completion timeout passed locally 3/3 and
-  passed on exact-job retry without a code change; the aggregate Temporal gate
-  then passed.
-- Exact-head public and paired private CI must rerun after the accepted review
-  correction. Preliminary specialist and final ReviewGPT completion results
-  remain pending.
+- Public CI passed on corrected reviewed head
+  `ddcbc159984b9fbb8c038b9c98a9d7672b0689f0`.
+- Paired private production-artifact workflow run `30950657103` passed on the
+  prior head, attempt 2. One first-attempt media completion timeout passed
+  locally 3/3 and passed on exact-job retry without a code change; the
+  aggregate Temporal gate then passed.
+- Paired private production-artifact workflow run `30959510194` passed on the
+  corrected public head, including every E2E group, the Junction journey, and
+  the aggregate Temporal gate.
+- Final ReviewGPT round 1 found the dist-selector/auth coupling. The finding
+  reproduced in the clean source fallback and the owner-boundary correction
+  removed the production auth change. Correction round 2 returned `PASS` with
+  no qualifying findings after more than the final-gate trust floor.
+- The corrected-head preliminary specialist pass accepted the existing prompt
+  expectation and returned one coverage finding: the focused negative harness
+  test exited at the profile gate instead of the missing-`BUILD_ID` branch.
+  Adding the real `e2e:stub` profile to that test closed the gap; the focused
+  29/29 harness tests and Cloudflare typecheck passed again.
+- Parent final review found no remaining production, auth, or test-contract
+  defect. The final isolated coverage addition does not change runtime behavior
+  or require another substantive ReviewGPT round.
+Status: completed
+Updated: 2026-08-04
+Completed: 2026-08-04
