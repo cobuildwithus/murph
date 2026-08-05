@@ -4,8 +4,10 @@ import { useSearchParams } from "next/navigation";
 
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import { ConnectDisconnectDialog } from "@/app/(dashboard)/connect/connect-page-dialogs";
+import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { markLocallyDisconnectedSources } from "@/app/(dashboard)/connect/connect-page-helpers";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
+import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
 
 type ConnectSourceCardStudyCase = {
   authenticated: boolean;
@@ -13,7 +15,26 @@ type ConnectSourceCardStudyCase = {
   source: ConnectSource;
 };
 
+const ZEPP_CONNECT_SOURCE: ConnectSource = {
+  description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
+  id: "zepp",
+  logo: {
+    className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+    height: 40,
+    src: "/brand-logos/connect/wearable-relay.svg",
+    width: 64,
+  },
+  name: "Zepp / Amazfit",
+  setupGuideActionLabel: "Set up sync",
+  setupGuideId: "zepp-apple-health",
+};
+
 const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: ZEPP_CONNECT_SOURCE,
+  },
   {
     authenticated: true,
     errorMessage: null,
@@ -216,6 +237,7 @@ export function ConnectSourceCardStudy() {
               pendingDisconnect={false}
               source={source}
               onDisconnectTargetChange={() => {}}
+              onSetupGuideOpen={() => {}}
               onStartConnection={() => Promise.resolve()}
             />
           ))}
@@ -228,6 +250,45 @@ export function ConnectSourceCardStudy() {
         pending={false}
         source={disconnectDialogSource}
         onConfirm={() => Promise.resolve()}
+        onOpenChange={() => {}}
+      />
+    </>
+  );
+}
+
+export function ZeppAppleHealthSetupStudy() {
+  const searchParams = useSearchParams();
+  const open = searchParams?.get("zeppSetupStudy") === "open";
+
+  return (
+    <>
+      <div
+        className="max-w-md rounded-3xl border border-border bg-background p-4 sm:p-8"
+        data-design-study="zepp-apple-health-setup"
+        id="zepp-apple-health-setup"
+        inert
+      >
+        <SourceCard
+          authenticated
+          errorMessage={null}
+          pending={false}
+          pendingDisconnect={false}
+          source={ZEPP_CONNECT_SOURCE}
+          onDisconnectTargetChange={() => {}}
+          onSetupGuideOpen={() => {}}
+          onStartConnection={() => Promise.resolve()}
+        />
+      </div>
+
+      <DeviceSyncSetupGuideDialog
+        contactAction={{
+          href: "sms:+15555550100?body=Help%20me%20set%20up%20Zepp",
+          kind: "imessage",
+          label: "Text Murph",
+        }}
+        guide={buildZeppAppleHealthSetupGuide()}
+        inert
+        open={open}
         onOpenChange={() => {}}
       />
     </>

@@ -17,6 +17,10 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 
+import type {
+  HostedLocalForegroundPriorityOrderingObservationState,
+} from "../../src/hosted-local-test/foreground-priority-ordering.ts";
+
 import { repoRoot } from "../../vitest.shared.js";
 import { resolveHostedLocalDevConfig } from "@murphai/hosted-local-harness/dev-hosted-local/config";
 import {
@@ -46,11 +50,27 @@ export interface HostedLocalDevHarness {
   requestJson<T>(pathname: string, init?: RequestInit): Promise<T>;
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   armCanonicalCheckpointLostAckForTest(userId: string): Promise<{ ok: true }>;
+  armForegroundPriorityOrderingObservationForTest(
+    userId: string,
+    barrierTarget:
+      | "canonical_post_commit"
+      | "empty_conversation_probe",
+  ): Promise<{ ok: true }>;
+  clearForegroundPriorityOrderingObservationForTest(
+    userId: string,
+  ): Promise<{ cleared: boolean; ok: true }>;
   armSnapshotPublicationCorruptionForTest(userId: string): Promise<{ ok: true }>;
+  armIdleSnapshotStartBarrierForTest(userId: string): Promise<{ ok: true }>;
   armShutdownCheckpointPublicationBarrierForTest(userId: string): Promise<{ ok: true }>;
   beginShutdownCheckpointGracefulStopForTest(userId: string): Promise<{ ok: true }>;
   expireRunnerActivityForTest(userId: string): Promise<{ ok: true }>;
   dropRunnerActiveOperationForTest(userId: string): Promise<{ ok: true }>;
+  readForegroundPriorityOrderingObservationForTest(
+    userId: string,
+  ): Promise<HostedLocalForegroundPriorityOrderingObservationState>;
+  recordForegroundPriorityAssistantProviderStartForTest(
+    userId: string,
+  ): Promise<{ ok: true }>;
   readShutdownCheckpointPublicationBarrierForTest(
     userId: string,
   ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
@@ -96,6 +116,9 @@ export interface HostedLocalDevHarness {
     },
   ): Promise<HostedRunnerStatusResponse>;
   armGeneratedImageProviderBarrierForTest(userId: string): Promise<{ ok: true }>;
+  releaseForegroundPriorityOrderingBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true; released: boolean }>;
   releaseGeneratedImageProviderBarrierForTest(userId: string): Promise<{ ok: true }>;
   /** True only when this harness selected an existing production Web artifact. */
   webUsesProductionArtifact: boolean;
@@ -224,12 +247,18 @@ export async function startHostedLocalDevHarness(input: {
       },
       armGeneratedImageProviderBarrierForTest,
       armCanonicalCheckpointLostAckForTest,
+      armForegroundPriorityOrderingObservationForTest,
+      clearForegroundPriorityOrderingObservationForTest,
       armSnapshotPublicationCorruptionForTest,
+      armIdleSnapshotStartBarrierForTest,
       armShutdownCheckpointPublicationBarrierForTest,
       beginShutdownCheckpointGracefulStopForTest,
       dropRunnerActiveOperationForTest,
       expireRunnerActivityForTest,
+      readForegroundPriorityOrderingObservationForTest,
+      recordForegroundPriorityAssistantProviderStartForTest,
       readShutdownCheckpointPublicationBarrierForTest,
+      releaseForegroundPriorityOrderingBarrierForTest,
       releaseGeneratedImageProviderBarrierForTest,
       releaseShutdownCheckpointPublicationBarrierForTest,
       runHostedAlarmInvocationForTest: requireTestControls(runHostedAlarmInvocationForTest),
@@ -566,6 +595,96 @@ export async function startHostedLocalDevHarness(input: {
     );
   }
 
+  async function armForegroundPriorityOrderingObservationForTest(
+    userId: string,
+    barrierTarget:
+      | "canonical_post_commit"
+      | "empty_conversation_probe",
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable(
+      "armForegroundPriorityOrderingObservationForTest",
+    );
+    const action = barrierTarget === "canonical_post_commit"
+      ? "arm-canonical"
+      : "arm-empty-probe";
+    return await requestForegroundPriorityOrderingControlForTest(
+      userId,
+      action,
+    );
+  }
+
+  async function readForegroundPriorityOrderingObservationForTest(
+    userId: string,
+  ): Promise<HostedLocalForegroundPriorityOrderingObservationState> {
+    assertHostedLocalTestControlsAvailable(
+      "readForegroundPriorityOrderingObservationForTest",
+    );
+    return await requestForegroundPriorityOrderingControlForTest(
+      userId,
+      "status",
+    );
+  }
+
+  async function releaseForegroundPriorityOrderingBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true; released: boolean }> {
+    assertHostedLocalTestControlsAvailable(
+      "releaseForegroundPriorityOrderingBarrierForTest",
+    );
+    return await requestForegroundPriorityOrderingControlForTest(
+      userId,
+      "release",
+    );
+  }
+
+  async function recordForegroundPriorityAssistantProviderStartForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable(
+      "recordForegroundPriorityAssistantProviderStartForTest",
+    );
+    return await requestForegroundPriorityOrderingControlForTest(
+      userId,
+      "provider-start",
+    );
+  }
+
+  async function clearForegroundPriorityOrderingObservationForTest(
+    userId: string,
+  ): Promise<{ cleared: boolean; ok: true }> {
+    assertHostedLocalTestControlsAvailable(
+      "clearForegroundPriorityOrderingObservationForTest",
+    );
+    return await requestForegroundPriorityOrderingControlForTest(
+      userId,
+      "clear",
+    );
+  }
+
+  async function requestForegroundPriorityOrderingControlForTest<T>(
+    userId: string,
+    action:
+      | "arm-canonical"
+      | "arm-empty-probe"
+      | "clear"
+      | "provider-start"
+      | "release"
+      | "status",
+  ): Promise<T> {
+    return await requestJsonForRuntime<T>(
+      `/__test/users/${encodeURIComponent(userId)}`
+        + `/foreground-priority-ordering?action=${action}`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
   async function armGeneratedImageProviderBarrierForTest(
     userId: string,
   ): Promise<{ ok: true }> {
@@ -627,6 +746,16 @@ export async function startHostedLocalDevHarness(input: {
     );
   }
 
+  async function armIdleSnapshotStartBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("armIdleSnapshotStartBarrierForTest");
+    return await requestShutdownCheckpointPublicationBarrierForTest<{ ok: true }>(
+      userId,
+      "arm-snapshot-start",
+    );
+  }
+
   async function beginShutdownCheckpointGracefulStopForTest(
     userId: string,
   ): Promise<{ ok: true }> {
@@ -658,7 +787,7 @@ export async function startHostedLocalDevHarness(input: {
 
   async function requestShutdownCheckpointPublicationBarrierForTest<T>(
     userId: string,
-    action: "arm" | "release" | "shutdown" | "status",
+    action: "arm" | "arm-snapshot-start" | "release" | "shutdown" | "status",
   ): Promise<T> {
     return await requestJsonForRuntime<T>(
       `/__test/users/${encodeURIComponent(userId)}`

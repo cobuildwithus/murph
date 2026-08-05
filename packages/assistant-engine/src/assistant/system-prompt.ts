@@ -1395,31 +1395,36 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection links are available for ${providerList}. When offering examples, mention about six supported choices from this list, not the full provider list. Do not add generic consumer-health app examples or proactively name unsupported sources as caveats. If the user asks for a wearable/source other than Apple Health or WHOOP that is not in this list, say it is not supported yet and suggest a listed source or text-only notes for now. Use \`murph.device\` to list accounts, create a real connection link, or queue reconciliation. Send only a returned \`connectUrl\`; never fabricate a URL or ask for provider credentials. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
+  return `- Hosted wearable connection links are available for ${providerList}. When offering examples, mention about six supported choices from this list, not the full provider list. Do not add generic consumer-health app examples or proactively name unsupported sources as caveats. If the user asks for a wearable/source other than Apple Health, WHOOP, or Zepp/Amazfit that is not in this list, say it is not supported yet and suggest a listed source or text-only notes for now. Use \`murph.device\` to list accounts, create a real connection link, or queue reconciliation. Send only a returned \`connectUrl\`; never fabricate a URL or ask for provider credentials. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
 }
 
 function buildAssistantIosAppDownloadGuidanceText(
   conversationScope: AssistantConversationScope
 ): string {
+  const directSignupGuidance = conversationScope === "direct"
+    ? `\n- Starting Murph: if asked how to begin, say accounts are created at ${MURPH_PRODUCT_ORIGIN} and put that URL last. The iPhone app supports sign-in, not account creation. Never invent a link or pressure them.`
+    : "";
   const groupBoundary = conversationScope === "group"
     ? "\n- In a group, this is ordinary public product information, not a personal account, settings, authorization, or wearable-connect link. Share it when this app-link rule applies; it does not configure the room or authorize Apple Health. Keep personal sign-in and health-source setup in the person's private Murph conversation or in the app."
     : "";
   return `Murph iOS app:
 - Canonical public App Store listing: ${MURPH_IOS_APP_STORE_URL}
-- App-link rule: when someone asks how to get, download, or install the Murph iPhone/iOS app, answer directly with this listing. It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.${groupBoundary}
+- App-link rule: when someone asks how to get, download, or install the Murph iPhone/iOS app, answer directly with this listing. It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.${directSignupGuidance}${groupBoundary}
 - In user-facing messages, put the URL alone on the final line with no text after it.`;
 }
 
 function buildAssistantAppleHealthRelayGuidanceText(): string {
   return `Apple Health relay:
-- Apple Watch/iPhone/Apple Health and WHOOP relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.
+- Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, or Zepp/Amazfit relay setup, open Murph, sign in, and connect Apple Health.
 - WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.
 - WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.
-- No documented WHOOP settings deeplink; never invent one.`;
+- No documented WHOOP settings deeplink; never invent one.
+- Zepp/Amazfit: share with Apple Health in Zepp, then connect Apple Health in Murph. This relay has no direct cloud access or history backfill.
+- For Zepp setup, use one brief \`murph.generate_voice_memo\` when available; keep text minimal and put the App Store URL last.`;
 }
 
 function buildAssistantToolTruthfulnessText(): string {
-  return `Claim actions only from runtime results. Never invent invite/share/auth/wearable URLs; same-turn results required except ${MURPH_IOS_APP_STORE_URL}. Never call Apple Health unsupported/disabled/coming soon; in messages put the URL alone last.`;
+  return `Claim only runtime-proven actions. Never invent invite/share/auth/wearable URLs; only ${MURPH_PRODUCT_ORIGIN} and ${MURPH_IOS_APP_STORE_URL} are proof-free. Never call Apple Health unsupported/disabled/coming soon; put message URLs alone last.`;
 }
 
 function buildAssistantGroupToolTruthfulnessText(): string {

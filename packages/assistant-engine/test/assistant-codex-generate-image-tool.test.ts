@@ -15,6 +15,12 @@ import {
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
+import type {
+  AssistantHostedToolContext,
+} from '../src/assistant/hosted-tool-context.ts'
+import type {
+  AssistantGeneratedImageCapturePersistence,
+} from '../src/assistant/execution-context.ts'
 
 const tempRoots: string[] = []
 const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
@@ -23,6 +29,11 @@ const webpBytes = new Uint8Array([
   0x00, 0x00, 0x00, 0x00,
   0x57, 0x45, 0x42, 0x50,
 ])
+const persistGeneratedImageCapture: AssistantGeneratedImageCapturePersistence =
+  async (write) => await write()
+const generatedImageHostedToolContext = {
+  persistGeneratedImageCapture,
+} as AssistantHostedToolContext
 
 afterEach(async () => {
   vi.restoreAllMocks()
@@ -130,6 +141,8 @@ describe('executeGenerateImageTool', () => {
           total_tokens: 8,
         },
       }))
+    let retentionWakeAt: string | null = null
+    const startedAt = Date.now()
 
     const result = await executeGenerateImageTool({
       args: {
@@ -143,6 +156,10 @@ describe('executeGenerateImageTool', () => {
         OPENAI_API_KEY: 'openai-test-key',
       },
       fetchImpl,
+      persistGeneratedImageCapture: async (write, metadata) => {
+        retentionWakeAt = metadata.retentionWakeAt
+        return await write()
+      },
       providerRequestOrdinal: 4,
       requireHostedPrivateImageDelivery: true,
       vaultRoot,
@@ -169,6 +186,10 @@ describe('executeGenerateImageTool', () => {
     ])
     await expect(readFile(path.join(vaultRoot, result.savedImageRef!)))
       .resolves.toEqual(Buffer.from(webpBytes))
+    const retentionWakeMs = Date.parse(retentionWakeAt ?? '')
+    const retentionWindowMs = 14 * 24 * 60 * 60 * 1000
+    expect(retentionWakeMs).toBeGreaterThanOrEqual(startedAt + retentionWindowMs)
+    expect(retentionWakeMs).toBeLessThanOrEqual(Date.now() + retentionWindowMs)
     expect(result.usageDraft?.providerRequestOrdinal).toBe(4)
     expect(result.usageDraft?.providerRequestOutcome).toBe('succeeded')
     expect(result.usageDraft?.usage).toMatchObject({
@@ -208,6 +229,7 @@ describe('executeGenerateImageTool', () => {
       captureIdempotencyKey: 'turn-1:tool-2',
       env: { OPENAI_API_KEY: 'openai-test-key' },
       fetchImpl,
+      persistGeneratedImageCapture,
       providerRequestOrdinal: 4,
       requireHostedPrivateImageDelivery: true,
       vaultRoot,
@@ -217,6 +239,7 @@ describe('executeGenerateImageTool', () => {
       captureIdempotencyKey: 'turn-1:tool-2',
       env: { OPENAI_API_KEY: 'openai-test-key' },
       fetchImpl,
+      persistGeneratedImageCapture,
       providerRequestOrdinal: 5,
       requireHostedPrivateImageDelivery: true,
       vaultRoot,
@@ -287,6 +310,7 @@ describe('executeGenerateImageTool', () => {
         OPENAI_API_KEY: 'openai-test-key',
       },
       fetchImpl,
+      hostedToolContext: generatedImageHostedToolContext,
       nextUsageOrdinal: () => usageOrdinal++,
       progressDelivery: null,
       request: firstRequest,
@@ -309,6 +333,7 @@ describe('executeGenerateImageTool', () => {
         OPENAI_API_KEY: 'openai-test-key',
       },
       fetchImpl,
+      hostedToolContext: generatedImageHostedToolContext,
       nextUsageOrdinal: () => usageOrdinal++,
       progressDelivery: null,
       request: secondRequest,
@@ -554,6 +579,7 @@ describe('executeGenerateImageTool', () => {
         OPENAI_API_KEY: 'openai-test-key',
       },
       fetchImpl,
+      persistGeneratedImageCapture,
       providerRequestOrdinal: 6,
       requireHostedPrivateImageDelivery: true,
       vaultRoot,
@@ -630,6 +656,36 @@ describe('executeGenerateImageTool', () => {
     expect(result).toEqual({
       rpcSuccess: false,
       rpcText: 'hosted private image delivery requires the owning vault',
+    })
+  })
+
+  it('fails before OpenAI when hosted capture persistence is unavailable', async () => {
+    const fetchImpl = vi.fn()
+    const vaultRoot = await createTempDir('assistant-image-tool-hosted-boundary-')
+    await initializeVault({ vaultRoot })
+
+    const result = await executeGenerateImageTool({
+      args: {
+        alt: null,
+        outputFormat: 'webp',
+        prompt: 'Render the object.',
+        quality: 'medium',
+        size: '1024x1024',
+      },
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      providerRequestOrdinal: 1,
+      requireHostedPrivateImageDelivery: true,
+      vaultRoot,
+    })
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      rpcSuccess: false,
+      rpcText:
+        'hosted private image delivery requires generated capture persistence',
     })
   })
 })
@@ -1005,6 +1061,7 @@ describe('murph.generate_image dynamic tool execution', () => {
         OPENAI_API_KEY: 'openai-test-key',
       },
       fetchImpl,
+      hostedToolContext: generatedImageHostedToolContext,
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,

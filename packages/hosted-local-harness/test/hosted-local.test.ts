@@ -127,6 +127,10 @@ describe("hosted-local harness", () => {
       file: "apps/cloudflare/test/hosted-local-foreground-reply-priority-e2e.test.ts",
       name: "foreground-reply-priority",
       testControls: true,
+      vitestProcessTestNamePatterns: [
+        "^hosted local foreground reply priority e2e",
+        "^hosted local foreground checkpoint ordering e2e",
+      ],
     });
     for (const [name, file] of [
       ["canonical-receipt-lost-ack-recovery", "hosted-local-canonical-receipt-lost-ack-recovery"],
