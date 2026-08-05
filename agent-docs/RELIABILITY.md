@@ -417,9 +417,12 @@ Last verified: 2026-08-04
   without guessing across missing or invalid chronology. Unresolved alerts
   separately count missing terminal evidence and terminal non-replies that
   still lack durable checkpoint acknowledgement. Checkpoint lifecycle telemetry
-  exposes only the bounded exact-item candidate count, so operators can
-  distinguish runtime candidate omission from the downstream Web stamping path
-  without logging identifiers.
+  exposes the bounded exact-item batch count plus whether that selected batch
+  contains the exact conversation frontier, without logging identifiers. The
+  plan/start/failure phases prove only local selection; a finished event
+  separately says whether Web accepted the checkpoint. Only the accepted
+  frontier combination routes an unconsumed row toward downstream Web stamping;
+  the count alone never chooses an owner.
   Outbound paging requires the shared Resend operational-email sender and
   recipients plus a valid IANA operator timezone; it never falls back to
   Linq/iMessage. It suppresses sends from 11 PM through 7 AM local time and

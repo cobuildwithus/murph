@@ -905,7 +905,7 @@ function buildHostedRuntimeLatencyAlertMessage(input: {
       ? `${input.health.recentSlowInitialResponseCount} completed ${pluralizeReply(input.health.recentSlowInitialResponseCount)} with no progress or final response within 30 seconds`
       : null,
     input.health.unresolvedReplyCount > 0
-      ? `${input.health.unresolvedReplyCount} traced ${pluralizeMessage(input.health.unresolvedReplyCount)} still unresolved after 30 seconds`
+      ? `${input.health.unresolvedReplyCount} unresolved ${pluralizeTurn(input.health.unresolvedReplyCount)} with no visible response or durable acknowledgement after 30 seconds`
       : null,
     input.health.scanTruncated
       ? "the bounded latency scan was truncated"
@@ -938,10 +938,10 @@ function buildHostedRuntimeSlowBoundarySummary(
       ? `${health.recentSlowProviderExecutionDominantCount} provider/assistant execution dominant`
       : null,
     health.recentSlowPreProviderDominantCount > 0
-      ? `${health.recentSlowPreProviderDominantCount} pre-provider runtime dominant`
+      ? `${health.recentSlowPreProviderDominantCount} pre-provider path dominant`
       : null,
     health.recentSlowUnknownBoundaryCount > 0
-      ? `${health.recentSlowUnknownBoundaryCount} unknown`
+      ? `${health.recentSlowUnknownBoundaryCount} unclassified (missing or invalid chronology)`
       : null,
   ].filter((value): value is string => value !== null);
   return boundaries.length > 0 ? `Slow boundary: ${boundaries.join(", ")}` : null;
@@ -958,8 +958,8 @@ function buildHostedRuntimeUnresolvedBoundarySummary(
       : null,
     health.unresolvedMissingTerminalEvidenceCount > 0
       ? health.unresolvedMissingTerminalEvidenceCount === 1
-        ? "1 trace has no valid terminal response evidence"
-        : `${health.unresolvedMissingTerminalEvidenceCount} traces have no valid terminal response evidence`
+        ? "1 unresolved turn has no valid terminal response evidence"
+        : `${health.unresolvedMissingTerminalEvidenceCount} unresolved turns have no valid terminal response evidence`
       : null,
   ].filter((value): value is string => value !== null);
   return boundaries.length > 0
@@ -1139,6 +1139,6 @@ function pluralizeReply(count: number): string {
   return count === 1 ? "reply" : "replies";
 }
 
-function pluralizeMessage(count: number): string {
-  return count === 1 ? "message" : "messages";
+function pluralizeTurn(count: number): string {
+  return count === 1 ? "turn" : "turns";
 }

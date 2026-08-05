@@ -89,6 +89,7 @@ export type HostedRuntimeBridgeReadCurrentLease = () =>
   | Promise<HostedRuntimeBridgeCheckpointLease | null>;
 type HostedWorkspaceSnapshotCheckpointRequest =
   HostedWorkspaceCheckpointRequest & {
+    handledConversationFrontierSelected?: boolean;
     reason: "idle_shutdown";
   };
 
@@ -159,6 +160,12 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
           attemptId: input.request.attemptId,
           expectedWorkspaceVersion:
             checkpointInput.expectedWorkspaceVersion ?? input.request.workspaceVersion,
+          ...(checkpointInput.handledConversationFrontierSelected === undefined
+            ? {}
+            : {
+                handledConversationFrontierSelected:
+                  checkpointInput.handledConversationFrontierSelected,
+              }),
           ...(checkpointInput.handledConversationMailboxItemIds === undefined
             ? {}
             : {
@@ -225,7 +232,9 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
-  request: HostedWorkspaceCheckpointRequest;
+  request: HostedWorkspaceCheckpointRequest & {
+    handledConversationFrontierSelected?: boolean;
+  };
   snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder;
   snapshotDiagnosticsHashSecret?: string | null;
   signal: AbortSignal | null;
@@ -631,9 +640,11 @@ async function createHostedWorkspaceV2Snapshot(
       userId: input.userId,
     };
     checkpointAttempted = true;
+    const checkpointRequest = { ...input.request };
+    delete checkpointRequest.handledConversationFrontierSelected;
     const completed = await workspaceSnapshotPort.completeSnapshotSession({
       checkpointRequest: {
-        ...input.request,
+        ...checkpointRequest,
         snapshotRef,
       },
       ref: snapshotRef,
@@ -782,6 +793,7 @@ async function createHostedWorkspaceV2Snapshot(
     snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
     sizeDiagnostics: workspaceSnapshotSizeDiagnostics,
     timingDetails: snapshotTimings,
+    webCheckpointAccepted: checkpoint?.checkpointed === true,
   });
 
   return {
@@ -876,6 +888,8 @@ async function writeHostedCheckpointSnapshotLifecycleLog(input: {
 
   const redactedJson: HostedRuntimeRedactedJson = {
     checkpointReason: input.request.reason,
+    handledConversationFrontierSelected:
+      input.request.handledConversationFrontierSelected ?? false,
     handledConversationMailboxItemCount:
       input.request.handledConversationMailboxItemIds?.length ?? 0,
     ...(input.request.idleCheckpointTrigger
@@ -1126,6 +1140,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   snapshotMode: typeof HOSTED_WORKSPACE_V2_SNAPSHOT_MODE;
   sizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null;
   timingDetails: HostedWorkspaceSnapshotTimingDetails;
+  webCheckpointAccepted: boolean;
 }): Promise<void> {
   if (!input.platform.logPort) {
     return;
@@ -1134,6 +1149,8 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   const redactedJson: HostedRuntimeRedactedJson = {
     browserVaultReplicaState: "omitted",
     checkpointReason: input.request.reason,
+    handledConversationFrontierSelected:
+      input.request.handledConversationFrontierSelected ?? false,
     handledConversationMailboxItemCount:
       input.request.handledConversationMailboxItemIds?.length ?? 0,
     ...(input.request.idleCheckpointTrigger
@@ -1165,6 +1182,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
     workspaceSnapshotPlainBytes: input.plainByteSize,
     ...createHostedWorkspaceSnapshotSizeDiagnosticLogDetails(input.sizeDiagnostics),
     snapshotMode: input.snapshotMode,
+    webCheckpointAccepted: input.webCheckpointAccepted,
   };
 
   try {

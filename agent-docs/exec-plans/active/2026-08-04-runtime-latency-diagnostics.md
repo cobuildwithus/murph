@@ -17,8 +17,9 @@ Updated: 2026-08-04
   and unknown slow-reply boundaries.
 - Unresolved diagnostics separate rows with no terminal evidence from terminal
   no-reply rows whose checkpoint expectation expired.
-- Checkpoint lifecycle logs record only bounded counts needed to prove whether
-  the runner offered terminal conversation items for acknowledgement.
+- Checkpoint lifecycle logs record bounded counts plus an identifier-free
+  boolean proving whether the selected batch contains the exact conversation
+  frontier; finished logs separately state whether Web accepted the checkpoint.
 - Focused Web and assistant-runtime tests plus affected typechecks pass.
 - Required exact-head ReviewGPT and CI gates pass before completion.
 
@@ -53,7 +54,7 @@ Updated: 2026-08-04
 1. Add failing monitor tests for provider-dominant, pre-provider, unknown, and
    expired terminal-checkpoint cases.
 2. Add the smallest aggregate classification and alert-copy changes.
-3. Add checkpoint lifecycle candidate-count diagnostics and focused tests.
+3. Add checkpoint lifecycle frontier-selection diagnostics and focused tests.
 4. Update current owner docs, run focused verification, inspect the diff, and
    complete the exact-head PR gates.
 
@@ -66,13 +67,18 @@ Updated: 2026-08-04
   lane. Later rows are acknowledged and repeated successful checkpoints have
   not repaired it, but current logs do not record whether that row was present
   in the checkpoint candidate list.
+- Exact-head review rejected count-only routing because rotating batches can be
+  nonempty while omitting the frontier. The accepted correction derives
+  frontier membership inside the existing pending-index selection owner and
+  carries only that boolean into redacted lifecycle telemetry.
 
 ## Verification
 
-- Passed: focused Web latency-monitor tests (42 tests), focused
-  assistant-runtime snapshot/checkpoint tests (39 tests), Web and
+- Passed: focused Web latency-monitor tests (44 tests), existing Web exact-row
+  checkpoint stamping tests (46 tests), focused assistant-runtime index/bridge
+  tests (73 tests), the production workspace entrypoint scenario, Web and
   assistant-runtime typechecks, and focused Web lint with no errors.
 - Remaining: required ReviewGPT passes and exact-head GitHub Actions.
 - Expected outcomes: aggregate classifications are deterministic, invalid
-  chronology remains fail-visible, checkpoint logs contain only bounded counts,
-  and all required checks are green.
+  chronology remains fail-visible, checkpoint logs contain only bounded counts
+  and booleans, and all required checks are green.

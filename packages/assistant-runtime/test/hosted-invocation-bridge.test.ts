@@ -690,13 +690,21 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     await expect(options.createCheckpointSnapshot(
-      createCheckpointInput("idle_shutdown"),
+      {
+        ...createCheckpointInput("idle_shutdown"),
+        handledConversationFrontierSelected: true,
+      },
     )).rejects.toThrow("HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON");
 
     const failureEntry = calls.logWrite.mock.calls
       .flatMap(([request]) => request.entries)
       .find((entry) => entry.eventCode === "checkpoint.snapshot_failed");
     const redactedJson = failureEntry?.redactedJson ?? {};
+    expect(redactedJson).toMatchObject({
+      handledConversationFrontierSelected: true,
+    });
+    expect(redactedJson).not.toHaveProperty("webCheckpointAccepted");
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
     expect(JSON.stringify(redactedJson)).not.toContain(rawPath);
     expect(JSON.stringify(redactedJson)).toContain("<redacted-path>");
   });
@@ -835,6 +843,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     await options.createCheckpointSnapshot({
       ...createCheckpointInput("idle_shutdown"),
+      handledConversationFrontierSelected: true,
       handledConversationMailboxItemIds: ["item_terminal_7"],
       idleCheckpointTrigger: "shutdown_signal",
       runtimeWakePendingAtCheckpoint: false,
@@ -845,10 +854,14 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(checkpointRequest?.handledConversationMailboxItemIds).toEqual([
       "item_terminal_7",
     ]);
+    expect(checkpointRequest).not.toHaveProperty(
+      "handledConversationFrontierSelected",
+    );
     expect(checkpointRequest?.idleCheckpointTrigger).toBe("shutdown_signal");
     expect(checkpointRequest?.runtimeWakePendingAtCheckpoint).toBe(false);
 
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(JSON.stringify(entries)).not.toContain("item_terminal_7");
     for (const eventCode of [
       "checkpoint.snapshot_plan",
       "checkpoint.snapshot_started",
@@ -856,10 +869,18 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     ]) {
       const entry = entries.find((candidate) => candidate.eventCode === eventCode);
       expect(entry?.redactedJson).toMatchObject({
+        handledConversationFrontierSelected: true,
         handledConversationMailboxItemCount: 1,
         idleCheckpointTrigger: "shutdown_signal",
         runtimeWakePendingAtCheckpoint: false,
       });
+      if (eventCode === "checkpoint.snapshot_finished") {
+        expect(entry?.redactedJson).toMatchObject({
+          webCheckpointAccepted: true,
+        });
+      } else {
+        expect(entry?.redactedJson).not.toHaveProperty("webCheckpointAccepted");
+      }
     }
   });
 

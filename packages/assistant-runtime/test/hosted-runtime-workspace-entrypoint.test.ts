@@ -28482,6 +28482,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const checkpointSnapshotFrontierSelections: boolean[] = [];
     const connectionId = "device_sync_connection_pending_retry";
     const firstNow = "2026-04-27T00:00:00.000Z";
     const deviceSyncWakeAt = "2026-04-27T00:10:00.000Z";
@@ -28554,6 +28555,9 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
+            checkpointSnapshotFrontierSelections.push(
+              snapshotInput.handledConversationFrontierSelected ?? false,
+            );
             return {
               snapshotRef: createBundleRef({
                 hash: "6".repeat(64),
@@ -28649,6 +28653,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(checkpoint.handledConversationMailboxItemIds, [
         "mailbox_item_entrypoint_device_sync_pending_retry",
       ]);
+      assert.deepEqual(checkpointSnapshotFrontierSelections, [true]);
 
       vi.useRealTimers();
       vi.useFakeTimers({ toFake: ["Date"] });

@@ -2337,10 +2337,18 @@ lossy and must not contain plaintext messages, transcripts, vault data,
 provider payloads, secrets, local paths, or direct personal identifiers. The
 `checkpoint.snapshot_plan`, `checkpoint.snapshot_started`, and
 `checkpoint.snapshot_finished` events record the bounded
-`handledConversationMailboxItemCount`, never the item identifiers. A zero count
-localizes a missing acknowledgement candidate to runtime compaction; a nonzero
-count proves only that the runner offered candidates to Web and does not imply
-that the exact-row stamps or contiguous consumed floor advanced.
+`handledConversationMailboxItemCount` and
+`handledConversationFrontierSelected`, never the item identifiers. The count is
+batch-volume context only. The frontier boolean reports whether the selected
+batch contains the exact conversation row immediately after Web's last
+contiguous consumed floor. Plan, start, and failure events prove local selection
+only; they do not claim that Web received the request. A finished event also
+records `webCheckpointAccepted`. When that value and the frontier boolean are
+both true, the accepted Web checkpoint carried the exact blocking row; when an
+accepted finished event has a false frontier boolean, the gap remains in runtime
+selection, mapping, or batch rotation. The fields never imply that exact-row
+stamping or the contiguous floor advanced; durable consumption remains that
+proof.
 Web runs one Vercel-authenticated reply-latency monitor every five minutes over
 the existing `HostedIngressLatencyTrace`, accepted `HostedLinqDelivery`, and
 conversation `consumed_at` facts. The fixed product boundary is 30 seconds. A
@@ -2359,7 +2367,7 @@ data cannot hide still-unconsumed work. The terminal and publication-expectation
 leaves alone use max-timestamp merge semantics. Every other latency leaf remains
 assign-once. For slow completed replies, the monitor compares
 accepted-to-provider-start with provider-start-to-first-visible-response and
-reports the larger measured boundary as pre-provider or provider/assistant
+reports the larger measured boundary as pre-provider path or provider/assistant
 execution. Missing, ambiguous, or impossible provider chronology remains
 unknown. For unresolved replies, it separates missing valid terminal evidence
 from valid terminal non-reply evidence that still lacks durable checkpoint

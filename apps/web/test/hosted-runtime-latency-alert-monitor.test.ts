@@ -61,6 +61,8 @@ describe("hosted runtime latency health", () => {
       oldestUnresolvedAgeMs: 30_000,
       recentCompletedReplyCount: 2,
       recentSlowInitialResponseCount: 1,
+      recentSlowUnknownBoundaryCount: 1,
+      unresolvedMissingTerminalEvidenceCount: 1,
       unresolvedReplyCount: 1,
     });
   });
@@ -609,6 +611,26 @@ describe("hosted runtime latency alert monitor", () => {
     );
     expect(sentMessage).not.toContain("operator@example.test");
     expect(sentMessage).not.toContain("resend-email-1");
+    expect(fixture.readState()?.detailsJson).toMatchObject({
+      health: {
+        invalidChronologyCount: 0,
+        maxFirstVisibleResponseLatencyMs: 60_000,
+        oldestUnresolvedAgeMs: null,
+        recentCompletedReplyCount: 1,
+        recentSlowInitialResponseCount: 1,
+        recentSlowPreProviderDominantCount: 0,
+        recentSlowProviderExecutionDominantCount: 1,
+        recentSlowUnknownBoundaryCount: 0,
+        scanTruncated: false,
+        unresolvedCheckpointAcknowledgementCount: 0,
+        unresolvedMissingTerminalEvidenceCount: 0,
+        unresolvedReplyCount: 0,
+      },
+      phase: "alert",
+      schema: "murph.hosted-runtime-latency-monitor.v3",
+      thresholdMs: 30_000,
+      windowMinutes: 10,
+    });
   });
 
   it("names overdue terminal checkpoint acknowledgement in the alert", async () => {
@@ -633,6 +655,69 @@ describe("hosted runtime latency alert monitor", () => {
 
     expect(sendAlert.mock.calls[0]?.[0].text).toContain(
       "Unresolved boundary: 1 terminal non-reply lacks durable checkpoint acknowledgement",
+    );
+  });
+
+  it("names the measured pre-provider path without assigning it to runtime", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+        deliveryAcceptedAt: "2026-07-26T15:58:50.000Z",
+        providerStartAt: "2026-07-26T15:58:40.000Z",
+      }),
+    ]);
+    const sendAlert = vi.fn(async (_input: AlertSendInput) => {
+      void _input;
+      return { providerMessageId: "resend-email-pre-provider" };
+    });
+
+    await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+
+    expect(sendAlert.mock.calls[0]?.[0].text).toContain(
+      "Slow boundary: 1 pre-provider path dominant",
+    );
+    expect(sendAlert.mock.calls[0]?.[0].text).not.toContain(
+      "pre-provider runtime",
+    );
+  });
+
+  it("reports grouped missing-terminal rows as one unresolved turn", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+        providerRequestOrdinal: 0,
+        providerStartAt: "2026-07-26T15:58:05.000Z",
+        runtimeAttemptId: "attempt_grouped_alert_1",
+      }),
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.500Z",
+        providerRequestOrdinal: 0,
+        providerStartAt: "2026-07-26T15:58:05.000Z",
+        runtimeAttemptId: "attempt_grouped_alert_1",
+      }),
+    ]);
+    const sendAlert = vi.fn(async (_input: AlertSendInput) => {
+      void _input;
+      return { providerMessageId: "resend-email-grouped-unresolved" };
+    });
+
+    await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+
+    expect(sendAlert.mock.calls[0]?.[0].text).toContain(
+      "1 unresolved turn with no visible response or durable acknowledgement after 30 seconds",
+    );
+    expect(sendAlert.mock.calls[0]?.[0].text).toContain(
+      "Unresolved boundary: 1 unresolved turn has no valid terminal response evidence",
     );
   });
 
@@ -693,7 +778,7 @@ describe("hosted runtime latency alert monitor", () => {
       sendAlert.mock.calls[1]?.[0].text,
     );
     expect(sendAlert.mock.calls[1]?.[0].text).toContain(
-      "1 traced message still unresolved after 30 seconds",
+      "1 unresolved turn with no visible response or durable acknowledgement after 30 seconds",
     );
     expect(fixture.readState()?.lastErrorCode).toBeNull();
     expect(fixture.readState()?.lastProviderStatus).toBeNull();
