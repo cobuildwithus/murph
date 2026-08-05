@@ -1160,7 +1160,7 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
       }
       const probes = [
         {
-          alertFailure: false,
+          alertFailure: null,
           kind: 'direct-success',
           prompt: [
             'I woke with a mild headache and had planned outdoor intervals today in Phoenix.',
@@ -1169,7 +1169,7 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
           scheduled: false,
         },
         {
-          alertFailure: true,
+          alertFailure: 'transient',
           kind: 'direct-failure',
           prompt: [
             'I woke with a mild headache and had planned outdoor intervals today in Phoenix.',
@@ -1178,7 +1178,7 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
           scheduled: false,
         },
         {
-          alertFailure: false,
+          alertFailure: null,
           kind: 'scheduled-alert-only',
           prompt: [
             weeklyHealthDigest.instructions,
@@ -1190,7 +1190,7 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
           scheduled: true,
         },
         {
-          alertFailure: true,
+          alertFailure: 'permanent',
           kind: 'scheduled-alert-failure',
           prompt: [
             weeklyHealthDigest.instructions,
@@ -1293,7 +1293,7 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
                           {
                             code: 'CONNECTED_APPS_PROVIDER_UNAVAILABLE',
                             detail: 'Connected apps are temporarily unavailable.',
-                            retryable: true,
+                            retryable: probe.alertFailure === 'transient',
                             status: 503,
                           },
                         )

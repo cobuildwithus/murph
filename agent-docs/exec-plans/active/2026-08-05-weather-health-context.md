@@ -34,9 +34,11 @@ Done:
 - Passed 201 focused tests, assistant and web typechecks, and the focused real-model journey.
 - Final ReviewGPT round 2 found that the alert failure result still combined generic retry guidance with the alert-specific no-retry rule. The required retrospective chose a shrinking fix at the existing tool boundary.
 - Removed the conflicting retry sentence for this route, preserved generic retry guidance elsewhere, and expanded the real-model journey to cover scheduled provider failure.
+- Final ReviewGPT round 3 found the same generic posture remained for non-retryable failures. The retrospective follow-up kept the same shrinking decision.
+- Suppressed the complete generic retry posture for this route and proved both retryable and non-retryable failures, including a scheduled real-model non-retryable probe.
 
 Now:
-- Commit and push the round-2 remediation, then run final correction review.
+- Commit and push the round-3 remediation, then run final correction review.
 
 Next:
 - Reconcile the branch with `main`, confirm exact-head CI, run the signed production-runtime smoke read after the web route is deployed, then close the plan.

@@ -198,11 +198,13 @@ function describeConnectedAppsFailure(
   }
 
   const detail = failure.message ? `: ${failure.message}` : ''
-  const posture = failure.retryable === true && retryGuidance === 'generic'
-    ? ' This failure is transient; one retry is reasonable.'
-    : failure.retryable === false
-      ? ' Repeating this call unchanged will fail the same way; change the request or tell the user what is wrong.'
-      : ''
+  const posture = retryGuidance === 'none'
+    ? ''
+    : failure.retryable === true
+      ? ' This failure is transient; one retry is reasonable.'
+      : failure.retryable === false
+        ? ' Repeating this call unchanged will fail the same way; change the request or tell the user what is wrong.'
+        : ''
   return `connected apps request failed with ${failure.code}${status}${detail}.${posture}`
 }
 

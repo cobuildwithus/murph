@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-30
+Last verified: 2026-08-05
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -25,6 +25,28 @@ The delivery path decides who owns broad verification:
 Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
 unrelated check sufficient.
+
+## Expensive And Stochastic Proof Order
+
+When a change needs a real-model, live-provider, browser, or external review
+run, finish the cheap deterministic proof first:
+
+1. Test the exact production boundary result before the expensive run. Assert
+   both required text and the absence of conflicting guidance when instructions
+   are composed from generic and route-specific parts.
+2. Build the expensive scenario from the production prompt, policy, or saved
+   automation instructions. Do not retype a reduced approximation when the real
+   builder or record is available.
+3. Assert the user-visible outcome and owned effects, such as provider call
+   count, writes, delivery, or suppression. Do not assert incidental model steps
+   such as reading one helper file or choosing search before execute unless that
+   exact step protects a product, cost, security, or reliability invariant.
+4. Run independent focused tests, typechecks, and lint checks concurrently.
+   Start the expensive scenario only after its boundary tests pass, and start
+   ReviewGPT only after the complete candidate passes focused proof.
+
+This order keeps stochastic evidence useful without making incidental model
+behavior or an avoidable late contradiction trigger repeated expensive runs.
 
 For hosted Linq weighted line-planning changes, the focused owner proof is the
 hosted-web Vitest slice covering routing policy, on-demand line load, home
