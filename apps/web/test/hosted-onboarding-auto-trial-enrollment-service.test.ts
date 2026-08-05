@@ -291,7 +291,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: prisma as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "enrolled",
     });
 
@@ -456,7 +456,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: prisma as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "enrolled",
     });
 
@@ -476,7 +476,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: makePrisma() as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "enrolled",
     });
 
@@ -634,7 +634,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: prisma as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "enrolled",
     });
 
@@ -925,7 +925,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: makePrisma() as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "enrolled",
     });
 
@@ -1640,7 +1640,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: makePrisma() as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "enrolled",
     });
 
@@ -1699,7 +1699,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: makePrisma() as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "enrolled",
     });
 
@@ -1761,7 +1761,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: makePrisma() as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "already_active",
     });
 
@@ -1787,7 +1787,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: makePrisma() as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "already_enrolled",
     });
 
@@ -1954,7 +1954,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       retryable: true,
     });
     await expect(enroll()).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "already_enrolled",
     });
 
@@ -2114,7 +2114,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       retryable: true,
     });
     await expect(enroll()).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "already_active",
     });
 
@@ -2167,7 +2167,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       now: new Date("2026-06-14T12:00:05.000Z"),
       prisma: makePrisma() as never,
     })).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "already_enrolled",
     });
 
@@ -2220,7 +2220,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       retryable: true,
     });
     await expect(enroll()).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "already_enrolled",
     });
 
@@ -2259,7 +2259,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: makePrisma() as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "already_enrolled",
     });
 
@@ -2298,7 +2298,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: makePrisma() as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "already_enrolled",
     });
 
@@ -2376,7 +2376,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: prisma as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "already_active",
     });
 
@@ -2542,7 +2542,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: makePrisma() as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "already_enrolled",
     });
 
@@ -2819,7 +2819,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: makePrisma() as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "enrolled",
     });
 
@@ -2856,7 +2856,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: prisma as never,
       }),
     ).resolves.toEqual({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "enrolled",
     });
 

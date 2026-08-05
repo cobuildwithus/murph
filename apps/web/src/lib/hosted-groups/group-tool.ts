@@ -1562,11 +1562,22 @@ function renderHostedGroupJoinOfferScopeSentence(
   const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
     .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
   const sentence = `your ${formatHumanList(["Murph profile name", ...labels])}`;
+  const disclosures: string[] = [];
   // Nutrition labels (e.g. "daily protein") read as a bare number; disclose that
   // the totals come from the member's meals, connected-app imports included, so a
   // like-to-consent reaction is not materially narrower than what is exported.
-  return projectionScopes.some(isHostedGroupMealNutritionProjectionScope)
-    ? `${sentence} (nutrition totals come from your meals in Murph, including meals imported from connected apps)`
+  if (projectionScopes.some(isHostedGroupMealNutritionProjectionScope)) {
+    disclosures.push(
+      "nutrition totals come from your meals in Murph, including meals imported from connected apps",
+    );
+  }
+  if (projectionScopes.some(isHostedGroupSleepSourceProjectionScope)) {
+    disclosures.push(
+      "by-source sleep includes every available source's value and name, plus when Murph recorded that source value",
+    );
+  }
+  return disclosures.length > 0
+    ? `${sentence} (${disclosures.join("; ")})`
     : sentence;
 }
 
@@ -1577,6 +1588,13 @@ function isHostedGroupMealNutritionProjectionScope(
     getHostedVaultShareDailyMetricProjectionSpec(scope.projectionKind)?.source.kind
       === "meal-nutrition-total"
   );
+}
+
+function isHostedGroupSleepSourceProjectionScope(
+  scope: HostedVaultShareProjectionScope,
+): boolean {
+  return scope.projectionKind === "deep-sleep-sources-days.v1"
+    || scope.projectionKind === "rem-sleep-sources-days.v1";
 }
 
 function formatHostedGroupJoinOfferShareScopeLabel(label: string): string {

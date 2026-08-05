@@ -8,9 +8,27 @@ import {
   buildAssistantSkillFileRef,
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
+import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
+
+function buildPrompt(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'imessage',
+    cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    currentLocalDate: '2026-08-05',
+    currentTimeZone: 'America/New_York',
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
 
 describe('assistant signup link guidance', () => {
-  it('loads a small dedicated skill only for an explicit shareable-link request', () => {
+  it('routes explicit shareable-link requests to one small dedicated skill', () => {
     const skill = ASSISTANT_SKILLS.find(
       (candidate) => candidate.slug === 'signup-link',
     )
@@ -22,6 +40,9 @@ describe('assistant signup link guidance', () => {
     expect(skill?.triggerHint).toContain('shareable link')
     expect(buildAssistantSkillFileRef('signup-link')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/signup-link/SKILL.md',
+    )
+    expect(buildPrompt()).toContain(
+      'signup-link (explicit requests)',
     )
     expect(lowUsage?.triggerHint).not.toContain('signup link')
     expect(lowUsage?.triggerHint).not.toContain('invite link')

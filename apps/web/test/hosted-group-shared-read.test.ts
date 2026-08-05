@@ -37,6 +37,9 @@ const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const PROTEIN_SCOPE = hostedVaultShareProjectionKindToScope("protein-days.v0");
 const STEPS_SCOPE = hostedVaultShareProjectionKindToScope("steps-days.v0");
 const DEEP_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("deep-sleep-days.v0");
+const DEEP_SLEEP_SOURCES_SCOPE = hostedVaultShareProjectionKindToScope(
+  "deep-sleep-sources-days.v1",
+);
 const REM_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("rem-sleep-days.v0");
 const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope(
   "workouts.v0",
@@ -45,6 +48,9 @@ const DEVICE_SCOPE = hostedVaultShareProjectionKindToScope("device-sync-status.v
 const PROTEIN_KEY = buildHostedVaultShareProjectionScopeKey(PROTEIN_SCOPE);
 const STEPS_KEY = buildHostedVaultShareProjectionScopeKey(STEPS_SCOPE);
 const DEEP_SLEEP_KEY = buildHostedVaultShareProjectionScopeKey(DEEP_SLEEP_SCOPE);
+const DEEP_SLEEP_SOURCES_KEY = buildHostedVaultShareProjectionScopeKey(
+  DEEP_SLEEP_SOURCES_SCOPE,
+);
 const REM_SLEEP_KEY = buildHostedVaultShareProjectionScopeKey(REM_SLEEP_SCOPE);
 const WORKOUTS_KEY = buildHostedVaultShareProjectionScopeKey(
   WORKOUTS_SCOPE,
@@ -57,6 +63,7 @@ type TestProjectionScope =
   | typeof PROTEIN_SCOPE
   | typeof STEPS_SCOPE
   | typeof DEEP_SLEEP_SCOPE
+  | typeof DEEP_SLEEP_SOURCES_SCOPE
   | typeof REM_SLEEP_SCOPE
   | typeof WORKOUTS_SCOPE
   | typeof DEVICE_SCOPE;
@@ -813,6 +820,83 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         })],
       })],
     })]);
+  });
+
+  it("preserves every consented sleep source and snapshot timestamp", async () => {
+    const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const records = [{
+      data: {
+        date,
+        metricKey: "deep-sleep-minutes",
+        projectedAt: `${date}T12:00:00.000Z`,
+        sources: [
+          {
+            label: "fitbit",
+            recordedAt: `${date}T06:58:00.000Z`,
+            source: "fitbit",
+            unit: "minutes",
+            value: 64,
+          },
+          {
+            label: "Garmin",
+            recordedAt: `${date}T07:01:00.000Z`,
+            selected: true as const,
+            source: "garmin",
+            unit: "minutes",
+            value: 88,
+          },
+          {
+            label: "Oura",
+            recordedAt: null,
+            source: "oura",
+            unit: "minutes",
+            value: 112,
+          },
+        ],
+        sourcesDisagree: true,
+        unit: "minutes",
+        value: 88,
+      },
+      occurredAt: `${date}T00:00:00.000Z`,
+      recordKey: date,
+      sourceRevision: "D".repeat(32),
+    }];
+    const sourceAwareSleep = snapshot({
+      id: "share_deep_sources",
+      memberId: "member_sources",
+      projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      records,
+    });
+    installCiphertexts({ sourceAwareSleep });
+    const { prisma } = createPrisma({
+      group: {
+        members: [{ id: "participant_sources", memberId: "member_sources" }],
+      },
+      shares: [shareRow({
+        ciphertext: "sourceAwareSleep",
+        id: "share_deep_sources",
+        memberId: "member_sources",
+        projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      })],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.requestedProjectionScopeKeys).toEqual([DEEP_SLEEP_SOURCES_KEY]);
+    expect(result.members[0]?.projections[0]).toMatchObject({
+      dataStatus: "available",
+      grantStatus: "granted",
+      records: [{ data: records[0]?.data }],
+    });
+    expect(JSON.stringify(result)).not.toContain("sourceRevision");
   });
 
   it("returns the complete sleep-stage and workout-timing member-by-scope matrix", async () => {

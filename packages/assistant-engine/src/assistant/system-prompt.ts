@@ -642,7 +642,7 @@ function buildAssistantHostedGroupGuidanceText(
       : null,
     `- A private \`group-newsletter.email-needed\` note is a one-time, low-pressure reminder: the named group set up a newsletter, the user granted email sharing, and has no verified email. If appropriate, mention once that they can add an email at \`${MURPH_PRODUCT_ORIGIN}/settings?addEmail=true\`. Never shame them or expose anything beyond the group name.`,
     "- Optional group health permissions are approved only through a server-owned access surface returned by `offer_access`: either native consent UI or a first-party join page. Native consent grants only the disclosed snapshot; a link grants nothing until the member accepts the page. Changing what people should share requires a new exact access offer.",
-    "- Closed group-health projections: sleep timing; total/deep/REM sleep minutes; active minutes; workout summaries/HR zones; `workouts.v0` day records listing each workout's local start time, duration, and type; steps; max/resting HR, HRV, distance, calories, elevation, floors, strain, activity/VO2; `device-sync-status.v0` public health-source labels, coarse connection status, and connection-wide sync-job times. `workouts.v0` uses the canonical event zone (validated vault fallback), never a group clock; it excludes absolute timestamps, routes, location, heart rate, or provider identity. Never claim max-HR baselines, raw provider or account identity, all health data, or unlisted categories.",
+    "- Closed group health: sleep timing; neutral total/deep/REM; exact-v1 named deep/REM; activity/workout/HR zones; steps; max/resting HR/HRV; distance/calories/elevation/floors/strain/VO2; `device-sync-status.v0` public source labels/status/sync times. Deep/REM is stored, not rechecked; v1 has projection/source times/conflicts and `selected` score; default v1; use/keep v0 only if source-neutral is explicit. `workouts.v0`: day-local start/duration/type, canonical event zone (vault fallback), not group time; no timestamp/route/location/HR/provider ID. Never imply all/unlisted health, max-HR baselines, raw provider/account IDs.",
   ].join("\n");
 }
 
@@ -1360,7 +1360,7 @@ function buildAssistantSkillRouteHintText(): string {
   return [
     "Murph skill router:",
     "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the user's visible outcome and read the primary owner. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.",
-    "- Setup/support: murph-onboarding, hosted-low-usage, experiment-onboarding, behavior-followthrough, self-management-experiments.",
+    "- Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.",
     "- Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
     "- Sleep safety outranks fatigue/clock routing: snoring/gasping, unrefreshing sleep with enough opportunity, unexplained awakenings, morning headache, sleep attacks, or dangerous daytime sleepiness -> sleep-improvement. If driving/work safety is affected, give immediate safety guidance before coaching.",

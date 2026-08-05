@@ -4935,9 +4935,9 @@ async function executeGroupTool(input: {
         'signup referral links require a fresh explicit user request',
       )
     }
-    if (userActionScope.conversationScope !== 'group') {
+    if (userActionScope.conversationScope === 'direct') {
       request = { action: 'create_signup_referral_link' }
-    } else {
+    } else if (userActionScope.conversationScope === 'group') {
       const messageRef = input.request.messageRef
       if (!messageRef || !userActionScope.acceptedInputIds.includes(messageRef)) {
         return toolTextResult(
@@ -4960,6 +4960,11 @@ async function executeGroupTool(input: {
         action: 'create_signup_referral_link',
         participant,
       }
+    } else {
+      return toolTextResult(
+        false,
+        'signup referral links require a verified direct or group request',
+      )
     }
   } else if (input.request.action === 'read_usage_referral') {
     const userActionScope =

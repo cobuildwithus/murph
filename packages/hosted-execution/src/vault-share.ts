@@ -5,10 +5,12 @@ import {
   isStrictIsoDateTime,
   normalizeActivityKindToken,
 } from "@murphai/contracts";
+import { resolveWearableProviderDescriptor } from "@murphai/health-metrics";
 
 import {
   readNullableStringValue,
   requireArray,
+  requireBoolean,
   requireNumber,
   requireObject,
   requireString,
@@ -37,7 +39,9 @@ export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS = [
   "activity-days.v0",
   "sleep-duration-days.v0",
   "deep-sleep-days.v0",
+  "deep-sleep-sources-days.v1",
   "rem-sleep-days.v0",
+  "rem-sleep-sources-days.v1",
   "steps-days.v0",
   "max-heart-rate-days.v0",
   "distance-days.v0",
@@ -88,6 +92,7 @@ export interface HostedVaultShareDailyMetricProjectionSpec {
   metricKey: string;
   minValue: number;
   projectionKind: HostedVaultShareDailyMetricProjectionKind;
+  sourceMode?: "all-public-sleep-sources";
   source: HostedVaultShareDailyMetricProjectionSource;
 }
 
@@ -97,7 +102,9 @@ export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS = [
   { projectionKind: "activity-days.v0", metricKey: "activity-minutes", minValue: 0, maxValue: 1_440, source: METRIC_SERIES_SOURCE },
   { projectionKind: "sleep-duration-days.v0", metricKey: "total-sleep-minutes", minValue: 0, maxValue: 1_440, source: METRIC_SERIES_SOURCE },
   { projectionKind: "deep-sleep-days.v0", metricKey: "deep-sleep-minutes", minValue: 0, maxValue: 1_440, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "deep-sleep-sources-days.v1", metricKey: "deep-sleep-minutes", expectedUnit: "minutes", minValue: 0, maxValue: 1_440, sourceMode: "all-public-sleep-sources", source: METRIC_SERIES_SOURCE },
   { projectionKind: "rem-sleep-days.v0", metricKey: "rem-sleep-minutes", minValue: 0, maxValue: 1_440, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "rem-sleep-sources-days.v1", metricKey: "rem-sleep-minutes", expectedUnit: "minutes", minValue: 0, maxValue: 1_440, sourceMode: "all-public-sleep-sources", source: METRIC_SERIES_SOURCE },
   { projectionKind: "steps-days.v0", metricKey: "steps", minValue: 0, maxValue: 1_000_000, source: METRIC_SERIES_SOURCE },
   { projectionKind: "max-heart-rate-days.v0", metricKey: "max-heart-rate", minValue: 0, maxValue: 260, source: METRIC_SERIES_SOURCE },
   { projectionKind: "distance-days.v0", metricKey: "distance-km", minValue: 0, maxValue: 1_000, source: METRIC_SERIES_SOURCE },
@@ -257,7 +264,9 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
   "sleep-times.v0",
   "sleep-duration-days.v0",
   "deep-sleep-days.v0",
+  "deep-sleep-sources-days.v1",
   "rem-sleep-days.v0",
+  "rem-sleep-sources-days.v1",
   "activity-days.v0",
   "workout-days.v0",
   "workouts.v0",
@@ -469,7 +478,23 @@ export interface HostedVaultShareDailyMetricData {
   date: string;
   metricKey: string;
   metricSemantics?: typeof HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS;
+  projectedAt?: string;
   provisional?: true;
+  sources?: HostedVaultShareSleepMetricSource[];
+  sourcesDisagree?: boolean;
+  unit: string | null;
+  value: number;
+}
+
+export const HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES = 4;
+export const HOSTED_VAULT_SHARE_SLEEP_METRIC_SOURCE_KEY_MAX_LENGTH = 80;
+export const HOSTED_VAULT_SHARE_SLEEP_METRIC_SOURCE_LABEL_MAX_LENGTH = 80;
+
+export interface HostedVaultShareSleepMetricSource {
+  label: string;
+  recordedAt: string | null;
+  selected?: true;
+  source: string;
   unit: string | null;
   value: number;
 }
@@ -956,7 +981,9 @@ export function parseHostedVaultShareDeliveryRecord(
   );
   const provisional = requireObject(record.data, "Vault share delivery record data").provisional;
   const completedDateScope = projectionScope.projectionKind === "deep-sleep-days.v0"
-    || projectionScope.projectionKind === "rem-sleep-days.v0";
+    || projectionScope.projectionKind === "deep-sleep-sources-days.v1"
+    || projectionScope.projectionKind === "rem-sleep-days.v0"
+    || projectionScope.projectionKind === "rem-sleep-sources-days.v1";
   if (provisional !== undefined && (provisional !== true || !completedDateScope)) {
     throw new TypeError(`Vault share ${projectionScope.projectionKind} data provisional is invalid.`);
   }
@@ -1319,12 +1346,207 @@ function parseHostedVaultShareDailyMetricData(
     );
   }
 
+  const sourceAware = spec.sourceMode === "all-public-sleep-sources";
+  if (sourceAware) {
+    assertObjectKeys(
+      data,
+      `Vault share ${spec.projectionKind} data`,
+      [
+        "date",
+        "metricKey",
+        "projectedAt",
+        "provisional",
+        "sources",
+        "sourcesDisagree",
+        "unit",
+        "value",
+      ],
+    );
+  }
+  if (!sourceAware) {
+    if (
+      data.projectedAt !== undefined
+      || data.sources !== undefined
+      || data.sourcesDisagree !== undefined
+    ) {
+      throw new TypeError(
+        `Vault share ${spec.projectionKind} does not accept source-aware sleep data.`,
+      );
+    }
+  }
+
+  const sourceAwareData = sourceAware
+    ? parseHostedVaultShareSleepMetricSources(data, spec, {
+        unit,
+        value: valueNumber,
+      })
+    : {};
+
   return {
     date,
     metricKey,
     ...(metricSemantics === undefined ? {} : { metricSemantics }),
+    ...sourceAwareData,
     unit,
     value: valueNumber,
+  };
+}
+
+function parseHostedVaultShareSleepMetricSources(
+  data: Record<string, unknown>,
+  spec: HostedVaultShareDailyMetricProjectionSpec,
+  selectedMetric: { unit: string | null; value: number },
+): Pick<
+  HostedVaultShareDailyMetricData,
+  "projectedAt" | "sources" | "sourcesDisagree"
+> {
+  const projectedAt = requireHostedVaultShareNonFutureTimestamp(
+    data.projectedAt,
+    `Vault share ${spec.projectionKind} data projectedAt`,
+  );
+  const rawSources = requireArray(
+    data.sources,
+    `Vault share ${spec.projectionKind} data sources`,
+  );
+  if (
+    rawSources.length === 0
+    || rawSources.length > HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES
+  ) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} sources must contain 1-${HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES} entries.`,
+    );
+  }
+
+  const sources = rawSources.map((value, index) =>
+    parseHostedVaultShareSleepMetricSource(value, spec, index)
+  );
+  const sourceKeys = new Set(sources.map((source) => source.source));
+  if (sourceKeys.size !== sources.length) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} source keys must be unique.`,
+    );
+  }
+
+  const selectedSources = sources.filter((source) => source.selected === true);
+  if (selectedSources.length !== 1) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} sources must contain exactly one selected source.`,
+    );
+  }
+  const selectedSource = selectedSources[0];
+  if (
+    !selectedSource
+    || selectedSource.unit !== selectedMetric.unit
+    || selectedSource.value !== selectedMetric.value
+  ) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} selected source must match the canonical value and unit.`,
+    );
+  }
+
+  const sourcesDisagree = requireBoolean(
+    data.sourcesDisagree,
+    `Vault share ${spec.projectionKind} data sourcesDisagree`,
+  );
+  const firstSource = sources[0];
+  const computedSourcesDisagree = firstSource
+    ? sources.some((source) =>
+        source.unit !== firstSource.unit || source.value !== firstSource.value
+      )
+    : false;
+  if (sourcesDisagree !== computedSourcesDisagree) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} sourcesDisagree must match the source values.`,
+    );
+  }
+
+  return {
+    projectedAt,
+    sources,
+    sourcesDisagree,
+  };
+}
+
+function parseHostedVaultShareSleepMetricSource(
+  value: unknown,
+  spec: HostedVaultShareDailyMetricProjectionSpec,
+  index: number,
+): HostedVaultShareSleepMetricSource {
+  const label = `Vault share ${spec.projectionKind} data sources[${index}]`;
+  const source = requireObject(value, label);
+  assertObjectKeys(source, label, [
+    "label",
+    "recordedAt",
+    "selected",
+    "source",
+    "unit",
+    "value",
+  ]);
+
+  const sourceKey = requireString(source.source, `${label} source`).trim();
+  if (
+    sourceKey.length > HOSTED_VAULT_SHARE_SLEEP_METRIC_SOURCE_KEY_MAX_LENGTH
+    || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(sourceKey)
+  ) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} source keys must be canonical public provider slugs.`,
+    );
+  }
+
+  const sourceLabel = requireString(source.label, `${label} label`).trim();
+  if (
+    sourceLabel.length === 0
+    || sourceLabel.length > HOSTED_VAULT_SHARE_SLEEP_METRIC_SOURCE_LABEL_MAX_LENGTH
+    || /[\u0000-\u001f\u007f]/u.test(sourceLabel)
+  ) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} source labels must be bounded text without control characters.`,
+    );
+  }
+  const providerDescriptor = resolveWearableProviderDescriptor(sourceKey);
+  if (
+    sourceKey === "junction"
+    || (providerDescriptor?.displayName ?? sourceKey) !== sourceLabel
+  ) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} sources must use canonical public provider keys and labels.`,
+    );
+  }
+
+  const recordedAt = source.recordedAt === null
+    ? null
+    : requireHostedVaultShareNonFutureTimestamp(
+        source.recordedAt,
+        `${label} recordedAt`,
+      );
+  let selected: true | undefined;
+  if (source.selected !== undefined) {
+    if (source.selected !== true) {
+      throw new TypeError(`${label} selected must be true when present.`);
+    }
+    selected = true;
+  }
+  const unit = readNullableStringValue(source.unit, `${label} unit`);
+  if (unit !== null && (unit.length > 40 || /[\u0000-\u001f\u007f]/u.test(unit))) {
+    throw new TypeError(`${label} unit must be bounded text without control characters.`);
+  }
+  if (spec.expectedUnit !== undefined && unit !== spec.expectedUnit) {
+    throw new TypeError(`${label} unit must be ${spec.expectedUnit}.`);
+  }
+  const metricValue = requireNumber(source.value, `${label} value`);
+  if (metricValue < spec.minValue || metricValue > spec.maxValue) {
+    throw new TypeError(
+      `${label} value must be between ${spec.minValue} and ${spec.maxValue}.`,
+    );
+  }
+
+  return {
+    label: sourceLabel,
+    recordedAt,
+    ...(selected === true ? { selected } : {}),
+    source: sourceKey,
+    unit,
+    value: metricValue,
   };
 }
 

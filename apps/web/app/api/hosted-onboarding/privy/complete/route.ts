@@ -88,10 +88,6 @@ export const POST = withJsonError(async (request: Request) => {
     });
 
     const response = jsonOk({
-      // The first-ever web session is the one-shot initial-visit owner: it is
-      // the last durable write before this response, so a completion that
-      // fails earlier leaves the handoff recoverable on retry.
-      ...(appSession.firstMemberSession ? { initialVisitEligible: true } : {}),
       inviteCode: result.inviteCode,
       joinUrl: `/join/${encodeURIComponent(result.inviteCode)}`,
       launchConsentGranted: launchConsent.granted,
