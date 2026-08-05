@@ -242,6 +242,7 @@ esac
           input: `
 const result = await tools.exec_command({
   cmd: "sed -n '1,150p' skills/food-journal/SKILL.md",
+  workdir: ${JSON.stringify(scenario.turnInput.workingDirectory)},
 });
 text(result.output);
 `,
@@ -259,6 +260,7 @@ const branded = JSON.stringify(JSON.stringify([
 ]));
 const result = await tools.exec_command({
   cmd: "./vault-cli batch --compact --format json --command " + generic + " --command " + branded,
+  workdir: ${JSON.stringify(scenario.turnInput.workingDirectory)},
 });
 text(result.output);
 `,
@@ -270,6 +272,7 @@ text(result.output);
           input: `
 const result = await tools.exec_command({
   cmd: "./vault-cli meal add --note 'Rolled oats and plain kefir' --ingredient 'rolled oats, 50 g' --ingredient 'plain kefir, 240 g' --nutrition-calories 344.5 --nutrition-protein-grams 18.45 --nutrition-carbs-grams 45.15 --nutrition-fat-grams 8.45 --nutrition-fiber-grams 5.3 --nutrition-source database --nutrition-confidence high --nutrition-source-detail 'USDA fdc:oats-1 scaled from 100 g; label fdc:kefir-1 scaled to its 240 g serving'",
+  workdir: ${JSON.stringify(scenario.turnInput.workingDirectory)},
 });
 text(result.output);
 `,
