@@ -1005,8 +1005,10 @@ describe("foods query helpers", () => {
     expect(
       compact.contaminantSummary.alerts[0]?.screeningPolicy?.ratio,
     ).toBeCloseTo(3.714286, 6);
-    expect(JSON.stringify(compact)).not.toContain("sourceReportTitle");
-    expect(JSON.stringify(compact)).not.toContain("testedProduct");
+    const compactJson = JSON.stringify(compact);
+    expect(compactJson).not.toContain("sourceReportTitle");
+    expect(compactJson).not.toContain("testedProduct");
+    expect(compactJson.length).toBeLessThan(3_000);
   });
 
   it("keeps daily-exposure guidance unknown when serving mass is missing", async () => {
