@@ -81,7 +81,6 @@ describe("hosted onboarding Privy completion route", () => {
     mocks.getPrisma.mockReturnValue({ prisma: "mock" });
     mocks.issueHostedAppSession.mockResolvedValue({
       cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
-      firstMemberSession: false,
       sessionId: "hws_123",
     });
     mocks.readHostedConsentStatus.mockResolvedValue(launchConsentStatus);
@@ -396,7 +395,6 @@ describe("hosted onboarding Privy completion route", () => {
     mocks.getHostedInviteStatus.mockResolvedValueOnce(createInviteStatus("active"));
     mocks.issueHostedAppSession.mockResolvedValueOnce({
       cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
-      firstMemberSession: true,
       sessionId: "hws_123",
     });
 
@@ -411,7 +409,6 @@ describe("hosted onboarding Privy completion route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      initialVisitEligible: true,
       stage: "active",
     });
   });
@@ -438,7 +435,6 @@ describe("hosted onboarding Privy completion route", () => {
 
     mocks.issueHostedAppSession.mockResolvedValueOnce({
       cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
-      firstMemberSession: true,
       sessionId: "hws_retry",
     });
 
@@ -446,7 +442,6 @@ describe("hosted onboarding Privy completion route", () => {
 
     expect(retryResponse.status).toBe(200);
     await expect(retryResponse.json()).resolves.toMatchObject({
-      initialVisitEligible: true,
     });
   });
 
@@ -467,7 +462,6 @@ describe("hosted onboarding Privy completion route", () => {
     mocks.getHostedInviteStatus.mockResolvedValueOnce(createInviteStatus("active"));
     mocks.issueHostedAppSession.mockResolvedValueOnce({
       cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
-      firstMemberSession: false,
       sessionId: "hws_after_lost_response",
     });
 

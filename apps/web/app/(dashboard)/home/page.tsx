@@ -36,6 +36,7 @@ import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowanc
 import { projectHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import { readHostedMemberBillingEligibilityState } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberMessagingSetupState } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { readHostedInitialOnboardingState } from "@/src/lib/hosted-onboarding/initial-onboarding";
 import { resolveHostedMemberMessagingState } from "@/src/lib/hosted-onboarding/messaging-state";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
@@ -48,10 +49,7 @@ export const metadata: Metadata = createMurphPageMetadata({
 
 type HomeSearchParams =
   & DeviceSyncCompletionSearchParams
-  & ConnectedAppCompletionSearchParams
-  & {
-    initialVisit?: string | string[] | undefined;
-  };
+  & ConnectedAppCompletionSearchParams;
 
 export default async function HomePage({
   searchParams,
@@ -59,8 +57,6 @@ export default async function HomePage({
   searchParams: Promise<HomeSearchParams>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const showInitialVisitPersonaPicker =
-    readFirstSearchParamValue(resolvedSearchParams.initialVisit) === "true";
   const auth = await getHostedDashboardPageAuthSnapshot();
   const member = auth.authenticatedMember;
 
@@ -86,8 +82,19 @@ export default async function HomePage({
       member,
       searchParams: resolvedSearchParams,
     }),
-    showInitialVisitPersonaPicker
-      ? resolveHomeInitialVisitContactAction()
+    member
+      ? (async () => {
+          const state = await readHostedInitialOnboardingState({
+            memberId: member.id,
+            prisma,
+          });
+          return {
+            contactAction: state.status === "pending"
+              ? await resolveHomeInitialVisitContactAction()
+              : null,
+            state,
+          };
+        })()
       : Promise.resolve(null),
     member
       ? readHostedMemberMessagingSetupState({
@@ -101,7 +108,7 @@ export default async function HomePage({
     usageGateResult,
     deviceSyncCompletionDialogResult,
     connectedAppCompletionDialogResult,
-    initialVisitContactActionResult,
+    initialVisitProjectionResult,
     messagingSetupStateResult,
   ] = homeProjectionResults;
   const showDeviceStep = readSettledValue(showDeviceStepResult, false);
@@ -114,13 +121,10 @@ export default async function HomePage({
     connectedAppCompletionDialogResult,
     null,
   );
-  const initialVisitContactAction = readSettledValue(
-    initialVisitContactActionResult,
+  const initialVisitProjection = readSettledValue(
+    initialVisitProjectionResult,
     null,
   );
-  const shouldRenderInitialVisitPersonaPicker =
-    showInitialVisitPersonaPicker
-    && initialVisitContactActionResult.status === "fulfilled";
   const messagingSetupState = readSettledValue(messagingSetupStateResult, null);
   // Telegram bots cannot open a conversation, so a member can finish signup
   // with a linked account Murph still cannot send to. Keep asking for that
@@ -133,6 +137,10 @@ export default async function HomePage({
   // Each marker uses its own query key, so only one model is non-null per
   // home load in normal use; device-sync wins the tiebreak if both fire.
   const completionDialog = deviceSyncCompletionDialog ?? connectedAppCompletionDialog;
+  const shouldRenderInitialVisitPersonaPicker =
+    completionDialog === null
+    && initialVisitProjectionResult.status === "fulfilled"
+    && initialVisitProjection?.state.status === "pending";
   const usageLimitNotice =
     usageGate && "userNotice" in usageGate && usageGate.userNotice
       ? usageGate.userNotice
@@ -196,7 +204,8 @@ export default async function HomePage({
 
       {shouldRenderInitialVisitPersonaPicker ? (
         <HomeInitialVisitPersonaPickerClient
-          contactAction={initialVisitContactAction}
+          contactAction={initialVisitProjection.contactAction}
+          initialPreferences={initialVisitProjection.state.preferences}
         />
       ) : null}
 
@@ -234,12 +243,6 @@ export default async function HomePage({
   );
 }
 
-function readFirstSearchParamValue(
-  value: string | string[] | undefined,
-): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 function readSettledValue<T>(
   result: PromiseSettledResult<T>,
   fallback: T,
@@ -254,10 +257,17 @@ function hasRejectedProjection(
 }
 
 async function resolveHomeInitialVisitContactAction() {
-  return resolveHostedMurphContactOption({
-    message: {
-      body: "Hey Murph, do your thing",
-      subject: "Hey Murph, do your thing",
-    },
-  });
+  try {
+    return await resolveHostedMurphContactOption({
+      message: {
+        body: "Hey Murph, do your thing",
+        subject: "Hey Murph, do your thing",
+      },
+    });
+  } catch {
+    // Contact-card setup is optional. Canonical onboarding must remain usable
+    // when its advisory contact projection is unavailable.
+    console.warn("Home initial onboarding contact projection unavailable.");
+    return null;
+  }
 }

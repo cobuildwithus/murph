@@ -70,8 +70,10 @@ function buildAuthorization(overrides: Record<string, unknown> = {}) {
 
 function buildActivationPurchase() {
   return {
-    checkoutCancelUrl: "https://www.withmurph.ai/groups/fund/example",
-    checkoutSuccessUrl: "https://www.withmurph.ai/groups/fund/example",
+    checkoutCancelUrl:
+      "https://www.withmurph.ai/groups/fund/example?usageCheckout=cancel&usagePurchase=hucp_activation_123",
+    checkoutSuccessUrl:
+      "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_activation_123",
     offerCode: "usage_5_usd",
     payerMemberId: "member_payer",
     status: HostedUsageCreditPurchaseStatus.fulfilled,
@@ -87,25 +89,38 @@ function createRefillHarness(input: {
   authorization?: ReturnType<typeof buildAuthorization>;
   purchases?: Array<{
     cashAmountMinor: number;
+    checkoutCancelUrl?: string;
+    checkoutSuccessUrl?: string;
     groupSponsorshipChargeOrdinal: number;
     id: string;
+    reconciliationVersion?: bigint;
     status: HostedUsageCreditPurchaseStatus;
   }>;
 } = {}) {
   let authorization = input.authorization ?? buildAuthorization();
-  const purchases = [...(input.purchases ?? [{
+  const purchases = (input.purchases ?? [{
     cashAmountMinor: 500,
     groupSponsorshipChargeOrdinal: 0,
     id: "hucp_activation_123",
     status: HostedUsageCreditPurchaseStatus.fulfilled,
-  }])];
+  }]).map((purchase) => ({
+    ...purchase,
+    checkoutCancelUrl: purchase.checkoutCancelUrl ??
+      `https://www.withmurph.ai/groups/fund/example?usageCheckout=cancel&usagePurchase=${purchase.id}`,
+    checkoutSuccessUrl: purchase.checkoutSuccessUrl ??
+      `https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=${purchase.id}`,
+    reconciliationVersion: purchase.reconciliationVersion ?? 0n,
+  }));
   const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
     purchases.push({
       cashAmountMinor: Number(data.cashAmountMinor),
+      checkoutCancelUrl: String(data.checkoutCancelUrl),
+      checkoutSuccessUrl: String(data.checkoutSuccessUrl),
       groupSponsorshipChargeOrdinal: Number(
         data.groupSponsorshipChargeOrdinal,
       ),
       id: String(data.id),
+      reconciliationVersion: 0n,
       status: data.status as HostedUsageCreditPurchaseStatus,
     });
     return data;
@@ -148,6 +163,22 @@ function createRefillHarness(input: {
           authorization.periodStartedAt.getTime()
       )),
       findUnique: vi.fn(async () => null),
+      updateMany: vi.fn(async ({ data, where }: {
+        data: Record<string, unknown>;
+        where: { id: string; reconciliationVersion: bigint };
+      }) => {
+        const purchase = purchases.find((candidate) =>
+          candidate.id === where.id &&
+          candidate.reconciliationVersion === where.reconciliationVersion
+        );
+        if (!purchase) {
+          return { count: 0 };
+        }
+        purchase.checkoutCancelUrl = String(data.checkoutCancelUrl);
+        purchase.checkoutSuccessUrl = String(data.checkoutSuccessUrl);
+        purchase.reconciliationVersion += 1n;
+        return { count: 1 };
+      }),
     },
   };
   return {
@@ -498,6 +529,15 @@ describe("hosted capped group sponsorship authorization", () => {
         status: HostedUsageCreditPurchaseStatus.created,
       }),
     });
+    const created = harness.create.mock.calls[0]?.[0].data;
+    expect(created).toBeDefined();
+    const refillPurchaseId = String(created?.id);
+    expect(new URL(String(created?.checkoutSuccessUrl)).searchParams.get(
+      "usagePurchase",
+    )).toBe(refillPurchaseId);
+    expect(new URL(String(created?.checkoutCancelUrl)).searchParams.get(
+      "usagePurchase",
+    )).toBe(refillPurchaseId);
     expect(harness.tx).not.toHaveProperty("hostedGroupSponsorshipMoment");
   });
 
@@ -535,6 +575,12 @@ describe("hosted capped group sponsorship authorization", () => {
     expect(harness.create).not.toHaveBeenCalled();
 
     pending.status = HostedUsageCreditPurchaseStatus.fulfilled;
+    const persistedPending = harness.purchases.find((purchase) =>
+      purchase.id === pending.id
+    );
+    if (persistedPending) {
+      persistedPending.status = HostedUsageCreditPurchaseStatus.fulfilled;
+    }
     await expect(admitHostedGroupSponsorshipRefillTx({
       beneficiaryMemberId: "member_group_runtime",
       capacityState: "low",
@@ -542,6 +588,50 @@ describe("hosted capped group sponsorship authorization", () => {
       tx: harness.tx as never,
     })).resolves.toBeNull();
     expect(harness.create).not.toHaveBeenCalled();
+  });
+
+  it("repairs a pre-fix created refill before returning it for recovery", async () => {
+    const refillPurchaseId = "hucp_refill_legacy_1";
+    const harness = createRefillHarness({ purchases: [
+      {
+        cashAmountMinor: 500,
+        groupSponsorshipChargeOrdinal: 0,
+        id: "hucp_activation_123",
+        status: HostedUsageCreditPurchaseStatus.fulfilled,
+      },
+      {
+        cashAmountMinor: 500,
+        checkoutCancelUrl:
+          "https://www.withmurph.ai/groups/fund/example?usageCheckout=cancel&usagePurchase=hucp_activation_123",
+        checkoutSuccessUrl:
+          "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_activation_123",
+        groupSponsorshipChargeOrdinal: 1,
+        id: refillPurchaseId,
+        reconciliationVersion: 3n,
+        status: HostedUsageCreditPurchaseStatus.created,
+      },
+    ] });
+
+    await expect(admitHostedGroupSponsorshipRefillTx({
+      beneficiaryMemberId: "member_group_runtime",
+      capacityState: "low",
+      now: NOW,
+      tx: harness.tx as never,
+    })).resolves.toEqual({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      purchaseId: refillPurchaseId,
+    });
+
+    const repaired = harness.purchases.find((purchase) =>
+      purchase.id === refillPurchaseId
+    );
+    expect(new URL(repaired?.checkoutSuccessUrl ?? "").searchParams.get(
+      "usagePurchase",
+    )).toBe(refillPurchaseId);
+    expect(new URL(repaired?.checkoutCancelUrl ?? "").searchParams.get(
+      "usagePurchase",
+    )).toBe(refillPurchaseId);
+    expect(repaired?.reconciliationVersion).toBe(4n);
   });
 
   it("rolls the cap lazily while leaving previously purchased credit outside sponsorship state", async () => {
@@ -998,6 +1088,10 @@ describe("hosted capped group sponsorship authorization", () => {
     let purchase = {
       beneficiaryMemberId: "member_group_runtime",
       cashAmountMinor: 500,
+      checkoutCancelUrl:
+        "https://www.withmurph.ai/groups/fund/example?usageCheckout=cancel&usagePurchase=hucp_activation_123",
+      checkoutSuccessUrl:
+        "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_activation_123",
       groupSponsorshipAuthorizationId: authorization.id,
       groupSponsorshipChargeOrdinal: 1,
       groupSponsorshipPeriodStartedAt: PERIOD_START,
@@ -1058,6 +1152,12 @@ describe("hosted capped group sponsorship authorization", () => {
       tx: tx as never,
     })).resolves.toEqual({ kind: "purchase", purchaseId: purchase.id });
     expect(purchase.status).toBe(HostedUsageCreditPurchaseStatus.created);
+    expect(new URL(purchase.checkoutSuccessUrl).searchParams.get(
+      "usagePurchase",
+    )).toBe(purchase.id);
+    expect(new URL(purchase.checkoutCancelUrl).searchParams.get(
+      "usagePurchase",
+    )).toBe(purchase.id);
     expect(authorization.status).toBe(
       HostedGroupSponsorshipAuthorizationStatus.recovery_required,
     );

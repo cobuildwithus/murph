@@ -14,7 +14,10 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
+  resolveConnectedAppCompletionDialogModel: vi.fn(),
+  resolveDeviceSyncCompletionDialogModel: vi.fn(),
   readHostedMemberBillingEligibilityState: vi.fn(),
+  readHostedInitialOnboardingState: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
   readHostedMemberMessagingSetupState: vi.fn(),
   projectHostedPersonalAiUsageStatus: vi.fn(),
@@ -102,6 +105,20 @@ vi.mock("../app/(dashboard)/home/initial-visit-persona-picker-client", () => ({
   },
 }));
 
+vi.mock("../app/(dashboard)/home/device-sync-completion-dialog", () => ({
+  DeviceSyncCompletionDialog({
+    model,
+  }: {
+    model: { kind: string; title: string };
+  }) {
+    return createElement(
+      "section",
+      { "data-completion-dialog-kind": model.kind },
+      model.title,
+    );
+  },
+}));
+
 vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
   resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
 }));
@@ -135,6 +152,16 @@ vi.mock("@/src/lib/device-sync/home-onboarding", () => ({
   shouldShowHomeDeviceSyncStep: mocks.shouldShowHomeDeviceSyncStep,
 }));
 
+vi.mock("@/src/lib/device-sync/connect-completion", () => ({
+  resolveDeviceSyncCompletionDialogModel:
+    mocks.resolveDeviceSyncCompletionDialogModel,
+}));
+
+vi.mock("@/src/lib/connected-apps/connect-completion", () => ({
+  resolveConnectedAppCompletionDialogModel:
+    mocks.resolveConnectedAppCompletionDialogModel,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
@@ -146,6 +173,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberMessagingSetupState: mocks.readHostedMemberMessagingSetupState,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/initial-onboarding", () => ({
+  readHostedInitialOnboardingState: mocks.readHostedInitialOnboardingState,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -182,7 +213,58 @@ beforeEach(() => {
     session: null,
   });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
+  mocks.resolveDeviceSyncCompletionDialogModel.mockImplementation(
+    ({ searchParams }: { searchParams: Record<string, string | undefined> }) => {
+      if (searchParams.deviceSyncCompletion !== "1") {
+        return null;
+      }
+
+      const failed = searchParams.deviceSyncStatus === "error";
+      return {
+        contactAction: null,
+        detail: failed
+          ? "Try connecting your device again."
+          : "Open Murph to confirm your connected sources.",
+        failed,
+        kind: "device-sync",
+        retryHref: failed ? "/connect" : null,
+        title: failed
+          ? "Device connection did not finish"
+          : "Device connection complete",
+        unverified: false,
+      };
+    },
+  );
+  mocks.resolveConnectedAppCompletionDialogModel.mockImplementation(
+    ({ searchParams }: { searchParams: Record<string, string | undefined> }) => {
+      if (searchParams.connectedAppCompletion !== "1") {
+        return null;
+      }
+
+      const failed = searchParams.connectedAppStatus !== "success";
+      const accountLabel = searchParams.toolkit === "gmail"
+        ? "Gmail"
+        : "Your integration";
+      return {
+        contactAction: null,
+        detail: failed
+          ? "Ask Murph for a new connection link when you are ready."
+          : `${accountLabel} is ready.`,
+        failed,
+        kind: "connected-app",
+        retryHref: null,
+        title: failed
+          ? `${accountLabel} connection did not finish`
+          : `${accountLabel} is connected`,
+        unverified: false,
+      };
+    },
+  );
   mocks.readHostedMemberBillingEligibilityState.mockResolvedValue(null);
+  mocks.readHostedInitialOnboardingState.mockResolvedValue({
+    preferences: { persona: null, tone: null, voice: null },
+    status: "pending",
+  });
   // Default to a member Murph can already reach, so the "Message Murph" step
   // stays hidden unless a test opts into the awaiting-first-message state.
   mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
@@ -741,27 +823,24 @@ test("HomePage shows non-limit denied usage notices without a reset countdown", 
   assert.doesNotMatch(markup, /Resets in/u);
 });
 
-test("HomePage preserves the initial-visit marker when contact projection retry is needed", async () => {
+test("HomePage keeps pending onboarding usable without optional contact projection", async () => {
   mocks.resolveHostedMurphContactOption.mockRejectedValueOnce(
     new Error("contact context unavailable"),
   );
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const searchParams = {
-    initialVisit: "true",
-  };
-  const failedMarkup = renderToStaticMarkup(
+  const searchParams = {};
+  const markup = renderToStaticMarkup(
     await HomePage({
       searchParams: Promise.resolve(searchParams),
     }),
   );
 
-  assert.match(failedMarkup, /Welcome to Murph/);
-  assert.match(failedMarkup, /Some dashboard details are unavailable/);
-  assert.doesNotMatch(
-    failedMarkup,
-    /data-home-initial-visit-persona-picker/,
-  );
+  assert.match(markup, /Welcome to Murph/);
+  assert.doesNotMatch(markup, /Some dashboard details are unavailable/);
+  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+  assert.match(markup, /data-contact-action-href="none"/);
+  assert.match(markup, /data-show-contact-card="false"/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
 
   const recoveredMarkup = renderToStaticMarkup(
@@ -782,13 +861,61 @@ test("HomePage preserves the initial-visit marker when contact projection retry 
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 2);
 });
 
-test("HomePage opens persona onboarding for initial visits", async () => {
+test("HomePage presents connection results before canonical onboarding", async () => {
+  const cases = [
+    {
+      expected: /Device connection complete/,
+      searchParams: { deviceSyncCompletion: "1" },
+    },
+    {
+      expected: /Device connection did not finish/,
+      searchParams: {
+        deviceSyncCompletion: "1",
+        deviceSyncError: "OAUTH_STATE_INVALID",
+        deviceSyncStatus: "error",
+      },
+    },
+    {
+      expected: /Gmail is connected/,
+      searchParams: {
+        connectedAppCompletion: "1",
+        connectedAppStatus: "success",
+        toolkit: "gmail",
+      },
+    },
+    {
+      expected: /Your integration connection did not finish/,
+      searchParams: {
+        connectedAppCompletion: "1",
+        connectedAppStatus: "error",
+      },
+    },
+  ] as const;
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+
+  for (const testCase of cases) {
+    const markup = renderToStaticMarkup(
+      await HomePage({ searchParams: Promise.resolve(testCase.searchParams) }),
+    );
+
+    assert.match(markup, testCase.expected);
+    assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+  }
+
+  const plainHomeMarkup = renderToStaticMarkup(
+    await HomePage({ searchParams: Promise.resolve({}) }),
+  );
+  assert.match(
+    plainHomeMarkup,
+    /data-home-initial-visit-persona-picker="shown"/,
+  );
+});
+
+test("HomePage opens pending persona onboarding on plain home", async () => {
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(
     await HomePage({
-      searchParams: Promise.resolve({
-        initialVisit: "true",
-      }),
+      searchParams: Promise.resolve({}),
     }),
   );
 
@@ -798,6 +925,27 @@ test("HomePage opens persona onboarding for initial visits", async () => {
   assert.match(markup, /data-contact-action-href="sms:\+15555550123"/);
   assert.match(markup, /Persona onboarding/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
+});
+
+test("HomePage suppresses onboarding after native completion", async () => {
+  mocks.readHostedInitialOnboardingState.mockResolvedValueOnce({
+    preferences: {
+      persona: "classic",
+      tone: "formal",
+      voice: "upbeat",
+    },
+    status: "completed",
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({}),
+    }),
+  );
+
+  assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
 });
 
 test("HomePage skips the contact-card picker for Telegram-only members", async () => {
@@ -812,9 +960,7 @@ test("HomePage skips the contact-card picker for Telegram-only members", async (
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(
     await HomePage({
-      searchParams: Promise.resolve({
-        initialVisit: "true",
-      }),
+      searchParams: Promise.resolve({}),
     }),
   );
 
@@ -838,9 +984,7 @@ test("HomePage preserves the resolved email webmail composer for initial visits"
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(
     await HomePage({
-      searchParams: Promise.resolve({
-        initialVisit: "true",
-      }),
+      searchParams: Promise.resolve({}),
     }),
   );
 
@@ -852,18 +996,16 @@ test("HomePage preserves the resolved email webmail composer for initial visits"
   assert.match(markup, /data-contact-action-webmail-label="Gmail"/);
 });
 
-test("HomePage keeps persona onboarding gated behind the exact initial-visit marker", async () => {
+test("HomePage reload keeps canonically pending onboarding visible", async () => {
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(
     await HomePage({
-      searchParams: Promise.resolve({
-        initialVisit: "false",
-      }),
+      searchParams: Promise.resolve({}),
     }),
   );
 
-  assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
-  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
+  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
 });
 
 test("HomePage asks for the first message when Murph has no way to send one", async () => {

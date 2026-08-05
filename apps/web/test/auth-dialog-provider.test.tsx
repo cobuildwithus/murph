@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   authDialogProps: null as {
     onCompleted?: (payload: {
       activationPending: boolean;
-      initialVisitEligible?: boolean;
       inviteCode: string;
       joinUrl: string;
       stage: string;
@@ -28,7 +27,6 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
     onCompleted?: (payload: {
       activationPending: boolean;
-      initialVisitEligible?: boolean;
       inviteCode: string;
       joinUrl: string;
       stage: string;
@@ -174,7 +172,6 @@ test("AuthProvider keeps a pending device connect intent ahead of the first-visi
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       activationPending: false,
-      initialVisitEligible: true,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -187,18 +184,7 @@ test("AuthProvider keeps a pending device connect intent ahead of the first-visi
   await rendered.cleanup();
 });
 
-test.each([
-  {
-    expectedDestination: "connect",
-    initialVisitEligible: false,
-    label: "returns an existing member to the Connect page",
-  },
-  {
-    expectedDestination: "initial-visit",
-    initialVisitEligible: true,
-    label: "preserves first-visit onboarding for a new member from Connect",
-  },
-] as const)("AuthProvider $label", async ({ expectedDestination, initialVisitEligible }) => {
+test("AuthProvider returns an authenticated member to the Connect page", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
@@ -235,20 +221,14 @@ test.each([
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       activationPending: false,
-      initialVisitEligible,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
     });
   });
 
-  if (expectedDestination === "connect") {
-    expect(rendered.reload).toHaveBeenCalledTimes(1);
-    expect(rendered.assign).not.toHaveBeenCalled();
-  } else {
-    expect(rendered.assign).toHaveBeenCalledWith("/home?initialVisit=true");
-    expect(rendered.reload).not.toHaveBeenCalled();
-  }
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
 
   await rendered.cleanup();
 });
@@ -305,7 +285,6 @@ test("AuthProvider resumes a scrubbed Clinical Records connect intent after sign
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       activationPending: false,
-      initialVisitEligible: true,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -407,7 +386,6 @@ test("AuthProvider returns an unauthenticated medical-records viewer to that pag
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       activationPending: false,
-      initialVisitEligible: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -456,7 +434,6 @@ test("AuthProvider returns an Environment voice user to that page", async () => 
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       activationPending: false,
-      initialVisitEligible: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -965,7 +942,7 @@ test("AuthProvider keeps the default home redirect for ordinary sign-in completi
   await rendered.cleanup();
 });
 
-test("AuthProvider preserves the first-visit redirect for newly created members", async () => {
+test("AuthProvider reloads plain home so it can read canonical onboarding state", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
@@ -1008,14 +985,13 @@ test("AuthProvider preserves the first-visit redirect for newly created members"
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       activationPending: false,
-      initialVisitEligible: true,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
     });
   });
 
-  expect(assign).toHaveBeenCalledWith("/home?initialVisit=true");
+  expect(assign).toHaveBeenCalledWith("https://join.example.test/home");
 
   await rendered.cleanup();
 });

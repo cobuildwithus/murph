@@ -72,17 +72,26 @@ export async function readHostedMurphContactContext():
     return emptyHostedMurphContactContext();
   }
 
+  return readHostedMurphContactContextForMember({
+    memberId: authenticatedMember.id,
+    prisma: getPrisma(),
+  });
+}
+
+export async function readHostedMurphContactContextForMember(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<HostedMurphContactContext> {
   return runWithHostedDomainRootUnwrapCache(async () => {
-    const prisma = getPrisma();
-    const member = await prisma.hostedMember.findUnique({
+    const member = await input.prisma.hostedMember.findUnique({
       select: hostedMurphContactMemberSelect,
-      where: { id: authenticatedMember.id },
+      where: { id: input.memberId },
     });
     if (!member) {
       return emptyHostedMurphContactContext();
     }
 
-    return projectHostedMurphContactContext(member, prisma);
+    return projectHostedMurphContactContext(member, input.prisma);
   });
 }
 
