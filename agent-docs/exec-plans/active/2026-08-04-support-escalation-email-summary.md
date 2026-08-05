@@ -96,6 +96,10 @@ Updated: 2026-08-05
 - Still-valid implementation findings remain landed: the first stored detail is
   canonical on replay, and missing, linked, or malformed detail fails before
   provider entry. The revised exact head requires fresh product/privacy review.
+- Direct-send final review found one remaining consent-era runner-first rollout
+  rule in `agent-docs/RELIABILITY.md`. The finding is accepted: delete only the
+  obsolete convergence and rollback sentences while preserving the persistence,
+  replay, cap, provider-failure, and no-second-owner contract.
 
 ## Verification
 
@@ -123,3 +127,7 @@ Updated: 2026-08-05
   14 tests and the five focused Assistant Engine suites pass 97 tests with 25
   credential-gated cases skipped. Web and Assistant Engine typechecks, docs
   drift, and diff checks pass on the composed working tree.
+- Final correction review round 4 at `500955c856` returned one accepted stale-
+  contract finding: RELIABILITY.md still required runner-first consent rollout.
+  The rule was deleted without changing runtime behavior or adding machinery;
+  PR-relative docs drift and stale-language scans must pass before round 5.
