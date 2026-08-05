@@ -372,6 +372,82 @@ async function createLegacyProfileDisplayNameVault(displayName: string): Promise
   return vaultRoot;
 }
 
+async function createSleepSourceProjectionVault(
+  days: readonly {
+    date: string;
+    providers: readonly string[];
+  }[],
+): Promise<string> {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-sleep-source-window-"));
+  await mkdir(join(vaultRoot, "ledger", "events", "2026"), { recursive: true });
+  await writeFile(
+    join(vaultRoot, "vault.json"),
+    `${JSON.stringify({
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4E",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      title: "Synthetic sleep-source window",
+      timezone: "UTC",
+    })}\n`,
+    "utf8",
+  );
+  const records = days.flatMap((day, dayIndex) =>
+    day.providers.flatMap((provider, providerIndex) => {
+      const suffix = `${dayIndex}_${providerIndex}`;
+      const recordedAt = `${day.date}T07:0${providerIndex}:00.000Z`;
+      const externalRef = {
+        system: "junction",
+        resourceType: "sleep",
+        resourceId: `sleep_source_window_${suffix}`,
+      };
+      const dataOrigin = {
+        aggregatorProvider: "junction",
+        originConfidence: "high",
+        sourceProviderSlug: provider,
+        version: 1,
+      };
+      return [
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_sleep_source_window_session_${suffix}`,
+          kind: "sleep_session",
+          occurredAt: `${day.date}T07:00:00.000Z`,
+          recordedAt,
+          dayKey: day.date,
+          source: "device",
+          title: "Overnight sleep",
+          startAt: `${day.date}T00:00:00.000Z`,
+          endAt: `${day.date}T07:00:00.000Z`,
+          durationMinutes: 420,
+          dataOrigin,
+          externalRef,
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_sleep_source_window_deep_${suffix}`,
+          kind: "observation",
+          occurredAt: `${day.date}T07:00:00.000Z`,
+          recordedAt,
+          dayKey: day.date,
+          source: "device",
+          title: "Deep sleep",
+          metric: "sleep-deep-minutes",
+          value: 70 + dayIndex * 10 + providerIndex,
+          unit: "minutes",
+          dataOrigin,
+          externalRef,
+        },
+      ];
+    })
+  );
+  await writeFile(
+    join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl"),
+    `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    "utf8",
+  );
+  return vaultRoot;
+}
+
 describe("offerHostedVaultShareProjectionBestEffort", () => {
   it("is a no-op without a vault-share port", async () => {
     const result = await offerHostedVaultShareProjectionBestEffort({
@@ -689,6 +765,281 @@ describe("selectProjectableDailyMetricDays", () => {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
     }
+  });
+
+  it("projects every available sleep source with freshness and one canonical selection", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-sleep-sources-"));
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await mkdir(join(vaultRoot, "ledger", "events", "2026"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "vault.json"),
+        `${JSON.stringify({
+          formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+          vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4E",
+          createdAt: "2026-07-03T00:00:00.000Z",
+          title: "Vault share sleep source projection test",
+          timezone: "UTC",
+        })}\n`,
+        "utf8",
+      );
+      const providers = [
+        { deepMinutes: 64, provider: "fitbit", recordedAt: "2026-07-03T06:58:00.000Z" },
+        { deepMinutes: 88, provider: "garmin", recordedAt: "2026-07-03T07:01:00.000Z" },
+        { deepMinutes: 112, provider: "oura", recordedAt: "2026-07-03T07:04:00.000Z" },
+      ] as const;
+      const records = providers.flatMap((provider, index) => [
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_sleep_source_session_${index}`,
+          kind: "sleep_session",
+          occurredAt: "2026-07-02T22:00:00.000Z",
+          recordedAt: provider.recordedAt,
+          dayKey: ACTIVITY_DAY.date,
+          source: "device",
+          title: "Overnight sleep",
+          startAt: "2026-07-02T22:00:00.000Z",
+          endAt: "2026-07-03T07:00:00.000Z",
+          durationMinutes: 540,
+          dataOrigin: {
+            aggregatorProvider: "junction",
+            originConfidence: "high",
+            sourceProviderSlug: provider.provider,
+            version: 1,
+          },
+          externalRef: {
+            system: "junction",
+            resourceType: "sleep",
+            resourceId: `sleep_source_projection_${index}`,
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_sleep_source_deep_${index}`,
+          kind: "observation",
+          occurredAt: "2026-07-03T07:00:00.000Z",
+          recordedAt: provider.recordedAt,
+          dayKey: ACTIVITY_DAY.date,
+          source: "device",
+          title: "Deep sleep",
+          metric: "sleep-deep-minutes",
+          value: provider.deepMinutes,
+          unit: "minutes",
+          dataOrigin: {
+            aggregatorProvider: "junction",
+            originConfidence: "high",
+            sourceProviderSlug: provider.provider,
+            version: 1,
+          },
+          externalRef: {
+            system: "junction",
+            resourceType: "sleep",
+            resourceId: `sleep_source_projection_${index}`,
+          },
+        },
+      ]);
+      await writeFile(
+        join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl"),
+        `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+        "utf8",
+      );
+
+      const selected = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec("deep-sleep-sources-days.v1"),
+      );
+
+      expect(selected).toHaveLength(1);
+      expect(selected[0]?.data).toMatchObject({
+        date: ACTIVITY_DAY.date,
+        metricKey: "deep-sleep-minutes",
+        projectedAt: "2026-07-04T00:00:00.000Z",
+        sourcesDisagree: true,
+        unit: "minutes",
+      });
+      const data = selected[0]?.data;
+      if (
+        !data
+        || !("sources" in data)
+        || !Array.isArray(data.sources)
+        || !("unit" in data)
+        || !("value" in data)
+      ) {
+        throw new Error("Expected source-aware sleep projection data.");
+      }
+      expect(data.sources).toEqual([
+        expect.objectContaining({
+          label: "fitbit",
+          recordedAt: "2026-07-03T06:58:00.000Z",
+          source: "fitbit",
+          value: 64,
+        }),
+        expect.objectContaining({
+          label: "Garmin",
+          recordedAt: "2026-07-03T07:01:00.000Z",
+          source: "garmin",
+          value: 88,
+        }),
+        expect.objectContaining({
+          label: "Oura",
+          recordedAt: "2026-07-03T07:04:00.000Z",
+          source: "oura",
+          value: 112,
+        }),
+      ]);
+      const selectedSources = data.sources.filter((source) =>
+        typeof source === "object"
+        && source !== null
+        && "selected" in source
+        && source.selected === true
+      );
+      expect(selectedSources).toHaveLength(1);
+      expect(selectedSources[0]).toMatchObject({
+        unit: data.unit,
+        value: data.value,
+      });
+      expect(parseHostedVaultShareDeliverRequest({
+        projectionKind: "deep-sleep-sources-days.v1",
+        records: selected,
+      }).records).toEqual(selected);
+      expect(JSON.stringify(selected)).not.toMatch(
+        /sourceInstanceId|connectionId|accountId|timeZone|resourceId/u,
+      );
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps valid dates when more than four providers appear across the window", async () => {
+    const vaultRoot = await createSleepSourceProjectionVault([
+      { date: "2026-07-02", providers: ["fitbit", "garmin", "oura", "polar"] },
+      { date: "2026-07-03", providers: ["suunto"] },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const selected = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec("deep-sleep-sources-days.v1"),
+      );
+
+      expect(selected.map((record) => record.recordKey).sort()).toEqual([
+        "2026-07-02",
+        "2026-07-03",
+      ]);
+      const sourceCounts = new Map(selected.map((record) => [
+        record.recordKey,
+        "sources" in record.data && Array.isArray(record.data.sources)
+          ? record.data.sources.length
+          : 0,
+      ]));
+      expect(sourceCounts).toEqual(new Map([
+        ["2026-07-02", 4],
+        ["2026-07-03", 1],
+      ]));
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("omits only an over-bound date while preserving other source-aware dates", async () => {
+    const vaultRoot = await createSleepSourceProjectionVault([
+      { date: "2026-07-02", providers: ["fitbit"] },
+      {
+        date: "2026-07-03",
+        providers: ["fitbit", "garmin", "oura", "polar", "suunto"],
+      },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const selected = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec("deep-sleep-sources-days.v1"),
+      );
+
+      expect(selected.map((record) => record.recordKey)).toEqual(["2026-07-02"]);
+      expect(selected[0]?.data).toMatchObject({
+        date: "2026-07-02",
+        sources: [expect.objectContaining({ source: "fitbit", selected: true })],
+      });
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("uses canonical source identity to select equal values and fails closed above the source bound", () => {
+    const spec = requireDailyMetricSpec("deep-sleep-sources-days.v1");
+    const sourceRows = [
+      {
+        label: "Fitbit",
+        recordedAt: "2026-07-03T06:58:00.000Z",
+        source: "fitbit",
+        unit: "minutes",
+        value: 88,
+      },
+      {
+        label: "Garmin",
+        recordedAt: "2026-07-03T07:01:00.000Z",
+        source: "garmin",
+        unit: "minutes",
+        value: 88,
+      },
+      {
+        label: "Oura",
+        recordedAt: null,
+        source: "oura",
+        unit: "minutes",
+        value: 112,
+      },
+    ];
+    const point = {
+      date: ACTIVITY_DAY.date,
+      grain: "day" as const,
+      metricKey: "deep-sleep-minutes",
+      sourceLabel: "Garmin",
+      sources: sourceRows,
+      statistic: "value" as const,
+      unit: "minutes",
+      value: 88,
+    };
+
+    const selected = selectProjectableDailyMetricDays([point], spec, nowMs);
+    expect(selected[0]?.data).toMatchObject({
+      projectedAt: "2026-07-04T00:00:00.000Z",
+      sources: [
+        expect.not.objectContaining({ selected: true }),
+        expect.objectContaining({ selected: true, source: "garmin" }),
+        expect.not.objectContaining({ selected: true }),
+      ],
+      sourcesDisagree: true,
+      value: 88,
+    });
+
+    expect(selectProjectableDailyMetricDays([{
+      ...point,
+      sources: [
+        ...sourceRows,
+        {
+          label: "Polar",
+          recordedAt: null,
+          source: "polar",
+          unit: "minutes",
+          value: 90,
+        },
+        {
+          label: "Suunto",
+          recordedAt: null,
+          source: "suunto",
+          unit: "minutes",
+          value: 92,
+        },
+      ],
+    }], spec, nowMs)).toEqual([]);
   });
 
   it("maps recent selected daily metric rows to generic scalar records", () => {
