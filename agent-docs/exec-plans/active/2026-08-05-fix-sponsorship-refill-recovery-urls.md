@@ -11,14 +11,14 @@ Updated: 2026-08-05
 ## Success criteria
 
 - Newly created refill purchases persist success and cancel URLs bound to their own purchase id.
-- Existing malformed refill rows can be repaired through one bounded, auditable production operation after the code deploy.
+- Existing malformed refill rows are repaired on the payer's first recovery attempt while still under the existing locks and write fence.
 - Recovery continues through the existing Stripe Checkout path and remains idempotent.
 - Focused unit/integration tests reproduce the production failure and prove recovery succeeds.
 - Required ReviewGPT and exact-head CI gates pass before deployment.
 
 ## Scope
 
-- In scope: refill return-URL construction, regression coverage, a bounded repair command for affected production rows, PR review, deploy, and post-deploy verification.
+- In scope: refill return-URL construction, regression coverage, bounded owner-path repair for affected production rows, PR review, deploy, and post-deploy verification.
 - Out of scope: redesigning sponsorship billing, changing sponsorship caps, changing Stripe prices, or weakening target/authority validation.
 
 ## Constraints
@@ -31,7 +31,7 @@ Updated: 2026-08-05
 1. Risk: rewriting an arbitrary return URL could redirect outside the authorized group target.
    Mitigation: accept only the already-validated activation URL shape, update only the purchase-id query parameter, and re-run the canonical target parser in tests.
 2. Risk: fixing only new rows leaves the current refill unrecoverable.
-   Mitigation: ship a bounded repair operation that updates only mismatched, nonterminal sponsorship refills and verifies the exact repaired count.
+   Mitigation: repair only an untouched `created` refill or the exact `payment_failed` refill during its existing fenced recovery transition.
 3. Risk: broad retry changes could double-charge.
    Mitigation: do not change dispatch, payment idempotency, purchase identity, or recovery ownership.
 
@@ -43,17 +43,18 @@ Updated: 2026-08-05
 4. Add and verify a bounded repair path for existing mismatched nonterminal refill rows.
 5. Run focused checks, inspect the diff, commit, push, and open the PR.
 6. Run preliminary specialist and final ReviewGPT gates concurrently with exact-head CI; resolve all findings.
-7. Merge/deploy, execute the bounded repair, and verify the affected flow and production logs.
+7. Merge/deploy, exercise the payer recovery action, and verify the affected flow and production logs.
 
 ## Decisions
 
 - Keep strict `purchase_target_invalid` validation; the persisted producer is wrong, not the validator.
 - Reuse Stripe Checkout for recovery rather than adding a custom payment form or direct PaymentIntent recovery UI.
-- Normalize only pre-fix refill rows still in `created` state, under the existing payer/beneficiary locks and reconciliation write fence. Do not touch a Checkout or payment already in progress.
+- Normalize a pre-fix refill only while it is still `created` or during the existing `payment_failed` → `created` payer-recovery transition, under the existing payer/beneficiary locks and reconciliation write fence. Do not touch a Checkout or payment already in progress.
+- Accepted the preliminary specialist finding that the original patch required two recovery clicks for a `payment_failed` row. Rebinding both URLs inside the existing reset transition closes that gap without another state owner or write.
 
 ## Verification
 
 - Commands to run: focused Vitest suites for sponsorship authorization, purchase status/service, and any repair utility; TypeScript checks selected by the testing map; exact-head GitHub Actions; ReviewGPT specialist and final gates.
 - Expected outcomes: a reproduced mismatch fails before the fix, refill URLs contain the refill id after the fix, recovery produces a Stripe Checkout capability, no unrelated subscription or usage-credit behavior changes, and production has zero malformed nonterminal refill rows after repair.
 - Reproduction: the focused sponsorship authorization test failed before the source change because the refill success URL retained the activation purchase id.
-- Local proof: 184 focused tests pass across sponsorship authorization, signed group-target projection, and usage-credit purchase service; the prepared web typecheck passes; scoped ESLint has zero errors.
+- Local proof: 185 focused tests pass across sponsorship authorization, signed group-target projection, and usage-credit purchase service, including first-attempt recovery through Stripe Checkout; the prepared web typecheck passes; scoped ESLint has zero errors.

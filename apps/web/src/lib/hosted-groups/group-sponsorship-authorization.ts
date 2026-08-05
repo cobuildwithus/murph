@@ -746,9 +746,15 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
     ) {
       return reactivateWithoutCharge();
     }
+    const returnUrls = buildHostedGroupSponsorshipRefillReturnUrls({
+      checkoutCancelUrl: failed.checkoutCancelUrl,
+      checkoutSuccessUrl: failed.checkoutSuccessUrl,
+      purchaseId: failed.id,
+    });
     const reset = await input.tx.hostedUsageCreditPurchase.updateMany({
       data: {
         checkoutExpiresAt: boundedCheckoutExpiresAt,
+        ...returnUrls,
         lastReconciledAt: null,
         reconciliationVersion: { increment: 1n },
         status: HostedUsageCreditPurchaseStatus.created,

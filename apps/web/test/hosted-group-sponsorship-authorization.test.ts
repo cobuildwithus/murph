@@ -1088,6 +1088,10 @@ describe("hosted capped group sponsorship authorization", () => {
     let purchase = {
       beneficiaryMemberId: "member_group_runtime",
       cashAmountMinor: 500,
+      checkoutCancelUrl:
+        "https://www.withmurph.ai/groups/fund/example?usageCheckout=cancel&usagePurchase=hucp_activation_123",
+      checkoutSuccessUrl:
+        "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_activation_123",
       groupSponsorshipAuthorizationId: authorization.id,
       groupSponsorshipChargeOrdinal: 1,
       groupSponsorshipPeriodStartedAt: PERIOD_START,
@@ -1148,6 +1152,12 @@ describe("hosted capped group sponsorship authorization", () => {
       tx: tx as never,
     })).resolves.toEqual({ kind: "purchase", purchaseId: purchase.id });
     expect(purchase.status).toBe(HostedUsageCreditPurchaseStatus.created);
+    expect(new URL(purchase.checkoutSuccessUrl).searchParams.get(
+      "usagePurchase",
+    )).toBe(purchase.id);
+    expect(new URL(purchase.checkoutCancelUrl).searchParams.get(
+      "usagePurchase",
+    )).toBe(purchase.id);
     expect(authorization.status).toBe(
       HostedGroupSponsorshipAuthorizationStatus.recovery_required,
     );
