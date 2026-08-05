@@ -1844,6 +1844,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         },
         userId: replacementPrivyUserId,
       };
+      const freshBearerIdentity = {
+        ...staleBearerIdentity,
+        phone: {
+          number: unownedLivePhoneNumber,
+          verifiedAt: 1_754_218_860,
+        },
+      };
 
       try {
         await expect(ensureHostedCompanionMemberId({
@@ -1857,7 +1864,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
         companionBoundaries.consentedMemberIds.add(memberId);
         await expect(ensureHostedCompanionMemberId({
-          identity: staleBearerIdentity,
+          identity: freshBearerIdentity,
           now: new Date("2026-08-03T12:01:00.000Z"),
           prisma: observer,
         })).resolves.toBe(memberId);
@@ -1997,6 +2004,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         telegram: null,
         userId: replacementPrivyUserId,
       };
+      const freshBearerIdentity = {
+        ...staleBearerIdentity,
+        phone: {
+          number: ownedLivePhoneNumber,
+          verifiedAt: 1_754_218_860,
+        },
+      };
 
       try {
         await expect(ensureHostedCompanionMemberId({
@@ -2010,7 +2024,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
         companionBoundaries.consentedMemberIds.add(memberId);
         await expect(ensureHostedCompanionMemberId({
-          identity: staleBearerIdentity,
+          identity: freshBearerIdentity,
           now: new Date("2026-08-03T12:01:00.000Z"),
           prisma: observer,
         })).resolves.toBe(memberId);

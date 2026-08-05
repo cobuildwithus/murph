@@ -396,13 +396,19 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
       tx: input.prisma,
     });
   }
-  const existingMemberLookup = await lookupHostedMemberForPrivyAuthAttempt({
+  const memberByPrincipal = input.allowVerifiedEmailRebinding
+    ? await lookupHostedMemberForPrivyPrincipal({
+        identity: input.identity,
+        prisma: input.prisma,
+      })
+    : null;
+  const existingMember = memberByPrincipal ?? (await lookupHostedMemberForPrivyAuthAttempt({
     authMethod,
     identity: input.identity,
     prisma: input.prisma,
-  });
+  }))?.core ?? null;
 
-  if (!existingMemberLookup) {
+  if (!existingMember) {
     await assertHostedPrivyAccountDeletionNotPendingTx({
       prisma: input.prisma,
       privyUserId: input.identity.userId,
@@ -455,7 +461,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
     allowVerifiedEmailRebinding: input.allowVerifiedEmailRebinding,
     authMethod,
     identity: input.identity,
-    member: existingMemberLookup.core,
+    member: existingMember,
     now: input.now,
     prisma: input.prisma,
   });
