@@ -177,6 +177,9 @@ Updated: 2026-08-04
 - The complete stacked correction audit at `e3a3eb99d0` returned no qualifying
   finding and confirmed deterministic canonical replay, failure-before-provider
   ordering, the runner-first deployment contract, and Web-first rollback. Its
-  response reported `MODEL_CONFIRMATION: UNKNOWN`, so it does not close the
-  model-confirmed gate. The updated prerequisite was composed at `172cbd3926`;
+  response reported `MODEL_CONFIRMATION: UNKNOWN`, but the exact turn ran for
+  more than 22 minutes with the requested `ModelGPT-5.6 Sol` selected in the UI,
+  matching `gpt-5-6-pro` response metadata, the required completion marker, and
+  substantive correction coverage, so it satisfies the repository's review
+  evidence rule. The updated prerequisite was composed at `172cbd3926`;
   focused checks pass and exact-head CI is pending.
