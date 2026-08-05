@@ -28,10 +28,13 @@ describe("Murph Codex base support guidance", () => {
       "Explicit verified-private human support",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'kind: "frustration"`, summary `Support escalation`, no changelog IDs',
+      'kind: "frustration"`, no changelog IDs',
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "supportArea/supportProblem; tool builds the safe issue",
+      "de-identified product explanation beginning exactly `Support escalation:`",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "Write it in your own words; never copy or quote the member's message",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Don't show or seek approval",

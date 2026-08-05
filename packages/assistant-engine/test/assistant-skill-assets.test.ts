@@ -23,6 +23,9 @@ import {
   ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
 } from '../src/assistant/first-contact-welcome.js'
 import {
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+} from '../src/assistant/onboarding-followup-automation.js'
+import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.js'
 
@@ -2620,12 +2623,12 @@ How old are you and what's your gender?
     expect(compact).toContain(
       'If the last onboarding question is still unanswered, do not send a different setup question.',
     )
-    expect(raw).toContain('### Finite next-day recovery')
+    expect(raw).toContain('### Finite three-day recovery')
     expect(compact).toContain(
-      'The occurrence may instead ask one natural, low-pressure question that lets the user choose whether to continue.',
+      'A later day\'s occurrence may instead ask one shorter, natural, low-pressure question that lets the user choose whether to continue, without urgency or escalating pressure.',
     )
     expect(compact).toContain(
-      'Send or skip ends this scheduled recovery.',
+      'Send or skip consumes only the current local day\'s opportunity.',
     )
     expect(compact).toContain(
       'do not run the completion command or otherwise mutate onboarding state',
@@ -2636,7 +2639,21 @@ How old are you and what's your gender?
     expect(compact).toContain(
       'uses the ordinary scheduled notification skip and leaves onboarding state unchanged',
     )
-    expect(compact).not.toContain('managed daily onboarding follow-up')
+    expect(compact).toContain(
+      'A managed owner may invoke this skill at most once on each of the next three local days after the welcome.',
+    )
+    expect(compact).not.toContain('single finite next-day recovery occurrence')
+    const scheduledProviderPolicy = [
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+      raw,
+    ].join('\n\n')
+    expect(scheduledProviderPolicy).toContain('finite three-day recovery rule')
+    expect(scheduledProviderPolicy).not.toContain(
+      'That occurrence is the only scheduled recovery',
+    )
+    expect(scheduledProviderPolicy).not.toContain(
+      'Send or skip ends this scheduled recovery.',
+    )
 
     expect(raw).not.toContain('roughly 9-10 short assistant messages')
     expect(raw).not.toContain('### 4. Establish the first ongoing support loop')

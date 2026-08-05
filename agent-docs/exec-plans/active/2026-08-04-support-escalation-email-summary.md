@@ -6,32 +6,33 @@ Updated: 2026-08-05
 
 ## Goal
 
-- Include the stored closed-vocabulary product issue in the immediate
-  internal alert created after an explicit verified-private request for Murph
-  human support, without showing the summary or adding a separate approval turn.
+- Include Murph's stored bounded, sanitized, de-identified product issue in its
+  own words in the immediate internal alert created after an explicit
+  verified-private request for Murph human support, without showing the summary
+  or adding a separate approval turn.
 
 ## Success criteria
 
-- The first three eligible support alerts per member per UTC day render readable
-  labels from the first parsed stored product-area/problem issue together with
-  the existing internal feedback and member identifiers.
+- The first three eligible support alerts per member per UTC day include the
+  first validated stored issue together with the existing internal feedback and
+  member identifiers.
 - An explicit verified-private human-support request may submit immediately;
   generic feedback remains anonymous, group or unverified requests stay
   account-unlinked, and the support address remains opt-in.
 - Exact callback replay reuses the same stored issue and Resend idempotency key
-  even if a later callback selects different codes. Missing, linked, free-form,
-  legacy, or malformed stored detail fails before provider entry.
+  even if a later callback supplies different wording. Missing, linked,
+  unsanitized, still-prefixed, or malformed stored detail fails before provider
+  entry.
 - The member-linked row remains fixed server-authored metadata, the anonymous
-  detail row contains only the shared canonical area/problem shape, and the
-  existing cap, authority, and plain-text delivery behavior stay unchanged.
+  detail row contains only Murph's bounded sanitized issue, and the existing
+  cap, authority, and plain-text delivery behavior stay unchanged.
 - Focused Web and Assistant Engine tests, affected typechecks, docs checks,
   exact-head CI, required reviews, and parent final review pass.
 
 ## Scope
 
-- In scope: Web-owned canonical-detail readback and parsing, support-alert
-  formatting from allowlisted labels, focused regressions, and owning
-  product/security/reliability docs.
+- In scope: Web-owned written-issue readback and validation, support-alert
+  formatting, focused regressions, and owning product/security/reliability docs.
 - Composed prerequisite: #1305 owns the one-turn Assistant Engine authority,
   de-identification guidance, opt-in address, and truthful completion copy.
 - Out of scope: raw transcript inclusion, schema changes, recipients, daily
@@ -39,21 +40,23 @@ Updated: 2026-08-05
 
 ## Constraints
 
-- Use the existing anonymous detail row for the shared canonical area/problem
-  value. Derive replay email content only after parsing stored state, preserve
-  the daily cap and provider key, and add no state owner or dependency.
+- Use the existing anonymous detail row for Murph's sanitized written issue.
+  Derive replay email content only after validating stored state, preserve the
+  daily cap and provider key, and add no state owner or dependency.
 - Treat this as a private-data exposure change: run product-experience and
   coverage specialist review, final cross-cutting ReviewGPT, exact-head CI, and
   a parent final review.
 
 ## Risks and mitigations
 
-1. Risk: model-authored prose can retain semantic private detail even after
+1. Risk: Murph-written prose can retain semantic private detail even after
    deterministic scrubbing.
-   Mitigation: #1305 accepts only allowlisted area/problem codes for reserved
-   support. Web rejects free-form reserved input and stored detail, parses the
-   shared canonical value, and renders only labels derived from those codes.
-2. Risk: callback codes change while replay reuses one provider key.
+   Mitigation: #1305 requires concise product-only wording in Murph's own words,
+   forbids copying or quoting the member, and applies the bounded sanitizer.
+   Web persists the stripped issue anonymously and validates it again before
+   email. The product owner explicitly accepts the remaining semantic risk for
+   this verified-private, member-requested support action.
+2. Risk: callback wording changes while replay reuses one provider key.
    Mitigation: validate both deterministic rows and treat the first stored
    anonymous detail as canonical; fail before Resend on invalid storage.
 3. Risk: an alert accepted before the email body change is replayed with the
@@ -65,7 +68,8 @@ Updated: 2026-08-05
    Mitigation: merge and deploy #1305's runner first, verify prompt/fingerprint
    convergence, then merge and deploy #1284's Web formatter. Old Web accepts
    the canonical prefix and retains the current metadata-only alert during the
-   window; new Web never has to accept the old free-form producer.
+   window; new Web rejects stored detail that does not match the written-issue
+   contract.
 
 ## Tasks
 
@@ -81,11 +85,10 @@ Updated: 2026-08-05
 
 - The explicit verified-private request itself authorizes the reserved call;
   Murph does not show the issue summary or ask for separate approval.
-- The email contains readable labels derived only from the parsed product area
-  and problem; it never contains the whole member message or model-authored
-  prose.
-- The anonymous detail row stores the full shared canonical issue; the linked
-  row stays fixed server-authored metadata.
+- The email contains the validated stored issue Murph wrote in its own words;
+  it never contains or copies the member's raw message or private context.
+- The anonymous detail row stores the stripped sanitized issue; the linked row
+  stays fixed server-authored metadata.
 - Provider retries format from read-back stored detail, not callback memory.
 - The two PRs are one product release. #1305's runner merges and deploys first;
   after convergence proof, #1284's Web formatter merges and deploys. Roll back
@@ -104,24 +107,26 @@ Updated: 2026-08-05
   rule in `agent-docs/RELIABILITY.md`. The finding is accepted: delete only the
   obsolete convergence and rollback sentences while preserving the persistence,
   replay, cap, provider-failure, and no-second-owner contract.
-- The stacked preliminary specialist found that deterministic scrubbing was not
-  semantic disclosure authority for free-form issue text emailed beside a
-  member identifier, and that the composition from model payload to Web email
-  lacked production-faithful proof. Both findings are accepted: #1305 now owns
-  a shared closed area/problem contract and real-provider argument proof; this
-  PR parses the same canonical value, renders only its labels, rejects legacy
-  or free-form stored detail, and tests the shared builder through the Web
-  persistence/email path.
+- The stacked preliminary specialist found that deterministic scrubbing alone
+  was not semantic disclosure authority for issue text emailed beside a member
+  identifier, and that the composition from model payload to Web email lacked
+  production-faithful proof. #1305 now owns the explicit verified-private
+  authority, own-words/no-copy contract, shared sanitizer, and real-provider
+  argument proof. This PR reads and validates that stored issue, rejects linked,
+  unsanitized, still-prefixed, or malformed detail, and tests the composed Web
+  persistence/email path. The product owner explicitly selected this behavior
+  over the closed-vocabulary remediation reviewed in the preceding round.
 
 ## Verification
 
 - Run the focused Web support service and callback-route suites, the focused
   Assistant Engine support suites inherited from #1305, Web and Assistant Engine
   typechecks, docs drift, and diff checks.
-- Expected outcome: an eligible email includes one labeled canonical issue,
-  excludes the reserved prefix and all model-authored context, replay preserves
-  body and key, free-form or invalid stored detail prevents provider entry, and
-  the one-turn direct conversation and group rejection contracts remain green.
+- Expected outcome: an eligible email includes Murph's one validated stored
+  issue, excludes the reserved prefix and the member's raw message or private
+  context, replay preserves body and key, invalid stored detail prevents
+  provider entry, and the one-turn direct conversation and group rejection
+  contracts remain green.
 - Provider input impact for this stacked Web diff is not applicable: relative to
   #1305, it changes no prompt, tool schema or description, skill, provider
   configuration, or request assembly. #1305 owns the complete paired capture for
@@ -143,12 +148,10 @@ Updated: 2026-08-05
   contract finding: RELIABILITY.md still required runner-first consent rollout.
   The rule was deleted without changing runtime behavior or adding machinery;
   PR-relative docs drift and stale-language scans must pass before round 5.
-- After restacking #1305's closed-vocabulary remediation, the focused Web
-  support service and callback-route suites pass 14 tests. The production path
-  proves canonical builder-to-storage-to-parser-to-email composition, semantic-
-  context rejection before persistence, canonical replay, and legacy free-form
-  stored-detail rejection before provider entry. The composed Assistant suites
-  pass 106 tests with 27 credential-gated cases compiled and skipped, and the
-  shared hosted contract passes 6 tests. Full Web, Assistant Engine, and Hosted
-  Execution typechecks pass; docs drift and diff checks pass. Exact-head CI and
-  correction ReviewGPT remain pending.
+- The closed-vocabulary remediation in the preceding exact-head round was
+  superseded by the product owner's clarification that Murph must write the
+  de-identified issue in its own words. The restacked candidate keeps the
+  anonymous storage boundary, stable replay, and fail-closed provider boundary
+  while emailing that validated stored issue beside internal identifiers.
+- Exact-head focused tests, typechecks, docs drift, CI, and correction ReviewGPT
+  remain pending for this superseding candidate.

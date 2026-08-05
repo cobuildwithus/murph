@@ -19,6 +19,7 @@ export interface MurphOnboardingFollowupAutomationDefinition {
   continuityPolicy: AutomationContinuityPolicy
   instructions: string
   jitterMinutes: number
+  opportunityDays: number
   schedule: MurphOnboardingFollowupAutomationSchedule
   slug: string
   summary: string
@@ -29,14 +30,15 @@ export interface MurphOnboardingFollowupAutomationDefinition {
 export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
   {
     slug: 'finish-onboarding-followup',
-    title: 'Final Murph onboarding follow-up',
-    summary: 'One finite next-day invitation to continue unfinished Murph onboarding.',
+    title: 'Finite Murph onboarding follow-up',
+    summary: 'One daily opportunity for three days to continue unfinished Murph onboarding.',
     continuityPolicy: 'preserve',
     schedule: {
       kind: 'dailyLocal',
       localTime: '13:30',
     },
     jitterMinutes: 60,
+    opportunityDays: 3,
     activeUntilLocalTime: '15:00',
     tags: [
       'assistant',
@@ -46,7 +48,7 @@ export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
       'murph-managed:onboarding-followup',
     ],
     instructions: [
-      'Goal: make one finite, low-pressure final attempt to reopen unfinished Murph onboarding and get a reply. This one-shot is consumed whether you send or skip. Never create, re-enable, or reschedule another onboarding follow-up; ordinary health help and reply-driven onboarding remain available after this run.',
+      'Goal: use this finite three-day window to make at most one low-pressure daily attempt to continue unfinished Murph onboarding and get a reply. Each scheduled occurrence is consumed whether you send or skip. Never create, re-enable, extend, or reschedule this onboarding follow-up; ordinary health help and reply-driven onboarding remain available after the window closes.',
       '',
       'Before deciding, read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md`, run `vault-cli assistant onboarding resume-context --format json`, and read the available recent user messages. The skill is the single owner of conversation order, checkpoint meaning, persistence, and completion; do not create a second state machine in this automation.',
       '',
@@ -60,7 +62,7 @@ export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
       '',
       'This automation never owns a promised check-in, reminder, or proactive support action. Those use the canonical plan and dedicated automation required by `behavior-followthrough`, which owns timing, due evaluation, delivery, retry, and skip behavior.',
       '',
-      'Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, decline, or a newer topic that should win. Follow the onboarding skill’s finite next-day recovery rule exactly. Do not re-ask known or resolved context, repeat an unanswered setup question, or rotate to another setup question. Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever the finite reopening question would not be timely or useful.',
+      'Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, decline, or a newer topic that should win. Follow the onboarding skill’s finite three-day recovery rule exactly. Do not re-ask known or resolved context or rotate to another setup question merely because another daily opportunity arrived. An unanswered question may receive one shorter, natural reopening on a later day, but never repeat the same wording or imply urgency. Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever the reopening question would not be timely or useful.',
       '',
       "Output: send at most one brief, natural, low-pressure in-chat continuation. It must contain exactly one easy, reply-oriented question; otherwise return an ordinary skip. Do not mention internal state, setup completion, final attempts, schedules, or this automation, and do not use a fixed script. The user's reply will be handled by the next normal Murph onboarding turn.",
     ].join('\n'),
@@ -110,30 +112,73 @@ export function resolveMurphOnboardingFollowupActiveUntil(input: {
     throw new TypeError('Onboarding follow-up active window requires a valid occurrence.')
   }
 
-  const activeUntil = computeAssistantCronNextRunAt(
-    {
-      kind: 'dailyLocal',
-      localTime:
-        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.activeUntilLocalTime,
-      timeZone: input.timeZone,
-    },
-    scheduledAt,
-  )
-  if (!activeUntil) {
+  const cutoffSchedule = {
+    kind: 'dailyLocal' as const,
+    localTime: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.activeUntilLocalTime,
+    timeZone: input.timeZone,
+  }
+  let activeUntilAnchor = scheduledAt
+  let activeUntil: string | null = null
+  for (
+    let day = 0;
+    day < MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays;
+    day += 1
+  ) {
+    activeUntil = computeAssistantCronNextRunAt(
+      cutoffSchedule,
+      activeUntilAnchor,
+    )
+    if (!activeUntil) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_INVALID_SCHEDULE',
+        'Onboarding follow-up active window does not produce a cutoff.',
+      )
+    }
+    activeUntilAnchor = new Date(activeUntil)
+  }
+  if (activeUntil === null) {
     throw new VaultCliError(
       'ASSISTANT_CRON_INVALID_SCHEDULE',
-      'Onboarding follow-up active window does not produce a cutoff.',
+      'Onboarding follow-up requires at least one opportunity day.',
     )
   }
+
+  const firstOccurrenceDay = formatTimeZoneDateTimeParts(
+    scheduledAt,
+    input.timeZone,
+  ).dayKey
+  const firstCutoff = computeAssistantCronNextRunAt(
+    cutoffSchedule,
+    scheduledAt,
+  )
   if (
-    formatTimeZoneDateTimeParts(scheduledAt, input.timeZone).dayKey !==
-    formatTimeZoneDateTimeParts(activeUntil, input.timeZone).dayKey
+    !firstCutoff ||
+    formatTimeZoneDateTimeParts(firstCutoff, input.timeZone).dayKey !==
+      firstOccurrenceDay
   ) {
     throw new VaultCliError(
       'ASSISTANT_CRON_INVALID_SCHEDULE',
-      'Onboarding follow-up cutoff must remain on the occurrence local day.',
+      'Onboarding follow-up first cutoff must remain on the first occurrence local day.',
     )
   }
 
   return activeUntil
+}
+
+export function isCurrentMurphOnboardingFollowupAutomation(input: {
+  continuityPolicy: AutomationContinuityPolicy
+  instructions: string
+  slug: string
+  summary: string | null
+  tags: readonly string[]
+  title: string
+}): boolean {
+  const expected = MURPH_ONBOARDING_FOLLOWUP_AUTOMATION
+  return input.slug === expected.slug &&
+    input.title === expected.title &&
+    input.summary === expected.summary &&
+    input.continuityPolicy === expected.continuityPolicy &&
+    input.instructions === expected.instructions &&
+    input.tags.length === expected.tags.length &&
+    input.tags.every((tag, index) => tag === expected.tags[index])
 }

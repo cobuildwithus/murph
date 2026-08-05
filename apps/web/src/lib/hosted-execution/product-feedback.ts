@@ -7,9 +7,7 @@ import {
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   isHostedProductSupportEscalationFeedback,
   isHostedProductSupportEscalationSummary,
-  parseHostedProductSupportEscalationSummary,
   sanitizeHostedProductFeedbackSummary,
-  type HostedProductSupportIssue,
   type HostedRuntimeProductFeedbackRecord,
   type HostedRuntimeProductFeedbackRecordResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -51,14 +49,14 @@ export async function recordHostedProductFeedback(input: {
   const feedbackId = buildHostedProductFeedbackId({
     feedback: input.feedback,
   });
-  const supportIssue = parseHostedProductSupportEscalationSummary(
-    feedback.summary,
+  // The reserved prefix is itself the support-path discriminator. Fail closed
+  // below when the remainder is missing or the reserved kind/linkage contract
+  // is invalid instead of persisting it as ordinary feedback.
+  const supportEscalation = feedback.summary.startsWith(
+    HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   );
 
-  if (!supportIssue) {
-    if (feedback.summary.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)) {
-      rejectHostedProductSupportEscalation();
-    }
+  if (!supportEscalation) {
     return await persistHostedProductFeedback({
       feedback,
       feedbackId,
@@ -84,7 +82,9 @@ export async function recordHostedProductFeedback(input: {
     throw new RangeError("Product support escalation time must be valid.");
   }
   const detailFeedbackId = buildHostedProductSupportDetailFeedbackId(feedbackId);
-  const detailSummary = feedback.summary;
+  const detailSummary = feedback.summary
+    .slice(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX.length)
+    .trim();
 
   const persistence = await getPrisma().$transaction(async (tx) => {
     await tx.$executeRaw`
@@ -151,10 +151,6 @@ export async function recordHostedProductFeedback(input: {
     const detailRow = rows.find(
       (candidate) => candidate.id === detailFeedbackId,
     );
-    const storedIssue = parseHostedProductSupportEscalationSummary(
-      detailRow?.summary,
-    );
-
     if (
       !row
       || row.memberId !== memberId
@@ -164,7 +160,7 @@ export async function recordHostedProductFeedback(input: {
       || !detailRow
       || detailRow.memberId !== null
       || detailRow.kind !== feedback.kind
-      || !storedIssue
+      || !isHostedProductSupportDetailSummary(detailRow.summary)
       || !isEmptyJsonArray(detailRow.relatedChangelogItemIdsJson)
     ) {
       throw hostedOnboardingError({
@@ -203,7 +199,7 @@ export async function recordHostedProductFeedback(input: {
     });
 
     return {
-      emailIssue: storedIssue,
+      emailIssueSummary: detailRow.summary,
       recorded: created.count > 0,
       shouldSendEmail:
         ordinal <= HOSTED_PRODUCT_SUPPORT_EMAILS_PER_MEMBER_UTC_DAY_MAX,
@@ -233,7 +229,7 @@ export async function recordHostedProductFeedback(input: {
       subject: `${HOSTED_PRODUCT_SUPPORT_SUBJECT} — ${feedbackId}`,
       text: formatHostedProductSupportEmail({
         feedbackId,
-        issue: persistence.emailIssue,
+        issueSummary: persistence.emailIssueSummary,
         memberId,
       }),
       to: emailConfig.recipients,
@@ -324,28 +320,29 @@ async function persistHostedProductFeedback(input: {
 
 function formatHostedProductSupportEmail(input: {
   feedbackId: string;
-  issue: HostedProductSupportIssue;
+  issueSummary: string;
   memberId: string;
 }): string {
   return [
     "A Murph member explicitly asked to escalate a product issue.",
     "",
-    `Product issue: ${formatHostedProductSupportIssue(input.issue)}`,
+    `Product issue: ${input.issueSummary}`,
     "",
     `Feedback ID: ${input.feedbackId}`,
     `Member ID: ${input.memberId}`,
   ].join("\n");
 }
 
-function formatHostedProductSupportIssue(
-  issue: HostedProductSupportIssue,
-): string {
-  return `${formatHostedProductSupportCode(issue.area)} — ${formatHostedProductSupportCode(issue.problem).toLowerCase()}.`;
-}
-
-function formatHostedProductSupportCode(value: string): string {
-  const words = value.replaceAll("_", " ");
-  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+function isHostedProductSupportDetailSummary(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= (
+      HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH
+      - HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX.length
+    )
+    && value.trim() === value
+    && !value.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)
+    && sanitizeHostedProductFeedbackSummary(value) === value;
 }
 
 export function buildHostedProductSupportDetailFeedbackId(

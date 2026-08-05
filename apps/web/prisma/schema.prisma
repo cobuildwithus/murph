@@ -611,6 +611,7 @@ model HostedMember {
   threadContainer                HostedThreadContainer?          @relation("HostedThreadContainerMember")
   ownedThreadContainers          HostedThreadContainer[]         @relation("HostedThreadContainerOwner")
   threadContainerParticipations  HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")
+  pendingGroupSetup              HostedPendingGroupSetup?
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -1816,6 +1817,23 @@ model HostedThreadContainer {
 
   @@index([ownerMemberId])
   @@map("hosted_thread_container")
+}
+
+model HostedPendingGroupSetup {
+  id                      String       @id
+  ownerMemberId           String       @unique @map("owner_member_id")
+  channel                 String
+  recipientPhoneLookupKey String       @map("recipient_phone_lookup_key")
+  payloadEncrypted        String       @map("payload_encrypted")
+  armedAt                 DateTime     @map("armed_at")
+  expiresAt               DateTime     @map("expires_at")
+  createdAt               DateTime     @default(now()) @map("created_at")
+  updatedAt               DateTime     @updatedAt @map("updated_at")
+  owner                   HostedMember @relation(fields: [ownerMemberId], references: [id], onDelete: Cascade)
+
+  @@index([channel, recipientPhoneLookupKey, expiresAt, ownerMemberId], map: "hosted_pending_group_setup_match_idx")
+  @@index([expiresAt], map: "hosted_pending_group_setup_expiry_idx")
+  @@map("hosted_pending_group_setup")
 }
 
 model HostedThreadContainerParticipant {

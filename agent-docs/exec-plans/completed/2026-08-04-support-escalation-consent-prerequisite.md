@@ -1,6 +1,6 @@
 # Keep support contact opt-in and send explicit escalations directly
 
-Status: active
+Status: completed
 Created: 2026-08-04
 Updated: 2026-08-05
 
@@ -165,3 +165,49 @@ Updated: 2026-08-05
   The synthetic capture included `input`, `parallel_tool_calls`, `text`, and
   `tool_choice`; its ignored temporary harness and generated workspace build
   outputs were removed or remained outside version control.
+- Exact-head app verification on `11ccf04cc5` exposed that Web still classified
+  support by the complete valid shape rather than by the reserved prefix. An
+  old free-form `Support escalation:` value therefore fell through to ordinary
+  feedback persistence instead of failing closed, and the Web support fixtures
+  still built that obsolete value. Web now routes every exact reserved-prefix
+  value through the closed-shape validator, so malformed or free-form reserved
+  input is rejected before persistence. The Web fixtures and callback-boundary
+  case use the shared canonical builder. After reconciling current `main`, the
+  focused Web suites pass 11 tests, the shared support contract passes 6 tests,
+  and Hosted Execution typecheck passes. Web typecheck reaches only the same
+  unrelated existing `next.config.ts` and `next-config.test.ts` `agentRules`
+  type errors, neither of which is in this PR's diff; exact-head CI remains
+  pending.
+- Final ReviewGPT round 2 on `9b7046f27f` returned
+  `RETROSPECTIVE_REQUIRED` because the ordinary-versus-reserved classification
+  collision from round 1 recurred at the Web compatibility boundary. The
+  requirement-level decision is to define the reserved namespace by the exact
+  `Support escalation:` prefix independently of canonical-shape acceptance.
+  Current closed-vocabulary values proceed through the existing support owner;
+  legacy free-form values fail closed before any member-linked or ordinary
+  persistence and yield the existing truthful unavailable result. Deployment
+  should roll the current runner bundle first, wait for warm old runners to
+  drain, and then deploy the paired Web issue renderer and recorder. Current
+  runner to old Web remains accepted by the old prefix contract; old runner to
+  current Web is bounded fail-closed rather than falsely successful or private.
+  Rollback in either direction retains those same safe outcomes. No queue,
+  compatibility row, replay path, migration, or new state owner is justified.
+  The focused Web recorder test proves malformed legacy input cannot reach the
+  transaction, and the existing callback-failure scenario proves truthful
+  no-retry recovery.
+- Exact-head CI on `527ffccdec` passed the full Web suite (8,854 tests) and all
+  other jobs, then exposed one stale Cloudflare timeout test that still built
+  the retired free-form support summary. The fixture now uses the shared
+  canonical builder, preserving the intended 12-second support-email bound;
+  the exact `cloudflare-node-platform` test passes all 5 cases. A new pushed
+  head and fresh final ReviewGPT round remain required.
+- After a clean merge of current `main`, final ReviewGPT round 4 passed with no
+  findings on `dacda38757` and verified the correction packet, lineage, closed
+  support shape, retained free-form rejection coverage, and unchanged
+  production ownership. Exact-head GitHub Actions are fully green: release app
+  verification passed all 8,854 Web tests, release build/typecheck passed, all
+  three coverage shards passed, both CLI host matrices passed, and the release
+  aggregator plus repository, frontend, overflow, and runner-sandbox gates
+  passed. Parent ancestry, mergeability, model-verification, diff, and privacy
+  review are clean; no unresolved finding remains.
+Completed: 2026-08-05

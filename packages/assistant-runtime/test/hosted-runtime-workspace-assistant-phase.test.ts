@@ -670,7 +670,10 @@ beforeEach(() => {
     }
     if (
       input?.allowedRouteActions?.length === 1
-      && input.allowedRouteActions[0] === "apply-member-preferences"
+      && (
+        input.allowedRouteActions[0] === "apply-member-preferences"
+        || input.allowedRouteActions[0] === "initialize-group-room-model"
+      )
     ) {
       return {
         at: null,
@@ -2860,10 +2863,35 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("checkpoints hosted managed automation changes before continuing assistant work", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
-      created: 1,
-      skipped: 0,
-      updated: 0,
+    const events: string[] = [];
+    mocks.applyMurphManagedAutomations.mockImplementationOnce(async (input) => {
+      events.push("managed-automation");
+      input.onOnboardingFollowupDiagnostic?.({
+        action: "migrated_three_day_window",
+        activeUntil: "2026-04-30T15:00:00.000Z",
+        firstOccurrenceAt: "2026-04-28T13:30:00.000Z",
+        onboardingStateCreatedAt: null,
+        onboardingStateSource: "default_missing",
+        onboardingStateStatus: "open",
+        onboardingStateUpdatedAt: null,
+        opportunityDays: 3,
+        previousScheduleKind: "at",
+        scheduleKind: "dailyLocal",
+      });
+      return {
+        created: 1,
+        skipped: 0,
+        updated: 0,
+      };
+    });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      events.push("automation-lane");
+      return {
+        assistantAutomationProgressed: false,
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -2876,6 +2904,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledWith({
       now: new Date("2026-04-27T00:00:00.000Z"),
       onDiagnosticStage: expect.any(Function),
+      onOnboardingFollowupDiagnostic: expect.any(Function),
       operatorHomeRoot: "/tmp/murph-hosted-operator-home",
       routeValidationProfile: "hosted",
       runtimeEnv: {},
@@ -2883,6 +2912,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       vaultRoot: "/tmp/murph-hosted-vault",
     });
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(["managed-automation", "automation-lane"]);
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "assistant_runtime_commit",
       progressed: true,
@@ -2892,6 +2922,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         murphManagedAutomationUpdated: 0,
       }),
     }));
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "assistant.onboarding_followup_reconciled",
+        level: "info",
+        redactedJson: {
+          onboardingFollowupAction: "migrated_three_day_window",
+          onboardingFollowupActiveUntil: "2026-04-30T15:00:00.000Z",
+          onboardingFollowupFirstOccurrenceAt: "2026-04-28T13:30:00.000Z",
+          onboardingFollowupOpportunityDays: 3,
+          onboardingFollowupPreviousScheduleKind: "at",
+          onboardingFollowupScheduleKind: "dailyLocal",
+          onboardingStateCreatedAt: null,
+          onboardingStateSource: "default_missing",
+          onboardingStateStatus: "open",
+          onboardingStateUpdatedAt: null,
+        },
+      }),
+    );
     expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
       expect.objectContaining({
         component: "runtime",
@@ -3692,6 +3741,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       defaultRoute,
       now: new Date("2026-04-27T00:00:00.000Z"),
       onDiagnosticStage: expect.any(Function),
+      onOnboardingFollowupDiagnostic: expect.any(Function),
       operatorHomeRoot: "/tmp/murph-operator-home",
       routeValidationProfile: "hosted",
       runtimeEnv: {},
@@ -8701,6 +8751,114 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });
+
+  it.each([
+    {
+      bindingDelivery: { kind: "thread" as const, target: "linq_chat_direct" },
+      cronStatusAvailable: true,
+      label: "direct-thread",
+    },
+    {
+      bindingDelivery: { kind: "participant" as const, target: "member_synthetic" },
+      cronStatusAvailable: false,
+      label: "participant",
+    },
+  ])(
+    "re-arms cron without a failure note after an authority-stale $label delivery",
+    async ({ bindingDelivery, cronStatusAvailable, label }) => {
+      const vaultRoot = await mkdtemp(path.join(
+        tmpdir(),
+        `murph-outbox-authority-stale-${label}-`,
+      ));
+      try {
+        const now = "2026-04-27T00:00:00.000Z";
+        const cronRetryAt = "2026-04-27T00:00:30.000Z";
+        const effect = {
+          ...createDeliveryEffect(),
+          deliveryPhase: "background_retry" as const,
+          effectId: `intent_authority_stale_${label}`,
+          fingerprint: `fingerprint_authority_stale_${label}`,
+          payload: {
+            ...createDeliveryEffect().payload,
+            channel: "linq" as const,
+            idempotencyKey: `assistant-outbox:intent_authority_stale_${label}`,
+          },
+        };
+        const authorityStaleOutcome = {
+          ...createFailedDeliveryOutcome({
+            deliveryErrorCode: "ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE",
+            effectId: effect.effectId,
+          }),
+          deliveryStatus: "failed" as const,
+          effectFingerprint: effect.fingerprint,
+          retryable: false,
+        };
+        let deliverySettled = false;
+        mocks.readAssistantOutboxIntent.mockResolvedValue(
+          createTerminalFailureOutboxIntent({
+            bindingDelivery,
+            createdAt: "2026-04-26T23:59:50.000Z",
+            effectId: effect.effectId,
+          }),
+        );
+        mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+          effect,
+        ]);
+        mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(
+          async () => {
+            deliverySettled = true;
+            return [authorityStaleOutcome];
+          },
+        );
+        mocks.getAssistantCronStatus.mockImplementation(async () => {
+          if (deliverySettled && !cronStatusAvailable) {
+            throw new Error("cron status temporarily unavailable");
+          }
+          return deliverySettled
+            ? {
+                dueJobs: 0,
+                enabledJobs: 1,
+                nextRunAt: cronRetryAt,
+                runningJobs: 0,
+                totalJobs: 1,
+              }
+            : {
+                dueJobs: 0,
+                enabledJobs: 0,
+                nextRunAt: null,
+                runningJobs: 0,
+                totalJobs: 0,
+              };
+        });
+
+        const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+          now: () => now,
+          vaultRoot,
+          workspace: createDueAssistantWorkspace(),
+        }));
+        const postCheckpoint = await result.afterCheckpoint?.();
+
+        expect(postCheckpoint).toEqual(expect.objectContaining({
+          checkpointReason: "outbox_receipt",
+          nextWakeAt: cronRetryAt,
+          redactedStatus: expect.objectContaining({
+            hostedAssistantNextWakeAt: cronRetryAt,
+            hostedOutboxTerminalFailureInputsStaged: 0,
+            nextWakeAt: cronRetryAt,
+          }),
+        }));
+        expect(mocks.getAssistantCronStatus).toHaveBeenLastCalledWith(
+          vaultRoot,
+          expect.any(Object),
+        );
+        await expect(readExistingHostedPendingAssistantInputIds({
+          vaultRoot,
+        })).resolves.toEqual([]);
+      } finally {
+        await rm(vaultRoot, { force: true, recursive: true });
+      }
+    },
+  );
 
   it("does not carry device-sync next-wake reasons from the assistant automation lane", async () => {
     const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
@@ -14667,6 +14825,98 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("retries prepared room setup before planning the first group conversation", async () => {
+    const callOrder: string[] = [];
+    const now = "2026-07-29T18:01:00.000Z";
+    const item = createGroupRoomModelInitializationSystemMailboxItem();
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async (input) =>
+      input?.allowedRouteActions?.includes("initialize-group-room-model")
+        ? {
+            at: now,
+            reason: "assistant",
+          }
+        : {
+            at: null,
+            reason: null,
+          }
+    );
+    mocks.prepareHostedSystemMailboxItemForCheckpoint
+      .mockImplementationOnce(async (input) => {
+        callOrder.push("room-model-failed");
+        expect(input.allowedRouteActions).toEqual([
+          "initialize-group-room-model",
+        ]);
+        return {
+          errorCode: "group_room_model_unavailable",
+          errorMessage: "Group room model unavailable.",
+          itemId: item.itemId,
+          nextWakeAt: "2026-07-29T18:02:00.000Z",
+          status: "retryable_failed",
+        };
+      })
+      .mockImplementationOnce(async (input) => {
+        callOrder.push("room-model-initialized");
+        expect(input.allowedRouteActions).toEqual([
+          "initialize-group-room-model",
+        ]);
+        return {
+          item,
+          itemId: item.itemId,
+          metrics: {
+            bootstrapResult: null,
+            conversationMetrics: null,
+            mailboxLane: "member-activated",
+            redactedLogEntries: [],
+          },
+          status: "processed",
+        };
+      });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      callOrder.push("assistant");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+    const input = createPhaseInput({
+      importedCount: 1,
+      now: () => now,
+    });
+
+    const failed = await runHostedWorkspaceAssistantPhase(input);
+
+    expect(failed).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: "2026-07-29T18:02:00.000Z",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedGroupRoomModelInitializationRetryableFailed: 1,
+      }),
+    }));
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+
+    const replay = await runHostedWorkspaceAssistantPhase(input);
+
+    expect(callOrder).toEqual([
+      "room-model-failed",
+      "room-model-initialized",
+      "assistant",
+    ]);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expectAssistantLaneCallWithoutDeviceSyncOptions({
+      freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
+    });
+    expect(replay).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedGroupRoomModelInitializationProcessed: 1,
+      }),
+    }));
+  });
+
   it("applies member preference mailbox work before planning fresh conversation input", async () => {
     const callOrder: string[] = [];
     let preferenceWakeChecks = 0;
@@ -14744,6 +14994,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           reason: null,
         };
       }
+      if (
+        input?.allowedRouteActions?.includes("initialize-group-room-model")
+      ) {
+        return {
+          at: null,
+          reason: null,
+        };
+      }
       return {
         at: now,
         reason: "assistant",
@@ -14776,7 +15034,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(10);
-    expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).toHaveBeenCalledTimes(11);
+    expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).toHaveBeenCalledTimes(12);
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: now,
@@ -17099,6 +17357,29 @@ function createMemberPreferencesSystemMailboxItem() {
       preferences: {
         tone: "formal" as const,
       },
+      userId: "member_synthetic_phase",
+    },
+  };
+}
+
+function createGroupRoomModelInitializationSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_group_room_model",
+    mailboxDedupeKey: "member.activated:prepared-group-room-model",
+    routeAction: "initialize-group-room-model" as const,
+    wake: {
+      eventId: "member.activated:prepared-group-room-model",
+      initialGroupRoomModelMarkdown:
+        "## Explicit setup\n\nKeep this room low-key.",
+      kind: "member.activated" as const,
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      occurredAt: "2026-07-29T18:01:00.000Z",
+      signupWelcome: null,
       userId: "member_synthetic_phase",
     },
   };

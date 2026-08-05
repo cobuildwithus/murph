@@ -121,3 +121,12 @@ test("SiteFooter exposes the consumer health data notice link in the legal nav c
   assert.match(markup, /href="\/consumer-health-data-privacy-policy"/u);
   assert.match(markup, /Consumer Health Data/u);
 });
+
+test("SiteFooter exposes the public status page in the product nav column", () => {
+  const markup = renderToStaticMarkup(createElement(SiteFooter));
+
+  assert.match(markup, /aria-label="Product links"/u);
+  assert.match(markup, /href="https:\/\/status\.withmurph\.ai"/u);
+  assert.match(markup, />Status<\/a>/u);
+  assert.match(markup, /href="https:\/\/status\.withmurph\.ai" target="_blank" rel="noreferrer"/u);
+});

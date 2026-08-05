@@ -191,6 +191,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Confirmed export includes decrypted user-facing Linq and Telegram routing IDs and pending Linq participant contacts while omitting lookup keys used for inbound traffic matching.",
   },
   {
+    slug: "prisma.hosted_pending_group_setup",
+    label: "Encrypted pending next-group setup",
+    deletion: "live-delete",
+    note: "Deletes the member's short-lived encrypted next-group style and room-context intent before routing and identity rows. Export reports only row counts and never exposes the blinded line key, ciphertext, or decoded setup.",
+  },
+  {
     slug: "prisma.hosted_member_email_authorization",
     label: "Email authorization state",
     deletion: "live-delete",
@@ -2214,6 +2220,9 @@ async function deleteHostedAccountPrismaRows(input: {
         { runtimeMemberId: memberIdFilter },
       ],
     },
+  }));
+  record("prisma.hosted_pending_group_setup", await input.prisma.hostedPendingGroupSetup.deleteMany({
+    where: { ownerMemberId: memberIdFilter },
   }));
   record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_sensitive_action_challenge", await input.prisma.hostedSensitiveActionChallenge.deleteMany({ where: { memberId: memberIdFilter } }));

@@ -1,11 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  buildHostedProductSupportEscalationSummary,
-  type HostedProductSupportArea,
-  type HostedProductSupportProblem,
-} from "@murphai/hosted-execution/runtime-control";
-
 const prismaMocks = vi.hoisted(() => ({
   count: vi.fn(),
   createMany: vi.fn(),
@@ -42,6 +36,8 @@ const EMAIL_ENV = {
   HOSTED_LINQ_ALERT_EMAIL_FROM: "Murph <support@withmurph.ai>",
   RESEND_API_KEY: "resend_test_key",
 };
+const ISSUE_SUMMARY =
+  "a connected source reports success but Murph does not finish the connection.";
 
 type TransactionClientMock = {
   $executeRaw: typeof prismaMocks.executeRaw;
@@ -124,7 +120,7 @@ describe("hosted product support escalation", () => {
           kind: "frustration",
           memberId: null,
           relatedChangelogItemIdsJson: [],
-          summary: feedback.summary,
+          summary: ISSUE_SUMMARY,
         }),
       ],
       skipDuplicates: true,
@@ -152,7 +148,7 @@ describe("hosted product support escalation", () => {
     expect(emailText).toBe([
       "A Murph member explicitly asked to escalate a product issue.",
       "",
-      "Product issue: Connected source — connection failed.",
+      `Product issue: ${ISSUE_SUMMARY}`,
       "",
       `Feedback ID: ${feedbackId}`,
       `Member ID: ${MEMBER_ID}`,
@@ -161,36 +157,9 @@ describe("hosted product support escalation", () => {
     expect(emailText).not.toContain(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX);
   });
 
-  it("rejects model-authored semantic context before persistence or email", async () => {
-    const canonical = makeSupportFeedback({
-      area: "data",
-      idempotencyKey: "9".repeat(64),
-      problem: "data_incorrect",
-    });
-    const sendEmail = vi.fn();
-
-    await expect(recordHostedProductFeedback({
-      env: EMAIL_ENV,
-      feedback: {
-        ...canonical,
-        summary:
-          `${canonical.summary}; context=person diagnosis medication clinic relationship location`,
-      },
-      memberId: MEMBER_ID,
-      now: NOW,
-      sendEmail,
-    })).rejects.toMatchObject({
-      code: "HOSTED_PRODUCT_SUPPORT_REJECTED",
-      httpStatus: 400,
-    });
-
-    expect(prismaMocks.transaction).not.toHaveBeenCalled();
-    expect(sendEmail).not.toHaveBeenCalled();
-  });
-
-  it("formats an exact replay from the validated stored issue detail", async () => {
+  it("keeps Murph's written issue out of the member-linked row and reads it from anonymous storage for email", async () => {
     const feedback = makeSupportFeedback({
-      idempotencyKey: "8".repeat(64),
+      idempotencyKey: "9".repeat(64),
     });
     const feedbackId = buildHostedProductFeedbackId({ feedback });
     const sendEmail = vi.fn().mockResolvedValue({ providerMessageId: null });
@@ -209,13 +178,62 @@ describe("hosted product support escalation", () => {
       sendEmail,
     });
 
-    const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
-    expect(emailText).toContain(
-      "Product issue: Connected source — connection failed.",
+    const createManyRows = prismaMocks.createMany.mock.calls[0]?.[0]?.data ?? [];
+    const memberRow = createManyRows.find(
+      (row: { memberId: string | null }) => row.memberId !== null,
     );
-    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
-      idempotencyKey: `hosted-product-support/${feedbackId}`,
+    const anonymousRow = createManyRows.find(
+      (row: { memberId: string | null }) => row.memberId === null,
+    );
+    expect(memberRow?.summary).toBe(
+      HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
+    );
+    expect(memberRow?.summary).not.toContain(ISSUE_SUMMARY);
+    expect(anonymousRow?.summary).toBe(ISSUE_SUMMARY);
+    expect(anonymousRow?.memberId).toBeNull();
+
+    const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
+    expect(emailText).toContain(`Product issue: ${ISSUE_SUMMARY}`);
+    expect(emailText).not.toContain(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX);
+    expect(emailText).toContain(`Member ID: ${MEMBER_ID}`);
+  });
+
+  it("scrubs recognizable private values before storing or emailing the issue", async () => {
+    const feedback = makeSupportFeedback({
+      idempotencyKey: "8".repeat(64),
+      issueSummary: "the connection screen shows member@example.com.",
+    });
+    const feedbackId = buildHostedProductFeedbackId({ feedback });
+    const scrubbedIssue = "the connection screen shows [redacted].";
+    const sendEmail = vi.fn().mockResolvedValue({ providerMessageId: null });
+    prismaMocks.createMany.mockResolvedValue({ count: 2 });
+    prismaMocks.findFeedbackRows.mockResolvedValue(makeStoredSupportFeedbackRows({
+      detailSummary: scrubbedIssue,
+      feedback,
+      feedbackId,
     }));
+    prismaMocks.count.mockResolvedValue(1);
+
+    await recordHostedProductFeedback({
+      env: EMAIL_ENV,
+      feedback,
+      memberId: MEMBER_ID,
+      now: NOW,
+      sendEmail,
+    });
+
+    expect(prismaMocks.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          memberId: null,
+          summary: scrubbedIssue,
+        }),
+      ]),
+      skipDuplicates: true,
+    });
+    const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
+    expect(emailText).toContain(`Product issue: ${scrubbedIssue}`);
+    expect(emailText).not.toContain("member@example.com");
   });
 
   it("records later escalations without sending more than three emails per UTC day", async () => {
@@ -307,12 +325,12 @@ describe("hosted product support escalation", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("rejects a prefixed payload that is not the exact support shape", async () => {
+  it("rejects an empty reserved payload before persistence", async () => {
     await expect(recordHostedProductFeedback({
       env: EMAIL_ENV,
       feedback: {
         ...makeSupportFeedback(),
-        kind: "feature_request",
+        summary: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
       },
       memberId: MEMBER_ID,
     })).rejects.toMatchObject({
@@ -357,19 +375,15 @@ describe("hosted product support escalation", () => {
 
   it("replays reworded callback content from the first stored issue detail", async () => {
     const feedback = makeSupportFeedback({
-      area: "data",
       idempotencyKey: "f".repeat(64),
-      problem: "feature_missing",
+      issueSummary: "a different product workflow fails during setup.",
     });
     const feedbackId = buildHostedProductFeedbackId({ feedback });
     const sendEmail = vi.fn().mockResolvedValue({ providerMessageId: null });
     prismaMocks.createMany.mockResolvedValue({ count: 0 });
     prismaMocks.findFeedbackRows.mockResolvedValue(
       makeStoredSupportFeedbackRows({
-        detailSummary: buildHostedProductSupportEscalationSummary({
-          area: "connected_source",
-          problem: "connection_failed",
-        }),
+        detailSummary: ISSUE_SUMMARY,
         feedback,
         feedbackId,
       }),
@@ -388,16 +402,16 @@ describe("hosted product support escalation", () => {
     });
 
     const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
-    expect(emailText).toContain(
-      "Product issue: Connected source — connection failed.",
+    expect(emailText).toContain(`Product issue: ${ISSUE_SUMMARY}`);
+    expect(emailText).not.toContain(
+      "Product issue: a different product workflow fails during setup.",
     );
-    expect(emailText).not.toContain("Product issue: Data — feature missing.");
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: `hosted-product-support/${feedbackId}`,
     }));
   });
 
-  it("rejects legacy free-form stored detail before provider entry", async () => {
+  it("rejects a malformed prefixed stored detail before provider entry", async () => {
     const feedback = makeSupportFeedback({
       idempotencyKey: "6".repeat(64),
     });
@@ -406,8 +420,7 @@ describe("hosted product support escalation", () => {
     prismaMocks.createMany.mockResolvedValue({ count: 0 });
     prismaMocks.findFeedbackRows.mockResolvedValue(
       makeStoredSupportFeedbackRows({
-        detailSummary:
-          "a connected source reports success but Murph does not finish the connection.",
+        detailSummary: `${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX} ${ISSUE_SUMMARY}`,
         feedback,
         feedbackId,
       }),
@@ -428,7 +441,7 @@ describe("hosted product support escalation", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("requires the exact support escalation prefix, content, and structured shape", () => {
+  it("requires the exact support escalation prefix and reserved feedback shape", () => {
     const feedback = makeSupportFeedback();
     expect(isHostedProductSupportEscalationSummary(feedback.summary)).toBe(true);
     expect(isHostedProductSupportEscalationFeedback(feedback)).toBe(true);
@@ -450,18 +463,14 @@ describe("hosted product support escalation", () => {
 });
 
 function makeSupportFeedback(input: {
-  area?: HostedProductSupportArea;
   idempotencyKey?: string;
-  problem?: HostedProductSupportProblem;
+  issueSummary?: string;
 } = {}) {
   return {
     idempotencyKey: input.idempotencyKey ?? "c".repeat(64),
     kind: "frustration" as const,
     relatedChangelogItemIds: [],
-    summary: buildHostedProductSupportEscalationSummary({
-      area: input.area ?? "connected_source",
-      problem: input.problem ?? "connection_failed",
-    }),
+    summary: `${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX} ${input.issueSummary ?? ISSUE_SUMMARY}`,
   };
 }
 
@@ -485,7 +494,9 @@ function makeStoredSupportFeedbackRows(input: {
       kind: input.feedback.kind,
       memberId: null,
       relatedChangelogItemIdsJson: [],
-      summary: input.detailSummary ?? input.feedback.summary,
+      summary: input.detailSummary ?? input.feedback.summary
+        .slice(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX.length)
+        .trim(),
     },
   ];
 }

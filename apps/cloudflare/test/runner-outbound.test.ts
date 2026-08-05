@@ -98,6 +98,9 @@ import {
   type R2PutValueLike,
 } from "../src/crypto.ts";
 import {
+  writeHostedEmailRawMessage,
+} from "../src/hosted-email.ts";
+import {
   createHostedArtifactStore,
   createHostedBundleStore,
 } from "../src/bundle-store.ts";
@@ -143,6 +146,9 @@ import {
   HOSTED_R2_CHECKSUM_MODE_ENABLED,
   HOSTED_R2_CHECKSUM_MODE_HEADER,
 } from "../src/r2-presigned-url.ts";
+import {
+  resolveHostedR2CutoverContext,
+} from "../src/r2-cutover.ts";
 import {
   hostedArtifactObjectKey,
   hostedWorkspaceSnapshotObjectKey,
@@ -2856,6 +2862,65 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("lets a source-active runner consume a destination-only raw email", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const source = createRunnerOutboundEnv().BUNDLES;
+    const destination = createRunnerOutboundEnv().BUNDLES;
+    const destinationContext = resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+    });
+    const rawBytes = new TextEncoder().encode(
+      "From: sender@example.test\r\nTo: assistant@example.test\r\n\r\nhello",
+    );
+    const rawMessageKey = await writeHostedEmailRawMessage({
+      bucket: destinationContext.bucket,
+      key: Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+      keyId: "udrk:ingress:test-root",
+      plaintext: rawBytes,
+      userId: "member_123",
+    });
+    await expect(source.list?.({})).resolves.toMatchObject({ objects: [] });
+    await expect(destination.list?.({})).resolves.toMatchObject({
+      objects: [expect.any(Object)],
+    });
+
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+      HOSTED_R2_CUTOVER_PHASE: "source_active",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker/messages/${rawMessageKey}`, {
+        headers: createRunnerWriteFenceProxyHeaders(),
+        method: "GET",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(rawBytes);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          fallbackBucketRole: "destination",
+          operation: "get",
+          primaryBucketRole: "source",
+        }),
+      }),
+    );
+  });
+
   it("preserves planned group recipient ids across the runner send response", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const emailSendMock = vi.fn(async (_message: unknown) => undefined);
@@ -5264,6 +5329,64 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(workerBodyResponse.status).toBe(405);
+  });
+
+  it("presigns a destination-only snapshot for a source-active mixed-version reader", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_read_destination_only";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const sourceBucket = createRunnerOutboundEnv().BUNDLES;
+    const destinationBucket = createRunnerOutboundEnv().BUNDLES;
+    const env = createRunnerOutboundEnv({
+      BUNDLES: sourceBucket,
+      BUNDLES_ENAM: destinationBucket,
+      HOSTED_R2_CUTOVER_PHASE: "source_active",
+      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles-enam-test",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    await destinationBucket.put(objectKey, new Uint8Array([1, 2, 3, 4]));
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignGetRequest({
+        objectKey,
+        snapshotRef,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    const body = requireTestObject(
+      await response.json(),
+      "destination-only snapshot presign GET response",
+    );
+    const getUrl = new URL(requireTestString(body.getUrl, "destination-only snapshot getUrl"));
+    expect(getUrl.pathname).toBe(`/bundles-enam-test/${objectKey}`);
+    await expect(sourceBucket.head?.(objectKey)).resolves.toBeNull();
+    await expect(destinationBucket.head?.(objectKey)).resolves.not.toBeNull();
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          operation: "workspace_snapshot_presign_get",
+          r2BucketRole: "destination",
+        }),
+        message: "Hosted workspace snapshot presign GET completed.",
+      }),
+    );
   });
 
   it("rejects direct-R2 workspace snapshot GET presigns without a matching v2 ref", async () => {

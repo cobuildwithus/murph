@@ -47,6 +47,9 @@ import type {
 import {
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
 } from "./vault-share-limits.ts";
+import type {
+  HostedRuntimePendingGroupSetupInput,
+} from "./pending-group-setup.ts";
 
 export const HOSTED_MAILBOX_LANES = [
   "system",
@@ -868,84 +871,12 @@ export interface HostedRuntimeProductFeedbackRecord {
 
 export const HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX = "Support escalation:";
 
-export const HOSTED_PRODUCT_SUPPORT_AREAS = [
-  "account",
-  "assistant",
-  "billing",
-  "connected_source",
-  "data",
-  "groups",
-  "messaging",
-  "onboarding",
-  "settings",
-  "web_app",
-  "other",
-] as const;
-
-export type HostedProductSupportArea =
-  (typeof HOSTED_PRODUCT_SUPPORT_AREAS)[number];
-
-export const HOSTED_PRODUCT_SUPPORT_PROBLEMS = [
-  "access_failed",
-  "action_failed",
-  "connection_failed",
-  "data_incorrect",
-  "data_missing",
-  "delivery_failed",
-  "feature_missing",
-  "stale_result",
-  "unexpected_error",
-  "unclear_behavior",
-  "visual_issue",
-  "other",
-] as const;
-
-export type HostedProductSupportProblem =
-  (typeof HOSTED_PRODUCT_SUPPORT_PROBLEMS)[number];
-
-export interface HostedProductSupportIssue {
-  area: HostedProductSupportArea;
-  problem: HostedProductSupportProblem;
-}
-
-export function buildHostedProductSupportEscalationSummary(
-  issue: HostedProductSupportIssue,
-): string {
-  return `${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX} area=${issue.area}; problem=${issue.problem}`;
-}
-
-export function parseHostedProductSupportEscalationSummary(
-  value: string | null | undefined,
-): HostedProductSupportIssue | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const match = /^Support escalation: area=([a-z_]+); problem=([a-z_]+)$/u.exec(
-    value,
-  );
-  if (!match) {
-    return null;
-  }
-  const area = match[1];
-  const problem = match[2];
-  if (
-    !HOSTED_PRODUCT_SUPPORT_AREAS.includes(area as HostedProductSupportArea)
-    || !HOSTED_PRODUCT_SUPPORT_PROBLEMS.includes(
-      problem as HostedProductSupportProblem,
-    )
-  ) {
-    return null;
-  }
-  return {
-    area: area as HostedProductSupportArea,
-    problem: problem as HostedProductSupportProblem,
-  };
-}
-
 export function isHostedProductSupportEscalationSummary(
   value: string | null | undefined,
 ): value is string {
-  return parseHostedProductSupportEscalationSummary(value) !== null;
+  return typeof value === "string"
+    && value.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)
+    && value.slice(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX.length).trim().length > 0;
 }
 
 export function isHostedProductSupportEscalationFeedback(
@@ -1443,6 +1374,12 @@ export type HostedRuntimeGroupToolRequest =
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
+  | {
+      action: "prepare_next_group";
+      setup?: HostedRuntimePendingGroupSetupInput;
+    }
+  | { action: "read_next_group" }
+  | { action: "cancel_next_group" }
   | { action: "read_chat_name" }
   | { action: "read_usage" }
   | {
@@ -1553,6 +1490,33 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "ok"; group: HostedRuntimeGroupSummary }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "prepare_next_group";
+      result:
+        | {
+            expiresAt: string;
+            setup: HostedRuntimePendingGroupSetupInput;
+            status: "prepared";
+          }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "read_next_group";
+      result:
+        | {
+            expiresAt: string;
+            setup: HostedRuntimePendingGroupSetupInput;
+            status: "prepared";
+          }
+        | { status: "none" }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "cancel_next_group";
+      result:
+        | { status: "canceled" | "none" }
+        | { status: "unavailable"; unavailableReason: string };
     }
   | {
       action: "read_chat_name";
@@ -2833,6 +2797,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "assistant.codex_auth_failed",
   "assistant.automation_detail",
   "assistant.computer_tool_failed",
+  "assistant.onboarding_followup_reconciled",
   "assistant.pass_finished",
   "device-sync.dense_raw_retention",
   "device-sync.job_failed",

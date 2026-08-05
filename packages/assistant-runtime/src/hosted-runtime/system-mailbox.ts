@@ -184,7 +184,14 @@ export async function enqueueHostedSystemMailboxItem(input: {
   vaultRoot: string;
   wake: HostedExecutionSystemWake;
 }): Promise<HostedMailboxItemImportOutcome> {
-  const routeAction = readHostedSystemMailboxRouteAction(input.item);
+  const routedAction = readHostedSystemMailboxRouteAction(input.item);
+  const routeAction =
+    routedAction === "apply-member-activation"
+      && input.wake.kind === "member.activated"
+      && input.wake.initialGroupRoomModelMarkdown
+      && input.wake.signupWelcome === null
+      ? "initialize-group-room-model"
+      : routedAction;
   if (!routeAction) {
     return {
       reasonCode: "system_mailbox.unsupported_route",
@@ -192,7 +199,13 @@ export async function enqueueHostedSystemMailboxItem(input: {
     };
   }
 
-  if (routeAction === "apply-member-activation" && input.wake.kind === "member.activated") {
+  if (
+    (
+      routeAction === "apply-member-activation"
+      || routeAction === "initialize-group-room-model"
+    )
+    && input.wake.kind === "member.activated"
+  ) {
     await bootstrapHostedMemberContext(input.vaultRoot, input.wake);
   }
   const nextItem: HostedSystemMailboxPendingItem = {
