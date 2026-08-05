@@ -6,10 +6,7 @@ import { Button } from "@/src/components/ui/button";
 
 const AUTO_CONTINUE_SECONDS = 5;
 
-export type IntegrationsConnectLauncherState =
-  | "waiting"
-  | "connecting"
-  | "failed";
+type LauncherState = "waiting" | "connecting" | "failed";
 
 interface IntegrationsConnectLauncherProps {
   claim: string;
@@ -17,23 +14,17 @@ interface IntegrationsConnectLauncherProps {
 
 interface IntegrationsConnectLauncherViewProps {
   onContinue?: () => void;
-  secondsRemaining?: number;
-  state: IntegrationsConnectLauncherState;
+  state: LauncherState;
 }
 
 export function IntegrationsConnectLauncher({
   claim,
 }: IntegrationsConnectLauncherProps) {
-  // Starting consumes the single-use claim. Guard the countdown and button
-  // paths so they can never race into two POSTs.
+  // Starting consumes the single-use claim. Guard the timeout and button paths
+  // so they can never race into two POSTs.
   const hasStartedRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [secondsRemaining, setSecondsRemaining] = useState(
-    AUTO_CONTINUE_SECONDS,
-  );
-  const [state, setState] = useState<IntegrationsConnectLauncherState>(
-    "waiting",
-  );
+  const [state, setState] = useState<LauncherState>("waiting");
 
   const startConnection = useCallback(async () => {
     if (hasStartedRef.current) {
@@ -62,6 +53,7 @@ export function IntegrationsConnectLauncher({
         setState("failed");
         return;
       }
+
       const data = (await response.json()) as { redirectUrl?: unknown };
       if (controller.signal.aborted) {
         return;
@@ -73,6 +65,7 @@ export function IntegrationsConnectLauncher({
         setState("failed");
         return;
       }
+
       window.location.href = data.redirectUrl;
     } catch {
       if (!controller.signal.aborted) {
@@ -86,33 +79,20 @@ export function IntegrationsConnectLauncher({
   }, [claim]);
 
   useEffect(() => {
-    return () => {
-      abortControllerRef.current?.abort();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (state !== "waiting") {
-      return;
-    }
-    if (secondsRemaining === 0) {
-      void startConnection();
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      setSecondsRemaining((current) => Math.max(0, current - 1));
-    }, 1_000);
+    const timeout = window.setTimeout(
+      () => void startConnection(),
+      AUTO_CONTINUE_SECONDS * 1_000,
+    );
 
     return () => {
       window.clearTimeout(timeout);
+      abortControllerRef.current?.abort();
     };
-  }, [secondsRemaining, startConnection, state]);
+  }, [startConnection]);
 
   return (
     <IntegrationsConnectLauncherView
       onContinue={() => void startConnection()}
-      secondsRemaining={secondsRemaining}
       state={state}
     />
   );
@@ -120,7 +100,6 @@ export function IntegrationsConnectLauncher({
 
 export function IntegrationsConnectLauncherView({
   onContinue,
-  secondsRemaining = AUTO_CONTINUE_SECONDS,
   state,
 }: IntegrationsConnectLauncherViewProps) {
   if (state === "failed") {
@@ -149,7 +128,7 @@ export function IntegrationsConnectLauncherView({
   return (
     <div className="mt-8 flex flex-col items-center gap-4">
       <p className="max-w-lg text-sm leading-6 text-muted-foreground text-pretty">
-        Continuing in {secondsRemaining} {secondsRemaining === 1 ? "second" : "seconds"}…
+        Continuing in {AUTO_CONTINUE_SECONDS} seconds…
       </p>
       <Button onClick={onContinue} type="button">
         Continue now
