@@ -53,8 +53,8 @@ import {
 } from './assistant/delivery-failure.js'
 import {
   LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
+  LINQ_IMESSAGE_APP_CARD_URL,
   buildLinqIMessageAppLayout,
-  encodeAppCardDataUrl,
   type AssistantResponseCard,
   type LinqIMessageAppLayout,
 } from './assistant-response-cards.js'
@@ -696,7 +696,7 @@ export async function sendLinqIMessageAppCard(
           app_store_id: 6786145859,
         },
         interactive: false,
-        url: encodeAppCardDataUrl(input.card),
+        url: LINQ_IMESSAGE_APP_CARD_URL,
         fallback_text: LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
         layout: buildLinqIMessageAppLayout(input.card),
       }],

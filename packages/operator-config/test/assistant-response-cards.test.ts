@@ -1,12 +1,11 @@
-import { Buffer } from 'node:buffer'
 import { describe, expect, it } from 'vitest'
 
 import {
   LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
+  LINQ_IMESSAGE_APP_CARD_URL,
   assistantResponseCardJsonSchema,
   assistantResponseCardSchema,
   buildLinqIMessageAppLayout,
-  encodeAppCardDataUrl,
   renderAssistantResponseCardText,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
@@ -239,19 +238,6 @@ describe('assistant response cards', () => {
     })).toThrow()
   })
 
-  it('round-trips the minified V1 envelope without changing any number', () => {
-    const dataUrl = encodeAppCardDataUrl(COMPLETE_CARD)
-    expect(dataUrl.length).toBeLessThan(4_096)
-    const encoded = dataUrl.replace('data:application/json;base64,', '')
-    const decoded = Buffer.from(encoded, 'base64').toString('utf8')
-
-    expect(decoded).not.toContain('\n')
-    expect(JSON.parse(decoded)).toEqual({
-      schemaVersion: 1,
-      card: COMPLETE_CARD,
-    })
-  })
-
   it('rejects contradictory or complete-looking status for untrusted totals', () => {
     const invalidGoals = [
       {
@@ -306,19 +292,6 @@ describe('assistant response cards', () => {
         },
       })).not.toThrow()
     }
-  })
-
-  it('round-trips the minified V2 envelope with fiber and frozen goal context', () => {
-    const dataUrl = encodeAppCardDataUrl(COMPLETE_CARD_V2)
-    expect(dataUrl.length).toBeLessThan(4_096)
-    const encoded = dataUrl.replace('data:application/json;base64,', '')
-    const decoded = Buffer.from(encoded, 'base64').toString('utf8')
-
-    expect(decoded).not.toContain('\n')
-    expect(JSON.parse(decoded)).toEqual({
-      schemaVersion: 2,
-      card: COMPLETE_CARD_V2,
-    })
   })
 
   it('renders deterministic complete and partial semantic text', () => {
@@ -385,7 +358,7 @@ describe('assistant response cards', () => {
     }).endsWith('Some calorie and macro estimates were partial.')).toBe(true)
   })
 
-  it('keeps the Linq static layout value-free and labels partial totals', () => {
+  it('renders complete and partial totals in the Linq static layout', () => {
     const completeLayout = buildLinqIMessageAppLayout(COMPLETE_CARD)
     const partialLayout = buildLinqIMessageAppLayout({
       ...COMPLETE_CARD_V2,
@@ -401,22 +374,22 @@ describe('assistant response cards', () => {
     expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
       'Open your Murph nutrition summary',
     )
+    expect(LINQ_IMESSAGE_APP_CARD_URL).toBe('https://murph.ai')
+    expect(LINQ_IMESSAGE_APP_CARD_URL.length).toBeLessThanOrEqual(2_048)
+    expect(new URL(LINQ_IMESSAGE_APP_CARD_URL).protocol).toBe('https:')
     expect(completeLayout).toEqual({
-      caption: 'Murph',
-      subcaption: 'Nutrition summary',
-      trailing_caption: 'OPEN',
+      caption: 'Jul 28 · 3 meals',
+      subcaption: '1,490.25 cal · 94.5g protein',
+      trailing_caption: '193.125g carbs · 34.75g fat',
     })
     expect(partialLayout).toEqual({
-      caption: 'Murph',
-      subcaption: 'Nutrition summary',
-      trailing_caption: 'OPEN',
-      trailing_subcaption: 'PARTIAL TOTALS',
+      caption: 'Jul 28 · 4 meals',
+      subcaption: '1,490.25 cal · 94.5g protein',
+      trailing_caption: '193.125g carbs · 34.75g fat',
+      trailing_subcaption: '26.5g fiber · PARTIAL TOTALS',
     })
-    const staticPresentation = JSON.stringify({
-      fallbackText: LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
-      completeLayout,
-      partialLayout,
-    })
-    expect(staticPresentation).not.toMatch(/1490|94|193|34|2026-07-28|today|day|time/iu)
+    expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).not.toMatch(
+      /\d|today|day|time/iu,
+    )
   })
 })
