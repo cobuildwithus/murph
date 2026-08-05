@@ -17,6 +17,8 @@ Updated: 2026-08-04
 - Every authenticated Home load renders canonically pending onboarding and
   suppresses it after canonical completion, independent of query or session
   history. Persona save or explicit persona skip/dismiss records completion.
+- User-initiated device and connected-app completion results finish before
+  pending onboarding becomes the foreground Home dialog.
 - Authenticated companion routes expose pending/completed state and perform
   idempotent completion without accepting a caller-selected member.
 - iOS can render the same contact, persona, voice/tone, and welcome sequence
@@ -93,12 +95,15 @@ Updated: 2026-08-04
 - Optional contact projection may omit only the contact-card step. It cannot
   block the canonical pending/completed state, public catalog, or Health
   continuation.
+- One-shot connection result dialogs take foreground priority over pending
+  onboarding and refresh plain Home on close; no general modal coordinator or
+  second onboarding owner is introduced.
 
 ## Verification
 
 - Completed: focused web Vitest suites, Prisma client generation and schema
   validation, web typecheck and ESLint, the full affected web verification
-  lane (644 files and 8,617 tests passed), focused iOS API/session/UI tests,
+  lane (644 files and 8,621 tests passed), focused iOS API/session/UI tests,
   the full iOS simulator suite, XcodeGen, SwiftFormat lint, visual-proof
   verifier tests, and simulator inspection of all six native states.
 - Completed: the preliminary specialist found three material gaps. The
@@ -112,14 +117,19 @@ Updated: 2026-08-04
   plain Home now reads only the canonical row, all eligibility marker/session
   branches were deleted, and contact projection fails soft to a catalog-only
   pending response.
+- Completed: Web ReviewGPT round two found that one-shot device or connected-app
+  completion results could mount alongside and be obscured by pending
+  onboarding. The result dialog now takes foreground priority and refreshes
+  plain Home on close. The same correction makes optional Web contact
+  resolution fail soft, matching the native contract.
 - Completed: production `/design?tab=sections` onboarding renders at desktop
   and mobile sizes. The required Claude Code UI double-check was attempted and
   stopped at explicit Fable credit exhaustion as the completion workflow
   directs.
 - Completed: refreshed exact-head visual evidence for the truthful skip-saving
   and retry states at desktop and mobile sizes.
-- Remaining: publish the web correction commit, finish green PR workflows and
-  the separate final ReviewGPT gate in both repositories, then close this plan.
+- Remaining: publish the correction commits, finish green PR workflows and the
+  separate final ReviewGPT gate in both repositories, then close this plan.
 - Expected outcomes: every check is clean; screenshots represent each
   materially changed native state; ReviewGPT reports zero blocking findings on
   each exact pushed PR head.

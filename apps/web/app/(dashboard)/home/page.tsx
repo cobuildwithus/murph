@@ -125,9 +125,6 @@ export default async function HomePage({
     initialVisitProjectionResult,
     null,
   );
-  const shouldRenderInitialVisitPersonaPicker =
-    initialVisitProjectionResult.status === "fulfilled"
-    && initialVisitProjection?.state.status === "pending";
   const messagingSetupState = readSettledValue(messagingSetupStateResult, null);
   // Telegram bots cannot open a conversation, so a member can finish signup
   // with a linked account Murph still cannot send to. Keep asking for that
@@ -140,6 +137,10 @@ export default async function HomePage({
   // Each marker uses its own query key, so only one model is non-null per
   // home load in normal use; device-sync wins the tiebreak if both fire.
   const completionDialog = deviceSyncCompletionDialog ?? connectedAppCompletionDialog;
+  const shouldRenderInitialVisitPersonaPicker =
+    completionDialog === null
+    && initialVisitProjectionResult.status === "fulfilled"
+    && initialVisitProjection?.state.status === "pending";
   const usageLimitNotice =
     usageGate && "userNotice" in usageGate && usageGate.userNotice
       ? usageGate.userNotice
@@ -256,10 +257,17 @@ function hasRejectedProjection(
 }
 
 async function resolveHomeInitialVisitContactAction() {
-  return resolveHostedMurphContactOption({
-    message: {
-      body: "Hey Murph, do your thing",
-      subject: "Hey Murph, do your thing",
-    },
-  });
+  try {
+    return await resolveHostedMurphContactOption({
+      message: {
+        body: "Hey Murph, do your thing",
+        subject: "Hey Murph, do your thing",
+      },
+    });
+  } catch {
+    // Contact-card setup is optional. Canonical onboarding must remain usable
+    // when its advisory contact projection is unavailable.
+    console.warn("Home initial onboarding contact projection unavailable.");
+    return null;
+  }
 }

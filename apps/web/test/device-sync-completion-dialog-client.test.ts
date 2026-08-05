@@ -150,6 +150,33 @@ test("DeviceSyncCompletionDialog refreshes an unverified completion once before 
   await remount.cleanup();
 });
 
+test("DeviceSyncCompletionDialog refreshes plain Home after the result closes", async () => {
+  const render = await renderDeviceSyncCompletionDialog(
+    buildCompletionDialogModel(),
+  );
+  await act(async () => {});
+
+  expect(render.replaceState).toHaveBeenCalledWith(
+    {},
+    "",
+    "/home?keep=1#source",
+  );
+  expect(mocks.routerRefresh).not.toHaveBeenCalled();
+  const continueButton = [...render.container.querySelectorAll("button")]
+    .find((button) => button.textContent?.trim() === "Continue exploring");
+  expect(continueButton).not.toBeNull();
+
+  await act(async () => {
+    continueButton?.dispatchEvent(new render.window.Event("click", {
+      bubbles: true,
+    }));
+  });
+
+  expect(render.container.querySelector('[data-dialog="open"]')).toBeNull();
+  expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
+  await render.cleanup();
+});
+
 test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary view", async () => {
   const model = buildCompletionDialogModel({
     contactAction: {

@@ -106,10 +106,13 @@ Last verified: 2026-08-04
   leaves the picker mounted with its unsaved choices, while an unavailable
   best-effort runtime wake does not roll back durable completion. Native
   foreground refresh and every authenticated Home load re-read the canonical
-  fact; query markers and Web-session history do not gate the flow. Optional
-  native contact projection fails soft to no contact-card step while the
-  catalog and Health continuation remain available. No local flag, lease,
-  cleanup worker, or second reconciliation owner exists.
+  fact; query markers and Web-session history do not gate the flow. A
+  user-initiated device or connected-app completion result takes foreground
+  priority on Home, and closing it refreshes plain Home before pending
+  onboarding renders. Optional Web and native contact projection fails soft to
+  no contact-card step while the catalog and Health continuation remain
+  available. No local flag, lease, cleanup worker, or second reconciliation
+  owner exists.
 
 - `packages/assistant-engine` owns one resident Codex App Server process and one
   memoized readiness promise on that process. Readiness covers spawn plus the

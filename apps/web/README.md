@@ -45,6 +45,10 @@ personality picker; members without one start at the personality picker. A
 successful save opens the final Welcome to Murph dialog with the resolved
 messaging action. Skipping or dismissing completes the durable onboarding state,
 and completed members are suppressed on later Web and companion-app loads.
+Optional contact resolution fails soft to the personality picker. A one-shot
+device or connected-app completion result takes foreground priority; closing it
+refreshes plain Home so pending onboarding appears next instead of mounting a
+second dialog.
 
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs a

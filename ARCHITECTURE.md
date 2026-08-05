@@ -1009,10 +1009,13 @@ the current member creator explicitly writes null so new-version members begin
 pending. Remove that compatibility default only in a later deployment after
 the legacy writer can no longer serve. Every authenticated Home load reads the
 canonical fact and renders the flow while it is pending; query markers and Web
-session history are not eligibility owners. The iOS companion reads the same
-fact through the bearer-only companion route. Optional contact projection may
-remove only the contact-card step when unavailable; it cannot block the public
-catalog or the member's continuation to Health. The native
+session history are not eligibility owners. A user-initiated connection result
+temporarily takes foreground priority on Home, then its close refreshes plain
+Home so pending onboarding can render without competing dialogs. The iOS
+companion reads the same fact through the bearer-only companion route. Optional
+contact projection may remove only the contact-card step when unavailable on
+either surface; it cannot block the public catalog or the member's continuation
+to Health. The native
 client receives the closed web-owned persona, voice, tone, and contact-avatar
 catalog and keeps only unsaved presentation state; it has no durable completion
 flag or parallel catalog.

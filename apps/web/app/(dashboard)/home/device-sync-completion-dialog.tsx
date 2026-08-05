@@ -65,6 +65,16 @@ export function DeviceSyncCompletionDialog({
       ? SendIcon
       : MessageCircleIcon;
 
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      // The effect below already removes the one-shot completion marker.
+      // Refresh plain Home so canonical pending onboarding can become the
+      // next foreground surface instead of competing with this result.
+      router.refresh();
+    }
+  }
+
   useEffect(() => {
     if (model.unverified && !hasRetriedUnverifiedCompletionRefresh) {
       hasRetriedUnverifiedCompletionRefresh = true;
@@ -81,13 +91,13 @@ export function DeviceSyncCompletionDialog({
         contactAction={model.contactAction}
         guide={setupGuide}
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={handleOpenChange}
       />
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         data-completion-unverified={model.unverified ? "true" : undefined}
         showCloseButton={false}
@@ -167,7 +177,7 @@ export function DeviceSyncCompletionDialog({
             className="w-full"
             size="xl"
             variant="ghost"
-            onClick={() => setOpen(false)}
+            onClick={() => handleOpenChange(false)}
           >
             Continue exploring
           </Button>
