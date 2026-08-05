@@ -950,6 +950,31 @@ reply. The phase-one rearm and drain gate are required: omitting either one
 strands other receipt-backed message carriers in dormant snapshots beyond
 their deadline.
 
+### Generated-image capture retention rollout
+
+Generated-image retirement reuses the existing retention wake and bounded
+hourly dispatcher. Roll it out in this order:
+
+1. Deploy the generated-image-retention-capable Worker and runner bundle with
+   `container_rollout=immediate`. Prove the deployed runner fingerprint and
+   drain old warm bundles before changing workspace wake state. Prove that new
+   captures checkpoint the earliest exact retention cutoff and that an
+   interrupted tombstone receipt replays from the prior snapshot.
+2. Count persisted snapshots and compare that total with the existing
+   retention-cron capacity of five snapshots per successful hourly run plus an
+   explicit signal-failure allowance. Stop if the queue cannot drain safely in
+   the rollout window; do not add a second dispatcher.
+3. Deploy Web with
+   `20260805010000_rearm_generated_image_capture_retention`. The migration
+   re-arms every persisted snapshot on `inbox_media_retention`, clears the prior
+   signal-attempt marker, advances the workspace CAS version, and leaves
+   checkpoint time unchanged. A runtime that read the previous version must
+   conflict and retry instead of clearing the new wake.
+4. Monitor the existing cron until the due snapshot queue reaches zero. Verify
+   generated-image tombstone checkpoints, deleted lookup replay, blocked-image
+   retry counts, and the absence of retention failures before declaring the
+   rollout complete.
+
 ### Retired WhatsApp configuration
 
 Removing WhatsApp bindings from the deploy workflow does not delete values that
