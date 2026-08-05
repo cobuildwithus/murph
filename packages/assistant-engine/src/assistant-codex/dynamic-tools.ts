@@ -3746,6 +3746,8 @@ export async function executeMurphDynamicToolRequest(input: {
         env: input.env,
         fetchImpl: input.fetchImpl,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+        persistGeneratedImageCapture:
+          input.hostedToolContext?.persistGeneratedImageCapture ?? null,
         providerRequestOrdinal,
         requireHostedPrivateImageDelivery:
           input.requireHostedPrivateImageDelivery ?? false,
@@ -5173,6 +5175,8 @@ async function prepareGroupAvatarRuntimeRequest(input: {
       env: input.env,
       fetchImpl: input.fetchImpl,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      persistGeneratedImageCapture:
+        input.hostedToolContext?.persistGeneratedImageCapture ?? null,
       providerRequestOrdinal: input.nextUsageOrdinal(),
       requireHostedPrivateImageDelivery: true,
       vaultRoot: input.vaultRoot,

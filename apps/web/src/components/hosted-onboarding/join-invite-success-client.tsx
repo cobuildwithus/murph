@@ -10,7 +10,7 @@ import { Button } from "@/src/components/ui/button";
 import { JoinInviteEyebrow } from "./join-invite-eyebrow";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";
-import { HOSTED_APP_INITIAL_VISIT_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
+import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import {
   consumeHostedGroupStartHandoff,
   HOSTED_GROUP_START_PATH,
@@ -363,5 +363,5 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
 function resolveHostedInviteSuccessRedirectPath(): string {
   return consumeHostedGroupStartHandoff()
     ? HOSTED_GROUP_START_PATH
-    : HOSTED_APP_INITIAL_VISIT_HOME_PATH;
+    : HOSTED_APP_HOME_PATH;
 }

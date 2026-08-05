@@ -11,10 +11,7 @@ import {
 } from "react";
 
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
-import {
-  HOSTED_APP_HOME_PATH,
-  HOSTED_APP_INITIAL_VISIT_HOME_PATH,
-} from "@/src/lib/hosted-onboarding/app-routes";
+import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import {
   HOSTED_START_PAID_GROUP_RETURN_PARAM,
   HOSTED_START_PAID_GROUP_RETURN_VALUE,
@@ -94,11 +91,7 @@ export function AuthProvider({
     }
 
     if (isHostedOnboardingAccessibleStage(payload.stage)) {
-      navigateHostedAuthRedirect(
-        payload.initialVisitEligible === true
-          ? HOSTED_APP_INITIAL_VISIT_HOME_PATH
-          : HOSTED_APP_HOME_PATH,
-      );
+      navigateHostedAuthRedirect(HOSTED_APP_HOME_PATH);
       return;
     }
 
@@ -133,6 +126,7 @@ export function AuthProvider({
 function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): boolean {
   return (
     shouldResumeCurrentActionApprovalUrl(payload)
+    || shouldResumeCurrentConnectIndexUrl(payload)
     || shouldResumeCurrentEnvironmentUrl(payload)
     || shouldResumeCurrentDeviceConnectIntentUrl(payload)
     || shouldResumeCurrentClinicalRecordsIndexUrl(payload)
@@ -143,6 +137,16 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
     || shouldResumeCurrentSettingsPlanChangeUrl(payload)
     || shouldResumeCurrentSettingsPulseTrialPaymentUrl(payload)
+  );
+}
+
+function shouldResumeCurrentConnectIndexUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  return (
+    isHostedOnboardingAccessibleStage(payload.stage)
+    && typeof window !== "undefined"
+    && window.location.pathname === "/connect"
   );
 }
 

@@ -6,21 +6,19 @@ import {
   resolveGroupJoinPostJoinDestination,
 } from "@/src/lib/hosted-groups/group-join-handoff";
 
-test("keeps a new accessible member on the group link with an initial-visit handoff", () => {
+test("keeps an accessible member on the group link without onboarding handoff state", () => {
   expect(buildGroupJoinPostAuthReturnPath({
     currentPath: "/groups/join/JOIN123?source=text#sharing",
     payload: {
-      initialVisitEligible: true,
       stage: "active",
     },
-  })).toBe("/groups/join/JOIN123?source=text&postJoin=initial-visit#sharing");
+  })).toBe("/groups/join/JOIN123?source=text#sharing");
 });
 
 test("removes a stale post-join marker for an existing accessible member", () => {
   expect(buildGroupJoinPostAuthReturnPath({
     currentPath: "/groups/join/JOIN123?postJoin=setup&source=text",
     payload: {
-      initialVisitEligible: false,
       stage: "activating",
     },
   })).toBe("/groups/join/JOIN123?source=text");
@@ -39,7 +37,7 @@ test.each(["checkout", "blocked"] as const)(
 test("maps only bounded handoff markers to fixed internal destinations", () => {
   expect(resolveGroupJoinPostJoinDestination(
     readGroupJoinPostAuthHandoff("initial-visit"),
-  )).toBe("/home?initialVisit=true");
+  )).toBe("/home");
   expect(resolveGroupJoinPostJoinDestination(
     readGroupJoinPostAuthHandoff(["setup", "initial-visit"]),
   )).toBe("/join");

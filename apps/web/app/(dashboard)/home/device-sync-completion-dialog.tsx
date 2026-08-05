@@ -65,6 +65,17 @@ export function DeviceSyncCompletionDialog({
       ? SendIcon
       : MessageCircleIcon;
 
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      // An unverified result intentionally keeps the marker for its first
+      // retry. Remove it synchronously before the close refresh too, so that
+      // refresh can only request plain Home and reveal canonical onboarding.
+      stripCompletionQueryParams();
+      router.refresh();
+    }
+  }
+
   useEffect(() => {
     if (model.unverified && !hasRetriedUnverifiedCompletionRefresh) {
       hasRetriedUnverifiedCompletionRefresh = true;
@@ -81,13 +92,13 @@ export function DeviceSyncCompletionDialog({
         contactAction={model.contactAction}
         guide={setupGuide}
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={handleOpenChange}
       />
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         data-completion-unverified={model.unverified ? "true" : undefined}
         showCloseButton={false}
@@ -167,7 +178,7 @@ export function DeviceSyncCompletionDialog({
             className="w-full"
             size="xl"
             variant="ghost"
-            onClick={() => setOpen(false)}
+            onClick={() => handleOpenChange(false)}
           >
             Continue exploring
           </Button>
@@ -180,11 +191,13 @@ export function DeviceSyncCompletionDialog({
 export function DeviceSyncSetupGuideDialog({
   contactAction,
   guide,
+  inert = false,
   onOpenChange,
   open,
 }: {
   contactAction: DeviceSyncCompletionContactAction | null;
   guide: DeviceSyncCompletionSetupGuide;
+  inert?: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
 }) {
@@ -193,6 +206,7 @@ export function DeviceSyncSetupGuideDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        inert={inert || undefined}
         showCloseButton={contactAction === null}
         className="max-h-[calc(100dvh-2rem)] max-w-[calc(100%-2rem)] gap-6 overflow-y-auto rounded-2xl border border-border bg-popover p-6 text-popover-foreground ring-border sm:max-w-md md:p-7"
       >
@@ -214,15 +228,17 @@ export function DeviceSyncSetupGuideDialog({
           </div>
         </DialogHeader>
 
-        <VoiceMemoPlayer
-          src={guide.voiceMemoSrc}
-          bars={24}
-          preload="metadata"
-          containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"
-          accentClassName="bg-primary"
-          fillClassName="bg-primary"
-          trackClassName="bg-primary/20"
-        />
+        {guide.voiceMemoSrc ? (
+          <VoiceMemoPlayer
+            src={guide.voiceMemoSrc}
+            bars={24}
+            preload="metadata"
+            containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"
+            accentClassName="bg-primary"
+            fillClassName="bg-primary"
+            trackClassName="bg-primary/20"
+          />
+        ) : null}
 
         <ol className="flex flex-col gap-4">
           {guide.steps.map((step, index) => (

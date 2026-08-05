@@ -60,9 +60,9 @@ const VENICE_USAGE_DISCLOSURE =
   "Venice’s higher provider rates use included AI capacity faster.";
 
 /**
- * Where new core replies go. Murph-managed providers and the member's own
- * endpoint are one choice because they answer the same question; the managed
- * provider stays remembered while the endpoint is in use.
+ * Where inference runs. Murph-managed providers and the member's own endpoint
+ * are one choice because they answer the same question; the managed provider
+ * stays remembered while the endpoint is in use.
  */
 export const CUSTOM_INFERENCE_ROUTING = "custom";
 
@@ -199,49 +199,46 @@ export function AssistantProviderSummary({
   const currentName = readRoutingName(currentRouting);
   const draftName = readRoutingName(draftRouting);
   const hasPendingChange = currentRouting !== draftRouting;
+  const displayedName = hasPendingChange ? draftName : currentName;
   const endpointDetail =
     draftRouting === CUSTOM_INFERENCE_ROUTING && connection
       ? `${connection.endpointHost} · ${connection.model}`
       : null;
 
   return (
-    <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-1">
-      <p className="text-sm text-muted-foreground">
-        {hasPendingChange ? (
-          <>
-            Core replies switch to{" "}
-            <span className="font-medium text-foreground">{draftName}</span>{" "}
-            after Save.
-          </>
-        ) : (
-          <>
-            New core replies use{" "}
-            <span className="font-medium text-foreground">{currentName}</span>.
-          </>
-        )}
-        {endpointDetail ? (
-          <span className="ml-1.5 font-mono text-xs [overflow-wrap:anywhere]">
-            {endpointDetail}
-          </span>
-        ) : null}
-      </p>
-      <Button
-        aria-label={
-          hasPendingChange
-            ? `Change where core replies go. Core replies will switch to ${draftName} after Save.`
-            : `Change where core replies go. New core replies use ${currentName}.`
-        }
-        className="text-muted-foreground"
-        disabled={disabled}
-        onClick={onChangeClick}
-        size="xs"
-        type="button"
-        variant="ghost"
-      >
-        Change
-      </Button>
+    <div className="w-full px-1" data-slot="assistant-provider-summary">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0 py-1.5">
+          <p className="text-sm font-medium text-foreground">
+            Inference on {displayedName}
+            {hasPendingChange ? (
+              <span className="font-normal text-muted-foreground"> after Save</span>
+            ) : null}
+          </p>
+          {endpointDetail ? (
+            <p className="mt-1 font-mono text-xs/5 text-muted-foreground [overflow-wrap:anywhere]">
+              {endpointDetail}
+            </p>
+          ) : null}
+        </div>
+        <Button
+          aria-label={
+            hasPendingChange
+              ? `Change inference routing. Inference on ${draftName} after Save.`
+              : `Change inference routing. Inference on ${currentName}.`
+          }
+          className="-my-0.5 -mr-2 min-h-10 px-2 text-muted-foreground"
+          disabled={disabled}
+          onClick={onChangeClick}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Change
+        </Button>
+      </div>
       {draftRouting === HOSTED_ASSISTANT_VENICE_PROVIDER ? (
-        <p className="basis-full text-xs/5 text-pretty text-muted-foreground">
+        <p className="mt-2 max-w-2xl text-xs/5 text-pretty text-muted-foreground">
           {VENICE_USAGE_DISCLOSURE}
         </p>
       ) : null}
@@ -322,8 +319,8 @@ export function AssistantProviderDialog({
                   }
                 >
                   {routing === CUSTOM_INFERENCE_ROUTING
-                    ? "Selected for core replies"
-                    : "Use for core replies"}
+                    ? "Selected for inference"
+                    : "Use for inference"}
                 </Button>
               ) : null}
             </div>
@@ -335,11 +332,11 @@ export function AssistantProviderDialog({
                 Choose provider
               </DialogTitle>
               <DialogDescription className="max-w-[38ch] text-sm/6">
-                Murph sends core replies here after you save.
+                Inference runs here after you save.
               </DialogDescription>
             </DialogHeader>
             <RadioGroup
-              aria-label="Core reply provider"
+              aria-label="Inference provider"
               className="gap-2"
               value={routing}
               onValueChange={(value) => {
@@ -406,7 +403,7 @@ export function AssistantProviderDialog({
               ) : null}
             </RadioGroup>
             <p className="px-1 text-xs/5 text-pretty text-muted-foreground">
-              The selected provider handles core replies. Image generation,
+              The selected provider handles inference. Image generation,
               voice, search, and other tools still use their specialized
               providers.
             </p>
@@ -637,9 +634,9 @@ function HostedAssistantModelSettingsForm(
       const savedProvider = managed?.provider ?? currentProvider;
       setSaveAnnouncement(
         enteringCustom
-          ? `Saved. New core replies use your endpoint. ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} stays your managed default.`
+          ? `Saved. Inference on your endpoint. ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} stays your managed default.`
           : (managed?.dormantSolPreference ?? dormantSolPreference)
-          ? `Saved. New core replies use ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} while Edge is paused; Sol remains saved.`
+          ? `Saved. Inference on ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} while Edge is paused; Sol remains saved.`
           : `Saved. ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} is your default.`,
       );
     } catch (error) {

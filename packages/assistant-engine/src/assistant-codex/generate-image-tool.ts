@@ -5,10 +5,14 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import {
-  addCapture,
   addCaptureWithLookup,
+  CAPTURE_LOOKUP_INDEX_PATH,
   deterministicContractId,
   findCaptureByLookup,
+  GENERATED_IMAGE_CAPTURE_PROVENANCE_SCHEMA,
+  GENERATED_IMAGE_CAPTURE_RETENTION_WINDOW_MS,
+  GENERATED_IMAGE_CAPTURE_SOURCE,
+  GENERATED_IMAGE_CAPTURE_TAGS,
   ID_PREFIXES,
   isVaultError,
 } from '@murphai/core'
@@ -20,6 +24,7 @@ import {
 } from '@murphai/operator-config/vault-cli-errors'
 
 import type {
+  AssistantGeneratedImageCapturePersistenceMetadata,
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import { hashAssistantProviderStableJson } from '../assistant/providers/helpers.js'
@@ -73,7 +78,6 @@ type GenerateImageUsageExtractionSourcePath =
 
 const LOCAL_GENERATED_IMAGES_DIR = 'generated_images'
 const MAX_GENERATED_IMAGE_BYTES = 10 * 1024 * 1024
-const GENERATED_IMAGE_CAPTURE_SOURCE = 'murph.generate_image'
 
 interface SavedGeneratedImageCapture {
   captureId: string
@@ -108,7 +112,10 @@ export async function executeGenerateImageTool(input: {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
-  persistGeneratedImageCapture?: (<T>(write: () => Promise<T>) => Promise<T>) | null
+  persistGeneratedImageCapture?: (<T>(
+    write: () => Promise<T>,
+    metadata: AssistantGeneratedImageCapturePersistenceMetadata,
+  ) => Promise<T>) | null
   providerRequestOrdinal: number
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
@@ -131,6 +138,15 @@ export async function executeGenerateImageTool(input: {
       rpcText: 'hosted private image delivery requires the owning vault',
     }
   }
+  if (
+    requireHostedPrivateImageDelivery &&
+    !input.persistGeneratedImageCapture
+  ) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'hosted private image delivery requires generated capture persistence',
+    }
+  }
 
   if (
     referenceImageRefs.length > 0 &&
@@ -144,15 +160,14 @@ export async function executeGenerateImageTool(input: {
   }
 
   const promptHash = hashGeneratedImagePrompt(input.args.prompt)
-  const captureIdentity = vaultRoot
-    ? buildGeneratedImageCaptureIdentity({
-        idempotencyKey: input.captureIdempotencyKey ?? null,
-        outputFormat: input.args.outputFormat,
-      })
-    : null
+  const captureIdentity = buildGeneratedImageCaptureIdentity({
+    idempotencyKey: input.captureIdempotencyKey ?? null,
+    outputFormat: input.args.outputFormat,
+  })
   let existingCapture: ExistingGeneratedImageCapture = { status: 'missing' }
-  if (captureIdentity && vaultRoot) {
+  if (vaultRoot) {
     try {
+      await input.materializeWorkspaceArtifacts?.([CAPTURE_LOOKUP_INDEX_PATH])
       existingCapture = await findExistingGeneratedImageCapture({
         captureIdentity,
         outputFormat: input.args.outputFormat,
@@ -273,20 +288,25 @@ export async function executeGenerateImageTool(input: {
 
     if (vaultRoot) {
       try {
+        const occurredAt = new Date().toISOString()
         const saveCapture = () => saveGeneratedImageCapture({
           args: input.args,
           bytes: generatedImageBytes,
           captureIdentity,
+          occurredAt,
           promptHash,
           referenceImages,
           vaultRoot,
         })
         savedCapture = input.persistGeneratedImageCapture
-          ? await input.persistGeneratedImageCapture(saveCapture)
+          ? await input.persistGeneratedImageCapture(saveCapture, {
+              retentionWakeAt: new Date(
+                Date.parse(occurredAt) + GENERATED_IMAGE_CAPTURE_RETENTION_WINDOW_MS,
+              ).toISOString(),
+            })
           : await saveCapture()
       } catch (error) {
         if (
-          captureIdentity &&
           isVaultError(error) &&
           error.code === 'CAPTURE_LOOKUP_EXISTS'
         ) {
@@ -397,101 +417,60 @@ function hasVaultReferenceImageRef(refs: readonly string[]): boolean {
 async function saveGeneratedImageCapture(input: {
   args: GenerateImageToolArgs
   bytes: Uint8Array
-  captureIdentity: GeneratedImageCaptureIdentity | null
+  captureIdentity: GeneratedImageCaptureIdentity
+  occurredAt: string
   promptHash: string
   referenceImages: readonly ResolvedGenerateImageReference[]
   vaultRoot: string
 }): Promise<SavedGeneratedImageCapture> {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-generated-image-'))
   try {
-    const filename = input.captureIdentity?.filename ??
-      generatedImageFilename(input.args.outputFormat)
+    const filename = input.captureIdentity.filename
     const sourcePath = path.join(tempRoot, filename)
     await writeFile(sourcePath, Buffer.from(input.bytes))
 
-    const occurredAt = new Date().toISOString()
-    const result = input.captureIdentity
-      ? await addCaptureWithLookup({
-          vaultRoot: input.vaultRoot,
-          lookupAttachmentRole: 'media_1',
-          lookupKey: input.captureIdentity.lookupKey,
-          draft: {
-            occurredAt,
-            source: 'derived',
-            tags: ['assistant-generated-image', 'generated-image'],
-            title: 'Generated image',
-            note: 'Assistant-generated image saved for later visual reuse.',
+    const result = await addCaptureWithLookup({
+      vaultRoot: input.vaultRoot,
+      lookupAttachmentRole: 'media_1',
+      lookupKey: input.captureIdentity.lookupKey,
+      draft: {
+        occurredAt: input.occurredAt,
+        source: 'derived',
+        tags: [...GENERATED_IMAGE_CAPTURE_TAGS],
+        title: 'Generated image',
+        note: 'Assistant-generated image saved for later visual reuse.',
+      },
+      attachments: [
+        {
+          kind: 'photo',
+          role: 'media_1',
+          sourcePath,
+          targetName: filename,
+        },
+      ],
+      rawImport: {
+        importId: input.captureIdentity.rawImportId,
+        importedAt: input.occurredAt,
+        importKind: 'capture',
+        source: GENERATED_IMAGE_CAPTURE_SOURCE,
+        provenance: {
+          family: 'capture',
+          generatedImage: {
+            model: OPENAI_IMAGE_GENERATION_MODEL,
+            outputFormat: input.args.outputFormat,
+            promptHash: input.promptHash,
+            quality: input.args.quality,
+            referenceImageCount: input.referenceImages.length,
+            ...(input.referenceImages.length > 0
+              ? { referenceImageSetHash: hashReferenceImageSet(input.referenceImages) }
+              : {}),
+            schema: GENERATED_IMAGE_CAPTURE_PROVENANCE_SCHEMA,
+            size: input.args.size,
           },
-          attachments: [
-            {
-              kind: 'photo',
-              role: 'media_1',
-              sourcePath,
-              targetName: filename,
-            },
-          ],
-          rawImport: {
-            importId: input.captureIdentity.rawImportId,
-            importedAt: occurredAt,
-            importKind: 'capture',
-            source: GENERATED_IMAGE_CAPTURE_SOURCE,
-            provenance: {
-              family: 'capture',
-              generatedImage: {
-                model: OPENAI_IMAGE_GENERATION_MODEL,
-                outputFormat: input.args.outputFormat,
-                promptHash: input.promptHash,
-                quality: input.args.quality,
-                referenceImageCount: input.referenceImages.length,
-                ...(input.referenceImages.length > 0
-                  ? { referenceImageSetHash: hashReferenceImageSet(input.referenceImages) }
-                  : {}),
-                schema: 'murph.generated-image.v1',
-                size: input.args.size,
-              },
-              mediaCount: 1,
-            },
-          },
-        })
-      : await addCapture({
-          vaultRoot: input.vaultRoot,
-          draft: {
-            occurredAt,
-            source: 'derived',
-            tags: ['assistant-generated-image', 'generated-image'],
-            title: 'Generated image',
-            note: 'Assistant-generated image saved for later visual reuse.',
-          },
-          attachments: [
-            {
-              kind: 'photo',
-              role: 'media_1',
-              sourcePath,
-              targetName: filename,
-            },
-          ],
-          rawImport: {
-            importedAt: occurredAt,
-            importKind: 'capture',
-            source: GENERATED_IMAGE_CAPTURE_SOURCE,
-            provenance: {
-              family: 'capture',
-              generatedImage: {
-                model: OPENAI_IMAGE_GENERATION_MODEL,
-                outputFormat: input.args.outputFormat,
-                promptHash: input.promptHash,
-                quality: input.args.quality,
-                referenceImageCount: input.referenceImages.length,
-                ...(input.referenceImages.length > 0
-                  ? { referenceImageSetHash: hashReferenceImageSet(input.referenceImages) }
-                  : {}),
-                schema: 'murph.generated-image.v1',
-                size: input.args.size,
-              },
-              mediaCount: 1,
-            },
-          },
-        })
+          mediaCount: 1,
+        },
+      },
+    })
 
     const imageRef = result.event.attachments?.find((attachment) =>
       attachment.role === 'media_1'
@@ -617,11 +596,9 @@ function generatedImageBytesMatchFormat(
 function buildGeneratedImageCaptureIdentity(input: {
   idempotencyKey: string | null
   outputFormat: OpenAiImageOutputFormat
-}): GeneratedImageCaptureIdentity | null {
-  const idempotencyKey = normalizeNullableString(input.idempotencyKey)
-  if (!idempotencyKey) {
-    return null
-  }
+}): GeneratedImageCaptureIdentity {
+  const idempotencyKey = normalizeNullableString(input.idempotencyKey) ??
+    `retention:${randomUUID()}`
 
   return {
     filename: generatedImageFilename(input.outputFormat, idempotencyKey),

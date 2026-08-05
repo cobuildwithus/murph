@@ -94,6 +94,26 @@ Last verified: 2026-08-04
 
 ## Runtime Expectations
 
+- Initial onboarding has one Postgres completion owner across website and
+  native clients. Existing members are backfilled complete. During the
+  migration-first rolling deploy, a temporary database default also completes
+  inserts from the still-serving legacy writer; the current member creator
+  explicitly writes null for genuine new-flow members. Retire that default in
+  a later migration only after the legacy writer has drained. New-member save
+  or skip locks the member row and records preferences plus completion in one
+  transaction; the first completion wins and later attempts return an
+  idempotent completed projection without preference mutation. A failed write
+  leaves the picker mounted with its unsaved choices, while an unavailable
+  best-effort runtime wake does not roll back durable completion. Native
+  foreground refresh and every authenticated Home load re-read the canonical
+  fact; query markers and Web-session history do not gate the flow. A
+  user-initiated device or connected-app completion result takes foreground
+  priority on Home, and closing it refreshes plain Home before pending
+  onboarding renders. Optional Web and native contact projection fails soft to
+  no contact-card step while the catalog and Health continuation remain
+  available. No local flag, lease, cleanup worker, or second reconciliation
+  owner exists.
+
 - `packages/assistant-engine` owns one resident Codex App Server process and one
   memoized readiness promise on that process. Readiness covers spawn plus the
   App Server initialization handshake; it does not reserve the process for a
@@ -412,7 +432,17 @@ Last verified: 2026-08-04
   the same reply remains alertable. The existing seven-day ingress-trace cleanup
   retires a trace only after both its original ingress and latest activity are
   stale, so a resumed trace survives quiet-hour deferral without making
-  inactive traces unbounded.
+  inactive traces unbounded. Slow completed alerts classify the larger
+  accepted-to-provider-start or provider-start-to-visible-response boundary
+  without guessing across missing or invalid chronology. Unresolved alerts
+  separately count missing terminal evidence and terminal non-replies that
+  still lack durable checkpoint acknowledgement. Checkpoint lifecycle telemetry
+  exposes the bounded exact-item batch count plus whether that selected batch
+  contains the exact conversation frontier, without logging identifiers. The
+  plan/start/failure phases prove only local selection; a finished event
+  separately says whether Web accepted the checkpoint. Only the accepted
+  frontier combination routes an unconsumed row toward downstream Web stamping;
+  the count alone never chooses an owner.
   Outbound paging requires the shared Resend operational-email sender and
   recipients plus a valid IANA operator timezone; it never falls back to
   Linq/iMessage. It suppresses sends from 11 PM through 7 AM local time and
@@ -725,6 +755,7 @@ Last verified: 2026-08-04
   failure.
 - The inbound message-content deadline does not cancel accepted work invisibly. Before local content retirement, the pending-input owner writes the existing terminal suppression evidence for any still-nonterminal input; the next successful idle checkpoint carries that exact mailbox item id until Web stamps the row and advances only the contiguous conversation floor. An unimported expired conversation row is terminalized in place by Web as `policy_non_reply.content_expired`, with payload ciphertext cleared in the same retention statement. Content retirement and checkpoint retries are idempotent, future deadlines share the existing `inbox_media_retention` wake, interrupted bounded passes retry, and an exact preselection sweep prevents a restored overdue input from starting a reply.
 - Transcript rollout is two-phase because ordinary snapshot cleanup deletes settled accepted-turn journals before content retention runs. Phase one deploys the stamping-capable runner with immediate rollout, proves fleet convergence, and then re-arms every persisted snapshot once. That rearm advances the existing workspace CAS version while leaving checkpoint time unchanged: pre-rearm runtime checkpoints conflict instead of clearing the new wake, and ambiguous runtime recovery accepts progress only when both version and checkpoint time advanced. The existing hourly cron signals five snapshots per successful run, and each restored runtime scrubs every receipt-backed carrier while preserving legacy unstamped transcript entries. Before migration, compare the aggregate persisted-snapshot count and failure allowance with that capacity; if the queue cannot drain safely, stop rather than inventing a second dispatcher during the retention release. Record the convergence instant, and do not declare phase one complete until the due queue reaches zero. Phase two may begin only after 14 complete days and phase-one drain completion: a separate migration re-arms the snapshots again, and the runtime may then retire every remaining unstamped user entry without reconstructing receipt state. Do not collapse the interval, infer a receipt from projection time, or add a second receipt index.
+- Assistant-generated image retirement reuses that same `inbox_media_retention` wake and hourly bounded dispatcher. Every hosted private generated-image path uses the workspace runner's existing capture-persistence boundary or fails closed; the generated-image owner materializes the shared lookup before reading it, and each successful capture write merges its exact 14-day cutoff into the same canonical receipt checkpoint, keeping the earliest cutoff even through shutdown. Deploy and prove the retention-capable runner before applying `20260805010000_rearm_generated_image_capture_retention`; the migration advances each persisted workspace CAS version without changing checkpoint time, clears the prior signal-attempt marker, and re-arms dormant snapshots once. The runtime lazily materializes the lookup and due raw artifacts, commits each image/manifest/event/lookup transition through the hosted canonical-write boundary, and lets valid captures progress when another capture is damaged. Guarded replacement receipts carry raw authority and the inspected preimage; restore materializes lazy receipt targets, treats the tombstone as idempotent, and rejects a third byte state. The rollout is incomplete until the existing due queue drains to zero; do not add another scheduler or migration-owned cursor.
 - Scheduled group Assistant Ask stays inside the ordinary scheduled Codex turn:
   start the selected requests, then use ordinary shell waits and exact replay to
   poll every accepted request until it returns completed or unavailable. The
