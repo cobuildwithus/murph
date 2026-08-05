@@ -910,8 +910,8 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 
   Reserved verified-private support escalation requires a two-turn authority
   contract before the existing product-feedback callback: Murph shows the exact
-  de-identified product-only summary, discloses that internal support receives
-  it linked to the member's account, and waits for affirmative approval. A
+  de-identified product-only summary, discloses that it may enter an internal
+  escalation linked to the member's account, and waits for affirmative approval. A
   generic escalation request, group, unverified audience, or unsafe summary
   does not authorize the tool. This runner policy lands and reaches exact
   bundle-fingerprint convergence before a separate Web release may add issue
