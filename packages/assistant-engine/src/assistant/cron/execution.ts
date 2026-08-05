@@ -4,6 +4,7 @@ import {
   archiveAutomationIfActiveUntilElapsed,
   isVaultError,
   setScheduledLogStatus,
+  splitAutomationAvailabilityConflictBlock,
   upsertAutomation,
 } from '@murphai/core'
 import {
@@ -172,6 +173,13 @@ const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
   'murph-managed:weekly-improvement-coach',
   'murph-managed:weekly-health-research-scout',
 ])
+export const ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS = [
+  'Independent automation authority (engine-supplied):',
+  '- This active saved automation is a current user request. Related plans and experiments are context, not cancellation authority.',
+  "- Do not treat a related plan or experiment's completion as cancellation unless the saved instructions explicitly make that state a skip condition.",
+  '- Completion of a broader plan is not proof that this occurrence\'s requested action already happened.',
+  '- You may still skip when the saved instructions authorize that outcome or current evidence proves the requested action already happened.',
+].join('\n')
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
 // OpenAI flex tier (~50% token cost). The Codex provider boundary validates
 // route support and bounds flex execution with a deadline; failures land in the
@@ -551,6 +559,7 @@ export async function executeClaimedAssistantCronJob(
   // release and a spurious failed foreground-yield run.
   const maintenanceJob = assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
   let maintenanceProviderStarted = false
+  let notificationProviderStarted = false
   const foregroundPreemption = createAssistantCronForegroundPreemption({
     jobName: claimedJob.name,
     parentSignal: input.signal,
@@ -891,7 +900,7 @@ export async function executeClaimedAssistantCronJob(
           const recordNotificationDecision = (
             decision: AssistantNotificationResult['decision'] | null | undefined,
           ): void => {
-            if (!decision) {
+            if (!decision || !notificationProviderStarted) {
               return
             }
             notificationDecision = decision.kind === 'skip'
@@ -904,17 +913,15 @@ export async function executeClaimedAssistantCronJob(
             vault: input.vault,
             ...automationTurn,
             executionContext: notificationExecutionContext,
-            // Replay barrier: once the provider was admitted, a yielded
-            // maintenance turn may already have committed memory writes even
-            // if the completed-command event never reached the buffered raw
-            // events, so the occurrence must be consumed, not retried.
-            ...(maintenanceJob
-              ? {
-                  onProviderRequestStarted: () => {
-                    maintenanceProviderStarted = true
-                  },
-                }
-              : {}),
+            // Provider admission distinguishes provider decisions from host
+            // gates. For maintenance it is also the replay barrier: admitted
+            // work may have committed writes before a terminal interruption.
+            onProviderRequestStarted: () => {
+              notificationProviderStarted = true
+              if (maintenanceJob) {
+                maintenanceProviderStarted = true
+              }
+            },
             beforeProviderAcceptedInputs: assertNotificationStillAuthorized,
             beforeDelivery: async (context) => {
               recordNotificationDecision(context?.decision)
@@ -1516,10 +1523,21 @@ function buildAssistantCronExecutionInstructions(
   const supportScope = buildAssistantCronSupportScopeInstructions(job)
   const independentAuthority =
     buildAssistantCronIndependentAutomationAuthorityInstructions(job)
-
-  return [job.job.prompt, retryEvidence, independentAuthority, supportScope]
+  const overlays = [retryEvidence, independentAuthority, supportScope]
     .filter((section): section is string => section !== null)
-    .join('\n\n')
+
+  try {
+    const { base, block } = splitAutomationAvailabilityConflictBlock(
+      job.job.prompt,
+    )
+    return [base, ...overlays, block]
+      .filter((section): section is string => section !== null)
+      .join('\n\n')
+  } catch {
+    // Malformed evidence remains fail-open for delivery. Preserve it exactly
+    // so the notification boundary can strip the untrusted suffix as before.
+    return [job.job.prompt, ...overlays].join('\n\n')
+  }
 }
 
 function buildAssistantCronIndependentAutomationAuthorityInstructions(
@@ -1531,21 +1549,12 @@ function buildAssistantCronIndependentAutomationAuthorityInstructions(
     job.source.status !== 'active' ||
     job.source.supportKind !== null ||
     resolveMurphManagedAutomationOwnerScope(job.source.automationId) !== null ||
-    job.source.tags.some((tag) =>
-      parseAutomationSupportSeriesTag(tag) !== null ||
-      tag.startsWith('murph-managed:')
-    )
+    job.source.tags.some((tag) => parseAutomationSupportSeriesTag(tag) !== null)
   ) {
     return null
   }
 
-  return [
-    'Independent automation authority (engine-supplied):',
-    '- This active saved automation is a current user request. Related plans and experiments are context, not cancellation authority.',
-    "- Do not treat a related plan or experiment's completion as cancellation unless the saved instructions explicitly make that state a skip condition.",
-    '- Completion of a broader plan is not proof that this occurrence\'s requested action already happened.',
-    '- You may still skip when the saved instructions authorize that outcome or current evidence proves the requested action already happened.',
-  ].join('\n')
+  return ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS
 }
 
 function buildAssistantCronSupportScopeInstructions(
