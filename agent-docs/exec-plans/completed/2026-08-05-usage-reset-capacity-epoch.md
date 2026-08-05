@@ -64,7 +64,7 @@ the same upgrade can grant the allowance again.
 
 ## State
 
-Active.
+Completed.
 
 Focused proof is complete on the corrected candidate: hosted Web, Cloudflare,
 assistant-engine, assistant-runtime, and hosted-execution typechecks; 257 Codex
@@ -88,8 +88,14 @@ then found that the first correction spent the existing 32-thread buffer limit
 per turn; the follow-up preserves the original distinct-thread cap while
 allowing every observed turn on a tracked child to remain independently
 billable. The full 257-assertion Codex proof includes a reused turn after all
-32 thread slots are occupied. Final ReviewGPT delta review, exact-head CI,
-corrected-head product revalidation, and plan closure remain.
+32 thread slots are occupied. Final ReviewGPT round 5 passed that delta with no
+findings. Corrected-head product revalidation also returned no findings, and
+the exact merged candidate passed every required GitHub Actions check,
+including complete app verification, build/typecheck, both CLI platforms, all
+package coverage shards, viewport proof, frontend design proof, fixture
+coverage, runner sandboxing, and tracked-artifact hygiene. No unresolved review
+threads remain.
 
-Status: active
+Status: completed
 Updated: 2026-08-05
+Completed: 2026-08-05
