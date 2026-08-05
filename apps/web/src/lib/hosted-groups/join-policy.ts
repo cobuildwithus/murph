@@ -144,7 +144,8 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   },
   "deep-sleep-sources-days.v1": {
     label: "Deep sleep by source",
-    description: "Shares your last 7 days of deep sleep minutes.",
+    description:
+      "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
   },
   "rem-sleep-days.v0": {
     label: "REM sleep",
@@ -152,7 +153,8 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   },
   "rem-sleep-sources-days.v1": {
     label: "REM sleep by source",
-    description: "Shares your last 7 days of REM sleep minutes.",
+    description:
+      "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
   },
   "steps-days.v0": {
     label: "Steps",
