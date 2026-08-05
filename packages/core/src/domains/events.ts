@@ -65,6 +65,9 @@ export {
   GENERATED_IMAGE_CAPTURE_TAGS,
   runGeneratedImageCaptureRetention,
 } from "./events/generated-image-capture-retention.ts";
+export {
+  CAPTURE_LOOKUP_INDEX_PATH,
+} from "./events/capture-lookup.ts";
 export type {
   DeleteEventInput,
   DeleteEventResult,

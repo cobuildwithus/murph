@@ -35,6 +35,7 @@ import {
   notifyAssistantActiveTurnInputAvailableForInputIds,
   readAssistantInputEvent,
   resolveAssistantContextSnapshotPath,
+  type AssistantGeneratedImageCapturePersistence,
   type AssistantInputEventRecord,
   warnAssistantBestEffortFailure,
 } from "@murphai/assistant-engine";
@@ -237,6 +238,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   now?: () => string;
   platform: HostedRuntimePlatform;
+  persistGeneratedImageCapture?: AssistantGeneratedImageCapturePersistence | null;
   prepareAutoReplyDelivery?: (() => Promise<void>) | null;
   recordDeferredUsage?: ((
     record: AssistantUsageRecord,
@@ -615,11 +617,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       readDurableRedactedStatus(),
       runtimeRedactedStatus,
     );
-  const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
+  const createAssistantCanonicalWritePort = (
+    generatedImageRetentionWakeAt?: string | null,
+  ): HostedCanonicalWritePort => createHostedWorkspaceCanonicalWritePort({
     onAssistantAutomationScheduleChanged: () => {
       assistantAutomationScheduleChanged = true;
     },
     checkpointRequestBuilder: checkpointRequestSession,
+    generatedImageRetentionWakeAt: generatedImageRetentionWakeAt ?? null,
     input,
     onAssistantContextSnapshotDirty: () => {
       assistantContextSnapshotDirty = true;
@@ -627,6 +632,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     readPreviousRedactedStatus: readCurrentRedactedStatus,
     recordRedactedStatus: mergeRuntimeRedactedStatus,
   });
+  const hostedCanonicalWritePort = createAssistantCanonicalWritePort();
   const hostedCanonicalMailboxWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
     deferRuntimeStatusCheckpoint: true,
@@ -1022,6 +1028,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       vaultRoot: input.vaultRoot,
     });
   };
+  const persistGeneratedImageCapture: AssistantGeneratedImageCapturePersistence =
+    async (write, metadata) =>
+      await withHostedCanonicalWritePort(
+        createAssistantCanonicalWritePort(metadata.retentionWakeAt),
+        write,
+      );
   const assistantPhaseInput = {
     assistantAutomationScheduleChanged: () => assistantAutomationScheduleChanged,
     backgroundMaintenanceSignal: backgroundMaintenanceAbortController.signal,
@@ -1035,6 +1047,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
     platform: input.platform,
+    persistGeneratedImageCapture,
     prepareAutoReplyDelivery: async () => {
       await stopForegroundMailboxImportLoop();
       if (!foregroundConversationWorkObserved && !input.signal?.aborted) {
@@ -2528,9 +2541,39 @@ function isDeferredHostedMailboxImportDirty(
   return result.checkpointDeferred && result.stateChanged;
 }
 
+function mergeGeneratedImageRetentionWakeIntoWorkspace(input: {
+  retentionWakeAt: string | null;
+  workspace: HostedWorkspaceState | null;
+}): HostedWorkspaceState | null {
+  if (input.retentionWakeAt === null) {
+    return input.workspace;
+  }
+  if (input.workspace === null) {
+    throw new TypeError(
+      "Generated-image persistence requires a hosted workspace checkpoint.",
+    );
+  }
+  const candidateMs = Date.parse(input.retentionWakeAt);
+  if (!Number.isFinite(candidateMs)) {
+    throw new TypeError("Generated-image retention wake must be a valid timestamp.");
+  }
+  const currentWakeAt = input.workspace.inboxMediaRetentionWakeAt ?? null;
+  if (
+    currentWakeAt !== null
+    && Date.parse(currentWakeAt) <= candidateMs
+  ) {
+    return input.workspace;
+  }
+  return {
+    ...input.workspace,
+    inboxMediaRetentionWakeAt: input.retentionWakeAt,
+  };
+}
+
 function createHostedWorkspaceCanonicalWritePort(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   deferRuntimeStatusCheckpoint?: boolean;
+  generatedImageRetentionWakeAt?: string | null;
   input: HostedWorkspaceRunnerInput;
   onAssistantAutomationScheduleChanged?: (() => void) | null;
   onAssistantContextSnapshotDirty?: (() => void) | null;
@@ -2593,7 +2636,12 @@ function createHostedWorkspaceCanonicalWritePort(input: {
               : {}),
             reason: "canonical_runtime_commit",
             redactedStatus: checkpointRedactedStatus,
-            workspace: input.checkpointRequestBuilder.latestWorkspace() ?? input.input.workspace,
+            workspace: mergeGeneratedImageRetentionWakeIntoWorkspace({
+              retentionWakeAt: input.generatedImageRetentionWakeAt ?? null,
+              workspace:
+                input.checkpointRequestBuilder.latestWorkspace()
+                ?? input.input.workspace,
+            }),
           });
           input.checkpointRequestBuilder.recordStatusCheckpoint(checkpoint);
           input.recordRedactedStatus(receiptLogStatus);

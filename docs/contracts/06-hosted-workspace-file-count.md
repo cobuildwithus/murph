@@ -220,6 +220,10 @@ landing; record the chosen posture here so the decision is reviewable.
   capture or was later deleted. Every generated-image vault write adds at most
   one small map entry: an available tool-call identity remains stable for
   replay, while a write without one receives a unique retention-only identity.
+  The generated-image owner materializes this shared file before every lookup
+  read; hosted private generation requires the workspace runner's existing
+  persistence boundary, so a lazy legacy index cannot be replaced as empty and
+  the capture cannot commit without its deadline checkpoint.
   Retries of a stable identity update no file count and either reuse the saved
   capture or return the deleted outcome.
   The index is one file per workspace, not one sidecar per image. Lookup-backed

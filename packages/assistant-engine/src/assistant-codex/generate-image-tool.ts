@@ -6,6 +6,7 @@ import path from 'node:path'
 
 import {
   addCaptureWithLookup,
+  CAPTURE_LOOKUP_INDEX_PATH,
   deterministicContractId,
   findCaptureByLookup,
   GENERATED_IMAGE_CAPTURE_PROVENANCE_SCHEMA,
@@ -137,6 +138,15 @@ export async function executeGenerateImageTool(input: {
       rpcText: 'hosted private image delivery requires the owning vault',
     }
   }
+  if (
+    requireHostedPrivateImageDelivery &&
+    !input.persistGeneratedImageCapture
+  ) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'hosted private image delivery requires generated capture persistence',
+    }
+  }
 
   if (
     referenceImageRefs.length > 0 &&
@@ -157,6 +167,7 @@ export async function executeGenerateImageTool(input: {
   let existingCapture: ExistingGeneratedImageCapture = { status: 'missing' }
   if (vaultRoot) {
     try {
+      await input.materializeWorkspaceArtifacts?.([CAPTURE_LOOKUP_INDEX_PATH])
       existingCapture = await findExistingGeneratedImageCapture({
         captureIdentity,
         outputFormat: input.args.outputFormat,

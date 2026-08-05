@@ -41,6 +41,7 @@ export type {
   AssistantGroupParticipantDisplayName,
   AssistantGroupParticipantDisplayNameSource,
   AssistantGeneratedImageCapturePersistenceMetadata,
+  AssistantGeneratedImageCapturePersistence,
   AssistantHostedGroupParticipantDisplayNameReader,
   AssistantHostedGroupPermissionOfferRequest,
   AssistantHostedGroupPermissionOfferTool,

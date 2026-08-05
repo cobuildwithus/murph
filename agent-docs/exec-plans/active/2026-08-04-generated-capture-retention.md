@@ -96,10 +96,37 @@ Updated: 2026-08-04
   the original bytes, and rejects a third state. Legacy lazy snapshots
   materialize receipt targets before checking that preimage.
 
+## Review anomaly retrospective
+
+- Trigger: final ReviewGPT correction round 2 repeated the lookup-visibility and
+  exact-wake ownership mechanisms, and the next substantive run is round 3.
+- Original requirement: retire every assistant-generated payload after 14 days
+  without member activity, preserve deleted retry identity across restore, and
+  leave durable user captures untouched using existing owners.
+- Shape movement: the first-reviewed head contained 843 added and 184 deleted
+  source lines. Before this retrospective, the corrected patch contains 1,204
+  added and 314 deleted source lines. Review-driven work added universal lookup
+  enrollment, per-capture isolation, exact wake metadata, guarded receipt
+  replay, lazy materialization, and rollout re-arm; the repeated defects came
+  from leaving lookup preparation and wake persistence optional at call sites.
+- Decision: continue this indivisible PR, but collapse both responsibilities
+  into the existing generated-image/hosted canonical-write path. The generated
+  image owner must materialize the one shared lookup before any lookup read and
+  fail closed when hosted private delivery lacks the existing persistence
+  callback. The hosted workspace runner must supply that callback to every
+  synchronous and group path and checkpoint the exact cutoff through a
+  deadline-specific instance of its existing canonical-write port. Detached
+  generation continues through its existing controller boundary.
+- Alternatives rejected: reverting universal lookup enrollment leaves
+  supported group-generated images outside retention; splitting would ship the
+  same privacy gap; a new index, scheduler, queue, cursor, manager, or repair
+  pass duplicates existing owners. Continuation adds no persisted state owner
+  and requires production-shaped cold-restore/group and interruption proofs.
+
 ## Verification
 
 - Passed locally: core, assistant-engine, assistant-runtime, and hosted-Web
-  typechecks; 48 focused core tests; 94 image-generation/group-tool tests; the
+  typechecks; 48 focused core tests; 95 image-generation/group-tool tests; the
   complete 2,039-test assistant-runtime suite (2,036 passed, 3 skipped); 10
   static Web migration tests; the local PostgreSQL re-arm proof;
   workspace-boundary verification; documentation drift; and diff hygiene.

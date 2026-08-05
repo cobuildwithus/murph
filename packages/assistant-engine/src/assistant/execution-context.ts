@@ -391,6 +391,11 @@ export interface AssistantGeneratedImageCapturePersistenceMetadata {
   retentionWakeAt: string
 }
 
+export type AssistantGeneratedImageCapturePersistence = <T>(
+  write: () => Promise<T>,
+  metadata: AssistantGeneratedImageCapturePersistenceMetadata,
+) => Promise<T>
+
 export interface AssistantHostedImageGenerationLauncher {
   launch(input: {
     operationId: string
@@ -458,6 +463,7 @@ export interface AssistantHostedExecutionContext {
   dynamicContextPrompts?: readonly string[] | null
   imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  persistGeneratedImageCapture?: AssistantGeneratedImageCapturePersistence | null
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
   productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null

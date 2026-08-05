@@ -31144,8 +31144,10 @@ describe("hosted runtime shutdown signal", () => {
     let assistantPhaseCalls = 0;
     let canonicalCheckpointCount = 0;
     let originInputId: string | null = null;
+    const synchronousRecordedAt = "2026-04-27T02:00:00.000Z";
     const firstRecordedAt = "2026-04-27T01:00:00.000Z";
     const secondRecordedAt = TEST_NOW;
+    const synchronousWakeAt = "2026-05-11T02:00:00.000Z";
     const firstWakeAt = "2026-05-11T01:00:00.000Z";
     const secondWakeAt = "2026-05-11T00:00:00.000Z";
     const mailboxItems = [createMailboxItem({
@@ -31291,6 +31293,13 @@ describe("hosted runtime shutdown signal", () => {
               inputId: originInputId,
               vaultRoot,
             });
+            assert.ok(input.persistGeneratedImageCapture);
+            await persistCapture({
+              lookupKey: "generated:retention-wake-synchronous-group",
+              persistCanonicalWrite: input.persistGeneratedImageCapture,
+              recordedAt: synchronousRecordedAt,
+              retentionWakeAt: synchronousWakeAt,
+            });
             assert.equal(input.imageGenerationLauncher?.launch({
               operationId: "image_operation_retention_wake_later",
               originAssistantInputId: originInputId,
@@ -31349,7 +31358,7 @@ describe("hosted runtime shutdown signal", () => {
         .map((request) => request.inboxMediaRetentionWakeAt);
       assert.deepEqual(
         canonicalWakes,
-        [firstWakeAt, secondWakeAt],
+        [synchronousWakeAt, firstWakeAt, secondWakeAt],
         JSON.stringify({ checkpointRequests, events }, null, 2),
       );
       const idleCheckpoint = checkpointRequests.at(-1);
