@@ -690,6 +690,32 @@ Last verified: 2026-08-05
   production secret and make arbitrary network calls can exfiltrate it without
   Crabbox.
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
+- The public automated live Junction wearable canary uses only sandbox Junction
+  authority and a dedicated WHOOP test account. Keep those four credentials
+  exclusively in the `junction-wearable-canary` GitHub Environment, restrict it to
+  protected `main`, and never duplicate them as repository secrets. The
+  `JUNCTION_CLIENT_USER_ID_SECRET` is Murph-owned rather than Junction-issued:
+  generate it once with a cryptographically secure random source, keep it
+  stable, and treat rotation as an identity remap that requires deliberate
+  cleanup of the prior derived Junction users.
+  The workflow may run only after a push to protected `main` or by manual dispatch
+  from protected `main`, with read-only repository permission and one
+  non-canceling concurrency slot.
+  Credential references belong only on the final hosted-local execution step;
+  checkout, dependency installation, bundle assembly, browser installation,
+  logs, and artifacts receive none. The canary must remain Junction-sandbox
+  only, upload no screenshots, traces, videos, provider pages, or hosted-local
+  state, pass only one provider login to the browser at a time, and perform
+  bounded provider-specific deregistration before and after each proof.
+  Oura web authentication requires a fresh emailed one-time code, so its live
+  Junction browser proof is operator-run and headful rather than an unattended
+  GitHub canary. It accepts the dedicated Oura account email only, waits for
+  manual code entry without persisting the code or a password, and retains the
+  same credential partitioning, artifact prohibition, and cleanup boundaries.
+  Retain the retired `MURPH_E2E_OURA_PASSWORD` name only in scrub lists so a
+  stale operator-shell export cannot reach preparation, runtimes, or Chromium.
+  Because a newly added workflow is not yet a protected trust root, its first
+  credentialed proof occurs only after that exact workflow lands on `main`.
 - Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.
 - The same protected-main Cloudflare workflow may attach the GitHub `Preview`
   Environment only for the explicit `preview` target. That environment must
