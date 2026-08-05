@@ -18,16 +18,58 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Merge current main and remove this transport
+      - name: Merge current main and resolve the migration inventory
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
-          if ! git merge --no-commit --no-ff origin/main; then
-            echo "Conflicting files:"
-            git diff --name-only --diff-filter=U
+
+          set +e
+          git merge --no-commit --no-ff origin/main
+          merge_status=$?
+          set -e
+
+          if [ "$merge_status" -ne 0 ]; then
+            expected_conflict="apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts"
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            if [ "$conflicts" != "$expected_conflict" ]; then
+              echo "Unexpected conflicts:"
+              printf '%s\n' "$conflicts"
+              exit 1
+            fi
+
+            # Main owns the canonical migration inventory. Keep its current list,
+            # then add only this PR's migration before the lock-file sentinel.
+            git checkout --theirs "$expected_conflict"
+            python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path(
+              "apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts"
+          )
+          text = path.read_text()
+          entry = '      "20260804223000_hosted_signup_referral_attribution",\n'
+          sentinel = '      "migration_lock.toml",\n'
+
+          if entry not in text:
+              if text.count(sentinel) != 1:
+                  raise SystemExit("migration inventory sentinel did not match exactly once")
+              text = text.replace(sentinel, entry + sentinel, 1)
+          elif text.count(entry) != 1:
+              raise SystemExit("signup referral migration inventory entry is duplicated")
+
+          path.write_text(text)
+          PY
+            git add "$expected_conflict"
+          fi
+
+          remaining_conflicts="$(git diff --name-only --diff-filter=U)"
+          if [ -n "$remaining_conflicts" ]; then
+            echo "Unresolved conflicts:"
+            printf '%s\n' "$remaining_conflicts"
             exit 1
           fi
+
           rm .github/workflows/refresh-signup-referral-pr.yml
           git add -A
           git diff --cached --check
