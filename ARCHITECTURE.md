@@ -45,6 +45,11 @@ sharing state or persist a copy in the workspace. Private self-leave atomically
 removes the non-owner membership and its shares under Web ownership. It does
 not append a runtime cleanup wake. Other permission mutations remain on the
 authenticated group join page or route-bound group-chat offer flow.
+After an authenticated group join or sharing save, the page reuses the
+dashboard auth owner's first-checkout decision: a member who still requires
+checkout continues directly to `/join`, while an accessible member retains the
+existing chat-channel or Home return. The group feature adds no onboarding or
+billing state owner.
 
 `murph.group action="read_shared"` is the only hosted assistant path for group
 standings, shared facts, and diagnostics. Its runtime adapter is synchronous and
@@ -210,7 +215,12 @@ bounded encrypted snapshots owned by those share rows, and returns every member
 with every requested scope as `not_granted`, `granted` plus `missing`, or
 `available`. A current exact-scope grant also returns its canonical activation
 time as bounded authorization metadata; it is not causal consent proof. The
-challenge page may treat that grant as best-effort social entry only when the
+grant metadata and snapshot reads stay separate: an unsuspended member with
+current health-data consent retains `granted` metadata while product access is
+inactive, but Web does not select or decrypt that member's ciphertext and
+returns `missing`. Suspension or health-data withdrawal still removes the grant
+from this disclosure result. The challenge page may treat that grant as
+best-effort social entry only when the
 same participant/scope was recorded `not_granted`, the access tool returned an
 eligible provider creation second inside the current native send attempt, the
 grant activated within 24 hours after it, and the finalized metric, window,

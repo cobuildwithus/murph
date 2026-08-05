@@ -33,6 +33,7 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 const GROUP_JOIN_RETURN_LABEL = "Back to Murph";
+const GROUP_JOIN_SETUP_LABEL = "Finish setting up Murph";
 
 export interface GroupJoinPermissionDisplay {
   description: string;
@@ -126,6 +127,7 @@ export function GroupJoinAcceptForm(props: {
   postJoinContactOption: MurphContactOption | null;
   postJoinDestination: GroupJoinPostJoinDestination;
 }) {
+  const router = useRouter();
   const initialSelectedScopeKeys = useMemo(
     () =>
       props.alreadyActiveMember
@@ -183,7 +185,6 @@ export function GroupJoinAcceptForm(props: {
         },
         url: `/api/groups/join/${encodeURIComponent(props.joinCode)}/accept`,
       });
-      setStatus("joined");
     } catch (error) {
       setStatus("idle");
       if (
@@ -195,10 +196,19 @@ export function GroupJoinAcceptForm(props: {
         return;
       }
       setErrorMessage(toErrorMessage(error, "Could not join this group right now."));
+      return;
+    }
+
+    setStatus("joined");
+    if (props.postJoinDestination === "/join") {
+      router.replace(props.postJoinDestination);
     }
   }
 
   if (status === "joined") {
+    const returnLabel = props.postJoinDestination === "/join"
+      ? GROUP_JOIN_SETUP_LABEL
+      : GROUP_JOIN_RETURN_LABEL;
     return (
       <div className="flex flex-col items-center gap-4 text-center">
         <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -209,11 +219,11 @@ export function GroupJoinAcceptForm(props: {
         </p>
         {props.postJoinContactOption ? (
           <MurphContactLink
-            actionLabel={GROUP_JOIN_RETURN_LABEL}
+            actionLabel={returnLabel}
             className={buttonVariants({ className: "w-full", size: "xl" })}
             option={props.postJoinContactOption}
           >
-            {GROUP_JOIN_RETURN_LABEL}
+            {returnLabel}
           </MurphContactLink>
         ) : (
           <Button
@@ -222,7 +232,7 @@ export function GroupJoinAcceptForm(props: {
             size="xl"
             className="w-full"
           >
-            {GROUP_JOIN_RETURN_LABEL}
+            {returnLabel}
           </Button>
         )}
       </div>

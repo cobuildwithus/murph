@@ -5,6 +5,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedDashboardCheckoutRequired: vi.fn(),
   readHostedConsentStatus: vi.fn(),
   readHostedGroupJoinView: vi.fn(),
   readHostedInitialOnboardingState: vi.fn(),
@@ -82,6 +83,7 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+  readHostedDashboardCheckoutRequired: mocks.readHostedDashboardCheckoutRequired,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/initial-onboarding", () => ({
@@ -99,6 +101,7 @@ beforeEach(() => {
     authenticated: false,
     authenticatedMember: null,
   });
+  mocks.readHostedDashboardCheckoutRequired.mockResolvedValue(false);
   mocks.readHostedInitialOnboardingState.mockResolvedValue({
     preferences: { persona: "classic", tone: "formal", voice: "murph" },
     status: "completed",
@@ -234,6 +237,24 @@ test.each([
     expect(markup).toContain("Not now");
   },
 );
+
+test("routes an authenticated first-checkout member into setup after the group save", async () => {
+  const auth = {
+    authenticated: true,
+    authenticatedMember: { id: "member_123" },
+  };
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce(auth);
+  mocks.readHostedDashboardCheckoutRequired.mockResolvedValueOnce(true);
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+    launchGranted: true,
+  }));
+
+  const markup = await renderGroupJoinPage("JOIN123");
+
+  expect(mocks.readHostedDashboardCheckoutRequired).toHaveBeenCalledWith(auth);
+  expect(markup).toContain('data-post-join-destination="/join"');
+  expect(markup).toContain('href="/join"');
+});
 
 test("ignores the obsolete initial-visit marker on the legal consent decline exit", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({

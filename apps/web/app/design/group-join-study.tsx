@@ -189,6 +189,25 @@ export function GroupJoinStudy() {
       </GroupJoinVariant>
 
       <GroupJoinVariant
+        caption="A first-checkout member keeps the same explicit sharing choice. After a successful save, Murph continues into the existing account setup route; the success action remains a direct fallback."
+        title="New invitee · setup recovery"
+      >
+        <GroupJoinPageMock alreadyActiveMember={false}>
+          <GroupJoinAcceptForm
+            activeVaultShareProjectionScopes={[]}
+            alreadyActiveMember={false}
+            expectedMembershipId={null}
+            groupName={DESIGN_GROUP_NAME}
+            joinCode={DESIGN_JOIN_CODE}
+            permissions={DESIGN_SLEEP_SOURCE_PERMISSIONS}
+            postJoinContactOption={null}
+            postJoinDestination="/join"
+          />
+          <GroupJoinHomeLink label="Not now" />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
         caption="The phone-bound invite belongs to a different account than the current browser session. The unsafe join stays blocked, and one existing sign-out action preserves this group link for phone verification."
         title="Different account · recovery"
       >
