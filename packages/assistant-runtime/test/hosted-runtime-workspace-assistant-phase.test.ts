@@ -2860,10 +2860,24 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("checkpoints hosted managed automation changes before continuing assistant work", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
-      created: 1,
-      skipped: 0,
-      updated: 0,
+    mocks.applyMurphManagedAutomations.mockImplementationOnce(async (input) => {
+      input.onOnboardingFollowupDiagnostic?.({
+        action: "migrated_three_day_window",
+        activeUntil: "2026-04-30T15:00:00.000Z",
+        firstOccurrenceAt: "2026-04-28T13:30:00.000Z",
+        onboardingStateCreatedAt: null,
+        onboardingStateSource: "default_missing",
+        onboardingStateStatus: "open",
+        onboardingStateUpdatedAt: null,
+        opportunityDays: 3,
+        previousScheduleKind: "at",
+        scheduleKind: "dailyLocal",
+      });
+      return {
+        created: 1,
+        skipped: 0,
+        updated: 0,
+      };
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -2876,6 +2890,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledWith({
       now: new Date("2026-04-27T00:00:00.000Z"),
       onDiagnosticStage: expect.any(Function),
+      onOnboardingFollowupDiagnostic: expect.any(Function),
       operatorHomeRoot: "/tmp/murph-hosted-operator-home",
       routeValidationProfile: "hosted",
       runtimeEnv: {},
@@ -2892,6 +2907,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         murphManagedAutomationUpdated: 0,
       }),
     }));
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "assistant.onboarding_followup_reconciled",
+        level: "info",
+        redactedJson: {
+          onboardingFollowupAction: "migrated_three_day_window",
+          onboardingFollowupActiveUntil: "2026-04-30T15:00:00.000Z",
+          onboardingFollowupFirstOccurrenceAt: "2026-04-28T13:30:00.000Z",
+          onboardingFollowupOpportunityDays: 3,
+          onboardingFollowupPreviousScheduleKind: "at",
+          onboardingFollowupScheduleKind: "dailyLocal",
+          onboardingStateCreatedAt: null,
+          onboardingStateSource: "default_missing",
+          onboardingStateStatus: "open",
+          onboardingStateUpdatedAt: null,
+        },
+      }),
+    );
     expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
       expect.objectContaining({
         component: "runtime",
@@ -3692,6 +3726,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       defaultRoute,
       now: new Date("2026-04-27T00:00:00.000Z"),
       onDiagnosticStage: expect.any(Function),
+      onOnboardingFollowupDiagnostic: expect.any(Function),
       operatorHomeRoot: "/tmp/murph-operator-home",
       routeValidationProfile: "hosted",
       runtimeEnv: {},

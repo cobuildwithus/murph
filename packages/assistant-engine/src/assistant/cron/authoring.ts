@@ -68,6 +68,7 @@ export interface AddAssistantCronJobInput
 
 export interface UpsertAssistantCronAutomationInput {
   activeUntil?: string | null
+  firstOccurrenceActiveDayCount?: number
   firstOccurrenceActiveUntilLocalTime?: string
   firstOccurrencePolicy?:
     | 'after-current-local-day'
@@ -246,13 +247,14 @@ export async function upsertAssistantCronAutomation(
           : resolvedCreation.schedule
     const activeUntil =
       input.activeUntil === undefined &&
-      materializeOneShot &&
+      input.firstOccurrencePolicy !== undefined &&
       input.firstOccurrenceActiveUntilLocalTime !== undefined
-        ? existingAutomation?.schedule.kind === 'at' &&
-          typeof existingAutomation.activeUntil === 'string'
+        ? typeof existingAutomation?.activeUntil === 'string'
           ? existingAutomation.activeUntil
           : resolveFirstOccurrenceActiveUntil({
+              activeDayCount: input.firstOccurrenceActiveDayCount ?? 1,
               activeUntilLocalTime: input.firstOccurrenceActiveUntilLocalTime,
+              now: resolvedCreation.now,
               occurrenceSchedule: schedule,
               resolvedSchedule: resolvedCreation.resolvedSchedule,
             })
@@ -418,7 +420,9 @@ function resolveFirstOccurrenceAfterCurrentLocalDay(input: {
 }
 
 function resolveFirstOccurrenceActiveUntil(input: {
+  activeDayCount: number
   activeUntilLocalTime: string
+  now: Date
   occurrenceSchedule: AssistantCronSchedule
   resolvedSchedule:
     | AssistantCronSchedule
@@ -426,42 +430,85 @@ function resolveFirstOccurrenceActiveUntil(input: {
     | ({ kind: 'dailyLocal'; localTime: string; timeZone: string })
 }): string {
   if (
-    input.occurrenceSchedule.kind !== 'at' ||
     input.resolvedSchedule.kind !== 'dailyLocal' ||
     !('timeZone' in input.resolvedSchedule)
   ) {
     throw new VaultCliError(
       'ASSISTANT_CRON_INVALID_SCHEDULE',
-      'A one-shot local cutoff requires a materialized daily-local occurrence.',
+      'A finite local cutoff requires a daily-local occurrence.',
+    )
+  }
+  if (
+    !Number.isSafeInteger(input.activeDayCount) ||
+    input.activeDayCount <= 0
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'A finite local cutoff requires at least one active local day.',
+    )
+  }
+  const firstOccurrenceAt =
+    input.occurrenceSchedule.kind === 'at'
+      ? input.occurrenceSchedule.at
+      : resolveFirstOccurrenceAfterCurrentLocalDay({
+          now: input.now,
+          schedule: input.resolvedSchedule,
+        })
+  const cutoffSchedule = {
+    kind: 'dailyLocal' as const,
+    localTime: input.activeUntilLocalTime,
+    timeZone: input.resolvedSchedule.timeZone,
+  }
+  let activeUntilAnchor = firstOccurrenceAt
+  let activeUntil: string | null = null
+  for (let day = 0; day < input.activeDayCount; day += 1) {
+    activeUntil = computeAssistantCronNextRunAt(
+      cutoffSchedule,
+      new Date(activeUntilAnchor),
+    )
+    if (!activeUntil) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_INVALID_SCHEDULE',
+        'The finite local cutoff does not produce a future boundary.',
+      )
+    }
+    activeUntilAnchor = activeUntil
+  }
+  if (activeUntil === null) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'The finite local cutoff requires at least one active day.',
     )
   }
 
-  const activeUntil = computeAssistantCronNextRunAt(
-    {
-      kind: 'dailyLocal',
-      localTime: input.activeUntilLocalTime,
-      timeZone: input.resolvedSchedule.timeZone,
-    },
-    new Date(input.occurrenceSchedule.at),
-  )
-  if (!activeUntil) {
-    throw new VaultCliError(
-      'ASSISTANT_CRON_INVALID_SCHEDULE',
-      'The one-shot local cutoff does not produce a future boundary.',
-    )
-  }
   const occurrenceDay = formatTimeZoneDateTimeParts(
-    input.occurrenceSchedule.at,
+    firstOccurrenceAt,
     input.resolvedSchedule.timeZone,
   ).dayKey
-  const cutoffDay = formatTimeZoneDateTimeParts(
+  const firstCutoff = computeAssistantCronNextRunAt(
+    cutoffSchedule,
+    new Date(firstOccurrenceAt),
+  )
+  const firstCutoffDay = firstCutoff
+    ? formatTimeZoneDateTimeParts(
+        firstCutoff,
+        input.resolvedSchedule.timeZone,
+      ).dayKey
+    : null
+  if (firstCutoffDay !== occurrenceDay) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'The first local cutoff must fall after the first occurrence on the same local day.',
+    )
+  }
+  const activeUntilDay = formatTimeZoneDateTimeParts(
     activeUntil,
     input.resolvedSchedule.timeZone,
   ).dayKey
-  if (cutoffDay !== occurrenceDay) {
+  if (activeUntilDay < occurrenceDay) {
     throw new VaultCliError(
       'ASSISTANT_CRON_INVALID_SCHEDULE',
-      'The one-shot local cutoff must fall after the occurrence on the same local day.',
+      'The finite local cutoff must not precede its first occurrence.',
     )
   }
 

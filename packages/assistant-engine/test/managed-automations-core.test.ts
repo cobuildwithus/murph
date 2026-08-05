@@ -28,6 +28,7 @@ import {
   applyMurphManagedAutomations,
   ensureAutomaticMealCloseoutAutomation,
   type MurphManagedAutomationDiagnosticStage,
+  type MurphOnboardingFollowupDiagnostic,
 } from '../src/assistant/managed-automations.ts'
 import { completeAssistantOnboarding } from '../src/assistant/onboarding-state.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
@@ -1213,16 +1214,16 @@ describe('applyMurphManagedAutomations core integration', () => {
         automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FC',
         vaultRoot,
       })).resolves.toMatchObject({
-        activeUntil: '2026-06-24T15:00:00.000Z',
+        activeUntil: '2026-06-26T15:00:00.000Z',
         automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FC',
         continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
         instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
         route: existingRoute,
         schedule: {
-          at: expect.stringMatching(
-            /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+          localTime: expect.stringMatching(
+            /^(?:13:[3-5]\d|14:[0-2]\d)$/u,
           ),
-          kind: 'at',
+          kind: 'dailyLocal',
         },
         slug: 'finish-onboarding-followup',
         status,
@@ -1233,12 +1234,120 @@ describe('applyMurphManagedAutomations core integration', () => {
     },
   )
 
+  it('expands the current one-shot into the same anchored three-day window', async () => {
+    const vaultRoot = await createVaultRoot()
+    const automationId = 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FG'
+    const diagnostics: MurphOnboardingFollowupDiagnostic[] = []
+
+    await upsertAutomation({
+      activeUntil: '2026-06-24T15:00:00.000Z',
+      automationId,
+      continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: {
+        at: '2026-06-24T14:00:00.000Z',
+        kind: 'at',
+      },
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      status: 'active',
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T13:00:00.000Z'),
+      onOnboardingFollowupDiagnostic(diagnostic) {
+        diagnostics.push(diagnostic)
+      },
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 1,
+    })
+    await expect(showAutomation({ automationId, vaultRoot })).resolves.toMatchObject({
+      activeUntil: '2026-06-26T15:00:00.000Z',
+      schedule: {
+        kind: 'dailyLocal',
+      },
+      status: 'active',
+    })
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        action: 'migrated_three_day_window',
+        activeUntil: '2026-06-26T15:00:00.000Z',
+        firstOccurrenceAt: '2026-06-24T14:00:00.000Z',
+        onboardingStateSource: 'default_missing',
+        onboardingStateStatus: 'open',
+        opportunityDays: 3,
+        previousScheduleKind: 'at',
+        scheduleKind: 'dailyLocal',
+      }),
+    ])
+  })
+
+  it('archives an established predecessor after its original three-day window', async () => {
+    const vaultRoot = await createVaultRoot()
+    const automationId = 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FH'
+    const diagnostics: MurphOnboardingFollowupDiagnostic[] = []
+
+    await upsertAutomation({
+      automationId,
+      continuityPolicy: previousOnboardingFollowupDefinition.continuityPolicy,
+      instructions: previousOnboardingFollowupDefinition.instructions,
+      now: new Date('2026-06-01T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '13:30',
+      },
+      slug: previousOnboardingFollowupDefinition.slug,
+      status: 'active',
+      summary: previousOnboardingFollowupDefinition.summary,
+      tags: [...previousOnboardingFollowupDefinition.tags],
+      title: previousOnboardingFollowupDefinition.title,
+      vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T13:00:00.000Z'),
+      onOnboardingFollowupDiagnostic(diagnostic) {
+        diagnostics.push(diagnostic)
+      },
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 1,
+    })
+    await expect(showAutomation({ automationId, vaultRoot })).resolves.toMatchObject({
+      status: 'archived',
+    })
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        action: 'archived_window_elapsed',
+        activeUntil: '2026-06-04T15:00:00.000Z',
+        onboardingStateSource: 'default_missing',
+        onboardingStateStatus: 'open',
+        opportunityDays: 3,
+        previousScheduleKind: 'dailyLocal',
+        scheduleKind: 'dailyLocal',
+      }),
+    ])
+  })
+
   it('restores the finite shape after an immediate-predecessor writer overwrites it', async () => {
     const vaultRoot = await createVaultRoot()
     const automationId = 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FD'
 
     await upsertAutomation({
-      activeUntil: '2026-06-24T15:00:00.000Z',
+      activeUntil: '2026-06-26T15:00:00.000Z',
       automationId,
       continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
@@ -1286,14 +1395,14 @@ describe('applyMurphManagedAutomations core integration', () => {
       automationId,
       vaultRoot,
     })).resolves.toMatchObject({
-      activeUntil: '2026-06-24T15:00:00.000Z',
+      activeUntil: '2026-06-26T15:00:00.000Z',
       automationId,
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       schedule: {
-        at: expect.stringMatching(
-          /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+        localTime: expect.stringMatching(
+          /^(?:13:[3-5]\d|14:[0-2]\d)$/u,
         ),
-        kind: 'at',
+        kind: 'dailyLocal',
       },
       status: 'active',
       summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
@@ -1475,14 +1584,14 @@ describe('applyMurphManagedAutomations core integration', () => {
       automationId: 'automation_01KCM5T5J4VB7D63T0Y29Q6R7A',
       vaultRoot,
     })).resolves.toMatchObject({
-      activeUntil: '2026-06-24T15:00:00.000Z',
+      activeUntil: '2026-06-26T15:00:00.000Z',
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: defaultRoute,
       schedule: {
-        at: expect.stringMatching(
-          /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+        localTime: expect.stringMatching(
+          /^(?:13:[3-5]\d|14:[0-2]\d)$/u,
         ),
-        kind: 'at',
+        kind: 'dailyLocal',
       },
       status: 'active',
       summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,

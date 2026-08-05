@@ -53,6 +53,7 @@ import {
   type AssistantHostedImageGenerationLauncher,
   type AssistantInputEventRecord,
   type MurphManagedAutomationDiagnosticStage,
+  type MurphOnboardingFollowupDiagnostic,
   type AssistantTurnEnvironment,
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
@@ -2774,12 +2775,16 @@ async function applyHostedManagedAutomationsBestEffort(input: {
   }
 
   let diagnosticStage: MurphManagedAutomationDiagnosticStage | null = null;
+  const onboardingFollowupDiagnostics: MurphOnboardingFollowupDiagnostic[] = [];
   let result: Awaited<ReturnType<typeof applyMurphManagedAutomations>>;
   try {
     result = await applyMurphManagedAutomations({
       now: new Date(resolveHostedAssistantPhaseNowMs(input.input)),
       onDiagnosticStage(stage) {
         diagnosticStage = stage;
+      },
+      onOnboardingFollowupDiagnostic(diagnostic) {
+        onboardingFollowupDiagnostics.push(diagnostic);
       },
       operatorHomeRoot: input.input.restored.operatorHomeRoot,
       ...(input.defaultRoute !== undefined
@@ -2955,6 +2960,31 @@ async function applyHostedManagedAutomationsBestEffort(input: {
     return null;
   }
 
+  const onboardingFollowupDiagnostic =
+    onboardingFollowupDiagnostics.at(-1) ?? null;
+  if (
+    onboardingFollowupDiagnostic
+    && onboardingFollowupDiagnostic.action !== "unchanged"
+  ) {
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        eventCode: "assistant.onboarding_followup_reconciled",
+        level: "info",
+        phase: "invoke",
+        redactedJson: buildHostedOnboardingFollowupDiagnostic(
+          onboardingFollowupDiagnostic,
+        ),
+      },
+      platform: input.input.runtime.platform,
+    });
+  }
+
   await writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields({
@@ -3011,6 +3041,24 @@ function buildHostedManagedAutomationStageDiagnostics(
     ...(diagnostic.seedPosition === undefined
       ? {}
       : { murphManagedAutomationSeedPosition: diagnostic.seedPosition }),
+  };
+}
+
+function buildHostedOnboardingFollowupDiagnostic(
+  diagnostic: MurphOnboardingFollowupDiagnostic,
+): HostedRuntimeRedactedJson {
+  return {
+    onboardingFollowupAction: diagnostic.action,
+    onboardingFollowupActiveUntil: diagnostic.activeUntil,
+    onboardingFollowupFirstOccurrenceAt: diagnostic.firstOccurrenceAt,
+    onboardingFollowupOpportunityDays: diagnostic.opportunityDays,
+    onboardingFollowupPreviousScheduleKind:
+      diagnostic.previousScheduleKind,
+    onboardingFollowupScheduleKind: diagnostic.scheduleKind,
+    onboardingStateCreatedAt: diagnostic.onboardingStateCreatedAt,
+    onboardingStateSource: diagnostic.onboardingStateSource,
+    onboardingStateStatus: diagnostic.onboardingStateStatus,
+    onboardingStateUpdatedAt: diagnostic.onboardingStateUpdatedAt,
   };
 }
 

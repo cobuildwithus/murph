@@ -214,6 +214,7 @@ import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
+import type { AssistantRunEvent } from '../src/assistant/automation/shared.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
   dispatchAssistantOutboxIntent,
@@ -916,6 +917,59 @@ describe('assistant cron runtime orchestration', () => {
       .toBe('archived')
   })
 
+  it('defers a recurring follow-up until tomorrow and caps it after three local days', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-upsert-three-day-automation-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+
+    const created = await upsertAssistantCronAutomation({
+      firstOccurrenceActiveDayCount: 3,
+      firstOccurrenceActiveUntilLocalTime: '15:00',
+      firstOccurrencePolicy: 'after-current-local-day',
+      instructions: 'Offer one useful setup continuation each day.',
+      now: new Date('2026-04-08T15:00:00.000Z'),
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '14:29',
+      },
+      slug: 'finite-three-day-followup',
+      summary: 'Three finite daily opportunities.',
+      title: 'Finite three-day follow-up',
+      vault: vaultRoot,
+    })
+    if (!created) {
+      throw new Error('Expected three-day follow-up to be seeded.')
+    }
+
+    expect(created.keepAfterRun).toBe(true)
+    expect(created.schedule).toEqual({
+      kind: 'dailyLocal',
+      localTime: '14:29',
+    })
+    expect(created.state.nextRunAt).toBe('2026-04-09T18:29:00.000Z')
+    expect(findCanonicalAutomation(vaultRoot, 'finite-three-day-followup'))
+      .toMatchObject({
+        activeUntil: '2026-04-11T19:00:00.000Z',
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '14:29',
+        },
+      })
+  })
+
   it.each([
     {
       onboardingStatus: 'completed',
@@ -1011,6 +1065,170 @@ describe('assistant cron runtime orchestration', () => {
       expect(completed.run.outcome).toBe(expectedOutcome)
     },
   )
+
+  it('runs at most once on each of three local days and records default-open admission', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T15:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-onboarding-three-day-window-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+    const job = await upsertAssistantCronAutomation({
+      firstOccurrenceActiveDayCount:
+        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
+      firstOccurrenceActiveUntilLocalTime:
+        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.activeUntilLocalTime,
+      firstOccurrencePolicy: 'after-current-local-day',
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+      now: new Date('2026-04-08T15:00:00.000Z'),
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '14:29',
+      },
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      vault: vaultRoot,
+    })
+    if (!job) {
+      throw new Error('Expected onboarding follow-up to be seeded.')
+    }
+    cronMocks.sendAssistantMessageLocal.mockResolvedValue({
+      decision: {
+        kind: 'skip',
+        privateSummary: 'No useful continuation today.',
+      },
+      response: null,
+      session: {
+        sessionId: 'session_onboarding_three_day_window',
+      },
+    })
+    const events: AssistantRunEvent[] = []
+
+    for (const now of [
+      '2026-04-09T18:29:05.000Z',
+      '2026-04-10T18:29:05.000Z',
+      '2026-04-11T18:29:05.000Z',
+    ]) {
+      vi.setSystemTime(new Date(now))
+      await expect(processDueAssistantCronJobsLocal({
+        limit: 1,
+        onEvent: (event) => events.push(event),
+        vault: vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        processed: 1,
+        succeeded: 1,
+      })
+    }
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(3)
+    expect(events.filter((event) =>
+      event.type === 'onboarding.followup.completed'
+    )).toHaveLength(3)
+    expect(events).toContainEqual(expect.objectContaining({
+      failureContext: expect.objectContaining({
+        activeUntil: '2026-04-11T19:00:00.000Z',
+        notificationDecisionKind: 'skip',
+        notificationDeliveryOutcomeKind: 'none',
+        onboardingStateCreatedAt: null,
+        onboardingStateSource: 'default_missing',
+        onboardingStateStatus: 'open',
+        occurrenceAt: expect.stringMatching(/^2026-04-(?:09|10|11)T/u),
+        runOutcome: 'no_op',
+        scheduleKind: 'dailyLocal',
+      }),
+      type: 'onboarding.followup.completed',
+    }))
+
+    vi.setSystemTime(new Date('2026-04-11T19:00:00.000Z'))
+    await processDueAssistantCronJobsLocal({
+      limit: 1,
+      onEvent: (event) => events.push(event),
+      vault: vaultRoot,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(3)
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+    )?.status).toBe('archived')
+  })
+
+  it('blocks a completed onboarding follow-up before provider admission and logs the persisted state', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T18:29:05.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-onboarding-completed-gate-',
+    )
+    await completeAssistantOnboarding({
+      completedAt: '2026-04-09T17:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    getVaultAutomationStore(vaultRoot).push({
+      activeUntil: '2026-04-11T19:00:00.000Z',
+      automationId: 'automation_onboarding_completed_gate',
+      continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+      createdAt: '2026-04-08T15:00:00.000Z',
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: true,
+      },
+      schedule: {
+        at: '2026-04-09T18:29:00.000Z',
+        kind: 'at',
+      },
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      status: 'active',
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      updatedAt: '2026-04-08T15:00:00.000Z',
+    })
+    const events: AssistantRunEvent[] = []
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      onEvent: (event) => events.push(event),
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(events).toContainEqual(expect.objectContaining({
+      failureContext: expect.objectContaining({
+        notificationDecisionKind: null,
+        onboardingStateCreatedAt: '2026-04-09T17:00:00.000Z',
+        onboardingStateSource: 'persisted',
+        onboardingStateStatus: 'completed',
+        onboardingStateUpdatedAt: '2026-04-09T17:00:00.000Z',
+        runOutcome: 'skipped_gate',
+      }),
+      type: 'onboarding.followup.completed',
+    }))
+  })
 
   it('recomputes an existing canonical automation when the schedule cadence changes', async () => {
     vi.useFakeTimers()

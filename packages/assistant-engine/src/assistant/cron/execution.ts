@@ -50,7 +50,13 @@ import {
   resolveMurphManagedMaintenancePolicy,
   type MurphManagedMaintenancePolicy,
 } from '../managed-automations.js'
-import { readAssistantOnboardingState } from '../onboarding-state.js'
+import {
+  isAssistantOnboardingStateReadError,
+  readAssistantOnboardingState,
+} from '../onboarding-state.js'
+import {
+  isCurrentMurphOnboardingFollowupAutomation,
+} from '../onboarding-followup-automation.js'
 import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
@@ -164,6 +170,8 @@ const ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding is open.'
 const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding state could not be read.'
+const ASSISTANT_CRON_ONBOARDING_FOLLOWUP_COMPLETED_ERROR =
+  'Assistant onboarding follow-up skipped because onboarding is completed.'
 const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
   'murph-managed:weekly-health-insight',
   'murph-managed:monthly-improvement-coach',
@@ -486,6 +494,17 @@ type DeviceActivityParentAuthority = Awaited<
   ReturnType<typeof resolveDeviceActivityParentAuthority>
 >
 
+interface AssistantCronOnboardingFollowupDiagnostic {
+  activeUntil: string | null
+  occurrenceAt: string
+  onboardingStateCreatedAt: string | null
+  onboardingStateReadError: 'invalid-json' | 'invalid-schema' | 'read-failed' | 'unknown' | null
+  onboardingStateSource: 'default_missing' | 'persisted' | 'read_error'
+  onboardingStateStatus: 'completed' | 'open' | 'unreadable'
+  onboardingStateUpdatedAt: string | null
+  scheduleKind: AssistantCronJob['schedule']['kind']
+}
+
 export async function executeClaimedAssistantCronJob(
   rawInput: ExecuteClaimedAssistantCronJobInput,
 ): Promise<AssistantCronRunExecutionResult> {
@@ -542,6 +561,11 @@ export async function executeClaimedAssistantCronJob(
     kind: 'unmanaged',
   }
   let managedOwnerSkipReason: string | null = null
+  let notificationDecisionKind: string | null = null
+  let notificationDeliveryOutcomeKind: string | null = null
+  let onboardingFollowupDiagnostic:
+    | AssistantCronOnboardingFollowupDiagnostic
+    | null = null
   // Preemptible background maintenance has exactly one yield owner: the
   // maintenance cancellation below. Wiring the generic foreground poller too
   // (hosted passes the same predicate as both callbacks) created a race
@@ -655,6 +679,24 @@ export async function executeClaimedAssistantCronJob(
       input.job.kind === 'canonical' &&
       input.job.source.kind === 'automation'
     ) {
+      const onboardingFollowup =
+        await readAssistantCronOnboardingFollowupDiagnostic({
+          job: input.job,
+          occurrenceAt,
+          vault: input.vault,
+        })
+      if (onboardingFollowup) {
+        onboardingFollowupDiagnostic = onboardingFollowup.diagnostic
+        if (onboardingFollowup.error) {
+          throw onboardingFollowup.error
+        }
+        if (
+          onboardingFollowup.diagnostic.onboardingStateStatus === 'completed'
+        ) {
+          lifecycleSkipReason =
+            ASSISTANT_CRON_ONBOARDING_FOLLOWUP_COMPLETED_ERROR
+        }
+      }
       // Route on the immutable automationId so a user-edited slug cannot
       // silently bypass the precondition.
       const onboardingAuthority =
@@ -976,6 +1018,9 @@ export async function executeClaimedAssistantCronJob(
 
           sessionId = result.session.sessionId
           response = result.response ?? result.decision.privateSummary
+          notificationDecisionKind = result.decision?.kind ?? null
+          notificationDeliveryOutcomeKind =
+            result.deliveryOutcome?.kind ?? 'none'
           const postTurnDeliveryFailure =
             resolveAssistantCronPostTurnDeliveryFailure({
               job: input.job,
@@ -1318,6 +1363,14 @@ export async function executeClaimedAssistantCronJob(
     }
   })
 
+  emitAssistantCronOnboardingFollowupCompletedEvent({
+    diagnostic: onboardingFollowupDiagnostic,
+    notificationDecisionKind,
+    notificationDeliveryOutcomeKind,
+    onEvent: input.onEvent,
+    run,
+  })
+
   return {
     job: finalized.job,
     removedAfterRun: finalized.removedAfterRun,
@@ -1344,6 +1397,103 @@ async function resolveResearchOrientedManagedAutomationOnboardingSkipError(input
   } catch {
     return ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR
   }
+}
+
+async function readAssistantCronOnboardingFollowupDiagnostic(input: {
+  job: ResolvedAssistantCronJob
+  occurrenceAt: string
+  vault: string
+}): Promise<{
+  diagnostic: AssistantCronOnboardingFollowupDiagnostic
+  error: unknown | null
+} | null> {
+  if (!isAssistantCronOnboardingFollowupJob(input.job)) {
+    return null
+  }
+  if (input.job.source.kind !== 'automation') {
+    return null
+  }
+
+  const base = {
+    activeUntil: input.job.source.activeUntil,
+    occurrenceAt: input.occurrenceAt,
+    scheduleKind: input.job.source.schedule.kind,
+  }
+  try {
+    const state = await readAssistantOnboardingState(input.vault)
+    return {
+      diagnostic: {
+        ...base,
+        onboardingStateCreatedAt: state.createdAt,
+        onboardingStateReadError: null,
+        onboardingStateSource:
+          state.createdAt === null ? 'default_missing' : 'persisted',
+        onboardingStateStatus: state.status,
+        onboardingStateUpdatedAt: state.updatedAt,
+      },
+      error: null,
+    }
+  } catch (error) {
+    return {
+      diagnostic: {
+        ...base,
+        onboardingStateCreatedAt: null,
+        onboardingStateReadError: isAssistantOnboardingStateReadError(error)
+          ? error.reason
+          : 'unknown',
+        onboardingStateSource: 'read_error',
+        onboardingStateStatus: 'unreadable',
+        onboardingStateUpdatedAt: null,
+      },
+      error,
+    }
+  }
+}
+
+function isAssistantCronOnboardingFollowupJob(
+  job: ResolvedAssistantCronJob,
+): job is Extract<ResolvedAssistantCronJob, { kind: 'canonical' }> {
+  return job.kind === 'canonical' &&
+    job.source.kind === 'automation' &&
+    isCurrentMurphOnboardingFollowupAutomation(job.source)
+}
+
+function emitAssistantCronOnboardingFollowupCompletedEvent(input: {
+  diagnostic: AssistantCronOnboardingFollowupDiagnostic | null
+  notificationDecisionKind: string | null
+  notificationDeliveryOutcomeKind: string | null
+  onEvent?: (event: AssistantRunEvent) => void
+  run: AssistantCronRunRecord
+}): void {
+  if (!input.diagnostic) {
+    return
+  }
+
+  input.onEvent?.({
+    type: 'onboarding.followup.completed',
+    details: 'onboarding follow-up occurrence completed',
+    safeDetails: 'onboarding_followup_completed',
+    failureContext: {
+      activeUntil: input.diagnostic.activeUntil,
+      occurrenceAt: input.diagnostic.occurrenceAt,
+      notificationDecisionKind: input.notificationDecisionKind,
+      notificationDeliveryOutcomeKind:
+        input.notificationDeliveryOutcomeKind,
+      onboardingStateCreatedAt:
+        input.diagnostic.onboardingStateCreatedAt,
+      onboardingStateReadError:
+        input.diagnostic.onboardingStateReadError,
+      onboardingStateSource: input.diagnostic.onboardingStateSource,
+      onboardingStateStatus: input.diagnostic.onboardingStateStatus,
+      onboardingStateUpdatedAt:
+        input.diagnostic.onboardingStateUpdatedAt,
+      runOutcome: input.run.outcome,
+      runReason: input.run.reason,
+      scheduleKind: input.diagnostic.scheduleKind,
+    },
+    providerKind: 'status',
+    providerState: 'completed',
+  })
 }
 
 function isResearchOrientedManagedAutomationCronJob(
@@ -1435,6 +1585,23 @@ async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
     input.job.source.kind !== 'automation'
   ) {
     return
+  }
+
+  const onboardingFollowup =
+    await readAssistantCronOnboardingFollowupDiagnostic({
+      job: input.job,
+      occurrenceAt: input.occurrenceAt,
+      vault: input.vault,
+    })
+  if (onboardingFollowup?.error) {
+    throw onboardingFollowup.error
+  }
+  if (
+    onboardingFollowup?.diagnostic.onboardingStateStatus === 'completed'
+  ) {
+    throw new AssistantCronLifecycleNotificationInvalidatedError(
+      ASSISTANT_CRON_ONBOARDING_FOLLOWUP_COMPLETED_ERROR,
+    )
   }
 
   const onboardingAuthority =

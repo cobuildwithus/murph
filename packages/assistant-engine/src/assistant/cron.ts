@@ -88,6 +88,9 @@ import {
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
 } from './cron/delivery-reconciliation.ts'
+import {
+  isCurrentMurphOnboardingFollowupAutomation,
+} from './onboarding-followup-automation.ts'
 
 export type { AssistantCronTargetSnapshot } from '@murphai/operator-config/assistant-cli-contracts'
 export {
@@ -742,11 +745,20 @@ async function emitAssistantCronScanEvents(input: {
       details: 'scheduled job scan decision',
       safeDetails: resolveAssistantCronDueReason(job, nowIso),
       failureContext: {
+        activeUntil:
+          canonicalEntry?.source.kind === 'automation'
+            ? canonicalEntry.source.activeUntil
+            : null,
         due: isAssistantCronJobDue(job, nowIso),
         enabled: job.enabled,
         localTime:
           job.schedule.kind === 'dailyLocal' ? job.schedule.localTime : null,
         nextRunAt: job.state.nextRunAt,
+        managedAutomationKind:
+          canonicalEntry?.source.kind === 'automation' &&
+          isCurrentMurphOnboardingFollowupAutomation(canonicalEntry.source)
+            ? 'onboarding_followup'
+            : null,
         pendingDelivery: Boolean(job.state.pendingDeliveryIntentId),
         reason: resolveAssistantCronDueReason(job, nowIso),
         routeConfigured: assistantCronJobHasDeliveryRoute(

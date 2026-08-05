@@ -45,6 +45,7 @@ import {
 } from './onboarding-goal-checkin-automation.js'
 import type { AssistantMaintenanceProfile } from './maintenance-evidence.js'
 import {
+  isCurrentMurphOnboardingFollowupAutomation,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   resolveMurphOnboardingFollowupActiveUntil,
   resolveMurphOnboardingFollowupSchedule,
@@ -86,6 +87,9 @@ export interface MurphManagedAutomationSeed {
 export interface ApplyMurphManagedAutomationsInput {
   defaultRoute?: AutomationRoute | null
   onDiagnosticStage?: ((diagnostic: MurphManagedAutomationDiagnosticStage) => void) | null
+  onOnboardingFollowupDiagnostic?: (
+    (diagnostic: MurphOnboardingFollowupDiagnostic) => void
+  ) | null
   now?: Date
   operatorHomeRoot?: string | null
   routeValidationProfile?: AssistantCronDeliveryRouteValidationProfile
@@ -118,6 +122,24 @@ export interface ApplyMurphManagedAutomationsResult {
   stableKeyRetryNeeded?: true
   updated: number
   yielded?: true
+}
+
+export interface MurphOnboardingFollowupDiagnostic {
+  action:
+    | 'archived_completed'
+    | 'archived_window_elapsed'
+    | 'migrated_three_day_window'
+    | 'unchanged'
+    | 'updated_three_day_window'
+  activeUntil: string | null
+  firstOccurrenceAt: string | null
+  onboardingStateCreatedAt: string | null
+  onboardingStateSource: 'default_missing' | 'persisted'
+  onboardingStateStatus: 'completed' | 'open'
+  onboardingStateUpdatedAt: string | null
+  opportunityDays: number
+  previousScheduleKind: AutomationSchedule['kind']
+  scheduleKind: AutomationSchedule['kind']
 }
 
 export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
@@ -1174,6 +1196,12 @@ export async function applyMurphManagedAutomations(
     if (onboardingReconciliation.yielded) {
       return { ...result, yielded: true }
     }
+    if (onboardingReconciliation.diagnostic) {
+      reportMurphOnboardingFollowupDiagnostic(
+        input,
+        onboardingReconciliation.diagnostic,
+      )
+    }
     if (onboardingReconciliation.updated) {
       result.updated += 1
     }
@@ -1258,6 +1286,17 @@ function reportMurphManagedAutomationDiagnosticStage(
 ): void {
   try {
     input.onDiagnosticStage?.(diagnostic)
+  } catch {
+    // Diagnostics are best-effort and must not affect reconciliation.
+  }
+}
+
+function reportMurphOnboardingFollowupDiagnostic(
+  input: ApplyMurphManagedAutomationsInput,
+  diagnostic: MurphOnboardingFollowupDiagnostic,
+): void {
+  try {
+    input.onOnboardingFollowupDiagnostic?.(diagnostic)
   } catch {
     // Diagnostics are best-effort and must not affect reconciliation.
   }
@@ -1386,28 +1425,41 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
   now: Date
   shouldYield: (() => boolean) | null
   vaultRoot: string
-}): Promise<{ updated: boolean; yielded: boolean }> {
+}): Promise<{
+  diagnostic: MurphOnboardingFollowupDiagnostic | null
+  updated: boolean
+  yielded: boolean
+}> {
   if (input.shouldYield?.() === true) {
-    return { updated: false, yielded: true }
+    return { diagnostic: null, updated: false, yielded: true }
   }
   const existing = await showAutomation({
     slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
     vaultRoot: input.vaultRoot,
   })
   if (input.shouldYield?.() === true) {
-    return { updated: false, yielded: true }
+    return { diagnostic: null, updated: false, yielded: true }
   }
   if (!existing || existing.status === 'archived') {
-    return { updated: false, yielded: false }
+    return { diagnostic: null, updated: false, yielded: false }
   }
 
   if (!isManagedOnboardingFollowupAutomation(existing)) {
-    return { updated: false, yielded: false }
+    return { diagnostic: null, updated: false, yielded: false }
   }
 
   const onboardingState = await readAssistantOnboardingState(input.vaultRoot)
+  const onboardingStateDiagnostic = {
+    onboardingStateCreatedAt: onboardingState.createdAt,
+    onboardingStateSource:
+      onboardingState.createdAt === null
+        ? 'default_missing' as const
+        : 'persisted' as const,
+    onboardingStateStatus: onboardingState.status,
+    onboardingStateUpdatedAt: onboardingState.updatedAt,
+  }
   if (input.shouldYield?.() === true) {
-    return { updated: false, yielded: true }
+    return { diagnostic: null, updated: false, yielded: true }
   }
   if (onboardingState.status === 'completed') {
     await patchAutomation({
@@ -1416,61 +1468,97 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
       status: 'archived',
       vaultRoot: input.vaultRoot,
     })
-    return { updated: true, yielded: false }
+    return {
+      diagnostic: {
+        action: 'archived_completed',
+        activeUntil: existing.activeUntil,
+        firstOccurrenceAt:
+          existing.schedule.kind === 'at' ? existing.schedule.at : null,
+        ...onboardingStateDiagnostic,
+        opportunityDays: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
+        previousScheduleKind: existing.schedule.kind,
+        scheduleKind: existing.schedule.kind,
+      },
+      updated: true,
+      yielded: false,
+    }
   }
 
-  const migrateRecurringSchedule = existing.schedule.kind !== 'at'
   const vault = await loadVault({ vaultRoot: input.vaultRoot })
   if (input.shouldYield?.() === true) {
-    return { updated: false, yielded: true }
+    return { diagnostic: null, updated: false, yielded: true }
   }
   const vaultId = typeof vault.metadata.vaultId === 'string'
     ? vault.metadata.vaultId.trim()
     : ''
   const timeZone = normalizeIanaTimeZone(vault.metadata.timezone) ?? 'UTC'
-  let migratedSchedule: AutomationSchedule | undefined
-  if (migrateRecurringSchedule) {
-    const schedule = resolveMurphOnboardingFollowupSchedule(
-      vaultId || existing.automationId,
-    )
-    migratedSchedule = {
-      kind: 'at',
-      at: computeAssistantCronFirstRunAfterCurrentLocalDay({
-        after: input.now,
-        schedule: {
-          ...schedule,
-          timeZone,
-        },
-      }),
+  const schedule = resolveMurphOnboardingFollowupSchedule(
+    vaultId || existing.automationId,
+  )
+  const existingCreatedAt = new Date(existing.createdAt)
+  const lifecycleAnchor = Number.isFinite(existingCreatedAt.getTime())
+    ? existingCreatedAt
+    : input.now
+  const firstOccurrenceAt =
+    existing.schedule.kind === 'at'
+      ? existing.schedule.at
+      : computeAssistantCronFirstRunAfterCurrentLocalDay({
+          after: lifecycleAnchor,
+          schedule: {
+            ...schedule,
+            timeZone,
+          },
+        })
+  const activeUntil = resolveMurphOnboardingFollowupActiveUntil({
+    scheduledAt: firstOccurrenceAt,
+    timeZone,
+  })
+  const previousScheduleKind = existing.schedule.kind
+  if (input.now.getTime() >= Date.parse(activeUntil)) {
+    await patchAutomation({
+      lookup: existing.automationId,
+      now: input.now,
+      status: 'archived',
+      vaultRoot: input.vaultRoot,
+    })
+    return {
+      diagnostic: {
+        action: 'archived_window_elapsed',
+        activeUntil,
+        firstOccurrenceAt,
+        ...onboardingStateDiagnostic,
+        opportunityDays: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
+        previousScheduleKind,
+        scheduleKind: schedule.kind,
+      },
+      updated: true,
+      yielded: false,
     }
   }
-  const scheduledAt =
-    migratedSchedule?.kind === 'at'
-      ? migratedSchedule.at
-      : existing.schedule.kind === 'at'
-        ? existing.schedule.at
-        : null
-  if (scheduledAt === null) {
-    throw new Error('Onboarding follow-up migration did not produce a one-shot.')
-  }
-  const activeUntil =
-    !migrateRecurringSchedule && typeof existing.activeUntil === 'string'
-      ? existing.activeUntil
-      : resolveMurphOnboardingFollowupActiveUntil({
-          scheduledAt,
-          timeZone,
-        })
 
   if (
-    !migrateRecurringSchedule &&
+    existing.schedule.kind === schedule.kind &&
+    existing.schedule.localTime === schedule.localTime &&
     existing.activeUntil === activeUntil &&
     !onboardingFollowupAutomationDefinitionChanged(existing)
   ) {
-    return { updated: false, yielded: false }
+    return {
+      diagnostic: {
+        action: 'unchanged',
+        activeUntil,
+        firstOccurrenceAt,
+        ...onboardingStateDiagnostic,
+        opportunityDays: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
+        previousScheduleKind,
+        scheduleKind: schedule.kind,
+      },
+      updated: false,
+      yielded: false,
+    }
   }
 
   if (input.shouldYield?.() === true) {
-    return { updated: false, yielded: true }
+    return { diagnostic: null, updated: false, yielded: true }
   }
   await patchAutomation({
     activeUntil,
@@ -1478,16 +1566,29 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
     instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
     lookup: existing.automationId,
     now: input.now,
-    ...(migratedSchedule === undefined
-      ? {}
-      : { schedule: migratedSchedule }),
+    schedule,
     summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
     tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
     title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
     vaultRoot: input.vaultRoot,
   })
 
-  return { updated: true, yielded: false }
+  return {
+    diagnostic: {
+      action:
+        previousScheduleKind === schedule.kind
+          ? 'updated_three_day_window'
+          : 'migrated_three_day_window',
+      activeUntil,
+      firstOccurrenceAt,
+      ...onboardingStateDiagnostic,
+      opportunityDays: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
+      previousScheduleKind,
+      scheduleKind: schedule.kind,
+    },
+    updated: true,
+    yielded: false,
+  }
 }
 
 async function resolveMurphManagedAutomationCreateRoute(
@@ -1592,8 +1693,7 @@ function isManagedOnboardingFollowupAutomation(
 function isCurrentManagedOnboardingFollowupAutomation(
   automation: AutomationRecord,
 ): boolean {
-  return automation.slug === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
-    !onboardingFollowupAutomationDefinitionChanged(automation)
+  return isCurrentMurphOnboardingFollowupAutomation(automation)
 }
 
 function isPreviousSeededOnboardingFollowupAutomation(

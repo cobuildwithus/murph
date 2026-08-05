@@ -46,8 +46,9 @@ privacy, authorization, or provider boundaries.
 - Keep the existing `open | completed` onboarding state. Open onboarding does
   not gate ordinary Murph use.
 - Keep the existing `finish-onboarding-followup` managed automation as the one
-  recovery and continuation mechanism. Do not add a second automation for
-  context collection or split onboarding into competing lifecycle owners.
+  finite three-day recovery and continuation mechanism. Do not add a second
+  automation for context collection or split onboarding into competing
+  lifecycle owners.
   Reconciliation recognizes only the exact current seed, its immediate
   predecessor, or the bounded original legacy seed; execution remains ordinary
   scheduled send-or-skip work, so editable slug, tags, title, and instructions
@@ -529,13 +530,15 @@ claim completion until the command reports it.
 
 ## Finite Scheduled Continuation
 
-The onboarding follow-up automation is one finite recovery attempt, not a
-category drip or a support-obligation resolver. It is scheduled for the next
-local day in a stable per-member window from 1:30 PM through 2:29 PM, and its
-delivery authority closes at 3:00 PM on that same local day, reserving at least
-30 minutes for a healthy turn after the latest scheduled start. Its one-shot is
-consumed after either a send or a skip. It should read recent conversation and
-the resume snapshot, then do one of four things:
+The onboarding follow-up automation is one finite three-day recovery window,
+not a category drip or a support-obligation resolver. It has one opportunity
+on each of the next three local days in a stable per-member window from 1:30 PM
+through 2:29 PM. Delivery authority closes at 3:00 PM on the third local day,
+reserving at least 30 minutes for a healthy turn after the latest scheduled
+start. Each daily opportunity is consumed after either a send or a skip; it is
+never extended, restarted, or rescheduled into an unbounded cadence. Each
+occurrence should read recent conversation and the resume snapshot, then do one
+of four things:
 
 1. return skip because onboarding is complete or declined; the existing
    managed-automation reconciler archives the follow-up deterministically;
@@ -547,23 +550,34 @@ the resume snapshot, then do one of four things:
    question.
 
 If the last onboarding question is unanswered, do not rotate to another
-category or repeat it. This single final attempt may instead use one natural,
+category or repeat its wording. A later day may use a shorter natural,
 low-pressure reopening question that lets the member choose whether to
-continue. Skip after an explicit decline, a request not to follow up, or when
-the nudge would not be timely or useful. Any promised proactive support
-continues through its dedicated canonical automation, including after
-onboarding closes. Every user-facing scheduled continuation includes exactly
-one easy question that invites a reply; a reflection-only scheduled message
-returns skip. Normal member replies may continue open onboarding indefinitely,
-but they do not create another scheduled recovery attempt.
+continue, without urgency or escalating pressure. Skip after an explicit
+decline, a request not to follow up, or when the nudge would not be timely or
+useful. Any promised proactive support continues through its dedicated
+canonical automation, including after onboarding closes. Every user-facing
+scheduled continuation includes exactly one easy question that invites a
+reply; a reflection-only scheduled message returns skip. Normal member replies
+may continue open onboarding indefinitely, but they do not extend or create
+another scheduled recovery window.
 
 The scheduled turn uses the ordinary notification send-or-skip contract and
 never invokes the completion command or otherwise mutates onboarding state.
-Evidence that the checkpoint is already answered, declined, deferred, or not
-useful to reopen produces an ordinary skip. Only a later foreground member
-reply may advance or complete onboarding through the canonical state owner.
-The same 3:00 PM cutoff prevents a queued or delayed outbound intent from
-entering the provider after the finite local window.
+Before provider admission and again before delivery or commit, the runtime
+reads canonical onboarding state: completed state deterministically skips, and
+an unreadable state fails closed and may retry only inside the existing finite
+window. Evidence that the checkpoint is already answered, declined, deferred,
+or not useful to reopen produces an ordinary skip. Only a later foreground
+member reply may advance or complete onboarding through the canonical state
+owner. The third-day 3:00 PM cutoff prevents a queued or delayed outbound
+intent from entering the provider after the finite local window.
+
+Hosted observability records the seed, exact-seed reconciliation, and each
+occurrence as metadata only. The records distinguish persisted onboarding
+state from the missing-state default and include state status and timestamps,
+the three-day window, schedule shape, model decision, delivery outcome, and run
+outcome. They never contain conversation text, vault content, or direct member
+identifiers and never become a second correctness owner.
 
 ## Post-Onboarding Choice Point
 

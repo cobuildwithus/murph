@@ -2419,15 +2419,15 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(managedAutomationMocks.patchAutomation).toHaveBeenCalledWith(
       expect.objectContaining({
-        activeUntil: '2026-06-24T15:00:00.000Z',
+        activeUntil: '2026-06-26T15:00:00.000Z',
         continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
         instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
         lookup: 'automation_onboarding_followup',
         schedule: {
-          at: expect.stringMatching(
-            /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+          localTime: expect.stringMatching(
+            /^(?:13:[3-5]\d|14:[0-2]\d)$/u,
           ),
-          kind: 'at',
+          kind: 'dailyLocal',
         },
         summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
         tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
@@ -2440,13 +2440,13 @@ describe('applyMurphManagedAutomations', () => {
       .not.toHaveProperty('status')
     expect(managedAutomationMocks.records.get('automation_onboarding_followup'))
       .toMatchObject({
-        activeUntil: '2026-06-24T15:00:00.000Z',
+        activeUntil: '2026-06-26T15:00:00.000Z',
         route: existingRoute,
         schedule: {
-          at: expect.stringMatching(
-            /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+          localTime: expect.stringMatching(
+            /^(?:13:[3-5]\d|14:[0-2]\d)$/u,
           ),
-          kind: 'at',
+          kind: 'dailyLocal',
         },
         status: 'active',
       })
@@ -2486,13 +2486,13 @@ describe('applyMurphManagedAutomations', () => {
     )
     expect(managedAutomationMocks.records.get('automation_onboarding_followup'))
       .toMatchObject({
-        activeUntil: '2026-06-24T15:00:00.000Z',
+        activeUntil: '2026-06-26T15:00:00.000Z',
         route: defaultRoute,
         schedule: {
-          at: expect.stringMatching(
-            /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+          localTime: expect.stringMatching(
+            /^(?:13:[3-5]\d|14:[0-2]\d)$/u,
           ),
-          kind: 'at',
+          kind: 'dailyLocal',
         },
         status: 'paused',
       })
@@ -2569,10 +2569,10 @@ describe('applyMurphManagedAutomations', () => {
         instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
         route: defaultRoute,
         schedule: {
-          at: expect.stringMatching(
-            /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+          localTime: expect.stringMatching(
+            /^(?:13:[3-5]\d|14:[0-2]\d)$/u,
           ),
-          kind: 'at',
+          kind: 'dailyLocal',
         },
         status: 'active',
         summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,

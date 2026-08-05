@@ -229,9 +229,11 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
     // delivery source) is enforced by upsertAssistantCronAutomation's target
     // validation; an undeliverable route lands in the catch below.
     const job = await upsertAssistantCronAutomation({
+      firstOccurrenceActiveDayCount:
+        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
       firstOccurrenceActiveUntilLocalTime:
         MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.activeUntilLocalTime,
-      firstOccurrencePolicy: "once-after-current-local-day",
+      firstOccurrencePolicy: "after-current-local-day",
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: buildOnboardingFollowupAutomationRoute(input.route),
       schedule: resolveMurphOnboardingFollowupSchedule(input.stableKey),
@@ -241,6 +243,18 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
       title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       vault: input.vaultRoot,
     });
+    try {
+      input.redactedLogEntries.push(
+        emitHostedOnboardingFollowupSeededLog({
+          details: input.logDetails,
+          job,
+          wake: input.wake,
+        }),
+      );
+    } catch {
+      // This diagnostic must never turn a successful canonical upsert into a
+      // failed onboarding-follow-up seed.
+    }
     return job?.enabled ? job.state.nextRunAt : null;
   } catch (error) {
     input.redactedLogEntries.push(
@@ -252,6 +266,40 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
     );
     return null;
   }
+}
+
+function emitHostedOnboardingFollowupSeededLog(input: {
+  details: HostedExecutionStructuredLogDetails;
+  job: Awaited<ReturnType<typeof upsertAssistantCronAutomation>>;
+  wake: HostedExecutionSystemWake;
+}): HostedExecutionRedactedLogEntry {
+  const details = {
+    ...input.details,
+    eventCode: "assistant.onboarding_followup_seeded",
+    onboardingFollowupEnabled: input.job?.enabled === true,
+    onboardingFollowupNextRunAt: input.job?.state.nextRunAt ?? null,
+    onboardingFollowupOpportunityDays:
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
+    onboardingFollowupScheduleKind: input.job?.schedule?.kind ?? null,
+  };
+
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details,
+    level: "info",
+    message: "Hosted onboarding follow-up automation seeded.",
+    phase: "wake.running",
+    wake: input.wake,
+  });
+
+  return {
+    component: "runtime",
+    eventId: input.wake.eventId,
+    level: "info",
+    message: "Hosted onboarding follow-up automation seeded.",
+    phase: "wake.running",
+    redacted: details,
+  };
 }
 
 function didAssistantNotificationAcceptDelivery(

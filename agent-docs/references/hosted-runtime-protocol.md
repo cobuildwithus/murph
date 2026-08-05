@@ -2335,7 +2335,15 @@ explicitly appends one.
 `HostedRuntimeLog` is redacted observability, not correctness state. Logs may be
 lossy and must not contain plaintext messages, transcripts, vault data,
 provider payloads, secrets, local paths, or direct personal identifiers. The
-`checkpoint.snapshot_plan`, `checkpoint.snapshot_started`, and
+hosted onboarding-follow-up path emits distinct metadata-only records when the
+finite three-day automation is seeded, when an exact recognized seed is
+reconciled, and when each occurrence completes. Those records distinguish a
+persisted onboarding state from the missing-state default and carry only state
+status and timestamps, finite-window and schedule shape, model decision,
+delivery outcome, and run outcome. They do not carry conversation or vault
+content and do not grant execution or state-mutation authority.
+
+The `checkpoint.snapshot_plan`, `checkpoint.snapshot_started`, and
 `checkpoint.snapshot_finished` events record the bounded
 `handledConversationMailboxItemCount` and
 `handledConversationFrontierSelected`, never the item identifiers. The count is
