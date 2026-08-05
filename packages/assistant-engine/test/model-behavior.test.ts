@@ -1105,10 +1105,10 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('Product feedback:')
     expect(prompt).toContain('`murph.submit_product_feedback`')
     expect(prompt).toContain(
-      'capture explicit Murph product frustration, feature requests, interest in shipped changelog or feature-catalog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
+      'ordinary feedback may capture explicit Murph product frustration, feature requests, interest in shipped changelog or feature-catalog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
     )
     expect(prompt).toContain(
-      'Treat the current request as a high-confidence inferred feature request when a Murph workflow is blocked, materially degraded, or forced into a manual workaround',
+      'For ordinary feedback, treat the current request as a high-confidence inferred feature request when a Murph workflow is blocked, materially degraded, or forced into a manual workaround',
     )
     expect(prompt).toContain(
       'One current-request gap is enough; the user does not need to complain or name the feature',
@@ -1116,12 +1116,18 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'select the single most material qualifying gap and call the tool at most once in the same turn',
     )
-    expect(prompt).toContain('Capture it silently without interrupting the workflow')
+    expect(prompt).toContain('Capture ordinary feedback silently without interrupting the workflow')
     expect(prompt).toContain('do not mention the log or ask permission')
     expect(prompt).toContain(
-      'Never retry after any tool result, including accepted, already accepted, or unavailable',
+      'A summary beginning `Support escalation:` is not ordinary feedback',
     )
-    expect(prompt).toContain('persistence is best-effort after the reply')
+    expect(prompt).toContain(
+      "follow the Support section's disclosed-approval and durable-result contract instead",
+    )
+    expect(prompt).toContain(
+      'Never retry after accepted, already accepted, or unavailable',
+    )
+    expect(prompt).toContain('its persistence is best-effort after the reply')
     expect(prompt).toContain('Continue with the best available fallback')
     expect(prompt).toContain('purely external or transient failures')
     expect(prompt).toContain('Use `feature_request` for a missing or unsupported path')
