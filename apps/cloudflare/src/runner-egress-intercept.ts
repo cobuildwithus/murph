@@ -1554,13 +1554,16 @@ async function maybeHandleVeniceRequest(input: {
     headers,
     { body: upstreamBody },
   );
-  const captureMemoryDiagnostic = isHostedCodexMemoryRequest(input.request);
+  const captureMemoryDiagnostic =
+    authorization.platformAiUsageAllowed !== false
+    && isHostedCodexMemoryRequest(input.request);
   const diagnosticBody = captureMemoryDiagnostic
     ? upstreamRequest.clone()
     : null;
   const canonicalModelKind = captureMemoryDiagnostic
     ? readHostedResponsesRequestModelKind(body)
     : null;
+  const providerStartedAt = Date.now();
   let response: Response;
   try {
     response = await fetchAuthorizedProviderUpstream({
@@ -1579,14 +1582,13 @@ async function maybeHandleVeniceRequest(input: {
         endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
         env: input.env,
         providerKind: "venice",
-        providerResponseTtfbMs: Date.now() - startedAt,
         providerTransportFailed: true,
         request: input.request,
         upstreamRequestBody: diagnosticBody,
         userId: authorization.userId,
         writeFence: authorization.writeFence,
       });
-      await scheduleOrAwaitHostedProviderDiagnostic({
+      scheduleHostedProviderDiagnostic({
         ctx: input.ctx ?? null,
         promise: diagnosticPromise,
       });
@@ -1601,14 +1603,14 @@ async function maybeHandleVeniceRequest(input: {
       endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
       env: input.env,
       providerKind: "venice",
-      providerResponseTtfbMs: Date.now() - startedAt,
+      providerResponseTtfbMs: Date.now() - providerStartedAt,
       request: input.request,
       response,
       upstreamRequestBody: diagnosticBody,
       userId: authorization.userId,
       writeFence: authorization.writeFence,
     });
-    await scheduleOrAwaitHostedProviderDiagnostic({
+    scheduleHostedProviderDiagnostic({
       ctx: input.ctx ?? null,
       promise: diagnosticPromise,
     });
@@ -2051,19 +2053,32 @@ async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   );
 }
 
-async function scheduleOrAwaitHostedProviderDiagnostic(input: {
+function scheduleHostedProviderDiagnostic(input: {
   ctx: HostedRunnerOutboundContext | null;
   promise: Promise<void>;
-}): Promise<void> {
-  if (typeof input.ctx?.waitUntil !== "function") {
-    await input.promise;
-    return;
+}): void {
+  if (typeof input.ctx?.waitUntil === "function") {
+    try {
+      input.ctx.waitUntil(input.promise);
+      return;
+    } catch {
+      // Production container interception has no lifecycle owner. If an
+      // optional scheduler rejects synchronously, use the same best-effort
+      // detached fallback without extending the provider-response budget.
+    }
   }
-  try {
-    input.ctx.waitUntil(input.promise);
-  } catch {
-    await input.promise;
-  }
+  void input.promise.catch((error: unknown) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...buildHostedExecutionSafeErrorDetails(error),
+        providerKind: "venice",
+      },
+      level: "warn",
+      message: "Hosted runner provider request diagnostic detached task failed.",
+      phase: "wake.running",
+    });
+  });
 }
 
 async function emitHostedRunnerOpenAiCacheDiagnostic(input: {

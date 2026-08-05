@@ -67,10 +67,14 @@ identifiers remain excluded.
 
 The row is observability only and remains failure-isolated from provider egress.
 Venice foreground and untagged calls do not create these rows. Container egress
-persists tagged memory rows through the existing awaited callback fallback when
-a Cloudflare `waitUntil` scheduler is unavailable. Non-OK and transport-error
-diagnostics use warning retention, while accepted and request-only diagnostics
-use debug retention.
+schedules tagged memory rows with Cloudflare `waitUntil` when available and
+otherwise starts a best-effort detached callback, which can be lost if the
+invocation ends. Diagnostic persistence never delays a provider response or
+transport error. Non-OK and transport-error diagnostics use warning retention,
+while accepted and request-only diagnostics use debug retention. Venice response
+status and response-header latency are recorded only after upstream dispatch;
+Murph-local platform-usage denials do not produce Venice response rows, and
+transport failures omit response-header latency.
 
 ## Append and deletion serialization
 
