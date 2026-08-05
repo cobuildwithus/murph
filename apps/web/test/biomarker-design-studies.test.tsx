@@ -139,6 +139,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Sponsor this chat");
   expect(sectionsMarkup).toContain('data-design-state="monthly-activation"');
   expect(sectionsMarkup).toContain('data-design-state="ordinary-sponsored-one-time"');
+  expect(sectionsMarkup).toContain('id="group-one-time-contribution"');
   expect(sectionsMarkup).toContain('data-design-state="monthly-active"');
   expect(sectionsMarkup).toContain('data-design-state="monthly-paused"');
   expect(sectionsMarkup).toContain('data-design-state="monthly-recovery"');
