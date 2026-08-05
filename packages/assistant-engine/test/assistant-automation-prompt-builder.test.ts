@@ -1840,6 +1840,21 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result.prompt).toContain('- inbox projection: pending')
     expect(result.prompt).toContain('- raw evidence: not_attempted')
     expect(result.prompt).not.toContain('- parser output:')
+    expect(result.prompt).toContain(
+      'immediately call `murph.send_progress_update` once with a brief acknowledgment',
+    )
+    expect(result.prompt).toContain(
+      'continue the same turn: wait briefly and recheck for readable attachment evidence',
+    )
+    expect(result.prompt).toContain(
+      'Do not finalize, claim inspection, or escalate product feedback solely because hydration is still pending.',
+    )
+    expect(result.prompt).toContain(
+      'Once readable, inspect the storedPath and complete the request.',
+    )
+    expect(result.prompt).not.toContain(
+      'respond using any other available message context',
+    )
     expect(result.prompt).toContain('Attachment 1\nfileName: private-photo.jpg')
     expect(result.prompt).toContain('kind: image')
     expect(result.prompt).toContain('mime: image/jpeg')
