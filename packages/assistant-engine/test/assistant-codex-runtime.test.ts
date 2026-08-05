@@ -144,6 +144,21 @@ const DAILY_NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
     fatGrams: { total: 34.75, mealCount: 3 },
   },
 }
+const TRACKED_COMPACT_TABLE_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Strength session',
+  subtitle: null,
+  rowHeader: 'Exercise',
+  columns: ['Set 1'],
+  rows: [{ label: 'Bench press', values: ['185 lb × 8'] }],
+  footer: null,
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-04T21:30:00.000Z',
+  },
+}
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-transport-diagnostics.v1'
 
@@ -19997,6 +20012,46 @@ describe('steered final segments', () => {
     }])
   })
 
+  it('keeps tracked-card authority out of a steered preceding delivery', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-tracked-card-1',
+        type: 'user_message',
+        message: 'Track this workout in a table',
+      }),
+      {
+        card: TRACKED_COMPACT_TABLE_RESPONSE_CARD,
+        expectedText: 'response card attached',
+        id: 840,
+        kind: 'attach-response-card',
+      },
+      completedItemEvent({
+        id: 'assistant-tracked-card-1',
+        type: 'assistant_message',
+        message: 'Model prose replaced by card text.',
+      }),
+      completedItemEvent({
+        id: 'user-tracked-card-2',
+        type: 'user_message',
+        message: 'One more thought',
+      }),
+      completedItemEvent({
+        id: 'assistant-tracked-card-2',
+        type: 'assistant_message',
+        message: 'Final follow-up answer.',
+      }),
+    ], { responseCardsAvailable: true })
+
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [],
+      response: 'Strength session\n\nBench press: Set 1: 185 lb × 8',
+      transcriptResponse:
+        'Strength session\n\nBench press: Set 1: 185 lb × 8\n\n' +
+        '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ; snapshot: 2026-08-04T21:30:00.000Z]',
+    }])
+  })
+
   it('keeps a response card when the model finishes without authored text', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       {
@@ -20011,6 +20066,25 @@ describe('steered final segments', () => {
     expect(result.providerAuthoredFinalMessage).toBe('')
     expect(result.finalMessage).toBe(
       'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals.',
+    )
+  })
+
+  it('keeps tracked-card authority only in the final transcript message', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        card: TRACKED_COMPACT_TABLE_RESPONSE_CARD,
+        expectedText: 'response card attached',
+        id: 870,
+        kind: 'attach-response-card',
+      },
+    ], { responseCardsAvailable: true })
+
+    expect(result.finalMessage).toBe(
+      'Strength session\n\nBench press: Set 1: 185 lb × 8',
+    )
+    expect(result.finalMessage).not.toContain('evt_')
+    expect(result.transcriptMessage).toContain(
+      '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',
     )
   })
 

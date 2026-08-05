@@ -1561,7 +1561,9 @@ describe('assistant auto-reply event-first path', () => {
     })
 
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
-    expect(sendInput.deliveryTarget).toBeNull()
+    expect(sendInput.bindingDeliveryTarget).toBeNull()
+    expect(sendInput.deliveryKind).toBeNull()
+    expect(sendInput).not.toHaveProperty('deliveryTarget')
     expect(sendInput.turnContext).toContain('provider thread reminder')
     expect(sendInput.turnContext).not.toContain('wrong channel reminder')
   })
@@ -1658,7 +1660,9 @@ describe('assistant auto-reply event-first path', () => {
     })
 
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
-    expect(sendInput.deliveryTarget).toBe('raw-linq-chat-1')
+    expect(sendInput.bindingDeliveryTarget).toBe('raw-linq-chat-1')
+    expect(sendInput.deliveryKind).toBe('thread')
+    expect(sendInput).not.toHaveProperty('deliveryTarget')
     expect(sendInput.turnContext).toContain('participant-bound cron reminder')
   })
 
@@ -1731,7 +1735,9 @@ describe('assistant auto-reply event-first path', () => {
     })
 
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
-    expect(sendInput.deliveryTarget).toBe(inboundTarget)
+    expect(sendInput.bindingDeliveryTarget).toBe(inboundTarget)
+    expect(sendInput.deliveryKind).toBe('thread')
+    expect(sendInput).not.toHaveProperty('deliveryTarget')
     expect(sendInput.turnContext).toContain('serialized target context')
 
     replyEventPathMocks.sendAssistantMessage.mockClear()
@@ -1767,7 +1773,9 @@ describe('assistant auto-reply event-first path', () => {
 
     const nextSendInput =
       replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
-    expect(nextSendInput.deliveryTarget).toBe(nextInboundTarget)
+    expect(nextSendInput.bindingDeliveryTarget).toBe(nextInboundTarget)
+    expect(nextSendInput.deliveryKind).toBe('thread')
+    expect(nextSendInput).not.toHaveProperty('deliveryTarget')
     expect(nextSendInput).not.toHaveProperty('turnContext')
   })
 

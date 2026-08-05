@@ -42,6 +42,21 @@ describe('accepted message target selection', () => {
     })
   })
 
+  it('uses the thread binding when no duplicate explicit target exists', async () => {
+    const fixture = await createTargetFixture({
+      channel: 'linq',
+      messageId: 'linq-message-binding-only',
+      reactionEligible: true,
+      service: 'iMessage',
+    })
+    await expect(resolveTarget(fixture, 'native-reply')).resolves.toMatchObject({
+      targetInputId: fixture.inputId,
+    })
+    await expect(resolveTarget(fixture, 'reaction')).resolves.toMatchObject({
+      targetInputId: fixture.inputId,
+    })
+  })
+
   it.each(['sms', 'rcs', null])(
     'rejects Linq service %s for both actions',
     async (service) => {
@@ -134,10 +149,16 @@ describe('accepted message target selection', () => {
       },
       () => {
         fixture.route.threadId = 'thread-hash'
-        fixture.route.explicitTarget = 'another-provider-thread'
+        fixture.route.bindingDelivery = {
+          kind: 'thread',
+          target: 'another-provider-thread',
+        }
       },
       () => {
-        fixture.route.explicitTarget = 'provider-thread'
+        fixture.route.bindingDelivery = {
+          kind: 'thread',
+          target: 'provider-thread',
+        }
         fixture.route.channel = 'telegram'
       },
       () => {
@@ -197,8 +218,8 @@ describe('accepted message target selection', () => {
   it('preserves the Telegram business reaction exclusion', async () => {
     const fixture = await createTargetFixture({
       channel: 'telegram',
-      explicitTarget: '123:business:business-connection',
       messageId: '55',
+      providerThreadTarget: '123:business:business-connection',
     })
 
     await expect(resolveTarget(fixture, 'native-reply')).resolves.toMatchObject({
@@ -284,7 +305,10 @@ describe('accepted message target selection', () => {
       code: 'ASSISTANT_MESSAGE_TARGET_UNAVAILABLE',
     })
     fixture.route.threadId = 'thread-hash'
-    fixture.route.explicitTarget = 'another-provider-room'
+    fixture.route.bindingDelivery = {
+      kind: 'thread',
+      target: 'another-provider-room',
+    }
     await expect(
       resolveParticipant(fixture, [fixture.inputId], fixture.inputId),
     ).rejects.toMatchObject({
@@ -315,16 +339,16 @@ describe('accepted message target selection', () => {
   it('gates static tool availability on a real conversational route', () => {
     expect(
       supportsAssistantAcceptedMessageTargetingRoute({
+        bindingDelivery: { kind: 'thread', target: '123' },
         channel: 'telegram',
-        explicitTarget: '123',
         threadId: 'thread-hash',
         threadIsDirect: true,
       }),
     ).toBe(true)
     expect(
       supportsAssistantAcceptedMessageTargetingRoute({
+        bindingDelivery: { kind: 'thread', target: 'hid_private' },
         channel: 'linq',
-        explicitTarget: 'hid_private',
         threadId: 'thread-hash',
         threadIsDirect: true,
       }),
@@ -348,8 +372,11 @@ interface TargetFixture {
   inputId: string
   route: {
     actorId: string | null
+    bindingDelivery: {
+      kind: 'thread'
+      target: string
+    } | null
     channel: string
-    explicitTarget: string
     identityId: string | null
     threadId: string
     threadIsDirect: boolean
@@ -386,9 +413,9 @@ async function resolveParticipant(
 async function createTargetFixture(input: {
   actorId?: string
   channel: 'linq' | 'telegram'
-  explicitTarget?: string
   externalThreadRouteAuthorityPresent?: boolean
   messageId: string
+  providerThreadTarget?: string
   reactionEligible?: boolean
   senderHandle?: string | null
   service?: string | null
@@ -403,7 +430,7 @@ async function createTargetFixture(input: {
   }
   const vault = input.vault ?? context!.vaultRoot
   const accountId = 'account-hash'
-  const explicitTarget = input.explicitTarget ?? 'provider-thread'
+  const providerThreadTarget = input.providerThreadTarget ?? 'provider-thread'
   const stored = await upsertAssistantInputEvent({
     vault,
     event: {
@@ -421,7 +448,7 @@ async function createTargetFixture(input: {
       replyTarget: {
         channel: input.channel,
         messageId: input.messageId,
-        threadId: explicitTarget,
+        threadId: providerThreadTarget,
       },
       sourceMetadata:
         input.channel === 'linq'
@@ -469,8 +496,11 @@ async function createTargetFixture(input: {
     inputId: stored.inputId,
     route: {
       actorId: input.actorId ?? 'actor-hash',
+      bindingDelivery: {
+        kind: 'thread',
+        target: providerThreadTarget,
+      },
       channel: input.channel,
-      explicitTarget,
       identityId: input.channel === 'linq' ? accountId : null,
       threadId: 'thread-hash',
       threadIsDirect: input.threadIsDirect ?? true,

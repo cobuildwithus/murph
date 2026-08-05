@@ -1,6 +1,6 @@
 # Shared Message Targeting
 
-Last verified: 2026-07-16
+Last verified: 2026-08-05
 Status: Implemented
 
 ## Decision
@@ -60,8 +60,13 @@ consulted. The resolver must then:
 2. require an exact accepted input id from that context;
 3. reload the stored `AssistantInputEvent`;
 4. recheck conversation, route, thread, direct/group audience, account, and
-   group-actor authority; and
+   group-actor authority, including an exact match between the event's provider
+   reply thread and the current thread-kind binding; and
 5. apply the action-specific native-reply or reaction capability policy.
+
+The thread binding is the provider-route authority. A one-off explicit-target
+override is not required for tool availability or resolution and does not
+replace that binding.
 
 The resolver fails closed for an invented, stale, cross-turn, cross-thread, or
 unsupported ref. The tool result and provider-turn result carry only the
@@ -77,6 +82,9 @@ database projection, service, API, or feature flag.
 The delivery owner clones the selected input's existing reply-delivery context.
 It does not mutate the shared accepted input. This keeps response segments and
 reactions isolated even when several inputs joined one live turn.
+Same-route inputs accepted during that turn may update their message anchor,
+reaction capability, and idempotency inputs, but do not replace the current
+thread binding or create an explicit-target override.
 
 Reactions keep the existing `message-reaction` outbox operation, retry policy,
 and provider adapter. The only behavior change is that its target comes from

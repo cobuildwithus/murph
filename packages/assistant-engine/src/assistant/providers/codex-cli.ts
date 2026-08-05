@@ -459,6 +459,9 @@ export async function executeCodexAssistantTurnAttempt(
         deliveryContextOrdinal: segment.deliveryContextOrdinal,
         media: segment.media,
         response: segment.response,
+        ...(segment.transcriptResponse === undefined
+          ? {}
+          : { transcriptResponse: segment.transcriptResponse }),
         ...(segment.targetInputId
           ? { targetInputId: segment.targetInputId }
           : {}),
