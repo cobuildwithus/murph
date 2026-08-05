@@ -11,6 +11,11 @@ import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect
 import { Input } from "@/src/components/ui/input";
 import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import type { DeviceSyncCompletionContactAction } from "@/src/lib/device-sync/connect-completion-types";
+import {
+  buildAppleHealthRelaySetupGuide,
+  isAppleHealthRelaySetupGuideId,
+  type AppleHealthRelaySetupGuideId,
+} from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
@@ -68,6 +73,7 @@ export { filterConnectSourcesForSearch } from "./connect-page-helpers";
 
 export function ConnectSourcesGrid({
   authenticated = true,
+  appleHealthRelaySyncContactActions = {},
   deviceConnectRecoveryContactAction = null,
   garminHistoricalDataVoiceMemoSrc = null,
   initialCallback = null,
@@ -79,6 +85,9 @@ export function ConnectSourcesGrid({
   zeppSyncContactAction = null,
 }: {
   authenticated?: boolean;
+  appleHealthRelaySyncContactActions?: Partial<
+    Record<AppleHealthRelaySetupGuideId, DeviceSyncCompletionContactAction | null>
+  >;
   deviceConnectRecoveryContactAction?: MurphContactOption | null;
   garminHistoricalDataVoiceMemoSrc?: string | null;
   initialCallback?: ConnectCallbackInput;
@@ -154,6 +163,12 @@ export function ConnectSourcesGrid({
   );
   const visibleNotice = notice ?? initialConnectIntentPresentation?.notice ?? null;
   const visibleActionError = actionError ?? initialConnectIntentPresentation?.actionError ?? null;
+  const activeAppleHealthRelaySetupGuide = isAppleHealthRelaySetupGuideId(activeSetupGuideId)
+    ? buildAppleHealthRelaySetupGuide(activeSetupGuideId)
+    : null;
+  const activeAppleHealthRelayContactAction = isAppleHealthRelaySetupGuideId(activeSetupGuideId)
+    ? appleHealthRelaySyncContactActions[activeSetupGuideId] ?? null
+    : null;
   // When this load carries a connect intent that the effect below will auto-redirect, show a
   // pending-redirect dialog. Seeded on mount and cleared only if that redirect attempt fails.
   const [connectIntentRedirectName, setConnectIntentRedirectName] = useState<string | null>(
@@ -471,6 +486,19 @@ export function ConnectSourcesGrid({
           }
         }}
       />
+
+      {activeAppleHealthRelaySetupGuide ? (
+        <DeviceSyncSetupGuideDialog
+          contactAction={activeAppleHealthRelayContactAction}
+          guide={activeAppleHealthRelaySetupGuide}
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setActiveSetupGuideId(null);
+            }
+          }}
+        />
+      ) : null}
 
       <GarminHistoricalDataDialog
         open={Boolean(garminHistoricalDataRequest)}
