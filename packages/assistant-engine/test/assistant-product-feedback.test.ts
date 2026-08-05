@@ -381,7 +381,11 @@ describe("assistant product feedback", () => {
       throw new Error("Expected a parsed support escalation request.");
     }
 
-    for (const conversationScope of ["group", "unverified-external"] as const) {
+    for (const conversationScope of [
+      null,
+      "group",
+      "unverified-external",
+    ] as const) {
       const result = await executeMurphDynamicToolRequest({
         env: {},
         fetchImpl: fetch,
@@ -389,14 +393,16 @@ describe("assistant product feedback", () => {
           computerToolsAvailable: false,
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
-          currentUserActionScope: () => ({
-            acceptedInputIds: ["assistant_input_1"],
-            conversationId: null,
-            conversationScope,
-            inboundMailboxItemIds: [],
-            originSessionId: "session-scope-check",
-            recipientKey: null,
-          }),
+          currentUserActionScope: () => conversationScope === null
+            ? null
+            : {
+                acceptedInputIds: ["assistant_input_1"],
+                conversationId: null,
+                conversationScope,
+                inboundMailboxItemIds: [],
+                originSessionId: "session-scope-check",
+                recipientKey: null,
+              },
           sendVaultFile: async () => {
             throw new Error("Vault-file sending is unavailable for this turn.");
           },
@@ -449,10 +455,28 @@ describe("assistant product feedback", () => {
     if (!request) {
       throw new Error("Expected a parsed support escalation request.");
     }
+    const hostedToolContext = {
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => ({
+        acceptedInputIds: ["assistant_input_1"],
+        conversationId: null,
+        conversationScope: "direct" as const,
+        inboundMailboxItemIds: [],
+        originSessionId: "session-scope-check",
+        recipientKey: null,
+      }),
+      sendVaultFile: async () => {
+        throw new Error("Vault-file sending is unavailable for this turn.");
+      },
+      vaultFileSendAvailable: false,
+    };
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
+      hostedToolContext,
       nextUsageOrdinal: () => 0,
       productFeedbackRecorder,
       progressDelivery: null,
@@ -481,6 +505,7 @@ describe("assistant product feedback", () => {
     const failedResult = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
+      hostedToolContext,
       nextUsageOrdinal: () => 0,
       productFeedbackRecorder: failingRecorder,
       progressDelivery: null,

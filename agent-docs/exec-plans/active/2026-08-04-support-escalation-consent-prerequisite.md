@@ -102,3 +102,9 @@ Updated: 2026-08-05
   tool, schema, configuration, or request assembly, so the rendered totals remain
   the current base/head totals. The temporary harness and detached measurement
   worktree were removed.
+- Parent privacy review found that the reserved tool rejected known non-direct
+  scopes but admitted a missing verification scope. The tool now requires an
+  affirmative `direct` scope and focused coverage includes missing, group, and
+  unverified-external scope rejection. All five focused suites still pass 97
+  tests with 25 credential-gated cases skipped, and Assistant Engine typecheck
+  remains clean. This implementation-only guard does not change provider input.

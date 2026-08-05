@@ -3970,7 +3970,7 @@ async function executeSubmitProductFeedbackTool(input: {
     }
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
-    if (userActionScope && userActionScope.conversationScope !== 'direct') {
+    if (userActionScope?.conversationScope !== 'direct') {
       return toolTextResult(
         false,
         'support escalation rejected: an account-linked support escalation is only available in a verified private direct conversation',
