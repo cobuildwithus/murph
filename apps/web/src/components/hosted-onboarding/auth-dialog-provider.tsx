@@ -133,6 +133,7 @@ export function AuthProvider({
 function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): boolean {
   return (
     shouldResumeCurrentActionApprovalUrl(payload)
+    || shouldResumeCurrentConnectIndexUrl(payload)
     || shouldResumeCurrentEnvironmentUrl(payload)
     || shouldResumeCurrentDeviceConnectIntentUrl(payload)
     || shouldResumeCurrentClinicalRecordsIndexUrl(payload)
@@ -143,6 +144,17 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
     || shouldResumeCurrentSettingsPlanChangeUrl(payload)
     || shouldResumeCurrentSettingsPulseTrialPaymentUrl(payload)
+  );
+}
+
+function shouldResumeCurrentConnectIndexUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  return (
+    isHostedOnboardingAccessibleStage(payload.stage)
+    && payload.initialVisitEligible !== true
+    && typeof window !== "undefined"
+    && window.location.pathname === "/connect"
   );
 }
 

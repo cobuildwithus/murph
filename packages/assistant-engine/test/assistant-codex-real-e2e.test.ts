@@ -2691,7 +2691,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
           productFeedbackRecorder: createRealCodexFeedbackRecorder(),
           prompt: [
             'My relative\'s diabetes readings from a glucose sensor vanished after syncing at a clinic, and the Murph connection still says it succeeded.',
-            'Please alert your product team about this directly.',
+            'I need Murph human support to take this over.',
           ].join(' '),
           workingDirectory: privateWorkingDirectory,
         })
@@ -2700,7 +2700,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
           'no support escalation before exact account-linked approval',
         ).toHaveLength(0)
         const offerText = privateOffer.finalMessage.trim()
-        expect(offerText, 'support address given before approval').toContain(
+        expect(offerText, 'support address not volunteered before approval').not.toContain(
           'support@withmurph.ai',
         )
         expect(offerText, 'account linkage disclosed').toMatch(
@@ -2753,7 +2753,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
           /relative|diabetes|glucose|clinic/iu,
         )
         const privateText = privateResult.finalMessage.trim()
-        expect(privateText, 'support address given').toContain(
+        expect(privateText, 'support address remains opt-in').not.toContain(
           'support@withmurph.ai',
         )
         expect(privateText, 'saved product issue confirmation').toMatch(
@@ -2773,16 +2773,25 @@ describeRealCodex('real Codex support escalation e2e', () => {
           productFeedbackRecorder: createRealCodexFeedbackRecorder(),
           prompt: [
             '[@Trainer_User] Murph keeps dropping my workout photos in here.',
-            'Murph, this is broken. Report it to your team right now.',
+            'Murph, this is broken. I need Murph human support to take it over.',
           ].join(' '),
           workingDirectory: groupWorkingDirectory,
         })
+        const groupSupportCalls = readFeedbackCalls(
+          groupResult.jsonEvents,
+        ).filter(
+          (action) =>
+            action.kind === 'dynamic'
+            && readString(action.argumentsValue.summary)?.startsWith(
+              'Support escalation:',
+            ),
+        )
         expect(
-          readFeedbackCalls(groupResult.jsonEvents),
+          groupSupportCalls,
           'no account-linked escalation from a group',
         ).toHaveLength(0)
         const groupText = groupResult.finalMessage.trim()
-        expect(groupText, 'group support address given').toContain(
+        expect(groupText, 'group support address remains opt-in').not.toContain(
           'support@withmurph.ai',
         )
         expect(groupText, 'group redirects escalation to private Murph').toMatch(

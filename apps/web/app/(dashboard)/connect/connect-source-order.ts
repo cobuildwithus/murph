@@ -13,6 +13,7 @@ const CONNECT_SOURCE_POPULARITY_ORDER = [
   "fitbit",
   "google-fit",
   "strava",
+  "zepp",
   "withings",
   "oura",
   "whoop",

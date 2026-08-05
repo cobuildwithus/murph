@@ -5,7 +5,7 @@ import {
 } from "../src/assistant/codex-base-instructions.js";
 
 describe("Murph Codex base support guidance", () => {
-  it("provides a direct support route and bounded explicit escalation", () => {
+  it("keeps product failures background-first and support contact opt-in", () => {
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "support@withmurph.ai",
     );
@@ -13,22 +13,28 @@ describe("Murph Codex base support guidance", () => {
       "murph.submit_product_feedback",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Support escalation:",
+      "do not volunteer contact details",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "In verified private direct chat",
+      "de-identified summary not beginning `Support escalation:`",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "show the exact de-identified product-only summary",
+      "say it was flagged",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "it may enter an internal escalation linked to their Murph account",
+      "Give support@withmurph.ai only when explicitly asked.",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Generic escalation approves neither; wait for affirmative approval.",
+      "For verified-private human support",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "If no safe summary or chat not private, give the address only; do not call.",
+      "show the exact product-only summary",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "disclose potential account linkage",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "the request alone is not approval",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "issue saved for triage and account-linked escalation recorded",
@@ -36,14 +42,20 @@ describe("Murph Codex base support guidance", () => {
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Never claim email delivery/receipt",
     );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "promise ticket, response, fix, follow-up, or timing",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "never retry",
+    );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
-      "a de-identified report is queued",
+      "For Murph product problems, give support@withmurph.ai directly",
     );
-    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Never promise a ticket, response, fix, follow-up, or timing",
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
+      "give the address and move account-linked escalation",
     );
-    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "never retry or evade limits",
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
+      "say a de-identified report is queued and give the address",
     );
   });
 

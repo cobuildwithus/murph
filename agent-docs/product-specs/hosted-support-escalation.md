@@ -1,26 +1,25 @@
 # Hosted support escalation
 
-Last verified: 2026-08-04
+Last verified: 2026-08-05
 
-Consent prerequisite plan: `agent-docs/exec-plans/completed/2026-08-04-support-escalation-consent-prerequisite.md`.
-Detailed-email plan: `agent-docs/exec-plans/completed/2026-08-04-support-escalation-email-summary.md`.
+Consent prerequisite plan: `agent-docs/exec-plans/active/2026-08-04-support-escalation-consent-prerequisite.md`.
+Detailed-email plan: `agent-docs/exec-plans/active/2026-08-04-support-escalation-email-summary.md`.
 
 ## User purpose
 
-A member who reaches a Murph-owned product blocker should not be left at a hard wall. Murph must provide a real support address immediately and, after truthful disclosure and approval in the member's private Murph conversation, can record a de-identified product-only issue and an account-linked escalation. A follow-up release may include that approved issue in the account-linked support notification only after the consent-capable runner has converged in production.
+A member who reaches a Murph-owned product failure should stay focused on recovery, not support plumbing. Murph may capture a de-identified issue through the existing background feedback path and give one short truthful acknowledgement after candidate acceptance. The support address remains opt-in. Account-linked human support is a separate explicit action that requires exact-summary and potential-linkage consent before the reserved support record is created.
 
 ## Conversation contract
 
-- For a Murph product problem, connection failure, or hard product wall, give `support@withmurph.ai` directly. Do not route the member through legal or privacy pages to discover it.
-- In a verified private direct conversation, Murph may offer escalation only by showing the exact de-identified product-only summary, stating that it may be included in an internal support escalation linked to the member's Murph account, and asking a natural confirmation question. The offer itself sends nothing. This maximum-disclosure wording remains truthful during the split rollout: the prerequisite records the issue separately from the account-linked escalation, while the follow-up may include the approved issue in the support email.
-- A generic request to alert humans, escalate, or open support does not authorize unseen account linkage or an unseen summary. One report for the current issue is authorized only after the member affirmatively approves that exact disclosed summary and potential linkage.
-- Reuse `murph.submit_product_feedback` with `kind: "frustration"` and a sanitized product-only summary beginning exactly `Support escalation:`.
-- In a group or unverified audience, give the support address but do not create an account-linked escalation from the synthetic room or uncertain audience. Direct the requester to their private Murph conversation for that action. The deterministic unverified-audience safety reply also names the support address so an unverifiable conversation is never a dead end.
-- A summary beginning with the reserved `Support escalation:` prefix must carry the exact shape (`frustration` kind, no changelog references, non-empty de-identified content after the prefix); any other prefixed payload is rejected synchronously at the tool boundary so the model can correct it instead of silently degrading.
-- The tool boundary also rejects a reserved support payload when the hosted user-action scope is not a verified direct conversation, as defense in depth ahead of the Web synthetic-room check.
-- In the hosted runtime, the exact support shape is recorded through the Web callback inside the turn, before the model may confirm anything, so the member-facing confirmation is backed by a durable member-linked record. Ordinary feedback keeps the existing best-effort post-delivery flush.
-- After the tool reports the record accepted, say the product issue was saved for triage and an account-linked escalation was recorded, then give the support address. This is the strongest completion claim shared by metadata-only delivery, the later detailed-email delivery, daily email suppression, and exact replay. Do not claim the issue was emailed or seen, that a ticket exists, that Murph will automatically message later, or that a fix has a deadline.
-- If the tool is unavailable or the durable record fails, say the direct notification did not complete and give the support address.
+- For a clear Murph-owned product failure, call `murph.submit_product_feedback` at most once with `kind: "frustration"` and a concise de-identified product-only summary that does not begin `Support escalation:`.
+- Ordinary feedback remains best-effort after the reply. If the candidate is accepted or already accepted, Murph may briefly say it flagged the issue for the product team. If unavailable, Murph must not imply it was recorded or sent. Continue with the best available recovery or fallback.
+- Do not mention the tool, feedback ids, queues, email, tickets, or internal escalation mechanics unless the member asks. Give `support@withmurph.ai` only when the member explicitly asks for the address or how to contact support.
+- A bug handoff, workaround, product-team feedback request, or even a first request for Murph human support does not authorize an unseen account-linked summary.
+- In a verified private direct conversation, respond to an explicit human-support request by showing the exact de-identified product-only summary, saying it may enter an internal escalation linked to the member's Murph account, and asking a natural confirmation question. The offer sends nothing.
+- Only affirmative approval of that shown summary and potential linkage authorizes one reserved call with `kind: "frustration"`, no changelog references, and the approved summary beginning exactly `Support escalation:`.
+- Outside a verified private direct conversation, move human support to private Murph without creating the reserved record. Do not volunteer the address; provide it only when explicitly requested.
+- The tool boundary rejects malformed reserved payloads and reserved payloads outside verified private direct conversations. The hosted runtime records the exact reserved shape through the Web callback inside the turn before Murph may confirm completion; ordinary feedback keeps its best-effort post-delivery flush.
+- After accepted or already accepted, say the issue was saved for triage and an account-linked escalation was recorded. On failure, say direct notification failed. Do not add the address unless requested, claim email delivery or receipt, promise a ticket, response, fix, follow-up, or timing, or retry in the same turn.
 
 ## Data and privacy
 

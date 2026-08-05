@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-04
-Updated: 2026-08-04
+Updated: 2026-08-05
 
 ## Goal
 
@@ -14,10 +14,10 @@ Updated: 2026-08-04
 
 - A generic escalation request produces no tool call.
 - The member sees the exact safe summary, maximum account-linkage disclosure,
-  direct support address, and a natural approval question.
+  and a natural approval question without an unrequested support address.
 - An affirmative continuation submits that same product-only summary once.
-- Group, unverified, or semantically unsafe contexts receive the direct support
-  route without an account-linked tool call.
+- Group, unverified, or semantically unsafe contexts receive a private support
+  route without an account-linked tool call; the address appears only if asked.
 - The consent-capable runner is deployed with immediate rollout and exact
   fingerprint convergence before any follow-up Web release may put issue text
   beside the member id in an email.
@@ -65,9 +65,10 @@ Updated: 2026-08-04
 - Maximum disclosure says the approved summary may be included with the
   account-linked escalation. That is informed consent for the follow-up while
   remaining truthful during the metadata-only prerequisite window.
-- Ordinary feedback remains silent and best-effort; the assembled developer
-  prompt and tool description explicitly exclude reserved support escalation
-  from that policy and route it to disclosed approval plus durable completion.
+- Ordinary feedback remains best-effort; a clear accepted Murph product failure
+  may receive one brief product-team acknowledgement. The assembled developer
+  prompt and tool description exclude reserved support escalation from that
+  policy and route it to disclosed approval plus durable completion.
 
 ## Verification
 
@@ -80,7 +81,7 @@ Updated: 2026-08-04
 - Focused prompt, prompt-budget, tool-contract, and real-model scenario suites
   pass 99 tests; 25 credential-gated live-provider cases compile and skip.
   Assistant Engine typecheck, docs drift, and diff checks pass. The compact
-  execution-kernel runtime literal is 2,975 characters / 2,979 UTF-8 bytes and
+  execution-kernel runtime literal is 2,990 characters / 2,994 UTF-8 bytes and
   passes its strict sub-3,000-byte ratchet.
 - The original production App Server paired capture plus exact serialized-field
   correction measurement uses `gpt-5.6-terra`, low reasoning, the exact support
