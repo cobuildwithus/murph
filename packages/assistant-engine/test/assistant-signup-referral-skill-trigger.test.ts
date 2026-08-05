@@ -5,45 +5,52 @@ import { describe, expect, it } from 'vitest'
 
 import {
   ASSISTANT_SKILLS,
+  buildAssistantSkillFileRef,
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
 
-describe('assistant signup referral guidance', () => {
-  it('loads referral guidance for an explicit shareable signup-link request', () => {
+describe('assistant signup link guidance', () => {
+  it('loads a small dedicated skill only for an explicit shareable-link request', () => {
     const skill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'signup-link',
+    )
+    const lowUsage = ASSISTANT_SKILLS.find(
       (candidate) => candidate.slug === 'hosted-low-usage',
     )
 
-    expect(skill?.triggerHint).toContain(
-      'signup, invite, share, or referral link to send someone',
+    expect(skill?.triggerHint).toContain('explicitly asks')
+    expect(skill?.triggerHint).toContain('shareable link')
+    expect(buildAssistantSkillFileRef('signup-link')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/signup-link/SKILL.md',
     )
+    expect(lowUsage?.triggerHint).not.toContain('signup link')
+    expect(lowUsage?.triggerHint).not.toContain('invite link')
   })
 
-  it('keeps group introductions as the default and requires an explicit link ask', async () => {
+  it('keeps group introductions as the default and separates attribution from rewards', async () => {
     const skill = await readFile(
-      path.join(
-        resolveAssistantSkillsRoot(),
-        'hosted-low-usage',
-        'SKILL.md',
-      ),
+      path.join(resolveAssistantSkillsRoot(), 'signup-link', 'SKILL.md'),
       'utf8',
     )
     const normalizedSkill = skill.replace(/\s+/gu, ' ')
 
     expect(normalizedSkill).toContain(
-      'The existing group introduction flow remains the default',
+      'The existing group-chat introduction flow remains the default',
     )
     expect(normalizedSkill).toContain(
-      'Only after the current member explicitly asks for a signup, invite, referral, or shareable link to forward',
+      'Only when the current member explicitly asks for a signup, invite, referral, or shareable link to forward',
     )
     expect(normalizedSkill).toContain(
-      '`murph.group action="create_signup_referral_link"`',
+      '`action="create_signup_referral_link"`',
     )
     expect(normalizedSkill).toContain(
-      'Murph returns the link to the requester and does not choose, contact, or message the recipient',
+      'pass the exact accepted `message_ref` from the requester',
     )
     expect(normalizedSkill).toContain(
-      'The link records signup attribution only',
+      'Never choose, contact, or message the recipient',
+    )
+    expect(normalizedSkill).toContain(
+      'does not earn usage, complete a mission, or guarantee a reward',
     )
   })
 })
