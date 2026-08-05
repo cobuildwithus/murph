@@ -15,6 +15,10 @@ const recoveryMigrationUrl = new URL(
   "../prisma/migrations/20260728050000_rearm_hosted_mailbox_content_retention/migration.sql",
   import.meta.url,
 );
+const generatedImageRetentionMigrationUrl = new URL(
+  "../prisma/migrations/20260805010000_rearm_generated_image_capture_retention/migration.sql",
+  import.meta.url,
+);
 
 if (
   runPostgresMigrationProof
@@ -31,6 +35,10 @@ describe.skipIf(!runPostgresMigrationProof)(
     it("re-arms persisted snapshots after the runner fleet converges", async () => {
       const migrationSql = await readFile(migrationUrl, "utf8");
       const recoveryMigrationSql = await readFile(recoveryMigrationUrl, "utf8");
+      const generatedImageRetentionMigrationSql = await readFile(
+        generatedImageRetentionMigrationUrl,
+        "utf8",
+      );
       const client = new pg.Client({ connectionString: databaseUrl });
       await client.connect();
 
@@ -40,7 +48,7 @@ describe.skipIf(!runPostgresMigrationProof)(
           transactionTimestamp: string;
         }>(`
           SELECT to_char(
-            (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::TIMESTAMP(3),
+            date_trunc('milliseconds', CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
             'YYYY-MM-DD"T"HH24:MI:SS.MS'
           ) AS "transactionTimestamp"
         `);
@@ -115,6 +123,7 @@ describe.skipIf(!runPostgresMigrationProof)(
         `);
 
         await client.query(recoveryMigrationSql);
+        await client.query(generatedImageRetentionMigrationSql);
 
         const staleCheckpoint = await client.query(`
           UPDATE "hosted_workspace"
@@ -123,7 +132,7 @@ describe.skipIf(!runPostgresMigrationProof)(
             "checkpointed_at" = '2026-07-26T15:00:00.000Z',
             "version" = "version" + 1
           WHERE "user_id" = 'snapshot-missing-wake'
-            AND "version" = 11
+            AND "version" = 12
         `);
         expect(staleCheckpoint.rowCount).toBe(0);
 
@@ -170,7 +179,7 @@ describe.skipIf(!runPostgresMigrationProof)(
             dueNow: true,
             userId: "snapshot-existing-wake",
             signalAttemptedAt: null,
-            version: "7",
+            version: "8",
             wakeAt: transactionTimestamp,
           },
           {
@@ -178,7 +187,7 @@ describe.skipIf(!runPostgresMigrationProof)(
             dueNow: true,
             userId: "snapshot-missing-wake",
             signalAttemptedAt: null,
-            version: "12",
+            version: "13",
             wakeAt: transactionTimestamp,
           },
         ]);

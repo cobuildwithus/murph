@@ -57,6 +57,17 @@ export {
 export {
   removeAutomaticMealPhoto,
 } from "./events/automatic-meal-photo-retention.ts";
+export {
+  GENERATED_IMAGE_CAPTURE_RETENTION_DAYS,
+  GENERATED_IMAGE_CAPTURE_RETENTION_WINDOW_MS,
+  GENERATED_IMAGE_CAPTURE_PROVENANCE_SCHEMA,
+  GENERATED_IMAGE_CAPTURE_SOURCE,
+  GENERATED_IMAGE_CAPTURE_TAGS,
+  runGeneratedImageCaptureRetention,
+} from "./events/generated-image-capture-retention.ts";
+export {
+  CAPTURE_LOOKUP_INDEX_PATH,
+} from "./events/capture-lookup.ts";
 export type {
   DeleteEventInput,
   DeleteEventResult,
@@ -70,6 +81,10 @@ export type {
   RemoveAutomaticMealPhotoInput,
   RemoveAutomaticMealPhotoResult,
 } from "./events/automatic-meal-photo-retention.ts";
+export type {
+  RunGeneratedImageCaptureRetentionInput,
+  RunGeneratedImageCaptureRetentionResult,
+} from "./events/generated-image-capture-retention.ts";
 
 export function buildExperimentEventRecord(input: {
   occurredAt: string;

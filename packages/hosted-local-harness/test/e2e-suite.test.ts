@@ -138,7 +138,7 @@ describe("hosted-local E2E suite preparation", () => {
     const vitestCalls = runForegroundCommand.mock.calls
       .map(([call]) => call)
       .filter((call) => call.args.includes("vitest"));
-    expect(vitestCalls).toHaveLength(20);
+    expect(vitestCalls).toHaveLength(21);
     expect(vitestCalls[0]).toEqual(expect.objectContaining({
       args: expect.arrayContaining([
         "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
@@ -412,7 +412,6 @@ describe("hosted-local E2E suite preparation", () => {
       [16, "retryable-outbox-foreground-restart", "hosted-local-retryable-outbox-foreground-restart"],
       [17, "shutdown-checkpoint-conversation-ahead", "hosted-local-shutdown-checkpoint-conversation-ahead"],
       [18, "vault-file-approval-resume", "hosted-local-vault-file-approval-resume"],
-      [19, "foreground-reply-priority", "hosted-local-foreground-reply-priority"],
     ] as const) {
       expect(vitestCalls[index]).toEqual(expect.objectContaining({
         args: expect.arrayContaining([
@@ -434,7 +433,27 @@ describe("hosted-local E2E suite preparation", () => {
       expect(vitestCalls[index]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
         .toBeUndefined();
     }
-    expect(cleanupHostedRunnerContainers).toHaveBeenCalledTimes(22);
+    for (const [index, processIndex, testNamePattern] of [
+      [19, 1, "^hosted local foreground reply priority e2e"],
+      [20, 2, "^hosted local foreground checkpoint ordering e2e"],
+    ] as const) {
+      expect(vitestCalls[index]).toEqual(expect.objectContaining({
+        args: expect.arrayContaining([
+          "apps/cloudflare/test/hosted-local-foreground-reply-priority-e2e.test.ts",
+          "--testNamePattern",
+          testNamePattern,
+        ]),
+        command: "pnpm",
+        label:
+          `Hosted local full-stack e2e scenario 20/20 foreground-reply-priority process ${processIndex}/2`,
+      }));
+      expect(vitestCalls[index]?.env).toEqual(expect.objectContaining({
+        MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS: "1",
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
+          expect.stringMatching(/^hosted-local-e2e-/u),
+      }));
+    }
+    expect(cleanupHostedRunnerContainers).toHaveBeenCalledTimes(23);
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(expect.objectContaining({
       ignoreErrors: false,
       scope: "current-build",

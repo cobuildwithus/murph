@@ -153,7 +153,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings custom inference connection">
+      <StudySection title="Settings custom inference routing and endpoint">
         <SettingsCustomInferenceStudy />
       </StudySection>
 

@@ -93,6 +93,9 @@ export type HostedCanonicalWriteReceiptAction =
       sha256: string;
       byteLength: number;
       effect: "create" | "update" | "reuse";
+      allowRaw?: true;
+      expectedSha256?: string;
+      expectedByteLength?: number;
       contentRef?: HostedCanonicalWriteReceiptContentRef;
     }
   | {
@@ -565,7 +568,15 @@ export async function applyHostedCanonicalWriteReceipt(input: {
           ref: action.contentRef,
         });
         await applyHostedCanonicalTextReceiptAction({
+          allowRaw: action.allowRaw === true,
           bytes,
+          expectedTargetReceipt:
+            action.expectedSha256 && action.expectedByteLength !== undefined
+              ? {
+                  byteLength: action.expectedByteLength,
+                  sha256: action.expectedSha256,
+                }
+              : undefined,
           targetRelativePath: action.targetRelativePath,
           vaultRoot,
         });
@@ -663,7 +674,9 @@ async function readHostedCanonicalWriteReceiptPayload(input: {
 }
 
 async function applyHostedCanonicalTextReceiptAction(input: {
+  allowRaw: boolean;
   bytes: Uint8Array;
+  expectedTargetReceipt?: CommittedPayloadReceipt;
   targetRelativePath: string;
   vaultRoot: string;
 }): Promise<void> {
@@ -672,12 +685,35 @@ async function applyHostedCanonicalTextReceiptAction(input: {
   });
   const target = await prepareVerifiedWriteTarget(input.vaultRoot, input.targetRelativePath, {
     kind: "text",
-    allowRaw: isRawTarget,
+    // Legacy create receipts predate allowRaw. Preserve their create-only
+    // replay while requiring explicit authority for guarded raw replacement.
+    allowRaw: input.allowRaw || (isRawTarget && !input.expectedTargetReceipt),
   });
   if (await targetMatchesBytes(target.absolutePath, input.bytes)) {
     return;
   }
-  if (isRawTarget && (await pathExists(target.absolutePath))) {
+  if (input.expectedTargetReceipt) {
+    let actualReceipt: CommittedPayloadReceipt;
+    try {
+      actualReceipt = await createFileContentReceipt(target.absolutePath);
+    } catch (error) {
+      if (isErrnoException(error) && error.code === "ENOENT") {
+        throw new VaultError(
+          "HOSTED_CANONICAL_WRITE_TEXT_CONFLICT",
+          "Hosted canonical guarded text replay found a missing preimage.",
+          { relativePath: input.targetRelativePath },
+        );
+      }
+      throw error;
+    }
+    if (!receiptsMatch(actualReceipt, input.expectedTargetReceipt)) {
+      throw new VaultError(
+        "HOSTED_CANONICAL_WRITE_TEXT_CONFLICT",
+        "Hosted canonical guarded text replay found conflicting existing bytes.",
+        { relativePath: input.targetRelativePath },
+      );
+    }
+  } else if (isRawTarget && (await pathExists(target.absolutePath))) {
     throw new VaultError(
       "HOSTED_CANONICAL_WRITE_RAW_CONFLICT",
       "Hosted canonical raw replay found conflicting existing bytes.",
@@ -2508,6 +2544,13 @@ export class WriteBatch {
           sha256: payloadReceipt.sha256,
           byteLength: payloadReceipt.byteLength,
           effect: action.effect ?? "update",
+          ...(action.allowRaw ? { allowRaw: true as const } : {}),
+          ...(action.expectedTargetReceipt
+            ? {
+                expectedSha256: action.expectedTargetReceipt.sha256,
+                expectedByteLength: action.expectedTargetReceipt.byteLength,
+              }
+            : {}),
           contentRef: createHostedCanonicalWriteReceiptContentRef(payloadReceipt),
         };
       }

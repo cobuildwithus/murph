@@ -105,7 +105,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // vault-share projection path without adding a forbidden boot input. macOS
 // assembly measured 10,159,653B total on 2026-08-04; retain the established
 // allowance above that measured baseline.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_159_653 + 32_768;
+//
+// The hosted-local foreground-priority regression adds bounded test-only
+// ordering observations to the runner entrypoint. After merging both changes,
+// macOS assembly measured 10,186,925B total on 2026-08-05; retain the
+// established allowance above that combined measured baseline.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_186_925 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_699_250;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_442_983;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

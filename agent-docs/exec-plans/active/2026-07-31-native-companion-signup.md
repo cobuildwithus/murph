@@ -3,6 +3,7 @@
 Status: active
 Owner: Codex
 Started: 2026-07-31
+Updated: 2026-08-03
 
 ## Goal
 
@@ -30,6 +31,9 @@ sync admission.
   onboarding flow asks whether Murph can reach the member.
 - Existing active members stay on a read-only fast path and do not create or
   refresh onboarding state.
+- A changed Privy principal may replace an existing member binding only when a
+  Privy-verified email resolves uniquely to that same member's durable verified
+  email. Phone-only mismatch and credentials split across members fail closed.
 - Only members still in the canonical `not_started` billing state may be
   automatically enrolled from this companion path. Existing incomplete or
   lapsed billing stays with its current recovery owner.
@@ -92,10 +96,15 @@ server-provided launch scopes, so no new continuation state is needed.
 - [x] Confirmed no overlapping branch or open pull request.
 - [x] Confirmed the native app already has complete phone/email OTP and consent
       continuation; no new native API field is necessary.
-- [ ] Implement the hosted orchestration and shared email readiness.
-- [ ] Add focused proof.
-- [ ] Update both repositories' documentation.
-- [ ] Open coordinated pull requests and inspect exact-head CI/review output.
+- [x] Implement the hosted orchestration and shared email readiness.
+- [x] Add the original focused proof and documentation.
+- [x] Reproduce the production native email recovery failure from typed logs
+      and narrow read-only member facts without creating a duplicate member.
+- [x] Preserve phone-only mismatch while allowing a changed Privy principal
+      whose verified email uniquely resolves to the same member.
+- [x] Add focused success and fail-closed regression proof.
+- [ ] Complete the hotfix PR's exact-head CI and ReviewGPT gates.
+- [ ] Deploy Web and verify the native retry succeeds without an app update.
 
 ## Verification
 
@@ -113,6 +122,23 @@ pnpm --filter @murph/web typecheck
 Broad PR proof remains owned by exact-head GitHub Actions. The iOS companion
 change is documentation-only unless implementation evidence disproves the
 current no-client-change conclusion.
+
+2026-08-03 hotfix proof:
+
+```sh
+pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage \
+  apps/web/test/hosted-onboarding-member-identity-service.test.ts \
+  apps/web/test/hosted-onboarding-privy-service.test.ts \
+  apps/web/test/hosted-onboarding-companion-member-access.test.ts \
+  apps/web/test/device-sync-companion-signup-route.test.ts
+pnpm --dir apps/web typecheck
+```
+
+The four focused suites pass all 52 cases, including verified-email recovery,
+phone-only rejection, cross-member email rejection, shared onboarding, and the
+companion route. The prepared typecheck initially found the fresh worktree's
+expected missing generated Health Commons input; the canonical Web typecheck
+generated that source-owned input and then passed.
 
 ## Rollout
 

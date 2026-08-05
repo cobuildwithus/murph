@@ -172,8 +172,9 @@ describe("hosted image generation", () => {
       scopeId: "session_1",
       async run(_signal, persistCanonicalWrite) {
         await heldImage;
-        const savedImageRef = await persistCanonicalWrite(async () =>
-          privateMedia.ref
+        const savedImageRef = await persistCanonicalWrite(
+          async () => privateMedia.ref,
+          { retentionWakeAt: "2026-08-18T00:00:00.000Z" },
         );
         return {
           media: privateMedia,
@@ -214,7 +215,11 @@ describe("hosted image generation", () => {
     await ready;
     assert.equal(notifyReadyOnce.mock.calls.length, 1);
     assert.equal(controller.hasCompleted(), false);
-    const canonicalBoundary = vi.fn(async (write: () => Promise<void>) => {
+    const canonicalBoundary = vi.fn(async (
+      write: () => Promise<void>,
+      metadata: { retentionWakeAt: string },
+    ) => {
+      assert.equal(metadata.retentionWakeAt, "2026-08-18T00:00:00.000Z");
       await write();
     });
     assert.equal(await controller.flushCanonicalWrites(canonicalBoundary), 1);
