@@ -202,9 +202,14 @@ describe("changelog registry", () => {
       sourcePullRequests: [1202],
       details: expect.stringContaining("never silently falls back"),
     });
+    expect(items.get("custom-inference-endpoint")?.tryIt).toBeUndefined();
     expect(items.get("health-data-consent-controls")).toMatchObject({
       sourcePullRequests: [1215],
       summary: expect.stringContaining("without locking you out"),
+      tryIt: {
+        href: "/settings/data-privacy",
+        label: "Open privacy settings",
+      },
     });
     expect(items.get("daily-nutrition-cards")).toMatchObject({
       sourcePullRequests: [1104, 1280],

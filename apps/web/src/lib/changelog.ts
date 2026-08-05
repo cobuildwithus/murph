@@ -80,10 +80,6 @@ const RAW_CHANGELOG_EDITIONS = [
           "Murph verifies a public HTTPS endpoint, encrypts its connection details, and never silently falls back to a managed model if the custom route fails. Murph's health tools and other hosted services keep their existing funding and privacy boundaries.",
         relevanceTags: ["assistant", "models", "settings", "privacy"],
         sourcePullRequests: [1202],
-        tryIt: {
-          href: "/settings",
-          label: "Open model settings",
-        },
       },
       {
         id: "health-data-consent-controls",
@@ -97,7 +93,7 @@ const RAW_CHANGELOG_EDITIONS = [
         relevanceTags: ["privacy", "consent", "health-data", "settings"],
         sourcePullRequests: [1215],
         tryIt: {
-          href: "/settings",
+          href: "/settings/data-privacy",
           label: "Open privacy settings",
         },
       },

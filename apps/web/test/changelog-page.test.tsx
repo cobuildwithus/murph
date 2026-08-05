@@ -106,8 +106,9 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
-    expect(markup).toContain("Open model settings");
+    expect(markup).not.toContain("Open model settings");
     expect(markup).toContain("Open privacy settings");
+    expect(markup).toContain('href="/settings/data-privacy"');
     expect(markup).toContain("Ask for today&#x27;s nutrition card");
     expect(markup).toContain("Manage connections");
     expect(markup).toContain("Open Environment");
