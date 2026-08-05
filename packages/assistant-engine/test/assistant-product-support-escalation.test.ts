@@ -158,12 +158,13 @@ describe("assistant product support escalation", () => {
     const deliverProductSupportEscalation = vi
       .fn()
       .mockRejectedValue(new Error("callback timed out"));
+    const acceptProductFeedbackCandidate = vi.fn();
     const recorder = createAssistantProductFeedbackRecorder({
       acceptedInputItems: [
         { id: "assistant_input_1", source: "assistant-input" },
       ],
       productFeedbackCandidateSink: {
-        acceptProductFeedbackCandidate: vi.fn(),
+        acceptProductFeedbackCandidate,
         deliverProductSupportEscalation,
       },
     });
@@ -174,9 +175,23 @@ describe("assistant product support escalation", () => {
     await expect(recorder.recordProductFeedback({
       kind: "frustration",
       relatedChangelogItemIds: [],
+      summary: "A connected-source flow did not complete.",
+    })).resolves.toEqual({ recorded: true });
+    const supportFeedback = {
+      kind: "frustration" as const,
+      relatedChangelogItemIds: [],
       summary: SUPPORT_SUMMARY,
-    })).rejects.toThrow("callback timed out");
+    };
 
+    await expect(
+      recorder.recordProductFeedback(supportFeedback),
+    ).rejects.toThrow("callback timed out");
+    await expect(
+      recorder.recordProductFeedback(supportFeedback),
+    ).rejects.toThrow("unavailable for this turn");
+
+    expect(deliverProductSupportEscalation).toHaveBeenCalledOnce();
+    expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled();
     expect(recorder.readProductFeedback()).toBeNull();
   });
 });

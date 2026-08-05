@@ -143,6 +143,9 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
+} from "@/src/lib/hosted-execution/product-feedback";
+import {
   buildHostedLinqInviteSignupEffectId,
   buildHostedLinqInviteSignupEffectIdMemberPrefix,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
@@ -1225,6 +1228,47 @@ describe("deleteHostedAccountData", () => {
     expect(order.indexOf("persist:cleanup")).toBeLessThan(
       order.indexOf("delete:hostedMember"),
     );
+  });
+
+  it("deletes the linked support marker while retaining its anonymous issue", async () => {
+    const productFeedbackRows = [
+      {
+        id: "product_feedback_linked",
+        memberId: "member_123",
+        summary: HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
+      },
+      {
+        id: "product_feedback_detail",
+        memberId: null,
+        summary:
+          "a connected source reports success but Murph does not finish the connection.",
+      },
+    ];
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+      productFeedbackRows,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(deleteCalls).toContainEqual({
+      model: "hostedProductFeedback",
+      where: {
+        memberId: "member_123",
+      },
+    });
+    expect(productFeedbackRows).toEqual([{
+      id: "product_feedback_detail",
+      memberId: null,
+      summary:
+        "a connected source reports success but Murph does not finish the connection.",
+    }]);
   });
 
   it("suspends before Temporal cleanup and terminates around local and Cloudflare cleanup", async () => {
@@ -3503,6 +3547,11 @@ function createHostedAccountDeletionPrismaForTest(input: {
   liveSignupDeliveryRows?: readonly { sourceRef: string | null }[];
   onTransaction: () => void;
   operationOrder?: string[];
+  productFeedbackRows?: Array<{
+    id: string;
+    memberId: string | null;
+    summary: string;
+  }>;
   transactionConnectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
   transactionBillingRefRecord?: Record<string, unknown> | null;
   transactionCheckoutSessionRecords?: Array<{
@@ -3655,6 +3704,37 @@ function createHostedAccountDeletionPrismaForTest(input: {
       findUnique: async () => input.transactionIdentityRecord
         ?? input.identityRecord
         ?? null,
+    },
+    hostedProductFeedback: {
+      ...makeDeleteDelegate("hostedProductFeedback"),
+      deleteMany: async (args) => {
+        input.operationOrder?.push("delete:hostedProductFeedback");
+        input.deleteCalls?.push({
+          model: "hostedProductFeedback",
+          where: args.where,
+        });
+        if (!input.productFeedbackRows) {
+          return { count: 1 };
+        }
+        const memberIdFilter = (
+          args.where as {
+            memberId?: string | { in?: readonly string[] };
+          }
+        ).memberId;
+        const memberIds = typeof memberIdFilter === "string"
+          ? [memberIdFilter]
+          : memberIdFilter?.in ?? [];
+        const retainedRows = input.productFeedbackRows.filter(
+          (row) => row.memberId === null || !memberIds.includes(row.memberId),
+        );
+        const deletedCount = input.productFeedbackRows.length - retainedRows.length;
+        input.productFeedbackRows.splice(
+          0,
+          input.productFeedbackRows.length,
+          ...retainedRows,
+        );
+        return { count: deletedCount };
+      },
     },
   }, {
     get(target, property) {
@@ -3940,6 +4020,7 @@ type HostedAccountDeletionPrismaTransactionFake = {
   hostedMemberIdentity: HostedAccountDeletionPrismaDeleteDelegate & {
     findUnique: () => Promise<unknown>;
   };
+  hostedProductFeedback: HostedAccountDeletionPrismaDeleteDelegate;
 };
 
 function makeCloudflareDeletionResult(): {

@@ -25,7 +25,7 @@ A member who reaches a Murph-owned product failure should stay focused on recove
 - Ordinary feedback stays de-identified and keeps the existing storage-linkage policy; it does not create the reserved account-linked support marker.
 - Explicit support escalation is member-linked because support may need the affected account, but the member-linked row carries only server-authored text and internal ids.
 - Murph's written issue is persisted separately without member identity after the shared bounded sanitizer. The paired Web release reads that stored detail back and includes it beside internal escalation metadata for the dedicated support recipient; the runner-policy release alone does not complete the human-support handoff.
-- Member-linked support rows stay excluded from the digest.
+- The fixed member-linked marker stays excluded from the general product-feedback digest. The anonymous issue remains in that existing de-identified triage audience and follows ordinary anonymous-feedback retention, including after account deletion; this preserves one product-feedback history without exposing a member id or creating another lifecycle owner. Account deletion removes the linked marker.
 - Never include raw conversation or voice text, names, handles, contact details, health facts or values, diagnoses, medications, precise locations, relationships, secrets, provider payloads, or unrelated context in a feedback summary or support email. The explicit verified-private request authorizes disclosure only of Murph's sanitized de-identified product explanation, never the member's raw wording.
 
 ## Rate and replay behavior

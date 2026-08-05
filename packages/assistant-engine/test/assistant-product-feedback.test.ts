@@ -508,13 +508,14 @@ describe("assistant product feedback", () => {
     });
     expect(productFeedbackRecorder.readProductFeedback()).toBeNull();
 
+    const failingDelivery = vi
+      .fn()
+      .mockRejectedValue(new Error("callback timed out"));
     const failingRecorder = createAssistantProductFeedbackRecorder({
       acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
       productFeedbackCandidateSink: {
         acceptProductFeedbackCandidate: vi.fn(),
-        deliverProductSupportEscalation: vi
-          .fn()
-          .mockRejectedValue(new Error("callback timed out")),
+        deliverProductSupportEscalation: failingDelivery,
       },
     });
     if (!failingRecorder) {
@@ -537,6 +538,24 @@ describe("assistant product feedback", () => {
         text: "product feedback candidate unavailable",
       }],
     });
+    const repeatedFailedResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      productFeedbackRecorder: failingRecorder,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(repeatedFailedResult.rpcResult).toEqual({
+      success: false,
+      contentItems: [{
+        type: "inputText",
+        text: "product feedback candidate unavailable",
+      }],
+    });
+    expect(failingDelivery).toHaveBeenCalledOnce();
   });
 
   it("parses generalized feature-request feedback without changelog ids", () => {
