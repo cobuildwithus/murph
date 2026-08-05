@@ -74,3 +74,35 @@ Updated: 2026-08-04
 - Run focused Assistant Engine support guidance and real-model scenario
   definition suites, Assistant Engine typecheck, docs drift, diff checks,
   provider-input measurement, required ReviewGPT passes, and exact-head CI.
+
+## Verification log
+
+- Focused prompt, prompt-budget, tool-contract, and real-model scenario suites
+  pass 99 tests; 25 credential-gated live-provider cases compile and skip.
+  Assistant Engine typecheck, docs drift, and diff checks pass. The compact
+  execution kernel measures 2,970 characters against its strict sub-3,000
+  ratchet.
+- The original production App Server paired capture plus exact serialized-field
+  correction measurement uses `gpt-5.6-terra`, low reasoning, the exact support
+  tool, identical direct/group fixtures, and `gpt-tokenizer` 3.4.0
+  `o200k_harmony`. Direct moves from 22,938 tokens / 106,468 bytes to 23,020 /
+  106,951 (+82 tokens, +0.3575%; +483 bytes, +0.4537%). Group moves from 19,504
+  / 91,094 to 19,586 / 91,577 (+82 tokens, +0.4204%; +483 bytes, +0.5302%).
+  Attribution is +2 tokens/+8 bytes for compact base support guidance,
+  +30/+190 for the ordinary-feedback exception, and +30/+177 for the
+  support-aware tool description; schema and other provider fields are zero.
+- Preliminary specialist ReviewGPT found three valid gaps: phase-one completion
+  copy overstated linked-summary delivery, ordinary silent feedback guidance
+  conflicted with reserved support consent, and the resumed scenario did not
+  compare displayed and submitted summaries exactly. All were accepted and
+  corrected at the existing prompt, tool-description, and test owners.
+- Final ReviewGPT round 1 independently reproduced the same delivery-overclaim
+  mechanism at the immutable `0c85fae178` head. The marked response completed
+  in the exact managed tab with substantive findings; its capture process did
+  not persist the already-complete turn, so the response was inspected directly
+  without relaunching the audit. The correction uses maximum disclosure before
+  approval and a completion claim valid for metadata-only delivery, later
+  detailed delivery, daily-cap suppression, and replay.
+- Exact-head CI is pending on `c85a380a47`. Production fingerprint convergence
+  remains a post-merge deployment prerequisite, so the stacked Web PR stays
+  draft.
