@@ -77,8 +77,8 @@ Updated: 2026-08-04
 
 1. Prove the existing persistence, email, replay, and privacy path.
 2. Extend the existing Web owner to validate and render the stored issue detail,
-   and make the compact assistant guidance disclose and obtain approval for the
-   exact account-linked summary first.
+   with the compact assistant guidance showing the exact summary and obtaining
+   approval for its potential inclusion in an account-linked escalation first.
 3. Update focused regressions and the owning durable docs.
 4. Run focused verification and direct payload proof; inspect the complete diff.
 5. Commit, push, open a PR, run the required specialist/final ReviewGPT and CI
@@ -89,7 +89,8 @@ Updated: 2026-08-04
 - The email will contain the normalized issue content after the reserved
   `Support escalation:` prefix, labeled as a de-identified product issue.
 - A generic request to escalate starts a natural disclosure/approval turn; only
-  approval of the exact shown summary and account linkage authorizes the tool.
+  approval of the exact shown summary and its potential account linkage
+  authorizes the tool.
 - The anonymous detail row remains the single durable text owner; the linked row
   stays fixed server-authored metadata.
 - Provider retries will format from read-back stored detail rather than the
@@ -143,8 +144,8 @@ Updated: 2026-08-04
 ## Verification log
 
 - Focused Web support service and route suites passed 14 tests. Focused
-  Assistant Engine support guidance, compact-instruction, durable support, and
-  real-model scenario-definition suites passed 20 tests with 24 opt-in live
+  Assistant Engine support guidance, assembled-prompt, tool-contract, and
+  real-model scenario-definition suites passed 90 tests with 25 opt-in live
   model cases compiled and skipped. Web and Assistant Engine typechecks passed.
 - The opt-in live-model conversation scenario could not run locally because no
   supported provider credential was available. The committed two-turn scenario
@@ -156,17 +157,26 @@ Updated: 2026-08-04
   serialized `input`, `parallel_tool_calls`, `text`, and `tool_choice` fields,
   excluding transport-only model, stream, storage, reasoning, service-tier,
   cache, client-metadata, and output-inclusion fields identically. Direct input
-  moved from 22,938 tokens / 106,468 bytes to 22,958 / 106,576 (+20 tokens,
-  +0.0872%; +108 bytes, +0.1014%). Group moved from 19,504 tokens / 91,094 bytes
-  to 19,524 / 91,202 (+20 tokens, +0.1025%; +108 bytes, +0.1186%). The compact
-  base-instruction change accounts for the full delta; tool/schema/generated
-  guidance and other provider-visible fields are unchanged. The temporary
-  capture harness was removed.
+  moved from 22,938 tokens / 106,468 bytes to 23,042 / 107,065 (+104 tokens,
+  +0.4534%; +597 bytes, +0.5607%). Group moved from 19,504 tokens / 91,094 bytes
+  to 19,608 / 91,691 (+104 tokens, +0.5332%; +597 bytes, +0.6554%). Exact
+  serialized-field correction measurement attributes +24 tokens/+122 bytes to
+  compact base support guidance, +30/+190 to the assembled ordinary-feedback
+  exception, and +30/+177 to the support-aware tool description. Tool schema,
+  generated guidance, and other provider-visible fields are unchanged. The
+  temporary capture harness was removed.
 - Corrected-head product-purpose revalidation found no remaining product
   finding. The extra natural confirmation is the minimum interaction required
-  to make account linkage truthful: the member sees the exact product-only
-  summary and linkage, may decline or correct it, and only affirmative approval
-  enters the existing bounded callback. Success copy says the summary is saved,
-  not that a capped alert was necessarily sent; failure still gives the direct
-  address. The unavailable opt-in live-model run is the only material evidence
-  gap.
+  to make potential account linkage truthful: the member sees the exact
+  product-only summary and its possible inclusion in the linked escalation, may
+  decline or correct it, and only affirmative approval enters the existing
+  bounded callback. Success copy says only that the issue was saved for triage
+  and an account-linked escalation was recorded, not that a capped alert was
+  necessarily sent; failure still gives the direct address. The unavailable
+  opt-in live-model run is the only material evidence gap.
+- The complete stacked correction audit at `e3a3eb99d0` returned no qualifying
+  finding and confirmed deterministic canonical replay, failure-before-provider
+  ordering, the runner-first deployment contract, and Web-first rollback. Its
+  response reported `MODEL_CONFIRMATION: UNKNOWN`, so it does not close the
+  model-confirmed gate. The updated prerequisite was composed at `172cbd3926`;
+  focused checks pass and exact-head CI is pending.
