@@ -163,20 +163,25 @@ Keep `HOSTED_R2_WRITE_ADMISSION=open` and
 3. Inventory ENAM and prove it contains no object outside the current approved
    manifest while OC remains authoritative.
 4. Run direct ENAM PUT, HEAD, GET, and delete smokes using a disposable key.
-5. Require bridge-protocol status from every relevant runner and confirm
-   account deletion remains maintenance-fenced. Account deletion is the only
+5. Deploy bridge protocol `r2-oc-enam-v2` with `source_active+open`, require that
+   status from every relevant runner, and confirm account deletion remains
+   maintenance-fenced before changing the phase. Account deletion is the only
    runtime path that lists user prefixes; all ordinary reads use explicit keys,
-   and destination-active reads fall back to OC only after a definitive ENAM
-   miss.
+   prefer the phase-active bucket, and consult the other bucket only after a
+   definitive miss. This pre-deploy is what makes a source-active invocation
+   able to consume a new ENAM-only email, staged upload, or checkpoint during
+   phase rollout.
 
 A new OC object after either manifest read does not invalidate readiness. It
 will remain readable after promotion and becomes part of the bounded tail-copy
 loop. Any unknown key, incorrect byte size, non-terminal managed job, failed
-ENAM smoke, or bridge-status gap blocks promotion without pausing service.
+ENAM smoke, pre-v2 runner, or bridge-status gap blocks promotion without
+pausing service.
 
 ### 4. Promote ENAM with runtime admission open
 
-Deploy the same bridge to 100 percent with:
+Only after every relevant runner reports `r2-oc-enam-v2` with
+`source_active+open`, deploy that same bridge to 100 percent with:
 
 ```text
 HOSTED_R2_CUTOVER_PHASE=destination_active
@@ -185,11 +190,20 @@ HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256=<unset>
 ```
 
 New current-version runtime writes and direct-upload tickets now target ENAM.
-During Cloudflare's Worker and Durable Object convergence, an old source-active
-runner or already-issued source-bucket upload ticket may still complete against
-OC. That write remains readable through the destination-first bridge and must
-not be treated as corruption. Do not terminate an invocation or revoke a valid
-upload capability.
+During Cloudflare's Worker and Durable Object convergence, a v2 source-active
+runner may still consume work while a destination-active Worker writes its
+payload to ENAM, and a source-active runner or already-issued source-bucket
+upload ticket may still write OC. Phase-active explicit reads fall back in
+either direction only after a definitive miss, so both rollout directions stay
+readable. Do not treat either write as corruption, terminate an invocation, or
+revoke a valid upload capability.
+
+While either coexistence phase is configured, runner dispatch omits the pre-
+dispatch snapshot URL because that optimization is fixed to the OC bucket. A
+cold container instead uses the existing write-fenced `/presign-get` route;
+the route validates the snapshot ref, locates its exact object with the same
+phase-ordered miss-only fallback, and presigns the concrete bucket that holds
+it. This is deletion of an unsafe shortcut, not a second restore protocol.
 
 Poll every relevant UserRunner until it reports the current bridge protocol,
 `phase=destination_active`, `writeAdmission=open`, and no paused canary. Confirm
@@ -198,7 +212,9 @@ to ENAM. Through one operator-controlled hosted member with a current snapshot,
 prove an ordinary wake can cold-restore a copied pre-switch snapshot, write an
 ENAM checkpoint, and cold-restore that checkpoint through a fresh
 current-version runner. Also prove a known source-only object is readable only
-through the definitive-miss fallback.
+through the definitive-miss fallback and compose one destination-only email or
+staged upload with a source-active v2 consumer. The source-active v2 cold-
+restore proof must also resolve and presign a destination-only checkpoint.
 
 Promotion becomes irreversible when ENAM accepts its first production write.
 From that point, repair forward; do not return to OC-only authority.
@@ -249,7 +265,7 @@ Re-enable account deletion only after its race canary proves the bridge deletes
 from both concrete buckets and retains state for retry after a partial failure.
 
 Keep OC, the second binding, upload-session bucket affinity, dual deletion, and
-ENAM-to-OC fallback through:
+both definitive-miss fallback directions through:
 
 - expiry of every valid OC GET or PUT capability;
 - empty OC lifecycle-managed prefixes;

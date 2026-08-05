@@ -712,9 +712,14 @@ Core execution tuning:
   the selected `preview` or `production` target; do not configure a conflicting
   GitHub Environment value.
 - `HOSTED_R2_WRITE_ADMISSION` defaults to `open` and remains open throughout a
-  healthy live OC-to-ENAM cutover. Promote `HOSTED_R2_CUTOVER_PHASE` directly to
-  `destination_active`; new writes then target ENAM while definitive destination
-  misses retain OC fallback and old source-bucket upload capabilities drain.
+  healthy live OC-to-ENAM cutover. First deploy bridge protocol v2 unchanged as
+  `source_active` and prove every runner reports it. Then promote
+  `HOSTED_R2_CUTOVER_PHASE` to `destination_active`; new writes target ENAM while
+  explicit reads prefer the phase-active bucket and use the other bucket only
+  after a definitive miss, and old source-bucket upload capabilities drain.
+  Both coexistence phases omit the fixed-source prepared snapshot URL; cold
+  restore uses the existing write-fenced `/presign-get` locator and presigns
+  the concrete bucket that contains the checkpoint.
   `paused` is an incident-containment lever: it returns a bounded `retry_later`
   from `runtime/ensure-processing` before any UserRunner Durable Object call.
 - `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` must be unset during the healthy live

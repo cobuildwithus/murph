@@ -1667,9 +1667,15 @@ after staged work drains, then remove runtime support.
 
 The temporary OC-to-ENAM R2 cutover keeps hosted runtime admission open during
 the healthy promotion. New current-version writes move to ENAM while old source-
-active Durable Objects and bucket-affine uploads may finish against OC; ENAM-
-first reads fall back to OC after a definitive miss until those writers drain
-and exact-key tail copies converge. Account deletion alone is maintenance-
+active Durable Objects and bucket-affine uploads may finish against OC. Bridge
+protocol v2 is deployed source-active before promotion; explicit reads prefer
+the phase-active bucket and consult the other bucket only after a definitive
+miss, so source-active invocations can consume new ENAM inputs and destination-
+active invocations can consume late OC writes while exact-key tail copies
+converge. During either coexistence phase, dispatch omits the fixed-source
+prepared snapshot URL; cold restore reuses the existing write-fenced object
+locator and presigns whichever concrete bucket contains the checkpoint. Account
+deletion alone is maintenance-
 fenced so ownership cannot shrink mid-copy. If storage correctness becomes
 unavailable after promotion, incident containment may pause admission only at
 the versioned Worker `ensure-processing` route, before any UserRunner call.

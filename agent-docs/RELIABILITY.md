@@ -725,11 +725,16 @@ Last verified: 2026-08-04
   the existing pending-input occurrence proof, and incomplete or invalid index
   evidence rejects the shortcut without repairing state.
 - The temporary R2 cutover keeps write admission open during healthy promotion.
-  New current-version writes target ENAM; old source-active Durable Objects and
-  bucket-affine uploads may finish against OC, destination reads fall back after
-  a definitive miss, and bounded exact-key tail copies converge after those
-  source writers drain. This adds no dual write, queue, or persisted migration
-  owner. The existing pause is incident containment only: it is a Worker-route
+  Bridge protocol v2 is first deployed and proven source-active on every runner.
+  New current-version writes then target ENAM; source-active Durable Objects and
+  bucket-affine uploads may finish against OC, phase-active explicit reads use
+  the other bucket only after a definitive miss, and bounded exact-key tail
+  copies converge after those source writers drain. Coexistence dispatch
+  deliberately omits the fixed-source prepared snapshot URL, so a cold restore
+  uses the existing write-fenced locator and presigns the bucket that contains
+  the checkpoint. This adds no dual write, queue, restore protocol, or persisted
+  migration owner. The existing pause is incident
+  containment only: it is a Worker-route
   gate before UserRunner dispatch, a paused signed Temporal ensure returns a
   one-minute `retry_later`, and a paused direct web hint schedules no Durable
   Object work. Already-accepted inbound remains in the encrypted mailbox while

@@ -125,6 +125,40 @@ describe("R2 OC to ENAM cutover bucket", () => {
     ]);
   });
 
+  it("uses OC then ENAM only after a definitive source miss", async () => {
+    const operations: string[] = [];
+    const source = createBucket({
+      get: async (key) => {
+        operations.push(`source:get:${key}`);
+        return null;
+      },
+      name: "source",
+      operations,
+    });
+    const destination = createBucket({
+      get: async (key) => {
+        operations.push(`destination:get:${key}`);
+        return storedObject;
+      },
+      name: "destination",
+      operations,
+    });
+    const context = resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+      HOSTED_R2_CUTOVER_PHASE: "source_active",
+    });
+
+    expect(await context.bucket.get("fallback")).toBe(storedObject);
+    await context.bucket.put("new", new Uint8Array([1]));
+
+    expect(operations).toEqual([
+      "source:get:fallback",
+      "destination:get:fallback",
+      "source:put:new",
+    ]);
+  });
+
   it("uses ENAM then OC only after a definitive destination miss", async () => {
     const operations: string[] = [];
     const source = createBucket({
@@ -202,6 +236,7 @@ describe("R2 OC to ENAM cutover bucket", () => {
     expect(await promotedRunner.bucket.get("late-source")).toBe(storedObject);
     await promotedRunner.bucket.put("new-destination", new Uint8Array([2]));
     expect(await promotedRunner.bucket.get("new-destination")).toBe(storedObject);
+    expect(await oldRunner.bucket.get("new-destination")).toBe(storedObject);
     await promotedRunner.bucket.list?.({ prefix: "users/" });
 
     expect(operations).toEqual([
@@ -209,6 +244,8 @@ describe("R2 OC to ENAM cutover bucket", () => {
       "destination:get:late-source",
       "source:get:late-source",
       "destination:put:new-destination",
+      "destination:get:new-destination",
+      "source:get:new-destination",
       "destination:get:new-destination",
       "destination:list:users/",
     ]);
@@ -233,6 +270,31 @@ describe("R2 OC to ENAM cutover bucket", () => {
 
     await expect(context.bucket.get("key")).rejects.toThrow("destination unavailable");
     expect(sourceGet).not.toHaveBeenCalled();
+  });
+
+  it("does not turn source operational failures into destination fallback reads", async () => {
+    const operations: string[] = [];
+    const destinationGet = vi.fn(async () => storedObject);
+    const source = createBucket({
+      get: async () => {
+        throw new Error("source unavailable");
+      },
+      name: "source",
+      operations,
+    });
+    const destination = createBucket({
+      get: destinationGet,
+      name: "destination",
+      operations,
+    });
+    const context = resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+      HOSTED_R2_CUTOVER_PHASE: "source_active",
+    });
+
+    await expect(context.bucket.get("key")).rejects.toThrow("source unavailable");
+    expect(destinationGet).not.toHaveBeenCalled();
   });
 
   it("propagates a partial dual-delete failure and preserves source-first order", async () => {
@@ -272,6 +334,15 @@ describe("R2 OC to ENAM cutover bucket", () => {
     });
 
     await expect(locateHostedR2ObjectBucketRole(context, "key")).resolves.toBe("source");
+    const sourceActiveContext = resolveHostedR2CutoverContext({
+      BUNDLES: destination,
+      BUNDLES_ENAM: source,
+      HOSTED_R2_CUTOVER_PHASE: "source_active",
+    });
+    await expect(locateHostedR2ObjectBucketRole(
+      sourceActiveContext,
+      "key",
+    )).resolves.toBe("destination");
     expect(() => resolveHostedR2CutoverContext({
       BUNDLES: source,
       BUNDLES_ENAM: destination,
@@ -280,5 +351,21 @@ describe("R2 OC to ENAM cutover bucket", () => {
       BUNDLES: source,
       HOSTED_R2_CUTOVER_PHASE: "source_active",
     })).toThrow("BUNDLES_ENAM");
+  });
+
+  it("keeps legacy single-bucket location reads single-shot", async () => {
+    const operations: string[] = [];
+    const source = createBucket({
+      head: async (key) => {
+        operations.push(`source:head:${key}`);
+        return null;
+      },
+      name: "source",
+      operations,
+    });
+    const context = resolveHostedR2CutoverContext({ BUNDLES: source });
+
+    await expect(locateHostedR2ObjectBucketRole(context, "missing")).resolves.toBeNull();
+    expect(operations).toEqual(["source:head:missing"]);
   });
 });
