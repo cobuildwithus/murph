@@ -128,10 +128,17 @@ describe("hosted connected-app connect page and start route", () => {
       markup,
       /Connect work-account-with-a-long-unbroken-display-name Gmail/,
     );
+    assert.match(markup, /Murph uses Composio to securely connect/);
+    assert.match(
+      markup,
+      /On the next screen, you’ll review and approve access\./,
+    );
     assert.match(markup, /break-words/);
-    // The launcher renders an initial "Connecting…" status; the actual POST +
-    // navigation fires from the client effect, not from a form action.
-    assert.match(markup, /Connecting…/);
+    // The launcher renders the pre-authorization handoff; the actual POST +
+    // navigation fires from the client timeout or button, not from a form.
+    assert.match(markup, /Continuing in 5 seconds…/);
+    assert.match(markup, /Continue now/);
+    assert.match(markup, /Stay here/);
     assert.equal(markup.includes("<form"), false);
     assert.equal(markup.includes(`/integrations/connect/${CLAIM}/start`), false);
   });

@@ -94,6 +94,52 @@ test('current audience delivery fields keep saved session binding before input f
   })
 })
 
+test('current audience delivery fields keep an opaque conversation locator separate from the trusted Linq reply thread', () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'linq-participant',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: null,
+      identityId: null,
+      threadId: 'opaque-conversation-thread',
+      threadIsDirect: true,
+    },
+  })
+  const input: AssistantMessageInput = {
+    bindingDeliveryTarget: 'provider-reply-thread',
+    channel: 'linq',
+    deliveryKind: 'thread',
+    prompt: 'Reply in the current conversation.',
+    threadId: 'opaque-conversation-thread',
+    threadIsDirect: true,
+    vault: '/vaults/test',
+  }
+
+  const fields = resolveAssistantCurrentAudienceDeliveryFields({
+    input,
+    session,
+    sharedPlan: createSharedPlan({
+      audience: {
+        actorId: 'linq-participant',
+        channel: 'linq',
+        threadId: 'opaque-conversation-thread',
+        threadIsDirect: true,
+      },
+    }),
+  })
+
+  expect(fields).toMatchObject({
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'provider-reply-thread',
+    },
+    explicitTarget: null,
+    threadId: 'opaque-conversation-thread',
+    threadIsDirect: true,
+  })
+})
+
 test('current audience delivery fields do not mix saved route fields with input binding target', () => {
   const session = createAssistantSession({
     binding: {
