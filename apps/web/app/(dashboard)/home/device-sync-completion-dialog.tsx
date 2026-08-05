@@ -68,9 +68,10 @@ export function DeviceSyncCompletionDialog({
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen);
     if (!nextOpen) {
-      // The effect below already removes the one-shot completion marker.
-      // Refresh plain Home so canonical pending onboarding can become the
-      // next foreground surface instead of competing with this result.
+      // An unverified result intentionally keeps the marker for its first
+      // retry. Remove it synchronously before the close refresh too, so that
+      // refresh can only request plain Home and reveal canonical onboarding.
+      stripCompletionQueryParams();
       router.refresh();
     }
   }

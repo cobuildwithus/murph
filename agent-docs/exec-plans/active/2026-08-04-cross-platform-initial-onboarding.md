@@ -122,6 +122,11 @@ Updated: 2026-08-04
   onboarding. The result dialog now takes foreground priority and refreshes
   plain Home on close. The same correction makes optional Web contact
   resolution fail soft, matching the native contract.
+- Completed: Web ReviewGPT round three found that the unverified device-result
+  retry intentionally retained its marker, so a fast close could refresh
+  marker-bearing Home and strand onboarding. The existing close owner now
+  strips that marker synchronously before refreshing; focused proof asserts
+  cleanup precedes the close refresh and that it observes plain Home.
 - Completed: production `/design?tab=sections` onboarding renders at desktop
   and mobile sizes. The required Claude Code UI double-check was attempted and
   stopped at explicit Fable credit exhaustion as the completion workflow

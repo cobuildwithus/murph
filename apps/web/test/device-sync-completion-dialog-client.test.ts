@@ -125,7 +125,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-test("DeviceSyncCompletionDialog refreshes an unverified completion once before stripping params", async () => {
+test("DeviceSyncCompletionDialog strips an unverified marker before its close refresh", async () => {
   // Vitest gives this file its own module graph, so the dialog module's
   // retry guard starts fresh here and is shared across the remount below.
   const unverifiedModel = buildCompletionDialogModel({ unverified: true });
@@ -135,12 +135,39 @@ test("DeviceSyncCompletionDialog refreshes an unverified completion once before 
   expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
   expect(firstRender.replaceState).not.toHaveBeenCalled();
 
+  const closeRefreshLocations: string[] = [];
+  mocks.routerRefresh.mockImplementationOnce(() => {
+    closeRefreshLocations.push(firstRender.window.location.href);
+  });
+  const continueButton = [...firstRender.container.querySelectorAll("button")]
+    .find((button) => button.textContent?.trim() === "Continue exploring");
+  expect(continueButton).not.toBeNull();
+
+  await act(async () => {
+    continueButton?.dispatchEvent(new firstRender.window.Event("click", {
+      bubbles: true,
+    }));
+  });
+
+  expect(firstRender.replaceState).toHaveBeenCalledWith(
+    {},
+    "",
+    "/home?keep=1#source",
+  );
+  expect(closeRefreshLocations).toEqual([
+    "https://app.example.test/home?keep=1#source",
+  ]);
+  expect(firstRender.replaceState.mock.invocationCallOrder[0]).toBeLessThan(
+    mocks.routerRefresh.mock.invocationCallOrder[1] ?? 0,
+  );
+  expect(mocks.routerRefresh).toHaveBeenCalledTimes(2);
+
   await firstRender.cleanup();
 
   const remount = await renderDeviceSyncCompletionDialog(unverifiedModel);
   await act(async () => {});
 
-  expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
+  expect(mocks.routerRefresh).toHaveBeenCalledTimes(2);
   expect(remount.replaceState).toHaveBeenCalledWith(
     {},
     "",
