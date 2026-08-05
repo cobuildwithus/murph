@@ -1,6 +1,6 @@
 # Disable Codex-native memory generation
 
-Status: active
+Status: completed
 Created: 2026-08-05
 Updated: 2026-08-05
 
@@ -67,9 +67,28 @@ Updated: 2026-08-05
 
 ## Verification
 
-- Commands to run: focused assistant-runtime config tests, focused Cloudflare
-  egress tests, affected package typechecks, `git diff --check`, direct
-  generated-config assertions, exact-head CI, and ReviewGPT.
-- Expected outcomes: `features.memories`, `memories.use_memories`, and
-  `memories.generate_memories` are all false, with no generation model or
-  scheduling settings emitted.
+- Generated config assertions confirm `features.memories`,
+  `memories.use_memories`, and `memories.generate_memories` are all false,
+  with no generation model or scheduling settings emitted.
+- The focused Cloudflare interception suite passed 221 tests; the broader
+  hosted-execution suite passed 485 tests across 45 files.
+- The hosted config suite passed 43 ordinary tests. Two opt-in pinned App
+  Server regressions passed, including an enabled eligible-rollout positive
+  control and the production-disabled no-request/no-injection proof.
+- Assistant runtime, hosted execution, and Cloudflare typechecks passed, along
+  with docs drift, source hygiene, diff checks, and the privacy scan.
+- Required exact-head GitHub Actions passed at
+  `9b9332dec4d3cd2bfe9c181b60253e4626809d9b`.
+- ReviewGPT correction round 2 returned `ROUND_OUTCOME: PASS` with no findings
+  and verified the requested Pro model. Its wording discrepancy about a
+  deleted egress diagnostic was corrected in the PR deployment guidance.
+
+## Outcome
+
+- Hosted Codex native memory is disabled at configuration and transport
+  boundaries for fresh individual and group sessions.
+- The obsolete native-memory egress subsystem was deleted, leaving only the
+  marker classifier and authenticated pre-provider rejection.
+- Review remediation changed authored production source by 24 additions and
+  1,231 deletions, so no anomaly retrospective was required.
+Completed: 2026-08-05
