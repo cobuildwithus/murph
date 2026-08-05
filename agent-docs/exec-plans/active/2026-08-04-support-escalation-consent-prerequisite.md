@@ -78,3 +78,27 @@ Updated: 2026-08-05
   superseded on 2026-08-05 by the product owner's one-turn direct-send decision.
   The revised exact head requires fresh focused proof, provider-input
   measurement, prompt/product ReviewGPT coverage, and CI.
+- Focused support guidance, tool-contract, assembled-prompt, prompt-budget, and
+  real-model scenario-definition suites pass 97 tests with 25 credential-gated
+  live-provider cases compiled and skipped. Assistant Engine typecheck, docs
+  drift, and diff checks pass. The compact runtime literal is 2,958 characters
+  / 2,962 UTF-8 bytes and remains below the strict 3,000-byte ratchet.
+- Complete paired first-provider capture used the pinned real Codex App Server,
+  `gpt-5.6-terra`, low reasoning, production code mode, the exact support tool,
+  identical synthetic direct/group requests, and `gpt-tokenizer` 3.4.0
+  `o200k_harmony`. It serialized `input`, `parallel_tool_calls`, `text`, and
+  `tool_choice`, including Codex-generated tool guidance, while excluding model,
+  stream/storage, reasoning, service-tier, cache/client metadata, and output-
+  inclusion transport fields identically. Two App Server current-context fields
+  were normalized identically across runs. Direct moved from 23,701 tokens /
+  109,002 bytes to 23,711 / 109,020 (+10 tokens, +0.0422%; +18 bytes,
+  +0.0165%). Group moved from 20,162 tokens / 93,282 bytes to 20,172 / 93,300
+  (+10 tokens, +0.0496%; +18 bytes, +0.0193%). Sequential whole-request
+  attribution is -36 tokens/-227 bytes for assembled product-feedback guidance,
+  +21/+100 for compact base instructions, and +25/+145 for Codex-generated tool
+  guidance; schema and other provider-visible input are unchanged. The capture
+  compared `9d1d17fd45` to `e374d58700`; the later base-only merge changed a
+  food skill, provider-usage extraction, and tests but no loaded fixture prompt,
+  tool, schema, configuration, or request assembly, so the rendered totals remain
+  the current base/head totals. The temporary harness and detached measurement
+  worktree were removed.
