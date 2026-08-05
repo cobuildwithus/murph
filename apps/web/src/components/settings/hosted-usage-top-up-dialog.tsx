@@ -415,7 +415,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             className={cn(
               "flex flex-col gap-5",
               props.scope === "group" &&
-                groupPaymentMode === "monthly" &&
+                (groupPaymentMode === "monthly" || !selectionNeedsRecovery) &&
                 "max-md:min-h-full",
             )}
           >

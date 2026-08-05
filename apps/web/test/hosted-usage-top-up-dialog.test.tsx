@@ -924,6 +924,11 @@ test("keeps the one-time contribution action reachable in the mobile drawer", as
       rendered.container.textContent ?? "",
       /cost-weighted usage credit/i,
     );
+    const selection = rendered.container.querySelector<HTMLElement>(
+      '[data-slot="usage-top-up-selection"]',
+    );
+    assert.ok(selection);
+    assert.equal(selection.classList.contains("max-md:min-h-full"), true);
     const noteContent = rendered.container
       .querySelector("#group-sponsor-message")
       ?.closest('[data-slot="collapsible-content"]');
@@ -935,6 +940,43 @@ test("keeps the one-time contribution action reachable in the mobile drawer", as
     ).parentElement;
     assert.ok(actions);
     assert.equal(actions.classList.contains("max-md:sticky"), true);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("pins the one-time contribution action in a short mobile drawer", async () => {
+  mocks.isMobile.mockReturnValue(true);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: false,
+      initialOpen: true,
+      mode: "one_time",
+      offers: groupSponsorshipOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const selection = rendered.container.querySelector<HTMLElement>(
+      '[data-slot="usage-top-up-selection"]',
+    );
+    assert.ok(selection);
+    assert.equal(selection.classList.contains("max-md:min-h-full"), true);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Add a note/u);
+    const actions = buttonByText(
+      rendered.container,
+      "Choose an amount",
+    ).parentElement;
+    assert.ok(actions);
+    assert.equal(actions.classList.contains("max-md:sticky"), true);
+    assert.equal(actions.classList.contains("max-md:mt-auto"), true);
   } finally {
     await rendered.cleanup();
   }
