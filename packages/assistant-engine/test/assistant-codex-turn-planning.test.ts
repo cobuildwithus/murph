@@ -2342,6 +2342,72 @@ describe('assistant Codex turn planning', () => {
       }),
     )
 
+    for (const targetingRoute of [
+      {
+        channel: 'linq',
+        target: 'linq-direct-chat',
+        threadId: 'linq-opaque-direct-thread',
+        threadIsDirect: true,
+      },
+      {
+        channel: 'linq',
+        target: 'linq-group-chat',
+        threadId: 'linq-opaque-group-thread',
+        threadIsDirect: false,
+      },
+      {
+        channel: 'telegram',
+        target: '123',
+        threadId: 'telegram-opaque-direct-thread',
+        threadIsDirect: true,
+      },
+      {
+        channel: 'telegram',
+        target: 'telegram-group-chat',
+        threadId: 'telegram-opaque-group-thread',
+        threadIsDirect: false,
+      },
+    ] as const) {
+      const bindingOnlyInput = {
+        ...createMessageInput(),
+        bindingDeliveryTarget: targetingRoute.target,
+        channel: targetingRoute.channel,
+        deliveryKind: 'thread' as const,
+        threadId: targetingRoute.threadId,
+        threadIsDirect: targetingRoute.threadIsDirect,
+      }
+      const bindingOnlyPlan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        messageTargetAuthorizerAvailable: true,
+        input: bindingOnlyInput,
+        profile,
+        promptTimeContext,
+        route,
+        session: createSession(),
+        sharedPlan: createSharedPlan(),
+      })
+      const planWithDuplicateTarget = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        messageTargetAuthorizerAvailable: true,
+        input: {
+          ...bindingOnlyInput,
+          deliveryTarget: targetingRoute.target,
+        },
+        profile,
+        promptTimeContext,
+        route,
+        session: createSession(),
+        sharedPlan: createSharedPlan(),
+      })
+
+      expect(bindingOnlyPlan.dynamicTools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(['react_to_message', 'select_reply_target']),
+      )
+      expect(bindingOnlyPlan.assistantContractFingerprint).toBe(
+        planWithDuplicateTarget.assistantContractFingerprint,
+      )
+    }
+
     const linqCurrentMessageNotReactionEligiblePlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
       messageTargetAuthorizerAvailable: true,
@@ -2403,7 +2469,7 @@ describe('assistant Codex turn planning', () => {
       }),
     )
 
-    const telegramNoReplyPlan = await resolveAssistantRouteTurnPlan({
+    const telegramInferredBindingPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
       messageTargetAuthorizerAvailable: true,
       input: createMessageInput(),
@@ -2414,12 +2480,12 @@ describe('assistant Codex turn planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(telegramNoReplyPlan.assistantContractFingerprint).toBe(
+    expect(telegramInferredBindingPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: telegramNoReplyPlan.developerInstructions,
+        developerInstructions: telegramInferredBindingPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
-          messageTargetingAvailable: false,
+          messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
@@ -2427,9 +2493,29 @@ describe('assistant Codex turn planning', () => {
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
     )
-    expect(telegramNoReplyPlan.assistantContractFingerprint).not.toBe(
+    expect(telegramInferredBindingPlan.assistantContractFingerprint).toBe(
       telegramReplyPlan.assistantContractFingerprint,
     )
+
+    const telegramWithoutRoutePlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      messageTargetAuthorizerAvailable: true,
+      input: {
+        ...createMessageInput(),
+        threadId: null,
+        threadIsDirect: null,
+      },
+      profile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(telegramWithoutRoutePlan.dynamicTools.map((tool) => tool.name))
+      .not.toEqual(
+        expect.arrayContaining(['react_to_message', 'select_reply_target']),
+      )
   })
 
   it('keeps hosted computer tools in the auto-reply route contract', async () => {

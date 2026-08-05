@@ -649,6 +649,7 @@ export const workoutSetSchema = z
   .object({
     order: integerSchema(1),
     type: workoutSetTypeSchema.optional(),
+    note: boundedString(1, 400).optional(),
     reps: integerSchema(0).optional(),
     weight: numberSchema(0).optional(),
     weightUnit: workoutLoadUnitSchema.optional(),

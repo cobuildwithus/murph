@@ -89,6 +89,12 @@ describe('murph.attach_response_card', () => {
       'current accepted member message explicitly requests it',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'single active tracked workout whose table was explicitly established earlier',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'with no active table or multiple plausible workouts, do not infer authority',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'card replaces the entire final response',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(

@@ -173,6 +173,7 @@ function workoutSessionFixture(): WorkoutSession {
           {
             order: 2,
             type: 'normal',
+            note: 'final rep spotted',
             reps: 5,
             weight: 185,
             weightUnit: 'lb',
@@ -253,7 +254,7 @@ test('workout add schema exposes typed fields without raw input fallback', async
   assert.match(optionDescription(schema, 'workoutExercise'), /Shell-quote each semicolon-separated value/u)
   assert.match(
     optionDescription(schema, 'workoutSet'),
-    /Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg/u,
+    /Supported keys: exercise, order, type, weightUnit, note, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg/u,
   )
   assert.match(optionDescription(schema, 'workoutSet'), /Shell-quote each semicolon-separated value/u)
 })
@@ -495,7 +496,7 @@ test('workout add typed fields persist the same structured strength workout as J
     '--workout-set',
     'exercise=1;order=1;type=warmup;reps=5;weight=135;weightUnit=lb',
     '--workout-set',
-    'exercise=1;order=2;type=normal;reps=5;weight=185;weightUnit=lb;rpe=8',
+    'exercise=1;order=2;type=normal;reps=5;weight=185;weightUnit=lb;note=final rep spotted;rpe=8',
     '--workout-exercise',
     'order=2;name=Ring row;groupId=superset-a;mode=bodyweight',
     '--workout-set',
@@ -600,7 +601,7 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   assert.match(misspelledSetField.envelope.error.message ?? '', /Unsupported --workout-set field "weightUnt"/u)
   assert.match(
     misspelledSetField.envelope.error.message ?? '',
-    /Supported fields: exercise, order, type, weightUnit, reps, weight/u,
+    /Supported fields: exercise, order, type, weightUnit, note, reps, weight/u,
   )
 
   const traversingMediaPath = await runInProcessJsonCli(cli, [

@@ -795,8 +795,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const messageTargetingAvailable =
     input.messageTargetAuthorizerAvailable === true &&
     supportsAssistantAcceptedMessageTargetingRoute({
+      bindingDelivery: currentAudienceDeliveryFields.bindingDelivery,
       channel: currentAudienceDeliveryFields.channel,
-      explicitTarget: currentAudienceDeliveryFields.explicitTarget,
       threadId: currentAudienceDeliveryFields.threadId,
       threadIsDirect: currentAudienceDeliveryFields.threadIsDirect,
     })

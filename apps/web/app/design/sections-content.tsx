@@ -21,6 +21,7 @@ import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
+import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
 import {
   AppleHealthRelaySetupStudy,
   ConnectSourceCardStudy,
@@ -176,7 +177,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Environment progressive voice capture">
+      <StudySection title="Environment full-width progressive voice capture">
         <EnvironmentProgressStudy />
       </StudySection>
 
@@ -262,6 +263,12 @@ export function SectionsContent() {
 
       <StudySection title="Connect source actions and disconnect lifecycle">
         <ConnectSourceCardStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Connected app authorization handoff">
+        <ConnectedAppAuthorizationStudy />
       </StudySection>
 
       <Separator />
