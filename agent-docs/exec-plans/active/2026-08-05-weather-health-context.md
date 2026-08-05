@@ -36,12 +36,15 @@ Done:
 - Removed the conflicting retry sentence for this route, preserved generic retry guidance elsewhere, and expanded the real-model journey to cover scheduled provider failure.
 - Final ReviewGPT round 3 found the same generic posture remained for non-retryable failures. The retrospective follow-up kept the same shrinking decision.
 - Suppressed the complete generic retry posture for this route and proved both retryable and non-retryable failures, including a scheduled real-model non-retryable probe.
+- Shortened duplicated connected-app prompt guidance after exact-head CI exposed the resident prompt-size ratchet; the fixed route, official-alert-only rule, one-call budget, causal boundary, and failure fallback remain explicit.
+- Added the August 5 public changelog edition for official local heat, cold, and outdoor-air-quality alert context, including a bounded try-it prompt.
+- Passed 175 focused assistant tests, assistant typecheck, 37 focused changelog tests, and web typecheck on the corrected source.
 
 Now:
-- Commit and push the round-3 remediation, then run final correction review.
+- Finish the final correction review and exact-head CI, then merge PR #1307 when both are green.
 
 Next:
-- Reconcile the branch with `main`, confirm exact-head CI, run the signed production-runtime smoke read after the web route is deployed, then close the plan.
+- Run the signed production-runtime smoke read after the web route is deployed, then close the plan and retire the merged worktree.
 
 Open questions (UNCONFIRMED if needed):
 - None.
