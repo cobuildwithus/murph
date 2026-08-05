@@ -50,7 +50,10 @@ function DataExportStudyContent() {
           })}
         />
       </div>
-      <div className="rounded-3xl border border-border bg-popover p-6 sm:p-7">
+      <div
+        className="mx-auto w-full max-w-md rounded-3xl border border-border bg-popover p-6 sm:p-7"
+        data-design-state="export-dialog"
+      >
         <HostedDataExportDialogContent
           acknowledgedSensitiveDownload={pending || ready}
           errorMessage={errorMessage}

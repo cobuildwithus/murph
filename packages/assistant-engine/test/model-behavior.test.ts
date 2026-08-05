@@ -1410,7 +1410,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Do not add generic consumer-health app examples or proactively name unsupported sources as caveats',
     )
     expect(prompt).toContain(
-      'If the user asks for a wearable/source other than Apple Health or WHOOP that is not in this list, say it is not supported yet',
+      'If the user asks for a wearable/source other than Apple Health, WHOOP, or Zepp/Amazfit that is not in this list, say it is not supported yet',
     )
     expect(prompt).toContain(
       'Use `murph.device` to list accounts, create a real connection link, or queue reconciliation',
@@ -1423,7 +1423,7 @@ describe('assistant local PDF evidence guidance', () => {
       'It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.',
     )
     expect(prompt).toContain(
-      'Apple Watch/iPhone/Apple Health and WHOOP relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.',
+      'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, or Zepp/Amazfit relay setup, open Murph, sign in, and connect Apple Health.',
     )
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain('WHOOP limits third-party access')
@@ -1431,11 +1431,28 @@ describe('assistant local PDF evidence guidance', () => {
       'WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow',
     )
     expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
+    expect(prompt).toContain(
+      'Zepp/Amazfit: share with Apple Health in Zepp',
+    )
+    expect(prompt).toContain(
+      'This relay has no direct cloud access or history backfill',
+    )
+    expect(prompt).toContain('Starting Murph: if asked how to begin')
+    expect(prompt).toContain(MURPH_PRODUCT_ORIGIN)
+    expect(prompt).toContain('accounts are created at')
+    expect(prompt).toContain('The iPhone app supports sign-in, not account creation')
+    expect(prompt).toContain('Never invent a link or pressure them')
+    expect(prompt).toContain(
+      'use one brief `murph.generate_voice_memo` when available',
+    )
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
     expect(prompt).toContain(
       'Never call Apple Health unsupported/disabled/coming soon',
     )
-    expect(prompt).toContain('in messages put the URL alone last')
+    expect(prompt).toContain(
+      'Apple Health works now in the Murph iPhone app.',
+    )
+    expect(prompt).toContain('put message URLs alone last')
     expect(prompt).not.toContain('Health Connect')
     expect(prompt).not.toContain('Before creating a connection link')
     expect(prompt).not.toContain('empty `--provider garmin`')
@@ -1484,7 +1501,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      'same-turn results required except https://apps.apple.com/us/app/murph-ai/id6786145859',
+      `only ${MURPH_PRODUCT_ORIGIN} and https://apps.apple.com/us/app/murph-ai/id6786145859 are proof-free`,
     )
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
@@ -1509,18 +1526,34 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain(
-      'Apple Watch/iPhone/Apple Health and WHOOP relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.',
+      'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, or Zepp/Amazfit relay setup, open Murph, sign in, and connect Apple Health.',
     )
     expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
     expect(prompt).toContain('WHOOP limits third-party access')
+    expect(prompt).toContain('Zepp/Amazfit: share with Apple Health in Zepp')
+    expect(prompt).toContain('accounts are created at')
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
     expect(prompt).toContain(
       'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      'same-turn results required except https://apps.apple.com/us/app/murph-ai/id6786145859',
+      `only ${MURPH_PRODUCT_ORIGIN} and https://apps.apple.com/us/app/murph-ai/id6786145859 are proof-free`,
     )
   })
+
+  it.each(['disabled', 'coming soon'])(
+    'keeps direct Apple Health %s questions on the supported iPhone path',
+    (staleAvailabilityClaim) => {
+      const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+      const truthfulnessBoundary = prompt.match(
+        /Never call Apple Health ([^;]+);/u,
+      )?.[1]
+
+      expect(truthfulnessBoundary?.split('/')).toContain(staleAvailabilityClaim)
+      expect(prompt).toContain('Apple Health works now in the Murph iPhone app.')
+      expect(prompt).toContain('sign in, and connect Apple Health')
+    },
+  )
 
   it('teaches Codex to inspect local PDF artifacts with Poppler tools', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
@@ -2146,7 +2179,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'b549d87c520c878ea8a049d8f02969011c7c7f775c77b8e8749daad2fbf4bd11',
+      'd19758fd9e43558a832e9aa9f880c30e10d30ad6ce6fc35e0d0b360854f7f23e',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2765,6 +2798,7 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).not.toContain('Apple Health relay:')
     expect(prompt).not.toContain('WHOOP limits third-party access')
+    expect(prompt).not.toContain('Starting Murph:')
     expect(prompt).not.toContain('Computer-use tools:')
     expect(prompt).not.toContain('Phone calls:')
     expect(prompt).not.toContain('Vault file sends:')

@@ -3003,13 +3003,14 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("still reconciles an actual plan change during the current period", async () => {
+  it("resets current-period spend when Pulse upgrades to Edge", async () => {
     const update = vi.fn(async (args: {
       data: {
         billingPlanCode: string;
         blockedAt: Date | null;
         limitUsdMicros: bigint;
         periodEnd: Date;
+        spentUsdMicros?: bigint;
       };
     }) => ({
       billingPlanCode: args.data.billingPlanCode,
@@ -3017,12 +3018,13 @@ describe("resolveHostedAiUsageGate", () => {
       limitUsdMicros: args.data.limitUsdMicros,
       periodEnd: args.data.periodEnd,
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      spentUsdMicros: 6_000_000n,
+      spentUsdMicros: args.data.spentUsdMicros ?? 6_000_000n,
     }));
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
+        blockedAt: new Date("2026-03-28T12:00:00.000Z"),
         limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
         periodEnd: new Date("2026-04-01T00:00:00.000Z"),
         periodStart: new Date("2026-03-01T00:00:00.000Z"),
@@ -3042,15 +3044,166 @@ describe("resolveHostedAiUsageGate", () => {
       allowed: true,
       billingPlanCode: "launch_edge_monthly",
       limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
-      remainingUsdMicros: 10_000_000n,
-      spentUsdMicros: 6_000_000n,
+      remainingUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      spentUsdMicros: 0n,
     });
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         billingPlanCode: "launch_edge_monthly",
+        blockedAt: null,
         limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+        spentUsdMicros: 0n,
       }),
     }));
+  });
+
+  it("resets trial spend when a same-period Pulse Trial converts to paid Pulse", async () => {
+    const periodStart = new Date("2026-04-01T12:00:00.000Z");
+    const paidPeriodEnd = new Date("2026-05-01T12:00:00.000Z");
+    const update = vi.fn(async (args: {
+      data: {
+        billingPlanCode: string;
+        blockedAt: Date | null;
+        limitUsdMicros: bigint;
+        periodEnd: Date;
+        spentUsdMicros?: bigint;
+      };
+    }) => ({
+      billingPlanCode: args.data.billingPlanCode,
+      blockedAt: args.data.blockedAt,
+      limitUsdMicros: args.data.limitUsdMicros,
+      periodEnd: args.data.periodEnd,
+      periodStart,
+      spentUsdMicros: args.data.spentUsdMicros ?? 4_000_000n,
+    }));
+    const prisma = createGatePrisma({
+      billingPhase: "paid",
+      checkoutOffer: "pulse_trial_7d",
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        blockedAt: new Date("2026-04-07T12:00:00.000Z"),
+        limitUsdMicros: 4_500_000n,
+        periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+        periodStart,
+        spentUsdMicros: 4_000_000n,
+      },
+      periodEnd: paidPeriodEnd,
+      periodStart,
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      pulseTrialRedeemedAt: periodStart,
+      spentUsdMicros: 4_000_000n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: periodStart,
+      update,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-08T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+      periodEnd: paidPeriodEnd,
+      remainingUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+      spentUsdMicros: 0n,
+    });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        billingPlanCode: "launch_monthly",
+        blockedAt: null,
+        limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+        periodEnd: paidPeriodEnd,
+        spentUsdMicros: 0n,
+      }),
+    }));
+  });
+
+  it("does not reset an ordinary paid Pulse allowance change", async () => {
+    const periodStart = new Date("2026-04-08T12:00:00.000Z");
+    const periodEnd = new Date("2026-05-08T12:00:00.000Z");
+    const update = vi.fn(async (args: {
+      data: {
+        billingPlanCode: string;
+        blockedAt: Date | null;
+        limitUsdMicros: bigint;
+        periodEnd: Date;
+        spentUsdMicros?: bigint;
+      };
+    }) => ({
+      billingPlanCode: args.data.billingPlanCode,
+      blockedAt: args.data.blockedAt,
+      limitUsdMicros: args.data.limitUsdMicros,
+      periodEnd: args.data.periodEnd,
+      periodStart,
+      spentUsdMicros: args.data.spentUsdMicros ?? 4_000_000n,
+    }));
+    const prisma = createGatePrisma({
+      billingPhase: "paid",
+      checkoutOffer: "pulse_trial_7d",
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 4_500_000n,
+        periodEnd,
+        periodStart,
+        spentUsdMicros: 4_000_000n,
+      },
+      periodEnd,
+      periodStart,
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      pulseTrialRedeemedAt: new Date("2026-04-01T12:00:00.000Z"),
+      spentUsdMicros: 4_000_000n,
+      trialEndsAt: periodStart,
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+      update,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-09T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+      remainingUsdMicros: 2_400_000n,
+      spentUsdMicros: 4_000_000n,
+    });
+    const updateData = (update.mock.calls[0]?.[0] as {
+      data?: Record<string, unknown>;
+    } | undefined)?.data;
+    expect(updateData).not.toHaveProperty("spentUsdMicros");
+  });
+
+  it("preserves spend after the upgraded Edge period is already reconciled", async () => {
+    const update = vi.fn();
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      findUniquePeriod: {
+        billingPlanCode: "launch_edge_monthly",
+        limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: 2_000_000n,
+      },
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      spentUsdMicros: 2_000_000n,
+      update,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      remainingUsdMicros: 14_000_000n,
+      spentUsdMicros: 2_000_000n,
+    });
+    expect(update).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -3251,6 +3404,82 @@ describe("resolveHostedAiUsageGate", () => {
 });
 
 describe("readHostedAiUsageGate", () => {
+  it("shows zero spend immediately when Pulse upgrades to Edge", async () => {
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        blockedAt: new Date("2026-03-28T12:00:00.000Z"),
+        limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: 6_000_000n,
+      },
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 6_000_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      remainingUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      spentUsdMicros: 0n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("shows zero spend immediately when a Pulse Trial converts to paid Pulse", async () => {
+    const periodStart = new Date("2026-04-01T12:00:00.000Z");
+    const paidPeriodEnd = new Date("2026-05-01T12:00:00.000Z");
+    const prisma = createGatePrisma({
+      billingPhase: "paid",
+      checkoutOffer: "pulse_trial_7d",
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        blockedAt: new Date("2026-04-07T12:00:00.000Z"),
+        limitUsdMicros: 4_500_000n,
+        periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+        periodStart,
+        spentUsdMicros: 4_000_000n,
+      },
+      periodEnd: paidPeriodEnd,
+      periodStart,
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      pulseTrialRedeemedAt: periodStart,
+      spentUsdMicros: 4_000_000n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: periodStart,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-08T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+      periodEnd: paidPeriodEnd,
+      remainingUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+      spentUsdMicros: 0n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
   it("honors manual usage-period counter resets on the read-first gate", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
@@ -3824,7 +4053,8 @@ describe("readHostedAiUsageGateSnapshots", () => {
       decision: {
         allowed: true,
         limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
-        remainingUsdMicros: 6_000_000n,
+        remainingUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+        spentUsdMicros: 0n,
       },
       periodPersistedAt: periodUpdatedAt,
     });

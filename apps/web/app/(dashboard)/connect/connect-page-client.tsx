@@ -12,6 +12,7 @@ import { Input } from "@/src/components/ui/input";
 import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import type { DeviceSyncCompletionContactAction } from "@/src/lib/device-sync/connect-completion-types";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
+import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import {
@@ -44,6 +45,7 @@ import type {
   ConnectIntentRecoveryRequest,
   ConnectPageInitialLoadError,
   ConnectSource,
+  ConnectSourceSetupGuideId,
   InitialDeviceConnectIntent,
 } from "./connect-page-types";
 
@@ -74,6 +76,7 @@ export function ConnectSourcesGrid({
   sources,
   whoopSyncContactAction = null,
   whoopSyncVoiceMemoSrc = null,
+  zeppSyncContactAction = null,
 }: {
   authenticated?: boolean;
   deviceConnectRecoveryContactAction?: MurphContactOption | null;
@@ -84,6 +87,7 @@ export function ConnectSourcesGrid({
   sources: readonly ConnectSource[];
   whoopSyncContactAction?: DeviceSyncCompletionContactAction | null;
   whoopSyncVoiceMemoSrc?: string | null;
+  zeppSyncContactAction?: DeviceSyncCompletionContactAction | null;
 }) {
   const [notice, setNotice] = useState<ConnectCallbackNotice>(() =>
     createConnectCallbackNotice(initialCallback, sources),
@@ -100,6 +104,8 @@ export function ConnectSourcesGrid({
   const [garminHistoricalDataRequest, setGarminHistoricalDataRequest] =
     useState<GarminHistoricalDataRequest | null>(null);
   const [showWhoopAppleHealthSetupDialog, setShowWhoopAppleHealthSetupDialog] = useState(false);
+  const [activeSetupGuideId, setActiveSetupGuideId] =
+    useState<ConnectSourceSetupGuideId | null>(null);
   const [disconnectSource, setDisconnectSource] = useState<ConnectSource | null>(null);
   const [disconnectedConnectionIds, setDisconnectedConnectionIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -125,6 +131,7 @@ export function ConnectSourcesGrid({
         disconnectedSourceIds,
       ).filter((source) =>
         source.connectionAvailable !== false
+        || Boolean(source.setupGuideId)
         || source.connected === true
         || source.requiresReconnect === true
         || Boolean(source.recoveryKind)
@@ -197,6 +204,7 @@ export function ConnectSourcesGrid({
     setNotice(null);
     setConnectIntentRecovery(null);
     setShowWhoopAppleHealthSetupDialog(false);
+    setActiveSetupGuideId(null);
 
     if (
       requiresGarminHistoricalDataPreflight(source)
@@ -439,6 +447,7 @@ export function ConnectSourcesGrid({
               pendingDisconnect={pendingDisconnectSourceId === source.id}
               source={source}
               onDisconnectTargetChange={setDisconnectSource}
+              onSetupGuideOpen={setActiveSetupGuideId}
               onStartConnection={startConnection}
             />
           ))}
@@ -450,6 +459,17 @@ export function ConnectSourcesGrid({
         guide={buildWhoopAppleHealthSetupGuide(whoopSyncVoiceMemoSrc)}
         open={showWhoopAppleHealthSetupDialog}
         onOpenChange={setShowWhoopAppleHealthSetupDialog}
+      />
+
+      <DeviceSyncSetupGuideDialog
+        contactAction={zeppSyncContactAction}
+        guide={buildZeppAppleHealthSetupGuide()}
+        open={activeSetupGuideId === "zepp-apple-health"}
+        onOpenChange={(open) => {
+          if (!open) {
+            setActiveSetupGuideId(null);
+          }
+        }}
       />
 
       <GarminHistoricalDataDialog

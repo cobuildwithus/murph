@@ -131,7 +131,7 @@ export function HealthDataConsentWithdrawalFlowStudy() {
       )}
       data-design-section="health-data-consent-withdrawal"
     >
-      <div className="flex min-w-0 flex-col gap-4 border-y border-border py-5">
+      <div className="flex min-w-0 flex-col gap-5 border-y border-border py-5">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           {presentation === "active" ? "Consent active" : "Consent withdrawn"}
         </p>
@@ -194,7 +194,10 @@ function ConsentStateFrame({
   label: string;
 }) {
   return (
-    <div className="rounded-2xl border border-border bg-background p-5">
+    <div
+      className="rounded-2xl border border-border bg-background p-5"
+      data-design-state={label.toLowerCase().replaceAll(" ", "-")}
+    >
       <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         {label}
       </p>

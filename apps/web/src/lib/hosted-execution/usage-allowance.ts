@@ -36,6 +36,7 @@ import {
   getHostedBillingPlanCodeForPlan,
   getHostedDefaultBillingPlanCode,
   getHostedFamilyAiUsageMonthlyAllowanceForPlan,
+  isHostedBillingPlanImmediateUpgrade,
   parseHostedBillingPlanCode,
   parseHostedBillingPhase,
   parseHostedPlanCode,
@@ -1783,6 +1784,14 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
         })
       )
     );
+  const resetForPlanUpgrade = shouldResetHostedAiUsageForPlanUpgrade({
+    billingRef: input.billingRef,
+    currentBillingPlanCode,
+    currentLimitUsdMicros: current.limitUsdMicros,
+    currentPeriodEnd: current.periodEnd,
+    currentPeriodStart: current.periodStart,
+    resolved,
+  });
 
   if (periodMatches) {
     const blockedAt = resolveHostedAiUsageAllowanceBlockedAt({
@@ -1822,13 +1831,15 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     };
   }
 
-  const blockedAt = resolveHostedAiUsageAllowanceBlockedAt({
-    blockedAt: current.blockedAt,
-    limitUsdMicros: resolved.limitUsdMicros,
-    now: input.now,
-    spentUsdMicros: current.spentUsdMicros,
-    usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
-  });
+  const blockedAt = resetForPlanUpgrade
+    ? null
+    : resolveHostedAiUsageAllowanceBlockedAt({
+        blockedAt: current.blockedAt,
+        limitUsdMicros: resolved.limitUsdMicros,
+        now: input.now,
+        spentUsdMicros: current.spentUsdMicros,
+        usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
+      });
   const upgraded = await input.tx.hostedAiUsagePeriod.update({
     where: {
       memberId_periodStart: {
@@ -1841,6 +1852,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       blockedAt,
       limitUsdMicros: resolved.limitUsdMicros,
       periodEnd: resolved.periodEnd,
+      ...(resetForPlanUpgrade ? { spentUsdMicros: 0n } : {}),
       updatedAt: input.now,
     },
     select: {
@@ -1932,17 +1944,25 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
           resolved,
         })
       );
+    const resetForPlanUpgrade = shouldResetHostedAiUsageForPlanUpgrade({
+      billingRef: input.billingRef,
+      currentBillingPlanCode,
+      currentLimitUsdMicros: current.limitUsdMicros,
+      currentPeriodEnd: current.periodEnd,
+      currentPeriodStart: current.periodStart,
+      resolved,
+    });
     const limitUsdMicros = periodMatches ? current.limitUsdMicros : resolved.limitUsdMicros;
 
     return {
       kind: "period",
       allowanceSource: resolved.allowanceSource,
       billingPlanCode: periodMatches ? currentBillingPlanCode : resolved.billingPlanCode,
-      blockedAt: current.blockedAt,
+      blockedAt: resetForPlanUpgrade ? null : current.blockedAt,
       limitUsdMicros,
       periodEnd: periodMatches ? current.periodEnd : resolved.periodEnd,
       periodStart: periodMatches ? current.periodStart : resolved.periodStart,
-      spentUsdMicros: current.spentUsdMicros,
+      spentUsdMicros: resetForPlanUpgrade ? 0n : current.spentUsdMicros,
       usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
       usageCreditLedgerVersion: input.usageCreditLedgerVersion,
     };
@@ -1960,6 +1980,48 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
     usageCreditLedgerVersion: input.usageCreditLedgerVersion,
   };
+}
+
+function shouldResetHostedAiUsageForPlanUpgrade(input: {
+  billingRef: HostedAiUsageAllowanceBillingRef | null;
+  currentBillingPlanCode: HostedBillingPlanCode;
+  currentLimitUsdMicros: bigint;
+  currentPeriodEnd: Date;
+  currentPeriodStart: Date;
+  resolved: Extract<HostedAiUsageAllowancePeriodResolution, { kind: "period" }>;
+}): boolean {
+  if (
+    input.resolved.allowanceSource !== "direct_paid_member_plan" &&
+    input.resolved.allowanceSource !== "family_sponsored_plan"
+  ) {
+    return false;
+  }
+
+  if (isHostedBillingPlanImmediateUpgrade({
+    currentPlanCode: input.currentBillingPlanCode,
+    targetPlanCode: input.resolved.billingPlanCode,
+  })) {
+    return true;
+  }
+
+  if (input.resolved.allowanceSource !== "direct_paid_member_plan") {
+    return false;
+  }
+
+  // Trial and paid Pulse share a plan code. Retained trial bounds identify the
+  // old row without mistaking an ordinary paid allowance change for conversion.
+  return (
+    input.currentBillingPlanCode === "launch_monthly" &&
+    input.resolved.billingPlanCode === "launch_monthly" &&
+    parseHostedBillingCheckoutOffer(input.billingRef?.currentCheckoutOffer)
+      === HOSTED_PULSE_TRIAL_OFFER &&
+    input.billingRef?.currentTrialStartedAt?.getTime()
+      === input.currentPeriodStart.getTime() &&
+    input.billingRef?.currentTrialEndsAt?.getTime()
+      === input.currentPeriodEnd.getTime() &&
+    input.currentLimitUsdMicros === HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS &&
+    input.resolved.limitUsdMicros > input.currentLimitUsdMicros
+  );
 }
 
 function shouldPreserveExistingPaidPeriodLimit(input: {

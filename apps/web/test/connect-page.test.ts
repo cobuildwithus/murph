@@ -170,7 +170,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
   assert.match(markup, /aria-label="Search sources"/);
-  assert.match(markup, />27 of 27 sources</);
+  assert.match(markup, />28 of 28 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
@@ -180,12 +180,22 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       body: "Help me finish setting up WHOOP through Apple Health.",
     },
   });
+  assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[1]?.[0], {
+    message: {
+      body: "Help me set up Zepp/Amazfit through Apple Health. Please walk me through it with a voice memo.",
+    },
+  });
 
   const sources = [
     {
       assetPath: "/brand-logos/connect/apple-health.png",
       description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
       name: "Apple Health",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
+      name: "Zepp / Amazfit",
     },
     {
       assetPath: "/brand-logos/connect/whoop.svg",
@@ -319,9 +329,9 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     },
   ];
 
-  assert.equal(sources.length, 27);
-  assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
-  assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length - 1);
+  assert.equal(sources.length, 28);
+  assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length - 1);
+  assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length - 2);
   assert.match(markup, /disabled=""/);
   assert.match(markup, /aria-label="Download app for Apple Health"/);
   assert.match(markup, /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859"/);
@@ -331,6 +341,8 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
   assert.match(markup, />Download app<\/a>/u);
+  assert.match(markup, /aria-label="Set up sync for Zepp \/ Amazfit"/u);
+  assert.match(markup, />Set up sync<\/button>/u);
   assert.doesNotMatch(markup, /Not connected/u);
   assert.doesNotMatch(markup, />Connected</u);
   assert.doesNotMatch(markup, />Health Connect</u);
@@ -345,7 +357,8 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.ok(sourceHeadingIndex(markup, "Apple Health") < sourceHeadingIndex(markup, "Garmin"));
   assert.ok(sourceHeadingIndex(markup, "Garmin") < sourceHeadingIndex(markup, "Fitbit"));
   assert.ok(sourceHeadingIndex(markup, "Fitbit") < sourceHeadingIndex(markup, "Google Fit"));
-  assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Withings"));
+  assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Zepp / Amazfit"));
+  assert.ok(sourceHeadingIndex(markup, "Zepp / Amazfit") < sourceHeadingIndex(markup, "Withings"));
   assert.ok(sourceHeadingIndex(markup, "Withings") < sourceHeadingIndex(markup, "Oura"));
   assert.ok(sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"));
   assert.ok(sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "Dexcom"));
@@ -437,6 +450,27 @@ test("ConnectPage fails open when the WHOOP setup contact route cannot resolve",
   assert.equal(readWhoopSyncContactAction(page), null);
 });
 
+test("ConnectPage maps the Zepp setup Messages option at the server boundary", async () => {
+  mocks.resolveHostedMurphContactOptions
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([
+      {
+        href: "sms:+15550100001?body=Help%20me%20set%20up%20Zepp",
+        kind: "text",
+        label: "Messages",
+      },
+    ]);
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
+  const page = await ConnectPage();
+
+  assert.deepEqual(readConnectSourcesGridProp(page, "zeppSyncContactAction"), {
+    href: "sms:+15550100001?body=Help%20me%20set%20up%20Zepp",
+    kind: "imessage",
+    label: "Text Murph",
+  });
+});
+
 test("filterConnectSourcesForSearch matches source names, ids, and descriptions", async () => {
   const { filterConnectSourcesForSearch } = await import(
     "../app/(dashboard)/connect/connect-page-client"
@@ -508,6 +542,24 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
       logo,
     },
     {
+      id: "zepp",
+      name: "Zepp / Amazfit",
+      description: "Activity.",
+      logo,
+    },
+    {
+      id: "fitbit",
+      name: "Fitbit",
+      description: "Activity.",
+      logo,
+    },
+    {
+      id: "google-fit",
+      name: "Google Fit",
+      description: "Activity.",
+      logo,
+    },
+    {
       id: "dexcom",
       name: "Dexcom",
       description: "Glucose.",
@@ -526,7 +578,6 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
       logo,
     },
     {
-      connected: true,
       id: "strava",
       name: "Strava",
       description: "Workouts.",
@@ -537,9 +588,12 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
   assert.deepEqual(
     sortConnectSourcesByConnectionState(sources).map((source) => source.id),
     [
-      "strava",
       "oura",
       "garmin",
+      "fitbit",
+      "google-fit",
+      "strava",
+      "zepp",
       "whoop",
       "dexcom",
       "dexcom-g6-and-older",
@@ -559,6 +613,104 @@ test("ConnectSourcesGrid shows an empty-state alert when no sources are availabl
   assert.match(markup, /No sources matched/);
   assert.match(markup, /Try a different search to get back to the full source list\./);
   assert.doesNotMatch(markup, />Connect<\/button>/u);
+});
+
+test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claiming a direct connection", async () => {
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectionAvailable: false,
+        connected: true,
+        description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
+        disconnectConnectionId: "impossible-zepp-provider-state",
+        historicalResetIncomplete: true,
+        id: "zepp",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 40,
+          src: "/brand-logos/connect/wearable-relay.svg",
+          width: 64,
+        },
+        name: "Zepp / Amazfit",
+        recoveryKind: "connection_reset",
+        requiresReconnect: true,
+        setupGuideActionLabel: "Set up sync",
+        setupGuideId: "zepp-apple-health",
+      },
+    ],
+    zeppSyncContactAction: {
+      href: "sms:+15550100001?body=Help%20me%20set%20up%20Zepp",
+      kind: "imessage",
+      label: "Text Murph",
+    },
+  }));
+
+  const setupButton = rendered.container.querySelector(
+    'button[aria-label="Set up sync for Zepp / Amazfit"]',
+  );
+  assert.ok(setupButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(rendered.container.querySelector("[data-connection-state]"), null);
+  assert.equal(rendered.container.querySelector(
+    'button[aria-label="Disconnect Zepp / Amazfit"]',
+  ), null);
+  assert.doesNotMatch(
+    rendered.container.textContent ?? "",
+    /Zepp \/ Amazfit (?:connected|not connected)/u,
+  );
+  assert.doesNotMatch(
+    rendered.container.textContent ?? "",
+    /needs a fresh connection|needs reconnect|Please reconnect/u,
+  );
+
+  await act(async () => {
+    setupButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  assert.match(rendered.container.textContent ?? "", /Sync Zepp through Apple Health/);
+  assert.match(rendered.container.textContent ?? "", /Turn on Apple Health in Zepp/);
+  assert.match(rendered.container.textContent ?? "", /Continue with Murph/);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /direct Zepp/u);
+  assert.equal(rendered.container.querySelector("audio"), null);
+  assert.ok(rendered.container.querySelector(
+    'a[href="https://apps.apple.com/us/app/murph-ai/id6786145859"]',
+  ));
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid requires account authentication before opening the Zepp guide", async () => {
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    authenticated: false,
+    sources: [
+      {
+        connectionAvailable: false,
+        description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
+        id: "zepp",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 40,
+          src: "/brand-logos/connect/wearable-relay.svg",
+          width: 64,
+        },
+        name: "Zepp / Amazfit",
+        setupGuideActionLabel: "Set up sync",
+        setupGuideId: "zepp-apple-health",
+      },
+    ],
+  }));
+
+  assert.ok(rendered.container.querySelector(
+    'button[aria-label="Log in or sign up to set up Zepp / Amazfit"]',
+  ));
+  assert.equal(rendered.container.querySelector(
+    'button[aria-label="Set up sync for Zepp / Amazfit"]',
+  ), null);
+  assert.equal(rendered.container.querySelector("[data-connection-state]"), null);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Sync Zepp through Apple Health/u);
+
+  await rendered.cleanup();
 });
 
 test("ConnectPage enables Garmin when Junction exposes Garmin as a connect target", async () => {
@@ -1782,6 +1934,8 @@ test("SourceCard stacks connection-reset content vertically at the base breakpoi
     ordinaryMarkup,
     /class="ml-auto flex shrink-0 flex-col items-stretch gap-2 self-end sm:mt-auto sm:shrink"/u,
   );
+  assert.match(ordinaryMarkup, /data-connection-state="idle"/u);
+  assert.match(ordinaryMarkup, /Garmin not connected/u);
   assert.match(ordinaryMarkup, /aria-label="Garmin connection is not available yet"[^>]+self-end/u);
 
   const connectedMarkup = renderToStaticMarkup(createElement(SourceCard, {
@@ -3995,16 +4149,20 @@ function readSupportMailto(markup: string): URL {
 }
 
 function readWhoopSyncContactAction(page: ReactNode): unknown {
+  return readConnectSourcesGridProp(page, "whoopSyncContactAction");
+}
+
+function readConnectSourcesGridProp(page: ReactNode, propName: string): unknown {
   assert.ok(isValidElement<{ children?: ReactNode }>(page));
   const connectSourcesGrid = Children.toArray(page.props.children).find((child) => {
     if (!isValidElement(child)) {
       return false;
     }
-    return "whoopSyncContactAction" in (child.props as Record<string, unknown>);
+    return propName in (child.props as Record<string, unknown>);
   });
 
   assert.ok(isValidElement(connectSourcesGrid));
-  return (connectSourcesGrid.props as Record<string, unknown>).whoopSyncContactAction;
+  return (connectSourcesGrid.props as Record<string, unknown>)[propName];
 }
 
 function escapeRegExp(value: string): string {

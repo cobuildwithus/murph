@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import type { EventAttachment, EventRecord, RawImportKind } from "@murphai/contracts";
 import { eventRecordSchema } from "@murphai/contracts";
 
@@ -22,10 +20,8 @@ import {
 } from "../../history/event-spine.ts";
 import { generateRecordId } from "../../ids.ts";
 import { readJsonlRecords } from "../../jsonl.ts";
-import { readJsonFile } from "../../fs.ts";
 import { withCanonicalWriteLock } from "../../operations/canonical-write-lock.ts";
 import { runCanonicalWrite, type WriteBatch } from "../../operations/write-batch.ts";
-import { normalizeRelativeVaultPath } from "../../path-safety.ts";
 import type { DateInput } from "../../types.ts";
 import { loadVault } from "../../vault.ts";
 import {
@@ -50,9 +46,13 @@ import {
 } from "./ledger.ts";
 import {
   CAPTURE_LOOKUP_BACKED_TAG,
-  CAPTURE_LOOKUP_INDEX_PATH,
   CAPTURE_LOOKUP_SCHEMA,
+  captureLookupPathForKey,
   isCaptureLookupBackedEvent,
+  readStoredCaptureLookup,
+  readStoredCaptureLookupIndex,
+  type StoredCaptureLookup,
+  type StoredCaptureLookupIndex,
 } from "./capture-lookup.ts";
 
 type AttachmentBackedPublicEventKind = "activity_session" | "capture" | "measurement" | "body_measurement";
@@ -146,18 +146,6 @@ export type FindCaptureByLookupResult =
       manifestPath: string | null;
       status: "live";
     };
-
-interface StoredCaptureLookup {
-  attachmentRef: string;
-  eventId: string;
-  ledgerFile: string;
-  manifestPath: string | null;
-}
-
-interface StoredCaptureLookupIndex {
-  entries: Record<string, StoredCaptureLookup>;
-  schema: typeof CAPTURE_LOOKUP_SCHEMA;
-}
 
 function mergeByRelativePath<T extends { relativePath: string }>(
   existing: readonly T[] | undefined,
@@ -303,156 +291,6 @@ function normalizeCaptureDraftWithRequiredTags(
   };
 }
 
-function hashCaptureLookupKey(lookupKey: string): string {
-  const normalized = normalizeOptionalText(lookupKey);
-  if (!normalized) {
-    throw new VaultError("INVALID_INPUT", "Capture lookup key is required.");
-  }
-
-  return createHash("sha256")
-    .update("murph.capture-lookup.v1")
-    .update("\0")
-    .update(normalized)
-    .digest("hex");
-}
-
-function captureLookupPathForKey(lookupKey: string): { lookupKeyHash: string; lookupPath: string } {
-  const lookupKeyHash = hashCaptureLookupKey(lookupKey);
-  return {
-    lookupKeyHash,
-    lookupPath: CAPTURE_LOOKUP_INDEX_PATH,
-  };
-}
-
-function readStringField(record: Record<string, unknown>, field: string): string | null {
-  const value = record[field];
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
-function readNullableStringField(record: Record<string, unknown>, field: string): string | null | undefined {
-  const value = record[field];
-  if (value === null) {
-    return null;
-  }
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
-
-function parseStoredCaptureLookup(input: {
-  lookupPath: string;
-  value: unknown;
-}): StoredCaptureLookup {
-  if (input.value === null || typeof input.value !== "object" || Array.isArray(input.value)) {
-    throw new VaultError("CAPTURE_LOOKUP_INVALID", "Capture lookup record is invalid.", {
-      relativePath: input.lookupPath,
-    });
-  }
-
-  const record = input.value as Record<string, unknown>;
-  const eventId = readStringField(record, "eventId");
-  const ledgerFile = readStringField(record, "ledgerFile");
-  const attachmentRef = readStringField(record, "attachmentRef");
-  const manifestPath = readNullableStringField(record, "manifestPath");
-
-  if (
-    !eventId ||
-    !ledgerFile ||
-    !attachmentRef ||
-    manifestPath === undefined
-  ) {
-    throw new VaultError("CAPTURE_LOOKUP_INVALID", "Capture lookup record is invalid.", {
-      relativePath: input.lookupPath,
-    });
-  }
-
-  const normalizedLedgerFile = normalizeRelativeVaultPath(ledgerFile);
-  if (!normalizedLedgerFile.startsWith("ledger/events/") || !normalizedLedgerFile.endsWith(".jsonl")) {
-    throw new VaultError("CAPTURE_LOOKUP_INVALID", "Capture lookup ledger file is invalid.", {
-      relativePath: input.lookupPath,
-    });
-  }
-
-  return {
-    attachmentRef: normalizeRelativeVaultPath(attachmentRef),
-    eventId,
-    ledgerFile: normalizedLedgerFile,
-    manifestPath: manifestPath === null ? null : normalizeRelativeVaultPath(manifestPath),
-  };
-}
-
-function parseStoredCaptureLookupIndex(input: {
-  lookupPath: string;
-  value: unknown;
-}): StoredCaptureLookupIndex {
-  if (input.value === null || typeof input.value !== "object" || Array.isArray(input.value)) {
-    throw new VaultError("CAPTURE_LOOKUP_INVALID", "Capture lookup index is invalid.", {
-      relativePath: input.lookupPath,
-    });
-  }
-
-  const record = input.value as Record<string, unknown>;
-  const schema = readStringField(record, "schema");
-  const entries = record.entries;
-  if (
-    schema !== CAPTURE_LOOKUP_SCHEMA ||
-    entries === null ||
-    typeof entries !== "object" ||
-    Array.isArray(entries)
-  ) {
-    throw new VaultError("CAPTURE_LOOKUP_INVALID", "Capture lookup index is invalid.", {
-      relativePath: input.lookupPath,
-    });
-  }
-
-  return {
-    entries: entries as Record<string, StoredCaptureLookup>,
-    schema: CAPTURE_LOOKUP_SCHEMA,
-  };
-}
-
-async function readStoredCaptureLookupIndex(input: {
-  vaultRoot: string;
-}): Promise<StoredCaptureLookupIndex> {
-  let value: unknown;
-  try {
-    value = await readJsonFile(input.vaultRoot, CAPTURE_LOOKUP_INDEX_PATH);
-  } catch (error) {
-    if (error instanceof VaultError && error.code === "VAULT_FILE_MISSING") {
-      return {
-        entries: {},
-        schema: CAPTURE_LOOKUP_SCHEMA,
-      };
-    }
-    throw error;
-  }
-
-  return parseStoredCaptureLookupIndex({
-    lookupPath: CAPTURE_LOOKUP_INDEX_PATH,
-    value,
-  });
-}
-
-async function readStoredCaptureLookup(input: {
-  lookupKey: string;
-  vaultRoot: string;
-}): Promise<{ lookup: StoredCaptureLookup; lookupPath: string } | null> {
-  const { lookupKeyHash, lookupPath } = captureLookupPathForKey(input.lookupKey);
-  const index = await readStoredCaptureLookupIndex({
-    vaultRoot: input.vaultRoot,
-  });
-  const value = index.entries[lookupKeyHash];
-  if (!value) {
-    return null;
-  }
-
-  return {
-    lookup: parseStoredCaptureLookup({
-      lookupPath,
-      value,
-    }),
-    lookupPath,
-  };
-}
-
 function parseStoredCaptureEvent(record: unknown, lookupPath: string): EventRecord | null {
   if (record === null || typeof record !== "object" || Array.isArray(record)) {
     return null;
@@ -499,6 +337,15 @@ export async function findCaptureByLookup(input: {
     return {
       lookupPath,
       status: "missing",
+    };
+  }
+
+  if (stored.lookup.retiredAt) {
+    return {
+      eventId: stored.lookup.eventId,
+      ledgerFile: stored.lookup.ledgerFile,
+      lookupPath: stored.lookupPath,
+      status: "deleted",
     };
   }
 

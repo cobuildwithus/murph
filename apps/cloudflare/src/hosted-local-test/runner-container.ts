@@ -31,6 +31,16 @@ import type {
 import {
   asWorkerStringEnvironment,
 } from "../worker-contracts.ts";
+import {
+  armForegroundPriorityOrderingObservation,
+  clearForegroundPriorityOrderingObservation,
+  readForegroundPriorityOrderingObservation,
+  recordForegroundPriorityAssistantProviderStart,
+  releaseForegroundPriorityOrderingBarrier,
+  wrapForegroundPriorityOrderingObservationForTest,
+  type HostedLocalForegroundPriorityOrderingControlInput,
+  type HostedLocalForegroundPriorityOrderingControlResult,
+} from "./foreground-priority-ordering.ts";
 
 export interface HostedLocalTestRunnerOutboundContext {
   containerId?: string;
@@ -70,6 +80,41 @@ export class RunnerContainer extends BaseRunnerContainer {
   ): Promise<{ ok: true }> {
     armCanonicalCheckpointPublicationBarrier(input.userId);
     return { ok: true };
+  }
+
+  async armIdleSnapshotStartBarrierForTest(
+    input: { userId: string },
+  ): Promise<{ ok: true }> {
+    armIdleSnapshotStartBarrier(input.userId);
+    return { ok: true };
+  }
+
+  async foregroundPriorityOrderingControlForTest(
+    input: HostedLocalForegroundPriorityOrderingControlInput,
+  ): Promise<HostedLocalForegroundPriorityOrderingControlResult> {
+    switch (input.action) {
+      case "arm":
+        armForegroundPriorityOrderingObservation(
+          input.userId,
+          input.barrierTarget ?? "none",
+        );
+        return { ok: true };
+      case "clear":
+        return {
+          cleared: clearForegroundPriorityOrderingObservation(input.userId),
+          ok: true,
+        };
+      case "record-provider-start":
+        recordForegroundPriorityAssistantProviderStart(input.userId);
+        return { ok: true };
+      case "release":
+        return {
+          ok: true,
+          released: releaseForegroundPriorityOrderingBarrier(input.userId),
+        };
+      case "status":
+        return readForegroundPriorityOrderingObservation(input.userId);
+    }
   }
 
   async armSnapshotPublicationCorruptionForTest(
@@ -189,7 +234,7 @@ export type HostedLocalShutdownCheckpointPublicationBarrierState =
 
 interface HostedLocalShutdownCheckpointPublicationBarrier {
   entered: boolean;
-  reason: "canonical_runtime_commit" | "idle_shutdown";
+  target: "canonical_runtime_commit" | "idle_shutdown" | "snapshot_start";
   release(): void;
   released: Promise<void>;
 }
@@ -310,9 +355,13 @@ export function armCanonicalCheckpointPublicationBarrier(userId: string): void {
   armCheckpointPublicationBarrier(userId, "canonical_runtime_commit");
 }
 
+export function armIdleSnapshotStartBarrier(userId: string): void {
+  armCheckpointPublicationBarrier(userId, "snapshot_start");
+}
+
 function armCheckpointPublicationBarrier(
   userId: string,
-  reason: "canonical_runtime_commit" | "idle_shutdown",
+  target: "canonical_runtime_commit" | "idle_shutdown" | "snapshot_start",
 ): void {
   const normalizedUserId = normalizeShutdownCheckpointPublicationBarrierUserId(userId);
   if (shutdownCheckpointPublicationBarriers.has(normalizedUserId)) {
@@ -327,7 +376,7 @@ function armCheckpointPublicationBarrier(
   });
   shutdownCheckpointPublicationBarriers.set(normalizedUserId, {
     entered: false,
-    reason,
+    target,
     release,
     released,
   });
@@ -369,7 +418,7 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
       !barrier
       || !await isCheckpointPublicationRequestForReason(
         request,
-        barrier.reason,
+        barrier.target,
       )
     ) {
       return await handler(request, env, ctx);
@@ -379,7 +428,7 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
-        barrierKind: `${barrier.reason}_checkpoint_publication`,
+        barrierKind: `${barrier.target}_checkpoint_publication`,
       },
       message:
         "Hosted-local test paused checkpoint publication before the real checkpoint commit.",
@@ -401,10 +450,17 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
 
 async function isCheckpointPublicationRequestForReason(
   request: Request,
-  reason: "canonical_runtime_commit" | "idle_shutdown",
+  target: "canonical_runtime_commit" | "idle_shutdown" | "snapshot_start",
 ): Promise<boolean> {
   if (
-    reason === "canonical_runtime_commit"
+    target === "snapshot_start"
+    && request.method === "POST"
+    && new URL(request.url).pathname === "/workspace-snapshots/start"
+  ) {
+    return true;
+  }
+  if (
+    target === "canonical_runtime_commit"
     && await isCanonicalRuntimeCheckpointRequest(request)
   ) {
     return true;
@@ -424,7 +480,7 @@ async function isCheckpointPublicationRequestForReason(
     && typeof checkpointRequest === "object"
     && !Array.isArray(checkpointRequest)
     && "reason" in checkpointRequest
-    && checkpointRequest.reason === reason,
+    && checkpointRequest.reason === target,
   );
 }
 
@@ -662,12 +718,18 @@ const hostedLocalTestOutboundByHost: typeof HOSTED_RUNNER_OUTBOUND_BY_HOST = {
   [CLOUDFLARE_HOSTED_TRANSCRIBE_HOST]: (request, env, ctx) =>
     transcribeHandler(request, env.AI ? env : { ...env, AI: hostedLocalTestAiBinding }, ctx),
   [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane]:
-    wrapShutdownCheckpointPublicationBarrierForTest(
-      wrapCanonicalCheckpointLostAckForTest(webControlPlaneHandler),
+    wrapForegroundPriorityOrderingObservationForTest(
+      wrapShutdownCheckpointPublicationBarrierForTest(
+        wrapCanonicalCheckpointLostAckForTest(webControlPlaneHandler),
+      ),
+      "web-control",
     ),
   [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore]:
-    wrapShutdownCheckpointPublicationBarrierForTest(
-      wrapSnapshotPublicationCorruptionForTest(workspaceSnapshotStoreHandler),
+    wrapForegroundPriorityOrderingObservationForTest(
+      wrapShutdownCheckpointPublicationBarrierForTest(
+        wrapSnapshotPublicationCorruptionForTest(workspaceSnapshotStoreHandler),
+      ),
+      "snapshot-store",
     ),
   [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort]: effectsPortHandler,
   [HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST]: handleHostedLocalLinqAttachmentUpload,
