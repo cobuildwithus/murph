@@ -1,6 +1,6 @@
 # Include the validated product issue in support escalation alerts
 
-Status: active
+Status: completed
 Created: 2026-08-04
 Updated: 2026-08-05
 
@@ -153,5 +153,10 @@ Updated: 2026-08-05
   de-identified issue in its own words. The restacked candidate keeps the
   anonymous storage boundary, stable replay, and fail-closed provider boundary
   while emailing that validated stored issue beside internal identifiers.
-- Exact-head focused tests, typechecks, docs drift, CI, and correction ReviewGPT
-  remain pending for this superseding candidate.
+- On the superseding restacked candidate, the two focused Web suites pass 14
+  tests, the full Web typecheck passes, docs drift passes, and diff checks pass.
+  The production-path tests cover anonymous stripped storage, exact readback
+  into email, deterministic private-value scrubbing, first-stored-issue replay,
+  cap behavior, and failure before provider entry for linked or malformed
+  detail. Exact-head CI and correction ReviewGPT remain pending.
+Completed: 2026-08-05
