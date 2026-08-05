@@ -6,10 +6,6 @@ import {
   resolveAssistantSkillsRoot,
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
-  HOSTED_ASSISTANT_LUNA_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
-} from "@murphai/hosted-execution/assistant-model";
-import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
   buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
@@ -94,40 +90,19 @@ const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 // attempt and make Codex's native transport fallback unreachable.
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 0;
 const HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS = 90_000;
-const HOSTED_CODEX_OPERATOR_MEMORY_CONFIG = {
-  disableOnExternalContext: false,
-  featureEnabled: true,
-  generateMemories: true,
-  maxRawMemoriesForConsolidation: 128,
-  maxRolloutAgeDays: 10,
-  maxRolloutsPerStartup: 1,
-  maxUnusedDays: 30,
-  minRateLimitRemainingPercent: 25,
-  minRolloutIdleHours: 1,
-  useMemories: true,
+const HOSTED_CODEX_NATIVE_MEMORY_CONFIG = {
+  featureEnabled: false,
+  generateMemories: false,
+  useMemories: false,
 } as const;
 export const HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS = {
-  codexOperatorMemoryDisableOnExternalContext:
-    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.disableOnExternalContext,
   codexOperatorMemoryFeatureEnabled:
-    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.featureEnabled,
+    HOSTED_CODEX_NATIVE_MEMORY_CONFIG.featureEnabled,
   codexOperatorMemoryGenerateMemories:
-    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.generateMemories,
-  codexOperatorMemoryMaxRawMemoriesForConsolidation:
-    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRawMemoriesForConsolidation,
-  codexOperatorMemoryMaxRolloutAgeDays:
-    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRolloutAgeDays,
-  codexOperatorMemoryMaxRolloutsPerStartup:
-    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRolloutsPerStartup,
-  codexOperatorMemoryMaxUnusedDays:
-    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxUnusedDays,
-  codexOperatorMemoryMinRateLimitRemainingPercent:
-    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.minRateLimitRemainingPercent,
-  codexOperatorMemoryMinRolloutIdleHours:
-    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.minRolloutIdleHours,
-  codexOperatorMemoryMode: "codex-native-operator-context",
+    HOSTED_CODEX_NATIVE_MEMORY_CONFIG.generateMemories,
+  codexOperatorMemoryMode: "disabled",
   codexOperatorMemoryUseMemories:
-    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.useMemories,
+    HOSTED_CODEX_NATIVE_MEMORY_CONFIG.useMemories,
 } as const;
 export const HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS = {
   codexProviderRequestMaxRetries: HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
@@ -587,14 +562,6 @@ export function buildHostedCodexConfigToml(input: {
     : input.provider.id;
   const customInferenceProvider =
     input.provider.id === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID;
-  const useConfiguredMemoryModel = input.chatGptAuth === true
-    || customInferenceProvider;
-  const memoryExtractModel = useConfiguredMemoryModel
-    ? input.model
-    : HOSTED_ASSISTANT_LUNA_MODEL;
-  const memoryConsolidationModel = useConfiguredMemoryModel
-    ? input.model
-    : HOSTED_ASSISTANT_TERRA_MODEL;
   const autoCompactTokenLimit = input.contextWindowTokens === null
       || input.contextWindowTokens === undefined
     ? DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT
@@ -654,7 +621,7 @@ export function buildHostedCodexConfigToml(input: {
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "[features]",
     "plugins = false",
-    `memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.featureEnabled}`,
+    `memories = ${HOSTED_CODEX_NATIVE_MEMORY_CONFIG.featureEnabled}`,
     "",
     "[features.current_time_reminder]",
     "enabled = true",
@@ -672,26 +639,13 @@ export function buildHostedCodexConfigToml(input: {
     `multi_agent_mode_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT)}`,
     `subagent_usage_hint_text = ${tomlString(HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT)}`,
     "",
-    "# Codex-native operator memory remains enabled. Platform-funded generation",
-    "# is pinned to Murph's Luna/Terra policy and metered from exact terminal usage.",
-    "# Member-owned credentials and endpoints follow the configured foreground model.",
+    "# Codex-native memory generation and use stay disabled. The feature gate stops",
+    "# startup processing of previously eligible rollouts, while the explicit values",
+    "# keep newly created threads ineligible if the feature is toggled independently.",
     "# Murph product memory remains canonical in the vault.",
     "[memories]",
-    `use_memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.useMemories}`,
-    `generate_memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.generateMemories}`,
-    ...(memoryExtractModel
-      ? [`extract_model = ${tomlString(memoryExtractModel)}`]
-      : []),
-    ...(memoryConsolidationModel
-      ? [`consolidation_model = ${tomlString(memoryConsolidationModel)}`]
-      : []),
-    `disable_on_external_context = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.disableOnExternalContext}`,
-    `min_rollout_idle_hours = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.minRolloutIdleHours}`,
-    `max_rollouts_per_startup = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRolloutsPerStartup}`,
-    `max_rollout_age_days = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRolloutAgeDays}`,
-    `min_rate_limit_remaining_percent = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.minRateLimitRemainingPercent}`,
-    `max_raw_memories_for_consolidation = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRawMemoriesForConsolidation}`,
-    `max_unused_days = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxUnusedDays}`,
+    `use_memories = ${HOSTED_CODEX_NATIVE_MEMORY_CONFIG.useMemories}`,
+    `generate_memories = ${HOSTED_CODEX_NATIVE_MEMORY_CONFIG.generateMemories}`,
     "",
     "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
     "# runner paths change on each wake and break provider prefix caching.",

@@ -1248,8 +1248,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "Hercules" ;;')
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "9444" ;;')
     expect(reviewGptConfig).toContain(
-      'review_gpt_browser_lanes=(eragon phlebas hercules mountain)',
+      'review_gpt_all_browser_lanes=(eragon phlebas hercules mountain)',
     )
+    expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
+    expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
+    expect(reviewGptConfig).toContain('REVIEW_GPT_FULL_REVIEW_REASON')
+    expect(reviewGptConfig).toContain('pr-correction-review.md')
     expect(reviewGptConfig).toContain(
       'managed_browser_background_mode="${managed_browser_background_mode:-balanced}"',
     )
@@ -1272,8 +1276,11 @@ describe('monorepo release flow coverage audit', () => {
       'utf8',
     )
     expect(prDeepReviewPrompt).toContain(
-      'Use `codebase.zip` as the sole repository-content source.',
+      'Use the `codebase.zip` files in this conversation as the sole',
     )
+    expect(prDeepReviewPrompt).toContain('`same_thread_delta`')
+    expect(prDeepReviewPrompt).toContain('`full_snapshot`')
+    expect(prDeepReviewPrompt).toContain('`contextAnchorHead`')
     expect(prDeepReviewPrompt).toMatch(/Do not review a\s+diff hunk in isolation\./u)
     expect(prDeepReviewPrompt).toContain(
       'Do not use app connectors, memory, pasted repository context',
@@ -1624,6 +1631,116 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
+  })
+
+  it('keeps ReviewGPT browser preferences local and reuses correction threads', () => {
+    const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-browser-'))
+    const localConfigRoot = path.join(harnessRoot, 'config')
+    const configHarness = `
+set -euo pipefail
+review_gpt_register_dir_preset() { :; }
+review_gpt_register_preset_group() { :; }
+source "$REPO_ROOT/scripts/review-gpt.config.sh"
+printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_count"
+`
+
+    try {
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=1\n',
+      )
+      const localResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...withoutNodeV8Coverage(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(localResult.status, localResult.stderr).toBe(0)
+      expect(localResult.stdout.trim()).toBe('eragon|1')
+
+      rmSync(path.join(localConfigRoot, 'murph', 'review-gpt.conf'))
+      const defaultResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...withoutNodeV8Coverage(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(defaultResult.status, defaultResult.stderr).toBe(0)
+      expect(defaultResult.stdout.trim().split('|')[1]).toBe('4')
+
+      const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...withoutNodeV8Coverage(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          REVIEW_GPT_REVIEW_PHASE: 'final',
+          REVIEW_GPT_ROUND_NUMBER: '2',
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(missingThreadResult.status).not.toBe(0)
+      expect(missingThreadResult.stderr).toContain(
+        'later ReviewGPT rounds require REVIEW_GPT_THREAD_URL',
+      )
+
+      const existingThreadResult = spawnSync(
+        'bash',
+        [
+          '-c',
+          `${configHarness}\nprintf '%s\\n' "$chatgpt_url"`,
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: {
+            ...withoutNodeV8Coverage(),
+            HOME: harnessRoot,
+            REPO_ROOT: repoRoot,
+            REVIEW_GPT_REVIEW_PHASE: 'final',
+            REVIEW_GPT_ROUND_NUMBER: '3',
+            REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
+            XDG_CONFIG_HOME: localConfigRoot,
+          },
+        },
+      )
+      expect(existingThreadResult.status, existingThreadResult.stderr).toBe(0)
+      expect(existingThreadResult.stdout.trim().split('\n').at(-1)).toBe(
+        'https://chatgpt.com/c/fallback-thread',
+      )
+
+      const correctionPresetHarness = `${configHarness}\nprintf '%s\\n' "$review_gpt_pr_review_prompt_file"`
+      const correctionPresetResult = spawnSync('bash', ['-c', correctionPresetHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...withoutNodeV8Coverage(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          REVIEW_GPT_REVIEW_PHASE: 'final',
+          REVIEW_GPT_ROUND_NUMBER: '2',
+          REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/review-thread',
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(correctionPresetResult.status, correctionPresetResult.stderr).toBe(0)
+      expect(correctionPresetResult.stdout.trim().split('\n').at(-1)).toBe(
+        'pr-correction-review.md',
+      )
+
+    } finally {
+      rmSync(harnessRoot, { force: true, recursive: true })
+    }
   })
 
   it('keeps product-experience decisions distinct inside the unified specialist review', () => {
@@ -2795,6 +2912,7 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('REVIEW_GPT_ROUND_NUMBER')
     expect(fullPackageScript).toContain('REVIEW_GPT_FIRST_REVIEWED_HEAD')
     expect(fullPackageScript).toContain('REVIEW_GPT_PREVIOUS_REVIEWED_HEAD')
+    expect(fullPackageScript).toContain('REVIEW_GPT_CONTEXT_ANCHOR_HEAD')
     expect(fullPackageScript).toContain('REVIEW_GPT_REVIEW_PHASE')
     expect(fullPackageScript).toContain('REVIEW_GPT_RENDERED_EVIDENCE_PATHS')
     expect(fullPackageScript).toContain('review-phase.json')
@@ -2869,6 +2987,9 @@ esac
         '.fake-tools/cobuild-package-audit-context',
         `#!/usr/bin/env bash
 set -euo pipefail
+if [[ -n "\${TEST_REAL_PACKAGER_BIN:-}" ]]; then
+  exec "$TEST_REAL_PACKAGER_BIN" "$@"
+fi
 out_dir=""
 name=""
 while (( "$#" )); do
@@ -2901,6 +3022,19 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         cwd: harnessRoot,
       })
       writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 0\n')
+      writeHarnessFile(harnessRoot, 'apps/demo/unrelated.ts', 'export const unrelated = true\n')
+      writeHarnessFile(
+        harnessRoot,
+        'packages/demo/test/unrelated.test.ts',
+        'export const unrelatedTest = true\n',
+      )
+      writeHarnessFile(harnessRoot, 'agent-docs/unrelated.md', 'unrelated docs\n')
+      writeHarnessFile(
+        harnessRoot,
+        '.github/workflows/unrelated.yml',
+        'name: unrelated\non: workflow_dispatch\n',
+      )
+      writeHarnessFile(harnessRoot, 'package.json', '{"name":"review-harness"}\n')
       writeHarnessFile(
         harnessRoot,
         'agent-docs/prompts/product-experience-review.md',
@@ -2995,10 +3129,16 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
             },
           },
         )
+        const exactZipPath = path.join(outDir, `${name}.zip`)
+        const generatedZipName = existsSync(outDir)
+          ? readdirSync(outDir).find((entry) => entry.endsWith('.zip'))
+          : undefined
         return {
           outDir,
           result,
-          zipPath: path.join(outDir, `${name}.zip`),
+          zipPath: existsSync(exactZipPath)
+            ? exactZipPath
+            : path.join(outDir, generatedZipName ?? `${name}.zip`),
         }
       }
 
@@ -3112,12 +3252,15 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         schemaVersion: 1,
         roundNumber: 1,
         reviewScope: 'full',
+        contextMode: 'full_snapshot',
+        contextAnchorHead: firstHead,
         currentBaseHead: baseHead,
         firstReviewedHead: firstHead,
         previousReviewedHead: null,
         currentReviewedHead: firstHead,
         firstReviewedHeadIsAncestorOfCurrent: true,
         previousReviewedHeadIsAncestorOfCurrent: null,
+        contextAnchorHeadIsAncestorOfPrevious: null,
       })
       expect(
         execFileSync(
@@ -3170,12 +3313,15 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         schemaVersion: 1,
         roundNumber: 2,
         reviewScope: 'correction',
+        contextMode: 'same_thread_delta',
+        contextAnchorHead: firstHead,
         currentBaseHead: baseHead,
         firstReviewedHead: firstHead,
         previousReviewedHead: firstHead,
         currentReviewedHead: currentHead,
         firstReviewedHeadIsAncestorOfCurrent: true,
         previousReviewedHeadIsAncestorOfCurrent: true,
+        contextAnchorHeadIsAncestorOfPrevious: true,
       })
       const expectedDelta = execFileSync(
         'git',
@@ -3193,15 +3339,108 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           { encoding: 'utf8' },
         ),
       ).toBe(expectedDelta)
-      expect(
+      const roundTwoEntries = listZipEntries(roundTwo.zipPath)
+      expect(roundTwoEntries).toEqual(
+        expect.arrayContaining([
+          'apps/demo/source.ts',
+          'review-gpt-pr-context/pr-body.md',
+          'review-gpt-pr-context/review-round.json',
+          'review-gpt-pr-context/since-previous-reviewed-head.diff',
+          'review-gpt-pr-context/changed-since-previous-reviewed-head.txt',
+        ]),
+      )
+      expect(roundTwoEntries).not.toContain('.crabbox.yaml')
+      expect(roundTwoEntries).not.toContain('review-gpt-pr-context/pr.diff')
+      expect(roundTwoEntries).not.toContain(
+        'review-gpt-pr-context/since-first-reviewed-head.diff',
+      )
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const realRoundTwo = invokePackager('round-two-real', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+        TEST_REAL_PACKAGER_BIN: path.join(
+          repoRoot,
+          'node_modules',
+          '.bin',
+          'cobuild-package-audit-context',
+        ),
+      })
+      expect(realRoundTwo.result.status, realRoundTwo.result.stderr).toBe(0)
+      expect(listZipEntries(realRoundTwo.zipPath)).toEqual([
+        'apps/demo/source.ts',
+        'review-gpt-pr-context/changed-since-previous-reviewed-head.txt',
+        'review-gpt-pr-context/pr-body.md',
+        'review-gpt-pr-context/review-round.json',
+        'review-gpt-pr-context/since-previous-reviewed-head.diff',
+      ])
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const roundTwoFull = invokePackager('round-two-full', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_FULL_REVIEW_REASON: 'The prior ChatGPT conversation is unavailable.',
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+      })
+      expect(roundTwoFull.result.status, roundTwoFull.result.stderr).toBe(0)
+      const roundTwoFullMetadata = JSON.parse(
         execFileSync(
           'unzip',
-          ['-p', roundTwo.zipPath, 'review-gpt-pr-context/since-first-reviewed-head.diff'],
+          ['-p', roundTwoFull.zipPath, 'review-gpt-pr-context/review-round.json'],
           { encoding: 'utf8' },
         ),
-      ).toBe(expectedDelta)
-      expect(listZipEntries(roundTwo.zipPath)).toContain('.crabbox.yaml')
-      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+      ) as Record<string, unknown>
+      expect(roundTwoFullMetadata).toMatchObject({
+        contextMode: 'full_snapshot',
+        contextAnchorHead: currentHead,
+        contextAnchorHeadIsAncestorOfPrevious: null,
+        reviewScope: 'correction',
+        roundNumber: 2,
+      })
+      expect(listZipEntries(roundTwoFull.zipPath)).toEqual(
+        expect.arrayContaining([
+          '.crabbox.yaml',
+          'review-gpt-pr-context/full-review-reason.txt',
+          'review-gpt-pr-context/since-first-reviewed-head.diff',
+        ]),
+      )
+
+      writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 3\n')
+      execFileSync('git', ['add', 'apps/demo/source.ts'], { cwd: harnessRoot })
+      execFileSync('git', ['commit', '-q', '-m', 'post-fallback correction'], {
+        cwd: harnessRoot,
+      })
+      const postFallbackHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: harnessRoot,
+        encoding: 'utf8',
+      }).trim()
+      const roundThree = invokePackager('round-three', postFallbackHead, {
+        REVIEW_GPT_CONTEXT_ANCHOR_HEAD: currentHead,
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: currentHead,
+        REVIEW_GPT_ROUND_NUMBER: '3',
+      })
+      expect(roundThree.result.status, roundThree.result.stderr).toBe(0)
+      const roundThreeMetadata = JSON.parse(
+        execFileSync(
+          'unzip',
+          ['-p', roundThree.zipPath, 'review-gpt-pr-context/review-round.json'],
+          { encoding: 'utf8' },
+        ),
+      ) as Record<string, unknown>
+      expect(roundThreeMetadata).toMatchObject({
+        contextMode: 'same_thread_delta',
+        contextAnchorHead: currentHead,
+        contextAnchorHeadIsAncestorOfPrevious: true,
+        previousReviewedHead: currentHead,
+        currentReviewedHead: postFallbackHead,
+        reviewScope: 'correction',
+        roundNumber: 3,
+      })
+      execFileSync('git', ['checkout', '-q', '--detach', currentHead], {
+        cwd: harnessRoot,
+      })
 
       const missingPrevious = invokePackager('missing-previous', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,

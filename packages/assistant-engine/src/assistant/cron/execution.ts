@@ -4,6 +4,8 @@ import {
   archiveAutomationIfActiveUntilElapsed,
   isVaultError,
   setScheduledLogStatus,
+  splitAutomationAvailabilityConflictBlock,
+  stripAutomationAvailabilityConflictEvidenceForProvider,
   upsertAutomation,
 } from '@murphai/core'
 import {
@@ -47,11 +49,21 @@ import {
 } from '../execution-context.js'
 import {
   isRetiredMurphManagedAutomationId,
+  isRecognizedMurphOnboardingFollowupAutomation,
+  MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   resolveMurphManagedAutomationOwnerScope,
   resolveMurphManagedMaintenancePolicy,
   type MurphManagedMaintenancePolicy,
 } from '../managed-automations.js'
-import { readAssistantOnboardingState } from '../onboarding-state.js'
+import {
+  isAssistantOnboardingStateReadError,
+  readAssistantOnboardingState,
+} from '../onboarding-state.js'
+import {
+  isCurrentMurphOnboardingFollowupAutomation,
+} from '../onboarding-followup-automation.js'
 import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
@@ -115,6 +127,7 @@ import {
   listCanonicalAssistantCronRecords,
   projectCanonicalAssistantCronJob,
   type CanonicalAssistantCronJobRecord,
+  type CanonicalAutomationAssistantCronJobRecord,
   resolveCanonicalAssistantCronJobId,
   resolveCanonicalAssistantCronOccurrenceAt,
   resolveCanonicalRuntimeState,
@@ -165,13 +178,22 @@ const ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding is open.'
 const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding state could not be read.'
-const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
-  'murph-managed:weekly-health-insight',
-  'murph-managed:monthly-improvement-coach',
-  // Legacy tag retained while existing records reconcile to the monthly seed.
-  'murph-managed:weekly-improvement-coach',
-  'murph-managed:weekly-health-research-scout',
+const ASSISTANT_CRON_ONBOARDING_FOLLOWUP_COMPLETED_ERROR =
+  'Assistant onboarding follow-up skipped because onboarding is completed.'
+const ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED_ERROR =
+  'Assistant onboarding follow-up predecessor is waiting for managed reconciliation.'
+const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_IDS = new Set([
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
 ])
+export const ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS = [
+  'Independent automation authority (engine-supplied):',
+  '- This active saved automation is a current user request. Related plans and experiments are context, not cancellation authority.',
+  "- Do not treat a related plan or experiment's completion as cancellation unless the saved instructions explicitly make that state a skip condition.",
+  '- Completion of a broader plan is not proof that this occurrence\'s requested action already happened.',
+  '- You may still skip when the saved instructions authorize that outcome or current evidence proves the requested action already happened.',
+].join('\n')
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
 // OpenAI flex tier (~50% token cost). The Codex provider boundary validates
 // route support and bounds flex execution with a deadline; failures land in the
@@ -487,6 +509,23 @@ type DeviceActivityParentAuthority = Awaited<
   ReturnType<typeof resolveDeviceActivityParentAuthority>
 >
 
+interface AssistantCronOnboardingFollowupDiagnostic {
+  activeUntil: string | null
+  authorityGate:
+    | 'initial'
+    | 'pre_provider'
+    | 'pre_tool'
+    | 'pre_delivery'
+    | 'pre_commit'
+  occurrenceAt: string
+  onboardingStateCreatedAt: string | null
+  onboardingStateReadError: 'invalid-json' | 'invalid-schema' | 'read-failed' | 'unknown' | null
+  onboardingStateSource: 'default_missing' | 'persisted' | 'read_error'
+  onboardingStateStatus: 'completed' | 'open' | 'unreadable'
+  onboardingStateUpdatedAt: string | null
+  scheduleKind: AssistantCronJob['schedule']['kind']
+}
+
 export async function executeClaimedAssistantCronJob(
   rawInput: ExecuteClaimedAssistantCronJobInput,
 ): Promise<AssistantCronRunExecutionResult> {
@@ -544,6 +583,11 @@ export async function executeClaimedAssistantCronJob(
     kind: 'unmanaged',
   }
   let managedOwnerSkipReason: string | null = null
+  let notificationDecisionKind: string | null = null
+  let notificationDeliveryOutcomeKind: string | null = null
+  let onboardingFollowupDiagnostic:
+    | AssistantCronOnboardingFollowupDiagnostic
+    | null = null
   // Preemptible background maintenance has exactly one yield owner: the
   // maintenance cancellation below. Wiring the generic foreground poller too
   // (hosted passes the same predicate as both callbacks) created a race
@@ -551,6 +595,7 @@ export async function executeClaimedAssistantCronJob(
   // release and a spurious failed foreground-yield run.
   const maintenanceJob = assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
   let maintenanceProviderStarted = false
+  let notificationProviderStarted = false
   const foregroundPreemption = createAssistantCronForegroundPreemption({
     jobName: claimedJob.name,
     parentSignal: input.signal,
@@ -657,6 +702,26 @@ export async function executeClaimedAssistantCronJob(
       input.job.kind === 'canonical' &&
       input.job.source.kind === 'automation'
     ) {
+      const onboardingFollowup =
+        await readAssistantCronOnboardingFollowupDiagnostic({
+          authorityGate: 'initial',
+          job: input.job,
+          occurrenceAt,
+          vault: input.vault,
+        })
+      if (onboardingFollowup) {
+        onboardingFollowupDiagnostic = onboardingFollowup.diagnostic
+        if (isAssistantCronOnboardingFollowupPredecessorJob(input.job)) {
+          throw buildAssistantCronOnboardingFollowupReconciliationRequiredError()
+        } else if (onboardingFollowup.error) {
+          throw onboardingFollowup.error
+        } else if (
+          onboardingFollowup.diagnostic.onboardingStateStatus === 'completed'
+        ) {
+          lifecycleSkipReason =
+            ASSISTANT_CRON_ONBOARDING_FOLLOWUP_COMPLETED_ERROR
+        }
+      }
       // Route on the immutable automationId so a user-edited slug cannot
       // silently bypass the precondition.
       const onboardingAuthority =
@@ -835,7 +900,9 @@ export async function executeClaimedAssistantCronJob(
               routeAuthorityVerified: !maintenanceJob,
               scheduledInvocationAuthority,
             })
-          const assertNotificationStillAuthorized = async (): Promise<void> => {
+          const assertNotificationStillAuthorized = async (
+            authorityGate: AssistantCronOnboardingFollowupDiagnostic['authorityGate'],
+          ): Promise<void> => {
             const authority = await resolveAssistantCronCanonicalSourceAuthority({
               job: input.job,
               now: new Date(),
@@ -847,7 +914,11 @@ export async function executeClaimedAssistantCronJob(
               throw new AssistantCronCanonicalSourceInvalidatedError(authority)
             }
             await assertAssistantCronLifecycleNotificationStillAuthorized({
+              authorityGate,
               job: input.job,
+              onOnboardingFollowupDiagnostic(diagnostic) {
+                onboardingFollowupDiagnostic = diagnostic
+              },
               occurrenceAt,
               vault: input.vault,
             })
@@ -891,7 +962,7 @@ export async function executeClaimedAssistantCronJob(
           const recordNotificationDecision = (
             decision: AssistantNotificationResult['decision'] | null | undefined,
           ): void => {
-            if (!decision) {
+            if (!decision || !notificationProviderStarted) {
               return
             }
             notificationDecision = decision.kind === 'skip'
@@ -904,26 +975,26 @@ export async function executeClaimedAssistantCronJob(
             vault: input.vault,
             ...automationTurn,
             executionContext: notificationExecutionContext,
-            // Replay barrier: once the provider was admitted, a yielded
-            // maintenance turn may already have committed memory writes even
-            // if the completed-command event never reached the buffered raw
-            // events, so the occurrence must be consumed, not retried.
-            ...(maintenanceJob
-              ? {
-                  onProviderRequestStarted: () => {
-                    maintenanceProviderStarted = true
-                  },
-                }
-              : {}),
-            beforeProviderAcceptedInputs: assertNotificationStillAuthorized,
+            // Provider admission distinguishes provider decisions from host
+            // gates. For maintenance it is also the replay barrier: admitted
+            // work may have committed writes before a terminal interruption.
+            onProviderRequestStarted: () => {
+              notificationProviderStarted = true
+              if (maintenanceJob) {
+                maintenanceProviderStarted = true
+              }
+            },
+            beforeProviderAcceptedInputs: () =>
+              assertNotificationStillAuthorized('pre_provider'),
             beforeDelivery: async (context) => {
               recordNotificationDecision(context?.decision)
-              await assertNotificationStillAuthorized()
+              await assertNotificationStillAuthorized('pre_delivery')
             },
-            beforeToolExecution: assertNotificationStillAuthorized,
+            beforeToolExecution: () =>
+              assertNotificationStillAuthorized('pre_tool'),
             beforeCommit: async (context) => {
               recordNotificationDecision(context.decision)
-              await assertNotificationStillAuthorized()
+              await assertNotificationStillAuthorized('pre_commit')
               await preemptAssistantCronNotificationCommitForForeground({
                 allowTerminalNoDelivery:
                   assistantCronDeviceActivitySkipConsumesOccurrence({
@@ -993,6 +1064,9 @@ export async function executeClaimedAssistantCronJob(
           recordNotificationDecision(result.decision)
           sessionId = result.session.sessionId
           response = result.response ?? result.decision.privateSummary
+          notificationDecisionKind = result.decision?.kind ?? null
+          notificationDeliveryOutcomeKind =
+            result.deliveryOutcome?.kind ?? 'none'
           const postTurnDeliveryFailure =
             resolveAssistantCronPostTurnDeliveryFailure({
               job: input.job,
@@ -1337,6 +1411,14 @@ export async function executeClaimedAssistantCronJob(
     }
   })
 
+  emitAssistantCronOnboardingFollowupCompletedEvent({
+    diagnostic: onboardingFollowupDiagnostic,
+    notificationDecisionKind,
+    notificationDeliveryOutcomeKind,
+    onEvent: input.onEvent,
+    run,
+  })
+
   return {
     job: finalized.job,
     removedAfterRun: finalized.removedAfterRun,
@@ -1365,14 +1447,137 @@ async function resolveResearchOrientedManagedAutomationOnboardingSkipError(input
   }
 }
 
+async function readAssistantCronOnboardingFollowupDiagnostic(input: {
+  authorityGate: AssistantCronOnboardingFollowupDiagnostic['authorityGate']
+  job: ResolvedAssistantCronJob
+  occurrenceAt: string
+  vault: string
+}): Promise<{
+  diagnostic: AssistantCronOnboardingFollowupDiagnostic
+  error: unknown | null
+} | null> {
+  if (!isAssistantCronOnboardingFollowupJob(input.job)) {
+    return null
+  }
+  if (input.job.source.kind !== 'automation') {
+    return null
+  }
+
+  const base = {
+    activeUntil: input.job.source.activeUntil,
+    authorityGate: input.authorityGate,
+    occurrenceAt: input.occurrenceAt,
+    scheduleKind: input.job.source.schedule.kind,
+  }
+  try {
+    const state = await readAssistantOnboardingState(input.vault)
+    return {
+      diagnostic: {
+        ...base,
+        onboardingStateCreatedAt: state.createdAt,
+        onboardingStateReadError: null,
+        onboardingStateSource:
+          state.createdAt === null ? 'default_missing' : 'persisted',
+        onboardingStateStatus: state.status,
+        onboardingStateUpdatedAt: state.updatedAt,
+      },
+      error: null,
+    }
+  } catch (error) {
+    const onboardingStateReadError = isAssistantOnboardingStateReadError(error)
+    const authorityError = onboardingStateReadError
+      ? new VaultCliError(
+          'ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE',
+          'Onboarding follow-up authority could not be revalidated.',
+          {
+            reason: error.reason,
+            retryable: true,
+          },
+        )
+      : error
+    return {
+      diagnostic: {
+        ...base,
+        onboardingStateCreatedAt: null,
+        onboardingStateReadError: onboardingStateReadError
+          ? error.reason
+          : 'unknown',
+        onboardingStateSource: 'read_error',
+        onboardingStateStatus: 'unreadable',
+        onboardingStateUpdatedAt: null,
+      },
+      error: authorityError,
+    }
+  }
+}
+
+function isAssistantCronOnboardingFollowupJob(
+  job: ResolvedAssistantCronJob,
+): job is Extract<ResolvedAssistantCronJob, { kind: 'canonical' }> & {
+  source: CanonicalAutomationAssistantCronJobRecord
+} {
+  if (job.kind !== 'canonical' || job.source.kind !== 'automation') {
+    return false
+  }
+  return isRecognizedMurphOnboardingFollowupAutomation(job.source)
+}
+
+function isAssistantCronOnboardingFollowupPredecessorJob(
+  job: ResolvedAssistantCronJob,
+): job is Extract<ResolvedAssistantCronJob, { kind: 'canonical' }> & {
+  source: CanonicalAutomationAssistantCronJobRecord
+} {
+  return isAssistantCronOnboardingFollowupJob(job) &&
+    !isCurrentMurphOnboardingFollowupAutomation(job.source)
+}
+
+function emitAssistantCronOnboardingFollowupCompletedEvent(input: {
+  diagnostic: AssistantCronOnboardingFollowupDiagnostic | null
+  notificationDecisionKind: string | null
+  notificationDeliveryOutcomeKind: string | null
+  onEvent?: (event: AssistantRunEvent) => void
+  run: AssistantCronRunRecord
+}): void {
+  if (!input.diagnostic) {
+    return
+  }
+
+  input.onEvent?.({
+    type: 'onboarding.followup.completed',
+    details: 'onboarding follow-up occurrence completed',
+    safeDetails: 'onboarding_followup_completed',
+    failureContext: {
+      activeUntil: input.diagnostic.activeUntil,
+      authorityGate: input.diagnostic.authorityGate,
+      occurrenceAt: input.diagnostic.occurrenceAt,
+      notificationDecisionKind: input.notificationDecisionKind,
+      notificationDeliveryOutcomeKind:
+        input.notificationDeliveryOutcomeKind,
+      onboardingStateCreatedAt:
+        input.diagnostic.onboardingStateCreatedAt,
+      onboardingStateReadError:
+        input.diagnostic.onboardingStateReadError,
+      onboardingStateSource: input.diagnostic.onboardingStateSource,
+      onboardingStateStatus: input.diagnostic.onboardingStateStatus,
+      onboardingStateUpdatedAt:
+        input.diagnostic.onboardingStateUpdatedAt,
+      runOutcome: input.run.outcome,
+      runReason: input.run.reason,
+      scheduleKind: input.diagnostic.scheduleKind,
+    },
+    providerKind: 'status',
+    providerState: 'completed',
+  })
+}
+
 function isResearchOrientedManagedAutomationCronJob(
   job: ResolvedAssistantCronJob,
 ): boolean {
   return (
     job.kind === 'canonical' &&
     job.source.kind === 'automation' &&
-    job.source.tags.some((tag) =>
-      MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS.has(tag),
+    MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_IDS.has(
+      job.source.automationId,
     )
   )
 }
@@ -1445,7 +1650,11 @@ async function resolveAssistantCronCanonicalSourceAuthority(input: {
 }
 
 async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
+  authorityGate: AssistantCronOnboardingFollowupDiagnostic['authorityGate']
   job: ResolvedAssistantCronJob
+  onOnboardingFollowupDiagnostic?: (
+    diagnostic: AssistantCronOnboardingFollowupDiagnostic
+  ) => void
   occurrenceAt: string
   vault: string
 }): Promise<void> {
@@ -1454,6 +1663,31 @@ async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
     input.job.source.kind !== 'automation'
   ) {
     return
+  }
+
+  if (isAssistantCronOnboardingFollowupPredecessorJob(input.job)) {
+    throw buildAssistantCronOnboardingFollowupReconciliationRequiredError()
+  }
+
+  const onboardingFollowup =
+    await readAssistantCronOnboardingFollowupDiagnostic({
+      authorityGate: input.authorityGate,
+      job: input.job,
+      occurrenceAt: input.occurrenceAt,
+      vault: input.vault,
+    })
+  if (onboardingFollowup) {
+    input.onOnboardingFollowupDiagnostic?.(onboardingFollowup.diagnostic)
+  }
+  if (onboardingFollowup?.error) {
+    throw onboardingFollowup.error
+  }
+  if (
+    onboardingFollowup?.diagnostic.onboardingStateStatus === 'completed'
+  ) {
+    throw new AssistantCronLifecycleNotificationInvalidatedError(
+      ASSISTANT_CRON_ONBOARDING_FOLLOWUP_COMPLETED_ERROR,
+    )
   }
 
   const onboardingAuthority =
@@ -1516,8 +1750,22 @@ function buildAssistantCronExecutionInstructions(
   const supportScope = buildAssistantCronSupportScopeInstructions(job)
   const independentAuthority =
     buildAssistantCronIndependentAutomationAuthorityInstructions(job)
+  const overlays = [retryEvidence, independentAuthority, supportScope]
+    .filter((section): section is string => section !== null)
+  const providerSafeBase =
+    stripAutomationAvailabilityConflictEvidenceForProvider(job.job.prompt)
+  let availabilityBlock: string | null = null
 
-  return [job.job.prompt, retryEvidence, independentAuthority, supportScope]
+  try {
+    availabilityBlock = splitAutomationAvailabilityConflictBlock(
+      job.job.prompt,
+    ).block
+  } catch {
+    // Malformed evidence remains fail-open for delivery and provider-private.
+    // Only a structurally valid block retains host skip authority below.
+  }
+
+  return [providerSafeBase, ...overlays, availabilityBlock]
     .filter((section): section is string => section !== null)
     .join('\n\n')
 }
@@ -1531,21 +1779,12 @@ function buildAssistantCronIndependentAutomationAuthorityInstructions(
     job.source.status !== 'active' ||
     job.source.supportKind !== null ||
     resolveMurphManagedAutomationOwnerScope(job.source.automationId) !== null ||
-    job.source.tags.some((tag) =>
-      parseAutomationSupportSeriesTag(tag) !== null ||
-      tag.startsWith('murph-managed:')
-    )
+    job.source.tags.some((tag) => parseAutomationSupportSeriesTag(tag) !== null)
   ) {
     return null
   }
 
-  return [
-    'Independent automation authority (engine-supplied):',
-    '- This active saved automation is a current user request. Related plans and experiments are context, not cancellation authority.',
-    "- Do not treat a related plan or experiment's completion as cancellation unless the saved instructions explicitly make that state a skip condition.",
-    '- Completion of a broader plan is not proof that this occurrence\'s requested action already happened.',
-    '- You may still skip when the saved instructions authorize that outcome or current evidence proves the requested action already happened.',
-  ].join('\n')
+  return ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS
 }
 
 function buildAssistantCronSupportScopeInstructions(
@@ -2743,6 +2982,14 @@ class AssistantCronLifecycleNotificationInvalidatedError extends VaultCliError {
   constructor(reason: string) {
     super('ASSISTANT_CRON_LIFECYCLE_AUTHORITY_STALE', reason)
   }
+}
+
+function buildAssistantCronOnboardingFollowupReconciliationRequiredError(): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED',
+    ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED_ERROR,
+    { retryable: true },
+  )
 }
 
 class AssistantCronManagedOwnerInvalidatedError extends VaultCliError {

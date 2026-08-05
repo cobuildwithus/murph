@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 
 export const ASSISTANT_USAGE_SCHEMA = "murph.assistant-usage.v1";
 export const ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH =
@@ -584,73 +584,6 @@ export function buildHostedElevenLabsMusicUsageRecord(input: {
     }),
     usageExtractionSourcePath: "elevenlabs.music.compose",
     usageExtractionVersion: "elevenlabs-music-v1",
-  });
-}
-
-// Exact usage for Codex-native memory work intercepted outside the foreground
-// app-server turn. Provider response ids make re-observation idempotent while
-// the provider timestamp keeps the immutable record stable across retries.
-export function buildHostedCodexMemoryUsageRecord(input: {
-  apiKeyEnv: string;
-  baseUrl: string;
-  cacheWriteTokens: number | null;
-  cachedInputTokens: number | null;
-  inputTokens: number;
-  memberId: string;
-  occurredAt: string;
-  outputTokens: number;
-  providerName: string;
-  providerRequestId: string;
-  providerRequestOutcome: AssistantProviderRequestOutcome;
-  rawUsageJson: Record<string, unknown>;
-  reasoningTokens: number | null;
-  requestedModel: string;
-  servedModel?: string | null;
-  tokenPricingBasis?: AssistantUsageTokenPricingBasis;
-  totalTokens: number;
-}): AssistantUsageRecord {
-  const digest = createHash("sha256")
-    .update("murph.hosted-codex-memory-usage.v1")
-    .update("\0")
-    .update(input.memberId)
-    .update("\0")
-    .update(input.providerName)
-    .update("\0")
-    .update(input.providerRequestId)
-    .digest("hex")
-    .slice(0, 32);
-  const turnId = `turn_codex_memory_${digest}`;
-
-  return parseAssistantUsageRecord({
-    apiKeyEnv: input.apiKeyEnv,
-    attemptCount: 1,
-    baseUrl: input.baseUrl,
-    cacheWriteTokens: input.cacheWriteTokens,
-    cachedInputTokens: input.cachedInputTokens,
-    credentialSource: "platform",
-    featureKey: "codex-native-memory",
-    inputTokens: input.inputTokens,
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    outputTokens: input.outputTokens,
-    provider: "codex-cli",
-    providerName: input.providerName,
-    providerRequestId: input.providerRequestId,
-    providerRequestOutcome: input.providerRequestOutcome,
-    rawUsageJson: input.rawUsageJson,
-    reasoningTokens: input.reasoningTokens,
-    requestedModel: input.requestedModel,
-    schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: input.servedModel ?? null,
-    sessionId: turnId,
-    surface: "hosted-runner",
-    tokenPricingBasis: input.tokenPricingBasis ?? "standard",
-    totalTokens: input.totalTokens,
-    triggerKind: "codex-native-memory",
-    turnId,
-    usageId: createAssistantUsageId({ attemptCount: 1, turnId }),
-    usageExtractionSourcePath: "codex.responses.terminal",
-    usageExtractionVersion: "codex-native-memory-v1",
   });
 }
 

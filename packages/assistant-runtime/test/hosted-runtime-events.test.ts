@@ -1498,6 +1498,10 @@ describe("executeHostedMailboxEvent", () => {
     });
     mocks.upsertAssistantCronAutomation.mockResolvedValueOnce({
       enabled: true,
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "13:30",
+      },
       state: {
         nextRunAt: seededNextWakeAt,
       },
@@ -1595,8 +1599,9 @@ describe("executeHostedMailboxEvent", () => {
       vault: "/tmp/assistant-runtime-events",
     });
     expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith({
+      firstOccurrenceActiveDayCount: 3,
       firstOccurrenceActiveUntilLocalTime: "15:00",
-      firstOccurrencePolicy: "once-after-current-local-day",
+      firstOccurrencePolicy: "after-current-local-day",
       instructions: expect.stringContaining(
         "vault-cli assistant onboarding resume-context --format json",
       ),
@@ -1614,7 +1619,7 @@ describe("executeHostedMailboxEvent", () => {
         localTime: expect.stringMatching(/^(?:13:[3-5]\d|14:[0-2]\d)$/u),
       },
       slug: "finish-onboarding-followup",
-      summary: "One finite next-day invitation to continue unfinished Murph onboarding.",
+      summary: "One daily opportunity for three days to continue unfinished Murph onboarding.",
       tags: [
         "assistant",
         "scheduled",
@@ -1622,7 +1627,7 @@ describe("executeHostedMailboxEvent", () => {
         "onboarding",
         "murph-managed:onboarding-followup",
       ],
-      title: "Final Murph onboarding follow-up",
+      title: "Finite Murph onboarding follow-up",
       vault: "/tmp/assistant-runtime-events",
     });
     const seedInput = mocks.upsertAssistantCronAutomation.mock.calls.at(0)?.[0];
@@ -1643,7 +1648,7 @@ describe("executeHostedMailboxEvent", () => {
       },
       {
         clause:
-          "Follow the onboarding skill’s finite next-day recovery rule exactly.",
+          "Follow the onboarding skill’s finite three-day recovery rule exactly.",
         state: "latest question unanswered",
       },
       {
@@ -1653,7 +1658,7 @@ describe("executeHostedMailboxEvent", () => {
       },
       {
         clause:
-          "Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever the finite reopening question would not be timely or useful.",
+          "Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever the reopening question would not be timely or useful.",
         state: "deferred until later",
       },
       {
@@ -1672,7 +1677,7 @@ describe("executeHostedMailboxEvent", () => {
       "The managed-automation owner archives this follow-up deterministically.",
     );
     expect(seedInput?.instructions).toContain(
-      "Goal: make one finite, low-pressure final attempt to reopen unfinished Murph onboarding and get a reply.",
+      "Goal: use this finite three-day window to make at most one low-pressure daily attempt to continue unfinished Murph onboarding and get a reply.",
     );
     expect(seedInput?.instructions).toContain("Success criteria:");
     expect(seedInput?.instructions).toContain(
@@ -1765,6 +1770,22 @@ describe("executeHostedMailboxEvent", () => {
       expect.objectContaining({
         component: "runtime",
         details: expect.objectContaining({
+          eventCode: "assistant.onboarding_followup_seeded",
+          onboardingFollowupEnabled: true,
+          onboardingFollowupNextRunAt: seededNextWakeAt,
+          onboardingFollowupOpportunityDays: 3,
+          onboardingFollowupScheduleKind: "dailyLocal",
+        }),
+        message: "Hosted onboarding follow-up automation seeded.",
+        phase: "wake.running",
+        wake,
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
+      5,
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
           notificationRouteChannel: "linq",
           notificationRouteDeliveryKind: "thread",
         }),
@@ -1830,6 +1851,20 @@ describe("executeHostedMailboxEvent", () => {
             providerPlanKind: "provider.plan",
             resumeCodexThreadIdPresent: true,
             workingDirectoryKind: "hosted-stable-proc-cwd",
+          }),
+        },
+        {
+          component: "runtime",
+          eventId: "evt_notification",
+          level: "info",
+          message: "Hosted onboarding follow-up automation seeded.",
+          phase: "wake.running",
+          redacted: expect.objectContaining({
+            eventCode: "assistant.onboarding_followup_seeded",
+            onboardingFollowupEnabled: true,
+            onboardingFollowupNextRunAt: seededNextWakeAt,
+            onboardingFollowupOpportunityDays: 3,
+            onboardingFollowupScheduleKind: "dailyLocal",
           }),
         },
         {
