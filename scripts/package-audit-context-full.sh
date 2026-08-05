@@ -186,6 +186,10 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       exit 1
     fi
     review_gpt_load_pr_shape "$review_gpt_pr_ref" || exit 1
+    if [[ "$review_gpt_pr_head_oid" != "$review_gpt_head_oid" ]]; then
+      echo "Error: PR head changed while ReviewGPT context was being packaged; rerun the same round." >&2
+      exit 1
+    fi
     review_gpt_recorded_first_head="$(
       printf '%s\n' "$review_gpt_pr_body" \
         | sed -nE 's/^ReviewGPT first-reviewed head: ([0-9a-f]{40})$/\1/p'

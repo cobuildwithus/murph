@@ -63,30 +63,32 @@ For round 2 or later, read `contextMode` from `review-round.json`:
   audit. Review the complete current PR from this ZIP. It becomes the context
   anchor for later delta rounds in this conversation.
 
-Stop as `INVALID` only when the code evidence itself will not support a review:
-the files required by the declared `contextMode` are missing, unreadable, or do
-not correspond to the checked commit. A `same_thread_delta` round is also
-invalid when its matching earlier full-snapshot ZIP is unavailable in this
-conversation. For round 2 or later, stop as invalid if either reviewed-head
-ancestry field is not `true`. A delta round also requires
-`contextAnchorHeadIsAncestorOfPrevious` to be `true`. State the exact evidence
-gap and stop.
+Stop as `INVALID` when the code evidence itself will not support a review: the
+files required by the declared `contextMode` are missing, unreadable, or do not
+correspond to the checked commit. A `same_thread_delta` round is also invalid
+when its matching earlier full-snapshot ZIP is unavailable in this conversation.
+For round 2 or later, stop as invalid if either reviewed-head ancestry field is
+not `true`. A delta round also requires
+`contextAnchorHeadIsAncestorOfPrevious` to be `true`. A later full audit also
+uses `INVALID` for the mandatory prior-finding summary gap defined below. State
+the exact evidence gap and stop.
 
 Do not stop for a discrepancy confined to the descriptive content of
 `review-gpt-pr-context/pr-body.md` — change-shape counts, validation claims, or
-prose that has drifted behind the current head — or for an invocation that is
-missing its prior-round summary. Those degrade the author's account of the
-change, not your ability to read the code. Record them as notes (see Output)
-and complete the substantive review. A stale table is never a reason to leave
-real defects unreviewed; say what is wrong with it and review anyway.
+prose that has drifted behind the current head. Those degrade the author's
+account of the change, not your ability to read the code. Record them as notes
+(see Output) and complete the substantive review. A stale table is never a
+reason to leave real defects unreviewed; say what is wrong with it and review
+anyway.
 
-For round 2 or later the invocation should state the same first-reviewed head as
-the artifact and summarize the prior round's findings, local dispositions,
-landed corrections, and underlying mechanisms. Treat that summary as process
+For round 2 or later the invocation must state the same first-reviewed head as
+the artifact and summarize every prior finding, its local disposition, any
+landed correction, and the underlying mechanism. Treat that summary as process
 metadata, not repository evidence, and verify its code claims against the ZIP.
-When it is absent or thin, reconstruct what you can from the current correction
-packet and earlier packets after the matching full-snapshot anchor. Note the gap
-and continue.
+This full-review prompt starts a new conversation, so a later round has no
+earlier review history: if the summary is absent, placeholder-only, or too thin
+to identify every prior accepted finding and claimed correction, return
+`ROUND_OUTCOME: INVALID` before the substantive audit.
 
 Read `reviewScope` from `review-round.json` and follow it exactly:
 
@@ -405,9 +407,10 @@ End with exactly one of these lines:
 Use `PASS` only when there are no qualifying findings and every claimed prior
 correction is proven effective; body discrepancies and rendered evidence gaps
 are notes and do not withhold it. Use `INVALID` only when the code evidence will
-not support a review at all, as defined in Evidence and round scope; it does not
-count as a substantive round. An inaccurate PR body is never grounds for
-`INVALID`. Put the selected outcome
-immediately before this exact final line, and do not use the token elsewhere:
+not support a review or a later full audit lacks its mandatory prior-finding
+summary, as defined in Evidence and round scope; it does not count as a
+substantive round. An inaccurate PR body is never grounds for `INVALID`. Put
+the selected outcome immediately before this exact final line, and do not use
+the token elsewhere:
 
 REVIEW_COMPLETE

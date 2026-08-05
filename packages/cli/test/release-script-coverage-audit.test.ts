@@ -1257,8 +1257,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('REVIEW_GPT_FULL_REVIEW_REASON')
-    expect(reviewGptConfig).toContain('review_gpt_default_full_review_reason')
-    expect(reviewGptConfig).toContain('pr-correction-review.md')
+    expect(reviewGptConfig).toContain('pr-followup-review.md')
+    expect(reviewGptConfig).not.toContain('review_gpt_load_pr_shape')
     expect(reviewGptContextPolicy).toContain(
       'REVIEW_GPT_LARGE_PR_CHANGED_LINES_THRESHOLD=500',
     )
@@ -1266,6 +1266,9 @@ describe('monorepo release flow coverage audit', () => {
       'REVIEW_GPT_LARGE_PR_CHANGED_FILES_THRESHOLD=10',
     )
     expect(reviewGptContextPolicy).toContain('review_gpt_load_pr_shape')
+    expect(reviewGptContextPolicy).toContain(
+      '--json headRefOid,additions,deletions,changedFiles',
+    )
     expect(reviewGptConfig).toContain(
       'managed_browser_background_mode="${managed_browser_background_mode:-balanced}"',
     )
@@ -1276,6 +1279,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).not.toContain('repomix_ignore_patterns=')
     const prDeepReviewPrompt = readFileSync(
       path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
+      'utf8',
+    )
+    const prFollowupReviewPrompt = readFileSync(
+      path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-followup-review.md'),
       'utf8',
     )
     const completionSpecialistsPrompt = readFileSync(
@@ -1308,7 +1315,7 @@ describe('monorepo release flow coverage audit', () => {
       '`review-gpt-pr-context/since-previous-reviewed-head.diff`',
     )
     expect(prDeepReviewPrompt).toContain(
-      'Stop as `INVALID` only when the code evidence itself will not support a review:',
+      'A later full audit also\nuses `INVALID` for the mandatory prior-finding summary gap',
     )
     expect(prDeepReviewPrompt).toContain(
       'Do not stop for a discrepancy confined to the descriptive content of',
@@ -1329,6 +1336,24 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(prDeepReviewPrompt).toContain(
       'another independent pass',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'if the summary is absent, placeholder-only, or too thin',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      '`ROUND_OUTCOME: INVALID` before',
+    )
+    expect(prFollowupReviewPrompt).toContain(
+      'When `reviewScope` is `full` and `contextMode` is `full_snapshot`',
+    )
+    expect(prFollowupReviewPrompt).toContain(
+      'perform a fresh full-patch audit',
+    )
+    expect(prFollowupReviewPrompt).toContain(
+      'When `reviewScope` is `correction` and `contextMode` is `same_thread_delta`',
+    )
+    expect(prFollowupReviewPrompt).toContain(
+      'report only a `REVIEW_INDUCED` finding',
     )
     expect(prDeepReviewPrompt).toContain('`ORIGINAL_PR`')
     expect(prDeepReviewPrompt).toContain('`REVIEW_INDUCED`')
@@ -1656,7 +1681,6 @@ describe('monorepo release flow coverage audit', () => {
   it('keeps ReviewGPT browser preferences local and reuses correction threads', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-browser-'))
     const localConfigRoot = path.join(harnessRoot, 'config')
-    const fakeBin = path.join(harnessRoot, 'bin')
     const configHarness = `
 set -euo pipefail
 review_gpt_register_dir_preset() { :; }
@@ -1666,16 +1690,6 @@ printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_c
 `
 
     try {
-      writeHarnessFile(
-        fakeBin,
-        'gh',
-        `#!/usr/bin/env bash
-set -euo pipefail
-[[ "$*" == *"--json additions,deletions,changedFiles"* ]]
-printf '%s\\t%s\\t%s\\n' "$TEST_PR_ADDITIONS" "$TEST_PR_DELETIONS" "$TEST_PR_CHANGED_FILES"
-`,
-        true,
-      )
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
@@ -1766,34 +1780,28 @@ printf '%s\\t%s\\t%s\\n' "$TEST_PR_ADDITIONS" "$TEST_PR_DELETIONS" "$TEST_PR_CHA
       })
       expect(correctionPresetResult.status, correctionPresetResult.stderr).toBe(0)
       expect(correctionPresetResult.stdout.trim().split('\n').at(-1)).toBe(
-        'pr-correction-review.md',
+        'pr-followup-review.md',
       )
 
-      const largePrHarness = `${configHarness}\nprintf '%s\\n' "$review_gpt_pr_review_prompt_file"\nprintf '%s\\n' "$REVIEW_GPT_FULL_REVIEW_REASON"\nprintf '%s\\n' "\${chatgpt_url:-new-conversation}"`
-      const largePrResult = spawnSync('bash', ['-c', largePrHarness], {
+      const explicitFullHarness = `${configHarness}\nprintf '%s\\n' "$review_gpt_pr_review_prompt_file"\nprintf '%s\\n' "\${chatgpt_url:-new-conversation}"`
+      const explicitFullResult = spawnSync('bash', ['-c', explicitFullHarness], {
         cwd: repoRoot,
         encoding: 'utf8',
         env: {
           ...withoutNodeV8Coverage(),
           HOME: harnessRoot,
-          PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ''}`,
           REPO_ROOT: repoRoot,
-          REVIEW_GPT_PR_URL: '123',
+          REVIEW_GPT_FULL_REVIEW_REASON: 'The current thread is unavailable.',
           REVIEW_GPT_REVIEW_PHASE: 'final',
           REVIEW_GPT_ROUND_NUMBER: '2',
-          TEST_PR_ADDITIONS: '499',
-          TEST_PR_CHANGED_FILES: '1',
-          TEST_PR_DELETIONS: '1',
           XDG_CONFIG_HOME: localConfigRoot,
         },
       })
-      expect(largePrResult.status, largePrResult.stderr).toBe(0)
-      expect(largePrResult.stdout.trim().split('\n').slice(-3)).toEqual([
+      expect(explicitFullResult.status, explicitFullResult.stderr).toBe(0)
+      expect(explicitFullResult.stdout.trim().split('\n').slice(-2)).toEqual([
         'pr-deep-review.md',
-        'Automatic full audit: current PR has 500 changed lines across 1 files; the cutoff is 500 lines or 10 files.',
         'new-conversation',
       ])
-
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true })
     }
@@ -3039,7 +3047,8 @@ set -euo pipefail
 set -euo pipefail
 case "$*" in
   *"additions,deletions,changedFiles"*)
-    printf '%s\\t%s\\t%s\\n' \
+    printf '%s\\t%s\\t%s\\t%s\\n' \
+      "\${TEST_SHAPE_HEAD_SHA:-$TEST_HEAD_SHA}" \
       "\${TEST_PR_ADDITIONS:-1}" \
       "\${TEST_PR_DELETIONS:-1}" \
       "\${TEST_PR_CHANGED_FILES:-1}"
@@ -3428,6 +3437,22 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(roundTwoEntries).not.toContain('review-gpt-pr-context/pr.diff')
       expect(roundTwoEntries).not.toContain(
         'review-gpt-pr-context/since-first-reviewed-head.diff',
+      )
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const changedDuringPackaging = invokePackager(
+        'round-two-changed-during-packaging',
+        currentHead,
+        {
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+          REVIEW_GPT_ROUND_NUMBER: '2',
+          TEST_SHAPE_HEAD_SHA: firstHead,
+        },
+      )
+      expect(changedDuringPackaging.result.status).not.toBe(0)
+      expect(changedDuringPackaging.result.stderr).toContain(
+        'PR head changed while ReviewGPT context was being packaged',
       )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 

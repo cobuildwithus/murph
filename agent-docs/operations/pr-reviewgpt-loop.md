@@ -35,10 +35,10 @@ a later `PASS` on the resulting patch.
 Certify the exact pushed PR patch against its stated user outcome and repository
 invariants using the guarded repository snapshot. Round 1 is always a full-patch
 audit. On round 2 or later, the packager measures the complete current PR against
-its base: at least 500 changed lines or 10 changed files starts a new conversation
-with a fresh full snapshot and full-patch audit; a smaller PR reuses the current
-conversation with the remediation delta and its directly affected paths. An
-explicit `REVIEW_GPT_FULL_REVIEW_REASON` also selects the full audit. The gate
+its base: at least 500 changed lines or 10 changed files re-sends a fresh full
+snapshot and requests a full-patch audit in the current conversation; a smaller
+PR sends the remediation delta and its directly affected paths. An explicit
+`REVIEW_GPT_FULL_REVIEW_REASON` selects a new full-audit conversation. The gate
 completes when the exact patch receives `ROUND_OUTCOME: PASS`, local triage has
 zero accepted findings, and CI is green on the final head. Missing or stale
 evidence, an invalid model/response, unresolved accepted findings, a required
@@ -253,9 +253,9 @@ requires it or the current user explicitly asks for it.
    - `review-gpt-pr-context/since-first-reviewed-head.diff`
    - `review-gpt-pr-context/since-previous-reviewed-head.diff`
 
-   Later rounds either resend the full guarded snapshot in a new conversation
-   or use a small correction packet in the same conversation, as described
-   below.
+   Later rounds either re-send the full guarded snapshot or use a small
+   correction packet in the same conversation, as described below. Only an
+   explicit full-review reason starts a new conversation.
 
    Round 1 defaults `REVIEW_GPT_FIRST_REVIEWED_HEAD` to the current PR head and
    leaves the remediation delta empty. For round 2 or later, preserve the
@@ -294,22 +294,31 @@ requires it or the current user explicitly asks for it.
    finding's accepted/rejected/out-of-scope disposition, the landed correction,
    and its underlying mechanism. Keep it compact and secret-safe; do not paste
    repository contents. If a completed retrospective permits continuation, name
-   its decision and why the current delta stays inside it.
+   its decision and why the current delta stays inside it. An explicitly
+   requested full audit starts a new conversation, so a missing,
+   placeholder-only, or too-thin summary makes that run `INVALID`; that audit
+   cannot return `PASS` without enough ledger detail to identify and verify
+   every prior accepted finding. Ordinary later rounds retain the conversation
+   ledger, whether the packager selects a full snapshot or a correction packet.
 
    Round 1 opens a new conversation and attaches the full guarded snapshot. On
-   later rounds, the wrapper measures the full current PR shape reported by
-   GitHub. At 500 changed lines or 10 changed files, it starts another new
-   conversation, attaches a fresh full snapshot, and requests a full audit of
-   the current PR. Below both cutoffs, it reuses the current conversation with a
-   short follow-up prompt containing only the immediate patch, its changed-file
-   list, round metadata, and current versions of files touched by the patch.
-   The size decision uses the current base-to-head PR, not only the immediate
-   remediation delta. If a smaller PR still needs full context, omit
+   later rounds, the packager measures the full current PR shape reported by
+   GitHub. At 500 changed lines or 10 changed files, it attaches a fresh full
+   snapshot and requests another full audit of the current PR in the same
+   conversation. Below both cutoffs, it attaches a short correction packet
+   containing only the immediate patch, its changed-file list, round metadata,
+   and current versions of files touched by the patch. The size decision uses
+   one GitHub response containing the current head and complete base-to-head PR
+   shape, not only the immediate remediation delta. The packager fails closed
+   if that head differs from the head being packaged and records its selected
+   mode in `review-round.json`; the same-thread follow-up prompt obeys that mode,
+   so prompt and ZIP scopes cannot diverge. If a smaller PR still needs a new
+   full-audit conversation, omit
    `REVIEW_GPT_THREAD_URL` and set `REVIEW_GPT_FULL_REVIEW_REASON` to a concrete
-   reason; this also starts a new full audit. Neither path resets the round
-   number or immutable first-reviewed head. Save each new full-audit conversation
-   URL and reviewed head. Later delta rounds reuse the most recent conversation
-   and pass its full snapshot head as `REVIEW_GPT_CONTEXT_ANCHOR_HEAD`.
+   reason. Neither path resets the round number or immutable first-reviewed
+   head. Save the new conversation URL and reviewed head after an explicit full
+   audit. Later delta rounds reuse the current conversation and pass its most
+   recent full-snapshot head as `REVIEW_GPT_CONTEXT_ANCHOR_HEAD`.
 
    The repo wrapper chooses one usable ReviewGPT browser lane per run:
    `Eragon.app` on CDP port `9448`, `Phlebas.app` on `9442`,
@@ -488,7 +497,7 @@ requires it or the current user explicitly asks for it.
 
 7. Fire the next substantive round immediately after a pushed accepted fix
    changes production source, runtime config, schema, behavior, or manual
-   conflict resolution. The packager selects a fresh full audit or same-thread
+   conflict resolution. The packager selects a re-sent full audit or same-thread
    correction from the full current PR shape. Run it in parallel with the new CI
    run. If CI later fails on a reviewed head, the round's findings still count.
 

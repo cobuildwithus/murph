@@ -16,20 +16,22 @@ review_gpt_load_pr_shape() {
   fi
   if ! pr_shape="$(
     gh pr view "$pr_ref" \
-      --json additions,deletions,changedFiles \
-      --jq '[.additions, .deletions, .changedFiles] | @tsv'
+      --json headRefOid,additions,deletions,changedFiles \
+      --jq '[.headRefOid, .additions, .deletions, .changedFiles] | @tsv'
   )"; then
     echo "Error: could not resolve the current PR shape for ReviewGPT context." >&2
     return 1
   fi
   IFS=$'\t' read -r \
+    review_gpt_pr_head_oid \
     review_gpt_pr_additions \
     review_gpt_pr_deletions \
     review_gpt_pr_changed_files <<< "$pr_shape"
-  if [[ ! "$review_gpt_pr_additions" =~ ^[0-9]+$ ]] \
+  if [[ ! "$review_gpt_pr_head_oid" =~ ^[0-9a-f]{40}$ ]] \
+    || [[ ! "$review_gpt_pr_additions" =~ ^[0-9]+$ ]] \
     || [[ ! "$review_gpt_pr_deletions" =~ ^[0-9]+$ ]] \
     || [[ ! "$review_gpt_pr_changed_files" =~ ^[0-9]+$ ]]; then
-    echo "Error: ReviewGPT PR shape must contain non-negative integer counts." >&2
+    echo "Error: ReviewGPT PR shape must contain a full head SHA and non-negative integer counts." >&2
     return 1
   fi
   review_gpt_pr_changed_lines=$((
