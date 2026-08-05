@@ -1,6 +1,6 @@
 # Next 16.3 Turbopack preview proof
 
-Status: active
+Status: completed
 Created: 2026-08-05
 Updated: 2026-08-05
 
@@ -52,7 +52,8 @@ Updated: 2026-08-05
    Next 16.3 Turbopack and update its focused policy assertion.
 2. Run focused tests and the complete local hosted Web build, then inspect the
    exact diff and create a separate experimental commit.
-3. Push the task branch and create a forced-cold Vercel preview deployment.
+3. Deploy the exact committed task branch through Vercel CLI and create a
+   forced-cold preview deployment.
 4. Capture duration, phase timings, and memory/failure evidence; assess the
    remaining Next 16.3 build switches without enabling them implicitly.
 
@@ -63,9 +64,34 @@ Updated: 2026-08-05
 - Keep the repository-wide preview catch-all disabled. Allow only the exact
   experimental branch because the first CLI deployment was blocked before a
   build started by the checked-in `git.deploymentEnabled` policy.
+- Remove that exact branch allowance again after the proof so the experiment
+  leaves the repository-wide preview policy unchanged.
+
+## Outcome
+
+- The default Next 16.3 production invocation used Turbopack and completed on
+  Vercel's 4-core, 8 GB Standard preview machine. The deployment reached
+  `READY`; no out-of-memory failure occurred. Vercel does not expose an exact
+  peak-memory value in these build logs, so the proof is bounded to fitting
+  within the machine limit rather than a precise peak.
+- The forced-cold deployment explicitly reported that it skipped build cache.
+  Dependency installation took 29.6 seconds, the prepared repository
+  TypeScript check took about 22 seconds, Turbopack compilation took 91
+  seconds, Next's generated-contract TypeScript phase took 54 seconds, and 233
+  static pages took 10 seconds. Vercel reported the build output complete in
+  about four minutes and finished deploying outputs about 45 seconds later.
+- The approximately nine-minute CLI wall time included about three and a half
+  minutes queued before Vercel assigned the build machine. It is not all build
+  execution time.
+- The preview generated Prisma Client once. Preview migrations were correctly
+  skipped, while the production-only handoff remains available for main-branch
+  production deploys.
+- Persistent Turbopack filesystem caching remains disabled. No additional Next
+  16.3 experiment was enabled as part of this proof.
 
 ## Verification
 
 - Focused Vitest for the production build-policy contract.
 - Full `pnpm --dir apps/web build` using the shared production runner.
 - Forced-cold Vercel preview inspection and build logs on the exact commit.
+Completed: 2026-08-05

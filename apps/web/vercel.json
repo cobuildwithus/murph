@@ -4,7 +4,6 @@
   "git": {
     "deploymentEnabled": {
       "main": true,
-      "agent/web-build-critical-path": true,
       "*": false
     }
   },

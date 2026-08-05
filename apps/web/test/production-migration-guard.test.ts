@@ -1531,7 +1531,6 @@ describe("hosted web production migration guard", () => {
 
     assert.deepEqual(vercelJson.git?.deploymentEnabled, {
       main: true,
-      "agent/web-build-critical-path": true,
       "*": false,
     });
   });
