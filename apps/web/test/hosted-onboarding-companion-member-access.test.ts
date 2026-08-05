@@ -90,7 +90,6 @@ function completion(
 ) {
   const completedMember = member(billingStatus);
   return {
-    initialVisitEligible: billingStatus === HostedBillingStatus.not_started,
     inviteCode: "invite_native",
     joinUrl: "https://withmurph.ai/join/invite_native",
     member: completedMember,
@@ -109,7 +108,7 @@ describe("native companion hosted member admission", () => {
     mocks.assertHostedMemberNotSuspended.mockReturnValue(undefined);
     mocks.completeHostedPrivyVerification.mockResolvedValue(completion());
     mocks.ensureHostedAutoPulseTrialEnrollment.mockResolvedValue({
-      redirectPath: "/home?initialVisit=true",
+      redirectPath: "/home",
       status: "enrolled",
     });
   });

@@ -6,7 +6,7 @@ import type {
   AssistantVoiceOptionId,
 } from "@murphai/contracts";
 import { MessageCircleIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { MurphContactCardPicker } from "@/src/components/murph/murph-contact-card-picker";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
@@ -20,8 +20,6 @@ import {
   DialogTitle,
 } from "@/src/components/ui/dialog";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
-
-const INITIAL_VISIT_QUERY_KEY = "initialVisit";
 
 export function HomeInitialVisitPersonaPickerClient({
   contactAction,
@@ -38,10 +36,6 @@ export function HomeInitialVisitPersonaPickerClient({
     contactAction?.kind === "text" ? "contact" : "persona",
   );
   const personaSavedRef = useRef(false);
-
-  useEffect(() => {
-    stripInitialVisitQueryParam();
-  }, []);
 
   if (stage === "contact") {
     return (
@@ -196,16 +190,6 @@ async function completeInitialOnboarding(
     throw new Error("Initial onboarding completion response was invalid.");
   }
   return { completedNow: (result as { completedNow: boolean }).completedNow };
-}
-
-function stripInitialVisitQueryParam() {
-  if (typeof window === "undefined" || typeof window.location.href !== "string") {
-    return;
-  }
-
-  const url = new URL(window.location.href);
-  url.searchParams.delete(INITIAL_VISIT_QUERY_KEY);
-  window.history?.replaceState?.({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 function MurphLogoMark({ className }: { className?: string }) {

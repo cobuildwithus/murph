@@ -6,16 +6,17 @@ Updated: 2026-08-04
 
 ## Goal
 
-- Make the existing `?initialVisit=true` hosted onboarding available natively
-  in the companion app while ensuring a member completes or skips it only once
-  across web and mobile.
+- Make the hosted onboarding flow available natively in the companion app
+  while ensuring a member completes or skips it only once across web and
+  mobile.
 
 ## Success criteria
 
 - Web/Postgres owns one canonical onboarding-completion fact.
 - Existing members are not unexpectedly enrolled during rollout.
-- Web suppresses `initialVisit=true` after canonical completion and records
-  completion after persona save or explicit persona skip/dismiss.
+- Every authenticated Home load renders canonically pending onboarding and
+  suppresses it after canonical completion, independent of query or session
+  history. Persona save or explicit persona skip/dismiss records completion.
 - Authenticated companion routes expose pending/completed state and perform
   idempotent completion without accepting a caller-selected member.
 - iOS can render the same contact, persona, voice/tone, and welcome sequence
@@ -66,7 +67,7 @@ Updated: 2026-08-04
 2. Ask ReviewGPT to review the proposed ownership, API, and migration design.
 3. Add canonical completion persistence, migration/backfill, shared service,
    companion routes, and focused backend tests.
-4. Gate and complete the hosted `initialVisit` flow through canonical state.
+4. Gate and complete the hosted Home flow through canonical state alone.
 5. Implement the native flow against the companion protocol with no local
    completion persistence.
 6. Update architecture/product/security/reliability documentation and visual
@@ -89,6 +90,9 @@ Updated: 2026-08-04
   foregrounds/reloads; no claim lease is added for this narrow race.
 - The companion route returns the current canonical choices so iOS does not
   become a second option-catalog owner.
+- Optional contact projection may omit only the contact-card step. It cannot
+  block the canonical pending/completed state, public catalog, or Health
+  continuation.
 
 ## Verification
 
@@ -102,6 +106,12 @@ Updated: 2026-08-04
   first-writer-wins proof were accepted and corrected. The new opt-in local
   PostgreSQL suite applies the exact migration SQL and proves both controlled
   Web-save/iOS-skip winner orderings with independent Prisma clients.
+- Completed: final ReviewGPT round one found that Web session/query history
+  still acted as a second eligibility owner and that optional contact
+  decryption could block native onboarding. Both were accepted and corrected:
+  plain Home now reads only the canonical row, all eligibility marker/session
+  branches were deleted, and contact projection fails soft to a catalog-only
+  pending response.
 - Completed: production `/design?tab=sections` onboarding renders at desktop
   and mobile sizes. The required Claude Code UI double-check was attempted and
   stopped at explicit Fable credit exhaustion as the completion workflow

@@ -59,17 +59,24 @@ export const GET = withJsonError(async (request: Request) => {
     return jsonOk(projectCompletedState(state));
   }
 
-  const contactContext = await readHostedMurphContactContextForMember({
-    memberId: auth.member.id,
-    prisma,
-  });
-  const contactAction = resolveMurphContactOptions({
-    contactChannels: contactContext.initialContactChannels,
-    message: INITIAL_MESSAGE,
-    murphEmailAddress: contactContext.murphEmailAddress,
-    murphPhoneNumber: contactContext.murphPhoneNumber,
-    userEmailAddress: contactContext.userEmailAddress,
-  })[0] ?? null;
+  let contactAction: MurphContactOption | null = null;
+  try {
+    const contactContext = await readHostedMurphContactContextForMember({
+      memberId: auth.member.id,
+      prisma,
+    });
+    contactAction = resolveMurphContactOptions({
+      contactChannels: contactContext.initialContactChannels,
+      message: INITIAL_MESSAGE,
+      murphEmailAddress: contactContext.murphEmailAddress,
+      murphPhoneNumber: contactContext.murphPhoneNumber,
+      userEmailAddress: contactContext.userEmailAddress,
+    })[0] ?? null;
+  } catch {
+    // Contact-card setup is optional. Never let unavailable encrypted contact
+    // context block the canonical onboarding choices or Health continuation.
+    console.warn("Companion initial onboarding contact projection unavailable.");
+  }
 
   return jsonOk(projectPendingState({
     contactAction,

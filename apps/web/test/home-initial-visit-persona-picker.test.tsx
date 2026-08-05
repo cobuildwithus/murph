@@ -148,31 +148,19 @@ vi.mock("@/src/components/ui/dialog", () => ({
     createElement("h2", props),
 }));
 
-test("HomeInitialVisitPersonaPickerClient opens the production persona picker and consumes the query marker", async () => {
+test("HomeInitialVisitPersonaPickerClient opens the production persona picker without mutating the URL", async () => {
   const { HomeInitialVisitPersonaPickerClient } = await import(
     "../app/(dashboard)/home/initial-visit-persona-picker-client"
   );
   const { cleanup, container, replaceState } = await renderClientComponent(
     createElement(HomeInitialVisitPersonaPickerClient, { contactAction: null }),
-    {
-      location: {
-        hash: "#notes",
-        href: "https://join.example.test/home?initialVisit=true&tab=overview#notes",
-        pathname: "/home",
-        search: "?initialVisit=true&tab=overview",
-      },
-      requireButton: false,
-    },
+    { requireButton: false },
   );
 
   try {
     assert.match(container.textContent ?? "", /Choose Murph’s main personality/u);
     assert.ok(container.querySelector("[data-murph-persona-picker='open']"));
-    assert.deepEqual(replaceState.mock.calls[0], [
-      {},
-      "",
-      "/home?tab=overview#notes",
-    ]);
+    assert.equal(replaceState.mock.calls.length, 0);
   } finally {
     await cleanup();
   }

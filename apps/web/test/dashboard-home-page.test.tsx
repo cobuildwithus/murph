@@ -750,15 +750,13 @@ test("HomePage shows non-limit denied usage notices without a reset countdown", 
   assert.doesNotMatch(markup, /Resets in/u);
 });
 
-test("HomePage preserves the initial-visit marker when contact projection retry is needed", async () => {
+test("HomePage retries pending onboarding contact projection on a fresh load", async () => {
   mocks.resolveHostedMurphContactOption.mockRejectedValueOnce(
     new Error("contact context unavailable"),
   );
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const searchParams = {
-    initialVisit: "true",
-  };
+  const searchParams = {};
   const failedMarkup = renderToStaticMarkup(
     await HomePage({
       searchParams: Promise.resolve(searchParams),
@@ -791,13 +789,11 @@ test("HomePage preserves the initial-visit marker when contact projection retry 
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 2);
 });
 
-test("HomePage opens persona onboarding for initial visits", async () => {
+test("HomePage opens pending persona onboarding on plain home", async () => {
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(
     await HomePage({
-      searchParams: Promise.resolve({
-        initialVisit: "true",
-      }),
+      searchParams: Promise.resolve({}),
     }),
   );
 
@@ -809,7 +805,7 @@ test("HomePage opens persona onboarding for initial visits", async () => {
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
 });
 
-test("HomePage suppresses initial-visit onboarding after native completion", async () => {
+test("HomePage suppresses onboarding after native completion", async () => {
   mocks.readHostedInitialOnboardingState.mockResolvedValueOnce({
     preferences: {
       persona: "classic",
@@ -822,7 +818,7 @@ test("HomePage suppresses initial-visit onboarding after native completion", asy
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(
     await HomePage({
-      searchParams: Promise.resolve({ initialVisit: "true" }),
+      searchParams: Promise.resolve({}),
     }),
   );
 
@@ -842,9 +838,7 @@ test("HomePage skips the contact-card picker for Telegram-only members", async (
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(
     await HomePage({
-      searchParams: Promise.resolve({
-        initialVisit: "true",
-      }),
+      searchParams: Promise.resolve({}),
     }),
   );
 
@@ -868,9 +862,7 @@ test("HomePage preserves the resolved email webmail composer for initial visits"
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(
     await HomePage({
-      searchParams: Promise.resolve({
-        initialVisit: "true",
-      }),
+      searchParams: Promise.resolve({}),
     }),
   );
 
@@ -882,18 +874,16 @@ test("HomePage preserves the resolved email webmail composer for initial visits"
   assert.match(markup, /data-contact-action-webmail-label="Gmail"/);
 });
 
-test("HomePage keeps persona onboarding gated behind the exact initial-visit marker", async () => {
+test("HomePage reload keeps canonically pending onboarding visible", async () => {
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(
     await HomePage({
-      searchParams: Promise.resolve({
-        initialVisit: "false",
-      }),
+      searchParams: Promise.resolve({}),
     }),
   );
 
-  assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
-  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
+  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
 });
 
 test("HomePage asks for the first message when Murph has no way to send one", async () => {

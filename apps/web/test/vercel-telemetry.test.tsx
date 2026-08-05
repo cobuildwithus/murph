@@ -334,7 +334,7 @@ test("VercelTelemetry canonicalizes allowlisted paths and strips URL state", () 
   assert.deepEqual(
     analyticsProps.beforeSend({
       type: "pageview",
-      url: "https://www.example.test/home?initialVisit=true#persona",
+      url: "https://www.example.test/home?tab=persona#persona",
     }),
     {
       type: "pageview",
@@ -345,7 +345,7 @@ test("VercelTelemetry canonicalizes allowlisted paths and strips URL state", () 
     speedInsightsProps.beforeSend({
       route: "/home?panel=usage",
       type: "vital",
-      url: "https://www.example.test/home?initialVisit=true#persona",
+      url: "https://www.example.test/home?tab=persona#persona",
     }),
     {
       route: "/home",

@@ -49,10 +49,7 @@ export const metadata: Metadata = createMurphPageMetadata({
 
 type HomeSearchParams =
   & DeviceSyncCompletionSearchParams
-  & ConnectedAppCompletionSearchParams
-  & {
-    initialVisit?: string | string[] | undefined;
-  };
+  & ConnectedAppCompletionSearchParams;
 
 export default async function HomePage({
   searchParams,
@@ -60,8 +57,6 @@ export default async function HomePage({
   searchParams: Promise<HomeSearchParams>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const showInitialVisitPersonaPicker =
-    readFirstSearchParamValue(resolvedSearchParams.initialVisit) === "true";
   const auth = await getHostedDashboardPageAuthSnapshot();
   const member = auth.authenticatedMember;
 
@@ -87,7 +82,7 @@ export default async function HomePage({
       member,
       searchParams: resolvedSearchParams,
     }),
-    showInitialVisitPersonaPicker && member
+    member
       ? (async () => {
           const state = await readHostedInitialOnboardingState({
             memberId: member.id,
@@ -131,8 +126,7 @@ export default async function HomePage({
     null,
   );
   const shouldRenderInitialVisitPersonaPicker =
-    showInitialVisitPersonaPicker
-    && initialVisitProjectionResult.status === "fulfilled"
+    initialVisitProjectionResult.status === "fulfilled"
     && initialVisitProjection?.state.status === "pending";
   const messagingSetupState = readSettledValue(messagingSetupStateResult, null);
   // Telegram bots cannot open a conversation, so a member can finish signup
@@ -246,12 +240,6 @@ export default async function HomePage({
       <FeatureHighlights />
     </div>
   );
-}
-
-function readFirstSearchParamValue(
-  value: string | string[] | undefined,
-): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
 }
 
 function readSettledValue<T>(

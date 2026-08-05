@@ -111,7 +111,7 @@ describe("hosted app session", () => {
       throw new Error("Expected issued hosted web session to be stored.");
     }
 
-    expect(result.firstMemberSession).toBe(true);
+    expect(harness.transactionHostedWebSession.count).not.toHaveBeenCalled();
     expect(result.sessionId).toMatch(/^hws_[A-Za-z0-9_-]+$/u);
     expect(result.cookie).toContain(`murph-session=murph_session_v2.${result.sessionId}.`);
     expect(result.cookie).toContain("Path=/");
@@ -184,7 +184,6 @@ describe("hosted app session", () => {
     const targetSessionIds = harness.records
       .filter((record) => record.memberId === "member_123" && record.privyUserId === "did:privy:user_123")
       .map((record) => record.id);
-    expect(result.firstMemberSession).toBe(false);
     expect(targetSessionIds).toHaveLength(20);
     expect(targetSessionIds).toContain(result.sessionId);
     expect(targetSessionIds).toContain("hws_target_19");

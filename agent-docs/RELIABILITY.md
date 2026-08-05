@@ -105,8 +105,11 @@ Last verified: 2026-08-04
   idempotent completed projection without preference mutation. A failed write
   leaves the picker mounted with its unsaved choices, while an unavailable
   best-effort runtime wake does not roll back durable completion. Native
-  foreground refresh and website navigation re-read the canonical fact; no
-  local flag, lease, cleanup worker, or second reconciliation owner exists.
+  foreground refresh and every authenticated Home load re-read the canonical
+  fact; query markers and Web-session history do not gate the flow. Optional
+  native contact projection fails soft to no contact-card step while the
+  catalog and Health continuation remain available. No local flag, lease,
+  cleanup worker, or second reconciliation owner exists.
 
 - `packages/assistant-engine` owns one resident Codex App Server process and one
   memoized readiness promise on that process. Readiness covers spawn plus the

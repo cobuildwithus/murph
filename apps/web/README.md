@@ -38,15 +38,13 @@ Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
 
-Signup-oriented landing-page auth completion for accessible hosted stages routes
-to `/home?initialVisit=true`. The home page treats that query as a one-shot
-browser handoff. Members with a resolved text contact see the contact-card picker
-first and then the production four-step Murph personality picker; members without
-one start at the personality picker. A successful save opens the final Welcome to
-Murph dialog with the resolved messaging action; skipping or dismissing the
-personality picker ends the handoff without it. The page strips the query parameter
-on mount so ordinary `/home` visits are not blocked.
-Login-oriented landing CTAs continue to route to `/home`.
+Accessible auth completion routes to `/home`, which reads the member-owned
+onboarding completion state on every load. Pending members with a resolved text
+contact see the contact-card picker first and then the production four-step Murph
+personality picker; members without one start at the personality picker. A
+successful save opens the final Welcome to Murph dialog with the resolved
+messaging action. Skipping or dismissing completes the durable onboarding state,
+and completed members are suppressed on later Web and companion-app loads.
 
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs a

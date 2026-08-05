@@ -117,6 +117,82 @@ describe("companion initial onboarding routes", () => {
       .toHaveBeenCalledWith(request, expect.anything());
   });
 
+  it("keeps pending onboarding available when optional contact projection fails", async () => {
+    mocks.readHostedMurphContactContextForMember.mockRejectedValue(
+      new Error("encrypted contact unavailable"),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const request = new Request(
+      "https://app.example.test/api/device-sync/companion/initial-onboarding",
+      { headers: { authorization: "Bearer identity-token" } },
+    );
+
+    const response = await route.GET(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      schema: "murph.companion.initial-onboarding.v1",
+      status: "pending",
+      contactAction: null,
+      contactCard: null,
+    });
+    expect(payload.catalog.personas).toHaveLength(6);
+    expect(warn).toHaveBeenCalledWith(
+      "Companion initial onboarding contact projection unavailable.",
+    );
+  });
+
+  it("short-circuits completed onboarding before optional contact projection", async () => {
+    mocks.readHostedInitialOnboardingState.mockResolvedValue({
+      completedAt: new Date("2026-08-04T12:00:00.000Z"),
+      preferences: { persona: "classic", tone: "formal", voice: "murph" },
+      status: "completed",
+    });
+    const request = new Request(
+      "https://app.example.test/api/device-sync/companion/initial-onboarding",
+      { headers: { authorization: "Bearer identity-token" } },
+    );
+
+    const response = await route.GET(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: "completed",
+      catalog: null,
+      contactAction: null,
+      contactCard: null,
+    });
+    expect(mocks.readHostedMurphContactContextForMember).not.toHaveBeenCalled();
+  });
+
+  it("keeps bearer authentication and canonical state reads fail-closed", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const authFailure = new Error("auth failed");
+    mocks.requireActivePrivyMemberAuthFromBearerToken.mockRejectedValue(authFailure);
+    const request = new Request(
+      "https://app.example.test/api/device-sync/companion/initial-onboarding",
+      { headers: { authorization: "Bearer identity-token" } },
+    );
+
+    const authResponse = await route.GET(request);
+
+    expect(authResponse.status).toBe(500);
+    expect(mocks.readHostedInitialOnboardingState).not.toHaveBeenCalled();
+
+    mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
+      member: { id: "member_123" },
+    });
+    const stateFailure = new Error("state failed");
+    mocks.readHostedInitialOnboardingState.mockRejectedValue(stateFailure);
+
+    const stateResponse = await route.GET(request);
+
+    expect(stateResponse.status).toBe(500);
+    expect(mocks.readHostedMurphContactContextForMember).not.toHaveBeenCalled();
+    expect(errorLog).toHaveBeenCalledTimes(2);
+  });
+
   it("uses the shared completion transaction for native skip", async () => {
     const request = new Request(
       "https://app.example.test/api/device-sync/companion/initial-onboarding",
