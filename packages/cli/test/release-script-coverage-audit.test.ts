@@ -1280,6 +1280,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(prDeepReviewPrompt).toContain('`same_thread_delta`')
     expect(prDeepReviewPrompt).toContain('`full_snapshot`')
+    expect(prDeepReviewPrompt).toContain('`contextAnchorHead`')
     expect(prDeepReviewPrompt).toMatch(/Do not review a\s+diff hunk in isolation\./u)
     expect(prDeepReviewPrompt).toContain(
       'Do not use app connectors, memory, pasted repository context',
@@ -1707,15 +1708,15 @@ printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_c
             HOME: harnessRoot,
             REPO_ROOT: repoRoot,
             REVIEW_GPT_REVIEW_PHASE: 'final',
-            REVIEW_GPT_ROUND_NUMBER: '10',
-            REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/review-thread',
+            REVIEW_GPT_ROUND_NUMBER: '3',
+            REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
             XDG_CONFIG_HOME: localConfigRoot,
           },
         },
       )
       expect(existingThreadResult.status, existingThreadResult.stderr).toBe(0)
       expect(existingThreadResult.stdout.trim().split('\n').at(-1)).toBe(
-        'https://chatgpt.com/c/review-thread',
+        'https://chatgpt.com/c/fallback-thread',
       )
 
       const correctionPresetHarness = `${configHarness}\nprintf '%s\\n' "$review_gpt_pr_review_prompt_file"`
@@ -2911,6 +2912,7 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('REVIEW_GPT_ROUND_NUMBER')
     expect(fullPackageScript).toContain('REVIEW_GPT_FIRST_REVIEWED_HEAD')
     expect(fullPackageScript).toContain('REVIEW_GPT_PREVIOUS_REVIEWED_HEAD')
+    expect(fullPackageScript).toContain('REVIEW_GPT_CONTEXT_ANCHOR_HEAD')
     expect(fullPackageScript).toContain('REVIEW_GPT_REVIEW_PHASE')
     expect(fullPackageScript).toContain('REVIEW_GPT_RENDERED_EVIDENCE_PATHS')
     expect(fullPackageScript).toContain('review-phase.json')
@@ -2985,6 +2987,9 @@ esac
         '.fake-tools/cobuild-package-audit-context',
         `#!/usr/bin/env bash
 set -euo pipefail
+if [[ -n "\${TEST_REAL_PACKAGER_BIN:-}" ]]; then
+  exec "$TEST_REAL_PACKAGER_BIN" "$@"
+fi
 out_dir=""
 name=""
 while (( "$#" )); do
@@ -3017,6 +3022,19 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         cwd: harnessRoot,
       })
       writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 0\n')
+      writeHarnessFile(harnessRoot, 'apps/demo/unrelated.ts', 'export const unrelated = true\n')
+      writeHarnessFile(
+        harnessRoot,
+        'packages/demo/test/unrelated.test.ts',
+        'export const unrelatedTest = true\n',
+      )
+      writeHarnessFile(harnessRoot, 'agent-docs/unrelated.md', 'unrelated docs\n')
+      writeHarnessFile(
+        harnessRoot,
+        '.github/workflows/unrelated.yml',
+        'name: unrelated\non: workflow_dispatch\n',
+      )
+      writeHarnessFile(harnessRoot, 'package.json', '{"name":"review-harness"}\n')
       writeHarnessFile(
         harnessRoot,
         'agent-docs/prompts/product-experience-review.md',
@@ -3111,10 +3129,16 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
             },
           },
         )
+        const exactZipPath = path.join(outDir, `${name}.zip`)
+        const generatedZipName = existsSync(outDir)
+          ? readdirSync(outDir).find((entry) => entry.endsWith('.zip'))
+          : undefined
         return {
           outDir,
           result,
-          zipPath: path.join(outDir, `${name}.zip`),
+          zipPath: existsSync(exactZipPath)
+            ? exactZipPath
+            : path.join(outDir, generatedZipName ?? `${name}.zip`),
         }
       }
 
@@ -3229,12 +3253,14 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         roundNumber: 1,
         reviewScope: 'full',
         contextMode: 'full_snapshot',
+        contextAnchorHead: firstHead,
         currentBaseHead: baseHead,
         firstReviewedHead: firstHead,
         previousReviewedHead: null,
         currentReviewedHead: firstHead,
         firstReviewedHeadIsAncestorOfCurrent: true,
         previousReviewedHeadIsAncestorOfCurrent: null,
+        contextAnchorHeadIsAncestorOfPrevious: null,
       })
       expect(
         execFileSync(
@@ -3288,12 +3314,14 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         roundNumber: 2,
         reviewScope: 'correction',
         contextMode: 'same_thread_delta',
+        contextAnchorHead: firstHead,
         currentBaseHead: baseHead,
         firstReviewedHead: firstHead,
         previousReviewedHead: firstHead,
         currentReviewedHead: currentHead,
         firstReviewedHeadIsAncestorOfCurrent: true,
         previousReviewedHeadIsAncestorOfCurrent: true,
+        contextAnchorHeadIsAncestorOfPrevious: true,
       })
       const expectedDelta = execFileSync(
         'git',
@@ -3328,6 +3356,27 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
+      const realRoundTwo = invokePackager('round-two-real', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+        TEST_REAL_PACKAGER_BIN: path.join(
+          repoRoot,
+          'node_modules',
+          '.bin',
+          'cobuild-package-audit-context',
+        ),
+      })
+      expect(realRoundTwo.result.status, realRoundTwo.result.stderr).toBe(0)
+      expect(listZipEntries(realRoundTwo.zipPath)).toEqual([
+        'apps/demo/source.ts',
+        'review-gpt-pr-context/changed-since-previous-reviewed-head.txt',
+        'review-gpt-pr-context/pr-body.md',
+        'review-gpt-pr-context/review-round.json',
+        'review-gpt-pr-context/since-previous-reviewed-head.diff',
+      ])
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
       const roundTwoFull = invokePackager('round-two-full', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
         REVIEW_GPT_FULL_REVIEW_REASON: 'The prior ChatGPT conversation is unavailable.',
@@ -3344,6 +3393,8 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       ) as Record<string, unknown>
       expect(roundTwoFullMetadata).toMatchObject({
         contextMode: 'full_snapshot',
+        contextAnchorHead: currentHead,
+        contextAnchorHeadIsAncestorOfPrevious: null,
         reviewScope: 'correction',
         roundNumber: 2,
       })
@@ -3354,6 +3405,42 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           'review-gpt-pr-context/since-first-reviewed-head.diff',
         ]),
       )
+
+      writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 3\n')
+      execFileSync('git', ['add', 'apps/demo/source.ts'], { cwd: harnessRoot })
+      execFileSync('git', ['commit', '-q', '-m', 'post-fallback correction'], {
+        cwd: harnessRoot,
+      })
+      const postFallbackHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: harnessRoot,
+        encoding: 'utf8',
+      }).trim()
+      const roundThree = invokePackager('round-three', postFallbackHead, {
+        REVIEW_GPT_CONTEXT_ANCHOR_HEAD: currentHead,
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: currentHead,
+        REVIEW_GPT_ROUND_NUMBER: '3',
+      })
+      expect(roundThree.result.status, roundThree.result.stderr).toBe(0)
+      const roundThreeMetadata = JSON.parse(
+        execFileSync(
+          'unzip',
+          ['-p', roundThree.zipPath, 'review-gpt-pr-context/review-round.json'],
+          { encoding: 'utf8' },
+        ),
+      ) as Record<string, unknown>
+      expect(roundThreeMetadata).toMatchObject({
+        contextMode: 'same_thread_delta',
+        contextAnchorHead: currentHead,
+        contextAnchorHeadIsAncestorOfPrevious: true,
+        previousReviewedHead: currentHead,
+        currentReviewedHead: postFallbackHead,
+        reviewScope: 'correction',
+        roundNumber: 3,
+      })
+      execFileSync('git', ['checkout', '-q', '--detach', currentHead], {
+        cwd: harnessRoot,
+      })
 
       const missingPrevious = invokePackager('missing-previous', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,

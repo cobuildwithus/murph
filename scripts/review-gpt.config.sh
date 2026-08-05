@@ -182,7 +182,7 @@ if [[ "$review_gpt_review_phase" == "final" ]] \
         review_gpt_pr_review_prompt_file="pr-correction-review.md"
         ;;
       *)
-        echo "Error: later ReviewGPT rounds require REVIEW_GPT_THREAD_URL for the existing round-1 conversation." >&2
+        echo "Error: later ReviewGPT rounds require REVIEW_GPT_THREAD_URL for the current context conversation." >&2
         return 1 2>/dev/null || exit 1
         ;;
     esac

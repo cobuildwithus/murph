@@ -276,7 +276,8 @@ requires it or the current user explicitly asks for it.
    REVIEW_GPT_ROUND_NUMBER=<k> \
    REVIEW_GPT_FIRST_REVIEWED_HEAD=<round-1-full-sha> \
    REVIEW_GPT_PREVIOUS_REVIEWED_HEAD=<round-k-minus-1-full-sha> \
-   REVIEW_GPT_THREAD_URL=<round-1-chatgpt-url> \
+   REVIEW_GPT_CONTEXT_ANCHOR_HEAD=<most-recent-full-snapshot-head> \
+   REVIEW_GPT_THREAD_URL=<current-context-chatgpt-url> \
      pnpm review:gpt pr-review \
        --wait \
        --wait-timeout 120m \
@@ -298,7 +299,9 @@ requires it or the current user explicitly asks for it.
    insufficient, omit `REVIEW_GPT_THREAD_URL` and set
    `REVIEW_GPT_FULL_REVIEW_REASON` to a concrete reason. This starts a new
    conversation with the full prompt and snapshot. It does not reset the round
-   number or immutable first-reviewed head.
+   number or immutable first-reviewed head. Save the new conversation URL and
+   reviewed head. Later delta rounds reuse that conversation and pass its full
+   snapshot head as `REVIEW_GPT_CONTEXT_ANCHOR_HEAD`.
 
    The repo wrapper chooses one usable ReviewGPT browser lane per run:
    `Eragon.app` on CDP port `9448`, `Phlebas.app` on `9442`,
@@ -347,13 +350,14 @@ requires it or the current user explicitly asks for it.
    relaunch the model audit. Fix a concrete pre-completion tooling/profile
    failure before considering another run against the same pushed head.
 
-   Verify `review-round.json` names the intended round, first-reviewed head,
-   previous reviewed head, and current pushed head. Round 1 must have `full`
-   scope, `full_snapshot` context, and empty cumulative and immediate
-   remediation deltas. Later rounds must have `correction` scope,
+   Verify `review-round.json` names the intended round, context anchor,
+   first-reviewed head, previous reviewed head, and current pushed head. Round 1
+   must have `full` scope, `full_snapshot` context, and empty cumulative and
+   immediate remediation deltas. Later rounds must have `correction` scope,
    `same_thread_delta` context unless a packaged reason justifies
    `full_snapshot`, a previous head different from the current head, and `true`
-   first/previous ancestry. The packaged first head must match
+   first/previous ancestry. A delta also requires the context anchor to be an
+   ancestor of the previous reviewed head. The packaged first head must match
    the immutable PR-body line and the invocation. Missing, mismatched,
    unavailable, or non-ancestral baseline evidence invalidates the run; restore
    or reconstruct the lineage before retrying the same substantive round.
