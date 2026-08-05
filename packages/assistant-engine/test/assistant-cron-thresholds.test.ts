@@ -57,7 +57,8 @@ const cronMocks = vi.hoisted(() => ({
   withAssistantCronWriteLock: vi.fn(),
 }))
 
-vi.mock('@murphai/core', () => ({
+vi.mock('@murphai/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@murphai/core')>()),
   archiveAutomationIfActiveUntilElapsed:
     cronMocks.archiveAutomationIfActiveUntilElapsed,
   isVaultError: (error: unknown) => Boolean(
