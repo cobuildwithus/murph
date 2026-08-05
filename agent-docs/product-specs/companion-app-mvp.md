@@ -286,8 +286,11 @@ verification (existing `@privy-io/node`):
    existing Privy verification is the auth boundary.
 2. `GET /api/device-sync/companion/status`
    — last data receipt overall and per resource (sleep / workouts / heart
-   rate / respiratory), sourced from the existing pipeline. This is what the
-   Connect screen renders.
+   rate / respiratory), sourced from the existing pipeline, plus server
+   `observedAt` for the snapshot. Native clients use that server clock for
+   setup age, receipt freshness, and relative-time copy; a fresh connection
+   requires a receipt that strictly advances the receipt observed immediately
+   before the explicit connect. This is what the Connect screen renders.
 3. `POST /api/device-sync/companion/health-metadata`
    — accepts schema version 1 with 1–200 records, exact lower-case SHA-256
    record identities, required non-negative safe-integer sync versions, and

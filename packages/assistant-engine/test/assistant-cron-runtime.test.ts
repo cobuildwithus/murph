@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
@@ -33,6 +33,9 @@ import {
 } from '../src/assistant/newsletter-outbox.js'
 import * as assistantDiagnostics from '../src/assistant/diagnostics.js'
 import * as assistantOutboxReceiptRepair from '../src/assistant/outbox/receipt-repair.js'
+import {
+  onboardingFollowupPredecessorDefinitions,
+} from './onboarding-followup-predecessor-fixtures.ts'
 
 type MockAutomationRecord = {
   activeUntil?: string | null
@@ -225,6 +228,7 @@ import {
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
+import type { AssistantRunEvent } from '../src/assistant/automation/shared.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
   dispatchAssistantOutboxIntent,
@@ -709,7 +713,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(updated.jobId).toBe(job.jobId)
     expect(updated.state.lastSucceededAt).toBe('2026-04-09T17:35:00.000Z')
     expect(updated.state.nextRunAt).toBe('2026-04-10T17:30:00.000Z')
-    expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+    expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(3)
     expect(getVaultAutomationStore(vaultRoot)).toHaveLength(1)
 
     const retargeted = await upsertAssistantCronAutomation({
@@ -738,7 +742,7 @@ describe('assistant cron runtime orchestration', () => {
       channel: 'telegram',
       deliveryTarget: 'room-1',
     })
-    expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+    expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(3)
 
     const automation = findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')
     if (!automation) {
@@ -771,7 +775,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')?.status).toBe(
       'archived',
     )
-    expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+    expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(3)
   })
 
   it('materializes a finite latest-slot occurrence with execution budget and preserves it on reseed', async () => {
@@ -939,6 +943,59 @@ describe('assistant cron runtime orchestration', () => {
       .toBe('archived')
   })
 
+  it('defers a recurring follow-up until tomorrow and caps it after three local days', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-upsert-three-day-automation-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+
+    const created = await upsertAssistantCronAutomation({
+      firstOccurrenceActiveDayCount: 3,
+      firstOccurrenceActiveUntilLocalTime: '15:00',
+      firstOccurrencePolicy: 'after-current-local-day',
+      instructions: 'Offer one useful setup continuation each day.',
+      now: new Date('2026-04-08T15:00:00.000Z'),
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '14:29',
+      },
+      slug: 'finite-three-day-followup',
+      summary: 'Three finite daily opportunities.',
+      title: 'Finite three-day follow-up',
+      vault: vaultRoot,
+    })
+    if (!created) {
+      throw new Error('Expected three-day follow-up to be seeded.')
+    }
+
+    expect(created.keepAfterRun).toBe(true)
+    expect(created.schedule).toEqual({
+      kind: 'dailyLocal',
+      localTime: '14:29',
+    })
+    expect(created.state.nextRunAt).toBe('2026-04-09T18:29:00.000Z')
+    expect(findCanonicalAutomation(vaultRoot, 'finite-three-day-followup'))
+      .toMatchObject({
+        activeUntil: '2026-04-11T19:00:00.000Z',
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '14:29',
+        },
+      })
+  })
+
   it.each([
     {
       onboardingStatus: 'completed',
@@ -982,7 +1039,7 @@ describe('assistant cron runtime orchestration', () => {
     'keeps a user-owned same-slug automation on the generic $onboardingStatus-onboarding path',
     async ({ expectedOutcome, onboardingStatus, result }) => {
       vi.useFakeTimers()
-      vi.setSystemTime(new Date('2026-04-09T18:29:05.000Z'))
+      vi.setSystemTime(new Date('2026-04-09T13:30:05.000Z'))
       const { vaultRoot } = await createRuntimeContext(
         `assistant-cron-runtime-user-owned-onboarding-slug-${onboardingStatus}-`,
       )
@@ -1032,6 +1089,455 @@ describe('assistant cron runtime orchestration', () => {
         }),
       )
       expect(completed.run.outcome).toBe(expectedOutcome)
+    },
+  )
+
+  it('runs at most once on each of three local days and records default-open admission', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T15:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-onboarding-three-day-window-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+    const job = await upsertAssistantCronAutomation({
+      firstOccurrenceActiveDayCount:
+        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
+      firstOccurrenceActiveUntilLocalTime:
+        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.activeUntilLocalTime,
+      firstOccurrencePolicy: 'after-current-local-day',
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+      now: new Date('2026-04-08T15:00:00.000Z'),
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '14:29',
+      },
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      vault: vaultRoot,
+    })
+    if (!job) {
+      throw new Error('Expected onboarding follow-up to be seeded.')
+    }
+    cronMocks.sendAssistantMessageLocal.mockResolvedValue({
+      decision: {
+        kind: 'skip',
+        privateSummary: 'No useful continuation today.',
+      },
+      response: null,
+      session: {
+        sessionId: 'session_onboarding_three_day_window',
+      },
+    })
+    const events: AssistantRunEvent[] = []
+
+    for (const now of [
+      '2026-04-09T18:29:05.000Z',
+      '2026-04-10T18:29:05.000Z',
+      '2026-04-11T18:29:05.000Z',
+    ]) {
+      vi.setSystemTime(new Date(now))
+      await expect(processDueAssistantCronJobsLocal({
+        limit: 1,
+        onEvent: (event) => events.push(event),
+        vault: vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        processed: 1,
+        succeeded: 1,
+      })
+    }
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(3)
+    expect(events.filter((event) =>
+      event.type === 'onboarding.followup.completed'
+    )).toHaveLength(3)
+    expect(events).toContainEqual(expect.objectContaining({
+      failureContext: expect.objectContaining({
+        activeUntil: '2026-04-11T19:00:00.000Z',
+        notificationDecisionKind: 'skip',
+        notificationDeliveryOutcomeKind: 'none',
+        onboardingStateCreatedAt: null,
+        onboardingStateSource: 'default_missing',
+        onboardingStateStatus: 'open',
+        occurrenceAt: expect.stringMatching(/^2026-04-(?:09|10|11)T/u),
+        runOutcome: 'no_op',
+        scheduleKind: 'dailyLocal',
+      }),
+      type: 'onboarding.followup.completed',
+    }))
+
+    vi.setSystemTime(new Date('2026-04-11T19:00:00.000Z'))
+    await processDueAssistantCronJobsLocal({
+      limit: 1,
+      onEvent: (event) => events.push(event),
+      vault: vaultRoot,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(3)
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+    )?.status).toBe('archived')
+  })
+
+  it('blocks a completed onboarding follow-up before provider admission and logs the persisted state', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T18:29:05.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-onboarding-completed-gate-',
+    )
+    await completeAssistantOnboarding({
+      completedAt: '2026-04-09T17:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    getVaultAutomationStore(vaultRoot).push({
+      activeUntil: '2026-04-11T19:00:00.000Z',
+      automationId: 'automation_onboarding_completed_gate',
+      continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+      createdAt: '2026-04-08T15:00:00.000Z',
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: true,
+      },
+      schedule: {
+        at: '2026-04-09T18:29:00.000Z',
+        kind: 'at',
+      },
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      status: 'active',
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      updatedAt: '2026-04-08T15:00:00.000Z',
+    })
+    const events: AssistantRunEvent[] = []
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      onEvent: (event) => events.push(event),
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(events).toContainEqual(expect.objectContaining({
+      failureContext: expect.objectContaining({
+        notificationDecisionKind: null,
+        onboardingStateCreatedAt: '2026-04-09T17:00:00.000Z',
+        onboardingStateSource: 'persisted',
+        onboardingStateStatus: 'completed',
+        onboardingStateUpdatedAt: '2026-04-09T17:00:00.000Z',
+        runOutcome: 'skipped_gate',
+      }),
+      type: 'onboarding.followup.completed',
+    }))
+  })
+
+  it.each(onboardingFollowupPredecessorDefinitions)(
+    'keeps the $label predecessor effect-ineligible when reconciliation has not completed',
+    async ({ definition, label, schedule }) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-09T18:29:05.000Z'))
+      const { vaultRoot } = await createRuntimeContext(
+        `assistant-cron-runtime-onboarding-predecessor-${label.replaceAll(' ', '-')}-`,
+      )
+      const onboardingStatePath = resolveAssistantOnboardingStatePath(vaultRoot)
+      await mkdir(path.dirname(onboardingStatePath), { recursive: true })
+      await writeFile(onboardingStatePath, '{ invalid onboarding json', 'utf8')
+      addRecognizedOnboardingFollowupPredecessorAutomation({
+        automationId: `automation_onboarding_predecessor_${label.replaceAll(' ', '_')}`,
+        definition,
+        schedule,
+        vaultRoot,
+      })
+      const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+      const occurrenceAt = claimed.runtimeState.state.pendingOccurrenceAt ??
+        claimed.job.state.nextRunAt
+      if (!occurrenceAt) {
+        throw new Error('Expected predecessor occurrence time.')
+      }
+      vi.setSystemTime(new Date(Date.parse(occurrenceAt) + 5_000))
+      const events: AssistantRunEvent[] = []
+
+      const result = await executeClaimedAssistantCronJob({
+        job: claimed,
+        onEvent: (event) => events.push(event),
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+
+      expect(result.run).toMatchObject({
+        outcome: 'failed',
+        reason: 'ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED',
+        status: 'failed',
+      })
+      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+      await expect(readFile(onboardingStatePath, 'utf8')).resolves.toBe(
+        '{ invalid onboarding json',
+      )
+      expect(getVaultAutomationStore(vaultRoot)).toContainEqual(
+        expect.objectContaining({
+          instructions: definition.instructions,
+          schedule,
+          status: 'active',
+        }),
+      )
+      const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+      expect(runtimeStore.jobs).toContainEqual(expect.objectContaining({
+        jobId: claimed.job.jobId,
+        state: expect.objectContaining({
+          consecutiveFailures: 1,
+          lastError:
+            'Assistant onboarding follow-up predecessor is waiting for managed reconciliation.',
+          pendingOccurrenceAt: occurrenceAt,
+          retryAfterAt: expect.any(String),
+        }),
+      }))
+      expect(events).toContainEqual(expect.objectContaining({
+        failureContext: expect.objectContaining({
+          notificationDecisionKind: null,
+          onboardingStateReadError: 'invalid-json',
+          onboardingStateSource: 'read_error',
+          onboardingStateStatus: 'unreadable',
+          runOutcome: 'failed',
+        }),
+        type: 'onboarding.followup.completed',
+      }))
+    },
+  )
+
+  it.each([
+    'pre-provider',
+    'pre-tool',
+    'pre-delivery',
+    'pre-commit',
+  ] as const)(
+    'invalidates an exact onboarding follow-up when onboarding completes at the %s gate',
+    async (completionGate) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-09T18:29:05.000Z'))
+      const { vaultRoot } = await createRuntimeContext(
+        `assistant-cron-runtime-onboarding-followup-completed-${completionGate}-`,
+      )
+      addCurrentOnboardingFollowupAutomation({
+        automationId: `automation_onboarding_completed_${completionGate}`,
+        vaultRoot,
+      })
+      const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+      const events: AssistantRunEvent[] = []
+      const completeAtGate = async (gate: typeof completionGate) => {
+        if (completionGate !== gate) {
+          return
+        }
+        await completeAssistantOnboarding({
+          completedAt: '2026-04-09T18:29:06.000Z',
+          reason: 'user_answered',
+          vault: vaultRoot,
+        })
+      }
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+        async (notificationInput: {
+          beforeCommit?: (context: {
+            decision: {
+              kind: 'send_message'
+              privateSummary: string
+              text: string
+            }
+            deliveryOutcome: null
+            response: string
+          }) => Promise<void>
+          beforeDelivery?: (context: {
+            decision: {
+              kind: 'send_message'
+              privateSummary: string
+              text: string
+            }
+            deliveryOutcome: null
+            response: string
+          }) => Promise<void>
+          beforeProviderAcceptedInputs?: () => Promise<void>
+          beforeToolExecution?: () => Promise<void>
+        }) => {
+          const context = {
+            decision: {
+              kind: 'send_message' as const,
+              privateSummary: 'Prepared a setup continuation.',
+              text: 'Would you like to keep going?',
+            },
+            deliveryOutcome: null,
+            response: 'Would you like to keep going?',
+          }
+          await completeAtGate('pre-provider')
+          await notificationInput.beforeProviderAcceptedInputs?.()
+          await completeAtGate('pre-tool')
+          await notificationInput.beforeToolExecution?.()
+          await completeAtGate('pre-delivery')
+          await notificationInput.beforeDelivery?.(context)
+          await completeAtGate('pre-commit')
+          await notificationInput.beforeCommit?.(context)
+          return {
+            ...context,
+            session: { sessionId: 'session_onboarding_completed_gate' },
+          }
+        },
+      )
+
+      const result = await executeClaimedAssistantCronJob({
+        job: claimed,
+        onEvent: (event) => events.push(event),
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+
+      expect(result.run).toMatchObject({
+        outcome: 'skipped_gate',
+        reason: 'lifecycle_precondition',
+        status: 'skipped',
+      })
+      expect(events).toContainEqual(expect.objectContaining({
+        failureContext: expect.objectContaining({
+          authorityGate: completionGate.replace('-', '_'),
+          onboardingStateSource: 'persisted',
+          onboardingStateStatus: 'completed',
+          runOutcome: 'skipped_gate',
+        }),
+        type: 'onboarding.followup.completed',
+      }))
+    },
+  )
+
+  it.each([
+    'pre-provider',
+    'pre-tool',
+    'pre-delivery',
+    'pre-commit',
+  ] as const)(
+    'keeps an exact onboarding follow-up retryable when state becomes unreadable at the %s gate',
+    async (failureGate) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-09T18:29:05.000Z'))
+      const { vaultRoot } = await createRuntimeContext(
+        `assistant-cron-runtime-onboarding-followup-unreadable-${failureGate}-`,
+      )
+      addCurrentOnboardingFollowupAutomation({
+        automationId: `automation_onboarding_unreadable_${failureGate}`,
+        vaultRoot,
+      })
+      const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+      const events: AssistantRunEvent[] = []
+      const failAtGate = async (gate: typeof failureGate) => {
+        if (failureGate !== gate) {
+          return
+        }
+        await mkdir(
+          path.dirname(resolveAssistantOnboardingStatePath(vaultRoot)),
+          { recursive: true },
+        )
+        await writeFile(
+          resolveAssistantOnboardingStatePath(vaultRoot),
+          '{ invalid onboarding json',
+          'utf8',
+        )
+      }
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+        async (notificationInput: {
+          beforeCommit?: (context: {
+            decision: {
+              kind: 'send_message'
+              privateSummary: string
+              text: string
+            }
+            deliveryOutcome: null
+            response: string
+          }) => Promise<void>
+          beforeDelivery?: (context: {
+            decision: {
+              kind: 'send_message'
+              privateSummary: string
+              text: string
+            }
+            deliveryOutcome: null
+            response: string
+          }) => Promise<void>
+          beforeProviderAcceptedInputs?: () => Promise<void>
+          beforeToolExecution?: () => Promise<void>
+        }) => {
+          const context = {
+            decision: {
+              kind: 'send_message' as const,
+              privateSummary: 'Prepared a setup continuation.',
+              text: 'Would you like to keep going?',
+            },
+            deliveryOutcome: null,
+            response: 'Would you like to keep going?',
+          }
+          await failAtGate('pre-provider')
+          await notificationInput.beforeProviderAcceptedInputs?.()
+          await failAtGate('pre-tool')
+          await notificationInput.beforeToolExecution?.()
+          await failAtGate('pre-delivery')
+          await notificationInput.beforeDelivery?.(context)
+          await failAtGate('pre-commit')
+          await notificationInput.beforeCommit?.(context)
+          return {
+            ...context,
+            session: { sessionId: 'session_onboarding_unreadable_gate' },
+          }
+        },
+      )
+
+      const result = await executeClaimedAssistantCronJob({
+        job: claimed,
+        onEvent: (event) => events.push(event),
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+
+      expect(result.removedAfterRun).toBe(false)
+      expect(result.run).toMatchObject({
+        outcome: 'failed',
+        reason: 'ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE',
+        status: 'failed',
+      })
+      expect(result.runErrorCode).toBe(
+        'ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE',
+      )
+      expect(events).toContainEqual(expect.objectContaining({
+        failureContext: expect.objectContaining({
+          authorityGate: failureGate.replace('-', '_'),
+          onboardingStateReadError: 'invalid-json',
+          onboardingStateSource: 'read_error',
+          onboardingStateStatus: 'unreadable',
+          runOutcome: 'failed',
+        }),
+        type: 'onboarding.followup.completed',
+      }))
     },
   )
 
@@ -1249,9 +1755,13 @@ describe('assistant cron runtime orchestration', () => {
       writeSpy.mockRestore()
     }
 
-    // The automation outlives the runtime-state write failure; readers
-    // synthesize initial runtime state and re-seeding remains idempotent.
+    // The automation outlives the runtime-state write failure, but remains a
+    // finite next-day source until the recurring cursor is durable.
     expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
+      schedule: {
+        at: '2026-04-09T17:30:00.000Z',
+        kind: 'at',
+      },
       status: 'active',
     })
 
@@ -1283,6 +1793,10 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(recovered.state.nextRunAt).toBe('2026-04-09T17:30:00.000Z')
     expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '13:30',
+      },
       status: 'active',
       tags: ['assistant', 'onboarding'],
     })
@@ -11360,7 +11874,10 @@ async function createCanonicalJob(
 }
 
 async function claimFirstCanonicalCronJob(vaultRoot: string): Promise<{
-  claimed: Awaited<ReturnType<typeof claimResolvedAssistantCronJob>>
+  claimed: Extract<
+    Awaited<ReturnType<typeof claimResolvedAssistantCronJob>>,
+    { kind: 'canonical' }
+  >
   paths: ReturnType<typeof resolveAssistantStatePaths>
 }> {
   const paths = resolveAssistantStatePaths(vaultRoot)
@@ -11382,11 +11899,76 @@ async function claimFirstCanonicalCronJob(vaultRoot: string): Promise<{
     },
     paths,
   })
+  if (claimed.kind !== 'canonical') {
+    throw new Error('Expected claimed canonical source.')
+  }
 
   return {
     claimed,
     paths,
   }
+}
+
+function addCurrentOnboardingFollowupAutomation(input: {
+  automationId: string
+  vaultRoot: string
+}): void {
+  getVaultAutomationStore(input.vaultRoot).push({
+    activeUntil: '2026-04-11T19:00:00.000Z',
+    automationId: input.automationId,
+    continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+    createdAt: '2026-04-08T13:30:00.000Z',
+    instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+    route: {
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'room-1',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+      threadIsDirect: true,
+    },
+    schedule: {
+      at: '2026-04-09T18:29:00.000Z',
+      kind: 'at',
+    },
+    slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+    status: 'active',
+    summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+    tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+    title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+    updatedAt: '2026-04-08T13:30:00.000Z',
+  })
+}
+
+function addRecognizedOnboardingFollowupPredecessorAutomation(input: {
+  automationId: string
+  definition: (typeof onboardingFollowupPredecessorDefinitions)[number]['definition']
+  schedule: (typeof onboardingFollowupPredecessorDefinitions)[number]['schedule']
+  vaultRoot: string
+}): void {
+  getVaultAutomationStore(input.vaultRoot).push({
+    automationId: input.automationId,
+    continuityPolicy: input.definition.continuityPolicy,
+    createdAt: '2026-04-08T15:00:00.000Z',
+    instructions: input.definition.instructions,
+    route: {
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'room-1',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+      threadIsDirect: true,
+    },
+    schedule: input.schedule,
+    slug: input.definition.slug,
+    status: 'active',
+    summary: input.definition.summary,
+    tags: [...input.definition.tags],
+    title: input.definition.title,
+    updatedAt: '2026-04-08T15:00:00.000Z',
+  })
 }
 
 function addManagedResearchAutomation(input: {
