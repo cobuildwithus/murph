@@ -34,24 +34,23 @@ describe('connected-apps skill and system-prompt coverage', () => {
     }
   })
 
-  it('keeps OpenWeather city-level and separates outdoor from indoor air', async () => {
+  it('keeps official OpenWeather alerts city-level without Murph thresholds', async () => {
     const skill = await readConnectedAppsSkill()
     const normalizedSkill = skill.replace(/\s+/g, ' ')
 
     expect(normalizedSkill).toContain('never an unnecessary exact address')
     expect(normalizedSkill).toContain('current outdoor air quality')
+    expect(normalizedSkill).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
     expect(normalizedSkill).toContain(
-      'heat, cold, or poor outdoor air that changes advice about exercise, recovery, sleep, fatigue, symptoms, or time outdoors',
+      'use only a returned alert about extreme heat, extreme cold, or outdoor air quality',
     )
     expect(normalizedSkill).toContain(
-      'Treat conditions as context or added load, not proof that they caused a health change.',
+      'Never infer an alert from raw temperature, AQI, a forecast, or a Murph-defined threshold.',
     )
     expect(normalizedSkill).toContain(
-      "Outdoor air quality is not evidence about the member's indoor air.",
+      'Treat a relevant alert as context or added load, not proof that it caused a health change.',
     )
-    expect(normalizedSkill).toContain(
-      'Do not claim unsupported UV or official-alert data.',
-    )
+    expect(normalizedSkill).toContain('Ignore unrelated alerts such as hurricanes or tornadoes')
   })
 
   it('keeps Mapbox as the geocoding and routing layer', async () => {

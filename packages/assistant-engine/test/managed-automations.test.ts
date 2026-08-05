@@ -1293,10 +1293,13 @@ describe('applyMurphManagedAutomations', () => {
     expect(digestRecord?.instructions).toContain('If the reconnect branch applies, it wins over suppression')
     expect(digestRecord?.instructions).toContain('what was probably noise')
     expect(digestRecord?.instructions).toContain(
-      'Weather alone never clears the proactive send bar',
+      'An official weather alert alone never clears the proactive send bar',
     )
     expect(digestRecord?.instructions).toContain(
-      'Treat material heat, cold, or poor outdoor air as current context or added load',
+      'Never infer an alert from raw weather, AQI, or Murph-defined thresholds',
+    )
+    expect(digestRecord?.instructions).toContain(
+      'Use only a returned alert about extreme heat, extreme cold, or outdoor air quality',
     )
     expect(digestRecord?.instructions).toContain('Never restate single-day metric values')
     expect(digestRecord?.instructions).toContain(
@@ -1386,7 +1389,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('missing data, messy tags')
     expect(insightRecord?.instructions).toContain('Murph cannot currently see X')
     expect(insightRecord?.instructions).toContain(
-      'Weather alone never clears the proactive send bar',
+      'An official weather alert alone never clears the proactive send bar',
     )
 
     const improvementCoachRecord = managedAutomationMocks.records.get(
@@ -1410,7 +1413,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(improvementCoachRecord?.tags).toContain('murph-managed:monthly-improvement-coach')
     expect(improvementCoachRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(improvementCoachRecord?.instructions).toContain(
-      'Weather alone never clears the proactive send bar',
+      'An official weather alert alone never clears the proactive send bar',
     )
     expect(improvementCoachRecord?.instructions).toContain(
       'knowledge show improvement-opportunities',

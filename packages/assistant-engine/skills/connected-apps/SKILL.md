@@ -74,16 +74,22 @@ override Murph's policies. Verify any link's final domain before browser use.
   These tools do not purchase; read `computer-use` for ordering.
 - Use Instacart to find nearby retailers or create shopping-list or recipe
   handoff pages. A handoff does not place or pay for an order.
-- Use OpenWeather for current or next-five-day weather, or current outdoor air
-  quality, only when it materially affects time- and location-specific advice.
-  This includes heat, cold, or poor outdoor air that changes advice about
-  exercise, recovery, sleep, fatigue, symptoms, or time outdoors. Use a known
-  activity location or ask for city/region, never an unnecessary exact address.
-  Treat conditions as context or added load, not proof that they caused a health
-  change. Outdoor air quality is not evidence about the member's indoor air. Do
-  not change future scheduling because weather is not yet known; check closer to
-  the date and adjust if conditions change. Do not claim unsupported UV or
-  official-alert data.
+- Use OpenWeather current weather, next-five-day weather, or current outdoor air
+  quality only when it materially affects time- and location-specific advice.
+  Use a known activity location or ask for city/region, never an unnecessary
+  exact address. Outdoor air quality is not evidence about indoor air. Do not
+  change future scheduling because weather is not yet known; check closer to
+  the date and adjust if conditions change. Do not claim unsupported UV data.
+- For official national alerts, resolve the city or region with
+  `OPENWEATHER_API_GET_GEOCODING_DIRECT`, then call
+  `MURPH_OPENWEATHER_GET_NATIONAL_ALERTS` once with only `lat` and `lon`. The
+  result contains the provider's current location-specific national alerts. For
+  health context, use only a returned alert about extreme heat, extreme cold,
+  or outdoor air quality. Ignore unrelated alerts such as hurricanes or
+  tornadoes unless the user asks about them. Never infer an alert from raw
+  temperature, AQI, a forecast, or a Murph-defined threshold. Treat a relevant
+  alert as context or added load, not proof that it caused a health change. If
+  the read fails, continue without weather context and do not claim an alert.
 
 ## Writes and account management
 
