@@ -1,0 +1,54 @@
+name: Fix signup referral assistant contracts
+
+on:
+  push:
+    branches:
+      - feat/explicit-signup-referral-links
+    paths:
+      - .github/workflows/fix-signup-referral-assistant-contracts.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Keep the group tool contract bounded
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          tool_path = Path("packages/assistant-engine/src/assistant-codex/dynamic-tools.ts")
+          tool = tool_path.read_text()
+          redundant = " create_signup_referral_link returns a shareable attributed signup link only after an explicit link request; it never sends the link or arms an earned-usage mission, and a group request requires the exact message_ref."
+          if tool.count(redundant) != 1:
+              raise SystemExit("signup referral tool-description sentence did not match exactly once")
+          tool_path.write_text(tool.replace(redundant, "", 1))
+
+          test_path = Path("packages/assistant-engine/test/assistant-codex-group-tool.test.ts")
+          test = test_path.read_text()
+          old = '''      "cancel_usage_referral",
+              "list_memberships",'''.replace("              ", "      ")
+          new = '''      "cancel_usage_referral",
+              "create_signup_referral_link",
+              "list_memberships",'''.replace("              ", "      ")
+          if test.count(old) != 1:
+              raise SystemExit("group action expectation anchor did not match exactly once")
+          test_path.write_text(test.replace(old, new, 1))
+
+          Path(".github/workflows/fix-signup-referral-assistant-contracts.yml").unlink()
+          PY
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+      - name: Commit contract fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/assistant-engine .github/workflows/fix-signup-referral-assistant-contracts.yml
+          git commit -m "fix: keep signup referral tool contract bounded"
+          git push
