@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  buildHostedProductSupportEscalationSummary,
+} from "@murphai/hosted-execution/runtime-control";
+
 const prismaMocks = vi.hoisted(() => ({
   count: vi.fn(),
   createMany: vi.fn(),
@@ -118,8 +122,7 @@ describe("hosted product support escalation", () => {
           kind: "frustration",
           memberId: null,
           relatedChangelogItemIdsJson: [],
-          summary:
-            "a connected source reports success but Murph does not finish the connection.",
+          summary: "area=connected_source; problem=connection_failed",
         }),
       ],
       skipDuplicates: true,
@@ -146,15 +149,12 @@ describe("hosted product support escalation", () => {
     const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
     expect(emailText).toContain(`Feedback ID: ${feedbackId}`);
     expect(emailText).not.toContain(feedback.summary);
-    expect(emailText).not.toContain("connected source");
+    expect(emailText).not.toContain("connected_source");
   });
 
-  it("keeps semantic private details out of the member-linked row and email", async () => {
-    const semanticDetail =
-      "Maria's diabetes readings from her Dexcom vanished after syncing at the Lakeside clinic.";
+  it("keeps the canonical product issue out of the member-linked row and email", async () => {
     const feedback = makeSupportFeedback({
       idempotencyKey: "9".repeat(64),
-      detail: semanticDetail,
     });
     const feedbackId = buildHostedProductFeedbackId({ feedback });
     const sendEmail = vi.fn().mockResolvedValue({ providerMessageId: null });
@@ -183,14 +183,15 @@ describe("hosted product support escalation", () => {
     expect(memberRow?.summary).toBe(
       HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
     );
-    expect(memberRow?.summary).not.toContain("Maria");
-    expect(anonymousRow?.summary).toBe(semanticDetail);
+    expect(memberRow?.summary).not.toContain("connected_source");
+    expect(anonymousRow?.summary).toBe(
+      "area=connected_source; problem=connection_failed",
+    );
     expect(anonymousRow?.memberId).toBeNull();
 
     const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
-    expect(emailText).not.toContain("Maria");
-    expect(emailText).not.toContain("Dexcom");
-    expect(emailText).not.toContain("diabetes");
+    expect(emailText).not.toContain("connected_source");
+    expect(emailText).not.toContain("connection_failed");
     expect(emailText).toContain(`Member ID: ${MEMBER_ID}`);
   });
 
@@ -283,12 +284,13 @@ describe("hosted product support escalation", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("rejects a prefixed payload that is not the exact support shape", async () => {
+  it("rejects a free-form reserved payload before persistence", async () => {
     await expect(recordHostedProductFeedback({
       env: EMAIL_ENV,
       feedback: {
         ...makeSupportFeedback(),
-        kind: "feature_request",
+        summary:
+          `${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX} a connected source failed.`,
       },
       memberId: MEMBER_ID,
     })).rejects.toMatchObject({
@@ -345,18 +347,16 @@ describe("hosted product support escalation", () => {
 });
 
 function makeSupportFeedback(input: {
-  detail?: string;
   idempotencyKey?: string;
 } = {}) {
   return {
     idempotencyKey: input.idempotencyKey ?? "c".repeat(64),
     kind: "frustration" as const,
     relatedChangelogItemIds: [],
-    summary: [
-      HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
-      input.detail
-        ?? "a connected source reports success but Murph does not finish the connection.",
-    ].join(" "),
+    summary: buildHostedProductSupportEscalationSummary({
+      area: "connected_source",
+      problem: "connection_failed",
+    }),
   };
 }
 

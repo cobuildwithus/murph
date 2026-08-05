@@ -165,3 +165,16 @@ Updated: 2026-08-05
   The synthetic capture included `input`, `parallel_tool_calls`, `text`, and
   `tool_choice`; its ignored temporary harness and generated workspace build
   outputs were removed or remained outside version control.
+- Exact-head app verification on `11ccf04cc5` exposed that Web still classified
+  support by the complete valid shape rather than by the reserved prefix. An
+  old free-form `Support escalation:` value therefore fell through to ordinary
+  feedback persistence instead of failing closed, and the Web support fixtures
+  still built that obsolete value. Web now routes every exact reserved-prefix
+  value through the closed-shape validator, so malformed or free-form reserved
+  input is rejected before persistence. The Web fixtures and callback-boundary
+  case use the shared canonical builder. After reconciling current `main`, the
+  focused Web suites pass 11 tests, the shared support contract passes 6 tests,
+  and Hosted Execution typecheck passes. Web typecheck reaches only the same
+  unrelated existing `next.config.ts` and `next-config.test.ts` `agentRules`
+  type errors, neither of which is in this PR's diff; exact-head CI remains
+  pending.

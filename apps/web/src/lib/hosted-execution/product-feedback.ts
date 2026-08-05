@@ -50,8 +50,11 @@ export async function recordHostedProductFeedback(input: {
   const feedbackId = buildHostedProductFeedbackId({
     feedback: input.feedback,
   });
-  const supportEscalation = isHostedProductSupportEscalationSummary(
-    feedback.summary,
+  // The reserved prefix is itself the support-path discriminator. Fail closed
+  // below when the remainder is not the exact closed-vocabulary shape instead
+  // of persisting a malformed or free-form escalation as ordinary feedback.
+  const supportEscalation = feedback.summary.startsWith(
+    HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   );
 
   if (!supportEscalation) {
