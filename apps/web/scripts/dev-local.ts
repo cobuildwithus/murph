@@ -9,7 +9,6 @@ import { resolveHostedWebDistDir } from "../next-artifacts";
 import { assertHostedWebDatabaseUrlConfigured } from "../src/lib/hosted-web/database-env";
 
 const DEFAULT_DEV_CACHE_LIMIT_BYTES = 4 * 1024 * 1024 * 1024;
-const hostedWebDevBundlerEnvVarName = "MURPH_NEXT_DEV_BUNDLER";
 const hostedWebDevCacheLimitEnvVarName = "MURPH_NEXT_DEV_CACHE_LIMIT_MB";
 const hostedWebDevLockDirectoryName = ".dev-server.lock";
 const hostedWebDevLockMetadataFileName = "owner.json";
@@ -48,8 +47,12 @@ export function buildHostedWebDevArgv(
 ): string[] {
   const resolvedArgv = argv[0] === "--" ? [...argv.slice(1)] : [...argv];
 
-  if (!resolvedArgv.includes("--turbopack") && !resolvedArgv.includes("--webpack")) {
-    resolvedArgv.push(resolveHostedWebDevBundlerFlag(environment));
+  if (resolvedArgv.includes("--webpack")) {
+    throw new Error("Hosted web development supports Turbopack only.");
+  }
+
+  if (!resolvedArgv.includes("--turbopack")) {
+    resolvedArgv.push("--turbopack");
   }
 
   if (
@@ -410,10 +413,6 @@ async function pruneOversizedHostedWebDevArtifacts(
   process.stderr.write(
     `Pruned hosted-web ${runtimePaths.distDirName} Turbopack cache after it reached ${formatBytes(cacheSizeBytes)} (limit ${formatBytes(cacheLimitBytes)}).\n`,
   );
-}
-
-function resolveHostedWebDevBundlerFlag(environment: NodeJS.ProcessEnv): "--turbopack" | "--webpack" {
-  return environment[hostedWebDevBundlerEnvVarName] === "webpack" ? "--webpack" : "--turbopack";
 }
 
 function resolveHostedWebDevPort(
