@@ -1943,7 +1943,9 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         env: { OPENAI_API_KEY: 'openai-test-key' },
         fetchImpl,
-        hostedToolContext: createHostedToolContext(),
+        hostedToolContext: createHostedToolContext({
+          computerToolsAvailable: false,
+        }),
         prompt: 'generate then clear media',
         requireHostedPrivateImageDelivery: true,
         vaultRoot,
@@ -3879,6 +3881,9 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         env: { OPENAI_API_KEY: 'openai-test-key' },
         fetchImpl,
+        hostedToolContext: createHostedToolContext({
+          computerToolsAvailable: false,
+        }),
         progressDelivery,
         prompt: 'generate with progress',
         requireHostedPrivateImageDelivery: true,
@@ -4029,6 +4034,9 @@ describe('assistant codex runtime', () => {
     const result = await executeCodexAppServerTurn({
       env: { OPENAI_API_KEY: 'openai-test-key' },
       fetchImpl,
+      hostedToolContext: createHostedToolContext({
+        computerToolsAvailable: false,
+      }),
       prompt: 'attach media then exceed the limit',
       requireHostedPrivateImageDelivery: true,
       vaultRoot,
@@ -7954,6 +7962,9 @@ describe('assistant codex runtime', () => {
           PATH: '/custom/bin',
         },
         fetchImpl,
+        hostedToolContext: createHostedToolContext({
+          computerToolsAvailable: false,
+        }),
         prompt: 'start the warm process',
         requireHostedPrivateImageDelivery: true,
         sandbox: 'workspace-write',
@@ -7974,6 +7985,9 @@ describe('assistant codex runtime', () => {
           PATH: '/custom/bin',
         },
         fetchImpl,
+        hostedToolContext: createHostedToolContext({
+          computerToolsAvailable: false,
+        }),
         prompt: 'write from the current warm turn',
         requireHostedPrivateImageDelivery: true,
         sandbox: 'workspace-write',
@@ -18480,6 +18494,9 @@ describe('assistant codex event shaping', () => {
           PATH: '/custom/bin',
         },
         fetchImpl,
+        hostedToolContext: createHostedToolContext({
+          computerToolsAvailable: false,
+        }),
         prompt: 'generate an image while a child reports usage',
         requireHostedPrivateImageDelivery: true,
         sandbox: 'workspace-write',
