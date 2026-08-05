@@ -35,6 +35,7 @@ import {
 } from "../src/hosted-runtime/callbacks.ts";
 import {
   compactHostedConversationMailboxHandledItemIds,
+  compactHostedConversationMailboxHandledItemSelection,
   compactHostedPendingAssistantInputIds,
   collectHostedPendingAssistantInputMediaRetentionProtections,
   enqueueHostedPendingAssistantInputId,
@@ -74,21 +75,33 @@ describe("hosted pending assistant input index", () => {
     const first = selectHostedConversationMailboxHandledItemBatch({
       candidates,
       cursorInputId: null,
+      frontierInputId: "input-257",
     });
     expect(first.candidates).toHaveLength(256);
     expect(first.candidates[0]?.mailboxItemId).toBe("item-1");
     expect(first.candidates.at(-1)?.mailboxItemId).toBe("item-256");
+    expect(first.frontierSelected).toBe(false);
     expect(first.nextCursorInputId).toBe("input-256");
 
     const second = selectHostedConversationMailboxHandledItemBatch({
       candidates,
       cursorInputId: first.nextCursorInputId,
+      frontierInputId: "input-257",
     });
     expect(second.candidates).toHaveLength(256);
     expect(second.candidates.slice(0, 3).map((candidate) => candidate.mailboxItemId))
       .toEqual(["item-257", "item-258", "item-1"]);
     expect(second.candidates.at(-1)?.mailboxItemId).toBe("item-254");
+    expect(second.frontierSelected).toBe(true);
     expect(second.nextCursorInputId).toBe("input-254");
+
+    const missingFrontierMapping = selectHostedConversationMailboxHandledItemBatch({
+      candidates: candidates.slice(1),
+      cursorInputId: null,
+      frontierInputId: "input-1",
+    });
+    expect(missingFrontierMapping.candidates).toHaveLength(256);
+    expect(missingFrontierMapping.frontierSelected).toBe(false);
   });
 
   it("preserves the exact abort reason before background compaction starts", async () => {
@@ -250,6 +263,20 @@ describe("hosted pending assistant input index", () => {
       consumedThroughSeq: "0",
       vaultRoot,
     })).resolves.toEqual(["item_prefix_linq"]);
+    await expect(compactHostedConversationMailboxHandledItemSelection({
+      consumedThroughSeq: null,
+      vaultRoot,
+    })).resolves.toEqual({
+      frontierSelected: false,
+      itemIds: ["item_prefix_linq"],
+    });
+    await expect(compactHostedConversationMailboxHandledItemSelection({
+      consumedThroughSeq: "1",
+      vaultRoot,
+    })).resolves.toEqual({
+      frontierSelected: true,
+      itemIds: ["item_prefix_linq"],
+    });
 
     await writeTerminalEvidence({
       evidenceId: later.inputId,

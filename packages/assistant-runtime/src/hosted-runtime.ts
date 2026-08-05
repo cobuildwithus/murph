@@ -200,7 +200,7 @@ import {
   readHostedSystemMailboxHandledThroughSeq,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
-  compactHostedConversationMailboxHandledItemIds,
+  compactHostedConversationMailboxHandledItemSelection,
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
@@ -5134,8 +5134,8 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   }
 
   input.assertRuntimeNotAborted();
-  const handledConversationMailboxItemIds =
-    await compactHostedConversationMailboxHandledItemIds({
+  const handledConversationMailboxSelection =
+    await compactHostedConversationMailboxHandledItemSelection({
       consumedThroughSeq: readHostedConversationConsumedSeqFromStatus(
         input.redactedStatus,
       ),
@@ -5150,7 +5150,10 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     vaultRoot: input.vaultRoot,
   });
   const checkpointInput = {
-    handledConversationMailboxItemIds,
+    handledConversationFrontierSelected:
+      handledConversationMailboxSelection.frontierSelected,
+    handledConversationMailboxItemIds:
+      handledConversationMailboxSelection.itemIds,
     ...(input.idleCheckpointTrigger
       ? { idleCheckpointTrigger: input.idleCheckpointTrigger }
       : {}),
