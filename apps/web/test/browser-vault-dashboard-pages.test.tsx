@@ -267,7 +267,8 @@ test("EnvironmentPage gives zero-data members one clear start and previews the r
   assert.match(markup, /Prefer typing\? Use chat/);
   assert.match(markup, /Murph will turn the clear details/);
   assert.match(markup, /Your report will cover/);
-  assert.match(
+  assert.match(markup, /class="flex w-full flex-col gap-10"/);
+  assert.doesNotMatch(
     markup,
     /Missing answers and optional equipment never lower your grade/,
   );

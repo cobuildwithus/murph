@@ -94,6 +94,7 @@ import {
   BIOMARKER_STUDY_GROUPS,
 } from "@/src/components/biomarkers/biomarker-design-data";
 import { DesignPage } from "@/app/design/design-page";
+import DesignRoute from "@/app/design/page";
 
 beforeEach(() => {
   navigationMocks.replace.mockReset();
@@ -113,6 +114,8 @@ test("design page routes the biomarker studies through the dedicated sections ta
   );
   expect(sectionsMarkup).toContain("Homepage experiment flow");
   expect(sectionsMarkup).toContain("Homepage personas");
+  expect(sectionsMarkup).toContain("Homepage footer");
+  expect(sectionsMarkup).toContain('data-design-section="homepage-footer"');
   expect(sectionsMarkup).toContain("Changelog archive edition");
   expect(sectionsMarkup).toContain('data-design-study="changelog-archive"');
   expect(sectionsMarkup).toContain("A week that closes its own loops");
@@ -232,6 +235,18 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(groupFundingStudySource).toContain(
     'mode="one_time"',
   );
+});
+
+test("design sections keep the route footer as the sole canonical footer target", async () => {
+  const route = await DesignRoute({
+    searchParams: Promise.resolve({ tab: "sections" }),
+  });
+  const routeMarkup = renderToStaticMarkup(route);
+
+  expect(routeMarkup.match(/id="site-footer"/g)).toHaveLength(1);
+  expect(routeMarkup).toContain('id="design-site-footer-preview"');
+  expect(routeMarkup).toContain('data-design-section="homepage-footer"');
+  expect(routeMarkup).toContain("inert=");
 });
 
 test("biomarker preparing study reassures members and previews the index structure", () => {
