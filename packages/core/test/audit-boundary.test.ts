@@ -13,6 +13,7 @@ const CANONICAL_WRITE_ALLOWLIST = new Set([
   "audited-write.ts",
   "domains/events/attachment-backed.ts",
   "domains/events/automatic-meal-photo-retention.ts",
+  "domains/events/generated-image-capture-retention.ts",
   "domains/events/ledger.ts",
   "domains/experiments.ts",
   "domains/shared.ts",

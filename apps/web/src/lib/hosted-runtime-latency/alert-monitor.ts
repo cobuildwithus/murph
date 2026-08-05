@@ -26,7 +26,7 @@ export const HOSTED_RUNTIME_LATENCY_ALERT_MINIMUM_INTERVAL_MS = 10 * 60_000;
 const HOSTED_RUNTIME_LATENCY_MONITOR_ID = "hosted-runtime-latency-monitor:v1";
 const HOSTED_RUNTIME_LATENCY_MONITOR_KIND = "hosted_runtime_latency_monitor";
 const HOSTED_RUNTIME_LATENCY_MONITOR_SUBJECT = "Hosted runtime reply latency";
-const HOSTED_RUNTIME_LATENCY_MONITOR_SCHEMA = "murph.hosted-runtime-latency-monitor.v2";
+const HOSTED_RUNTIME_LATENCY_MONITOR_SCHEMA = "murph.hosted-runtime-latency-monitor.v3";
 const HOSTED_RUNTIME_LATENCY_COMPLETED_WINDOW_MS = 10 * 60_000;
 const HOSTED_RUNTIME_LATENCY_UNRESOLVED_WINDOW_MS = 24 * 60 * 60_000;
 const HOSTED_RUNTIME_LATENCY_READ_LIMIT = 20_000;
@@ -73,8 +73,13 @@ export interface HostedRuntimeLatencyHealth {
   oldestUnresolvedAgeMs: number | null;
   recentCompletedReplyCount: number;
   recentSlowInitialResponseCount: number;
+  recentSlowPreProviderDominantCount: number;
+  recentSlowProviderExecutionDominantCount: number;
+  recentSlowUnknownBoundaryCount: number;
   scanTruncated: boolean;
   thresholdMs: number;
+  unresolvedCheckpointAcknowledgementCount: number;
+  unresolvedMissingTerminalEvidenceCount: number;
   unresolvedReplyCount: number;
   windowMinutes: number;
 }
@@ -331,6 +336,11 @@ export function summarizeHostedRuntimeLatencyRows(input: {
   let oldestUnresolvedAgeMs: number | null = null;
   let recentCompletedReplyCount = 0;
   let recentSlowInitialResponseCount = 0;
+  let recentSlowPreProviderDominantCount = 0;
+  let recentSlowProviderExecutionDominantCount = 0;
+  let recentSlowUnknownBoundaryCount = 0;
+  let unresolvedCheckpointAcknowledgementCount = 0;
+  let unresolvedMissingTerminalEvidenceCount = 0;
   let unresolvedReplyCount = 0;
 
   const groupedRows = new Map<string, HostedRuntimeLatencyHealthRow[]>();
@@ -404,17 +414,43 @@ export function summarizeHostedRuntimeLatencyRows(input: {
           maxFirstVisibleResponseLatencyMs ?? 0,
           latencyMs,
         );
+        const providerStartAtValues = [
+          ...new Set(rows
+            .map((row) => row.providerStartAt?.getTime() ?? null)
+            .filter((value): value is number => value !== null)),
+        ];
+        const providerStartAtMs = providerStartAtValues[0] ?? null;
+        if (providerStartAtValues.length === 0) {
+          recentSlowUnknownBoundaryCount += 1;
+        } else if (
+          providerStartAtValues.length !== 1
+          || providerStartAtMs === null
+          || providerStartAtMs < acceptedAtMs
+          || providerStartAtMs > firstVisibleResponseAtMs
+        ) {
+          invalidChronologyCount += 1;
+          recentSlowUnknownBoundaryCount += 1;
+        } else if (
+          firstVisibleResponseAtMs - providerStartAtMs
+          >= providerStartAtMs - acceptedAtMs
+        ) {
+          recentSlowProviderExecutionDominantCount += 1;
+        } else {
+          recentSlowPreProviderDominantCount += 1;
+        }
       }
       continue;
     }
 
     let groupOldestUnresolvedAgeMs: number | null = null;
+    let groupHasUnacknowledgedTerminalNonReply = false;
     for (const row of rows) {
       const rowAcceptedAtMs = row.acceptedAt.getTime();
       const checkpointPublicationExpectedByMs =
         row.checkpointPublicationExpectedBy?.getTime() ?? null;
       const terminalNonReplyCommittedAtMs =
         row.terminalNonReplyCommittedAt?.getTime() ?? null;
+      let rowHasValidTerminalNonReply = false;
 
       if (terminalNonReplyCommittedAtMs !== null) {
         if (
@@ -422,21 +458,25 @@ export function summarizeHostedRuntimeLatencyRows(input: {
           || terminalNonReplyCommittedAtMs > nowMs
         ) {
           invalidChronologyCount += 1;
-        } else if (
-          checkpointPublicationExpectedByMs !== null
-          && checkpointPublicationExpectedByMs >= terminalNonReplyCommittedAtMs
-          && nowMs <= checkpointPublicationExpectedByMs
-        ) {
-          // The runtime refreshes this expectation whenever later dirty work
-          // restarts the idle checkpoint window. A crashed runtime stops
-          // refreshing it, so the row becomes unresolved after the last
-          // published expectation instead of being hidden indefinitely.
-          continue;
-        } else if (
-          checkpointPublicationExpectedByMs !== null
-          && checkpointPublicationExpectedByMs < terminalNonReplyCommittedAtMs
-        ) {
-          invalidChronologyCount += 1;
+        } else {
+          rowHasValidTerminalNonReply = true;
+          if (
+            checkpointPublicationExpectedByMs !== null
+            && checkpointPublicationExpectedByMs >= terminalNonReplyCommittedAtMs
+            && nowMs <= checkpointPublicationExpectedByMs
+          ) {
+            // The runtime refreshes this expectation whenever later dirty work
+            // restarts the idle checkpoint window. A crashed runtime stops
+            // refreshing it, so the row becomes unresolved after the last
+            // published expectation instead of being hidden indefinitely.
+            continue;
+          }
+          if (
+            checkpointPublicationExpectedByMs !== null
+            && checkpointPublicationExpectedByMs < terminalNonReplyCommittedAtMs
+          ) {
+            invalidChronologyCount += 1;
+          }
         }
       }
 
@@ -445,6 +485,7 @@ export function summarizeHostedRuntimeLatencyRows(input: {
         ageMs >= HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS
         && row.consumedAt === null
       ) {
+        groupHasUnacknowledgedTerminalNonReply ||= rowHasValidTerminalNonReply;
         groupOldestUnresolvedAgeMs = Math.max(
           groupOldestUnresolvedAgeMs ?? 0,
           ageMs,
@@ -458,6 +499,11 @@ export function summarizeHostedRuntimeLatencyRows(input: {
         < HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS;
     if (groupOldestUnresolvedAgeMs !== null && !earlyProgressAccepted) {
       unresolvedReplyCount += 1;
+      if (groupHasUnacknowledgedTerminalNonReply) {
+        unresolvedCheckpointAcknowledgementCount += 1;
+      } else {
+        unresolvedMissingTerminalEvidenceCount += 1;
+      }
       oldestUnresolvedAgeMs = Math.max(
         oldestUnresolvedAgeMs ?? 0,
         groupOldestUnresolvedAgeMs,
@@ -476,8 +522,13 @@ export function summarizeHostedRuntimeLatencyRows(input: {
     oldestUnresolvedAgeMs,
     recentCompletedReplyCount,
     recentSlowInitialResponseCount,
+    recentSlowPreProviderDominantCount,
+    recentSlowProviderExecutionDominantCount,
+    recentSlowUnknownBoundaryCount,
     scanTruncated,
     thresholdMs: HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS,
+    unresolvedCheckpointAcknowledgementCount,
+    unresolvedMissingTerminalEvidenceCount,
     unresolvedReplyCount,
     windowMinutes: HOSTED_RUNTIME_LATENCY_COMPLETED_WINDOW_MS / 60_000,
   };
@@ -822,7 +873,17 @@ function buildHostedRuntimeLatencyAlertDetails(input: {
       recentCompletedReplyCount: input.health.recentCompletedReplyCount,
       recentSlowInitialResponseCount:
         input.health.recentSlowInitialResponseCount,
+      recentSlowPreProviderDominantCount:
+        input.health.recentSlowPreProviderDominantCount,
+      recentSlowProviderExecutionDominantCount:
+        input.health.recentSlowProviderExecutionDominantCount,
+      recentSlowUnknownBoundaryCount:
+        input.health.recentSlowUnknownBoundaryCount,
       scanTruncated: input.health.scanTruncated,
+      unresolvedCheckpointAcknowledgementCount:
+        input.health.unresolvedCheckpointAcknowledgementCount,
+      unresolvedMissingTerminalEvidenceCount:
+        input.health.unresolvedMissingTerminalEvidenceCount,
       unresolvedReplyCount: input.health.unresolvedReplyCount,
     },
     incidentId: input.incidentId,
@@ -844,7 +905,7 @@ function buildHostedRuntimeLatencyAlertMessage(input: {
       ? `${input.health.recentSlowInitialResponseCount} completed ${pluralizeReply(input.health.recentSlowInitialResponseCount)} with no progress or final response within 30 seconds`
       : null,
     input.health.unresolvedReplyCount > 0
-      ? `${input.health.unresolvedReplyCount} traced ${pluralizeMessage(input.health.unresolvedReplyCount)} still unresolved after 30 seconds`
+      ? `${input.health.unresolvedReplyCount} unresolved ${pluralizeTurn(input.health.unresolvedReplyCount)} with no visible response or durable acknowledgement after 30 seconds`
       : null,
     input.health.scanTruncated
       ? "the bounded latency scan was truncated"
@@ -857,6 +918,8 @@ function buildHostedRuntimeLatencyAlertMessage(input: {
     input.health.oldestUnresolvedAgeMs !== null
       ? `Oldest unresolved: ${formatDuration(input.health.oldestUnresolvedAgeMs)}`
       : null,
+    buildHostedRuntimeSlowBoundarySummary(input.health),
+    buildHostedRuntimeUnresolvedBoundarySummary(input.health),
   ].filter((value): value is string => value !== null);
 
   return [
@@ -865,6 +928,43 @@ function buildHostedRuntimeLatencyAlertMessage(input: {
     timing.length > 0 ? `${timing.join(". ")}.` : null,
     `Checked ${formatHostedRuntimeLatencyAlertTime(input.now)}.`,
   ].filter((value): value is string => value !== null).join(" ");
+}
+
+function buildHostedRuntimeSlowBoundarySummary(
+  health: HostedRuntimeLatencyHealth,
+): string | null {
+  const boundaries = [
+    health.recentSlowProviderExecutionDominantCount > 0
+      ? `${health.recentSlowProviderExecutionDominantCount} provider/assistant execution dominant`
+      : null,
+    health.recentSlowPreProviderDominantCount > 0
+      ? `${health.recentSlowPreProviderDominantCount} pre-provider path dominant`
+      : null,
+    health.recentSlowUnknownBoundaryCount > 0
+      ? `${health.recentSlowUnknownBoundaryCount} unclassified (missing or invalid chronology)`
+      : null,
+  ].filter((value): value is string => value !== null);
+  return boundaries.length > 0 ? `Slow boundary: ${boundaries.join(", ")}` : null;
+}
+
+function buildHostedRuntimeUnresolvedBoundarySummary(
+  health: HostedRuntimeLatencyHealth,
+): string | null {
+  const boundaries = [
+    health.unresolvedCheckpointAcknowledgementCount > 0
+      ? health.unresolvedCheckpointAcknowledgementCount === 1
+        ? "1 terminal non-reply lacks durable checkpoint acknowledgement"
+        : `${health.unresolvedCheckpointAcknowledgementCount} terminal non-replies lack durable checkpoint acknowledgement`
+      : null,
+    health.unresolvedMissingTerminalEvidenceCount > 0
+      ? health.unresolvedMissingTerminalEvidenceCount === 1
+        ? "1 unresolved turn has no valid terminal response evidence"
+        : `${health.unresolvedMissingTerminalEvidenceCount} unresolved turns have no valid terminal response evidence`
+      : null,
+  ].filter((value): value is string => value !== null);
+  return boundaries.length > 0
+    ? `Unresolved boundary: ${boundaries.join(", ")}`
+    : null;
 }
 
 function buildHostedRuntimeLatencyAlertIdempotencyKey(
@@ -1039,6 +1139,6 @@ function pluralizeReply(count: number): string {
   return count === 1 ? "reply" : "replies";
 }
 
-function pluralizeMessage(count: number): string {
-  return count === 1 ? "message" : "messages";
+function pluralizeTurn(count: number): string {
+  return count === 1 ? "turn" : "turns";
 }

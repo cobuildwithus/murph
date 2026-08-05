@@ -9,7 +9,7 @@ export function SettingsCustomInferenceStudy() {
   return (
     <div
       id="settings-custom-inference"
-      className="flex flex-col gap-8"
+      className="mx-auto flex w-full max-w-5xl flex-col gap-8"
       data-design-section="settings-custom-inference"
       inert
     >

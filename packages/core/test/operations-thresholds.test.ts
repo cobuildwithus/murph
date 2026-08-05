@@ -1245,6 +1245,74 @@ test("hosted canonical receipt replay allows raw manifest text writes idempotent
   );
 });
 
+test("hosted guarded text replay replaces only the inspected raw preimage", async () => {
+  const vaultRoot = await makeTempDirectory(
+    "murph-core-hosted-guarded-raw-text-replay",
+  );
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "raw/captures/2026/04/cap_1/media_1-image.webp";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetRelativePath).absolutePath;
+  const original = Buffer.from("original generated image bytes", "utf8");
+  const tombstone = "{\"schema\":\"murph.generated-image-retention-tombstone.v1\"}\n";
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, original);
+
+  const payloads = new Map<string, Uint8Array>();
+  const receipts: HostedCanonicalWriteReceipt[] = [];
+  const batch = await WriteBatch.create({
+    hostedCanonicalWritePort: {
+      async persistCanonicalWrite(input) {
+        receipts.push(input.receipt);
+        for (const payload of input.payloads) {
+          payloads.set(payload.sha256, payload.bytes);
+        }
+      },
+    },
+    operationType: "hosted_guarded_raw_text_replay",
+    summary: "replace inspected generated image bytes",
+    vaultRoot,
+  });
+  await batch.stageTextWrite(targetRelativePath, tombstone, {
+    allowRaw: true,
+    expectedTargetReceipt: {
+      byteLength: original.byteLength,
+      sha256: createHash("sha256").update(original).digest("hex"),
+    },
+  });
+  await batch.commit();
+  const receipt = receipts[0];
+  assert.ok(receipt);
+  assert.deepEqual(receipt.actions[0], {
+    allowRaw: true,
+    byteLength: Buffer.byteLength(tombstone),
+    contentRef: {
+      byteSize: Buffer.byteLength(tombstone),
+      sha256: createHash("sha256").update(tombstone).digest("hex"),
+    },
+    effect: "update",
+    expectedByteLength: original.byteLength,
+    expectedSha256: createHash("sha256").update(original).digest("hex"),
+    kind: "text_upsert",
+    sha256: createHash("sha256").update(tombstone).digest("hex"),
+    targetRelativePath,
+  });
+
+  const replay = () => applyHostedCanonicalWriteReceipt({
+    readPayload: async (ref) => payloads.get(ref.sha256) ?? null,
+    receipt,
+    vaultRoot,
+  });
+  await fs.writeFile(targetAbsolutePath, original);
+  await replay();
+  await replay();
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), tombstone);
+
+  await fs.writeFile(targetAbsolutePath, "unrelated third state", "utf8");
+  await assert.rejects(replay(), /guarded text replay found conflicting/u);
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "unrelated third state");
+});
+
 test("write batches fail closed and roll back when hosted receipt persistence fails", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-operations-thresholds-hosted-receipts-fail");
   const receiptRoot = await makeTempDirectory("murph-core-operations-thresholds-hosted-receipts-fail-out");

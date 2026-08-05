@@ -7,6 +7,9 @@ import {
   jsonError,
   notFound,
 } from "../../json.ts";
+import type {
+  HostedLocalForegroundPriorityOrderingControlInput,
+} from "../../hosted-local-test/foreground-priority-ordering.ts";
 import {
   resolveHostedExecutionRunnerContainerName,
 } from "../../runner-container.ts";
@@ -59,6 +62,9 @@ interface HostedLocalTestRunnerContainerStubLike {
   armCanonicalCheckpointPublicationBarrierForTest?(
     input: { userId: string },
   ): Promise<{ ok: true }>;
+  armIdleSnapshotStartBarrierForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true }>;
   armSnapshotPublicationCorruptionForTest?(
     input: { userId: string },
   ): Promise<{ ok: true }>;
@@ -70,6 +76,9 @@ interface HostedLocalTestRunnerContainerStubLike {
   ): Promise<{ ok: true }>;
   dropActiveOperationForTest?(input: { userId: string }): Promise<{ ok: true }>;
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
+  foregroundPriorityOrderingControlForTest?(
+    input: HostedLocalForegroundPriorityOrderingControlInput,
+  ): Promise<unknown>;
   readShutdownCheckpointPublicationBarrierForTest?(
     input: { userId: string },
   ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
@@ -79,6 +88,17 @@ interface HostedLocalTestRunnerContainerStubLike {
   releaseShutdownCheckpointPublicationBarrierForTest?(
     input: { userId: string },
   ): Promise<{ ok: true; released: boolean }>;
+}
+
+function hasHostedLocalTestRunnerContainerForegroundPriorityOrderingControl(
+  stub: object,
+): stub is HostedLocalTestRunnerContainerStubLike & {
+  foregroundPriorityOrderingControlForTest(
+    input: HostedLocalForegroundPriorityOrderingControlInput,
+  ): Promise<unknown>;
+} {
+  return "foregroundPriorityOrderingControlForTest" in stub
+    && typeof stub.foregroundPriorityOrderingControlForTest === "function";
 }
 
 function hasHostedLocalTestRunnerContainerGeneratedImageProviderBarrierControl(
@@ -116,6 +136,7 @@ function hasHostedLocalTestRunnerContainerShutdownCheckpointPublicationBarrierCo
 ): stub is HostedLocalTestRunnerContainerStubLike & Required<Pick<
   HostedLocalTestRunnerContainerStubLike,
   | "armCanonicalCheckpointPublicationBarrierForTest"
+  | "armIdleSnapshotStartBarrierForTest"
   | "armShutdownCheckpointPublicationBarrierForTest"
   | "beginShutdownCheckpointGracefulStopForTest"
   | "readShutdownCheckpointPublicationBarrierForTest"
@@ -123,6 +144,8 @@ function hasHostedLocalTestRunnerContainerShutdownCheckpointPublicationBarrierCo
 >> {
   return "armCanonicalCheckpointPublicationBarrierForTest" in stub
     && typeof stub.armCanonicalCheckpointPublicationBarrierForTest === "function"
+    && "armIdleSnapshotStartBarrierForTest" in stub
+    && typeof stub.armIdleSnapshotStartBarrierForTest === "function"
     && "armShutdownCheckpointPublicationBarrierForTest" in stub
     && typeof stub.armShutdownCheckpointPublicationBarrierForTest === "function"
     && "beginShutdownCheckpointGracefulStopForTest" in stub
@@ -192,6 +215,22 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     ),
     methods: ["POST"],
     name: "test-canonical-checkpoint-lost-ack",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
+      return handleTestForegroundPriorityOrderingRoute(context, params.userId);
+    },
+    match: matchHostedLocalTestUserRoute(
+      "/__test/users/",
+      "/foreground-priority-ordering",
+    ),
+    methods: ["POST"],
+    name: "test-foreground-priority-ordering",
     wrongMethodResponse: "not-found",
   },
   {
@@ -465,6 +504,72 @@ export async function handleTestCanonicalCheckpointLostAckRoute(
   return json(await stub.armCanonicalCheckpointLostAckForTest({ userId }));
 }
 
+export async function handleTestForegroundPriorityOrderingRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-foreground-priority-ordering",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const actions = context.url.searchParams.getAll("action");
+  const action = actions.length === 1 ? actions[0] : null;
+  if (
+    context.url.searchParams.size !== 1
+    || (
+      action !== "arm-canonical"
+      && action !== "arm-empty-probe"
+      && action !== "clear"
+      && action !== "provider-start"
+      && action !== "release"
+      && action !== "status"
+    )
+  ) {
+    return jsonError(
+      "Foreground-priority ordering action must be arm-canonical, arm-empty-probe, clear, provider-start, release, or status.",
+      400,
+    );
+  }
+
+  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+    source: context.env,
+    userId,
+  });
+  const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
+  if (!hasHostedLocalTestRunnerContainerForegroundPriorityOrderingControl(stub)) {
+    throw new Error(
+      "Hosted runner container foreground-priority ordering test RPC is unavailable.",
+    );
+  }
+
+  if (action === "arm-canonical" || action === "arm-empty-probe") {
+    return json(await stub.foregroundPriorityOrderingControlForTest({
+      action: "arm",
+      barrierTarget: action === "arm-canonical"
+        ? "canonical_post_commit"
+        : "empty_conversation_probe",
+      userId,
+    }));
+  }
+
+  return json(await stub.foregroundPriorityOrderingControlForTest({
+    action: action === "provider-start" ? "record-provider-start" : action,
+    userId,
+  }));
+}
+
 async function handleTestGeneratedImageProviderBarrierRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
@@ -564,13 +669,14 @@ export async function handleTestShutdownCheckpointPublicationBarrierRoute(
     || (
       action !== "arm"
       && action !== "arm-canonical"
+      && action !== "arm-snapshot-start"
       && action !== "shutdown"
       && action !== "status"
       && action !== "release"
     )
   ) {
     return jsonError(
-      "Checkpoint publication barrier action must be arm, arm-canonical, shutdown, status, or release.",
+      "Checkpoint publication barrier action must be arm, arm-canonical, arm-snapshot-start, shutdown, status, or release.",
       400,
     );
   }
@@ -589,6 +695,8 @@ export async function handleTestShutdownCheckpointPublicationBarrierRoute(
   switch (action) {
     case "arm-canonical":
       return json(await stub.armCanonicalCheckpointPublicationBarrierForTest({ userId }));
+    case "arm-snapshot-start":
+      return json(await stub.armIdleSnapshotStartBarrierForTest({ userId }));
     case "arm":
       return json(await stub.armShutdownCheckpointPublicationBarrierForTest({ userId }));
     case "shutdown":
