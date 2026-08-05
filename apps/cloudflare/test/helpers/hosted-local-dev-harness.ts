@@ -97,6 +97,8 @@ export interface HostedLocalDevHarness {
   ): Promise<HostedRunnerStatusResponse>;
   armGeneratedImageProviderBarrierForTest(userId: string): Promise<{ ok: true }>;
   releaseGeneratedImageProviderBarrierForTest(userId: string): Promise<{ ok: true }>;
+  /** True only when this harness selected an existing production Web artifact. */
+  webUsesProductionArtifact: boolean;
   webBaseUrl: string;
   workerBaseUrl: string;
 }
@@ -166,6 +168,9 @@ export async function startHostedLocalDevHarness(input: {
     };
     harnessRuntimeEnv = runtimeEnv;
     nextDistDir = resolveHostedWebDevDistDirName(runtimeEnv);
+    const webUsesProductionArtifact = await shouldUseHostedWebProductionStart({
+      env: runtimeEnv,
+    });
 
     stack = await startHostedLocalDevStack({
       env: runtimeEnv,
@@ -427,6 +432,7 @@ export async function startHostedLocalDevHarness(input: {
           ...(lastStatusReadError ? [`last status read error: ${lastStatusReadError}`] : []),
         ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
       },
+      webUsesProductionArtifact,
       webBaseUrl,
       workerBaseUrl,
     };
