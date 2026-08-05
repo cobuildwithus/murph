@@ -98,6 +98,7 @@ it("passes host-only web overrides with the harness process pid", async () => {
   const harness = await startHostedLocalDevHarness({
     env: {
       DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
       NEXT_DIST_DIR_MODE: "smoke",
     },
     persistDirPrefix: "murph-hosted-local-test-",
@@ -108,6 +109,7 @@ it("passes host-only web overrides with the harness process pid", async () => {
 
   await harness.stop();
 
+  expect(harness.webUsesProductionArtifact).toBe(false);
   expect(startHostedLocalDevStack).toHaveBeenCalledWith({
     env: expect.objectContaining({
       MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
@@ -141,6 +143,7 @@ it("preserves a prebuilt production web dist across E2E prod stack stops", async
       persistDirPrefix: "murph-hosted-local-test-",
     });
 
+    expect(harness.webUsesProductionArtifact).toBe(true);
     await harness.stop();
 
     expect(existsSync(path.join(distDir, "BUILD_ID"))).toBe(true);

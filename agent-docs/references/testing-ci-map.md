@@ -281,6 +281,8 @@ linkage, and asks naturally without calling the tool; only a resumed affirmative
 approval may submit it. The opt-in real-model scenario also carries synthetic
 semantic private context and proves that context is absent from the disclosed
 summary and tool payload, while the group case remains tool-free.
+Routine CI compiles the live-provider scenario but skips it without an explicit
+supported provider credential.
 
 ## Current CI Workflows
 

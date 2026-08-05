@@ -2,7 +2,8 @@
 
 Last verified: 2026-08-04
 
-Implementation plan: `agent-docs/exec-plans/completed/2026-08-04-support-escalation-email-summary.md`.
+Consent prerequisite plan: `agent-docs/exec-plans/completed/2026-08-04-support-escalation-consent-prerequisite.md`.
+Detailed-email plan: `agent-docs/exec-plans/completed/2026-08-04-support-escalation-email-summary.md`.
 
 ## User purpose
 
@@ -31,6 +32,12 @@ A member who reaches a Murph-owned product blocker should not be left at a hard 
 - The support email contains exactly: a fixed escalation sentence, the labeled de-identified issue summary without the reserved prefix, the internal feedback id, and the internal member id.
 - Never include raw conversation or voice text, names, handles, email addresses, phone numbers, health facts, measurements, diagnoses, medications, precise locations, secrets, provider payloads, or any other unsanitized context in the support summary or email.
 
+## Deployment contract
+
+- The consent-only prerequisite changes the hosted runner prompt but leaves Web's support email metadata-only. Land it separately, deploy Cloudflare/runner with `container_rollout=immediate`, and require managed-container smoke to report the exact new bundle fingerprint before the stacked detailed-email PR may merge.
+- New runner plus old Web is safe: the member sees and approves the exact account-linked summary while the old alert remains metadata-only. Old runner plus new Web is unsafe and must not be admitted. New runner plus new Web completes the intended flow.
+- The consent-capable runner is the rollback floor while detailed-email Web is deployed. Roll back Web first; only after Web no longer emits detailed alerts may Cloudflare/runner return to the earlier policy. Use the existing bundle/source fingerprint admission and deploy smoke rather than adding consent-version state to the callback or database.
+
 ## Rate and replay behavior
 
 - The first three distinct escalation records for one member in one UTC day are email-eligible. Record timestamps are captured after the member-scoped advisory lock is held, so concurrent same-member escalations rank in lock-acquisition order and cannot overshoot the cap.
@@ -39,12 +46,6 @@ A member who reaches a Murph-owned product blocker should not be left at a hard 
 - This coordinated runner-and-Web rollout deliberately retains the existing provider key. During Resend's 24-hour key-retention window, a legacy alert that was already accepted before deployment and then replayed after deployment can return `invalid_idempotent_request` because the body changed; the original alert remains delivered and no duplicate is sent. Do not version the key for rollout. Monitor that provider error for 24 hours after deployment; the existing 12-second current-turn callback bound and absence of a retry queue keep the practical overlap narrow.
 - Ordinary feedback keeps the existing two-second callback bound; only the exact explicit support shape receives a bounded 12-second callback allowance, spent inside the turn where the model can truthfully report the outcome.
 - Murph never retries the model tool in the same turn or attempts to evade the server limit.
-
-## Deployment contract
-
-- The affirmative-approval policy is runner-bundle behavior, while the detailed support email is Web behavior. Deploy Cloudflare/runner first with `container_rollout=immediate`, and require managed-container smoke to report the exact new bundle fingerprint before deploying Web.
-- New runner plus old Web is safe: the member sees and approves the exact account-linked summary, while the old Web alert remains metadata-only. Old runner plus new Web is unsafe and must not be admitted because the old policy can submit without that approval. New runner plus new Web completes the intended flow.
-- The consent-capable runner is the rollback floor while detailed-email Web is deployed. Roll back Web first; only after Web no longer emits detailed alerts may Cloudflare/runner return to the earlier policy. Use the existing bundle/source fingerprint admission and deploy smoke rather than adding consent-version state to the callback or database.
 
 ## Public source context
 

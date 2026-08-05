@@ -1119,20 +1119,19 @@ That command:
 The gradual container rollout keeps the production `RunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
-The detailed support-escalation email rollout is runner-first because the
-affirmative exact-summary/account-linkage approval policy lives in
-`packages/assistant-engine`, while Web owns the email disclosure. Deploy
-Cloudflare/runner with `container_rollout=immediate`, then require
-managed-container smoke to report the exact new runner-bundle fingerprint
-before deploying Web. The compatibility matrix is asymmetric: new runner plus
-old Web is safe because the old alert remains metadata-only; old runner plus
-new Web is unsafe because the earlier prompt policy may submit before approval;
+The support-escalation consent prerequisite is a prompt-only runner release.
+Land it separately while Web's support alert remains metadata-only, deploy
+Cloudflare/runner with `container_rollout=immediate`, and require
+managed-container smoke to report the exact new runner-bundle fingerprint. A
+stacked Web PR may add the approved issue beside the member id only after that
+production convergence proof, making old runner plus new Web an inadmissible
+state. New runner plus old Web is safe because the alert remains metadata-only;
 new runner plus new Web completes the two-turn flow. Keep the consent-capable
 runner as the rollback floor while detailed-email Web is deployed. Roll back
 Web first and verify it no longer emits detailed alerts before rolling the
 runner back. The normal source/bundle fingerprint admission rejects stale
 shells on the user path and deploy smoke proves convergence; do not add a
-consent-version field, compatibility service, or second durable consent owner.
+feature flag, callback version, compatibility service, or second consent owner.
 
 The accepted group-message participant rollout is Web-first. Deploy the Web
 release that accepts both new exact `groupRequester` / `participant` evidence

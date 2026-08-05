@@ -41,14 +41,15 @@ beforeEach(async () => {
     },
   });
   mocks.upgradeHostedBillingPlan.mockResolvedValue({
-    billingPlanCode: "launch_edge_monthly",
-    status: "upgraded",
+    billingPlanCode: "launch_monthly",
+    paymentUrl: "https://billing.stripe.test/session_fixture",
+    status: "pending_payment",
   });
 
   billingUpgradeRoute = await import("../app/api/settings/billing/upgrade-plan/route");
 });
 
-test("upgrades an authenticated hosted member to Edge", async () => {
+test("opens Stripe confirmation for an authenticated hosted member upgrading to Edge", async () => {
   const response = await billingUpgradeRoute.POST(
     new Request("https://join.example.test/api/settings/billing/upgrade-plan", {
       body: JSON.stringify({
@@ -64,8 +65,9 @@ test("upgrades an authenticated hosted member to Edge", async () => {
 
   expect(response.status).toBe(200);
   await expect(response.json()).resolves.toEqual({
-    billingPlanCode: "launch_edge_monthly",
-    status: "upgraded",
+    billingPlanCode: "launch_monthly",
+    paymentUrl: "https://billing.stripe.test/session_fixture",
+    status: "pending_payment",
   });
   expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
@@ -81,8 +83,9 @@ test("upgrades an authenticated hosted member to Edge", async () => {
 
 test("upgrades an authenticated Group member to Pulse", async () => {
   mocks.upgradeHostedBillingPlan.mockResolvedValueOnce({
-    billingPlanCode: "launch_monthly",
-    status: "upgraded",
+    billingPlanCode: "launch_group_monthly",
+    paymentUrl: "https://billing.stripe.test/session_fixture",
+    status: "pending_payment",
   });
 
   const response = await billingUpgradeRoute.POST(

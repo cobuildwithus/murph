@@ -178,11 +178,13 @@ export interface HostedAppSessionForTestInput {
   environment?: NodeJS.ProcessEnv;
   memberId: string;
   privyUserId: string;
+  secureCookieMode: boolean;
 }
 
 export interface HostedAppSessionForTest {
   cookieName: string;
   cookieValue: string;
+  secureCookieMode: boolean;
   sessionId: string;
 }
 
@@ -1076,9 +1078,17 @@ export async function issueHostedAppSessionForTest(
       throw new Error("Hosted app session issuance returned an unparsable cookie.");
     }
 
+    const issuedCookieName = cookiePair.slice(0, separatorIndex).trim();
+    const unprefixedCookieName = issuedCookieName.startsWith("__Host-")
+      ? issuedCookieName.slice("__Host-".length)
+      : issuedCookieName;
+
     return {
-      cookieName: cookiePair.slice(0, separatorIndex).trim(),
+      cookieName: input.secureCookieMode
+        ? `__Host-${unprefixedCookieName}`
+        : unprefixedCookieName,
       cookieValue: decodeURIComponent(cookiePair.slice(separatorIndex + 1)),
+      secureCookieMode: input.secureCookieMode,
       sessionId: issued.sessionId,
     };
   });
