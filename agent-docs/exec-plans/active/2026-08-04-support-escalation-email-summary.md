@@ -145,7 +145,7 @@ Updated: 2026-08-04
 
 - Focused Web support service and route suites passed 14 tests. Focused
   Assistant Engine support guidance, assembled-prompt, tool-contract, and
-  real-model scenario-definition suites passed 90 tests with 25 opt-in live
+  prompt-budget and real-model scenario-definition suites passed 99 tests with 25 opt-in live
   model cases compiled and skipped. Web and Assistant Engine typechecks passed.
 - The opt-in live-model conversation scenario could not run locally because no
   supported provider credential was available. The committed two-turn scenario
@@ -157,10 +157,10 @@ Updated: 2026-08-04
   serialized `input`, `parallel_tool_calls`, `text`, and `tool_choice` fields,
   excluding transport-only model, stream, storage, reasoning, service-tier,
   cache, client-metadata, and output-inclusion fields identically. Direct input
-  moved from 22,938 tokens / 106,468 bytes to 23,042 / 107,065 (+104 tokens,
-  +0.4534%; +597 bytes, +0.5607%). Group moved from 19,504 tokens / 91,094 bytes
-  to 19,608 / 91,691 (+104 tokens, +0.5332%; +597 bytes, +0.6554%). Exact
-  serialized-field correction measurement attributes +24 tokens/+122 bytes to
+  moved from 22,938 tokens / 106,468 bytes to 23,020 / 106,951 (+82 tokens,
+  +0.3575%; +483 bytes, +0.4537%). Group moved from 19,504 tokens / 91,094 bytes
+  to 19,586 / 91,577 (+82 tokens, +0.4204%; +483 bytes, +0.5302%). Exact
+  serialized-field correction measurement attributes +2 tokens/+8 bytes to
   compact base support guidance, +30/+190 to the assembled ordinary-feedback
   exception, and +30/+177 to the support-aware tool description. Tool schema,
   generated guidance, and other provider-visible fields are unchanged. The
