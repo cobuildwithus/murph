@@ -110,6 +110,7 @@ describe("murph.group dynamic tool", () => {
       "read_usage_referral",
       "arm_usage_referral",
       "cancel_usage_referral",
+      "create_signup_referral_link",
       "list_memberships",
       "leave_membership",
       "update_display_name",

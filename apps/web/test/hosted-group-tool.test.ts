@@ -359,9 +359,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
     mocks.issueHostedSignupReferralLink.mockResolvedValue({
       expiresAt: new Date("2026-08-06T22:30:00.000Z"),
-      inviteCode: "invite",
-      signupUrl: "https://www.withmurph.ai/?referral=invite",
-      targetMemberId: "member_target",
+      signupUrl: "https://www.withmurph.ai/join/signup_invite",
     });
     mocks.getHostedLinqChatSummary.mockResolvedValue({
       displayName: "Weekend Warriors",
@@ -527,7 +525,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       action: "create_signup_referral_link",
       result: {
         expiresAt: "2026-08-06T22:30:00.000Z",
-        signupUrl: "https://www.withmurph.ai/?referral=invite",
+        signupUrl: "https://www.withmurph.ai/join/signup_invite",
         status: "ok",
       },
     });

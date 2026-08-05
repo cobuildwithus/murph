@@ -267,22 +267,6 @@ Do not say "sign up your mom" and do not immediately drop a link. First ask for
 an introduction. If that person later wants their own Murph, follow the
 reciprocal setup path.
 
-## Explicit shareable signup links
-
-A shareable signup link is a separate signup handoff, not proof for an earned
-usage mission. Do not create or send one merely because someone mentions a
-friend, asks about a mission, starts a group, or agrees to introduce Murph.
-The existing group introduction flow remains the default.
-
-Only after the current member explicitly asks for a signup, invite, referral,
-or shareable link to forward, call
-`murph.group action="create_signup_referral_link"`. In a group, pass the exact
-accepted `message_ref` from the member who asked. Use only the exact returned
-`signupUrl`; say naturally when it expires if useful. Murph returns the link to
-the requester and does not choose, contact, or message the recipient. The link
-records signup attribution only. Never say that sharing or using it earns
-usage, completes a mission, or guarantees a reward.
-
 ## Follow-up options
 
 When the user asks what to do, read current state again if the answer requires
