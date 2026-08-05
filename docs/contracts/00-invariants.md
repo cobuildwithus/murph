@@ -432,10 +432,17 @@ it has been explicitly elevated to a cross-cutting invariant.
   planner, prompt stack, thread policy, skills, and dynamic-tool eligibility.
   Its stored instructions are the turn request; trusted occurrence and delivery
   facts are context, and the send-or-skip JSON object is only a delivery
-  envelope. Trigger origin must not select a second assistant profile or a
-  reduced tool planner. Effects still require the same invocation ports,
-  audience and accepted-input evidence, and owning-boundary validation as any
-  other turn.
+  envelope. An active ordinary automation is independent authority: completion
+  of a merely related plan or experiment cannot silently cancel it unless the
+  stored instructions define that state as a skip condition or current evidence
+  proves the occurrence's requested action already happened. Plan-owned support
+  continues to use its typed owner and consent gates. Trigger origin must not
+  select a second assistant profile or a reduced tool planner. Effects still
+  require the same invocation ports, audience and accepted-input evidence, and
+  owning-boundary validation as any other turn. The existing cron run record
+  stores the scheduled occurrence and structured provider send-or-skip decision;
+  surrounding job and session ids are the bounded record references, while
+  private tool output and reasoning remain excluded.
 - A detached system notification without a valid scheduled occurrence is not a
   user or automation turn. It runs as isolated output-only formatting with no
   conversation history, private context, resume mutation, tools, network, or
