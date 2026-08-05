@@ -1097,9 +1097,12 @@ pnpm --dir apps/web release:production:migrate
 pnpm --dir apps/web release:production:contract-migrate
 ```
 
-The checked-in Vercel build command runs
-`pnpm release:production:migrate && pnpm build`, so Vercel deploys still run
-the guarded production migration wrapper automatically before building. The
+The checked-in Vercel build command runs the guarded production migration
+wrapper before building. That wrapper generates the Prisma client because the
+post-migration Linq sync needs it, then passes an explicit build-only handoff so
+the following production build reuses that client instead of generating it a
+second time. The handoff is accepted only for a main-branch Vercel production
+deploy; ordinary and preview builds still generate Prisma themselves. The
 generic `pnpm --dir apps/web build` script is intentionally non-mutating and
 only generates artifacts plus validation output. The predeploy migration
 wrapper uses `DIRECT_DATABASE_URL` when it is set, requires it in Vercel
@@ -1399,7 +1402,7 @@ does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 The production build launches the parent Next process explicitly through Node
 with `--max-old-space-size=1024` while appending
 `--max-old-space-size=3072` to `NODE_OPTIONS`. Node gives the direct CLI flag
-precedence in the parent. Next 16.2.6 reconstructs its non-isolated TypeScript
+precedence in the parent. Next 16.3 reconstructs its non-isolated TypeScript
 worker options from the parent arguments followed by `NODE_OPTIONS`, so the
 mandatory generated-contract validation receives the 3 GiB limit. Next removes
 that option from its isolated static workers. The existing caller options are
@@ -1418,11 +1421,10 @@ compilation to reduce build-memory pressure, while the memory-optimization mode
 trades some compile speed for a lower peak. Local development remains on
 Turbopack by default.
 
-Next 16.2.6 accepts `experimental.turbopackMemoryLimit` at the JavaScript/native
-boundary but discards the `_memory_limit` argument when creating its native
-backend. The option is therefore omitted rather than documented or tested as a
-4 GiB governor that does not exist. A Next upgrade must re-audit that behavior
-before reintroducing the option.
+Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
+`experimental.turbopackMemoryEviction`, is documented for development sessions
+with the Turbopack filesystem cache, so it cannot govern the production Webpack
+compile and remains omitted.
 
 A 2 GiB parent-old-space candidate passed one forced-cold Standard preview but
 the next identical build was still killed by the 8 GB container OOM boundary.

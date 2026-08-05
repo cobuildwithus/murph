@@ -20,12 +20,16 @@ describe("sync-hosted-linq-lines script", () => {
       mainBody.indexOf("assertHostedLinqAssignableHomeLinePoolReady({");
     const inventorySyncIndex = mainBody.indexOf("syncHostedLinqPhoneNumberInventory({");
     const inventorySkipIndex = mainBody.indexOf("Skipped Linq provider inventory sync.");
+    const finallyIndex = mainBody.indexOf("finally {");
+    const disconnectIndex = mainBody.indexOf("await prisma.$disconnect();");
 
     expect(configuredWriteIndex).toBeGreaterThanOrEqual(0);
     expect(configuredLogIndex).toBeGreaterThan(configuredWriteIndex);
     expect(inventorySyncIndex).toBeGreaterThan(configuredLogIndex);
     expect(inventorySkipIndex).toBeGreaterThan(inventorySyncIndex);
     expect(assignablePoolCheckIndex).toBeGreaterThan(inventorySkipIndex);
+    expect(finallyIndex).toBeGreaterThan(assignablePoolCheckIndex);
+    expect(disconnectIndex).toBeGreaterThan(finallyIndex);
   });
 
   it("omits malformed configured line values from stderr", () => {

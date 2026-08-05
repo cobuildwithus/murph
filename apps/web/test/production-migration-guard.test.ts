@@ -24,6 +24,9 @@ import {
   verifyVercelProductionDeploymentProtection,
 } from "../scripts/resolve-vercel-production-alias-sha";
 import {
+  prepareHostedWebPrismaClientForBuild,
+} from "../scripts/prepare-prisma-client-for-build";
+import {
   hostedRuntimeLogProductionMigrationCommand,
   hostedWebProductionLinqLineSyncCommand,
   hostedWebProductionMigrationCommand,
@@ -138,6 +141,55 @@ describe("hosted web production migration guard", () => {
       /HOSTED_APP_SESSION_HMAC_KEY/u,
     );
     assert.equal(commands, 0);
+  });
+
+  test("reuses the Prisma client only after the guarded production migration step", async () => {
+    let commands = 0;
+    const result = await prepareHostedWebPrismaClientForBuild(
+      {
+        MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS: "1",
+        VERCEL: "1",
+        VERCEL_ENV: "production",
+        VERCEL_GIT_COMMIT_REF: "main",
+      },
+      async () => { commands += 1; },
+    );
+
+    assert.equal(result, "reused");
+    assert.equal(commands, 0);
+  });
+
+  test("generates the Prisma client for ordinary and preview builds", async () => {
+    const environments: HostedWebProductionMigrationEnvironment[] = [
+      {},
+      {
+        MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS: "1",
+        VERCEL: "1",
+        VERCEL_ENV: "preview",
+        VERCEL_GIT_COMMIT_REF: "feature",
+      },
+    ];
+
+    for (const environment of environments) {
+      const calls: Array<{ args: readonly string[]; command: string }> = [];
+      const result = await prepareHostedWebPrismaClientForBuild(
+        environment,
+        async (command, args) => { calls.push({ args, command }); },
+      );
+
+      assert.equal(result, "generated");
+      assert.deepEqual(calls, [hostedWebProductionPrismaGenerateCommand]);
+    }
+  });
+
+  test("rejects an invalid production Prisma handoff marker", async () => {
+    await assert.rejects(
+      () => prepareHostedWebPrismaClientForBuild(
+        { MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS: "yes" },
+        async () => undefined,
+      ),
+      /MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS must be 0 or 1/u,
+    );
   });
 
   test("blocks future destructive Prisma migrations before Vercel deploy promotion", async () => {
@@ -1137,6 +1189,7 @@ describe("hosted web production migration guard", () => {
 
     const scripts = packageJson.scripts ?? {};
     const buildScript = scripts.build ?? "";
+    const prismaBuildScript = scripts["prisma:generate:build"] ?? "";
     const typecheckScript = scripts.typecheck ?? "";
     const preparedTypecheckScript = scripts["typecheck:prepared"] ?? "";
     const watchTypecheckScript = scripts["typecheck:watch"] ?? "";
@@ -1146,7 +1199,12 @@ describe("hosted web production migration guard", () => {
     const deploymentProtectionScript =
       scripts["release:production:verify-deployment-protection"] ?? "";
 
-    assert.match(buildScript, /pnpm prisma:generate/u);
+    assert.match(buildScript, /pnpm prisma:generate:build/u);
+    assert.doesNotMatch(buildScript, /pnpm prisma:generate(?=\s|&&|$)/u);
+    assert.equal(
+      prismaBuildScript,
+      "pnpm --dir ../.. exec tsx apps/web/scripts/prepare-prisma-client-for-build.ts",
+    );
     assert.match(buildScript, /pnpm typecheck:prepared/u);
     assert.match(buildScript, /bash scripts\/run-production-next-build\.sh/u);
     assert.doesNotMatch(buildScript, /&& next build &&/u);
@@ -1194,7 +1252,7 @@ describe("hosted web production migration guard", () => {
     assert.doesNotMatch(buildScript, /release:production:migrate/u);
     assert.doesNotMatch(buildScript, /run-production-migrations/u);
     assert.ok(
-      buildScript.indexOf("pnpm prisma:generate") <
+      buildScript.indexOf("pnpm prisma:generate:build") <
         buildScript.indexOf("run-production-next-build.sh"),
       "non-mutating build prep must finish before next build",
     );
@@ -1261,7 +1319,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.equal(
       vercelJson.buildCommand,
-      "pnpm release:production:migrate && pnpm build",
+      "pnpm release:production:migrate && MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS=1 pnpm build",
     );
     assert.equal(scripts["migrate:production:prebuild"], undefined);
     assert.equal(
