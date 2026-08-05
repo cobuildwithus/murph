@@ -1,5 +1,9 @@
 import "server-only";
 
+import {
+  serializeHostedConnectedAppsResult,
+} from "@murphai/hosted-execution/connected-apps";
+
 const OPENWEATHER_ONE_CALL_ALERTS_URL =
   "https://api.openweathermap.org/data/3.0/onecall";
 const OPENWEATHER_ALERTS_TIMEOUT_MS = 10_000;
@@ -102,11 +106,23 @@ export async function executeOpenWeatherNationalAlerts(input: {
     });
   }
 
-  return {
-    alerts: (record.alerts ?? [])
-      .slice(0, OPENWEATHER_ALERTS_LIMIT)
-      .flatMap(readAlert),
-  };
+  const alerts: Array<{
+    description: string;
+    end: number;
+    event: string;
+    senderName: string;
+    start: number;
+    tags: string[];
+  }> = [];
+  for (const value of (record.alerts ?? []).slice(0, OPENWEATHER_ALERTS_LIMIT)) {
+    const alert = readAlert(value)[0];
+    if (!alert) continue;
+    if (serializeHostedConnectedAppsResult({ alerts: [...alerts, alert] }) === null) {
+      break;
+    }
+    alerts.push(alert);
+  }
+  return { alerts };
 }
 
 function readCoordinates(value: Record<string, unknown>): {

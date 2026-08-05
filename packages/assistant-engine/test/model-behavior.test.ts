@@ -2373,16 +2373,19 @@ describe('assistant experiment onboarding guidance', () => {
       'Before personal improvement or new-goal advice, or whether to take, keep, reorder, or drop a supplement or other intervention, read personal evidence that could change the answer. Open with what it shows (such as the latest panel date and markers), not goals alone; if none exists, say so.',
     )
     expect(prompt).toContain(
-      'When a local heat, cold, or air-quality alert could change health advice, reuse a known city/region.',
+      'For local heat, cold, or air-quality context, reuse a known location.',
     )
     expect(prompt).toContain(
-      'Call `OPENWEATHER_API_GET_GEOCODING_DIRECT`, then call `MURPH_OPENWEATHER_GET_NATIONAL_ALERTS` once with only `lat` and `lon`.',
+      'Call direct-only `MURPH_OPENWEATHER_GET_NATIONAL_ALERTS` without search',
+    )
+    expect(prompt).toContain('never guess coordinates')
+    expect(prompt).toContain('once including retries')
+    expect(prompt).toContain('On failure, do not retry; answer without it.')
+    expect(prompt).toContain(
+      'Raw weather/AQI never establishes an alert',
     )
     expect(prompt).toContain(
-      'Never infer an alert from raw weather or AQI',
-    )
-    expect(prompt).toContain(
-      'ask for city/region only when it could change the answer',
+      'Ask only if location could change the answer',
     )
 
     // Discovery has no arbitrary question cap, but stays paced and useful.

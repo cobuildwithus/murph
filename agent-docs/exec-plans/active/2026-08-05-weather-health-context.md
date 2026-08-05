@@ -27,12 +27,17 @@ Done:
 - Recorded One Call activation plus a successful signed smoke read as a deployment prerequisite.
 - Kept the exact alert instruction out of the shared group-visible skill and preserved the existing group rejection boundary.
 - Final ReviewGPT round 1 found the missing entitlement gate and the shared-skill group leak. Both findings were accepted and corrected without expanding the group allowlist.
+- Activated One Call 3 with a 2,000-call daily account cap; the signed production-runtime smoke read remains a deployment check.
+- Capped the normalized alert list at the existing assistant-result byte budget instead of rejecting an otherwise valid provider response.
+- Made the optional alert read non-retryable across the prompt and tool-failure boundary while preserving the generic retry contract for other connected apps.
+- Added a real-model journey covering a successful official heat alert, provider failure fallback, and alert-only scheduled suppression.
+- Passed 201 focused tests, assistant and web typechecks, and the focused real-model journey.
 
 Now:
-- Commit and push the combined review remediation.
+- Commit and push the combined review remediation, then run final correction review.
 
 Next:
-- Complete the preliminary specialist pass and final correction round, confirm exact-head CI, then close the plan.
+- Reconcile the branch with `main`, confirm exact-head CI, run the signed production-runtime smoke read after the web route is deployed, then close the plan.
 
 Open questions (UNCONFIRMED if needed):
 - None.

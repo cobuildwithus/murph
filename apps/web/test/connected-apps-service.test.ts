@@ -885,6 +885,49 @@ describe("connected-app service", () => {
     expect(executeFetch).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a maximum-shape official-alert projection within the assistant budget", async () => {
+    vi.stubEnv("OPENWEATHER_API_KEY", "openweather-test-key");
+    installPrismaHarness();
+    const alerts = Array.from({ length: 16 }, (_, index) => ({
+      description: `${index}:${"x".repeat(7_998)}`,
+      end: 1_786_032_000 + index,
+      event: `Alert ${index} ${"e".repeat(230)}`,
+      sender_name: `Agency ${index} ${"s".repeat(228)}`,
+      start: 1_785_945_600 + index,
+      tags: Array.from({ length: 16 }, (__, tagIndex) =>
+        `Tag ${tagIndex} ${"t".repeat(112)}`
+      ),
+    }));
+    const executeFetch = vi.fn(async (): Promise<Response> =>
+      jsonResponse({ alerts })
+    );
+
+    const result = await executeHostedConnectedAppsRequest({
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          arguments: { lat: 52.2297, lon: 21.0122 },
+          toolSlug: "MURPH_OPENWEATHER_GET_NATIONAL_ALERTS",
+        },
+        operation: "execute",
+      },
+    });
+
+    expect(result).toMatchObject({ alerts: expect.any(Array) });
+    if (
+      typeof result !== "object"
+      || result === null
+      || !("alerts" in result)
+      || !Array.isArray(result.alerts)
+    ) {
+      throw new Error("Expected a bounded official-alert result.");
+    }
+    expect(result.alerts.length).toBeGreaterThan(0);
+    expect(result.alerts.length).toBeLessThan(16);
+    expect(executeFetch).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects invalid official-alert coordinates before provider execution", async () => {
     vi.stubEnv("OPENWEATHER_API_KEY", "openweather-test-key");
     installPrismaHarness();

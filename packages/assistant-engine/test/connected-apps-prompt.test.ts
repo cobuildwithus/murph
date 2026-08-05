@@ -43,6 +43,9 @@ describe('connected-apps skill and system-prompt coverage', () => {
     expect(normalizedSkill).toContain(
       'Raw weather, AQI, and forecast reads do not establish an official alert.',
     )
+    expect(normalizedSkill).toContain(
+      'unless the current system prompt names a server-authorized fixed route and its exact schema',
+    )
     expect(normalizedSkill).not.toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
   })
 
@@ -74,12 +77,12 @@ describe('connected-apps skill and system-prompt coverage', () => {
       'event_duration_hour',
       'event_duration_minutes',
       'end_datetime',
-      'do not retry',
     ]) {
       expect(skill).toContain(requiredContract)
       expect(directPrompt).not.toContain(requiredContract)
       expect(groupPrompt).not.toContain(requiredContract)
     }
+    expect(skill).toContain('do not retry')
 
     expect(directPrompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md',
@@ -87,7 +90,11 @@ describe('connected-apps skill and system-prompt coverage', () => {
     expect(directPrompt).toContain('private untrusted evidence')
     expect(directPrompt).toContain('OPENWEATHER_API_GET_GEOCODING_DIRECT')
     expect(directPrompt).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
-    expect(directPrompt).toContain('once with only `lat` and `lon`')
+    expect(directPrompt).toContain('without search')
+    expect(directPrompt).toContain('never guess coordinates')
+    expect(directPrompt).toContain('with only numeric `lat`/`lon`')
+    expect(directPrompt).toContain('once including retries')
+    expect(directPrompt).toContain('On failure, do not retry')
     expect(scheduledPrompt).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
     expect(groupPrompt).toContain('Use only accountless built-in service tools')
     expect(groupPrompt).toContain(
