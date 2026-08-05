@@ -69,21 +69,10 @@ test("hosted web dev loads local env before checking required database config", 
   }
 });
 
-test("hosted web dev respects an explicit webpack flag", () => {
-  assert.deepEqual(buildHostedWebDevArgv(["--port", "3000", "--webpack"]), [
-    "--port",
-    "3000",
-    "--webpack",
-    "--disable-source-maps",
-  ]);
-});
-
-test("hosted web dev accepts a webpack env override when no bundler flag is provided", () => {
-  assert.deepEqual(
-    buildHostedWebDevArgv(["--port", "3000"], createEnv({
-      MURPH_NEXT_DEV_BUNDLER: "webpack",
-    })),
-    ["--port", "3000", "--webpack", "--disable-source-maps"],
+test("hosted web dev rejects the removed Webpack fallback", () => {
+  assert.throws(
+    () => buildHostedWebDevArgv(["--port", "3000", "--webpack"]),
+    /supports Turbopack only/u,
   );
 });
 
