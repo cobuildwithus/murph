@@ -1323,6 +1323,9 @@ export async function sendAssistantMessageLocal(
           const usageRecordStartedAt = Date.now()
           await recordAssistantUsageEvent({
             executionContext,
+            ...(providerRequestStartedAtMs === null
+              ? {}
+              : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
             providerRequestAcceptedInputIds,
             providerRequestOrdinal,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
@@ -1342,6 +1345,9 @@ export async function sendAssistantMessageLocal(
             additionalUsages: providerOutcome.additionalUsages,
             effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
             executionContext,
+            ...(providerRequestStartedAtMs === null
+              ? {}
+              : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
             providerRequestAcceptedInputIds,
             providerResult: failedProviderResult,
             turnId: currentUserTurn.turnId,
@@ -1561,6 +1567,9 @@ export async function sendAssistantMessageLocal(
         const usageRecordStartedAt = Date.now()
         await recordAssistantUsageEvent({
           executionContext,
+          ...(providerRequestStartedAtMs === null
+            ? {}
+            : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
           providerRequestAcceptedInputIds,
           providerRequestOrdinal,
           providerResult,
@@ -1579,6 +1588,9 @@ export async function sendAssistantMessageLocal(
           additionalUsages: providerResult.additionalUsages,
           effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
           executionContext,
+          ...(providerRequestStartedAtMs === null
+            ? {}
+            : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
           providerRequestAcceptedInputIds,
           providerResult,
           turnId: currentUserTurn.turnId,

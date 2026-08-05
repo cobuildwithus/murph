@@ -617,6 +617,7 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
   linqChatId?: string | null;
   memberId: string;
   periodStart: Date;
+  planResetAt?: Date | null;
   phoneNumber?: string | null;
   prisma: HostedLinqDeliveryClient;
   source: HostedAiUsageLimitNoticeDeliverySource;
@@ -707,9 +708,13 @@ async function runHostedLinqDeliveryTransaction<T>(
 export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
   memberId: string;
   periodStart: Date | string;
+  planResetAt?: Date | string | null;
   usageCreditLedgerVersion: bigint;
 }): string {
   const periodStart = normalizeHostedAiUsageNoticePeriodStart(input.periodStart);
+  const planResetAt = input.planResetAt === null || input.planResetAt === undefined
+    ? null
+    : normalizeHostedAiUsageNoticePeriodStart(input.planResetAt);
   if (input.usageCreditLedgerVersion < 0n) {
     throw new TypeError(
       "Hosted AI usage notice ledger version must be a non-negative integer.",
@@ -719,10 +724,12 @@ export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
     ? {
         memberId: input.memberId,
         periodStart: periodStart.toISOString(),
+        ...(planResetAt ? { planResetAt: planResetAt.toISOString() } : {}),
       }
     : {
         memberId: input.memberId,
         periodStart: periodStart.toISOString(),
+        ...(planResetAt ? { planResetAt: planResetAt.toISOString() } : {}),
         usageCreditLedgerVersion: input.usageCreditLedgerVersion.toString(),
       };
   return `ai-usage-gate:${sha256Hex(JSON.stringify(capacityEpoch)).slice(0, 32)}`;

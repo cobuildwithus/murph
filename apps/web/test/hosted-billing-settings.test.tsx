@@ -626,6 +626,7 @@ describe("HostedBillingSettings", () => {
         memberId,
         periodEnd,
         periodStart,
+        planResetAt: null,
         remainingUsdMicros: 3_000_000n,
         spentUsdMicros: 10_000_000n,
         usageCreditBalanceUsdMicros: 3_000_000n,

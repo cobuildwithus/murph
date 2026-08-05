@@ -2152,6 +2152,8 @@ model HostedAiUsagePeriod {
   periodStart       DateTime     @map("period_start")
   periodEnd         DateTime     @map("period_end")
   billingPlanCode   String       @map("billing_plan_code")
+  highestBillingPlanCode String? @map("highest_billing_plan_code")
+  planResetAt DateTime? @map("plan_reset_at")
   limitUsdMicros    BigInt       @map("limit_usd_micros")
   spentUsdMicros    BigInt       @default(0) @map("spent_usd_micros")
   blockedAt         DateTime?    @map("blocked_at")

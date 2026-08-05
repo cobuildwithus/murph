@@ -2298,6 +2298,11 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
   })
 
   expect(providerRequestStarted).toHaveBeenCalledTimes(1)
+  expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledWith(
+    expect.objectContaining({
+      occurredAt: '2026-06-09T00:00:00.000Z',
+    }),
+  )
   const event = providerRequestStarted.mock.calls[0]?.[0] as {
     admissionMs: number
     codexAppServerInitializeMs: number
