@@ -275,7 +275,11 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   );
   assert.match(
     view.document.body.textContent ?? "",
-    /Privacy-first inference\. Venice’s higher provider rates use included AI capacity faster\./u,
+    /Privacy-first inference\./u,
+  );
+  assert.doesNotMatch(
+    view.document.body.textContent ?? "",
+    /Venice’s higher provider rates use included AI capacity faster\./u,
   );
   assert.match(
     view.document.body.textContent ?? "",

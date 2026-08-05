@@ -1342,12 +1342,15 @@ accepted input in the same live turn invalidates an earlier card-only decision,
 and attachment is rejected after the delivery context advances. Every
 card copies the immediately preceding single-date canonical meal-totals read.
 Both versions use the same deterministic text fallback, Linq capability
-boundary, inline URL size bound, and existing outbox idempotency lifecycle.
-Linq owns the always-visible static transcript layout, which marks partial
-totals without exposing their values; tapping the card passes the same inline
-URL to the offline iOS reader. The installed extension does not own initial
-balloon visibility. No card API, database, auth path, cleanup owner, or second
-queue exists.
+boundary, and existing outbox idempotency lifecycle. Linq owns the
+noninteractive static transcript layout, which carries the date, meal count,
+available totals, an explicit partial marker, and the first available exact V2
+goal plus its frozen status in canonical metric order. Its required URL is a
+fixed, non-sensitive HTTPS product URL rather than encoded card state. The
+fallback body remains value-free and names a truthful text-recovery action to
+avoid Apple data-detector downgrade; the installed extension does not own
+balloon visibility. No card API, database, auth path, cleanup owner, extension
+network read, or second queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
