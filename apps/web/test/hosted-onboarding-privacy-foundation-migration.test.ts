@@ -1064,6 +1064,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260804170000_add_initial_onboarding_completion",
       "20260804223000_hosted_signup_referral_attribution",
       "20260805010000_rearm_generated_image_capture_retention",
+      "20260805160000_hosted_usage_plan_reset_epoch",
       "migration_lock.toml",
     ]);
     expect(hostedPendingGroupSetupMigrationSql).toContain(
