@@ -143,8 +143,11 @@ Updated: 2026-08-05
   The rule was deleted without changing runtime behavior or adding machinery;
   PR-relative docs drift and stale-language scans must pass before round 5.
 - After restacking #1305's closed-vocabulary remediation, the focused Web
-  support service passes 12 tests. The production path proves canonical
-  builder-to-storage-to-parser-to-email composition, semantic-context rejection
-  before persistence, canonical replay, and legacy free-form stored-detail
-  rejection before provider entry. Broader focused suites and exact-head CI
-  remain pending.
+  support service and callback-route suites pass 14 tests. The production path
+  proves canonical builder-to-storage-to-parser-to-email composition, semantic-
+  context rejection before persistence, canonical replay, and legacy free-form
+  stored-detail rejection before provider entry. The composed Assistant suites
+  pass 106 tests with 27 credential-gated cases compiled and skipped, and the
+  shared hosted contract passes 6 tests. Full Web, Assistant Engine, and Hosted
+  Execution typechecks pass; docs drift and diff checks pass. Exact-head CI and
+  correction ReviewGPT remain pending.
