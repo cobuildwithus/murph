@@ -51,8 +51,11 @@ privacy, authorization, or provider boundaries.
   lifecycle owners.
   Reconciliation recognizes only the exact current seed, its immediate
   predecessor, or the bounded original legacy seed; execution remains ordinary
-  scheduled send-or-skip work, so editable slug, tags, title, and instructions
-  confer no onboarding-state authority.
+  scheduled send-or-skip work. One exact recognition predicate is shared by
+  reconciliation, cron diagnostics/execution, and queued provider-entry
+  authority. A recognized predecessor is effect-ineligible until managed
+  reconciliation rewrites it to the current finite definition, so editable
+  slug, tags, title, and instructions confer no onboarding-state authority.
 - Keep the post-onboarding choice point separate from unfinished-onboarding
   recovery. It is one finite managed one-shot for members who answered
   onboarding, not another collection flow, recurring cadence, or profile.
@@ -583,6 +586,11 @@ so signup and maintenance never compete through different hash identities. A rec
 after canonical runtime state durably owns that first occurrence; if the state
 write fails, the source remains the finite next-day one-shot and normal managed
 reconciliation completes the conversion on a later pass.
+If reconciliation cannot read authority or commit its rewrite, every recognized
+predecessor remains visible in metadata-only cron diagnostics but cannot enter
+the provider, tools, commit, delivery, or queued external-transport boundary.
+This may under-send during a failed migration; it cannot resurrect the older
+cadence or bypass the current three-day authority.
 
 Hosted queue-only delivery carries the automation revision into the existing
 outbox authority fence. Immediately before external provider entry, that owner

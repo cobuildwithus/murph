@@ -15,6 +15,9 @@ metadata-only hosted runtime logs.
   rehash an existing schedule through a different stable identity.
 - In-turn lifecycle reads did not cover the later queued external-transport
   boundary.
+- The first correction recognized predecessor definitions during managed
+  reconciliation but not at cron or queued effect boundaries, so a failed
+  reconciliation could leave an older record executable.
 - Existing logs expose schedule and delivery mechanics but not the
   onboarding-state source or a stable lifecycle decision reason.
 
@@ -30,6 +33,8 @@ metadata-only hosted runtime logs.
 - Signup, rollout migration, and maintenance preserve one local minute and the
   original first occurrence through partial-write recovery.
 - Existing active members are not granted an unbounded cadence during rollout.
+- Every exact recognized predecessor is effect-ineligible until the existing
+  reconciler durably produces the current finite definition.
 - Logs identify the managed automation, onboarding-state status and source,
   lifecycle action, execution outcome, and safe reason code without member
   identity, transcript text, health data, delivery targets, or local paths.

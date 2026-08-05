@@ -104,6 +104,9 @@ import {
 } from '../src/outbound-channel.ts'
 import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 import { createTempVaultContext } from './test-helpers.ts'
+import {
+  onboardingFollowupPredecessorDefinitions,
+} from './onboarding-followup-predecessor-fixtures.ts'
 
 const mockedDeliverAssistantMessageOverBinding = vi.mocked(
   deliverAssistantMessageOverBinding,
@@ -3344,6 +3347,70 @@ describe('assistant outbox runtime', () => {
     })
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
   })
+
+  it.each(onboardingFollowupPredecessorDefinitions)(
+    'makes a queued $label predecessor terminally stale until managed reconciliation completes',
+    async ({ definition, label, schedule }) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-07-20T17:31:00.000Z'))
+      const { vaultRoot } = await createInitializedAssistantVault(
+        `assistant-outbox-onboarding-predecessor-${label.replaceAll(' ', '-')}-`,
+      )
+      const opaqueSuffix = label.replaceAll(' ', '-')
+      const automation = await upsertAutomation({
+        continuityPolicy: definition.continuityPolicy,
+        instructions: definition.instructions,
+        now: new Date('2026-07-20T17:29:00.000Z'),
+        route: {
+          channel: 'telegram',
+          deliveryTarget: 'telegram-chat',
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+        schedule,
+        slug: definition.slug,
+        status: 'active',
+        summary: definition.summary,
+        tags: [...definition.tags],
+        title: definition.title,
+        vaultRoot,
+      })
+      const queued = await deliverAssistantOutboxMessage({
+        automationAuthority: {
+          automationId: automation.record.automationId,
+          expectedUpdatedAt: automation.record.updatedAt,
+        },
+        channel: 'telegram',
+        dispatchMode: 'queue-only',
+        explicitTarget: 'telegram-chat',
+        message: `Queued ${label} predecessor.`,
+        sessionId: `session-outbox-onboarding-predecessor-${opaqueSuffix}`,
+        threadId: 'telegram-chat',
+        threadIsDirect: true,
+        turnId: `turn-outbox-onboarding-predecessor-${opaqueSuffix}`,
+        vault: vaultRoot,
+      })
+      const onboardingStatePath = resolveAssistantOnboardingStatePath(vaultRoot)
+      await mkdir(path.dirname(onboardingStatePath), { recursive: true })
+      await writeFile(onboardingStatePath, '{not valid json', 'utf8')
+
+      const blocked = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: queued.intent.intentId,
+        vault: vaultRoot,
+      })
+
+      expect(blocked.intent.status).toBe('failed')
+      expect(blocked.deliveryError).toMatchObject({
+        code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+      })
+      expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+      await expect(readFile(onboardingStatePath, 'utf8')).resolves.toBe(
+        '{not valid json',
+      )
+    },
+  )
 
   it('blocks a queued one-shot at activeUntil before provider entry', async () => {
     vi.useFakeTimers()

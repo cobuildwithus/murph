@@ -46,6 +46,7 @@ import {
 } from '../execution-context.js'
 import {
   isRetiredMurphManagedAutomationId,
+  isRecognizedMurphOnboardingFollowupAutomation,
   resolveMurphManagedAutomationOwnerScope,
   resolveMurphManagedMaintenancePolicy,
   type MurphManagedMaintenancePolicy,
@@ -120,6 +121,7 @@ import {
   listCanonicalAssistantCronRecords,
   projectCanonicalAssistantCronJob,
   type CanonicalAssistantCronJobRecord,
+  type CanonicalAutomationAssistantCronJobRecord,
   resolveCanonicalAssistantCronJobId,
   resolveCanonicalAssistantCronOccurrenceAt,
   resolveCanonicalRuntimeState,
@@ -172,6 +174,8 @@ const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding state could not be read.'
 const ASSISTANT_CRON_ONBOARDING_FOLLOWUP_COMPLETED_ERROR =
   'Assistant onboarding follow-up skipped because onboarding is completed.'
+const ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED_ERROR =
+  'Assistant onboarding follow-up predecessor skipped until managed reconciliation completes.'
 const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
   'murph-managed:weekly-health-insight',
   'murph-managed:monthly-improvement-coach',
@@ -694,10 +698,12 @@ export async function executeClaimedAssistantCronJob(
         })
       if (onboardingFollowup) {
         onboardingFollowupDiagnostic = onboardingFollowup.diagnostic
-        if (onboardingFollowup.error) {
+        if (isAssistantCronOnboardingFollowupPredecessorJob(input.job)) {
+          lifecycleSkipReason =
+            ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED_ERROR
+        } else if (onboardingFollowup.error) {
           throw onboardingFollowup.error
-        }
-        if (
+        } else if (
           onboardingFollowup.diagnostic.onboardingStateStatus === 'completed'
         ) {
           lifecycleSkipReason =
@@ -1481,10 +1487,22 @@ async function readAssistantCronOnboardingFollowupDiagnostic(input: {
 
 function isAssistantCronOnboardingFollowupJob(
   job: ResolvedAssistantCronJob,
-): job is Extract<ResolvedAssistantCronJob, { kind: 'canonical' }> {
-  return job.kind === 'canonical' &&
-    job.source.kind === 'automation' &&
-    isCurrentMurphOnboardingFollowupAutomation(job.source)
+): job is Extract<ResolvedAssistantCronJob, { kind: 'canonical' }> & {
+  source: CanonicalAutomationAssistantCronJobRecord
+} {
+  if (job.kind !== 'canonical' || job.source.kind !== 'automation') {
+    return false
+  }
+  return isRecognizedMurphOnboardingFollowupAutomation(job.source)
+}
+
+function isAssistantCronOnboardingFollowupPredecessorJob(
+  job: ResolvedAssistantCronJob,
+): job is Extract<ResolvedAssistantCronJob, { kind: 'canonical' }> & {
+  source: CanonicalAutomationAssistantCronJobRecord
+} {
+  return isAssistantCronOnboardingFollowupJob(job) &&
+    !isCurrentMurphOnboardingFollowupAutomation(job.source)
 }
 
 function emitAssistantCronOnboardingFollowupCompletedEvent(input: {
@@ -1619,6 +1637,12 @@ async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
     input.job.source.kind !== 'automation'
   ) {
     return
+  }
+
+  if (isAssistantCronOnboardingFollowupPredecessorJob(input.job)) {
+    throw new AssistantCronLifecycleNotificationInvalidatedError(
+      ASSISTANT_CRON_ONBOARDING_FOLLOWUP_RECONCILIATION_REQUIRED_ERROR,
+    )
   }
 
   const onboardingFollowup =

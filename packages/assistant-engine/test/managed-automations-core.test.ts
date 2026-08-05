@@ -1,5 +1,5 @@
-import { rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 
 import {
   initializeVault,
@@ -31,13 +31,19 @@ import {
   type MurphManagedAutomationDiagnosticStage,
   type MurphOnboardingFollowupDiagnostic,
 } from '../src/assistant/managed-automations.ts'
-import { completeAssistantOnboarding } from '../src/assistant/onboarding-state.ts'
+import {
+  completeAssistantOnboarding,
+  resolveAssistantOnboardingStatePath,
+} from '../src/assistant/onboarding-state.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import { upsertAssistantCronAutomation } from '../src/assistant/cron/authoring.ts'
 import * as assistantCronRuntimeState from '../src/assistant/cron/runtime-state.ts'
 import { resolveMurphOnboardingFollowupSchedule } from '../src/assistant/onboarding-followup-automation.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
+import {
+  onboardingFollowupPredecessorDefinitions,
+} from './onboarding-followup-predecessor-fixtures.ts'
 
 const tempRoots: string[] = []
 
@@ -1805,6 +1811,47 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
     })
   })
+
+  it.each(onboardingFollowupPredecessorDefinitions)(
+    'leaves the exact $label predecessor unchanged when onboarding authority is unreadable',
+    async ({ definition, schedule }) => {
+      const vaultRoot = await createVaultRoot()
+      const created = await upsertAutomation({
+        continuityPolicy: definition.continuityPolicy,
+        instructions: definition.instructions,
+        now: new Date('2026-04-08T15:00:00.000Z'),
+        route: defaultRoute,
+        schedule,
+        slug: definition.slug,
+        status: 'active',
+        summary: definition.summary,
+        tags: [...definition.tags],
+        title: definition.title,
+        vaultRoot,
+      })
+      const onboardingStatePath = resolveAssistantOnboardingStatePath(vaultRoot)
+      await mkdir(dirname(onboardingStatePath), { recursive: true })
+      await writeFile(onboardingStatePath, '{ invalid onboarding json', 'utf8')
+
+      await expect(applyMurphManagedAutomations({
+        defaultRoute,
+        now: new Date('2026-04-09T18:29:05.000Z'),
+        vaultRoot,
+      })).rejects.toMatchObject({
+        reason: 'invalid-json',
+      })
+
+      await expect(showAutomation({
+        automationId: created.record.automationId,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        instructions: definition.instructions,
+        schedule,
+        status: 'active',
+        updatedAt: created.record.updatedAt,
+      })
+    },
+  )
 
   it('updates an existing weekly health insight without rewriting its schedule', async () => {
     const vaultRoot = await createVaultRoot()

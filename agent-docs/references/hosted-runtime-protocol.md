@@ -2340,6 +2340,11 @@ finite three-day automation is seeded, when an exact recognized seed is
 reconciled, and when each occurrence completes. Recognized migration sources
 are the exact PR 1203 one-shot, the older exact recurring fingerprint, and the
 bounded original legacy fingerprint; editable metadata grants no authority.
+The same exact recognition predicate guards managed reconciliation, cron scan
+and execution, and queued provider entry. Non-current recognized definitions
+are effect-ineligible until the existing reconciler has durably produced the
+current finite definition; best-effort reconciliation failure therefore cannot
+leave an older due occurrence or queued intent able to reach a provider.
 Those records distinguish a
 persisted onboarding state from the missing-state default and carry only state
 status and timestamps, the last authority gate checked, finite-window and

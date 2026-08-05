@@ -1480,7 +1480,7 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
     return { diagnostic: null, updated: false, yielded: false }
   }
 
-  if (!isManagedOnboardingFollowupAutomation(existing)) {
+  if (!isRecognizedMurphOnboardingFollowupAutomation(existing)) {
     return { diagnostic: null, updated: false, yielded: false }
   }
 
@@ -1746,8 +1746,19 @@ function onboardingFollowupAutomationDefinitionChanged(
     )
 }
 
-function isManagedOnboardingFollowupAutomation(
-  automation: AutomationRecord,
+type MurphOnboardingFollowupAutomationIdentity = Pick<
+  AutomationRecord,
+  | 'continuityPolicy'
+  | 'instructions'
+  | 'schedule'
+  | 'slug'
+  | 'summary'
+  | 'tags'
+  | 'title'
+>
+
+export function isRecognizedMurphOnboardingFollowupAutomation(
+  automation: MurphOnboardingFollowupAutomationIdentity,
 ): boolean {
   return isCurrentManagedOnboardingFollowupAutomation(automation) ||
     isImmediatePreviousOneshotOnboardingFollowupAutomation(automation) ||
@@ -1756,13 +1767,13 @@ function isManagedOnboardingFollowupAutomation(
 }
 
 function isCurrentManagedOnboardingFollowupAutomation(
-  automation: AutomationRecord,
+  automation: MurphOnboardingFollowupAutomationIdentity,
 ): boolean {
   return isCurrentMurphOnboardingFollowupAutomation(automation)
 }
 
 function isImmediatePreviousOneshotOnboardingFollowupAutomation(
-  automation: AutomationRecord,
+  automation: MurphOnboardingFollowupAutomationIdentity,
 ): boolean {
   return automation.slug ===
       IMMEDIATE_PREVIOUS_ONESHOT_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
@@ -1782,7 +1793,7 @@ function isImmediatePreviousOneshotOnboardingFollowupAutomation(
 }
 
 function isHistoricalRecurringOnboardingFollowupAutomation(
-  automation: AutomationRecord,
+  automation: MurphOnboardingFollowupAutomationIdentity,
 ): boolean {
   return automation.slug ===
       HISTORICAL_RECURRING_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
@@ -1805,7 +1816,7 @@ function isHistoricalRecurringOnboardingFollowupAutomation(
 }
 
 function isLegacySeededOnboardingFollowupAutomation(
-  automation: AutomationRecord,
+  automation: MurphOnboardingFollowupAutomationIdentity,
 ): boolean {
   return automation.slug === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
     automation.instructions === LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS &&

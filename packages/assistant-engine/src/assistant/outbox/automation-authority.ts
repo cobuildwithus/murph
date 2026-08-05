@@ -11,7 +11,10 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   runExperimentLifecycleDeliveryAuthorityPrecondition,
 } from '../experiment-support-automations.js'
-import { isRetiredMurphManagedAutomationId } from '../managed-automations.js'
+import {
+  isRecognizedMurphOnboardingFollowupAutomation,
+  isRetiredMurphManagedAutomationId,
+} from '../managed-automations.js'
 import {
   isAssistantOnboardingStateReadError,
   readAssistantOnboardingState,
@@ -45,7 +48,10 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
     return createAssistantOutboxAutomationAuthorityStaleError()
   }
 
-  if (isCurrentMurphOnboardingFollowupAutomation(current.record)) {
+  if (isRecognizedMurphOnboardingFollowupAutomation(current.record)) {
+    if (!isCurrentMurphOnboardingFollowupAutomation(current.record)) {
+      return createAssistantOutboxAutomationAuthorityStaleError()
+    }
     let onboardingState: AssistantOnboardingState
     try {
       onboardingState = await readAssistantOnboardingState(input.vault)

@@ -89,8 +89,8 @@ import {
   repairPendingAssistantCronDeliveries,
 } from './cron/delivery-reconciliation.ts'
 import {
-  isCurrentMurphOnboardingFollowupAutomation,
-} from './onboarding-followup-automation.ts'
+  isRecognizedMurphOnboardingFollowupAutomation,
+} from './managed-automations.ts'
 
 export type { AssistantCronTargetSnapshot } from '@murphai/operator-config/assistant-cli-contracts'
 export {
@@ -756,7 +756,7 @@ async function emitAssistantCronScanEvents(input: {
         nextRunAt: job.state.nextRunAt,
         managedAutomationKind:
           canonicalEntry?.source.kind === 'automation' &&
-          isCurrentMurphOnboardingFollowupAutomation(canonicalEntry.source)
+          isRecognizedMurphOnboardingFollowupAutomation(canonicalEntry.source)
             ? 'onboarding_followup'
             : null,
         pendingDelivery: Boolean(job.state.pendingDeliveryIntentId),

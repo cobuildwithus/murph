@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
@@ -26,6 +26,9 @@ import {
 } from '../src/assistant/newsletter-outbox.js'
 import * as assistantDiagnostics from '../src/assistant/diagnostics.js'
 import * as assistantOutboxReceiptRepair from '../src/assistant/outbox/receipt-repair.js'
+import {
+  onboardingFollowupPredecessorDefinitions,
+} from './onboarding-followup-predecessor-fixtures.ts'
 
 type MockAutomationRecord = {
   activeUntil?: string | null
@@ -1013,7 +1016,7 @@ describe('assistant cron runtime orchestration', () => {
     'keeps a user-owned same-slug automation on the generic $onboardingStatus-onboarding path',
     async ({ expectedOutcome, onboardingStatus, result }) => {
       vi.useFakeTimers()
-      vi.setSystemTime(new Date('2026-04-09T18:29:05.000Z'))
+      vi.setSystemTime(new Date('2026-04-09T13:30:05.000Z'))
       const { vaultRoot } = await createRuntimeContext(
         `assistant-cron-runtime-user-owned-onboarding-slug-${onboardingStatus}-`,
       )
@@ -1229,6 +1232,62 @@ describe('assistant cron runtime orchestration', () => {
       type: 'onboarding.followup.completed',
     }))
   })
+
+  it.each(onboardingFollowupPredecessorDefinitions)(
+    'keeps the $label predecessor effect-ineligible when reconciliation has not completed',
+    async ({ definition, label, schedule }) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-09T18:29:05.000Z'))
+      const { vaultRoot } = await createRuntimeContext(
+        `assistant-cron-runtime-onboarding-predecessor-${label.replaceAll(' ', '-')}-`,
+      )
+      const onboardingStatePath = resolveAssistantOnboardingStatePath(vaultRoot)
+      await mkdir(path.dirname(onboardingStatePath), { recursive: true })
+      await writeFile(onboardingStatePath, '{ invalid onboarding json', 'utf8')
+      addRecognizedOnboardingFollowupPredecessorAutomation({
+        automationId: `automation_onboarding_predecessor_${label.replaceAll(' ', '_')}`,
+        definition,
+        schedule,
+        vaultRoot,
+      })
+      const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+      const occurrenceAt = claimed.runtimeState.state.pendingOccurrenceAt ??
+        claimed.job.state.nextRunAt
+      if (!occurrenceAt) {
+        throw new Error('Expected predecessor occurrence time.')
+      }
+      vi.setSystemTime(new Date(Date.parse(occurrenceAt) + 5_000))
+      const events: AssistantRunEvent[] = []
+
+      const result = await executeClaimedAssistantCronJob({
+        job: claimed,
+        onEvent: (event) => events.push(event),
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+
+      expect(result.run).toMatchObject({
+        outcome: 'skipped_gate',
+        reason: 'lifecycle_precondition',
+        status: 'skipped',
+      })
+      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+      await expect(readFile(onboardingStatePath, 'utf8')).resolves.toBe(
+        '{ invalid onboarding json',
+      )
+      expect(events).toContainEqual(expect.objectContaining({
+        failureContext: expect.objectContaining({
+          notificationDecisionKind: null,
+          onboardingStateReadError: 'invalid-json',
+          onboardingStateSource: 'read_error',
+          onboardingStateStatus: 'unreadable',
+          runOutcome: 'skipped_gate',
+        }),
+        type: 'onboarding.followup.completed',
+      }))
+    },
+  )
 
   it.each([
     'pre-provider',
@@ -11246,7 +11305,10 @@ async function createCanonicalJob(
 }
 
 async function claimFirstCanonicalCronJob(vaultRoot: string): Promise<{
-  claimed: Awaited<ReturnType<typeof claimResolvedAssistantCronJob>>
+  claimed: Extract<
+    Awaited<ReturnType<typeof claimResolvedAssistantCronJob>>,
+    { kind: 'canonical' }
+  >
   paths: ReturnType<typeof resolveAssistantStatePaths>
 }> {
   const paths = resolveAssistantStatePaths(vaultRoot)
@@ -11268,6 +11330,9 @@ async function claimFirstCanonicalCronJob(vaultRoot: string): Promise<{
     },
     paths,
   })
+  if (claimed.kind !== 'canonical') {
+    throw new Error('Expected claimed canonical source.')
+  }
 
   return {
     claimed,
@@ -11283,7 +11348,7 @@ function addCurrentOnboardingFollowupAutomation(input: {
     activeUntil: '2026-04-11T19:00:00.000Z',
     automationId: input.automationId,
     continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
-    createdAt: '2026-04-08T15:00:00.000Z',
+    createdAt: '2026-04-08T13:30:00.000Z',
     instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
     route: {
       channel: 'telegram',
@@ -11303,6 +11368,36 @@ function addCurrentOnboardingFollowupAutomation(input: {
     summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
     tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
     title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+    updatedAt: '2026-04-08T13:30:00.000Z',
+  })
+}
+
+function addRecognizedOnboardingFollowupPredecessorAutomation(input: {
+  automationId: string
+  definition: (typeof onboardingFollowupPredecessorDefinitions)[number]['definition']
+  schedule: (typeof onboardingFollowupPredecessorDefinitions)[number]['schedule']
+  vaultRoot: string
+}): void {
+  getVaultAutomationStore(input.vaultRoot).push({
+    automationId: input.automationId,
+    continuityPolicy: input.definition.continuityPolicy,
+    createdAt: '2026-04-08T15:00:00.000Z',
+    instructions: input.definition.instructions,
+    route: {
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'room-1',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+      threadIsDirect: true,
+    },
+    schedule: input.schedule,
+    slug: input.definition.slug,
+    status: 'active',
+    summary: input.definition.summary,
+    tags: [...input.definition.tags],
+    title: input.definition.title,
     updatedAt: '2026-04-08T15:00:00.000Z',
   })
 }
