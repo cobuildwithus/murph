@@ -214,6 +214,9 @@ export async function createHostedMember(input: {
     data: {
       billingStatus: input.billingStatus,
       id: input.memberId,
+      // The database default protects legacy writers during a rolling deploy.
+      // Current signup owns pending onboarding explicitly.
+      initialOnboardingCompletedAt: null,
       ...(input.suspendedAt !== undefined
         ? {
             suspendedAt: input.suspendedAt,

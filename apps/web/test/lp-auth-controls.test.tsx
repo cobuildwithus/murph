@@ -28,7 +28,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
       autoSendPastedPhoneNumber?: boolean;
       onCompleted?: (payload: {
         activationPending: boolean;
-        initialVisitEligible?: boolean;
         inviteCode: string;
         joinUrl: string;
         stage: "active" | "blocked" | "checkout";
@@ -55,7 +54,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
             onClick: () =>
               void props.onCompleted?.({
                 activationPending: false,
-                initialVisitEligible: true,
                 inviteCode: "invite-code",
                 joinUrl: "/join/invite-code",
                 stage: "active",
@@ -70,7 +68,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
             onClick: () =>
               void props.onCompleted?.({
                 activationPending: false,
-                initialVisitEligible: false,
                 inviteCode: "invite-code",
                 joinUrl: "/join/invite-code",
                 stage: "active",
@@ -432,7 +429,7 @@ test("LandingAuthActions sends completed homepage signups through the initial-vi
   });
 
   expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith(
-    "/home?initialVisit=true",
+    "/home",
   );
 });
 
@@ -522,7 +519,7 @@ test("LandingAuthActions sends new split login completions through the initial-v
   });
 
   expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith(
-    "/home?initialVisit=true",
+    "/home",
   );
 });
 
@@ -555,7 +552,7 @@ test("LandingAuthActions sends split signup completions through the initial-visi
   });
 
   expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith(
-    "/home?initialVisit=true",
+    "/home",
   );
 });
 
