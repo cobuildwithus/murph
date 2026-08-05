@@ -1,6 +1,6 @@
 # mobile-contribution-drawer
 
-Status: active
+Status: completed
 Created: 2026-08-05
 Updated: 2026-08-05
 
@@ -40,8 +40,22 @@ Updated: 2026-08-05
 
 - Expand the existing group mobile drawer predicate instead of building a new responsive overlay abstraction.
 - Keep internal cost-weighted accounting terminology unchanged because the request concerns customer-facing purchase copy.
+- Apply the existing mobile full-height group-selection rule to ordinary one-time contributions so the existing sticky action reaches the safe-area edge even when customization is unavailable or notes are collapsed.
+- Reject a second browser-like test harness for the inert catalog hash controller: the exact target is already exercised by hosted rendered proof, while focused component tests own production behavior.
 
 ## Verification
 
-- Commands to run: focused top-up dialog and design-study Vitest suites, prepared web typecheck, scoped lint, local desktop/mobile render proof, exact-head GitHub Actions, and preliminary specialist ReviewGPT.
-- Expected outcomes: a mobile one-time contribution renders `drawer-content` and no `dialog-content`; desktop renders `dialog-content`; visible contribution copy contains “usage” and omits “cost-weighted.”
+- Focused Vitest: 104 tests passed across the top-up dialog and design-study suites.
+- Prepared hosted-web typecheck passed; scoped ESLint passed with zero errors.
+- Desktop render at 1440×1000 retained the centered dialog and plain usage copy.
+- Mobile render at 390×844 used the drawer; with notes collapsed, the selection and action both ended at the drawer bottom with a measured 0px gap.
+- Preliminary specialist ReviewGPT found the short-drawer layout edge case; the accepted correction reused the existing full-height rule. The catalog-only duplicate-test suggestion was rejected with rationale recorded in the PR.
+- Final ReviewGPT round 1 passed with no findings. Correction round 2 passed with no findings on `12412d0fe6625fa5b733e24fd8835895868848e9`.
+- Exact-head GitHub Actions passed, including frontend design proof, viewport overflow, build/typecheck, app verification, package coverage, CLI host matrices, fixtures, and artifact hygiene.
+
+## Outcome
+
+- Group one-time contributions now use the existing drawer on phones and the existing dialog on larger viewports.
+- Customer-facing amount choices say “usage”; internal cost-weighted accounting and the Stripe purchase path remain unchanged.
+- The existing sticky safe-area action stays bottom-pinned in both long and short ordinary mobile selections without adding another component, state owner, endpoint, or dependency.
+Completed: 2026-08-05
