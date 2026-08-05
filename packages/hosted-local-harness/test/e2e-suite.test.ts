@@ -474,18 +474,23 @@ describe("hosted-local E2E suite preparation", () => {
     }
   });
 
-  test("gives live WHOOP login values only to the isolated device-connect Vitest child", async () => {
+  test("gives live wearable login values only to the isolated device-connect Vitest child", async () => {
     const liveValues = {
       JUNCTION_API_KEY: "sk_us_sentinel",
       JUNCTION_CLIENT_USER_ID_SECRET: "sentinel-client-user-secret",
       JUNCTION_ENV: "sandbox",
       JUNCTION_REGION: "us",
-      MURPH_E2E_JUNCTION_WHOOP_LIVE: "1",
-      MURPH_E2E_WHOOP_EMAIL: "canary@example.test",
-      MURPH_E2E_WHOOP_HEADLESS: "1",
+      MURPH_E2E_JUNCTION_OURA_MEMBER_ID: "member-oura",
+      MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1",
+      MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID: "member-whoop",
+      MURPH_E2E_OURA_EMAIL: "oura@example.test",
+      MURPH_E2E_OURA_OTP: "234567",
+      MURPH_E2E_OURA_PASSWORD: "sentinel-oura-password",
+      MURPH_E2E_WEARABLE_HEADLESS: "1",
+      MURPH_E2E_WEARABLE_TIMEOUT_MS: "180000",
+      MURPH_E2E_WHOOP_EMAIL: "whoop@example.test",
       MURPH_E2E_WHOOP_OTP: "123456",
-      MURPH_E2E_WHOOP_PASSWORD: "sentinel-password",
-      MURPH_E2E_WHOOP_TIMEOUT_MS: "180000",
+      MURPH_E2E_WHOOP_PASSWORD: "sentinel-whoop-password",
     };
 
     await runHostedLocalE2eSuite({
@@ -516,16 +521,16 @@ describe("hosted-local E2E suite preparation", () => {
     }
   });
 
-  test("rejects a live WHOOP run before preparation unless device-connect is isolated", async () => {
+  test("rejects a live wearable run before preparation unless device-connect is isolated", async () => {
     await expect(runHostedLocalE2eSuite({
       env: {
-        MURPH_E2E_JUNCTION_WHOOP_LIVE: "1",
+        MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1",
         MURPH_E2E_WHOOP_EMAIL: "canary@example.test",
         MURPH_E2E_WHOOP_PASSWORD: "sentinel-password",
       },
       scenario: ["device-connect", "checkpoint-baseline"],
     })).rejects.toThrow(
-      "Run the live Junction WHOOP browser proof by itself",
+      "Run the live Junction wearable browser proof by itself",
     );
 
     expect(runForegroundCommand).not.toHaveBeenCalled();

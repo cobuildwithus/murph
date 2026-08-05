@@ -1,4 +1,4 @@
-name: Live Junction WHOOP Canary
+name: Live Junction Wearable Canary
 
 on:
   push:
@@ -9,17 +9,17 @@ on:
 permissions:
   contents: read
 
-# One dedicated WHOOP account cannot safely authorize two Junction sessions at
-# once. Never cancel a run after provider cleanup or authorization has started.
+# Dedicated provider accounts cannot safely authorize overlapping Junction
+# sessions. Never cancel a run after cleanup or authorization has started.
 concurrency:
-  group: live-junction-whoop-canary
+  group: live-junction-wearable-canary
   cancel-in-progress: false
 
 jobs:
   connect:
-    name: Connect WHOOP through Junction
+    name: Connect Oura and WHOOP through Junction
     if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}
-    environment: junction-whoop-canary
+    environment: junction-wearable-canary
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
@@ -58,8 +58,8 @@ jobs:
 
       # Keep credentials off every checkout, install, bundle, and browser-install
       # step. The hosted-local suite further partitions Junction authority into
-      # the platform and WHOOP login values into only the Chromium child.
-      - name: Run live Junction WHOOP browser canary
+      # the platform and one provider login at a time into the Chromium child.
+      - name: Run live Junction wearable browser canary
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync
           JUNCTION_API_KEY: ${{ secrets.JUNCTION_API_KEY }}
@@ -67,10 +67,13 @@ jobs:
           JUNCTION_ENV: sandbox
           JUNCTION_REGION: ${{ vars.JUNCTION_REGION || 'us' }}
           MURPH_DEV_TEMPORAL: disabled
-          MURPH_E2E_JUNCTION_WHOOP_LIVE: "1"
+          MURPH_E2E_JUNCTION_OURA_MEMBER_ID: member_e2e_junction_oura_github_canary
+          MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"
           MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID: member_e2e_junction_whoop_github_canary
+          MURPH_E2E_OURA_EMAIL: ${{ secrets.OURA_CANARY_EMAIL }}
+          MURPH_E2E_OURA_PASSWORD: ${{ secrets.OURA_CANARY_PASSWORD }}
+          MURPH_E2E_WEARABLE_HEADLESS: "1"
+          MURPH_E2E_WEARABLE_TIMEOUT_MS: "420000"
           MURPH_E2E_WHOOP_EMAIL: ${{ secrets.WHOOP_CANARY_EMAIL }}
-          MURPH_E2E_WHOOP_HEADLESS: "1"
           MURPH_E2E_WHOOP_PASSWORD: ${{ secrets.WHOOP_CANARY_PASSWORD }}
-          MURPH_E2E_WHOOP_TIMEOUT_MS: "420000"
         run: pnpm hosted-local e2e device-connect

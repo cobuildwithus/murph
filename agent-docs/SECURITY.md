@@ -666,9 +666,9 @@ Last verified: 2026-08-04
   production secret and make arbitrary network calls can exfiltrate it without
   Crabbox.
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
-- The public live Junction/WHOOP canary uses only sandbox Junction authority and
-  a dedicated WHOOP test account. Keep those four credentials exclusively in
-  the `junction-whoop-canary` GitHub Environment, restrict that Environment to
+- The public live Junction wearable canary uses only sandbox Junction authority
+  and dedicated Oura and WHOOP test accounts. Keep those six credentials
+  exclusively in the `junction-wearable-canary` GitHub Environment, restrict it to
   protected `main`, and never duplicate them as repository secrets. The
   workflow may run only after a push to protected `main` or by manual dispatch
   from protected `main`, with read-only repository permission and one
@@ -677,7 +677,8 @@ Last verified: 2026-08-04
   checkout, dependency installation, bundle assembly, browser installation,
   logs, and artifacts receive none. The canary must remain Junction-sandbox
   only, upload no screenshots, traces, videos, provider pages, or hosted-local
-  state, and perform bounded WHOOP deregistration before and after the proof.
+  state, pass only one provider login to the browser at a time, and perform
+  bounded provider-specific deregistration before and after each proof.
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
 - Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.

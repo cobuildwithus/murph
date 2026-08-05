@@ -48,9 +48,30 @@ const planUsageUserId = `member_local_plan_usage_control_${runId}`;
 const subscriptionUserId = `member_local_subscription_control_${runId}`;
 const subscriptionThreadId = `telegram_direct_subscription_${runId}`;
 const browserSessionUserId = `member_local_browser_session_${runId}`;
-const liveBrowserUserId =
-  process.env.MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID?.trim()
-  || "member_e2e_junction_whoop_browser";
+type LiveWearableSource = "oura" | "whoop";
+
+const liveBrowserUserIds: Record<LiveWearableSource, string> = {
+  oura: process.env.MURPH_E2E_JUNCTION_OURA_MEMBER_ID?.trim()
+    || "member_e2e_junction_oura_browser",
+  whoop: process.env.MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID?.trim()
+    || "member_e2e_junction_whoop_browser",
+};
+const liveProviderDefinitions = {
+  oura: {
+    deregisterSlug: "oura",
+    junctionSlugs: ["oura"],
+    label: "Oura",
+  },
+  whoop: {
+    deregisterSlug: "whoop_v2",
+    junctionSlugs: ["whoop_v2", "whoop"],
+    label: "WHOOP",
+  },
+} as const satisfies Record<LiveWearableSource, {
+  deregisterSlug: string;
+  junctionSlugs: readonly string[];
+  label: string;
+}>;
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride =
   process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -61,17 +82,20 @@ const syntheticJunctionConfig = {
   clientUserIdSecret: "junction-client-user-id-secret-value",
   region: "us" as const,
 };
-const liveJunctionWhoopConfig = readLiveJunctionWhoopConfig(process.env);
-const junctionConfig = liveJunctionWhoopConfig ?? syntheticJunctionConfig;
+const liveJunctionWearableConfig = readLiveJunctionWearableConfig(process.env);
+const junctionConfig = liveJunctionWearableConfig ?? syntheticJunctionConfig;
 
 let scenario: HostedLocalFullStackScenario | null = null;
 
 describe("hosted local device connect e2e", () => {
   beforeAll(async () => {
-    // The hosted stack needs Junction authority, but never the human WHOOP
-    // login. Capture those values at module load and exclude them from every
+    // The hosted stack needs Junction authority, but never human provider
+    // login values. Capture them at module load and exclude them from every
     // Web, Worker, runner, and Temporal child process started by the harness.
-    const restoreWhoopLoginEnvironment = temporarilyRemoveProcessEnvironment([
+    const restoreProviderLoginEnvironment = temporarilyRemoveProcessEnvironment([
+      "MURPH_E2E_OURA_EMAIL",
+      "MURPH_E2E_OURA_OTP",
+      "MURPH_E2E_OURA_PASSWORD",
       "MURPH_E2E_WHOOP_EMAIL",
       "MURPH_E2E_WHOOP_OTP",
       "MURPH_E2E_WHOOP_PASSWORD",
@@ -92,10 +116,10 @@ describe("hosted local device connect e2e", () => {
           JUNCTION_API_KEY: junctionConfig.apiKey,
           JUNCTION_CLIENT_USER_ID_SECRET: junctionConfig.clientUserIdSecret,
           JUNCTION_ENV: "sandbox",
-          JUNCTION_PROVIDER_FILTER: "whoop_v2",
+          JUNCTION_PROVIDER_FILTER: "oura,whoop_v2",
           JUNCTION_REGION: junctionConfig.region,
           MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-          MURPH_DEV_TEMPORAL: liveJunctionWhoopConfig ? "disabled" : "managed",
+          MURPH_DEV_TEMPORAL: liveJunctionWearableConfig ? "disabled" : "managed",
           MURPH_DEV_WEB_HOST: "localhost",
         },
         localDatabaseUrl,
@@ -106,7 +130,7 @@ describe("hosted local device connect e2e", () => {
         streamLogs: streamDevLogs,
       });
     } finally {
-      restoreWhoopLoginEnvironment();
+      restoreProviderLoginEnvironment();
     }
   }, 600_000);
 
@@ -116,7 +140,7 @@ describe("hosted local device connect e2e", () => {
   }, 120_000);
 
   it(
-    "keeps Junction credentials in platform authority and creates a signed WHOOP connect link",
+    "keeps Junction credentials in platform authority and creates signed wearable links",
     async () => {
       await requireScenario().seedActiveHostedMember({ memberId: userId });
       const runnerRuntime = buildHostedRunnerJobRuntimeConfig({
@@ -132,7 +156,7 @@ describe("hosted local device connect e2e", () => {
         providerConfigs: {
           junction: {
             environment: "sandbox",
-            providerFilter: ["whoop_v2"],
+            providerFilter: ["oura", "whoop_v2"],
             region: junctionConfig.region,
           },
         },
@@ -145,10 +169,13 @@ describe("hosted local device connect e2e", () => {
       expect(serializableJunctionConfig).not.toHaveProperty("clientUserIdSecret");
       expect(
         runnerRuntime.resolvedConfig?.deviceSync?.providerConfigs,
+      ).not.toHaveProperty("oura");
+      expect(
+        runnerRuntime.resolvedConfig?.deviceSync?.providerConfigs,
       ).not.toHaveProperty("whoop");
       expect(runnerRuntime.platformEnv).toMatchObject({
         JUNCTION_ENV: "sandbox",
-        JUNCTION_PROVIDER_FILTER: "whoop_v2",
+        JUNCTION_PROVIDER_FILTER: "oura,whoop_v2",
         JUNCTION_REGION: junctionConfig.region,
       });
       expect(
@@ -170,41 +197,46 @@ describe("hosted local device connect e2e", () => {
       expect(
         JSON.stringify(userEnv).includes(junctionConfig.clientUserIdSecret),
       ).toBe(false);
+      expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_OURA_EMAIL)).toBe(false);
+      expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_OURA_OTP)).toBe(false);
+      expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_OURA_PASSWORD)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_EMAIL)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_OTP)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_PASSWORD)).toBe(false);
       expect(requireScenario().runtimeEnv.MURPH_DEV_TEMPORAL).toBe(
-        liveJunctionWhoopConfig ? "disabled" : "managed",
+        liveJunctionWearableConfig ? "disabled" : "managed",
       );
 
-      const connectLink = await createHostedWhoopConnectLink(userId);
+      for (const source of ["oura", "whoop"] as const) {
+        const connectLink = await createHostedWearableConnectLink(userId, source);
 
-      // The runtime port surfaces the user-facing connect target. The
-      // Junction implementation is asserted independently in resolvedConfig.
-      expect(connectLink).toMatchObject({
-        provider: "whoop",
-        providerLabel: "WHOOP",
-      });
-      expect(connectLink?.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
-      const authorizationUrl = new URL(connectLink?.authorizationUrl ?? "");
-      expect(authorizationUrl.origin).toBe(requireScenario().harness.webBaseUrl);
-      expect(authorizationUrl.pathname).toBe("/connect");
-      expect(authorizationUrl.search).toBe("");
-      const authorizationFragment = new URLSearchParams(
-        authorizationUrl.hash.slice(1),
-      );
-      expect(authorizationFragment.get("deviceConnectIntent")).toMatch(
-        /^dc_[A-Za-z0-9_-]{32}$/u,
-      );
-      expect(authorizationFragment.get("connectSource")).toBe("whoop");
-      expect(
-        (connectLink?.authorizationUrl ?? "").includes(junctionConfig.apiKey),
-      ).toBe(false);
-      expect(
-        (connectLink?.authorizationUrl ?? "").includes(
-          junctionConfig.clientUserIdSecret,
-        ),
-      ).toBe(false);
+        // The runtime port surfaces the user-facing target. Junction ownership
+        // is asserted independently in resolvedConfig.
+        expect(connectLink).toMatchObject({
+          provider: source,
+          providerLabel: liveProviderDefinitions[source].label,
+        });
+        expect(connectLink?.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
+        const authorizationUrl = new URL(connectLink?.authorizationUrl ?? "");
+        expect(authorizationUrl.origin).toBe(requireScenario().harness.webBaseUrl);
+        expect(authorizationUrl.pathname).toBe("/connect");
+        expect(authorizationUrl.search).toBe("");
+        const authorizationFragment = new URLSearchParams(
+          authorizationUrl.hash.slice(1),
+        );
+        expect(authorizationFragment.get("deviceConnectIntent")).toMatch(
+          /^dc_[A-Za-z0-9_-]{32}$/u,
+        );
+        expect(authorizationFragment.get("connectSource")).toBe(source);
+        expect(
+          (connectLink?.authorizationUrl ?? "").includes(junctionConfig.apiKey),
+        ).toBe(false);
+        expect(
+          (connectLink?.authorizationUrl ?? "").includes(
+            junctionConfig.clientUserIdSecret,
+          ),
+        ).toBe(false);
+      }
       expect(requireScenario().harness.stderrTail()).not.toContain(
         "No device sync providers are configured",
       );
@@ -315,34 +347,29 @@ describe("hosted local device connect e2e", () => {
     300_000,
   );
 
-  // The default scenario remains hermetic. This opt-in branch uses one real
-  // Junction sandbox user and WHOOP account, and must run as the only selected
-  // hosted-local scenario so no unrelated process inherits its credentials.
-  it.runIf(Boolean(liveJunctionWhoopConfig))(
+  // The default scenario remains hermetic. These opt-in branches use distinct
+  // Junction sandbox users and dedicated provider accounts, and must run as the
+  // only selected hosted-local scenario so no unrelated process inherits login
+  // credentials.
+  it.runIf(Boolean(liveJunctionWearableConfig))(
+    "connects Oura through Junction Link in a real browser and reloads persisted state",
+    async () => {
+      await expect(runLiveJunctionWearableProof("oura")).resolves.toEqual({
+        callbackAutoCompleted: true,
+        connectedAfterCallback: true,
+        connectedAfterReload: true,
+        disconnectedDuringCleanup: true,
+        provider: "junction",
+        source: "oura",
+      });
+    },
+    600_000,
+  );
+
+  it.runIf(Boolean(liveJunctionWearableConfig))(
     "connects WHOOP through Junction Link in a real browser and reloads persisted state",
     async () => {
-      const liveConfig = requireLiveJunctionWhoopConfig();
-      await resetLiveJunctionWhoopProvider(liveConfig);
-      await requireScenario().seedActiveHostedMember({
-        memberId: liveBrowserUserId,
-      });
-      const hostedSessionCookie = await issueHostedBrowserSession({
-        memberId: liveBrowserUserId,
-      });
-      const connectLink = await createHostedWhoopConnectLink(liveBrowserUserId);
-      if (!connectLink) {
-        throw new Error("Hosted device-sync port did not create a WHOOP connect link.");
-      }
-      const result = await runJunctionWhoopBrowser({
-        config: liveConfig,
-        hostedSessionCookie,
-        startUrl: connectLink.authorizationUrl,
-        webBaseUrl: requireScenario().harness.webBaseUrl,
-      }).finally(async () => {
-        await resetLiveJunctionWhoopProvider(liveConfig);
-      });
-
-      expect(result).toEqual({
+      await expect(runLiveJunctionWearableProof("whoop")).resolves.toEqual({
         callbackAutoCompleted: true,
         connectedAfterCallback: true,
         connectedAfterReload: true,
@@ -355,48 +382,53 @@ describe("hosted local device connect e2e", () => {
   );
 });
 
-interface LiveJunctionWhoopConfig {
-  apiKey: string;
-  clientUserIdSecret: string;
+interface LiveProviderCredentials {
   email: string;
-  headless: boolean;
   otp: string | null;
   password: string;
-  region: "eu" | "us";
 }
 
-interface JunctionWhoopBrowserResult {
+interface LiveJunctionWearableConfig {
+  apiKey: string;
+  clientUserIdSecret: string;
+  headless: boolean;
+  providers: Record<LiveWearableSource, LiveProviderCredentials>;
+  region: "eu" | "us";
+  timeoutMs: number;
+}
+
+interface JunctionWearableBrowserResult {
   callbackAutoCompleted: true;
   connectedAfterCallback: true;
   connectedAfterReload: true;
   disconnectedDuringCleanup: true;
   provider: "junction";
-  source: "whoop";
+  source: LiveWearableSource;
 }
 
 interface JunctionProviderModule {
   buildJunctionClientUserId(secret: string, ownerId: string): string;
 }
 
-function readLiveJunctionWhoopConfig(
+function readLiveJunctionWearableConfig(
   env: NodeJS.ProcessEnv,
-): LiveJunctionWhoopConfig | null {
-  if (env.MURPH_E2E_JUNCTION_WHOOP_LIVE !== "1") {
+): LiveJunctionWearableConfig | null {
+  if (env.MURPH_E2E_JUNCTION_WEARABLE_LIVE !== "1") {
     return null;
   }
 
   const environment = requireLiveEnvironmentValue(env, "JUNCTION_ENV");
   if (environment !== "sandbox") {
-    throw new Error("Live Junction WHOOP E2E requires JUNCTION_ENV=sandbox.");
+    throw new Error("Live Junction wearable E2E requires JUNCTION_ENV=sandbox.");
   }
   const region = requireLiveEnvironmentValue(env, "JUNCTION_REGION");
   if (region !== "us" && region !== "eu") {
-    throw new Error("Live Junction WHOOP E2E requires JUNCTION_REGION=us or eu.");
+    throw new Error("Live Junction wearable E2E requires JUNCTION_REGION=us or eu.");
   }
   const apiKey = requireLiveEnvironmentValue(env, "JUNCTION_API_KEY");
   if (!apiKey.startsWith(`sk_${region}_`)) {
     throw new Error(
-      `Live Junction WHOOP E2E requires a ${region} sandbox JUNCTION_API_KEY.`,
+      `Live Junction wearable E2E requires a ${region} sandbox JUNCTION_API_KEY.`,
     );
   }
 
@@ -406,11 +438,21 @@ function readLiveJunctionWhoopConfig(
       env,
       "JUNCTION_CLIENT_USER_ID_SECRET",
     ),
-    email: requireLiveEnvironmentValue(env, "MURPH_E2E_WHOOP_EMAIL"),
-    headless: env.MURPH_E2E_WHOOP_HEADLESS !== "0",
-    otp: env.MURPH_E2E_WHOOP_OTP?.trim() || null,
-    password: requireLiveEnvironmentValue(env, "MURPH_E2E_WHOOP_PASSWORD"),
+    headless: env.MURPH_E2E_WEARABLE_HEADLESS !== "0",
+    providers: {
+      oura: {
+        email: requireLiveEnvironmentValue(env, "MURPH_E2E_OURA_EMAIL"),
+        otp: env.MURPH_E2E_OURA_OTP?.trim() || null,
+        password: requireLiveEnvironmentValue(env, "MURPH_E2E_OURA_PASSWORD"),
+      },
+      whoop: {
+        email: requireLiveEnvironmentValue(env, "MURPH_E2E_WHOOP_EMAIL"),
+        otp: env.MURPH_E2E_WHOOP_OTP?.trim() || null,
+        password: requireLiveEnvironmentValue(env, "MURPH_E2E_WHOOP_PASSWORD"),
+      },
+    },
     region,
+    timeoutMs: readLiveTimeoutMs(env.MURPH_E2E_WEARABLE_TIMEOUT_MS),
   };
 }
 
@@ -420,23 +462,36 @@ function requireLiveEnvironmentValue(
 ): string {
   const value = env[key]?.trim();
   if (!value) {
-    throw new Error(`Live Junction WHOOP E2E requires ${key}.`);
+    throw new Error(`Live Junction wearable E2E requires ${key}.`);
   }
   return value;
 }
 
-function requireLiveJunctionWhoopConfig(): LiveJunctionWhoopConfig {
-  if (!liveJunctionWhoopConfig) {
-    throw new Error("Live Junction WHOOP E2E configuration was not enabled.");
+function readLiveTimeoutMs(value: string | undefined): number {
+  const timeoutMs = Number(value?.trim() || "420000");
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 30_000 || timeoutMs > 600_000) {
+    throw new Error(
+      "MURPH_E2E_WEARABLE_TIMEOUT_MS must be an integer from 30000 to 600000.",
+    );
   }
-  return liveJunctionWhoopConfig;
+  return timeoutMs;
 }
 
-async function createHostedWhoopConnectLink(memberId: string) {
+function requireLiveJunctionWearableConfig(): LiveJunctionWearableConfig {
+  if (!liveJunctionWearableConfig) {
+    throw new Error("Live Junction wearable E2E configuration was not enabled.");
+  }
+  return liveJunctionWearableConfig;
+}
+
+async function createHostedWearableConnectLink(
+  memberId: string,
+  source: LiveWearableSource,
+) {
   const platform = buildRuntimePlatform(memberId);
   return await platform.deviceSyncPort?.createConnectLink({
     messagingReturnTarget: "telegram",
-    connectTarget: "whoop",
+    connectTarget: source,
   });
 }
 
@@ -451,8 +506,9 @@ function buildRuntimePlatform(boundUserId: string) {
   });
 }
 
-async function resetLiveJunctionWhoopProvider(
-  config: LiveJunctionWhoopConfig,
+async function resetLiveJunctionProvider(
+  config: LiveJunctionWearableConfig,
+  source: LiveWearableSource,
 ): Promise<void> {
   const client = new JunctionClient({
     apiKey: config.apiKey,
@@ -464,7 +520,7 @@ async function resetLiveJunctionWhoopProvider(
   ) as JunctionProviderModule;
   const clientUserId = junctionProvider.buildJunctionClientUserId(
     config.clientUserIdSecret,
-    liveBrowserUserId,
+    liveBrowserUserIds[source],
   );
   const user = await client.resolveUser(clientUserId);
   if (!user) {
@@ -472,20 +528,49 @@ async function resetLiveJunctionWhoopProvider(
   }
 
   const providers = await client.listUserProviders(user.userId);
-  const whoopConnected = providers.some((provider) => {
+  const providerDefinition = liveProviderDefinitions[source];
+  const connected = providers.some((provider) => {
     const sourceProviderSlug = normalizeJunctionProviderSlug(
       provider.origin.sourceProviderSlug ?? provider.slug,
     );
     const status = normalizeJunctionProviderSlug(provider.status);
-    return (sourceProviderSlug === "whoop_v2" || sourceProviderSlug === "whoop")
+    return providerDefinition.junctionSlugs.some(
+      (providerSlug) => providerSlug === sourceProviderSlug,
+    )
       && status !== "disconnected";
   });
-  if (whoopConnected) {
+  if (connected) {
     await client.deregisterProvider({
-      providerSlug: "whoop_v2",
+      providerSlug: providerDefinition.deregisterSlug,
       userId: user.userId,
     });
   }
+}
+
+async function runLiveJunctionWearableProof(
+  source: LiveWearableSource,
+): Promise<JunctionWearableBrowserResult> {
+  const config = requireLiveJunctionWearableConfig();
+  const memberId = liveBrowserUserIds[source];
+  await resetLiveJunctionProvider(config, source);
+  await requireScenario().seedActiveHostedMember({ memberId });
+  const hostedSessionCookie = await issueHostedBrowserSession({ memberId });
+  const connectLink = await createHostedWearableConnectLink(memberId, source);
+  if (!connectLink) {
+    throw new Error(
+      `Hosted device-sync port did not create a ${liveProviderDefinitions[source].label} connect link.`,
+    );
+  }
+
+  return await runJunctionWearableBrowser({
+    config,
+    hostedSessionCookie,
+    source,
+    startUrl: connectLink.authorizationUrl,
+    webBaseUrl: requireScenario().harness.webBaseUrl,
+  }).finally(async () => {
+    await resetLiveJunctionProvider(config, source);
+  });
 }
 
 async function issueHostedBrowserSession(input: {
@@ -568,12 +653,14 @@ function temporarilyRemoveProcessEnvironment(keys: readonly string[]): () => voi
   };
 }
 
-async function runJunctionWhoopBrowser(input: {
-  config: LiveJunctionWhoopConfig;
+async function runJunctionWearableBrowser(input: {
+  config: LiveJunctionWearableConfig;
   hostedSessionCookie: string;
+  source: LiveWearableSource;
   startUrl: string;
   webBaseUrl: string;
-}): Promise<JunctionWhoopBrowserResult> {
+}): Promise<JunctionWearableBrowserResult> {
+  const providerCredentials = input.config.providers[input.source];
   const { stdout } = await execFileAsync(
     "pnpm",
     [
@@ -581,7 +668,7 @@ async function runJunctionWhoopBrowser(input: {
       "tsx",
       "--tsconfig",
       "apps/web/tsconfig.json",
-      "apps/web/scripts/run-hosted-local-junction-whoop-browser.ts",
+      "apps/web/scripts/run-hosted-local-junction-wearable-browser.ts",
     ],
     {
       cwd: repoRoot,
@@ -591,13 +678,17 @@ async function runJunctionWhoopBrowser(input: {
         MURPH_E2E_CONNECT_URL: input.startUrl,
         MURPH_E2E_HOSTED_SESSION_COOKIE: input.hostedSessionCookie,
         MURPH_E2E_WEB_BASE_URL: input.webBaseUrl,
-        MURPH_E2E_WHOOP_EMAIL: input.config.email,
-        MURPH_E2E_WHOOP_HEADLESS: input.config.headless ? "1" : "0",
-        ...(input.config.otp ? { MURPH_E2E_WHOOP_OTP: input.config.otp } : {}),
-        MURPH_E2E_WHOOP_PASSWORD: input.config.password,
+        MURPH_E2E_PROVIDER_EMAIL: providerCredentials.email,
+        MURPH_E2E_PROVIDER_HEADLESS: input.config.headless ? "1" : "0",
+        ...(providerCredentials.otp
+          ? { MURPH_E2E_PROVIDER_OTP: providerCredentials.otp }
+          : {}),
+        MURPH_E2E_PROVIDER_PASSWORD: providerCredentials.password,
+        MURPH_E2E_PROVIDER_SOURCE: input.source,
+        MURPH_E2E_PROVIDER_TIMEOUT_MS: String(input.config.timeoutMs),
       },
       maxBuffer: 1_000_000,
-      timeout: 480_000,
+      timeout: input.config.timeoutMs + 60_000,
     },
   );
   const marker = stdout
@@ -605,12 +696,12 @@ async function runJunctionWhoopBrowser(input: {
     .reverse()
     .find((line) => line.startsWith("MURPH_E2E_RESULT="));
   if (!marker) {
-    throw new Error("Junction WHOOP browser E2E did not return a result marker.");
+    throw new Error("Junction wearable browser E2E did not return a result marker.");
   }
 
   return JSON.parse(
     marker.slice("MURPH_E2E_RESULT=".length),
-  ) as JunctionWhoopBrowserResult;
+  ) as JunctionWearableBrowserResult;
 }
 
 function buildBrowserProcessEnvironment(): NodeJS.ProcessEnv {
@@ -621,11 +712,21 @@ function buildBrowserProcessEnvironment(): NodeJS.ProcessEnv {
     "JUNCTION_WEBHOOK_SECRET",
     "MURPH_E2E_CONNECT_URL",
     "MURPH_E2E_HOSTED_SESSION_COOKIE",
+    "MURPH_E2E_OURA_EMAIL",
+    "MURPH_E2E_OURA_OTP",
+    "MURPH_E2E_OURA_PASSWORD",
+    "MURPH_E2E_PROVIDER_EMAIL",
+    "MURPH_E2E_PROVIDER_HEADLESS",
+    "MURPH_E2E_PROVIDER_OTP",
+    "MURPH_E2E_PROVIDER_PASSWORD",
+    "MURPH_E2E_PROVIDER_SOURCE",
+    "MURPH_E2E_PROVIDER_TIMEOUT_MS",
     "MURPH_E2E_WEB_BASE_URL",
     "MURPH_E2E_WHOOP_EMAIL",
-    "MURPH_E2E_WHOOP_HEADLESS",
     "MURPH_E2E_WHOOP_OTP",
     "MURPH_E2E_WHOOP_PASSWORD",
+    "OURA_CLIENT_ID",
+    "OURA_CLIENT_SECRET",
     "WHOOP_CLIENT_ID",
     "WHOOP_CLIENT_SECRET",
   ]) {

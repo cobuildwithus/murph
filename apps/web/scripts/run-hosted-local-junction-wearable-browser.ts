@@ -9,8 +9,10 @@ interface BrowserConfig {
   email: string;
   headless: boolean;
   hostedSessionCookie: string;
+  label: "Oura" | "WHOOP";
   otp: string | null;
   password: string;
+  source: "oura" | "whoop";
   startUrl: string;
   timeoutMs: number;
   webBaseUrl: string;
@@ -38,8 +40,11 @@ const NEGATIVE_AUTH_ACTION_PATTERN =
 const TRUSTED_AUTHORIZATION_DOMAINS = [
   "junction.com",
   "tryvital.io",
-  "whoop.com",
 ] as const;
+const PROVIDER_AUTHORIZATION_DOMAINS = {
+  oura: ["ouraring.com"],
+  whoop: ["whoop.com"],
+} as const;
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
 
@@ -75,7 +80,7 @@ async function main(): Promise<void> {
       timeout: config.timeoutMs,
     });
 
-    stage = "junction_whoop_authorization";
+    stage = `junction_${config.source}_authorization`;
     const [callbackResponse] = await Promise.all([
       page.waitForResponse((response) => {
         const url = new URL(response.url());
@@ -93,7 +98,7 @@ async function main(): Promise<void> {
       (url) => url.origin === config.webOrigin && url.pathname === "/home",
       { timeout: config.timeoutMs },
     );
-    await page.getByRole("heading", { name: /^WHOOP is connected$/i }).waitFor({
+    await page.getByRole("heading", { name: `${config.label} is connected` }).waitFor({
       timeout: config.timeoutMs,
     });
 
@@ -101,12 +106,12 @@ async function main(): Promise<void> {
     await page.goto(new URL("/connect", config.webBaseUrl).toString(), {
       waitUntil: "domcontentloaded",
     });
-    await assertWhoopConnectionState(page, "connected", config.timeoutMs);
+    await assertWearableConnectionState(page, config, "connected");
     await page.reload({ waitUntil: "domcontentloaded" });
-    await assertWhoopConnectionState(page, "connected", config.timeoutMs);
+    await assertWearableConnectionState(page, config, "connected");
 
     stage = "junction_cleanup";
-    await disconnectJunctionAccount(page, config.timeoutMs);
+    await disconnectJunctionAccount(page, config);
 
     process.stdout.write(`MURPH_E2E_RESULT=${JSON.stringify({
       callbackAutoCompleted: true,
@@ -114,7 +119,7 @@ async function main(): Promise<void> {
       connectedAfterReload: true,
       disconnectedDuringCleanup: true,
       provider: "junction",
-      source: "whoop",
+      source: config.source,
     })}\n`);
   } finally {
     await browser.close();
@@ -157,7 +162,7 @@ async function completeExternalAuthorization(
       return;
     }
 
-    assertTrustedAuthorizationUrl(page.url());
+    assertTrustedAuthorizationUrl(page.url(), config);
     await fillVisible(page, [
       'input[type="email"]',
       'input[autocomplete="email"]',
@@ -183,7 +188,7 @@ async function completeExternalAuthorization(
         }
       } else if (config.headless) {
         throw new Error(
-          "WHOOP requested a one-time code. Set MURPH_E2E_WHOOP_OTP or run headfully for manual entry.",
+          `${config.label} requested a one-time code. Set MURPH_E2E_PROVIDER_OTP or run headfully for manual entry.`,
         );
       } else if (!currentOtp.trim()) {
         await page.waitForTimeout(1_000);
@@ -288,38 +293,42 @@ async function clickFirstVisibleAction(
   return false;
 }
 
-async function assertWhoopConnectionState(
+async function assertWearableConnectionState(
   page: Page,
+  config: BrowserConfig,
   state: "connected" | "idle",
-  timeoutMs: number,
 ): Promise<void> {
-  const whoopCard = page
-    .getByRole("heading", { name: "Whoop", exact: true })
+  const wearableCard = page
+    .getByRole("heading", { name: new RegExp(`^${config.label}$`, "i") })
     .locator("xpath=ancestor::div[.//*[@data-connection-state]][1]");
-  await whoopCard.locator(`[data-connection-state="${state}"]`).waitFor({
-    timeout: timeoutMs,
+  await wearableCard.locator(`[data-connection-state="${state}"]`).waitFor({
+    timeout: config.timeoutMs,
   });
 }
 
 async function disconnectJunctionAccount(
   page: Page,
-  timeoutMs: number,
+  config: BrowserConfig,
 ): Promise<void> {
   await page
-    .getByRole("button", { name: /^Disconnect (?:Whoop|account)$/i })
+    .getByRole("button", { name: new RegExp(`^Disconnect (?:${config.label}|account)$`, "i") })
     .click();
   const dialog = page.getByRole("dialog");
   await dialog
-    .getByRole("heading", { name: /^Disconnect (?:Whoop|account)\?$/i })
+    .getByRole("heading", {
+      name: new RegExp(`^Disconnect (?:${config.label}|account)\\?$`, "i"),
+    })
     .waitFor();
   await dialog.getByRole("button", { name: "Disconnect", exact: true }).click();
   await page.getByText("Source disconnected", { exact: true }).waitFor({
-    timeout: timeoutMs,
+    timeout: config.timeoutMs,
   });
-  await assertWhoopConnectionState(page, "idle", timeoutMs);
+  await assertWearableConnectionState(page, config, "idle");
 }
 
 function readBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
+  const source = requireWearableSource(env.MURPH_E2E_PROVIDER_SOURCE);
+  const label = source === "oura" ? "Oura" : "WHOOP";
   const webBaseUrl = requireEnvironmentValue(env, "MURPH_E2E_WEB_BASE_URL");
   const parsedWebBaseUrl = new URL(webBaseUrl);
   const startUrl = new URL(
@@ -330,31 +339,33 @@ function readBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
     startUrl.origin !== parsedWebBaseUrl.origin
     || startUrl.pathname !== "/connect"
     || !connectIntentParams.has("deviceConnectIntent")
-    || connectIntentParams.get("connectSource") !== "whoop"
+    || connectIntentParams.get("connectSource") !== source
   ) {
     throw new Error(
-      "MURPH_E2E_CONNECT_URL must be a signed WHOOP /connect device intent on the hosted-local Web origin.",
+      `MURPH_E2E_CONNECT_URL must be a signed ${label} /connect device intent on the hosted-local Web origin.`,
     );
   }
   const timeoutMs = Number.parseInt(
-    env.MURPH_E2E_WHOOP_TIMEOUT_MS ?? "180000",
+    env.MURPH_E2E_PROVIDER_TIMEOUT_MS ?? "180000",
     10,
   );
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 30_000 || timeoutMs > 600_000) {
     throw new Error(
-      "MURPH_E2E_WHOOP_TIMEOUT_MS must be between 30000 and 600000.",
+      "MURPH_E2E_PROVIDER_TIMEOUT_MS must be between 30000 and 600000.",
     );
   }
 
   return {
-    email: requireEnvironmentValue(env, "MURPH_E2E_WHOOP_EMAIL"),
-    headless: env.MURPH_E2E_WHOOP_HEADLESS !== "0",
+    email: requireEnvironmentValue(env, "MURPH_E2E_PROVIDER_EMAIL"),
+    headless: env.MURPH_E2E_PROVIDER_HEADLESS !== "0",
     hostedSessionCookie: requireEnvironmentValue(
       env,
       "MURPH_E2E_HOSTED_SESSION_COOKIE",
     ),
-    otp: env.MURPH_E2E_WHOOP_OTP?.trim() || null,
-    password: requireEnvironmentValue(env, "MURPH_E2E_WHOOP_PASSWORD"),
+    label,
+    otp: env.MURPH_E2E_PROVIDER_OTP?.trim() || null,
+    password: requireEnvironmentValue(env, "MURPH_E2E_PROVIDER_PASSWORD"),
+    source,
     startUrl: startUrl.toString(),
     timeoutMs,
     webBaseUrl: parsedWebBaseUrl.toString().replace(/\/$/u, ""),
@@ -369,11 +380,22 @@ function clearSensitiveBrowserEnvironment(): void {
     "JUNCTION_WEBHOOK_SECRET",
     "MURPH_E2E_CONNECT_URL",
     "MURPH_E2E_HOSTED_SESSION_COOKIE",
+    "MURPH_E2E_PROVIDER_EMAIL",
+    "MURPH_E2E_PROVIDER_HEADLESS",
+    "MURPH_E2E_PROVIDER_OTP",
+    "MURPH_E2E_PROVIDER_PASSWORD",
+    "MURPH_E2E_PROVIDER_SOURCE",
+    "MURPH_E2E_PROVIDER_TIMEOUT_MS",
+    "MURPH_E2E_OURA_EMAIL",
+    "MURPH_E2E_OURA_OTP",
+    "MURPH_E2E_OURA_PASSWORD",
     "MURPH_E2E_WHOOP_EMAIL",
     "MURPH_E2E_WHOOP_OTP",
     "MURPH_E2E_WHOOP_PASSWORD",
     "WHOOP_CLIENT_ID",
     "WHOOP_CLIENT_SECRET",
+    "OURA_CLIENT_ID",
+    "OURA_CLIENT_SECRET",
   ]) {
     delete process.env[key];
   }
@@ -386,29 +408,44 @@ function requireEnvironmentValue(
   const value = env[key]?.trim();
   if (!value) {
     throw new Error(
-      `Hosted-local Junction WHOOP browser runner requires ${key}.`,
+      `Hosted-local Junction wearable browser runner requires ${key}.`,
     );
   }
   return value;
 }
 
-function assertTrustedAuthorizationUrl(value: string): void {
+function assertTrustedAuthorizationUrl(
+  value: string,
+  config: BrowserConfig,
+): void {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new Error("Junction or WHOOP opened an invalid authorization URL.");
+    throw new Error(`Junction or ${config.label} opened an invalid authorization URL.`);
   }
 
   const hostname = url.hostname.toLowerCase();
-  const trusted = TRUSTED_AUTHORIZATION_DOMAINS.some((domain) =>
+  const trustedDomains = [
+    ...TRUSTED_AUTHORIZATION_DOMAINS,
+    ...PROVIDER_AUTHORIZATION_DOMAINS[config.source],
+  ];
+  const trusted = trustedDomains.some((domain) =>
     hostname === domain || hostname.endsWith(`.${domain}`)
   );
   if (!trusted || url.protocol !== "https:") {
     throw new Error(
-      `Refusing to enter WHOOP credentials at unexpected authorization host ${hostname}.`,
+      `Refusing to enter ${config.label} credentials at unexpected authorization host ${hostname}.`,
     );
   }
+}
+
+function requireWearableSource(value: string | undefined): "oura" | "whoop" {
+  const source = value?.trim();
+  if (source === "oura" || source === "whoop") {
+    return source;
+  }
+  throw new Error("MURPH_E2E_PROVIDER_SOURCE must be oura or whoop.");
 }
 
 function readOrigin(value: string): string | null {
@@ -454,7 +491,7 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
 
 void main().catch((error: unknown) => {
   process.stderr.write(
-    `Junction WHOOP browser E2E failed at ${stage} (${safePageLocation(activePage)}): ${
+    `Junction wearable browser E2E failed at ${stage} (${safePageLocation(activePage)}): ${
       sanitizeFailure(error, activeConfig)
     }\n`,
   );

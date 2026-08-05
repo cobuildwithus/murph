@@ -23,19 +23,23 @@ const SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS = 60_000;
 const HOSTED_LOCAL_E2E_TEST_CONTROLS_ENV =
   "MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS";
 const FINAL_RUNNER_CLEANUP_TIMEOUT_MS = 60_000;
-const JUNCTION_WHOOP_LIVE_ENV = "MURPH_E2E_JUNCTION_WHOOP_LIVE";
-const JUNCTION_WHOOP_LIVE_ENV_KEYS = [
+const JUNCTION_WEARABLE_LIVE_ENV = "MURPH_E2E_JUNCTION_WEARABLE_LIVE";
+const JUNCTION_WEARABLE_LIVE_ENV_KEYS = [
   "JUNCTION_API_KEY",
   "JUNCTION_CLIENT_USER_ID_SECRET",
   "JUNCTION_ENV",
   "JUNCTION_REGION",
-  JUNCTION_WHOOP_LIVE_ENV,
+  JUNCTION_WEARABLE_LIVE_ENV,
+  "MURPH_E2E_JUNCTION_OURA_MEMBER_ID",
   "MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID",
+  "MURPH_E2E_OURA_EMAIL",
+  "MURPH_E2E_OURA_OTP",
+  "MURPH_E2E_OURA_PASSWORD",
   "MURPH_E2E_WHOOP_EMAIL",
-  "MURPH_E2E_WHOOP_HEADLESS",
   "MURPH_E2E_WHOOP_OTP",
   "MURPH_E2E_WHOOP_PASSWORD",
-  "MURPH_E2E_WHOOP_TIMEOUT_MS",
+  "MURPH_E2E_WEARABLE_HEADLESS",
+  "MURPH_E2E_WEARABLE_TIMEOUT_MS",
 ] as const;
 
 interface HostedLocalE2eRunnerCleanupOptions {
@@ -420,25 +424,25 @@ export function listHostedLocalE2eScenarios(): readonly HostedLocalE2eScenario[]
   return hostedLocalE2eScenarios;
 }
 
-function partitionLiveWhoopEnvironment(input: {
+function partitionLiveWearableEnvironment(input: {
   env: NodeJS.ProcessEnv;
   scenarios: readonly HostedLocalE2eScenario[];
 }): {
   genericEnv: NodeJS.ProcessEnv;
   vitestEnvOverlay: NodeJS.ProcessEnv;
 } {
-  if (input.env[JUNCTION_WHOOP_LIVE_ENV] !== "1") {
+  if (input.env[JUNCTION_WEARABLE_LIVE_ENV] !== "1") {
     return { genericEnv: input.env, vitestEnvOverlay: {} };
   }
   if (input.scenarios.length !== 1 || input.scenarios[0]?.name !== "device-connect") {
     throw new Error(
-      "Run the live Junction WHOOP browser proof by itself: pnpm hosted-local e2e device-connect.",
+      "Run the live Junction wearable browser proof by itself: pnpm hosted-local e2e device-connect.",
     );
   }
 
   const genericEnv = { ...input.env };
   const vitestEnvOverlay: NodeJS.ProcessEnv = {};
-  for (const key of JUNCTION_WHOOP_LIVE_ENV_KEYS) {
+  for (const key of JUNCTION_WEARABLE_LIVE_ENV_KEYS) {
     const value = genericEnv[key];
     if (value !== undefined) {
       vitestEnvOverlay[key] = value;
@@ -454,11 +458,11 @@ export async function runHostedLocalE2eSuite(
   const env = sanitizeHostedLocalGenericEnvironment(input.env ?? process.env);
   removeHostedLocalWebAuthorityFromProcessEnvironment();
   const scenarios = resolveHostedLocalE2eScenarios(input.scenario ?? "all");
-  const liveWhoopEnvironment = partitionLiveWhoopEnvironment({ env, scenarios });
+  const liveWearableEnvironment = partitionLiveWearableEnvironment({ env, scenarios });
   const prepareRunnerBundle = input.prepareRunnerBundle !== false;
   const injectSkipRunnerBundleEnv = input.injectSkipRunnerBundleEnv !== false;
   const suiteEnv = buildHostedLocalE2eSuiteEnv({
-    env: liveWhoopEnvironment.genericEnv,
+    env: liveWearableEnvironment.genericEnv,
     injectSkipRunnerBundleEnv,
   });
   let terminationSignal: NodeJS.Signals | null = null;
@@ -514,7 +518,7 @@ export async function runHostedLocalE2eSuite(
           assertWorkAdmission,
           env: suiteEnv,
           scenarios,
-          vitestEnvOverlay: liveWhoopEnvironment.vitestEnvOverlay,
+          vitestEnvOverlay: liveWearableEnvironment.vitestEnvOverlay,
         });
       });
     } catch (error) {
