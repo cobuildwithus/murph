@@ -5,7 +5,7 @@ import {
 import type { R2BucketLike } from "./bundle-store.ts";
 
 export const HOSTED_R2_CUTOVER_PHASE_ENV = "HOSTED_R2_CUTOVER_PHASE";
-export const HOSTED_R2_CUTOVER_PROTOCOL_VERSION = "r2-oc-enam-v1";
+export const HOSTED_R2_CUTOVER_PROTOCOL_VERSION = "r2-oc-enam-v2";
 export const HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256_ENV =
   "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256";
 export const HOSTED_R2_WRITE_ADMISSION_ENV = "HOSTED_R2_WRITE_ADMISSION";
@@ -33,6 +33,12 @@ export interface HostedR2CutoverContext {
   phase: HostedR2CutoverPhase;
   sourceBucket: R2BucketLike;
   writeBucketRole: HostedR2BucketRole;
+}
+
+interface HostedR2ReadBucket {
+  bucket: R2BucketLike;
+  label: "BUNDLES" | "BUNDLES_ENAM";
+  role: HostedR2BucketRole;
 }
 
 export function resolveHostedR2CutoverContext(
@@ -160,19 +166,18 @@ export async function locateHostedR2ObjectBucketRole(
   context: HostedR2CutoverContext,
   key: string,
 ): Promise<HostedR2BucketRole | null> {
-  if (context.phase === "source_active") {
+  if (!context.coexisting) {
     return await requireHead(context.sourceBucket, "BUNDLES", key) ? "source" : null;
   }
-
-  if (await requireHead(context.destinationBucket, "BUNDLES_ENAM", key)) {
-    return "destination";
+  const [primary, fallback] = readHostedR2BucketOrder(context);
+  if (await requireHead(primary.bucket, primary.label, key)) {
+    return primary.role;
   }
-  const sourceObject = await requireHead(context.sourceBucket, "BUNDLES", key);
-  if (!sourceObject) {
+  if (!await requireHead(fallback.bucket, fallback.label, key)) {
     return null;
   }
-  emitFallbackObservation("head");
-  return "source";
+  emitFallbackObservation("head", primary.role, fallback.role);
+  return fallback.role;
 }
 
 function createLegacySingleBucketContext(bucket: R2BucketLike): HostedR2CutoverContext {
@@ -190,20 +195,18 @@ function createLegacySingleBucketContext(bucket: R2BucketLike): HostedR2CutoverC
 function createHostedR2CutoverBucket(
   context: Omit<HostedR2CutoverContext, "bucket">,
 ): R2BucketLike {
+  const [primary, fallback] = readHostedR2BucketOrder(context);
   const bucket: R2BucketLike = {
     async get(key) {
-      if (context.phase === "source_active") {
-        return await context.sourceBucket.get(key);
+      const primaryObject = await primary.bucket.get(key);
+      if (primaryObject !== null) {
+        return primaryObject;
       }
-      const destinationObject = await context.destinationBucket.get(key);
-      if (destinationObject !== null) {
-        return destinationObject;
+      const fallbackObject = await fallback.bucket.get(key);
+      if (fallbackObject !== null) {
+        emitFallbackObservation("get", primary.role, fallback.role);
       }
-      const sourceObject = await context.sourceBucket.get(key);
-      if (sourceObject !== null) {
-        emitFallbackObservation("get");
-      }
-      return sourceObject;
+      return fallbackObject;
     },
     async put(key, value, options) {
       await context.activeBucket.put(key, value, options);
@@ -234,18 +237,15 @@ function createHostedR2CutoverBucket(
   };
 
   bucket.head = async (key) => {
-    if (context.phase === "source_active") {
-      return await requireHead(context.sourceBucket, "BUNDLES", key);
+    const primaryObject = await requireHead(primary.bucket, primary.label, key);
+    if (primaryObject !== null) {
+      return primaryObject;
     }
-    const destinationObject = await requireHead(context.destinationBucket, "BUNDLES_ENAM", key);
-    if (destinationObject !== null) {
-      return destinationObject;
+    const fallbackObject = await requireHead(fallback.bucket, fallback.label, key);
+    if (fallbackObject !== null) {
+      emitFallbackObservation("head", primary.role, fallback.role);
     }
-    const sourceObject = await requireHead(context.sourceBucket, "BUNDLES", key);
-    if (sourceObject !== null) {
-      emitFallbackObservation("head");
-    }
-    return sourceObject;
+    return fallbackObject;
   };
 
   bucket.list = async (input) => {
@@ -257,6 +257,27 @@ function createHostedR2CutoverBucket(
   };
 
   return bucket;
+}
+
+function readHostedR2BucketOrder(
+  context: Pick<
+    HostedR2CutoverContext,
+    "destinationBucket" | "phase" | "sourceBucket"
+  >,
+): readonly [HostedR2ReadBucket, HostedR2ReadBucket] {
+  const source = {
+    bucket: context.sourceBucket,
+    label: "BUNDLES",
+    role: "source",
+  } as const;
+  const destination = {
+    bucket: context.destinationBucket,
+    label: "BUNDLES_ENAM",
+    role: "destination",
+  } as const;
+  return context.phase === "source_active"
+    ? [source, destination]
+    : [destination, source];
 }
 
 function assertBridgeBucketCapabilities(bucket: R2BucketLike, label: string): void {
@@ -303,15 +324,19 @@ async function requireHead(
   return await requireHeadMethod(bucket, label)(key);
 }
 
-function emitFallbackObservation(operation: "get" | "head"): void {
+function emitFallbackObservation(
+  operation: "get" | "head",
+  primaryBucketRole: HostedR2BucketRole,
+  fallbackBucketRole: HostedR2BucketRole,
+): void {
   emitHostedExecutionStructuredLog({
     component: "hosted.r2",
     details: {
-      fallbackBucketRole: "source",
+      fallbackBucketRole,
       operation,
-      primaryBucketRole: "destination",
+      primaryBucketRole,
     },
-    message: "Hosted R2 destination read used the source fallback after a definitive miss.",
+    message: "Hosted R2 explicit-key read used the fallback bucket after a definitive miss.",
     phase: "wake.running",
     userId: null,
   });
