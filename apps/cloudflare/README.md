@@ -217,9 +217,9 @@ monitor.
 Defaulted worker vars:
 
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
-- `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=180000` for the runtime-owned idle
+- `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=60000` for the runtime-owned idle
   window before a dirty invocation checkpoints and returns; production rejects
-  lower values so routine checkpoints cannot bypass the three-minute quiet floor
+  lower values so routine checkpoints cannot bypass the one-minute quiet floor
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=1200000` for the post-completion
   conversation warm lease (code default is `300000` when unset)
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
@@ -276,7 +276,10 @@ current foreground phase may run once when due before the floor without
 publishing a snapshot; inherited or committed wakes and durability barriers
 remain checkpoint-first. If state remains dirty, the direct invocation
 checkpoints with reason `idle_shutdown` at the floor or during shutdown before
-returning success. A restored due wake in a clean workspace runs ordinarily.
+returning success. The floor is independent of `sleepAfter` and the conversation
+warm lease. That lease starts only after the invocation settles, so a clean
+checkpointed process can remain warm without retaining dirty state. A restored
+due wake in a clean workspace runs ordinarily.
 Before a direct user-action provider turn, a session absent from the restored
 published snapshot receives that same full `idle_shutdown` checkpoint while the
 foreground watcher and detached work are quiescent. This includes a session

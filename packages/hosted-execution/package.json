@@ -142,6 +142,10 @@
       "types": "./dist/runtime-control.d.ts",
       "default": "./dist/runtime-control.js"
     },
+    "./runtime-control-limits": {
+      "types": "./dist/runtime-control-limits.d.ts",
+      "default": "./dist/runtime-control-limits.js"
+    },
     "./return-contact": {
       "types": "./dist/return-contact.d.ts",
       "default": "./dist/return-contact.js"

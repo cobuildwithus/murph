@@ -26,7 +26,7 @@ describe("readHostedExecutionEnvironment", () => {
     );
     expect(environment.hostedCrypto.HOSTED_CRYPTO_ENV).toBe("test");
     expect(environment.maxEventAttempts).toBe(3);
-    expect(environment.idleCheckpointDelayMs).toBe(180_000);
+    expect(environment.idleCheckpointDelayMs).toBe(60_000);
     expect(environment.retryDelayMs).toBe(30_000);
     expect(environment.runnerCommitTimeoutMs).toBe(45_000);
     expect(environment.runnerReadyTimeoutMs).toBe(20_000);
@@ -168,22 +168,22 @@ describe("readHostedExecutionEnvironment", () => {
     ).toThrow(/HOSTED_WEB_BASE_URL must not use HTTP in production/u);
   });
 
-  it("rejects a production idle checkpoint delay below 180 seconds", () => {
+  it("rejects a production idle checkpoint delay below 60 seconds", () => {
     expect(() =>
       readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv({
         HOSTED_CRYPTO_ENV: "production",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "179999",
+        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "59999",
       })),
     ).toThrow(
-      /HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS must be at least 180000 in production/u,
+      /HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS must be at least 60000 in production/u,
     );
 
     expect(
       readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv({
         HOSTED_CRYPTO_ENV: "production",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000",
+        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "60000",
       })).idleCheckpointDelayMs,
-    ).toBe(180_000);
+    ).toBe(60_000);
   });
 
   it("reads the configured Vercel OIDC environment when provided", () => {
@@ -238,7 +238,7 @@ describe("readHostedExecutionEnvironment", () => {
 
   it("rejects partial numeric Worker timing environment values", () => {
     const invalidTimingValues = {
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000abc",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "60000abc",
       HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: "3abc",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "30000abc",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "30000abc",

@@ -567,7 +567,7 @@ and foreground reruns. A consented-member request remains checkpoint-gated;
 every accepted-input completion is admitted without a completion-kind context.
 Request import kicks the existing detached controller; completion import uses
 the existing foreground-causal delivery path. Neither starts or advances the
-at-least-180-second idle snapshot. Any unrelated system wake in that prefix
+at-least-60-second idle snapshot. Any unrelated system wake in that prefix
 keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
 pass re-enters the existing bounded pass loop after admitting any newly arrived
 personal input first, so multiple safe items or a safe item imported during the
@@ -1712,9 +1712,11 @@ controls how often an idle shell is reconsidered, while
 lease. The assistant runtime observes only fresh staged conversation input or
 recovered conversation input admitted to the provider. The container process
 publishes that observation as a private completion watermark in its health
-response. At each lifecycle expiry RunnerContainer derives the remaining lease
-from that live child watermark, re-arms the platform timeout while the lease or
-active work remains, and destroys the shell after expiry. Durable Object
+response. The watermark is stamped only when an observed invocation settles,
+after its dirty checkpoint; it is not a deadline visible to the active runtime.
+At each lifecycle expiry RunnerContainer derives the remaining lease from that
+live child watermark, re-arms the platform timeout while the lease or active
+work remains, and destroys the shell after expiry. Durable Object
 reconstruction reads the same resident process; a replacement process starts
 without inherited warmth. Replay, system-lane work, device sync, and generic
 maintenance do not mint or slide the lease. An inactive old child missing the
@@ -2004,11 +2006,14 @@ limits bound replay work, not object
 retention: encrypted owner-scoped receipt, log, and payload artifacts are not
 eagerly deleted after consolidation until the artifact store has a
 reference-safe owner-scoped retention primitive.
-`idle_shutdown` is the snapshot boundary for warm-runner wind-down: it maps to
-a direct-R2 v2 snapshot from the effective restored state, runs through the
-ordinary invocation lease shortly before container sleep, and checks the lease
-during the broad snapshot walk so stale idle shutdown can abort before direct
-R2 upload. Before planning begins, the runtime completes the resident-Codex
+`idle_shutdown` is the snapshot boundary before a dirty invocation releases
+its write fence. It maps to a direct-R2 v2 snapshot from the effective restored
+state and runs inside the ordinary invocation, not from RunnerContainer activity
+expiry. After it commits and the invocation settles, a clean conversation process
+may remain warm under the independent post-completion lease. The snapshot bridge
+checks the invocation checkpoint lease during the broad snapshot walk so stale
+idle shutdown can abort before direct R2 upload. Before planning begins, the
+runtime completes the resident-Codex
 background boundary described above; no snapshot may race admitted optional
 enrichment or an unowned background terminal. Snapshot planning, archive
 construction, upload, and publication hold the vault's canonical-write lock as
@@ -2161,7 +2166,7 @@ old web deployment's `checkpointed: false` plus
 response remains a successful transport-level compatibility result and must not
 be collapsed into a generic HTTP conflict. Current web no longer produces it;
 post-upload local wake checks must not discard a valid snapshot on its behalf.
-In production, the configured idle checkpoint delay is at least 180 seconds,
+In production, the configured idle checkpoint delay is at least 60 seconds,
 and every dirty foreground pass restarts that hard lower bound. The exact
 assistant wake projected directly by the current foreground assistant phase may
 run once per dirty checkpoint generation before that boundary against the warm

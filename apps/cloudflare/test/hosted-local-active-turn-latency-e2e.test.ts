@@ -22,9 +22,12 @@ import {
 import {
   parseHostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedRunnerStatusResponse,
+import {
+  type HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS,
+} from "@murphai/hosted-execution/runtime-control-limits";
 import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
@@ -66,7 +69,8 @@ const productionLikeAssistantModel = "gpt-5.6-terra";
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const configuredDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
-const idleShutdownDelayProbeIdleDelayMs = 180_000;
+const idleShutdownDelayProbeIdleDelayMs =
+  HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS;
 const projectedWakeNoSnapshotObservationMs = 5_000;
 const slowPostDeliveryMaintenanceMs = 20_000;
 

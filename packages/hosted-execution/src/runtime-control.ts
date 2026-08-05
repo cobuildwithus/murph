@@ -50,6 +50,9 @@ import {
 import type {
   HostedRuntimePendingGroupSetupInput,
 } from "./pending-group-setup.ts";
+export {
+  HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS,
+} from "./runtime-control-limits.ts";
 
 export const HOSTED_MAILBOX_LANES = [
   "system",

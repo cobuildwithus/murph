@@ -6,6 +6,9 @@ import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
+import {
+  HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS,
+} from "@murphai/hosted-execution/runtime-control-limits";
 
 export interface HostedExecutionWorkerEnvironment {
   allowedRunnerSecretKeys: string | null;
@@ -36,7 +39,6 @@ const HOSTED_EXECUTION_LOOPBACK_HOSTS = new Set([
   "[::1]",
 ]);
 const HOSTED_EXECUTION_RUNNER_COMMIT_RESPONSE_MARGIN_MS = 5_000;
-const HOSTED_EXECUTION_MIN_PRODUCTION_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 
 export interface HostedExecutionWorkerEnvironmentOptions {
   allowHostedWebHttpHosts?: readonly string[];
@@ -69,15 +71,17 @@ export function readHostedExecutionWorkerEnvironment(
   );
   const idleCheckpointDelayMs = parsePositiveInteger(
     normalizeHostedExecutionString(source.HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS),
-    180_000,
+    HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS,
     "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS",
   );
   if (
     isProduction
-    && idleCheckpointDelayMs < HOSTED_EXECUTION_MIN_PRODUCTION_IDLE_CHECKPOINT_DELAY_MS
+    && idleCheckpointDelayMs
+      < HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS
   ) {
     throw new TypeError(
-      "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS must be at least 180000 in production.",
+      "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS must be at least "
+        + `${HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS} in production.`,
     );
   }
   const runnerCommitTimeoutMs = parsePositiveInteger(

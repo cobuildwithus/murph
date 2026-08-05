@@ -401,7 +401,7 @@ test("hosted provider cleanup plan queues terminal Linq cleanup as checkpoint wo
 
     assert.deepEqual(plan, {
       checkpoint: {
-        nextWakeAt: "2026-07-01T00:12:01.000Z",
+        nextWakeAt: "2026-07-01T00:10:01.000Z",
       },
       deferred: false,
       due: false,
@@ -685,12 +685,17 @@ test("hosted provider cleanup scheduled read surfaces an immediate wake for due 
 });
 
 test("hosted provider cleanup first defer wake follows the idle checkpoint delay", () => {
+  const nowMs = Date.parse("2026-07-01T00:09:00.000Z");
   assert.equal(
     resolveHostedProviderCleanupFirstDeferredWakeAt({
       idleCheckpointDelayMs: 54_000,
-      nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+      nowMs,
     }),
     "2026-07-01T00:09:55.000Z",
+  );
+  assert.equal(
+    resolveHostedProviderCleanupFirstDeferredWakeAt({ nowMs }),
+    "2026-07-01T00:10:01.000Z",
   );
 });
 

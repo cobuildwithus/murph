@@ -46,6 +46,9 @@ import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS,
+} from "@murphai/hosted-execution/runtime-control-limits";
+import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
   type HostedExecutionSnapshotRef,
@@ -93,7 +96,8 @@ const latencyAlertEmail = "operator@example.test";
 const latencyAlertCronSecret = "hosted-local-priority-latency-cron-secret";
 const latencyAlertTimeZone = buildDaytimeTestTimeZone(new Date());
 const productionLikeAssistantModel = "gpt-5.6-terra";
-const productionIdleCheckpointDelayMs = 180_000;
+const productionIdleCheckpointDelayMs =
+  HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS;
 const orderingIdleCheckpointDelayMs = 10_000;
 const promptReplyDeadlineMs = 30_000;
 const duplicateReplyObservationMs = 3_000;
