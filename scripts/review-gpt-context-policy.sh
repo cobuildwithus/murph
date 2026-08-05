@@ -6,6 +6,33 @@
 readonly REVIEW_GPT_LARGE_PR_CHANGED_LINES_THRESHOLD=500
 readonly REVIEW_GPT_LARGE_PR_CHANGED_FILES_THRESHOLD=10
 
+review_gpt_load_context_sensitivity() {
+  local pr_body="$1"
+  local declaration_count
+  local parsed_sensitivity
+
+  declaration_count="$(
+    printf '%s\n' "$pr_body" \
+      | sed -n '/^ReviewGPT context sensitivity:/p' \
+      | wc -l \
+      | tr -d ' '
+  )"
+  parsed_sensitivity="$(
+    printf '%s\n' "$pr_body" \
+      | sed -nE 's/^ReviewGPT context sensitivity: (routine|sensitive)$/\1/p'
+  )"
+  case "$declaration_count:$parsed_sensitivity" in
+    1:routine | 1:sensitive)
+      review_gpt_context_sensitivity="${parsed_sensitivity}"
+      ;;
+    *)
+      # Missing, malformed, and duplicate declarations all fail safe to the
+      # full-snapshot path instead of guessing that a PR is routine.
+      review_gpt_context_sensitivity="undeclared"
+      ;;
+  esac
+}
+
 review_gpt_load_pr_shape() {
   local pr_ref="$1"
   local pr_shape
@@ -40,6 +67,24 @@ review_gpt_load_pr_shape() {
 }
 
 review_gpt_default_full_review_reason() {
+  case "${review_gpt_context_sensitivity:-undeclared}" in
+    sensitive)
+      printf '%s\n' \
+        'Automatic full audit: the PR body declares sensitive ReviewGPT context.'
+      return
+      ;;
+    routine) ;;
+    undeclared)
+      printf '%s\n' \
+        'Automatic full audit: the PR body does not contain exactly one valid ReviewGPT context sensitivity declaration.'
+      return
+      ;;
+    *)
+      echo "Error: unsupported ReviewGPT context sensitivity '$review_gpt_context_sensitivity'." >&2
+      return 1
+      ;;
+  esac
+
   if ((
     review_gpt_pr_changed_lines >= REVIEW_GPT_LARGE_PR_CHANGED_LINES_THRESHOLD
       || review_gpt_pr_changed_files >= REVIEW_GPT_LARGE_PR_CHANGED_FILES_THRESHOLD

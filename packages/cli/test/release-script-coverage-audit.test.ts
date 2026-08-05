@@ -1266,6 +1266,8 @@ describe('monorepo release flow coverage audit', () => {
       'REVIEW_GPT_LARGE_PR_CHANGED_FILES_THRESHOLD=10',
     )
     expect(reviewGptContextPolicy).toContain('review_gpt_load_pr_shape')
+    expect(reviewGptContextPolicy).toContain('review_gpt_load_context_sensitivity')
+    expect(reviewGptContextPolicy).toContain('review_gpt_context_sensitivity="undeclared"')
     expect(reviewGptContextPolicy).toContain(
       '--json headRefOid,additions,deletions,changedFiles',
     )
@@ -1509,7 +1511,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('REVIEW_GPT_FIRST_REVIEWED_HEAD')
     expect(prReviewGptLoop).toContain('REVIEW_GPT_PREVIOUS_REVIEWED_HEAD')
     expect(prReviewGptLoop).toContain('Round 1 is always a full-patch')
-    expect(prReviewGptLoop).toContain('at least 500 changed lines or 10 changed files')
+    expect(prReviewGptLoop).toContain('Sensitive or\nundeclared PRs')
+    expect(prReviewGptLoop).toContain('500 changed lines or 10 changed files')
     expect(prReviewGptLoop).toMatch(/Keep that line and baseline\s+immutable/u)
     expect(prReviewGptLoop).toContain('ReviewGPT first-reviewed head: <full-sha>')
     expect(prReviewGptLoop).toContain('`ROUND_OUTCOME: INVALID`')
@@ -1549,7 +1552,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(agentsGuide).toContain('isolated regression test or explanatory doc')
     expect(agentsGuide).toContain(
-      'at least 500 changed lines or 10 changed files gets a fresh full-patch audit',
+      'sensitive, undeclared, or large current PRs get a fresh full-patch audit',
     )
     expect(agentWorkflowRouting).toContain('final-ReviewGPT-eligible PR-lane work')
     expect(agentWorkflowRouting).toContain('scope-anomaly signal')
@@ -1614,6 +1617,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(completionWorkflow).toContain('gpt-5.6-sol')
     expect(completionWorkflow).toContain('Change-shape breakdown')
+    expect(completionWorkflow).toContain('ReviewGPT context sensitivity: sensitive')
     expect(completionWorkflow).toContain('scope-anomaly signal')
     expect(completionWorkflow).toContain('not a quality target or an automatic merge')
     expect(completionWorkflow).toContain('evidenced current member/event volume')
@@ -3056,7 +3060,20 @@ case "$*" in
   *".baseRefName"*) printf 'main\\n' ;;
   *".baseRefOid"*) printf '%s\\n' "$TEST_BASE_SHA" ;;
   *".headRefOid"*) printf '%s\\n' "$TEST_HEAD_SHA" ;;
-  *".body"*) printf 'ReviewGPT first-reviewed head: %s\\n' "$TEST_FIRST_SHA" ;;
+  *".body"*)
+    printf 'ReviewGPT first-reviewed head: %s\\n' "$TEST_FIRST_SHA"
+    case "\${TEST_CONTEXT_SENSITIVITY:-routine}" in
+      missing) ;;
+      duplicate)
+        printf 'ReviewGPT context sensitivity: routine\\n'
+        printf 'ReviewGPT context sensitivity: routine\\n'
+        ;;
+      *)
+        printf 'ReviewGPT context sensitivity: %s\\n' \
+          "\${TEST_CONTEXT_SENSITIVITY:-routine}"
+        ;;
+    esac
+    ;;
   *) printf 'unexpected gh invocation: %s\\n' "$*" >&2; exit 1 ;;
 esac
 `,
@@ -3333,6 +3350,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         roundNumber: 1,
         reviewScope: 'full',
         contextMode: 'full_snapshot',
+        contextSensitivity: 'routine',
         prChangedLines: 2,
         prChangedFiles: 1,
         contextAnchorHead: firstHead,
@@ -3396,6 +3414,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         roundNumber: 2,
         reviewScope: 'correction',
         contextMode: 'same_thread_delta',
+        contextSensitivity: 'routine',
         prChangedLines: 2,
         prChangedFiles: 1,
         contextAnchorHead: firstHead,
@@ -3439,6 +3458,107 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         'review-gpt-pr-context/since-first-reviewed-head.diff',
       )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const roundTwoSensitive = invokePackager('round-two-sensitive', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+        TEST_CONTEXT_SENSITIVITY: 'sensitive',
+      })
+      expect(roundTwoSensitive.result.status, roundTwoSensitive.result.stderr).toBe(0)
+      expect(
+        JSON.parse(
+          execFileSync(
+            'unzip',
+            [
+              '-p',
+              roundTwoSensitive.zipPath,
+              'review-gpt-pr-context/review-round.json',
+            ],
+            { encoding: 'utf8' },
+          ),
+        ),
+      ).toMatchObject({
+        contextMode: 'full_snapshot',
+        contextSensitivity: 'sensitive',
+        prChangedFiles: 1,
+        prChangedLines: 2,
+        reviewScope: 'full',
+      })
+      expect(
+        execFileSync(
+          'unzip',
+          [
+            '-p',
+            roundTwoSensitive.zipPath,
+            'review-gpt-pr-context/full-review-reason.txt',
+          ],
+          { encoding: 'utf8' },
+        ),
+      ).toBe('Automatic full audit: the PR body declares sensitive ReviewGPT context.\n')
+
+      const roundTwoUndeclared = invokePackager('round-two-undeclared', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+        TEST_CONTEXT_SENSITIVITY: 'missing',
+      })
+      expect(roundTwoUndeclared.result.status, roundTwoUndeclared.result.stderr).toBe(0)
+      expect(
+        JSON.parse(
+          execFileSync(
+            'unzip',
+            [
+              '-p',
+              roundTwoUndeclared.zipPath,
+              'review-gpt-pr-context/review-round.json',
+            ],
+            { encoding: 'utf8' },
+          ),
+        ),
+      ).toMatchObject({
+        contextMode: 'full_snapshot',
+        contextSensitivity: 'undeclared',
+        reviewScope: 'full',
+      })
+      expect(
+        execFileSync(
+          'unzip',
+          [
+            '-p',
+            roundTwoUndeclared.zipPath,
+            'review-gpt-pr-context/full-review-reason.txt',
+          ],
+          { encoding: 'utf8' },
+        ),
+      ).toBe(
+        'Automatic full audit: the PR body does not contain exactly one valid ReviewGPT context sensitivity declaration.\n',
+      )
+
+      const roundTwoDuplicate = invokePackager('round-two-duplicate', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+        TEST_CONTEXT_SENSITIVITY: 'duplicate',
+      })
+      expect(roundTwoDuplicate.result.status, roundTwoDuplicate.result.stderr).toBe(0)
+      expect(
+        JSON.parse(
+          execFileSync(
+            'unzip',
+            [
+              '-p',
+              roundTwoDuplicate.zipPath,
+              'review-gpt-pr-context/review-round.json',
+            ],
+            { encoding: 'utf8' },
+          ),
+        ),
+      ).toMatchObject({
+        contextMode: 'full_snapshot',
+        contextSensitivity: 'undeclared',
+        reviewScope: 'full',
+      })
 
       const changedDuringPackaging = invokePackager(
         'round-two-changed-during-packaging',
@@ -3503,6 +3623,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(roundTwoLargeByLinesMetadata).toMatchObject({
         contextAnchorHead: currentHead,
         contextMode: 'full_snapshot',
+        contextSensitivity: 'routine',
         prChangedFiles: 1,
         prChangedLines: 500,
         reviewScope: 'full',
@@ -3555,6 +3676,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         ),
       ).toMatchObject({
         contextMode: 'full_snapshot',
+        contextSensitivity: 'routine',
         prChangedFiles: 10,
         prChangedLines: 2,
         reviewScope: 'full',
@@ -3578,6 +3700,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         contextMode: 'full_snapshot',
         contextAnchorHead: currentHead,
         contextAnchorHeadIsAncestorOfPrevious: null,
+        contextSensitivity: 'routine',
         prChangedFiles: 1,
         prChangedLines: 2,
         reviewScope: 'full',
@@ -3618,6 +3741,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         contextMode: 'same_thread_delta',
         contextAnchorHead: currentHead,
         contextAnchorHeadIsAncestorOfPrevious: true,
+        contextSensitivity: 'routine',
         previousReviewedHead: currentHead,
         currentReviewedHead: postFallbackHead,
         reviewScope: 'correction',

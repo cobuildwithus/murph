@@ -164,6 +164,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
   review_gpt_pr_body="$(
     gh pr view "$review_gpt_pr_ref" --json body --jq '.body // ""'
   )"
+  review_gpt_load_context_sensitivity "$review_gpt_pr_body"
   printf '%s\n' "$review_gpt_pr_body" \
     > "$review_gpt_pr_context_dir/pr-body.md"
   if [[ ! "$review_gpt_base_oid" =~ ^[0-9a-f]{40}$ ]] \
@@ -348,6 +349,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       printf '  "roundNumber": %s,\n' "$review_gpt_round_number"
       printf '  "reviewScope": "%s",\n' "$review_gpt_review_scope"
       printf '  "contextMode": "%s",\n' "$review_gpt_context_mode"
+      printf '  "contextSensitivity": "%s",\n' "$review_gpt_context_sensitivity"
       printf '  "prChangedLines": %s,\n' "$review_gpt_pr_changed_lines"
       printf '  "prChangedFiles": %s,\n' "$review_gpt_pr_changed_files"
       printf '  "contextAnchorHead": "%s",\n' "$review_gpt_context_anchor_head"

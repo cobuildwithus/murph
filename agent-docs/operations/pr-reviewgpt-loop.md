@@ -34,10 +34,11 @@ a later `PASS` on the resulting patch.
 
 Certify the exact pushed PR patch against its stated user outcome and repository
 invariants using the guarded repository snapshot. Round 1 is always a full-patch
-audit. On round 2 or later, the packager measures the complete current PR against
-its base: at least 500 changed lines or 10 changed files re-sends a fresh full
-snapshot and requests a full-patch audit in the current conversation; a smaller
-PR sends the remediation delta and its directly affected paths. An explicit
+audit. On round 2 or later, the packager reads the PR body's explicit context
+sensitivity and measures the complete current PR against its base. Sensitive or
+undeclared PRs re-send a fresh full snapshot regardless of size. Routine PRs do
+the same at 500 changed lines or 10 changed files; only routine PRs below both
+cutoffs send the remediation delta and its directly affected paths. An explicit
 `REVIEW_GPT_FULL_REVIEW_REASON` selects a new full-audit conversation. The gate
 completes when the exact patch receives `ROUND_OUTCOME: PASS`, local triage has
 zero accepted findings, and CI is green on the final head. Missing or stale
@@ -208,6 +209,15 @@ recovery, invariants to preserve, non-obvious affected surfaces, and
 added/deleted lines by source, tests, docs, config/tooling, and generated/other.
 Before firing a round, confirm that block is present and current.
 
+Before the final gate starts, the PR body must also contain exactly one
+`ReviewGPT context sensitivity: routine` or
+`ReviewGPT context sensitivity: sensitive` line plus a short reason. Use
+`sensitive` whenever the final-gate eligibility exclusions or cross-cutting
+conditions in `agent-docs/operations/completion-workflow.md` apply, regardless
+of patch size. A small cosmetic change or narrow bug fix is `routine` only when
+none apply. Missing, malformed, or duplicate declarations are packaged as
+`undeclared` and default to the full snapshot.
+
 At round 1, also record the exact first-reviewed head and its five-category
 change shape in the PR body. Include the exact machine-readable line
 `ReviewGPT first-reviewed head: <full-sha>`. Keep that line and baseline
@@ -302,17 +312,20 @@ requires it or the current user explicitly asks for it.
    ledger, whether the packager selects a full snapshot or a correction packet.
 
    Round 1 opens a new conversation and attaches the full guarded snapshot. On
-   later rounds, the packager measures the full current PR shape reported by
-   GitHub. At 500 changed lines or 10 changed files, it attaches a fresh full
-   snapshot and requests another full audit of the current PR in the same
-   conversation. Below both cutoffs, it attaches a short correction packet
-   containing only the immediate patch, its changed-file list, round metadata,
-   and current versions of files touched by the patch. The size decision uses
-   one GitHub response containing the current head and complete base-to-head PR
-   shape, not only the immediate remediation delta. The packager fails closed
-   if that head differs from the head being packaged and records its selected
-   mode in `review-round.json`; the same-thread follow-up prompt obeys that mode,
-   so prompt and ZIP scopes cannot diverge. If a smaller PR still needs a new
+   later rounds, the packager reads the PR body's context-sensitivity declaration
+   and measures the full current PR shape reported by GitHub. A `sensitive` or
+   `undeclared` PR attaches a fresh full snapshot regardless of size. A `routine`
+   PR does the same at 500 changed lines or 10 changed files. Only a `routine` PR
+   below both cutoffs attaches a short correction packet containing the immediate
+   patch, its changed-file list, round metadata, and current versions of files
+   touched by the patch. Missing, malformed, or duplicate declarations become
+   `undeclared`; the packager never guesses that a PR is routine from file paths.
+   The size decision uses one GitHub response containing the current head and
+   complete base-to-head PR shape, not only the immediate remediation delta. The
+   packager fails closed if that head differs from the head being packaged and
+   records its parsed sensitivity and selected mode in `review-round.json`; the
+   same-thread follow-up prompt obeys that mode, so prompt and ZIP scopes cannot
+   diverge. If a routine small PR still needs a new
    full-audit conversation, omit
    `REVIEW_GPT_THREAD_URL` and set `REVIEW_GPT_FULL_REVIEW_REASON` to a concrete
    reason. Neither path resets the round number or immutable first-reviewed
@@ -367,13 +380,15 @@ requires it or the current user explicitly asks for it.
    relaunch the model audit. Fix a concrete pre-completion tooling/profile
    failure before considering another run against the same pushed head.
 
-   Verify `review-round.json` names the intended round, context anchor,
-   first-reviewed head, previous reviewed head, current PR changed-line/file
-   counts, and current pushed head. Round 1 must have `full` scope,
+   Verify `review-round.json` names the intended round, context sensitivity,
+   context anchor, first-reviewed head, previous reviewed head, current PR
+   changed-line/file counts, and current pushed head. Round 1 must have `full`
+   scope,
    `full_snapshot` context, and empty cumulative and immediate remediation
-   deltas. A later large or explicitly justified round must have `full` scope
-   and `full_snapshot` context. A later small round must have `correction` scope
-   and `same_thread_delta` context. Every later round requires a previous head
+   deltas. A later sensitive, undeclared, large, or explicitly justified round
+   must have `full` scope and `full_snapshot` context. A later routine small
+   round must have `correction` scope and `same_thread_delta` context. Every
+   later round requires a previous head
    different from the current head and `true` first/previous ancestry. A delta
    also requires the context anchor to be an ancestor of the previous reviewed
    head. The packaged first head must match the immutable PR-body line and the

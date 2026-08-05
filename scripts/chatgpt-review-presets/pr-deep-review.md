@@ -58,10 +58,11 @@ For round 2 or later, read `contextMode` from `review-round.json`:
   conversation for unchanged repository context. Its reviewed head must match
   `contextAnchorHead` in the current `review-round.json`.
 - `full_snapshot` means the current ZIP contains the full guarded snapshot. A
-  later round uses this when the current PR meets the repository's large-change
-  cutoff or `full-review-reason.txt` gives another concrete reason for a full
-  audit. Review the complete current PR from this ZIP. It becomes the context
-  anchor for later delta rounds in this conversation.
+  later round uses this when the PR is sensitive or undeclared, when a routine
+  PR meets the repository's large-change cutoff, or when
+  `full-review-reason.txt` gives another concrete reason for a full audit.
+  Review the complete current PR from this ZIP. It becomes the context anchor
+  for later delta rounds in this conversation.
 
 Stop as `INVALID` when the code evidence itself will not support a review: the
 files required by the declared `contextMode` are missing, unreadable, or do not
