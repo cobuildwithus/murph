@@ -203,9 +203,9 @@ test("custom inference marks the model cards as the managed default", () => {
     );
     assert.match(markup, /Managed default/u);
     // One control owns where replies go, even when Venice is unavailable.
-    assert.match(markup, /New core replies use/u);
+    assert.match(markup, /Inference on/u);
   }
-  assert.match(withVenice, /New core replies use.*OpenAI/su);
+  assert.match(withVenice, /Inference on OpenAI/u);
 });
 
 test("the routing dialog offers the member's endpoint as a third option", () => {
@@ -236,7 +236,7 @@ test("the routing dialog offers the member's endpoint as a third option", () => 
 
   // A routed endpoint is described where the provider choice lives, so there
   // is no second inference control to reconcile.
-  assert.match(markup, /New core replies use.*your endpoint/su);
+  assert.match(markup, /Inference on your endpoint/u);
   assert.match(markup, /inference\.example\.test · example-model/u);
 });
 
@@ -260,7 +260,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
       veniceAvailable: true,
     }),
   );
-  assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
+  assert.match(view.container.textContent ?? "", /Inference on OpenAI/u);
   assert.doesNotMatch(
     view.container.textContent ?? "",
     /higher provider rates use included AI capacity faster/u,
@@ -275,15 +275,19 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   );
   assert.match(
     view.document.body.textContent ?? "",
-    /Privacy-first inference\. Venice’s higher provider rates use included AI capacity faster\./u,
+    /Privacy-first inference\./u,
+  );
+  assert.doesNotMatch(
+    view.document.body.textContent ?? "",
+    /Venice’s higher provider rates use included AI capacity faster\./u,
   );
   assert.match(
     view.document.body.textContent ?? "",
-    /Murph sends core replies here after you save\./u,
+    /Inference runs here after you save\./u,
   );
   assert.match(
     view.document.body.textContent ?? "",
-    /The selected provider handles core replies\. Image generation, voice, search, and other tools still use their specialized providers\./u,
+    /The selected provider handles inference\. Image generation, voice, search, and other tools still use their specialized providers\./u,
   );
   const providerDialog = view.document.querySelector<HTMLElement>(
     '[role="dialog"]',
@@ -309,7 +313,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   assert.equal(view.document.querySelector('[role="dialog"]'), null);
   assert.match(
     view.container.textContent ?? "",
-    /Core replies switch to Venice after Save\./u,
+    /Inference on Venice after Save/u,
   );
   assert.match(
     view.container.textContent ?? "",
@@ -328,7 +332,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     },
     url: "/api/settings/assistant-model",
   });
-  assert.match(view.container.textContent ?? "", /New core replies use Venice\./u);
+  assert.match(view.container.textContent ?? "", /Inference on Venice/u);
   assert.match(
     view.container.textContent ?? "",
     /Venice’s higher provider rates use included AI capacity faster\./u,
@@ -357,7 +361,7 @@ test("a saved Venice provider discloses its higher included-capacity use", () =>
     }),
   );
 
-  assert.match(markup, /New core replies use.*Venice/su);
+  assert.match(markup, /Inference on Venice/u);
   assert.match(
     markup,
     /Venice’s higher provider rates use included AI capacity faster\./u,
@@ -392,7 +396,7 @@ test("one save routes replies to the endpoint and keeps the managed default", as
     }),
   );
 
-  assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
+  assert.match(view.container.textContent ?? "", /Inference on OpenAI/u);
   await act(async () => {
     findButton(view.container, "Change").click();
   });
@@ -408,7 +412,7 @@ test("one save routes replies to the endpoint and keeps the managed default", as
   assert.equal(view.document.querySelector('[role="dialog"]'), null);
   assert.match(
     view.container.textContent ?? "",
-    /Core replies switch to your endpoint after Save\./u,
+    /Inference on your endpoint after Save/u,
   );
   // Selecting is a draft: nothing is durable until the single Save runs.
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
@@ -429,11 +433,11 @@ test("one save routes replies to the endpoint and keeps the managed default", as
   });
   assert.match(
     view.container.textContent ?? "",
-    /New core replies use your endpoint\./u,
+    /Inference on your endpoint/u,
   );
   assertHiddenSaveAnnouncement(
     view.container,
-    /Saved\. New core replies use your endpoint\. Terra through OpenAI stays your managed default\./u,
+    /Saved\. Inference on your endpoint\. Terra through OpenAI stays your managed default\./u,
   );
   view.cleanup();
 });
@@ -487,7 +491,7 @@ test("leaving an active endpoint changes the managed provider before routing", a
   });
   assert.match(
     view.container.textContent ?? "",
-    /Core replies switch to Venice after Save\./u,
+    /Inference on Venice after Save/u,
   );
   assert.equal(findButton(view.container, "Save change").disabled, false);
 
@@ -509,7 +513,7 @@ test("leaving an active endpoint changes the managed provider before routing", a
     payload: { mode: "managed" },
     url: "/api/settings/assistant",
   });
-  assert.match(view.container.textContent ?? "", /New core replies use Venice\./u);
+  assert.match(view.container.textContent ?? "", /Inference on Venice/u);
   assert.ok(findButton(view.container, "Save change").disabled);
 
   view.cleanup();
@@ -590,7 +594,7 @@ test("retrying a failed endpoint exit preserves dormant Sol", async () => {
   }
   assertHiddenSaveAnnouncement(
     view.container,
-    /Saved\. New core replies use Terra through Venice while Edge is paused; Sol remains saved\./u,
+    /Saved\. Inference on Terra through Venice while Edge is paused; Sol remains saved\./u,
   );
 
   view.cleanup();
@@ -643,9 +647,9 @@ test("the shown route is derived from the durable connection, not a copy", () =>
     }),
   );
 
-  assert.match(active, /New core replies use.*your endpoint/su);
-  assert.match(replaced, /New core replies use.*OpenAI/su);
-  assert.doesNotMatch(replaced, /New core replies use.*your endpoint/su);
+  assert.match(active, /Inference on your endpoint/u);
+  assert.match(replaced, /Inference on OpenAI/u);
+  assert.doesNotMatch(replaced, /Inference on your endpoint/u);
 });
 
 test("the routing dialog is not inside the settings form", async () => {
@@ -769,7 +773,7 @@ test("closing the provider dialog leaves the draft unchanged", async () => {
   });
 
   assert.equal(view.document.querySelector('[role="dialog"]'), null);
-  assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
+  assert.match(view.container.textContent ?? "", /Inference on OpenAI/u);
   assert.ok(saveButton.disabled);
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
 
@@ -810,7 +814,7 @@ test("a model-only save adopts the server's canonical provider", async () => {
     payload: { model: HOSTED_ASSISTANT_LUNA_MODEL },
     url: "/api/settings/assistant-model",
   });
-  assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
+  assert.match(view.container.textContent ?? "", /Inference on OpenAI/u);
   assertHiddenSaveAnnouncement(
     view.container,
     /Saved\. Luna through OpenAI is your default\./u,
@@ -880,7 +884,7 @@ test("a provider-only save preserves a dormant Sol preference", async () => {
   assert.equal(findHiddenSaveAnnouncement(view.container), announcement);
   assert.match(
     announcement.textContent ?? "",
-    /Saved\. New core replies use Terra through Venice while Edge is paused; Sol remains saved\./u,
+    /Saved\. Inference on Terra through Venice while Edge is paused; Sol remains saved\./u,
   );
   assert.equal(findButton(view.container, "Save change").disabled, false);
 
@@ -941,7 +945,7 @@ test("a combined provider and model save preserves both choices for retry", asyn
   );
   assert.match(
     view.container.textContent ?? "",
-    /Core replies switch to Venice after Save\./u,
+    /Inference on Venice after Save/u,
   );
   assert.ok(isRadioChecked(solInput));
   assert.equal(findButton(view.container, "Save change").disabled, false);
@@ -957,7 +961,7 @@ test("a combined provider and model save preserves both choices for retry", asyn
     payload: combinedPayload,
     url: "/api/settings/assistant-model",
   });
-  assert.match(view.container.textContent ?? "", /New core replies use Venice\./u);
+  assert.match(view.container.textContent ?? "", /Inference on Venice/u);
   assertHiddenSaveAnnouncement(
     view.container,
     /Saved\. Sol through Venice is your default\./u,
@@ -1363,7 +1367,7 @@ test("a stale Venice page falls back to OpenAI and removes the unavailable choic
     view.container.textContent ?? "",
     /Venice is no longer available\. Murph will keep using OpenAI\./,
   );
-  assert.doesNotMatch(view.container.textContent ?? "", /Core replies/u);
+  assert.doesNotMatch(view.container.textContent ?? "", /Inference on/u);
   assert.equal(findOptionalButton(view.container, "Change"), undefined);
   assert.ok(findButton(view.container, "Save change").disabled);
 
@@ -1526,7 +1530,7 @@ test("members without active personal access see both provider and model control
     markup,
     /Provider and model choices are read-only until personal Murph access is active\./,
   );
-  assert.match(markup, /New core replies use.*OpenAI/su);
+  assert.match(markup, /Inference on OpenAI/u);
   assert.match(markup, /<button[^>]*disabled=""[^>]*>Change<\/button>/u);
   assert.doesNotMatch(markup, /Choose provider/u);
 });

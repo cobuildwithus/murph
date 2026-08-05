@@ -20,7 +20,11 @@ import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
-import { ConnectSourceCardStudy } from "./connect-source-card-study";
+import {
+  AppleHealthRelaySetupStudy,
+  ConnectSourceCardStudy,
+  ZeppAppleHealthSetupStudy,
+} from "./connect-source-card-study";
 import { DataExportFlowStudy } from "./data-export-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
@@ -153,7 +157,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings custom inference connection">
+      <StudySection title="Settings custom inference routing and endpoint">
         <SettingsCustomInferenceStudy />
       </StudySection>
 
@@ -224,7 +228,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Persona onboarding with stacked tone samples">
-        <PersonaOnboardingStudy />
+        <div data-design-section="persona-onboarding">
+          <PersonaOnboardingStudy />
+        </div>
       </StudySection>
 
       <Separator />
@@ -243,6 +249,18 @@ export function SectionsContent() {
 
       <StudySection title="Connect source actions and disconnect lifecycle">
         <ConnectSourceCardStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Zepp/Amazfit Apple Health setup">
+        <ZeppAppleHealthSetupStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Apple Health relay wearable setup">
+        <AppleHealthRelaySetupStudy />
       </StudySection>
 
       <Separator />
@@ -301,7 +319,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Always-available group sponsorship and contribution">
+      <StudySection title="Group sponsorship and mobile one-time contribution">
         <GroupUsageFundingStudy />
       </StudySection>
 

@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   authDialogProps: null as {
     onCompleted?: (payload: {
       activationPending: boolean;
-      initialVisitEligible?: boolean;
       inviteCode: string;
       joinUrl: string;
       stage: string;
@@ -28,7 +27,6 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
     onCompleted?: (payload: {
       activationPending: boolean;
-      initialVisitEligible?: boolean;
       inviteCode: string;
       joinUrl: string;
       stage: string;
@@ -174,7 +172,6 @@ test("AuthProvider keeps a pending device connect intent ahead of the first-visi
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       activationPending: false,
-      initialVisitEligible: true,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -183,6 +180,55 @@ test("AuthProvider keeps a pending device connect intent ahead of the first-visi
 
   expect(reload).toHaveBeenCalledTimes(1);
   expect(assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
+test("AuthProvider returns an authenticated member to the Connect page", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Log in or sign up",
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+    {
+      location: {
+        hash: "",
+        href: "https://join.example.test/connect",
+        origin: "https://join.example.test",
+        pathname: "/connect",
+        search: "",
+      },
+    },
+  );
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  await act(async () => {
+    await mocks.authDialogProps?.onCompleted?.({
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    });
+  });
+
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
 
   await rendered.cleanup();
 });
@@ -239,7 +285,6 @@ test("AuthProvider resumes a scrubbed Clinical Records connect intent after sign
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       activationPending: false,
-      initialVisitEligible: true,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -341,7 +386,6 @@ test("AuthProvider returns an unauthenticated medical-records viewer to that pag
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       activationPending: false,
-      initialVisitEligible: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -390,7 +434,6 @@ test("AuthProvider returns an Environment voice user to that page", async () => 
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       activationPending: false,
-      initialVisitEligible: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
@@ -875,9 +918,9 @@ test("AuthProvider keeps the default home redirect for ordinary sign-in completi
     value: {
       assign,
       hash: "",
-      href: "https://join.example.test/connect",
+      href: "https://join.example.test/search",
       origin: "https://join.example.test",
-      pathname: "/connect",
+      pathname: "/search",
       search: "",
     },
   });
@@ -899,7 +942,7 @@ test("AuthProvider keeps the default home redirect for ordinary sign-in completi
   await rendered.cleanup();
 });
 
-test("AuthProvider preserves the first-visit redirect for newly created members", async () => {
+test("AuthProvider reloads plain home so it can read canonical onboarding state", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
@@ -942,14 +985,13 @@ test("AuthProvider preserves the first-visit redirect for newly created members"
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       activationPending: false,
-      initialVisitEligible: true,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
     });
   });
 
-  expect(assign).toHaveBeenCalledWith("/home?initialVisit=true");
+  expect(assign).toHaveBeenCalledWith("https://join.example.test/home");
 
   await rendered.cleanup();
 });

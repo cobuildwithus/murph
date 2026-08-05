@@ -23,4 +23,4 @@ next_bin="$(node -p 'require.resolve("next/dist/bin/next")')"
 printf '[apps/web build] Next memory policy: parent_old_space_mb=%s typecheck_worker_old_space_mb=%s\n' \
   "$parent_old_space_mb" \
   "$typecheck_worker_old_space_mb"
-exec node "--max-old-space-size=$parent_old_space_mb" "$next_bin" build --webpack
+exec node "--max-old-space-size=$parent_old_space_mb" "$next_bin" build

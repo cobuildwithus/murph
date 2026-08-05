@@ -122,7 +122,7 @@ test("renders separate active and paused consent controls", async () => {
   expect(active.container.textContent).toContain("Withdraw consent");
   const sourceReviewLink = active.container.querySelector('a[href="/connect"]');
   expect(sourceReviewLink?.textContent).toContain("Review or reconnect sources");
-  expect(sourceReviewLink?.className).toContain("before:-inset-y-2");
+  expect(sourceReviewLink?.className).toContain("min-h-10");
   expect(sourceReviewLink?.parentElement?.className).toContain("mt-2");
   expect(active.container.firstElementChild?.className).toContain("items-start");
 
@@ -140,6 +140,12 @@ test("renders separate active and paused consent controls", async () => {
 
   expect(paused.container.textContent).toContain("Processing paused");
   expect(paused.container.textContent).toContain("Use Murph again");
+  expect(paused.container.firstElementChild?.className).toContain(
+    "sm:grid-cols-[minmax(0,1fr)_auto]",
+  );
+  expect(findButton(paused.container, "Use Murph again").className).toContain(
+    "sm:col-span-2",
+  );
 });
 
 test("renders legacy missing and unavailable consent states without treating either as withdrawn", async () => {

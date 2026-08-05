@@ -46,9 +46,13 @@ const nextEnvDeclarationImportPathPattern =
   /^\.\/\.next(?:-(?:dev|smoke)(?:-[a-z0-9-]+)?)?(?:\/dev)?\/types\/routes\.d\.ts$/u;
 
 export function buildNextEnvDeclarationArtifact(routeTypesImportPath: string): string {
-  return [...nextEnvCommonLines, `import "${routeTypesImportPath}";`, ...nextEnvTrailingLines].join(
-    "\n",
-  );
+  const rootParamsImportPath = routeTypesImportPath.replace(/routes\.d\.ts$/u, "root-params.d.ts");
+  return [
+    ...nextEnvCommonLines,
+    `import "${routeTypesImportPath}";`,
+    `import "${rootParamsImportPath}";`,
+    ...nextEnvTrailingLines,
+  ].join("\n");
 }
 
 export function buildNextEnvDeclarationArtifacts(
@@ -179,11 +183,19 @@ export function isAllowedNextEnvDeclarationArtifactContents(contents: string): b
   const normalizedContents = normalizeDeclarationArtifactContents(contents);
   const lines = normalizedContents.split("\n");
 
-  if (lines.length !== 6) {
+  if (lines.length !== 7) {
     return false;
   }
 
-  const [referenceLine, imageReferenceLine, importLine, spacerLine, noteLine, docsLine] = lines;
+  const [
+    referenceLine,
+    imageReferenceLine,
+    routeTypesImportLine,
+    rootParamsImportLine,
+    spacerLine,
+    noteLine,
+    docsLine,
+  ] = lines;
 
   if (
     referenceLine !== nextEnvCommonLines[0]
@@ -195,9 +207,21 @@ export function isAllowedNextEnvDeclarationArtifactContents(contents: string): b
     return false;
   }
 
-  const importMatch = importLine.match(/^import ["'](\.\/[^"'`]+)["'];$/u);
+  const routeTypesImportMatch = routeTypesImportLine.match(/^import ["'](\.\/[^"'`]+)["'];$/u);
 
-  return importMatch !== null && isAllowedNextEnvRouteTypesImportPath(importMatch[1]);
+  if (
+    routeTypesImportMatch === null
+    || !isAllowedNextEnvRouteTypesImportPath(routeTypesImportMatch[1])
+  ) {
+    return false;
+  }
+
+  const rootParamsImportMatch = rootParamsImportLine.match(/^import ["'](\.\/[^"'`]+)["'];$/u);
+  const expectedRootParamsImportPath = routeTypesImportMatch[1].replace(
+    /routes\.d\.ts$/u,
+    "root-params.d.ts",
+  );
+  return rootParamsImportMatch?.[1] === expectedRootParamsImportPath;
 }
 
 export function isAllowedNextEnvRouteTypesImportPath(routeTypesImportPath: string): boolean {

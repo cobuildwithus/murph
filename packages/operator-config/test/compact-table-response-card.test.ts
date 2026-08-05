@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   assistantResponseCardSchema,
-  encodeAppCardDataUrl,
+  encodeCompactTableAppCardUrl,
   renderAssistantResponseCardText,
   renderAssistantResponseCardTranscriptText,
   type AssistantResponseCard,
@@ -34,11 +34,11 @@ const TRACKED_WORKOUT_CARD = {
   },
 } satisfies AssistantResponseCard
 
-function decodeDataUrl(url: string): unknown {
-  const prefix = 'data:application/json;base64,'
+function decodeAppCardUrl(url: string): unknown {
+  const prefix = 'https://murph.ai/#murph-card='
   expect(url.startsWith(prefix)).toBe(true)
   return JSON.parse(
-    Buffer.from(url.slice(prefix.length), 'base64').toString('utf8'),
+    Buffer.from(url.slice(prefix.length), 'base64url').toString('utf8'),
   )
 }
 
@@ -82,9 +82,9 @@ describe('compact table response cards', () => {
   })
 
   it('encodes a V3 immutable snapshot without losing tracking authority', () => {
-    const url = encodeAppCardDataUrl(TRACKED_WORKOUT_CARD)
-    expect(url.length).toBeLessThan(4_096)
-    expect(decodeDataUrl(url)).toEqual({
+    const url = encodeCompactTableAppCardUrl(TRACKED_WORKOUT_CARD)
+    expect(url.length).toBeLessThan(2_048)
+    expect(decodeAppCardUrl(url)).toEqual({
       schemaVersion: 3,
       card: TRACKED_WORKOUT_CARD,
     })

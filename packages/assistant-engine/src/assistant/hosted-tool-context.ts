@@ -40,6 +40,7 @@ import type {
   AssistantHostedGroupTool,
   AssistantHostedIMessageContactTool,
   AssistantHostedImageGenerationLauncher,
+  AssistantGeneratedImageCapturePersistence,
   AssistantHostedLabsTool,
   AssistantHostedNewsletterTool,
   AssistantHostedPersonalizationTool,
@@ -113,6 +114,7 @@ export interface AssistantHostedToolContext {
   readonly imessageContactTool?: AssistantHostedIMessageContactTool | null
   readonly labsTool?: AssistantHostedLabsTool | null
   readonly imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
+  readonly persistGeneratedImageCapture?: AssistantGeneratedImageCapturePersistence | null
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
@@ -275,6 +277,8 @@ export function createAssistantHostedToolContext(input: {
     imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
     imageGenerationLauncher: executionContext?.imageGenerationLauncher ?? null,
+    persistGeneratedImageCapture:
+      executionContext?.persistGeneratedImageCapture ?? null,
     newsletterTool,
     personalizationTool: executionContext?.personalizationTool ?? null,
     planUsageTool: executionContext?.planUsageTool ?? null,

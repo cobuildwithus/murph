@@ -63,6 +63,484 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-08-05",
+    publishedOn: "2026-08-05",
+    title: "Local alerts can shape health advice",
+    summary:
+      "Murph can now use official local heat, cold, and outdoor-air-quality alerts when they matter to your health, recovery, or activity plans.",
+    items: [
+      {
+        id: "official-local-alert-health-context",
+        kind: "feature",
+        priority: 5,
+        title: "Murph can account for official local alerts",
+        summary:
+          "When heat, cold, or outdoor air quality matters, Murph can check the official alert for your location and use it as added health context.",
+        details:
+          "Murph uses the provider's location-specific alert instead of applying one temperature or air-quality threshold everywhere. An alert alone does not trigger outreach, unrelated hazards stay out of health reasoning, and a failed check does not block the rest of the answer.",
+        relevanceTags: ["assistant", "weather", "air-quality", "recovery"],
+        sourcePullRequests: [1307],
+        tryIt: {
+          label: "Ask about today's conditions",
+          prompt:
+            "I feel more tired than usual and planned an outdoor workout today. Check whether an official local alert should change my plan.",
+        },
+      },
+    ],
+  },
+  {
+    id: "2026-08-04",
+    publishedOn: "2026-08-04",
+    title: "More control over data, models, and connections",
+    summary:
+      "You can bring a compatible model endpoint, pause health-data processing, ask for a nutrition card, disconnect one wearable source, and get clearer recovery across usage, device sync, physical notes, photos, and follow-up timing.",
+    items: [
+      {
+        id: "custom-inference-endpoint",
+        kind: "feature",
+        priority: 5,
+        title: "Bring your own model endpoint",
+        summary:
+          "Settings now lets you use Murph's managed models or a compatible custom endpoint for core replies in your personal conversation.",
+        details:
+          "Murph verifies a public HTTPS endpoint, encrypts its connection details, and never silently falls back to a managed model if the custom route fails. Murph's health tools and other hosted services keep their existing funding and privacy boundaries.",
+        relevanceTags: ["assistant", "models", "settings", "privacy"],
+        sourcePullRequests: [1202],
+      },
+      {
+        id: "health-data-consent-controls",
+        kind: "feature",
+        priority: 5,
+        title: "Pause health-data processing",
+        summary:
+          "Health data use in Settings now includes a consent-withdrawal flow that pauses health-data processing without locking you out of Settings, export, or account deletion.",
+        details:
+          "A confirmation explains the effect before anything changes. Processing stays paused until you explicitly choose to use Murph again and renew consent, including across wearable sync and assistant runtime paths.",
+        relevanceTags: ["privacy", "consent", "health-data", "settings"],
+        sourcePullRequests: [1215],
+        tryIt: {
+          href: "/settings/data-privacy",
+          label: "Open privacy settings",
+        },
+      },
+      {
+        id: "daily-nutrition-cards",
+        kind: "feature",
+        priority: 5,
+        title: "Ask for today's nutrition card",
+        summary:
+          "In a private conversation, you can ask for a daily nutrition card with the current totals for calories, protein, carbohydrates, fat, and fiber.",
+        details:
+          "When the date and data are clear, the card can also show an exact saved goal and status. Missing goals stay missing, uncertain dates fall back to a normal reply, and group or unrelated scheduled turns do not produce the card.",
+        relevanceTags: ["nutrition", "imessage", "goals", "health-data"],
+        sourcePullRequests: [1104, 1280],
+        tryIt: {
+          label: "Ask for today's nutrition card",
+          prompt: "Show me today's nutrition card.",
+        },
+      },
+      {
+        id: "single-source-wearable-disconnect",
+        kind: "feature",
+        priority: 5,
+        title: "Disconnect one wearable source at a time",
+        summary:
+          "The Connections page can now remove one selected wearable source without disconnecting your other sources or deleting their history.",
+        details:
+          "The chosen source keeps its imported history but stops future sync. A failed removal stays recoverable, and reconnect-required cards now expose the same source-specific action.",
+        relevanceTags: ["wearables", "connect", "settings", "privacy"],
+        sourcePullRequests: [1274],
+        tryIt: {
+          href: "/connect",
+          label: "Manage connections",
+        },
+      },
+      {
+        id: "database-first-nutrition-estimates",
+        kind: "improvement",
+        priority: 5,
+        title: "Food estimates start with label data",
+        summary:
+          "Murph now looks up a nutrition label or food-database match for each identifiable part of a meal before estimating its nutrients.",
+        details:
+          "Portions still come from the photo and conversation, while sauces, fats, drinks, and exact supplement labels stay explicit. A general estimate is used only when database and official-source lookup cannot resolve the food.",
+        relevanceTags: ["nutrition", "meals", "images", "health-data"],
+        sourcePullRequests: [1278],
+      },
+      {
+        id: "physical-note-address-completion",
+        kind: "improvement",
+        priority: 5,
+        title: "Physical notes need fewer address follow-ups",
+        summary:
+          "When you provide a destination for an approved physical note, Murph can temporarily complete a missing city, state, or ZIP code from the address you supplied.",
+        details:
+          "The lookup cannot discover where someone lives, saved prompts and notes never gain the address, and Murph's platform-owned return address stays separate from the recipient destination.",
+        relevanceTags: ["notes", "mail", "privacy", "assistant"],
+        sourcePullRequests: [1261, 1266],
+      },
+      {
+        id: "capacity-without-message-estimates",
+        kind: "improvement",
+        priority: 4,
+        title: "Capacity answers stay in percentages and dates",
+        summary:
+          "Murph no longer turns remaining AI capacity into a guessed number of messages, even when you ask how many replies are left.",
+        details:
+          "Usage answers use the known percentage, reset date, trial date, or day-level forecast instead. They do not pretend that differently sized requests consume a predictable message count.",
+        relevanceTags: ["usage", "billing", "assistant", "settings"],
+        sourcePullRequests: [1265],
+      },
+      {
+        id: "venice-provider-rate-usage",
+        kind: "improvement",
+        priority: 4,
+        title: "Venice usage reflects its provider rate",
+        summary:
+          "Replies sent through Venice now consume included AI capacity at the underlying provider rate instead of using the managed-model price.",
+        details:
+          "Settings explains that this choice can use capacity faster. The change applies to new usage only and does not reprice earlier replies.",
+        relevanceTags: ["assistant", "models", "venice", "usage"],
+        sourcePullRequests: [1277],
+      },
+      {
+        id: "device-sync-artifact-retries",
+        kind: "improvement",
+        priority: 4,
+        title: "Device sync retries transient write failures",
+        summary:
+          "A temporary failure while saving a replay-safe device-sync artifact now retries through the existing sync job instead of ending the import immediately.",
+        details:
+          "Only safe transient writes retry. Permanent errors still stop with their specific failure, and the retry does not create a second import or duplicate user action.",
+        relevanceTags: ["wearables", "sync", "reliability", "health-data"],
+        sourcePullRequests: [1269],
+      },
+      {
+        id: "foreground-after-checkpoint-wake",
+        kind: "improvement",
+        priority: 4,
+        title: "New messages keep priority after a wake",
+        summary:
+          "A newly accepted message now keeps foreground priority when it arrives just after Murph wakes from a saved checkpoint.",
+        details:
+          "The change is invisible when timing is normal. In the race it fixes, the new message reaches the ordinary reply path instead of waiting behind restored background work.",
+        relevanceTags: ["messaging", "assistant", "reliability", "performance"],
+        sourcePullRequests: [1273],
+      },
+      {
+        id: "group-photo-reference-reuse",
+        kind: "improvement",
+        priority: 4,
+        title: "Group photo references carry forward",
+        summary:
+          "Murph now keeps a bounded room index of captions, positions, and corrections for recent group photos, then checks it before asking for another upload.",
+        details:
+          "References stay tied to the conversation and do not use face recognition. Corrections can update which known photo the group means without turning the image into an identity record.",
+        relevanceTags: ["groups", "images", "memory", "privacy"],
+        sourcePullRequests: [1289],
+      },
+      {
+        id: "usage-denials-preserve-pending-work",
+        kind: "improvement",
+        priority: 4,
+        title: "Usage limits no longer turn into runtime errors",
+        summary:
+          "When managed AI usage is exhausted, accepted work stays safely pending instead of being mislabeled as a runtime failure during a background wake.",
+        details:
+          "Murph does not consume the conversation or call a metered model while access is denied. The existing usage message explains the block, and the existing continuation path can resume after capacity changes.",
+        relevanceTags: ["usage", "reliability", "assistant", "messaging"],
+        sourcePullRequests: [1283],
+      },
+    ],
+  },
+  {
+    id: "2026-08-03",
+    publishedOn: "2026-08-03",
+    title: "Connected apps recover with a clearer next step",
+    summary:
+      "Large connected-app results now stay bounded and useful, so Murph can narrow the request or explain the real failure without losing the conversation.",
+    items: [
+      {
+        id: "connected-app-results-stay-in-turn",
+        kind: "improvement",
+        priority: 5,
+        title: "Oversized app results can be narrowed in place",
+        summary:
+          "When a connected app returns more data than one reply can safely use, Murph now compacts the result and can narrow or retry the request in the same turn.",
+        details:
+          "A genuinely failed app call keeps its specific safe error instead of looking like an oversized success. Raw service responses stay outside the model conversation.",
+        relevanceTags: ["connected-apps", "assistant", "reliability", "privacy"],
+        sourcePullRequests: [1259],
+      },
+    ],
+  },
+  {
+    id: "2026-08-02",
+    publishedOn: "2026-08-02",
+    title: "Recovery that stops at the right moment",
+    summary:
+      "Phone transfer, group signup, contact setup, and physical-note delivery now recover from partial completion without repeating work that already succeeded.",
+    items: [
+      {
+        id: "phone-transfer-recovery",
+        kind: "improvement",
+        priority: 5,
+        title: "Phone transfer recovery recognizes success",
+        summary:
+          "Linking or changing your phone now repairs incomplete local setup while recognizing when the external transfer already finished.",
+        details:
+          "Murph stops retrying a terminal transfer, preserves the correct home-line route, retires a disposable source account only when it is safe, and shows the existing contact-support path when automatic repair cannot finish.",
+        relevanceTags: ["phone", "settings", "onboarding", "reliability"],
+        sourcePullRequests: [1191, 1255, 1267],
+      },
+      {
+        id: "unknown-group-signup-recovery",
+        kind: "feature",
+        priority: 5,
+        title: "An unknown group can start with signup",
+        summary:
+          "When someone who is not active yet messages Murph in a supported group, the group can receive one first-party signup link instead of reaching a dead end.",
+        details:
+          "The page handles signup only and does not let anyone claim a room or choose an owner. After activation, the next ordinary message continues through the existing group route without duplicate capacity or follow-up claims.",
+        relevanceTags: ["groups", "signup", "onboarding", "messaging"],
+        sourcePullRequests: [1221, 1257],
+      },
+      {
+        id: "physical-note-claim-recovery",
+        kind: "improvement",
+        priority: 5,
+        title: "Physical-note sends recover after partial completion",
+        summary:
+          "A physical note that was approved but stranded between claim and delivery can now resume without consuming a second complimentary send.",
+        details:
+          "Clear refusals explain whether the note needs approval, an address, or remaining eligibility. A retry reuses the existing claim and preserves the exact approved message.",
+        relevanceTags: ["notes", "mail", "reliability", "privacy"],
+        sourcePullRequests: [1260],
+      },
+      {
+        id: "contact-card-line-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Contact setup does not stall on one unusable line",
+        summary:
+          "Contact-card setup now moves past an unusable unowned line and distinguishes that case from a complete line-inventory outage.",
+        details:
+          "A healthy available line can still finish setup. If no trustworthy inventory can be loaded, Murph surfaces the outage for recovery instead of silently choosing or retrying the wrong line.",
+        relevanceTags: ["contacts", "phone", "onboarding", "reliability"],
+        sourcePullRequests: [1244, 1253],
+      },
+    ],
+  },
+  {
+    id: "2026-08-01",
+    publishedOn: "2026-08-01",
+    title: "More ways to finish what you started",
+    summary:
+      "Environment reports can finish and print, physical notes can leave the chat, support can receive a private escalation, and group, signup, reminder, connection, and reply flows keep more of their context.",
+    items: [
+      {
+        id: "environment-processing-and-print",
+        kind: "feature",
+        priority: 5,
+        title: "Finish, revisit, and print your Environment report",
+        summary:
+          "The Environment page now keeps checking a voice memo until processing finishes, reports progress without a manual reload, and offers a private print view beside Share.",
+        details:
+          "Signed-out members return to Environment after login. On iOS, the microphone-permission handoff keeps the walkthrough mounted, and moving the page to the background safely ends an active recording.",
+        relevanceTags: ["environment", "voice", "privacy", "accessibility"],
+        sourcePullRequests: [1228, 1238, 1251],
+        tryIt: {
+          href: "/environment",
+          label: "Open Environment",
+        },
+      },
+      {
+        id: "physical-notes-from-chat",
+        kind: "feature",
+        priority: 5,
+        title: "Send a physical note from your conversation",
+        summary:
+          "Murph can turn a generated image and an explicitly approved message into one complimentary physical note from an eligible conversation.",
+        details:
+          "Sending requires the postal destination and exact message authority. The physical-note delivery record does not store the postal address, artwork, note text, or image prompt; conversation history follows Murph's existing retention rules, and a retry cannot silently create another claim.",
+        relevanceTags: ["notes", "mail", "images", "privacy"],
+        sourcePullRequests: [1199, 1248],
+      },
+      {
+        id: "direct-product-support-escalation",
+        kind: "feature",
+        priority: 5,
+        title: "Ask Murph to escalate to product support",
+        summary:
+          "In a verified private conversation, an explicit request for product support can queue a de-identified escalation to the support team.",
+        details:
+          "Murph does not promise a ticket number or response time. Group conversations receive the support email and a direction to continue privately, and the site footer now exposes the same direct support address.",
+        relevanceTags: ["support", "assistant", "privacy", "settings"],
+        sourcePullRequests: [1247],
+      },
+      {
+        id: "calendar-aware-reminder-availability",
+        kind: "feature",
+        priority: 5,
+        title: "Reminders can respect busy calendar time",
+        summary:
+          "A reminder with skip-when-busy or calendar-only availability can now use the busy timestamps from your connected calendar to decide whether to send.",
+        details:
+          "Calendar titles, attendees, locations, and descriptions never enter the model. If availability cannot be checked safely, the ordinary reminder sends instead of silently disappearing.",
+        relevanceTags: ["reminders", "calendar", "privacy", "automations"],
+        sourcePullRequests: [1204],
+      },
+      {
+        id: "one-action-challenge-entry",
+        kind: "feature",
+        priority: 5,
+        title: "One clear reaction can enter a challenge",
+        summary:
+          "A recent native reaction can now confirm the exact unchanged terms of a group challenge and move that participant into the finalized challenge in one action.",
+        details:
+          "The shortcut applies only when the participant, scope, terms, and timing all match. Ambiguous or changed terms still require the existing explicit confirmation.",
+        relevanceTags: ["groups", "challenges", "reactions", "consent"],
+        sourcePullRequests: [1217],
+      },
+      {
+        id: "group-reactions-shape-room-memory",
+        kind: "improvement",
+        priority: 5,
+        title: "Group reactions now shape room memory",
+        summary:
+          "Supported group reactions now become durable room evidence even when nobody sends another message afterward.",
+        details:
+          "Adds, removals, custom reactions, and bounded reaction summaries can help Murph learn what lands in the room without triggering a reply by themselves. Reaction evidence stays out of private member memory.",
+        relevanceTags: ["groups", "reactions", "memory", "privacy"],
+        sourcePullRequests: [1212],
+      },
+      {
+        id: "group-casing-room-tone",
+        kind: "feature",
+        priority: 4,
+        title: "A group can set Murph's casing style",
+        summary:
+          "A persistent request for sentence case or capitalization now moves the room toward a formal tone, while a persistent lowercase request moves it toward casual.",
+        details:
+          "A one-reply formatting request stays temporary. The preference belongs to the room rather than changing a participant's private conversation style.",
+        relevanceTags: ["groups", "tone", "personalization", "conversation"],
+        sourcePullRequests: [1239],
+      },
+      {
+        id: "signup-handoffs-stay-on-course",
+        kind: "improvement",
+        priority: 5,
+        title: "Signup returns to the place that invited you",
+        summary:
+          "Native companion signup now reuses the hosted onboarding flow, and a first web sign-in still reaches the welcome handoff even when texting created the member record earlier.",
+        details:
+          "Reacting to an eligible group invite can open one link-free private signup conversation. Consent and activation remain required, and returning members keep their existing destination instead of being sent through first-visit setup again.",
+        relevanceTags: ["signup", "onboarding", "groups", "mobile"],
+        sourcePullRequests: [1222, 1226, 1243],
+      },
+      {
+        id: "wearable-connect-finish-and-recover",
+        kind: "improvement",
+        priority: 5,
+        title: "Wearable connection returns finish itself",
+        summary:
+          "After you approve a wearable connection, the callback now completes automatically and returns to the Connections result without an extra confirmation screen.",
+        details:
+          "If setup fails, the notice explains what happened and offers the relevant next action: log in, try again, or contact support. The signed-out and successful paths keep their original destination.",
+        relevanceTags: ["wearables", "connect", "onboarding", "reliability"],
+        sourcePullRequests: [1252, 1256],
+        tryIt: {
+          href: "/connect",
+          label: "Open Connections",
+        },
+      },
+      {
+        id: "late-followups-stay-eligible",
+        kind: "improvement",
+        priority: 5,
+        title: "Late follow-ups still get their turn",
+        summary:
+          "A follow-up that arrives too late to affect the current answer now stays pending for the next ordinary reply instead of being recorded as already handled.",
+        details:
+          "Optional delegated work can also finish after the first reply and return when it is relevant to the next message. Neither path delays the current answer or invents a second background conversation.",
+        relevanceTags: ["assistant", "conversation", "reliability", "delegation"],
+        sourcePullRequests: [1218, 1219],
+      },
+      {
+        id: "image-errors-explain-the-failure",
+        kind: "improvement",
+        priority: 4,
+        title: "Image failures explain what happened",
+        summary:
+          "A failed image generation or group-avatar delivery now returns a safe, useful reason through the original conversation instead of ending with a vague failure.",
+        details:
+          "Documented service errors keep their actionable category without exposing raw responses. Murph does not automatically repeat an image request that may have already been accepted.",
+        relevanceTags: ["images", "groups", "reliability", "messaging"],
+        sourcePullRequests: [1216, 1227],
+      },
+      {
+        id: "bounded-onboarding-followup",
+        kind: "improvement",
+        priority: 4,
+        title: "Onboarding gets one useful follow-up",
+        summary:
+          "After signup, Murph can send one bounded follow-up with a single easy question when the conversation still needs a natural next step.",
+        details:
+          "The attempt is spread away from the signup moment, never retries forever, and does not turn into a nag sequence when you do not answer.",
+        relevanceTags: ["onboarding", "conversation", "messaging", "reliability"],
+        sourcePullRequests: [1203],
+      },
+      {
+        id: "daily-wrong-line-redirect",
+        kind: "improvement",
+        priority: 4,
+        title: "The wrong direct chat can point home again",
+        summary:
+          "If you message an old or non-home Murph line directly, that chat can send one short redirect per day with your current home number.",
+        details:
+          "The reminder is link-free, appears only after a new inbound message, and does not create scheduled outreach from the wrong line.",
+        relevanceTags: ["phone", "messaging", "onboarding", "reliability"],
+        sourcePullRequests: [1224],
+      },
+      {
+        id: "dashboard-refresh-stays-in-place",
+        kind: "improvement",
+        priority: 4,
+        title: "Dashboard refresh stays on the current page",
+        summary:
+          "Returning focus to the dashboard now refreshes account data in the background while keeping the current page mounted.",
+        details:
+          "The update no longer jumps through a blank or replacement state when the existing screen is already usable.",
+        relevanceTags: ["dashboard", "settings", "performance", "accessibility"],
+        sourcePullRequests: [1235],
+      },
+      {
+        id: "faster-first-imessage-reply",
+        kind: "improvement",
+        priority: 4,
+        title: "The first iMessage reply starts sooner",
+        summary:
+          "Murph now prewarms the reply service for instant-start conversations and begins the typing hint after durable work is accepted.",
+        details:
+          "The hint stops on failure and does not count as a message. The actual reply keeps the existing durable delivery path.",
+        relevanceTags: ["imessage", "performance", "messaging", "reliability"],
+        sourcePullRequests: [1246],
+      },
+      {
+        id: "higher-group-daily-text-capacity",
+        kind: "improvement",
+        priority: 4,
+        title: "Active group chats have more daily room",
+        summary:
+          "The daily safeguard for supported group chats now allows up to 400 inbound texts, twice the previous limit.",
+        details:
+          "The higher limit applies to group activity only. Personal-chat safeguards and the existing handling after the group limit remain unchanged.",
+        relevanceTags: ["groups", "messaging", "usage", "reliability"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
     id: "2026-07-31",
     publishedOn: "2026-07-31",
     title: "A clearer view of home, stronger follow-through",

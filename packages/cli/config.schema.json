@@ -5870,7 +5870,7 @@
                           }
                         },
                         "workoutSet": {
-                          "description": "Compact workoutSet grammar: exercise=...;order=... plus optional set fields. Shell-quote each semicolon-separated value. Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
+                          "description": "Compact workoutSet grammar: exercise=...;order=... plus optional set fields. Shell-quote each semicolon-separated value. Supported keys: exercise, order, type, weightUnit, note, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -6223,7 +6223,7 @@
                           }
                         },
                         "workoutSet": {
-                          "description": "Attach replacement sets with the compact workoutSet grammar: exercise=...;order=... plus optional set fields. Shell-quote each semicolon-separated value. Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
+                          "description": "Attach replacement sets with the compact workoutSet grammar: exercise=...;order=... plus optional set fields. Shell-quote each semicolon-separated value. Supported keys: exercise, order, type, weightUnit, note, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -7775,10 +7775,14 @@
                       "additionalProperties": false,
                       "properties": {
                         "limit": {
-                          "description": "Maximum label matches to return. Defaults to 5.",
+                          "description": "Maximum label matches to return. Defaults to 1.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 50
+                        },
+                        "fullLabel": {
+                          "description": "Return the complete source label when the requested fact is absent from compact serving, calorie, macro, and fiber facts.",
+                          "type": "boolean"
                         },
                         "generic": {
                           "description": "Search only USDA generic food rows, excluding branded food products.",
@@ -7812,10 +7816,14 @@
                           "description": "Food product, brand, or generic ingredient search text. Repeat --query for multiple values."
                         },
                         "limit": {
-                          "description": "Maximum label matches to return per query. Defaults to 5.",
+                          "description": "Maximum label matches to return per query. Defaults to 1.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 50
+                        },
+                        "fullLabel": {
+                          "description": "Return complete source labels when a requested fact is absent from compact serving, calorie, macro, and fiber facts.",
+                          "type": "boolean"
                         },
                         "generic": {
                           "description": "Search only USDA generic food rows, excluding branded food products.",

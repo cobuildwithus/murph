@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-30
+Last verified: 2026-08-05
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -25,6 +25,28 @@ The delivery path decides who owns broad verification:
 Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
 unrelated check sufficient.
+
+## Expensive And Stochastic Proof Order
+
+When a change needs a real-model, live-provider, browser, or external review
+run, finish the cheap deterministic proof first:
+
+1. Test the exact production boundary result before the expensive run. Assert
+   both required text and the absence of conflicting guidance when instructions
+   are composed from generic and route-specific parts.
+2. Build the expensive scenario from the production prompt, policy, or saved
+   automation instructions. Do not retype a reduced approximation when the real
+   builder or record is available.
+3. Assert the user-visible outcome and owned effects, such as provider call
+   count, writes, delivery, or suppression. Do not assert incidental model steps
+   such as reading one helper file or choosing search before execute unless that
+   exact step protects a product, cost, security, or reliability invariant.
+4. Run independent focused tests, typechecks, and lint checks concurrently.
+   Start the expensive scenario only after its boundary tests pass, and start
+   ReviewGPT only after the complete candidate passes focused proof.
+
+This order keeps stochastic evidence useful without making incidental model
+behavior or an avoidable late contradiction trigger repeated expensive runs.
 
 For hosted Linq weighted line-planning changes, the focused owner proof is the
 hosted-web Vitest slice covering routing policy, on-demand line load, home
@@ -516,7 +538,7 @@ working directory, and stdio unchanged. In the current observe-only state it
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`. The
 Vercel package build starts the parent Next process with a direct 1 GiB
 old-space flag and appends a 3 GiB old-space flag to `NODE_OPTIONS`. Node applies
-the direct flag to the parent; Next 16.2.6 rebuilds its non-isolated TypeScript
+the direct flag to the parent; Next 16.3.0 rebuilds its non-isolated TypeScript
 worker options from the parent arguments followed by `NODE_OPTIONS`, so the
 mandatory generated-contract validation receives 3 GiB. Next removes the flag
 from isolated static workers. The same script owns the Vercel package build and
@@ -539,12 +561,18 @@ cold local Turbopack compile then fell from roughly 4.4 minutes to 57 seconds
 and completed all 229 static pages with the same heap policy. Repeated
 exact-head Standard previews remain the external acceptance proof. The
 next exact-head Standard preview still OOM-killed Turbopack, so the catalog
-correction remains a boundary fix but is not sufficient capacity proof.
-Production builds now use Next's supported `--webpack` fallback with the
-explicit Webpack build worker and memory optimizations. Explicit opt-in is
-required because the Workflow integration contributes custom Webpack config;
-local development stays on Turbopack. The worker build retains the same heap
-policy and all route/type validation and completed all 229 pages locally. The
+correction remains a boundary fix but was not sufficient capacity proof on
+Next 16.2.6. Production and Linux CI now use Next 16.3's default Turbopack path
+through the same shared production-build selector. The Workflow integration
+runs through its native Next integration: exact-head CI proves the complete
+compile, type-validation, static-generation, and directive-discovery path,
+while focused Stripe and phone-call suites prove the existing
+`workflow/api.start` wrappers and step contracts. Two forced-cold exact-head
+Standard previews completed without OOM: compilation took 91 and 87 seconds,
+TypeScript validation took 54 and 55 seconds, all 233 pages took 10.0 and 10.8
+seconds, and each Vercel build stage completed in four minutes. These repeated
+previews remain the external memory acceptance proof. The accepted Next 16.3
+candidate preserves the heap policy and all route/type validation. The
 advisory budget is a cgroup-unit machine model
 for Vercel Standard's 8 GB build machine: 7.2 GB available to the build cgroup,
 with a 0.8 GB reserve for OS/container overhead outside it at the ceiling. The

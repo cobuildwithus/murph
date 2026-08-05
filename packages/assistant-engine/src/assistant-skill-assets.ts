@@ -26,6 +26,12 @@ export const ASSISTANT_SKILLS = [
       'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.',
   },
   {
+    slug: 'signup-link',
+    name: 'signup-link',
+    triggerHint:
+      'Use only when a current member explicitly asks for a Murph signup link, invite link, referral link, or shareable link to forward to another person.',
+  },
+  {
     slug: 'experiment-onboarding',
     name: 'experiment-onboarding',
     triggerHint:

@@ -1138,11 +1138,11 @@ export function ComponentsContent() {
 
         <Section
           id="assistant-provider-picker"
-          title="Radio Group, Choice Cards & Provider Picker"
+          title="Radio group, choice cards & inference routing"
         >
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Compare model choice cards and review the provider privacy and
-            included-capacity disclosures used by assistant settings.
+            Compare model choice cards, provider privacy labels, and the
+            included-capacity disclosure shown after Venice is selected.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"

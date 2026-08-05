@@ -2,7 +2,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { initializeVault } from "@murphai/core";
+import {
+  addCaptureWithLookup,
+  CAPTURE_LOOKUP_INDEX_PATH,
+  findCaptureByLookup,
+  initializeVault,
+  runGeneratedImageCaptureRetention,
+} from "@murphai/core";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
@@ -110,6 +116,7 @@ describe("murph.group dynamic tool", () => {
       "read_usage_referral",
       "arm_usage_referral",
       "cancel_usage_referral",
+      "create_signup_referral_link",
       "list_memberships",
       "leave_membership",
       "update_display_name",
@@ -143,7 +150,9 @@ describe("murph.group dynamic tool", () => {
       .toEqual(expect.arrayContaining([
         "sleep-times.v0",
         "deep-sleep-days.v0",
+        "deep-sleep-sources-days.v1",
         "rem-sleep-days.v0",
+        "rem-sleep-sources-days.v1",
         "steps-days.v0",
         "workouts.v0",
       ]));
@@ -397,6 +406,7 @@ describe("murph.group dynamic tool", () => {
 
     for (const action of [
       "ask_current_sender",
+      "create_signup_referral_link",
       "revoke_own_email_share",
     ] as const) {
       expect(readMurphDynamicToolRequest(groupToolCall({
@@ -419,6 +429,196 @@ describe("murph.group dynamic tool", () => {
         message_ref: FRESH_ASSISTANT_INPUT_ID,
       }))).toMatchObject({ kind: "invalid-group-arguments" });
     }
+  });
+
+  it("creates a direct signup link only from fresh user input and returns the exact server result", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "create_signup_referral_link",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected signup referral request.");
+    }
+    const response = {
+      action: "create_signup_referral_link" as const,
+      result: {
+        expiresAt: "2026-08-06T12:00:00.000Z",
+        signupUrl: "https://www.withmurph.ai/join/server-issued",
+        status: "ok" as const,
+      },
+    };
+    const groupRequest = vi.fn<GroupToolRequest>(async () => response);
+    const currentUserActionScope = () => ({
+      acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+      conversationId: "conversation_private",
+      conversationScope: "direct" as const,
+      inboundMailboxItemIds: ["mailbox_private"],
+      originSessionId: "session_private",
+      recipientKey: "recipient_private",
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope,
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "create_signup_referral_link",
+    });
+    expect(readGroupToolPayload(result)).toEqual(response);
+
+    const rejectedRequest = vi.fn<GroupToolRequest>();
+    const rejected = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => null,
+        groupRequest: rejectedRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(rejected.rpcResult.success).toBe(false);
+    expect(rejectedRequest).not.toHaveBeenCalled();
+
+    const unverifiedRequest = vi.fn<GroupToolRequest>();
+    const unverified = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_external",
+          conversationScope: "unverified-external",
+          inboundMailboxItemIds: ["mailbox_external"],
+          originSessionId: "session_external",
+          recipientKey: "recipient_external",
+        }),
+        groupRequest: unverifiedRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(unverified.rpcResult.success).toBe(false);
+    expect(unverifiedRequest).not.toHaveBeenCalled();
+  });
+
+  it("binds a group signup link to the request-bearing accepted message", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "create_signup_referral_link",
+      message_ref: FRESH_ASSISTANT_INPUT_ID,
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected signup referral request.");
+    }
+    const participant = {
+      assistantInputId: FRESH_ASSISTANT_INPUT_ID,
+      senderHandle: "+15551110003",
+      source: "linq" as const,
+    };
+    const authorizeAcceptedMessageTarget: AssistantAcceptedMessageTargetAuthorizer =
+      vi.fn(async ({ messageRef }) =>
+        messageRef === FRESH_ASSISTANT_INPUT_ID
+          ? { participant, targetInputId: FRESH_ASSISTANT_INPUT_ID }
+          : null);
+    const response = {
+      action: "create_signup_referral_link" as const,
+      result: {
+        expiresAt: "2026-08-06T12:00:00.000Z",
+        signupUrl: "https://www.withmurph.ai/join/group-server-issued",
+        status: "ok" as const,
+      },
+    };
+    const groupRequest = vi.fn<GroupToolRequest>(async () => response);
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [EARLIER_ASSISTANT_INPUT_ID, FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group",
+          inboundMailboxItemIds: ["mailbox_one", "mailbox_two"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledWith({
+      action: "participant-effect",
+      deliveryContextOrdinal: 0,
+      messageRef: FRESH_ASSISTANT_INPUT_ID,
+    });
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "create_signup_referral_link",
+      participant,
+    });
+    expect(readGroupToolPayload(result)).toEqual(response);
+  });
+
+  it.each([
+    ["no message ref", undefined],
+    ["a ref outside the accepted input set", EARLIER_ASSISTANT_INPUT_ID],
+  ])("rejects a group signup link with %s", async (_case, messageRef) => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "create_signup_referral_link",
+      ...(messageRef ? { message_ref: messageRef } : {}),
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected signup referral request.");
+    }
+    const authorizeAcceptedMessageTarget = vi.fn();
+    const groupRequest = vi.fn<GroupToolRequest>();
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group",
+          inboundMailboxItemIds: ["mailbox_group"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(authorizeAcceptedMessageTarget).not.toHaveBeenCalled();
+    expect(groupRequest).not.toHaveBeenCalled();
   });
 
   it("binds a group referral read to the request-bearing accepted message", async () => {
@@ -1173,6 +1373,112 @@ describe("murph.group dynamic tool", () => {
         status: "ok",
       },
     });
+  });
+
+  it("passes source-aware sleep values and freshness through the model boundary", async () => {
+    const groupSharedReadRequest = vi.fn(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_internal_sleep_sources",
+        participantId: "participant_sleep_sources",
+        projections: [{
+          dataStatus: "available" as const,
+          grantStatus: "granted" as const,
+          projectionScope: {
+            projectionKind: "deep-sleep-sources-days.v1" as const,
+          },
+          projectionScopeKey: "deep-sleep-sources-days.v1",
+          records: [{
+            data: {
+              date: "2026-07-18",
+              metricKey: "deep-sleep-minutes",
+              projectedAt: "2026-07-18T12:00:00.000Z",
+              sources: [
+                {
+                  label: "Fitbit",
+                  recordedAt: "2026-07-18T06:58:00.000Z",
+                  source: "fitbit",
+                  unit: "minutes",
+                  value: 64,
+                },
+                {
+                  label: "Garmin",
+                  recordedAt: "2026-07-18T07:01:00.000Z",
+                  selected: true as const,
+                  source: "garmin",
+                  unit: "minutes",
+                  value: 88,
+                },
+                {
+                  label: "Oura",
+                  recordedAt: null,
+                  source: "oura",
+                  unit: "minutes",
+                  value: 112,
+                },
+              ],
+              sourcesDisagree: true,
+              unit: "minutes",
+              value: 88,
+            },
+            occurredAt: "2026-07-18T00:00:00.000Z",
+            recordKey: "2026-07-18",
+          }],
+        }],
+      }],
+      requestedProjectionScopeKeys: ["deep-sleep-sources-days.v1"],
+      status: "ok" as const,
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "deep-sleep-sources-days.v1" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    const payload = readGroupToolPayload(result);
+    expect(payload).toMatchObject({
+      action: "read_shared",
+      result: {
+        members: [{
+          participantId: "participant_sleep_sources",
+          projections: {
+            "deep-sleep-sources-days.v1": {
+              records: [{
+                data: {
+                  projectedAt: "2026-07-18T12:00:00.000Z",
+                  sources: [
+                    { source: "fitbit", value: 64 },
+                    { selected: true, source: "garmin", value: 88 },
+                    { source: "oura", value: 112 },
+                  ],
+                  sourcesDisagree: true,
+                  value: 88,
+                },
+              }],
+              status: "available",
+            },
+          },
+        }],
+        status: "ok",
+      },
+    });
+    expect(JSON.stringify(payload)).not.toContain("member_internal_sleep_sources");
   });
 
   it("passes bounded workout arrays through the model-facing boundary", async () => {
@@ -3221,6 +3527,72 @@ describe("murph.group dynamic tool", () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-generated-"));
     try {
       await initializeVault({ vaultRoot });
+      const existingImagePath = join(vaultRoot, "existing-generated.webp");
+      await writeFile(existingImagePath, webpBytes);
+      const oldRecordedAt = new Date(
+        Date.now() - 16 * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      const addExistingGeneratedCapture = async (lookupKey: string) =>
+        await addCaptureWithLookup({
+          attachments: [{
+            role: "media_1",
+            sourcePath: existingImagePath,
+          }],
+          draft: {
+            note: "Assistant-generated image saved for later visual reuse.",
+            occurredAt: oldRecordedAt,
+            recordedAt: oldRecordedAt,
+            source: "derived",
+            tags: ["assistant-generated-image", "generated-image"],
+            title: "Generated image",
+          },
+          lookupAttachmentRole: "media_1",
+          lookupKey,
+          rawImport: {
+            importKind: "capture",
+            importedAt: oldRecordedAt,
+            provenance: {
+              family: "capture",
+              generatedImage: { schema: "murph.generated-image.v1" },
+              mediaCount: 1,
+            },
+            source: "murph.generate_image",
+          },
+          vaultRoot,
+        });
+      const retiredExisting = await addExistingGeneratedCapture(
+        "generated:legacy-retired",
+      );
+      const liveExisting = await addExistingGeneratedCapture(
+        "generated:legacy-live",
+      );
+      await expect(runGeneratedImageCaptureRetention({
+        now: new Date(),
+        protectedCaptureIds: [liveExisting.event.id],
+        vaultRoot,
+      })).resolves.toMatchObject({ retiredCaptureCount: 1 });
+      const lookupPath = join(vaultRoot, CAPTURE_LOOKUP_INDEX_PATH);
+      const lazyLookupBytes = await readFile(lookupPath);
+      await rm(lookupPath);
+      let lookupMaterialized = false;
+      const materializeWorkspaceArtifacts = vi.fn(async (
+        relativePaths: readonly string[],
+      ) => {
+        if (
+          relativePaths.includes(CAPTURE_LOOKUP_INDEX_PATH)
+          && !lookupMaterialized
+        ) {
+          await mkdir(join(vaultRoot, "derived", "captures"), {
+            recursive: true,
+          });
+          await writeFile(lookupPath, lazyLookupBytes);
+          lookupMaterialized = true;
+        }
+        return {
+          materializedArtifactPaths: new Set(relativePaths),
+          missingArtifactPaths: new Set<string>(),
+        };
+      });
 
       const groupRequest = vi.fn<GroupToolRequest>(async (request) =>
         request.action === "preflight_set_chat_avatar"
@@ -3262,6 +3634,7 @@ describe("murph.group dynamic tool", () => {
       }
 
       const nextUsageOrdinal = vi.fn(() => 7);
+      let retentionWakeAt: string | null = null;
       const result = await executeMurphDynamicToolRequest({
         env: {
           OPENAI_API_KEY: "openai-test-key",
@@ -3269,9 +3642,14 @@ describe("murph.group dynamic tool", () => {
         fetchImpl,
         hostedToolContext: createGroupHostedToolContext({
           groupRequest,
+          persistGeneratedImageCapture: async (write, metadata) => {
+            retentionWakeAt = metadata.retentionWakeAt;
+            return await write();
+          },
           privateImageUrlPublish,
         }),
         nextUsageOrdinal,
+        materializeWorkspaceArtifacts,
         progressDelivery: null,
         request,
         vaultRoot,
@@ -3279,6 +3657,10 @@ describe("murph.group dynamic tool", () => {
 
       expect(nextUsageOrdinal).toHaveBeenCalledOnce();
       expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(retentionWakeAt).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
+      expect(materializeWorkspaceArtifacts.mock.calls[0]?.[0]).toEqual([
+        CAPTURE_LOOKUP_INDEX_PATH,
+      ]);
       expect(result.rpcResult.success).toBe(true);
       expect(readGroupToolPayload(result)).toMatchObject({
         action: "set_chat_avatar",
@@ -3300,6 +3682,41 @@ describe("murph.group dynamic tool", () => {
         { action: "set_chat_avatar", groupChatIconUrl: SIGNED_PRIVATE_IMAGE_URL },
       );
       expect(result.usageDraft).toMatchObject({ providerRequestOrdinal: 7 });
+
+      const savedImageRef = generatedImageRefFromPayload(
+        readGroupToolPayload(result),
+      );
+      const restoredLookup = JSON.parse(
+        await readFile(lookupPath, "utf8"),
+      ) as { entries: Record<string, { retiredAt?: string }> };
+      expect(Object.keys(restoredLookup.entries)).toHaveLength(3);
+      expect(Object.values(restoredLookup.entries).filter(
+        (entry) => entry.retiredAt !== undefined,
+      )).toHaveLength(1);
+      await expect(findCaptureByLookup({
+        lookupKey: "generated:legacy-retired",
+        vaultRoot,
+      })).resolves.toMatchObject({
+        eventId: retiredExisting.event.id,
+        status: "deleted",
+      });
+      await expect(findCaptureByLookup({
+        lookupKey: "generated:legacy-live",
+        vaultRoot,
+      })).resolves.toMatchObject({
+        eventId: liveExisting.event.id,
+        status: "live",
+      });
+      await expect(runGeneratedImageCaptureRetention({
+        now: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
+        vaultRoot,
+      })).resolves.toMatchObject({
+        blockedCaptureCount: 0,
+        retiredCaptureCount: 2,
+      });
+      await expect(readFile(join(vaultRoot, savedImageRef), "utf8"))
+        .resolves.toContain("generated_image_retention");
+      expect(groupRequest).toHaveBeenCalledTimes(2);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -4485,6 +4902,9 @@ function createGroupHostedToolContext(input: {
   privateImageUrlPublish?: AssistantHostedPrivateImageUrlPublisher[
     "publishPrivateImageUrl"
   ];
+  persistGeneratedImageCapture?: NonNullable<
+    AssistantHostedToolContext["persistGeneratedImageCapture"]
+  >;
 } = {}): AssistantHostedToolContext {
   const currentUserActionScope = input.currentUserActionScope ?? (() => null);
   const context = {
@@ -4525,6 +4945,8 @@ function createGroupHostedToolContext(input: {
         },
     newsletterTool: null,
     phoneCalls: null,
+    persistGeneratedImageCapture:
+      input.persistGeneratedImageCapture ?? (async (write) => await write()),
     privateImageUrlPublisher: input.privateImageUrlPublish
       ? { publishPrivateImageUrl: input.privateImageUrlPublish }
       : null,

@@ -24,6 +24,7 @@ Last verified: 2026-07-31
 | `MURPH_SAFE_E2E_PRODUCT_REF=... MURPH_SAFE_E2E_PRODUCT_NAME=... MURPH_SAFE_E2E_QUERY=... MURPH_SAFE_E2E_EXPECTED_TEST_ID=... pnpm --dir apps/web exec playwright test e2e/murph-safe-production-seam.spec.ts` | Opt-in rendered production-seam proof against an explicitly seeded local labels database. It uses the real POST search route, validates the public detail contract and exact selected-record test id, renders the server detail at phone and desktop widths, and checks detail overflow. `MURPH_SAFE_E2E_EXCLUDED_TEST_ID` can prove that a same-canonical sibling observation is absent. | Murph Safe public search route, shared service, labels SQL, contract, and server-rendered detail page |
 | `MURPH_IMESSAGE_ENROLLMENT_TEST_DB_URL="$LOCAL_POSTGRES_URL" pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/imessage-mini-app-account-deletion.db.test.ts --no-coverage` | Opt-in real-PostgreSQL proof for bounded Messages credential rotation and enrollment versus account deletion against an isolated, migrated local test database. The URL guard permits only loopback or local socket targets; the ordinary hosted-web workspace excludes `*.db.test.ts`, and the focused config additionally skips this suite when the dedicated variable is absent. | Repeated enrollment rotates one Messages-owned row while invalidating prior bearers and preserving ordinary sessions, including stale-generation self-revocation, re-enrollment after revocation and expiry, plus both deletion-first and enrollment-first serialization orders with final absence of the member and its device-agent session |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/prisma-database-retry-postgres.test.ts` | Opt-in real-PostgreSQL proof that the shared Prisma client returns visible local saturation as backpressure and retries only ambiguous failures that did no work. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | A contended transaction-start timeout is not retried and never invokes its callback, a real pool-checkout timeout on an ordinary non-transaction write is not retried and persists no row, and a transaction that opened and then expired raises the same `P2028` code without being replayed |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/initial-onboarding-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for initial-onboarding rollout compatibility and first-writer-wins serialization. The suite rejects non-loopback database URLs and runs after migrations. | The exact migration SQL backfills existing rows, its temporary default completes a legacy omitted-column insert, the current explicit-null insert stays pending, and independent Web-save/iOS-skip Prisma transactions serialize in both controlled winner orderings without loser preference overwrite |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for deterministic hosted usage replay. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | A first writer holds an uncommitted deterministic usage row while an exact concurrent replay waits; both transactions complete after release and the ledger retains one immutable row |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-accepted-attempt-recheck-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof that the accepted-attempt recheck cooldown elects one owner. The claim replaced a runtime-log-row election, so exactly-one-winner is now PostgreSQL conditional-update semantics rather than application logic. Runs in the hosted E2E PostgreSQL job after migrations. | Two concurrent claims at the same logical time yield exactly one winner; a claim at the cooldown boundary is denied; a claim past the boundary succeeds |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-home-routing-postgres.test.ts` | Opt-in real-PostgreSQL proof for hosted Linq proactive-capacity, edit-source, and member-route concurrency. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | One blind source-message key serializes concurrent edit lineage reads, while an edit racing an uncommitted ordinary source append sees the retryable missing-source state and resolves the source after commit; the final daily slot admits exactly one claim; concurrent direct-Telegram contact requests converge on one encrypted home-line assignment without a chat binding or proactive-capacity claim; activation, first-contact, reclassification, and participant routing serialize on the member owner; and real Telegram/Linq planners complete in both routing orders for already-active members and for an inbound reclassified after an uncommitted activation, while retaining both bindings and exactly one mailbox item per event |
@@ -275,7 +276,7 @@ never reads production feedback or enters Resend.
   environment, cwd, and stdio. It does not currently write `memory.max`,
   `memory.swap.max`, or `memory.oom.group`. The Vercel package build gives the
   parent Next process a direct 1 GiB old-space flag and appends a 3 GiB flag to
-  `NODE_OPTIONS`. Node applies the direct flag to the parent; Next 16.2.6
+  `NODE_OPTIONS`. Node applies the direct flag to the parent; Next 16.3.0
   rebuilds its non-isolated TypeScript worker options from the parent arguments
   followed by `NODE_OPTIONS`, while removing the flag from isolated static
   workers. The same script owns the Vercel package build and CI memory-
@@ -298,13 +299,19 @@ never reads production feedback or enters Resend.
   seconds instead of roughly 4.4 minutes and completed all 229 static pages.
   Repeated exact-head Standard previews remain the external acceptance proof.
   The next exact-head Standard preview still OOM-killed Turbopack, so the
-  catalog correction is retained as a boundary fix but not sufficient capacity
-  proof. Production builds therefore use Next's supported `--webpack` fallback
-  with `webpackBuildWorker` and `webpackMemoryOptimizations` enabled. The
-  Workflow integration contributes custom Webpack configuration, so the worker
-  must be explicit. Local development remains on Turbopack. The worker build
-  preserves the same heap split and all route/type validation and completed all
-  229 pages locally. The advisory budget is
+  catalog correction is retained as a boundary fix but was not sufficient
+  capacity proof on Next 16.2.6. Production and Linux CI now use Next 16.3's
+  default Turbopack path through the same shared production-build selector. The
+  Workflow integration runs through its native Next integration: exact-head CI
+  proves the complete compile, type-validation, static-generation, and
+  directive-discovery path, while focused Stripe and phone-call suites prove
+  the existing `workflow/api.start` wrappers and step contracts. Two
+  forced-cold exact-head Standard previews completed without OOM: compilation
+  took 91 and 87 seconds, TypeScript validation took 54 and 55 seconds, all 233
+  pages took 10.0 and 10.8 seconds, and each Vercel build stage completed in
+  four minutes. These repeated previews remain the external memory acceptance
+  proof. The accepted candidate preserves the heap split and all route/type
+  validation. The advisory budget is
   a cgroup-unit model of Vercel Standard's 8 GB build machine: 7.2 GB available
   to the build cgroup and a 0.8 GB reserve for OS/container overhead outside it
   at the ceiling. The legacy-named guard budget override must stay strictly
@@ -356,8 +363,14 @@ never reads production feedback or enters Resend.
   and separately stages system-mailbox, retention-only, stale-owner, and active
   foreground contention. Each real signed Linq inbound must produce exactly one
   accepted outbound Linq request within 30 seconds while any staged background
-  checkpoint remains held. Its separately named workflow leg makes this latency
-  invariant visible without replacing the two aggregate required checks.
+  checkpoint remains held. The same scenario command then starts a clean Vitest
+  process with a 10-second idle floor and typed, bounded ordering observation.
+  That process proves a later durable conversation reaches mailbox import and
+  provider start before an interrupted idle snapshot can retry, and proves the
+  same foreground continuation after a committed canonical publication. The
+  two process profiles cannot share process-scoped hosted crypto state. Its
+  separately named workflow leg makes these invariants visible without
+  replacing the two aggregate required checks.
 - `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
   same exact 30-second boundary for completed and still-unresolved Linq traces,
   excludes chronologically valid AI usage-denied traces before grouping while
@@ -669,7 +682,7 @@ keep the one-second presentation-only deadline and late-result rejection.
   recipient observation; `--assert-progress-typing-visible` fails unless typing
   is visibly present both before and after the outbound progress-message boundary.
 - No automated check hits a live AgentMail endpoint; email provisioning, polling, and in-thread reply behavior are currently verified through mocked CLI and inboxd tests only.
-- No automated check hits a live WHOOP or other wearable OAuth provider; device-syncd auth/webhook behavior is currently verified through local service tests, route tests, stubbed control-plane callers, and the hosted-local device-connect smoke that creates a signed WHOOP connect link against synthetic provider config.
+- No pull-request check hits a live wearable OAuth provider. The default hosted-local device-connect smoke remains hermetic and creates signed Oura and WHOOP links against synthetic Junction config. Its explicit `MURPH_E2E_JUNCTION_WEARABLE_LIVE=1` mode runs alone, uses `MURPH_E2E_JUNCTION_WEARABLE_SOURCES` to select one or both real providers, drives each selected signed intent through Junction and provider browser authorization, verifies the proof-bound automatic callback plus persisted reload, and disconnects each provider during cleanup. The suite owner strips all live-mode Junction authority, provider login values, browser controls, and the retired `MURPH_E2E_OURA_PASSWORD` name from generic bundle, image, generated-artifact, cleanup, runtime, and browser commands, forwarding only current selected-provider inputs to the isolated owners. The test then keeps Junction authority in the hosted platform and passes only the current provider login to the browser driver. `.github/workflows/junction-wearable-canary.yml` runs the unattended WHOOP proof after every push to protected `main` and by manual dispatch under the dedicated `junction-wearable-canary` GitHub Environment, with read-only repository permission, fixed non-overlapping concurrency, sandbox-only configuration, step-scoped credentials, no uploaded artifacts, and Temporal disabled because connection persistence does not own orchestration. Oura's current passwordless web login requires a fresh emailed code, so its full live proof runs headfully from an operator shell with the Oura account email and manual code entry; the code and a nonexistent reusable Oura password are not persisted as CI secrets. Device-syncd auth/webhook behavior otherwise remains covered through local service tests, route tests, and stubbed control-plane callers; the private integration matrix retains the production-shaped external Temporal worker proof.
 - Automatic meal-photo capture is covered by hosted-web enrollment/upload, companion bearer-consent status/acceptance, verified-email route fallback and current-recipient resolution, accepted-capture member-wide engagement, and model-gate-with-system-lag tests; hosted-execution wake/route parsing tests; Cloudflare private-object, processing-mode, and signed control-proxy tests; Temporal blocked-system and foreground-fairness tests; assistant-runtime system-only cron projection/post-checkpoint cleanup, canonical import/idempotency/automation-postcondition, and fail-closed email-authority tests; managed-automation tests; oldest-first closeout-work CLI tests; and canonical meal photo-retirement tests. Routine CI does not grant a real iPhone Photos permission or upload to the production R2 bucket, so deployed product proof still requires an explicit physical-device capture.
 - The temporary R2 cutover write-admission gate has focused Cloudflare route
   coverage for both callback-signed Temporal ensures and Vercel OIDC direct

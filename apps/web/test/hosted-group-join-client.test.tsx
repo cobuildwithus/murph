@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
     inviteCode?: string | null;
     methods?: readonly ("phone" | "telegram" | "email")[];
     onCompleted?: (payload: {
-      initialVisitEligible?: boolean;
       stage: "active" | "activating" | "blocked" | "checkout";
     }) => Promise<void> | void;
     onOpenChange: (open: boolean) => void;
@@ -40,7 +39,6 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
     inviteCode?: string | null;
     methods?: readonly ("phone" | "telegram" | "email")[];
     onCompleted?: (payload: {
-      initialVisitEligible?: boolean;
       stage: "active" | "activating" | "blocked" | "checkout";
     }) => Promise<void> | void;
     onOpenChange: (open: boolean) => void;
@@ -119,7 +117,7 @@ test("renders a not-now escape link with the group join legal consent gate", asy
   expect(markup).toContain("Not now");
 });
 
-test("keeps the initial-visit destination on the consent gate not-now link", async () => {
+test("keeps the home destination on the consent gate not-now link", async () => {
   const { GroupJoinLegalConsentGate } = await import(
     "@/src/components/hosted-groups/group-join-client"
   );
@@ -127,11 +125,11 @@ test("keeps the initial-visit destination on the consent gate not-now link", asy
   const markup = renderToStaticMarkup(
     createElement(GroupJoinLegalConsentGate, {
       initialStatus: null,
-      notNowHref: "/home?initialVisit=true",
+      notNowHref: "/home",
     }),
   );
 
-  expect(markup).toContain('href="/home?initialVisit=true"');
+  expect(markup).toContain('href="/home"');
   expect(markup).toContain("Not now");
 });
 
@@ -165,6 +163,68 @@ test("renders optional sharing cards with visible keyboard focus treatment", asy
   );
   expect(markup).toContain("has-[:focus-visible]:ring-2");
   expect(markup).toContain('type="checkbox"');
+});
+
+test("discloses and submits source-aware sleep metadata on the link-only join page", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: false,
+      expectedMembershipId: null,
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      permissions: [
+        {
+          description:
+            "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+          label: "Deep sleep by source",
+          projectionScope: { projectionKind: "deep-sleep-sources-days.v1" as const },
+          projectionScopeKey: "deep-sleep-sources-days.v1",
+        },
+        {
+          description:
+            "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
+          label: "REM sleep by source",
+          projectionScope: { projectionKind: "rem-sleep-sources-days.v1" as const },
+          projectionScopeKey: "rem-sleep-sources-days.v1",
+        },
+      ],
+      postJoinContactOption: null,
+      postJoinDestination: "/home",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  expect(container.textContent).toContain(
+    "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+  );
+  expect(container.textContent).toContain(
+    "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
+  );
+  expect(Array.from(container.querySelectorAll<HTMLInputElement>(
+    'input[type="checkbox"]',
+  )).every((checkbox) => checkbox.checked)).toBe(true);
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      expectedMembershipId: null,
+      selectedVaultShareProjectionScopes: [
+        { projectionKind: "deep-sleep-sources-days.v1" },
+        { projectionKind: "rem-sleep-sources-days.v1" },
+      ],
+    },
+    url: "/api/groups/join/JOIN123/accept",
+  });
 });
 
 test("groups the four macro nutrients into one Daily macros card, calories separate", async () => {
@@ -465,13 +525,12 @@ test("returns an authenticated new member to the same group intent", async () =>
 
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
-      initialVisitEligible: true,
       stage: "active",
     });
   });
 
   expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith(
-    "/groups/join/JOIN123?source=text&postJoin=initial-visit#sharing",
+    "/groups/join/JOIN123?source=text#sharing",
   );
 });
 
@@ -544,7 +603,7 @@ test("returns to the dashboard through a real link once membership succeeds", as
       joinCode: "JOIN123",
       permissions: [],
       postJoinContactOption: null,
-      postJoinDestination: "/home?initialVisit=true",
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -570,7 +629,7 @@ test("returns to the dashboard through a real link once membership succeeds", as
     (candidate) => candidate.textContent?.includes("Back to Murph"),
   );
   expect(returnLink).toBeTruthy();
-  expect(returnLink?.getAttribute("href")).toBe("/home?initialVisit=true");
+  expect(returnLink?.getAttribute("href")).toBe("/home");
   expect(mocks.routerPush).not.toHaveBeenCalled();
 });
 
@@ -615,7 +674,7 @@ test("hands a messaging member back to the channel Murph reaches them on", async
   expect(container.querySelector('a[href="/home"]')).toBeNull();
 });
 
-test("prefers the one-shot initial-visit handoff over the messaging-channel return", async () => {
+test("uses the canonical home destination when no completed-member contact return is projected", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
   const { GroupJoinAcceptForm } = await import(
     "@/src/components/hosted-groups/group-join-client"
@@ -628,12 +687,8 @@ test("prefers the one-shot initial-visit handoff over the messaging-channel retu
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
       permissions: [],
-      postJoinContactOption: {
-        href: "sms:+15555550100",
-        kind: "text",
-        label: "Messages",
-      },
-      postJoinDestination: "/home?initialVisit=true",
+      postJoinContactOption: null,
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -643,13 +698,10 @@ test("prefers the one-shot initial-visit handoff over the messaging-channel retu
     await Promise.resolve();
   });
 
-  // A member created by texting binds their Privy user during this very
-  // authentication, so a skipped initial visit can never be recreated: the
-  // web destination must outrank the usual return-to-messages handoff.
   const returnLink = Array.from(container.querySelectorAll("a")).find(
     (candidate) => candidate.textContent?.includes("Back to Murph"),
   );
-  expect(returnLink?.getAttribute("href")).toBe("/home?initialVisit=true");
+  expect(returnLink?.getAttribute("href")).toBe("/home");
   expect(container.querySelector('a[href^="sms:"]')).toBeNull();
 });
 

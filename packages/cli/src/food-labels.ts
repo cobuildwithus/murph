@@ -19,11 +19,13 @@ const foodLabelsClient = createHostedDataApiLabelsClient({
 })
 
 export const foodLabelSearchInputSchema = hostedDataApiLabelSearchInputSchema.extend({
+  fullLabel: z.boolean().optional(),
   genericOnly: z.boolean().optional(),
 })
 export const foodLabelSearchItemSchema = hostedDataApiLabelSearchItemSchema
 export const foodLabelSearchResultSchema = foodLabelsClient.searchResultSchema
 export const foodLabelBatchSearchInputSchema = hostedDataApiLabelBatchSearchInputSchema.extend({
+  fullLabel: z.boolean().optional(),
   genericOnly: z.boolean().optional(),
 })
 export const foodLabelBatchSearchResultSchema = foodLabelsClient.batchSearchResultSchema
@@ -37,12 +39,26 @@ export async function searchFoodLabels(
   rawInput: FoodLabelSearchInput,
   dependencies: HostedDataApiLabelsDependencies = {},
 ): Promise<FoodLabelSearchResult> {
-  return await foodLabelsClient.searchLabels(rawInput, dependencies)
+  const input = foodLabelSearchInputSchema.parse(rawInput)
+  return await foodLabelsClient.searchLabels({
+    genericOnly: input.genericOnly,
+    includeOffMarket: input.includeOffMarket,
+    limit: input.limit ?? 1,
+    nutritionOnly: input.fullLabel !== true,
+    q: input.q,
+  }, dependencies)
 }
 
 export async function searchFoodLabelsBatch(
   rawInput: FoodLabelBatchSearchInput,
   dependencies: HostedDataApiLabelsDependencies = {},
 ): Promise<FoodLabelBatchSearchResult> {
-  return await foodLabelsClient.searchLabelsBatch(rawInput, dependencies)
+  const input = foodLabelBatchSearchInputSchema.parse(rawInput)
+  return await foodLabelsClient.searchLabelsBatch({
+    genericOnly: input.genericOnly,
+    includeOffMarket: input.includeOffMarket,
+    limit: input.limit ?? 1,
+    nutritionOnly: input.fullLabel !== true,
+    queries: input.queries,
+  }, dependencies)
 }

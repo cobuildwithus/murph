@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-07-30
+Last verified: 2026-08-05
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -488,14 +488,14 @@ the touched surface, push it, and use the ordinary review-loop rules.
   the round counter; correct the gap and retry the same substantive round.
 - `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` pauses tactical remediation until the
   requirement-level retrospective is recorded. It is not a structural verdict.
-- Hard cap: 5 rounds per PR. There is no automatic sixth substantive round. An
-  accepted round-five finding may still be reproduced and fixed; do not leave a
-  known bug in place merely because the review counter reached five. After that
+- Hard cap: 7 rounds per PR. There is no automatic eighth substantive round. An
+  accepted round-seven finding may still be reproduced and fixed; do not leave a
+  known bug in place merely because the review counter reached seven. After that
   fix, pause the ReviewGPT loop and confirm the preliminary specialist pass,
   required local audit, parent final review, verification, and PR CI are all
   complete. Record the cap
   retrospective and obtain an explicit continuation decision before starting
-  round six; the answer may be delete, revert, shrink, split, redesign,
+  round eight; the answer may be delete, revert, shrink, split, redesign,
   continue, or abandon. A green non-ReviewGPT gate does not make the PR
   merge-ready without the required later `PASS`.
 - Report a per-round summary at handoff: findings received, accepted, rejected

@@ -1,9 +1,16 @@
+import type { AppleHealthRelaySetupGuideId } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
+
 export type LogoAsset = {
   className: string;
   height: number;
   src: string;
   width: number;
 };
+
+export type ConnectSourceSetupGuideId =
+  | "zepp-apple-health"
+  | AppleHealthRelaySetupGuideId;
+
 
 export type ConnectSource = {
   connectionAvailable?: boolean;
@@ -20,6 +27,8 @@ export type ConnectSource = {
   name: string;
   recoveryKind?: "connection_reset";
   requiresReconnect?: boolean;
+  setupGuideActionLabel?: string;
+  setupGuideId?: ConnectSourceSetupGuideId;
   unavailableActionLabel?: string;
   unavailableActionUrl?: string;
   unavailableMessage?: string;

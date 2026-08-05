@@ -1,7 +1,4 @@
-import {
-  HOSTED_APP_HOME_PATH,
-  HOSTED_APP_INITIAL_VISIT_HOME_PATH,
-} from "@/src/lib/hosted-onboarding/app-routes";
+import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type {
   HostedPrivyAuthMethod,
@@ -43,11 +40,7 @@ export async function resolveHostedAuthRedirectUrl(input: {
   }
 
   if (isHostedOnboardingAccessibleStage(input.payload.stage)) {
-    // The completion payload is the only owner of first-visit eligibility;
-    // invite provenance must not reinterpret it.
-    return input.payload.initialVisitEligible === true
-      ? HOSTED_APP_INITIAL_VISIT_HOME_PATH
-      : HOSTED_APP_HOME_PATH;
+    return HOSTED_APP_HOME_PATH;
   }
 
   return input.payload.joinUrl;

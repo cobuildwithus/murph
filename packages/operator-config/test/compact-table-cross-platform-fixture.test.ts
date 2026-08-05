@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  encodeAppCardDataUrl,
+  encodeCompactTableAppCardUrl,
   type CompactTableResponseCardV1,
 } from '../src/assistant-response-cards.js'
 
@@ -30,11 +30,11 @@ const CARD: CompactTableResponseCardV1 = {
   },
 }
 
-const EXACT_SWIFT_FIXTURE_DATA_URL =
-  'data:application/json;base64,eyJzY2hlbWFWZXJzaW9uIjozLCJjYXJkIjp7ImtpbmQiOiJjb21wYWN0X3RhYmxlIiwidmVyc2lvbiI6MSwidGl0bGUiOiJMaXZlIHN0cmVuZ3RoIHNlc3Npb24iLCJzdWJ0aXRsZSI6bnVsbCwicm93SGVhZGVyIjoiRXhlcmNpc2UiLCJjb2x1bW5zIjpbIlNldCAxIiwiU2V0IDIiLCJTZXQgMyIsIlNldCA0Il0sInJvd3MiOlt7ImxhYmVsIjoiRXhlcmNpc2UgQSIsInZhbHVlcyI6WyIxMiIsIjEwIChmaW5hbCByZXAgc3BvdHRlZCkiLCI5IiwiOCAoZmluYWwgMiByZXBzIHNwb3R0ZWQpIl19LHsibGFiZWwiOiJFeGVyY2lzZSBCIiwidmFsdWVzIjpbIjQwIMOXIDgiLCI0NSDDlyA4IiwiNDUgw5cgNyIsIjQ1IMOXIDYgKGZpbmFsIHJlcCBzcG90dGVkKSJdfV0sImZvb3RlciI6bnVsbCwidHJhY2tpbmciOnsia2luZCI6IndvcmtvdXQiLCJlbnRpdHlJZCI6ImV2dF8wMUsxQUJDREVGR0hKS01OUFFSU1RWV1hZWiIsInNuYXBzaG90QXQiOiIyMDI2LTA4LTA0VDIxOjMwOjAwLjAwMFoifX19'
+const EXACT_SWIFT_FIXTURE_URL =
+  'https://murph.ai/#murph-card=eyJzY2hlbWFWZXJzaW9uIjozLCJjYXJkIjp7ImtpbmQiOiJjb21wYWN0X3RhYmxlIiwidmVyc2lvbiI6MSwidGl0bGUiOiJMaXZlIHN0cmVuZ3RoIHNlc3Npb24iLCJzdWJ0aXRsZSI6bnVsbCwicm93SGVhZGVyIjoiRXhlcmNpc2UiLCJjb2x1bW5zIjpbIlNldCAxIiwiU2V0IDIiLCJTZXQgMyIsIlNldCA0Il0sInJvd3MiOlt7ImxhYmVsIjoiRXhlcmNpc2UgQSIsInZhbHVlcyI6WyIxMiIsIjEwIChmaW5hbCByZXAgc3BvdHRlZCkiLCI5IiwiOCAoZmluYWwgMiByZXBzIHNwb3R0ZWQpIl19LHsibGFiZWwiOiJFeGVyY2lzZSBCIiwidmFsdWVzIjpbIjQwIMOXIDgiLCI0NSDDlyA4IiwiNDUgw5cgNyIsIjQ1IMOXIDYgKGZpbmFsIHJlcCBzcG90dGVkKSJdfV0sImZvb3RlciI6bnVsbCwidHJhY2tpbmciOnsia2luZCI6IndvcmtvdXQiLCJlbnRpdHlJZCI6ImV2dF8wMUsxQUJDREVGR0hKS01OUFFSU1RWV1hZWiIsInNuYXBzaG90QXQiOiIyMDI2LTA4LTA0VDIxOjMwOjAwLjAwMFoifX19'
 
 describe('compact-table TypeScript to Swift contract fixture', () => {
   it('keeps the exact production encoder output pinned for the iOS decoder', () => {
-    expect(encodeAppCardDataUrl(CARD)).toBe(EXACT_SWIFT_FIXTURE_DATA_URL)
+    expect(encodeCompactTableAppCardUrl(CARD)).toBe(EXACT_SWIFT_FIXTURE_URL)
   })
 })

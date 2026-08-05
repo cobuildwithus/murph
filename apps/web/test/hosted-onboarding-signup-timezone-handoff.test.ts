@@ -67,12 +67,22 @@ const MEMBER = {
   suspendedAt: null,
   updatedAt: NOW,
 };
+const IDENTITY = {
+  email: null,
+  phone: {
+    number: "+48123456789",
+    verifiedAt: 1782043200,
+  },
+  telegram: null,
+  userId: "did:privy:timezone-handoff",
+};
 
 describe("hosted signup timezone handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.ensureHostedMemberForPrivyIdentityResolutionTx.mockResolvedValue({
       created: true,
+      identity: IDENTITY,
       member: MEMBER,
     });
     mocks.issueHostedInvite.mockResolvedValue({
@@ -122,15 +132,7 @@ describe("hosted signup timezone handoff", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        identity: {
-          email: null,
-          phone: {
-            number: "+48123456789",
-            verifiedAt: 1782043200,
-          },
-          telegram: null,
-          userId: "did:privy:timezone-handoff",
-        },
+        identity: IDENTITY,
         now: NOW,
         prisma,
         timeZone: "Europe/Warsaw",

@@ -6,6 +6,8 @@ import {
 import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query/entity-families'
 import { z } from 'zod'
 
+export const VAULT_CLI_BATCH_RESULT_SCHEMA = 'murph.vault-cli.batch-result.v1'
+
 function describeQueryRecordTypes(values: readonly string[]): string {
   return `Optional query record families. Repeat --record-type for multiple values: ${values.join(', ')}.`
 }

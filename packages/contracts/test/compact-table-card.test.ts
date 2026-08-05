@@ -191,33 +191,45 @@ describe("compact table response-card contract", () => {
     }
   });
 
-  it("accepts exact maximum text and shape bounds", () => {
-    const maximumCard: CompactTableResponseCardV1 = {
+  it("accepts exact field and shape bounds within the aggregate URL limit", () => {
+    const maximumTextCard: CompactTableResponseCardV1 = {
       ...TRACKED_WORKOUT_CARD,
       title: "T".repeat(compactTableCardV1Bounds.title),
       subtitle: "S".repeat(compactTableCardV1Bounds.subtitle),
       rowHeader: "H".repeat(compactTableCardV1Bounds.rowHeader),
+      columns: ["C".repeat(compactTableCardV1Bounds.columnHeader)],
+      rows: [{
+        label: "L".repeat(compactTableCardV1Bounds.rowLabel),
+        values: ["V".repeat(compactTableCardV1Bounds.cellValue)],
+      }],
+      footer: "F".repeat(compactTableCardV1Bounds.footer),
+      tracking: null,
+    };
+    const maximumShapeCard: CompactTableResponseCardV1 = {
+      ...TRACKED_WORKOUT_CARD,
       columns: Array.from(
         { length: compactTableCardV1Bounds.columns },
-        (_, index) => `${index}`.repeat(compactTableCardV1Bounds.columnHeader),
+        (_, index) => `Set ${index + 1}`,
       ),
       rows: Array.from(
         { length: compactTableCardV1Bounds.rows },
         (_, rowIndex) => ({
-          label: `${rowIndex}`.repeat(compactTableCardV1Bounds.rowLabel),
+          label: `Exercise ${rowIndex + 1}`,
           values: Array.from(
             { length: compactTableCardV1Bounds.columns },
-            (_, valueIndex) =>
-              `${valueIndex}`.repeat(compactTableCardV1Bounds.cellValue),
+            (_, valueIndex) => `${valueIndex + 1}`,
           ),
         }),
       ),
-      footer: "F".repeat(compactTableCardV1Bounds.footer),
+      footer: null,
       tracking: null,
     };
 
-    expect(compactTableResponseCardV1Schema.parse(maximumCard)).toEqual(
-      maximumCard,
+    expect(compactTableResponseCardV1Schema.parse(maximumTextCard)).toEqual(
+      maximumTextCard,
+    );
+    expect(compactTableResponseCardV1Schema.parse(maximumShapeCard)).toEqual(
+      maximumShapeCard,
     );
   });
 });

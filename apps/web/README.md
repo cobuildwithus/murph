@@ -38,15 +38,17 @@ Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
 
-Signup-oriented landing-page auth completion for accessible hosted stages routes
-to `/home?initialVisit=true`. The home page treats that query as a one-shot
-browser handoff. Members with a resolved text contact see the contact-card picker
-first and then the production four-step Murph personality picker; members without
-one start at the personality picker. A successful save opens the final Welcome to
-Murph dialog with the resolved messaging action; skipping or dismissing the
-personality picker ends the handoff without it. The page strips the query parameter
-on mount so ordinary `/home` visits are not blocked.
-Login-oriented landing CTAs continue to route to `/home`.
+Accessible auth completion routes to `/home`, which reads the member-owned
+onboarding completion state on every load. Pending members with a resolved text
+contact see the contact-card picker first and then the production four-step Murph
+personality picker; members without one start at the personality picker. A
+successful save opens the final Welcome to Murph dialog with the resolved
+messaging action. Skipping or dismissing completes the durable onboarding state,
+and completed members are suppressed on later Web and companion-app loads.
+Optional contact resolution fails soft to the personality picker. A one-shot
+device or connected-app completion result takes foreground priority; closing it
+refreshes plain Home so pending onboarding appears next instead of mounting a
+second dialog.
 
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs a
@@ -141,6 +143,14 @@ instead of maintaining an app-local provider list or provider-config object.
 Routes and pages that only need connect-target metadata should use the narrower
 `@murphai/device-syncd/connect-config` entrypoint so builds do not pull provider
 runtime factories into static analysis.
+
+The `/connect` catalog may also expose an explicitly guided relay without
+pretending it is a hosted provider account. Zepp/Amazfit uses that path: its
+card explains how to share supported data into Apple Health and then connect
+Apple Health in the native Murph app. It must not create a Zepp provider row,
+claim direct Zepp cloud access, or promise historical backfill. The
+conversation handoff reuses Murph's existing contact routing and runtime voice
+memo tool.
 
 ## Device-sync wake epoch rollout
 
@@ -788,7 +798,7 @@ Hosted AI usage metering:
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog, including the active Family owner's authorized own-seat target. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
 - Settings keeps the aggregate usage meter as the only current-capacity view. A fulfilled purchase starts a fresh 0%-used display window, and later counted usage advances it without changing admission or ledger accounting. Its read-only activity detail leads with compact mission status and reward ownership, keeps requirements and selection dates in a native details disclosure, then shows flat purchase-grant history with added amount, source, and date.
 - Usage-credit payment accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and keeps the browser from choosing an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
-- Hosted-group funding offers monthly sponsorship first and one-time contribution second at every current capacity. Monthly activation freezes one exact $5 purchase plus a payer/group authorization with a $5, $10, or $20 maximum. The durable settlement seam may admit one deterministic exact-$5 refill under the group beneficiary lock when capacity is low; the existing Stripe minute sweep charges it after commit. Pending and fulfilled purchases derive period commitment, unused ledger credit carries forward, and the authorization never stores a balance. Periods roll lazily from the successful activation anchor, including month-end. Payment failure blocks further automatic charges until the authenticated payer follows the private recovery path. Automatic refills create no sponsorship moment and no room notification; public group usage exposes only sponsored versus unsponsored.
+- Hosted-group funding offers monthly sponsorship first and one-time contribution second at every current capacity. One-time amount choices use plain `usage` copy and open in the shared bottom drawer on phones, with the contribution action pinned above the safe area, while retaining the centered desktop dialog. Monthly activation freezes one exact $5 purchase plus a payer/group authorization with a $5, $10, or $20 maximum. The durable settlement seam may admit one deterministic exact-$5 refill under the group beneficiary lock when capacity is low; the existing Stripe minute sweep charges it after commit. Pending and fulfilled purchases derive period commitment, unused ledger credit carries forward, and the authorization never stores a balance. Periods roll lazily from the successful activation anchor, including month-end. Payment failure blocks further automatic charges until the authenticated payer follows the private recovery path. Automatic refills create no sponsorship moment and no room notification; public group usage exposes only sponsored versus unsponsored.
 - Personal, Family, and group funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy personal and Family purchases resolve the exact Murph billing Subscription whose Customer matches the frozen purchase, then use its attached explicit default card or inherited attached Customer default. Missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only exact-subscription state stays in Checkout, and unrelated Subscriptions never participate. Group funding has no required billing Subscription and may use the attached Customer default or sole attached card only when no legacy Customer default Source exists. Stripe's redisplay setting controls Checkout presentation rather than whether the existing subscription card can fund the payer's explicit top-up. The service creates an unconfirmed PaymentIntent, then rechecks active payer, still-created purchase state, and the current exact personal or Family billing Customer, Subscription, canonical status, suspension state, and last accepted Stripe-event time while durably binding that intent under the payer lock before off-session confirmation. A billing-reference change, deletion, or terminal-state race cancels the unbound intent and never confirms it; after bind, recovery remains tied to that exact intent rather than retargeting. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Current-policy Checkout asks the payer whether to save the selected method so Stripe may present it in later Checkout flows. Murph stores no raw card data and never charges from amount selection alone.
 - A browser return or synchronous PaymentIntent response never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout and line-item facts when present plus the exact PaymentIntent and Charge, then commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
 - The purchase schema freezes payer and beneficiary separately. Personal, Family-member, and hosted-group purchases converge on the same append-only beneficiary ledger, Stripe verification, refund/dispute adjustments, status/expire routes, and webhook-only grant path. Family top-ups reuse the active group billing customer; they do not create a personal customer, Family wallet, second ledger, or second credit projection. One payer-wide nonterminal purchase is the ambiguity fence: a conflicting Family target receives no payable URL or retry action, and former-member recovery remains payable only when Settings can show an owner-recognizable frozen beneficiary.
@@ -1097,9 +1107,12 @@ pnpm --dir apps/web release:production:migrate
 pnpm --dir apps/web release:production:contract-migrate
 ```
 
-The checked-in Vercel build command runs
-`pnpm release:production:migrate && pnpm build`, so Vercel deploys still run
-the guarded production migration wrapper automatically before building. The
+The checked-in Vercel build command runs the guarded production migration
+wrapper before building. That wrapper generates the Prisma client because the
+post-migration Linq sync needs it, then passes an explicit build-only handoff so
+the following production build reuses that client instead of generating it a
+second time. The handoff is accepted only for a main-branch Vercel production
+deploy; ordinary and preview builds still generate Prisma themselves. The
 generic `pnpm --dir apps/web build` script is intentionally non-mutating and
 only generates artifacts plus validation output. The predeploy migration
 wrapper uses `DIRECT_DATABASE_URL` when it is set, requires it in Vercel
@@ -1399,7 +1412,7 @@ does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 The production build launches the parent Next process explicitly through Node
 with `--max-old-space-size=1024` while appending
 `--max-old-space-size=3072` to `NODE_OPTIONS`. Node gives the direct CLI flag
-precedence in the parent. Next 16.2.6 reconstructs its non-isolated TypeScript
+precedence in the parent. Next 16.3 reconstructs its non-isolated TypeScript
 worker options from the parent arguments followed by `NODE_OPTIONS`, so the
 mandatory generated-contract validation receives the 3 GiB limit. Next removes
 that option from its isolated static workers. The existing caller options are
@@ -1409,20 +1422,17 @@ later validation worker or changing the compiled application. Repeated
 forced-cold Standard previews remain the direct acceptance evidence, and a Next
 upgrade must revalidate this worker boundary.
 
-Production builds explicitly use Next's supported `--webpack` fallback with
-`experimental.webpackBuildWorker=true` and
-`experimental.webpackMemoryOptimizations=true`. The Workflow integration
-contributes custom Webpack configuration, so the worker is opted in explicitly
-instead of relying on Next's automatic selection. The worker isolates Webpack
-compilation to reduce build-memory pressure, while the memory-optimization mode
-trades some compile speed for a lower peak. Local development remains on
-Turbopack by default.
+Production builds use Next 16.3's default Turbopack path. The production script
+does not pass `--webpack`, and the Next config does not retain Webpack-only
+worker or memory flags. The hosted local-development wrapper also selects
+Turbopack unconditionally and rejects an explicit Webpack flag. Workflow
+directive discovery runs through its native Next integration without a custom
+repository Webpack configuration.
 
-Next 16.2.6 accepts `experimental.turbopackMemoryLimit` at the JavaScript/native
-boundary but discards the `_memory_limit` argument when creating its native
-backend. The option is therefore omitted rather than documented or tested as a
-4 GiB governor that does not exist. A Next upgrade must re-audit that behavior
-before reintroducing the option.
+Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
+`experimental.turbopackMemoryEviction`, is documented for development sessions
+with the Turbopack filesystem cache. Production filesystem caching is disabled
+while that new state owner is evaluated, so memory eviction remains omitted.
 
 A 2 GiB parent-old-space candidate passed one forced-cold Standard preview but
 the next identical build was still killed by the 8 GB container OOM boundary.
@@ -1449,13 +1459,15 @@ preview nevertheless OOM-killed Turbopack, so the catalog correction is kept
 for its proven boundary and graph improvement but is not claimed as sufficient
 capacity relief.
 
-The memory-optimized Webpack worker compiled the complete application within
-the local heap policy and enforced stricter route contracts. It exposed a
-browser-vault parser re-export through a server-heavy cursor, an extra helper
-export from a page module, optional page props, and one synchronous route-param
-compatibility union. Those boundaries now use their narrow owners and Next 16
-route signatures; validation remains enabled. A complete local Webpack build
-then passed TypeScript and generated all 229 pages.
+The historical memory-optimized Webpack fallback compiled the complete
+application within the local heap policy and exposed stricter route-contract
+issues: a browser-vault parser re-export through a server-heavy cursor, an
+extra helper export from a page module, optional page props, and one synchronous
+route-param compatibility union. Those corrections remain in place, but the
+fallback itself is no longer active. A forced-cold Next 16.3 Standard preview
+subsequently completed with Turbopack on 4 vCPUs and 8 GB RAM: compilation took
+91 seconds, the complete Vercel build stage took four minutes, and all 233
+static pages were generated without an out-of-memory failure.
 
 The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
 machine model minus a 0.8 GB reserve for OS/container overhead outside the build

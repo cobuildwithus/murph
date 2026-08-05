@@ -76,6 +76,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
     'groupSponsorshipsReceived HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")',
     "inferenceConnection HostedInferenceConnection?",
+    'initialOnboardingCompletedAt DateTime? @default(now()) @map("initial_onboarding_completed_at")',
     "linqContactCardShares HostedLinqContactCardShare[]",
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
@@ -1040,6 +1041,9 @@ describe("hosted Prisma baseline migration", () => {
       "20260731120000_anonymize_hosted_product_feedback",
       "20260801010000_hosted_inference_connection_revision_seq",
       "20260802000000_add_hosted_linq_line_inventory_confirmed_at",
+      "20260804170000_add_initial_onboarding_completion",
+      "20260804223000_hosted_signup_referral_attribution",
+      "20260805010000_rearm_generated_image_capture_retention",
       "migration_lock.toml",
     ]);
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(

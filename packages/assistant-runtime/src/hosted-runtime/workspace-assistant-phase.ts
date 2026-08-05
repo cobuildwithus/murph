@@ -638,6 +638,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         action: request.action,
         result: { status: "unavailable", unavailableReason },
       };
+    case "create_signup_referral_link":
     case "preflight_set_chat_avatar":
     case "set_chat_avatar":
     case "share_contact_card":
@@ -1782,6 +1783,12 @@ export async function runHostedWorkspaceAssistantPhase(
           : {}),
         ...(input.imageGenerationLauncher
           ? { imageGenerationLauncher: input.imageGenerationLauncher }
+          : {}),
+        ...(input.persistGeneratedImageCapture
+          ? {
+              persistGeneratedImageCapture:
+                input.persistGeneratedImageCapture,
+            }
           : {}),
         ...(input.runtime.platform.productFeedbackPort
           ? {

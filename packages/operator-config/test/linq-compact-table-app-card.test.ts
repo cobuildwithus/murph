@@ -4,8 +4,9 @@ import {
   sendLinqIMessageAppCard,
   type LinqFetch,
 } from '../src/linq-runtime.js'
-import type {
-  CompactTableResponseCardV1,
+import {
+  encodeCompactTableAppCardUrl,
+  type CompactTableResponseCardV1,
 } from '../src/assistant-response-cards.js'
 
 const CARD: CompactTableResponseCardV1 = {
@@ -64,7 +65,7 @@ describe('Linq compact-table app cards', () => {
         idempotency_key: 'compact-table-1',
         parts: [
           {
-            fallback_text: 'Open your Murph card',
+            fallback_text: 'Ask Murph for this card in text',
             interactive: false,
             layout: {
               caption: 'Murph',
@@ -72,6 +73,7 @@ describe('Linq compact-table app cards', () => {
               trailing_caption: 'OPEN',
             },
             type: 'imessage_app',
+            url: encodeCompactTableAppCardUrl(CARD),
           },
         ],
         preferred_service: 'iMessage',

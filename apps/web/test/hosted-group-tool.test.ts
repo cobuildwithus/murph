@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   hostedThreadContainerParticipantUpsert: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   isHostedMemberSuspended: vi.fn(),
+  issueHostedSignupReferralLink: vi.fn(),
   leaveHostedGroupMemberTx: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
@@ -60,6 +61,10 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
 });
+
+vi.mock("@/src/lib/hosted-growth/signup-referral", () => ({
+  issueHostedSignupReferralLink: mocks.issueHostedSignupReferralLink,
+}));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
@@ -276,7 +281,13 @@ const RENAMED_GROUP_SUMMARY = {
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const SLEEP_DURATION_SCOPE = { projectionKind: "sleep-duration-days.v0" } as const;
 const DEEP_SLEEP_SCOPE = { projectionKind: "deep-sleep-days.v0" } as const;
+const DEEP_SLEEP_SOURCES_SCOPE = {
+  projectionKind: "deep-sleep-sources-days.v1",
+} as const;
 const REM_SLEEP_SCOPE = { projectionKind: "rem-sleep-days.v0" } as const;
+const REM_SLEEP_SOURCES_SCOPE = {
+  projectionKind: "rem-sleep-sources-days.v1",
+} as const;
 const WORKOUTS_SCOPE = {
   projectionKind: "workouts.v0",
 } as const;
@@ -352,6 +363,10 @@ describe("handleHostedRuntimeGroupTool", () => {
     );
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
+    mocks.issueHostedSignupReferralLink.mockResolvedValue({
+      expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+      signupUrl: "https://www.withmurph.ai/join/signup_invite",
+    });
     mocks.getHostedLinqChatSummary.mockResolvedValue({
       displayName: "Weekend Warriors",
       handles: [],
@@ -482,6 +497,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       ask_member: "participant_aware",
       arm_usage_referral: "participant_aware",
       cancel_usage_referral: "participant_aware",
+      create_signup_referral_link: "participant_aware",
       create_join_link: "owner_active",
       leave_membership: "participant_aware",
       list_memberships: "personal_active",
@@ -500,6 +516,61 @@ describe("handleHostedRuntimeGroupTool", () => {
       set_chat_avatar: "owner_active",
       share_contact_card: "owner_active",
       update_display_name: "owner_active",
+    });
+  });
+
+  it("attributes a direct signup link to the current member", async () => {
+    mocks.hostedThreadContainerFindUnique.mockResolvedValueOnce(null);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_direct",
+      request: {
+        action: "create_signup_referral_link",
+      },
+    })).resolves.toEqual({
+      action: "create_signup_referral_link",
+      result: {
+        expiresAt: "2026-08-06T22:30:00.000Z",
+        signupUrl: "https://www.withmurph.ai/join/signup_invite",
+        status: "ok",
+      },
+    });
+
+    expect(mocks.issueHostedSignupReferralLink).toHaveBeenCalledWith({
+      referrerMemberId: "member_direct",
+    });
+  });
+
+  it("attributes a group signup link to the exact accepted sender", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce({
+      core: {
+        id: "member_referrer",
+      },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "create_signup_referral_link",
+        participant: {
+          assistantInputId: `ain_${"a".repeat(32)}`,
+          senderHandle: "+14045550100",
+          source: "linq",
+        },
+      },
+    })).resolves.toMatchObject({
+      action: "create_signup_referral_link",
+      result: {
+        status: "ok",
+      },
+    });
+
+    expect(mocks.hasHostedMemberActivationProof).toHaveBeenCalledWith({
+      memberId: "member_referrer",
+      prisma: expect.any(Object),
+    });
+    expect(mocks.issueHostedSignupReferralLink).toHaveBeenCalledWith({
+      referrerMemberId: "member_referrer",
     });
   });
 
@@ -2377,7 +2448,9 @@ describe("hosted group join policy", () => {
       { projectionKind: "sleep-times.v0" },
       SLEEP_DURATION_SCOPE,
       DEEP_SLEEP_SCOPE,
+      DEEP_SLEEP_SOURCES_SCOPE,
       REM_SLEEP_SCOPE,
+      REM_SLEEP_SOURCES_SCOPE,
       { projectionKind: "activity-days.v0" },
       WORKOUTS_SCOPE,
       RUNNING_SCOPE,
@@ -2428,11 +2501,27 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "deep-sleep-days.v0",
       },
       {
+        description:
+          "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+        label: "Deep sleep by source",
+        projectionKind: "deep-sleep-sources-days.v1",
+        projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+        projectionScopeKey: "deep-sleep-sources-days.v1",
+      },
+      {
         description: "Shares your last 7 days of REM sleep minutes.",
         label: "REM sleep",
         projectionKind: "rem-sleep-days.v0",
         projectionScope: REM_SLEEP_SCOPE,
         projectionScopeKey: "rem-sleep-days.v0",
+      },
+      {
+        description:
+          "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
+        label: "REM sleep by source",
+        projectionKind: "rem-sleep-sources-days.v1",
+        projectionScope: REM_SLEEP_SOURCES_SCOPE,
+        projectionScopeKey: "rem-sleep-sources-days.v1",
       },
       {
         description: "Shares your last 7 days of active minutes.",
@@ -3210,6 +3299,33 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       }),
     );
   });
+
+  it.each([
+    ["deep sleep", "deep-sleep-sources-days.v1", "deep sleep by source"],
+    ["REM sleep", "rem-sleep-sources-days.v1", "REM sleep by source"],
+  ] as const)(
+    "discloses each source and its recorded time in the native %s offer",
+    async (_label, projectionKind, displayLabel) => {
+      await expect(handleHostedRuntimeGroupTool({
+        memberId: "member_container",
+        request: {
+          action: "post_join_offer",
+          joinOffer: { projectionScopes: [{ projectionKind }] },
+          linqThread: LINQ_THREAD,
+        },
+      })).resolves.toMatchObject({
+        action: "post_join_offer",
+        result: { status: "sent" },
+      });
+
+      expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            `Like or heart this message if these default sharing choices look right: your Murph profile name and ${displayLabel} (by-source sleep includes every available source's value and name, plus when Murph recorded that source value). Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.`,
+        }),
+      );
+    },
+  );
 
   it("reuses an active covering offer without another provider send", async () => {
     const requestedScopes = [{ projectionKind: "steps-days.v0" as const }];

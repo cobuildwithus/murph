@@ -16,8 +16,9 @@ export const compactTableCardV1Bounds = {
   rows: 8,
 } as const;
 
-const APP_CARD_DATA_URL_PREFIX = "data:application/json;base64,";
-const APP_CARD_DATA_URL_MAX_LENGTH = 4_096;
+const COMPACT_TABLE_APP_CARD_URL_PREFIX =
+  "https://murph.ai/#murph-card=";
+const COMPACT_TABLE_APP_CARD_URL_MAX_LENGTH = 2_048;
 const EVENT_ID_PATTERN = new RegExp(idPattern(ID_PREFIXES.event), "u");
 
 function singleLineText(maxLength: number) {
@@ -113,10 +114,13 @@ export const compactTableResponseCardV1Schema = z
       card,
     });
     const payloadByteLength = new TextEncoder().encode(envelope).byteLength;
-    const encodedLength = 4 * Math.ceil(payloadByteLength / 3);
+    const base64PaddingLength =
+      (3 - (payloadByteLength % 3)) % 3;
+    const encodedLength =
+      4 * Math.ceil(payloadByteLength / 3) - base64PaddingLength;
     if (
-      APP_CARD_DATA_URL_PREFIX.length + encodedLength >=
-      APP_CARD_DATA_URL_MAX_LENGTH
+      COMPACT_TABLE_APP_CARD_URL_PREFIX.length + encodedLength >=
+      COMPACT_TABLE_APP_CARD_URL_MAX_LENGTH
     ) {
       context.addIssue({
         code: "custom",
