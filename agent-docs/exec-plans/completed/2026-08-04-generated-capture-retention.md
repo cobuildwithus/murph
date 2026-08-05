@@ -1,8 +1,8 @@
 # Expire generated image captures after 14 days
 
-Status: active
+Status: completed
 Created: 2026-08-04
-Updated: 2026-08-04
+Updated: 2026-08-05
 
 ## Goal
 
@@ -140,8 +140,12 @@ Updated: 2026-08-04
   2,039-test assistant-runtime suite (2,036 passed, 3 skipped); 10 static Web
   migration tests; the local PostgreSQL re-arm proof; workspace-boundary
   verification; documentation drift; and diff hygiene.
-- Remaining: exact-head GitHub Actions and ReviewGPT round 5 on the documented
-  round-4 body-only correction.
+- ReviewGPT round 5 passed with no qualifying findings and confirmed the
+  round-4 body-only correction, current change-shape table, and unchanged
+  production source since round 4.
+- Remaining external gate after plan archival: exact-head GitHub Actions on the
+  final docs-only plan commit.
 - Expected outcomes: old generated media is retired atomically and cannot be
   resurrected; fresh, unrelated, durable, and protected captures remain; all
   checks and reviews pass.
+Completed: 2026-08-05
