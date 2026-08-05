@@ -6,10 +6,19 @@ import { Button } from "@/src/components/ui/button";
 
 const AUTO_CONTINUE_SECONDS = 5;
 
-type LauncherState = "waiting" | "connecting" | "failed";
+export type IntegrationsConnectLauncherState =
+  | "waiting"
+  | "connecting"
+  | "failed";
 
 interface IntegrationsConnectLauncherProps {
   claim: string;
+}
+
+interface IntegrationsConnectLauncherViewProps {
+  onContinue?: () => void;
+  secondsRemaining?: number;
+  state: IntegrationsConnectLauncherState;
 }
 
 export function IntegrationsConnectLauncher({
@@ -22,7 +31,9 @@ export function IntegrationsConnectLauncher({
   const [secondsRemaining, setSecondsRemaining] = useState(
     AUTO_CONTINUE_SECONDS,
   );
-  const [state, setState] = useState<LauncherState>("waiting");
+  const [state, setState] = useState<IntegrationsConnectLauncherState>(
+    "waiting",
+  );
 
   const startConnection = useCallback(async () => {
     if (hasStartedRef.current) {
@@ -98,6 +109,20 @@ export function IntegrationsConnectLauncher({
     };
   }, [secondsRemaining, startConnection, state]);
 
+  return (
+    <IntegrationsConnectLauncherView
+      onContinue={() => void startConnection()}
+      secondsRemaining={secondsRemaining}
+      state={state}
+    />
+  );
+}
+
+export function IntegrationsConnectLauncherView({
+  onContinue,
+  secondsRemaining = AUTO_CONTINUE_SECONDS,
+  state,
+}: IntegrationsConnectLauncherViewProps) {
   if (state === "failed") {
     return (
       <p
@@ -126,7 +151,7 @@ export function IntegrationsConnectLauncher({
       <p className="max-w-lg text-sm leading-6 text-muted-foreground text-pretty">
         Continuing in {secondsRemaining} {secondsRemaining === 1 ? "second" : "seconds"}…
       </p>
-      <Button onClick={() => void startConnection()} type="button">
+      <Button onClick={onContinue} type="button">
         Continue now
       </Button>
     </div>
