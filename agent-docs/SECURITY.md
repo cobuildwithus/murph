@@ -201,6 +201,28 @@ Last verified: 2026-08-05
   post-drain ledger contract migration has widened and validated the credit
   entry constraints.
 - Linq participant-derived thread-container access is a bounded seven-day lease, not a permanent capability. Every canonical access consumer must use the same `lastSeenAt` and `removedAt` predicate. An authenticated group inbound may renew only an existing nonremoved relationship after server-side sender resolution; it may not upsert authority, reverse removal, regress the observation, or accept a future provider time. Provider display labels and raw contact text are never entitlement authority.
+- A next-Linq-group ownership intent may be armed, read, or canceled only from
+  fresh accepted input in a private text conversation for an active person
+  member on that member's current managed Linq line. It is not available from a
+  group, email, scheduled turn, synthetic thread container, or model-supplied
+  target. Persist the owner id, blinded line key, bounded timestamps, and only a
+  strict versioned setup payload encrypted with member-private-field
+  authenticated data bound to the exact row. Plaintext setup, raw handles,
+  roster, chat id, messages, and contact labels remain absent. Setup may contain
+  only sparse existing style values and bounded explicit room-context Markdown;
+  it rejects raw phone, email, Sender, Telegram, and participant handles. The
+  assistant must not infer or copy private memory, health facts, contacts, or
+  personal settings. Current roster handles are request-local evidence and only
+  bounded resolved member ids enter the route transaction. An unavailable
+  roster or an exact recovery delivery still awaiting provider correlation
+  must fail before route creation; neither may collapse to first-speaker
+  authority. An undocumented or provider-supplied add actor is never authority.
+  Logs contain only categorical roster, claim, and activation outcomes, never
+  setup content.
+  Setup can configure only a newly created synthetic room through the existing
+  preference and fixed room-model owners; it cannot change an existing route,
+  establish identity, consent, routing, or membership authority. Owner deletion
+  cascades the encrypted intent.
 - Account deletion must establish durable external-cleanup ownership before canonical member removal. The foreign-key-free retry receipt stores only KMS-encrypted runtime/vendor identifiers with receipt- and environment-bound authenticated data, remains pending for missing configuration, provider timeout, partial failure, or a legacy Cloudflare response without explicit `deleteAllCompleted` evidence, and is deleted only after Cloudflare, Stripe-customer, and Privy cleanup converge. Privy new-member resolution must first resolve any existing identity, then reject a pending deletion receipt, then require a bounded live-provider read; after binding, app-session issuance must lock and re-check the member so a missing or suspended deletion target cannot receive a session. Immediate and retention attempts have explicit target deadlines; the retention batch uses bounded concurrency so a stuck provider cannot become an unbounded response-path or sweep owner. Logs and the deleted member row are not retry owners.
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.

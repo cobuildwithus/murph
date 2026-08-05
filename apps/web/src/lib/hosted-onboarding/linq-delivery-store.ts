@@ -22,7 +22,11 @@ import {
   parseHostedLinqInviteSignupEffectId,
 } from "./linq-invite-signup-effect-id";
 import {
+  buildHostedLinqGroupLineRecoveryAttemptEffectId,
+  buildHostedLinqGroupLineRecoveryEffectId,
   HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
+  HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS,
+  isHostedLinqGroupLineRecoverySourceRefForEffect,
   parseHostedLinqGroupLineRecoverySourceRef,
 } from "./linq-group-line-recovery";
 import {
@@ -450,6 +454,80 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
     targetKind: delivery.targetKind,
     template: delivery.template,
   };
+}
+
+export type HostedLinqGroupLineRecoveryAuthority =
+  | "accepted"
+  | "in_flight"
+  | "none";
+
+/**
+ * A completed private recovery delivery is the existing durable proof that a
+ * member was told to move this exact group from one Murph line to another.
+ * An exact uncorrelated attempt remains distinguishable so admission retries
+ * instead of treating an unfinished provider outcome as definitive absence.
+ * Bound both states to setup time so an old recovery cannot affect a later
+ * "next group" setup for an unrelated retry.
+ */
+export async function readHostedLinqGroupLineRecoveryAuthorityTx(input: {
+  memberId: string;
+  occurredAt: Date;
+  originalRecipientPhone: string;
+  pendingGroupSetupId: string;
+  prisma: HostedLinqDeliveryClient;
+  recoveredRecipientPhoneLookupKey: string;
+  setupArmedAt: Date;
+  threadId: string;
+}): Promise<HostedLinqGroupLineRecoveryAuthority> {
+  const effectId = buildHostedLinqGroupLineRecoveryEffectId({
+    incomingRecipientPhone: input.originalRecipientPhone,
+    memberId: input.memberId,
+    pendingGroupSetupId: input.pendingGroupSetupId,
+    threadId: input.threadId,
+  });
+  const attemptEffectIds = Array.from(
+    { length: HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS },
+    (_, index) => buildHostedLinqGroupLineRecoveryAttemptEffectId({
+      attempt: index + 1,
+      effectId,
+    }),
+  );
+  const persistedIntents =
+    await readHostedLinqDeliveryProviderDispatchIntentsTx({
+      idempotencyKeys: attemptEffectIds,
+      prisma: input.prisma,
+    });
+  const matchingIntents = persistedIntents.filter((intent) =>
+    intent.attemptedAt >= input.setupArmedAt
+    && intent.attemptedAt <= input.occurredAt
+    && intent.phoneNumberLookupKey
+      === input.recoveredRecipientPhoneLookupKey
+    && intent.status !== "failed"
+    && intent.status !== "skipped"
+    && intent.targetKind === "participant"
+    && intent.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+    && isHostedLinqGroupLineRecoverySourceRefForEffect({
+      candidate: intent.sourceRef,
+      effectId,
+    })
+  );
+  if (matchingIntents.some((intent) => intent.providerCorrelated)) {
+    return "accepted";
+  }
+  return matchingIntents.length > 0 ? "in_flight" : "none";
+}
+
+export async function hasHostedLinqGroupLineRecoveryAuthorityTx(input: {
+  memberId: string;
+  occurredAt: Date;
+  originalRecipientPhone: string;
+  pendingGroupSetupId: string;
+  prisma: HostedLinqDeliveryClient;
+  recoveredRecipientPhoneLookupKey: string;
+  setupArmedAt: Date;
+  threadId: string;
+}): Promise<boolean> {
+  return await readHostedLinqGroupLineRecoveryAuthorityTx(input) === "accepted";
 }
 
 async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
@@ -2470,6 +2548,7 @@ const hostedLinqDeliveryLifecycleSelect = {
   status: true,
   targetKind: true,
   template: true,
+  updatedAt: true,
 } satisfies Prisma.HostedLinqDeliverySelect;
 
 function isHostedLinqTerminalTelegramUsageLimitFailure(input: {
@@ -2494,7 +2573,7 @@ function resolveHostedLinqDeliveryInFlightState(input: {
     messageLookupKey: string | null;
     retryAfterAt: Date | null;
     skippedAt: Date | null;
-    source: string | null;
+    source: string;
     status: string;
   };
 }): { inFlight: boolean; retryAt?: Date } {
@@ -2576,11 +2655,12 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     phoneNumberLookupKey: string | null;
     retryAfterAt: Date | null;
     skippedAt: Date | null;
-    source: string | null;
+    source: string;
     sourceRef: string | null;
     status: string;
     targetKind: string | null;
     template: string | null;
+    updatedAt: Date;
   };
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
@@ -2601,6 +2681,10 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       && (
         input.delivery.linqChatLookupKey !== input.data.linqChatLookupKey
         || input.delivery.phoneNumberLookupKey !== input.data.phoneNumberLookupKey
+        || (
+          input.data.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+          && input.delivery.source !== input.source
+        )
         || input.delivery.sourceRef !== input.data.sourceRef
         || input.delivery.targetKind !== input.data.targetKind
         || input.delivery.template !== input.data.template
@@ -2621,6 +2705,50 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       ...(isHostedLinqPinnedTargetDeliveryTemplate(input.data.template)
         ? { outcome: "completed" as const }
         : {}),
+    };
+  }
+
+  // Recovery awaits provider correlation before returning, so an uncorrelated
+  // row can mean the provider succeeded but the accepted write failed. Its
+  // pinned provider idempotency key makes immediate exact replay safe.
+  if (
+    input.data.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+    && isHostedLinqDeliveryPreProvider(input.delivery)
+  ) {
+    const updated = await input.prisma.hostedLinqDelivery.updateMany({
+      where: {
+        acceptedAt: null,
+        attemptedAt: input.delivery.attemptedAt,
+        deliveredAt: null,
+        failedAt: null,
+        id: input.delivery.id,
+        lastReceiptAt: null,
+        linqChatLookupKey: input.delivery.linqChatLookupKey,
+        messageLookupKey: null,
+        phoneNumberLookupKey: input.delivery.phoneNumberLookupKey,
+        skippedAt: null,
+        source: input.delivery.source,
+        sourceRef: input.delivery.sourceRef,
+        status: input.delivery.status,
+        targetKind: input.delivery.targetKind,
+        template: HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
+        updatedAt: input.delivery.updatedAt,
+      },
+      data: {
+        ...input.data,
+        // This is the authority timestamp proving that the recovery instruction
+        // preceded a replacement-line event. Provider-idempotent replay must
+        // advance only the existing row version, never this proof.
+        attemptedAt: input.delivery.attemptedAt,
+        updatedAt: new Date(Math.max(
+          input.attemptedAt.getTime(),
+          input.delivery.updatedAt.getTime() + 1,
+        )),
+      },
+    });
+    return {
+      claimed: updated.count === 1,
+      id: input.delivery.id,
     };
   }
 

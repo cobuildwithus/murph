@@ -47,6 +47,9 @@ import type {
 import {
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
 } from "./vault-share-limits.ts";
+import type {
+  HostedRuntimePendingGroupSetupInput,
+} from "./pending-group-setup.ts";
 
 export const HOSTED_MAILBOX_LANES = [
   "system",
@@ -1371,6 +1374,12 @@ export type HostedRuntimeGroupToolRequest =
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
+  | {
+      action: "prepare_next_group";
+      setup?: HostedRuntimePendingGroupSetupInput;
+    }
+  | { action: "read_next_group" }
+  | { action: "cancel_next_group" }
   | { action: "read_chat_name" }
   | { action: "read_usage" }
   | {
@@ -1481,6 +1490,33 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "ok"; group: HostedRuntimeGroupSummary }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "prepare_next_group";
+      result:
+        | {
+            expiresAt: string;
+            setup: HostedRuntimePendingGroupSetupInput;
+            status: "prepared";
+          }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "read_next_group";
+      result:
+        | {
+            expiresAt: string;
+            setup: HostedRuntimePendingGroupSetupInput;
+            status: "prepared";
+          }
+        | { status: "none" }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "cancel_next_group";
+      result:
+        | { status: "canceled" | "none" }
+        | { status: "unavailable"; unavailableReason: string };
     }
   | {
       action: "read_chat_name";
@@ -2761,6 +2797,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "assistant.codex_auth_failed",
   "assistant.automation_detail",
   "assistant.computer_tool_failed",
+  "assistant.onboarding_followup_reconciled",
   "assistant.pass_finished",
   "device-sync.dense_raw_retention",
   "device-sync.job_failed",
