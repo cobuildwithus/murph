@@ -131,6 +131,10 @@ Updated: 2026-08-04
   shared authentication owner, resumes successful authentication on `/connect`,
   omits lifecycle state for guide-only cards, and restores the stronger
   unsupported/disabled/coming-soon rule with current iPhone-path guidance.
+- Parent candidate review tightened the same guide-only derivation before the
+  correction audit: stale reconnect, reset, and unfinished-reset projections
+  are now suppressed alongside status and disconnect actions, with an
+  impossible-state regression case proving the complete lifecycle boundary.
 - Remediation proof passed 104 focused Web tests, 73 Assistant Engine prompt
   tests, both affected package typechecks, the frontend design-proof suite, the
   seven-test exhaustive hosted-visible source guard, scoped Web lint, and

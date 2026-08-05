@@ -611,6 +611,7 @@ test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claimin
         connected: true,
         description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
         disconnectConnectionId: "impossible-zepp-provider-state",
+        historicalResetIncomplete: true,
         id: "zepp",
         logo: {
           className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
@@ -619,6 +620,8 @@ test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claimin
           width: 64,
         },
         name: "Zepp / Amazfit",
+        recoveryKind: "connection_reset",
+        requiresReconnect: true,
         setupGuideActionLabel: "Set up sync",
         setupGuideId: "zepp-apple-health",
       },
@@ -641,6 +644,10 @@ test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claimin
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
     /Zepp \/ Amazfit (?:connected|not connected)/u,
+  );
+  assert.doesNotMatch(
+    rendered.container.textContent ?? "",
+    /needs a fresh connection|needs reconnect|Please reconnect/u,
   );
 
   await act(async () => {

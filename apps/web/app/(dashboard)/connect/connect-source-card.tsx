@@ -35,14 +35,17 @@ export function SourceCard({
   const canDisconnect = !guideOnly
     && authenticated
     && Boolean(source.disconnectConnectionId);
-  const requiresConnectionReset = source.recoveryKind === "connection_reset";
-  const historicalResetIncomplete = source.historicalResetIncomplete === true
+  const requiresConnectionReset = !guideOnly
+    && source.recoveryKind === "connection_reset";
+  const requiresReconnect = !guideOnly && source.requiresReconnect === true;
+  const historicalResetIncomplete = !guideOnly
+    && source.historicalResetIncomplete === true
     && !source.connected
     && !requiresConnectionReset
-    && !source.requiresReconnect;
-  const actionLabel = source.requiresReconnect ? "Reconnect" : "Connect";
+    && !requiresReconnect;
+  const actionLabel = requiresReconnect ? "Reconnect" : "Connect";
   const disconnectAriaLabel = resolveDisconnectAriaLabel(source);
-  const reconnectUnavailable = source.requiresReconnect && !isAvailable;
+  const reconnectUnavailable = requiresReconnect && !isAvailable;
   const connectionOfferEnabled = source.connectionAvailable !== false;
   const historicalReconnectUnavailable = historicalResetIncomplete && !connectionOfferEnabled;
   const showReconnectStateDisconnect = canDisconnect
@@ -52,14 +55,14 @@ export function SourceCard({
       || source.disconnectScope === "junction_account"
       || Boolean(source.disconnectSourceProviderSlug)
     );
-  const unavailableMessage = !source.requiresReconnect && !requiresConnectionReset && !isAvailable
+  const unavailableMessage = !requiresReconnect && !requiresConnectionReset && !isAvailable
     ? source.unavailableMessage
     : undefined;
   // These branches add message content beside the source details. Stack the
   // card on phone widths so the message and action never squeeze the
   // description into a narrow column.
   const showsSideMessage = requiresConnectionReset
-    || source.requiresReconnect
+    || requiresReconnect
     || historicalResetIncomplete
     || Boolean(unavailableMessage)
     || Boolean(errorMessage);
@@ -72,7 +75,7 @@ export function SourceCard({
             connected={source.connected}
             historicalResetIncomplete={historicalResetIncomplete}
             requiresConnectionReset={requiresConnectionReset}
-            requiresReconnect={source.requiresReconnect}
+            requiresReconnect={requiresReconnect}
             sourceName={source.name}
           />
         </div>
@@ -98,7 +101,7 @@ export function SourceCard({
           </p>
         </div>
 
-        {!guideOnly && source.connected && !source.requiresReconnect ? (
+        {!guideOnly && source.connected && !requiresReconnect ? (
           <div className="ml-auto flex shrink-0 flex-col items-end gap-2 self-end sm:mt-auto sm:shrink">
             {errorMessage ? (
               <p role="alert" className="text-xs leading-snug text-destructive">
@@ -131,7 +134,7 @@ export function SourceCard({
                   ? `${source.name} needs a fresh connection. Disconnect it first, then connect it again.`
                   : `${source.name} needs a fresh connection, but reconnecting is temporarily unavailable. You can disconnect the old connection here.`}
               </p>
-            ) : source.requiresReconnect ? (
+            ) : requiresReconnect ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
                 {reconnectUnavailable
                   ? `${source.name} needs attention from the connected app before Murph can keep syncing it.`
