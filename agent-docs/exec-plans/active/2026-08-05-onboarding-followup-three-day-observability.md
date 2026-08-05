@@ -24,6 +24,11 @@ metadata-only hosted runtime logs.
 - The third correction preserved predecessor settlement by source identity,
   but hosted idle ordering could rewrite that source before draining its old
   queued intent and re-expose the generic consuming path.
+- The fourth correction deferred that rewrite, but the hosted post-delivery
+  owner did not re-read cron after authority-stale settlement. The retained
+  occurrence could therefore lack a workspace wake, while direct threads could
+  receive a misleading generic delivery-failure input for an intentional
+  cancellation.
 - Existing logs expose schedule and delivery mechanics but not the
   onboarding-state source or a stable lifecycle decision reason.
 
@@ -45,6 +50,9 @@ metadata-only hosted runtime logs.
 - Managed conversion defers while a predecessor runtime owns a pending delivery
   intent, allowing the existing outbox drain to settle the obsolete payload
   before the next managed pass rewrites the retained occurrence.
+- Authority-stale predecessor settlement re-arms the retained cron retry for
+  both direct-thread and participant delivery targets and does not stage a
+  generic delivery-failure conversation.
 - Logs identify the managed automation, onboarding-state status and source,
   lifecycle action, execution outcome, and safe reason code without member
   identity, transcript text, health data, delivery targets, or local paths.

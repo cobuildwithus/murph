@@ -2352,7 +2352,12 @@ Because hosted idle work applies managed automations before draining outbox,
 the predecessor-to-current rewrite defers while canonical runtime still owns a
 pending delivery intent. Outbox therefore settles against the revision that
 authorized the obsolete payload, and a later managed pass converts the retained
-occurrence.
+occurrence. Authority-stale predecessor settlement is an intentional
+cancellation, so it does not stage the generic terminal-delivery failure input.
+After that settlement, the existing post-delivery owner re-reads canonical cron
+status and includes its retry in the workspace wake projection; if the status
+read is temporarily unavailable, it arms the existing short cron-status retry
+instead of letting the retained occurrence sleep indefinitely.
 Those records distinguish a
 persisted onboarding state from the missing-state default and carry only state
 status and timestamps, the last authority gate checked, finite-window and

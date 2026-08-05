@@ -242,6 +242,8 @@ const HOSTED_RUNTIME_ALLOWED_LOG_KEY_NAMES = new Set([
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 const HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS = 30_000;
 const HOSTED_ASSISTANT_CRON_STATUS_YIELD_POLL_MS = 100;
+const ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE =
+  "ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE";
 const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS = 30_000;
 const HOSTED_MANAGED_AUTOMATION_SETUP_FAILURE_RETRY_DELAYS_MS = [
   30_000,
@@ -6164,8 +6166,26 @@ async function drainHostedPostCheckpointDelivery(input: {
   const postBaseNextWake = dropConsumedWorkspaceAssistantWake(
     resolveHostedPostDeliveryBaseNextWake(input),
   );
+  const postDeliveryCronWakeState =
+    outcomes.some((outcome) =>
+      outcome.deliveryErrorCode === ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE
+    )
+      ? await resolveHostedAssistantCronWakeStateBestEffort(input.input)
+      : null;
+  const postDeliveryCronWake = postDeliveryCronWakeState?.available === true
+    ? postDeliveryCronWakeState.wake
+    : postDeliveryCronWakeState
+      ? createHostedRuntimeWakeCandidate(
+          new Date(
+            resolveHostedAssistantPhaseNowMs(input.input)
+              + HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS,
+          ).toISOString(),
+          HOSTED_ASSISTANT_WAKE_REASON,
+        )
+      : null;
   const postNextWake = selectHostedRuntimeWakeCandidate([
     postBaseNextWake,
+    dropConsumedWorkspaceAssistantWake(postDeliveryCronWake),
     input.postDeliveryReconciliationWake,
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
@@ -6518,6 +6538,11 @@ function shouldStageHostedTerminalOutboxFailureInput(
   outcome: HostedAssistantDeliveryOutcome,
 ): boolean {
   if (outcome.deliveryStatus !== "failed" || outcome.retryable === true) {
+    return false;
+  }
+  if (
+    outcome.deliveryErrorCode === ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE
+  ) {
     return false;
   }
   return normalizeHostedTerminalOutboxFailureDirectReplyChannel(

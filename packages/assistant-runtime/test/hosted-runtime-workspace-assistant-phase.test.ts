@@ -8749,6 +8749,114 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it.each([
+    {
+      bindingDelivery: { kind: "thread" as const, target: "linq_chat_direct" },
+      cronStatusAvailable: true,
+      label: "direct-thread",
+    },
+    {
+      bindingDelivery: { kind: "participant" as const, target: "member_synthetic" },
+      cronStatusAvailable: false,
+      label: "participant",
+    },
+  ])(
+    "re-arms cron without a failure note after an authority-stale $label delivery",
+    async ({ bindingDelivery, cronStatusAvailable, label }) => {
+      const vaultRoot = await mkdtemp(path.join(
+        tmpdir(),
+        `murph-outbox-authority-stale-${label}-`,
+      ));
+      try {
+        const now = "2026-04-27T00:00:00.000Z";
+        const cronRetryAt = "2026-04-27T00:00:30.000Z";
+        const effect = {
+          ...createDeliveryEffect(),
+          deliveryPhase: "background_retry" as const,
+          effectId: `intent_authority_stale_${label}`,
+          fingerprint: `fingerprint_authority_stale_${label}`,
+          payload: {
+            ...createDeliveryEffect().payload,
+            channel: "linq" as const,
+            idempotencyKey: `assistant-outbox:intent_authority_stale_${label}`,
+          },
+        };
+        const authorityStaleOutcome = {
+          ...createFailedDeliveryOutcome({
+            deliveryErrorCode: "ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE",
+            effectId: effect.effectId,
+          }),
+          deliveryStatus: "failed" as const,
+          effectFingerprint: effect.fingerprint,
+          retryable: false,
+        };
+        let deliverySettled = false;
+        mocks.readAssistantOutboxIntent.mockResolvedValue(
+          createTerminalFailureOutboxIntent({
+            bindingDelivery,
+            createdAt: "2026-04-26T23:59:50.000Z",
+            effectId: effect.effectId,
+          }),
+        );
+        mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+          effect,
+        ]);
+        mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(
+          async () => {
+            deliverySettled = true;
+            return [authorityStaleOutcome];
+          },
+        );
+        mocks.getAssistantCronStatus.mockImplementation(async () => {
+          if (deliverySettled && !cronStatusAvailable) {
+            throw new Error("cron status temporarily unavailable");
+          }
+          return deliverySettled
+            ? {
+                dueJobs: 0,
+                enabledJobs: 1,
+                nextRunAt: cronRetryAt,
+                runningJobs: 0,
+                totalJobs: 1,
+              }
+            : {
+                dueJobs: 0,
+                enabledJobs: 0,
+                nextRunAt: null,
+                runningJobs: 0,
+                totalJobs: 0,
+              };
+        });
+
+        const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+          now: () => now,
+          vaultRoot,
+          workspace: createDueAssistantWorkspace(),
+        }));
+        const postCheckpoint = await result.afterCheckpoint?.();
+
+        expect(postCheckpoint).toEqual(expect.objectContaining({
+          checkpointReason: "outbox_receipt",
+          nextWakeAt: cronRetryAt,
+          redactedStatus: expect.objectContaining({
+            hostedAssistantNextWakeAt: cronRetryAt,
+            hostedOutboxTerminalFailureInputsStaged: 0,
+            nextWakeAt: cronRetryAt,
+          }),
+        }));
+        expect(mocks.getAssistantCronStatus).toHaveBeenLastCalledWith(
+          vaultRoot,
+          expect.any(Object),
+        );
+        await expect(readExistingHostedPendingAssistantInputIds({
+          vaultRoot,
+        })).resolves.toEqual([]);
+      } finally {
+        await rm(vaultRoot, { force: true, recursive: true });
+      }
+    },
+  );
+
   it("does not carry device-sync next-wake reasons from the assistant automation lane", async () => {
     const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({

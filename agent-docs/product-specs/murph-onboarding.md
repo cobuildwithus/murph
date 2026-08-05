@@ -603,8 +603,11 @@ lose the migration source, or bypass the current three-day authority.
 On an ordinary hosted idle pass, managed reconciliation runs before the
 automation lane drains outbox. A predecessor with a pending delivery intent
 therefore stays unchanged for that pass; outbox settles the obsolete payload,
-and the next managed pass performs the existing finite conversion against the
-retained occurrence.
+the post-delivery owner re-reads cron status so the retained retry remains a
+real hosted wake, and the next managed pass performs the existing finite
+conversion against the retained occurrence. This intentional authority-stale
+settlement does not stage a generic delivery-failure conversation for either a
+direct-thread or participant target.
 
 Hosted queue-only delivery carries the automation revision into the existing
 outbox authority fence. Immediately before external provider entry, that owner
