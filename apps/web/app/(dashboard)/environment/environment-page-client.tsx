@@ -360,7 +360,7 @@ async function requestEnvironmentVoiceProcessingRecheck(): Promise<void> {
   }
 }
 
-function EnvironmentShell({
+export function EnvironmentShell({
   actions,
   children,
 }: {
@@ -478,7 +478,7 @@ export function EnvironmentEmptyState({
   );
 }
 
-function EnvironmentReport({
+export function EnvironmentReport({
   values,
   scene,
   notes,
