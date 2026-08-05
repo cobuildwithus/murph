@@ -1251,14 +1251,9 @@ describe('monorepo release flow coverage audit', () => {
       'review_gpt_all_browser_lanes=(eragon phlebas hercules mountain)',
     )
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
-    expect(reviewGptConfig).toContain('REVIEW_GPT_HEADLESS')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('REVIEW_GPT_FULL_REVIEW_REASON')
     expect(reviewGptConfig).toContain('pr-correction-review.md')
-    expect(reviewGptConfig).toContain('review-gpt-headless-browser.sh')
-    expect(
-      existsSync(path.join(repoRoot, 'scripts', 'review-gpt-headless-browser.sh')),
-    ).toBe(true)
     expect(reviewGptConfig).toContain(
       'managed_browser_background_mode="${managed_browser_background_mode:-balanced}"',
     )
@@ -1637,24 +1632,22 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
   })
 
-  it('keeps ReviewGPT browser preferences local and headless launches explicit', () => {
+  it('keeps ReviewGPT browser preferences local and reuses correction threads', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-browser-'))
     const localConfigRoot = path.join(harnessRoot, 'config')
-    const fakeBrowserPath = path.join(harnessRoot, 'fake-browser')
-    const capturedArgsPath = path.join(harnessRoot, 'browser-args.txt')
     const configHarness = `
 set -euo pipefail
 review_gpt_register_dir_preset() { :; }
 review_gpt_register_preset_group() { :; }
 source "$REPO_ROOT/scripts/review-gpt.config.sh"
-printf '%s|%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_count" "$browser_binary_path"
+printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_count"
 `
 
     try {
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=1\nREVIEW_GPT_HEADLESS=1\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=1\n',
       )
       const localResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
@@ -1667,9 +1660,7 @@ printf '%s|%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lan
         },
       })
       expect(localResult.status, localResult.stderr).toBe(0)
-      expect(localResult.stdout.trim()).toBe(
-        `eragon|1|${path.join(repoRoot, 'scripts', 'review-gpt-headless-browser.sh')}`,
-      )
+      expect(localResult.stdout.trim()).toBe('eragon|1')
 
       rmSync(path.join(localConfigRoot, 'murph', 'review-gpt.conf'))
       const defaultResult = spawnSync('bash', ['-c', configHarness], {
@@ -1746,37 +1737,6 @@ printf '%s|%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lan
         'pr-correction-review.md',
       )
 
-      writeHarnessFile(
-        harnessRoot,
-        'fake-browser',
-        '#!/usr/bin/env bash\nprintf \'%s\\n\' "$@" > "$TEST_BROWSER_ARGS_PATH"\n',
-        true,
-      )
-      const headlessResult = spawnSync(
-        'bash',
-        [
-          path.join(repoRoot, 'scripts', 'review-gpt-headless-browser.sh'),
-          '--user-data-dir=/tmp/MurphReviewGPT/Eragon',
-          '--new-window',
-          'https://chatgpt.com/',
-        ],
-        {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          env: {
-            ...withoutNodeV8Coverage(),
-            REVIEW_GPT_HEADLESS_BROWSER_BINARY: fakeBrowserPath,
-            TEST_BROWSER_ARGS_PATH: capturedArgsPath,
-          },
-        },
-      )
-      expect(headlessResult.status, headlessResult.stderr).toBe(0)
-      expect(readFileSync(capturedArgsPath, 'utf8').trim().split('\n')).toEqual([
-        '--headless=new',
-        '--user-data-dir=/tmp/MurphReviewGPT/Eragon',
-        '--new-window',
-        'https://chatgpt.com/',
-      ])
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true })
     }

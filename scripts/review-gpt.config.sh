@@ -130,24 +130,11 @@ if [[ ! -d "$review_gpt_selected_browser_app" ]] && command -v mdfind >/dev/null
 fi
 
 review_gpt_selected_browser_binary="$review_gpt_selected_browser_app/Contents/MacOS/Brave Browser"
-review_gpt_headless="${REVIEW_GPT_HEADLESS:-${MURPH_REVIEW_GPT_HEADLESS:-0}}"
-review_gpt_headless="$(printf '%s' "$review_gpt_headless" | tr '[:upper:]' '[:lower:]')"
-case "$review_gpt_headless" in
-  1 | true | yes | on)
-    browser_binary_path="${browser_binary_path:-$review_gpt_repo_root/scripts/review-gpt-headless-browser.sh}"
-    ;;
-  0 | false | no | off | "")
-    if [[ -x "$review_gpt_selected_browser_binary" ]]; then
-      browser_binary_path="${browser_binary_path:-$review_gpt_selected_browser_binary}"
-    else
-      browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
-    fi
-    ;;
-  *)
-    echo "Error: REVIEW_GPT_HEADLESS must be 1 or 0." >&2
-    return 1 2>/dev/null || exit 1
-    ;;
-esac
+if [[ -x "$review_gpt_selected_browser_binary" ]]; then
+  browser_binary_path="${browser_binary_path:-$review_gpt_selected_browser_binary}"
+else
+  browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
+fi
 managed_browser_user_data_dir="${managed_browser_user_data_dir:-$(review_gpt_browser_lane_data_dir "$review_gpt_selected_browser_lane")}"
 managed_browser_profile="${managed_browser_profile:-Default}"
 managed_browser_port="${managed_browser_port:-$review_gpt_selected_browser_port}"

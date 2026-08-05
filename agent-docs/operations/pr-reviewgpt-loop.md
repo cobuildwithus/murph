@@ -309,10 +309,8 @@ requires it or the current user explicitly asks for it.
 
    `REVIEW_GPT_BROWSER_LANE_COUNT` limits the automatic pool to the first one
    through four lanes and defaults to four. A local
-   `$XDG_CONFIG_HOME/murph/review-gpt.conf` may set this and
-   `REVIEW_GPT_HEADLESS=1` without committing machine-specific preferences or
-   account details. Headless mode keeps the same managed profile and login but
-   does not open a visible window.
+   `$XDG_CONFIG_HOME/murph/review-gpt.conf` may set this without committing
+   machine-specific preferences or account details.
 
    A lane is considered usable when its managed profile is unlocked, or when its
    configured CDP endpoint is already alive. The default random path skips a
