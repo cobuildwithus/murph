@@ -1241,8 +1241,9 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       productionNextBuildScript,
-      /exec node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
+      /exec node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build/u,
     );
+    assert.doesNotMatch(productionNextBuildScript, /--webpack/u);
     assert.match(
       verifyFastScript,
       /local next_build_command=\(bash "\$script_dir\/run-production-next-build\.sh"\)/u,
