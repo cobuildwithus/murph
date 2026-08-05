@@ -9,8 +9,12 @@ import {
 import { getPrisma } from "../prisma";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  readHostedMemberIdentity,
+  type HostedMemberIdentityState,
+  upsertHostedMemberIdentity,
+} from "../hosted-onboarding/hosted-member-identity-store";
 import { createHostedMember } from "../hosted-onboarding/hosted-member-store";
-import { upsertHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import {
   getHostedOnboardingEnvironment,
   requireHostedOnboardingPublicBaseUrl,
@@ -31,6 +35,7 @@ export interface HostedSignupReferralLink {
 
 type HostedReusableSignupReferralInvite = {
   expiresAt: Date;
+  id: string;
   inviteCode: string;
   memberId: string;
 };
@@ -96,7 +101,7 @@ async function issueHostedSignupReferralInviteTx(input: {
   }
   assertHostedMemberNotSuspended(referrer);
 
-  const reusable = await readReusableHostedSignupReferralInviteTx(input);
+  const reusable = await reuseOrRefreshHostedSignupReferralInviteTx(input);
   if (reusable) {
     return reusable;
   }
@@ -135,13 +140,14 @@ async function issueHostedSignupReferralInviteTx(input: {
     },
     select: {
       expiresAt: true,
+      id: true,
       inviteCode: true,
       memberId: true,
     },
   });
 }
 
-async function readReusableHostedSignupReferralInviteTx(input: {
+async function reuseOrRefreshHostedSignupReferralInviteTx(input: {
   now: Date;
   prisma: Prisma.TransactionClient;
   referrerMemberId: string;
@@ -152,13 +158,11 @@ async function readReusableHostedSignupReferralInviteTx(input: {
     },
     select: {
       expiresAt: true,
+      id: true,
       inviteCode: true,
       memberId: true,
     },
     where: {
-      expiresAt: {
-        gt: input.now,
-      },
       referrerMemberId: input.referrerMemberId,
     },
   });
@@ -166,18 +170,50 @@ async function readReusableHostedSignupReferralInviteTx(input: {
     return null;
   }
 
-  // Signup reconciliation takes this same member-row lock before binding Privy.
-  // Re-read the identity under the lock so an invite is never handed out again
-  // after another browser has claimed it.
+  // Signup mutations take this same member-row lock. Read the complete domain
+  // identity under the lock so a link is reused only before any recipient has
+  // started onboarding—not merely before Privy identity binding completes.
   await lockHostedMemberRow(input.prisma, invite.memberId);
-  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+  const identity = await readHostedMemberIdentity({
+    memberId: invite.memberId,
+    prisma: input.prisma,
+  });
+  if (!isPristineHostedSignupReferralIdentity(identity)) {
+    return null;
+  }
+
+  if (invite.expiresAt > input.now) {
+    return invite;
+  }
+
+  return input.prisma.hostedInvite.update({
+    data: {
+      channel: "share",
+      expiresAt: inviteExpiresAt(
+        input.now,
+        getHostedOnboardingEnvironment().inviteTtlHours,
+      ),
+      inviteCode: generateHostedInviteCode(),
+    },
     select: {
-      privyUserLookupKey: true,
+      expiresAt: true,
+      id: true,
+      inviteCode: true,
+      memberId: true,
     },
     where: {
-      memberId: invite.memberId,
+      id: invite.id,
     },
   });
+}
 
-  return identity?.privyUserLookupKey === null ? invite : null;
+function isPristineHostedSignupReferralIdentity(
+  identity: HostedMemberIdentityState | null,
+): boolean {
+  if (!identity) {
+    return false;
+  }
+
+  const { memberId: _memberId, ...recipientState } = identity;
+  return Object.values(recipientState).every((value) => value === null);
 }
