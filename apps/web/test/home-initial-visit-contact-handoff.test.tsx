@@ -70,10 +70,10 @@ test("initial-visit contact handoff advances to persona setup after Safari launc
     location: {
       hash: "",
       host: "app.example.com",
-      href: "https://app.example.com/home?initialVisit=true",
+      href: "https://app.example.com/home",
       origin: "https://app.example.com",
       pathname: "/home",
-      search: "?initialVisit=true",
+      search: "",
     },
     requireButton: false,
   });

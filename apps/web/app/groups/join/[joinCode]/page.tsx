@@ -16,6 +16,7 @@ import {
   type GroupJoinPostJoinDestination,
 } from "@/src/lib/hosted-groups/group-join-handoff";
 import { readHostedGroupJoinView } from "@/src/lib/hosted-groups/group-store";
+import { readHostedInitialOnboardingState } from "@/src/lib/hosted-onboarding/initial-onboarding";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import {
@@ -88,9 +89,14 @@ export default async function GroupJoinPage({
       })
     : null;
   // Most members live in a chat thread, not the dashboard, so the post-join
-  // hand-off returns them to the channel Murph already reaches them on.
+  // hand-off returns completed members to the channel Murph already reaches
+  // them on. Pending members go through Home, whose canonical onboarding read
+  // owns the one-time flow.
   const postJoinContactOption = auth.authenticatedMember
-    ? await resolveGroupJoinPostJoinContactOption()
+    ? await resolveGroupJoinPostJoinContactOption({
+        memberId: auth.authenticatedMember.id,
+        prisma,
+      })
     : null;
 
   return (
@@ -108,8 +114,18 @@ export default async function GroupJoinPage({
   );
 }
 
-async function resolveGroupJoinPostJoinContactOption(): Promise<MurphContactOption | null> {
+async function resolveGroupJoinPostJoinContactOption(input: {
+  memberId: string;
+  prisma: ReturnType<typeof getPrisma>;
+}): Promise<MurphContactOption | null> {
   try {
+    const onboarding = await readHostedInitialOnboardingState({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+    if (onboarding.status === "pending") {
+      return null;
+    }
     return await resolveHostedMurphContactOption();
   } catch {
     return null;

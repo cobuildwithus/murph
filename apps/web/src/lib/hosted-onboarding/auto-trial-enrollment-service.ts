@@ -8,7 +8,7 @@ import {
 } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
-import { HOSTED_APP_INITIAL_VISIT_HOME_PATH } from "./app-routes";
+import { HOSTED_APP_HOME_PATH } from "./app-routes";
 import { buildHostedBillingOfferMetadata } from "./billing-offer-metadata";
 import {
   HOSTED_PULSE_TRIAL_DAYS,
@@ -1936,7 +1936,7 @@ function buildHostedAutoPulseTrialEnrollmentResult(
   status: HostedAutoPulseTrialEnrollmentStatus,
 ): HostedAutoPulseTrialEnrollmentResult {
   return {
-    redirectPath: HOSTED_APP_INITIAL_VISIT_HOME_PATH,
+    redirectPath: HOSTED_APP_HOME_PATH,
     status,
   };
 }
