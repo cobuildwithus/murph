@@ -34,8 +34,9 @@ friction.
 
 # Evidence and round scope
 
-Use `codebase.zip` as the sole repository-content source. It is a guarded
-snapshot of the pushed PR head and contains:
+Use the `codebase.zip` files in this conversation as the sole
+repository-content source. Round 1 contains a guarded snapshot of the pushed PR
+head with:
 
 - `review-gpt-pr-context/pr-body.md`, the PR description and intent contract
 - `review-gpt-pr-context/pr.diff`, the full current PR diff
@@ -48,13 +49,23 @@ snapshot of the pushed PR head and contains:
   delta, empty for round 1
 - the current source, tests, and repository guidance included by the packager
 
+For round 2 or later, read `contextMode` from `review-round.json`:
+
+- `same_thread_delta` means the current small ZIP contains `pr-body.md`,
+  `review-round.json`, `since-previous-reviewed-head.diff`,
+  `changed-since-previous-reviewed-head.txt`, and current versions of files
+  touched by that delta. Use the earlier round-1 ZIP in this same conversation
+  for unchanged repository context.
+- `full_snapshot` means the current ZIP contains the full guarded snapshot. A
+  later round may use this only when `full-review-reason.txt` gives a concrete
+  reason why the prior conversation or small correction packet is insufficient.
+
 Stop as `INVALID` only when the code evidence itself will not support a review:
-`pr.diff`, `changed-files.txt`, `review-round.json`, the round diffs, or the
-source snapshot is missing, unreadable, or does not correspond to the checked
-commit. For round 2 or later, also stop as invalid if either ancestry field in
-`review-round.json` is not `true`, since the remediation delta then cannot be
-trusted to describe the change under review. State the exact evidence gap and
-stop.
+the files required by the declared `contextMode` are missing, unreadable, or do
+not correspond to the checked commit. A `same_thread_delta` round is also
+invalid when the earlier round-1 ZIP is unavailable in this conversation. For
+round 2 or later, stop as invalid if either ancestry field in
+`review-round.json` is not `true`. State the exact evidence gap and stop.
 
 Do not stop for a discrepancy confined to the descriptive content of
 `review-gpt-pr-context/pr-body.md` — change-shape counts, validation claims, or
@@ -68,9 +79,8 @@ For round 2 or later the invocation should state the same first-reviewed head as
 the artifact and summarize the prior round's findings, local dispositions,
 landed corrections, and underlying mechanisms. Treat that summary as process
 metadata, not repository evidence, and verify its code claims against the ZIP.
-When it is absent or thin, reconstruct what you can from
-`since-first-reviewed-head.diff` and `since-previous-reviewed-head.diff`, note
-the gap, and continue.
+When it is absent or thin, reconstruct what you can from the current correction
+packet and the earlier round in this conversation, note the gap, and continue.
 
 Round 1 is the only full-patch audit. In round 1, review `pr.diff` in repository
 context and classify a qualifying finding as `ORIGINAL_PR`.
