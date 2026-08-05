@@ -1093,7 +1093,7 @@ test('food search-labels schema exposes hosted label lookup inputs', async () =>
   )
   assert.match(
     String(schema.options.properties.fullLabel?.description ?? ''),
-    /complete source labels and contaminant evidence/u,
+    /complete source label when the requested fact is absent from compact/u,
   )
 })
 
@@ -1131,7 +1131,7 @@ test('food search-labels-batch schema exposes hosted batch lookup inputs', async
   )
   assert.match(
     String(schema.options.properties.fullLabel?.description ?? ''),
-    /complete source labels and contaminant evidence/u,
+    /complete source labels when a requested fact is absent from compact/u,
   )
   assert.doesNotMatch(queryDescription, /USDA FDC id|UPC/u)
   assert.match(

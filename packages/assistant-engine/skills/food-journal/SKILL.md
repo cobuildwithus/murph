@@ -70,8 +70,10 @@ Before calculating a meal total:
   mixed meal into at most two lookups: one generic USDA batch and one normal
   branded/menu/package batch. The default returns one compact nutrition match
   per component. Increase `--limit` only for an ambiguous match, and use
-  `--full-label` only when micronutrients, ingredients, allergens, or
-  contaminant evidence are necessary for the user's request.
+  `--full-label` whenever the user needs a fact outside the compact serving,
+  calories, protein, carbohydrate, fat, and fiber response. This includes
+  sugars, saturated fat, cholesterol, sodium or other micronutrients,
+  ingredients, allergens, and contaminant evidence.
 - Prefer an exact visible or user-named product, restaurant item, variant, UPC,
   or FDC id over a nearby generic substitute. Never merge nutrition from
   similarly named variants without evidence that they are the same item.

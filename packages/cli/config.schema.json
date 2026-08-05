@@ -7781,7 +7781,7 @@
                           "maximum": 50
                         },
                         "fullLabel": {
-                          "description": "Return complete source labels and contaminant evidence instead of compact calorie, macro, and fiber facts.",
+                          "description": "Return the complete source label when the requested fact is absent from compact serving, calorie, macro, and fiber facts.",
                           "type": "boolean"
                         },
                         "generic": {
@@ -7822,7 +7822,7 @@
                           "maximum": 50
                         },
                         "fullLabel": {
-                          "description": "Return complete source labels and contaminant evidence instead of compact calorie, macro, and fiber facts.",
+                          "description": "Return complete source labels when a requested fact is absent from compact serving, calorie, macro, and fiber facts.",
                           "type": "boolean"
                         },
                         "generic": {

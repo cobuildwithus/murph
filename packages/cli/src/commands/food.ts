@@ -573,7 +573,6 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         description: 'Search USDA generic foods for an ordinary ingredient.',
         options: {
           generic: true,
-          limit: 5,
         },
       },
     ],
@@ -589,7 +588,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
       fullLabel: z
         .boolean()
         .optional()
-        .describe('Return complete source labels and contaminant evidence instead of compact calorie, macro, and fiber facts.'),
+        .describe('Return the complete source label when the requested fact is absent from compact serving, calorie, macro, and fiber facts.'),
       generic: z
         .boolean()
         .optional()
@@ -621,7 +620,6 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
           query: [
             "'greek yogurt' --query 'whole milk' --query 'sourdough bread'",
           ],
-          limit: 5,
         },
       },
     ],
@@ -642,7 +640,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
       fullLabel: z
         .boolean()
         .optional()
-        .describe('Return complete source labels and contaminant evidence instead of compact calorie, macro, and fiber facts.'),
+        .describe('Return complete source labels when a requested fact is absent from compact serving, calorie, macro, and fiber facts.'),
       generic: z
         .boolean()
         .optional()

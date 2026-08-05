@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createServer, type Server, type ServerResponse } from 'node:http'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -185,6 +185,119 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('carries a compact mixed-meal lookup through a grounded save and final reply', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const skillsRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../skills',
+    )
+    const commandLog = path.join(
+      scenario.turnInput.workingDirectory,
+      'vault-cli-invocations.log',
+    )
+    const fakeVaultCli = path.join(
+      scenario.turnInput.workingDirectory,
+      'vault-cli',
+    )
+    await writeFile(fakeVaultCli, `#!/bin/sh
+printf '%s\\n' "$*" >> "${commandLog}"
+case "$*" in
+  *food*search-labels-batch*)
+    printf '%s\\n' '{"ok":true,"results":[{"query":"rolled oats","items":[{"id":"fdc:oats-1","name":"Rolled oats","serving":{"amount":100,"unit":"g"},"nutrition":{"basis":"per_100_g","rows":[{"name":"Calories","unit":"kcal","value":389},{"name":"Protein","unit":"g","value":16.9},{"name":"Carbohydrate","unit":"g","value":66.3},{"name":"Fat","unit":"g","value":6.9},{"name":"Fiber","unit":"g","value":10.6}]}}]},{"query":"Example plain kefir","items":[{"id":"fdc:kefir-1","name":"Example plain kefir","serving":{"amount":240,"unit":"g"},"nutrition":{"basis":"per_100_g","rows":[{"name":"Calories","unit":"kcal","value":62.5},{"name":"Protein","unit":"g","value":4.17},{"name":"Carbohydrate","unit":"g","value":5},{"name":"Fat","unit":"g","value":2.08},{"name":"Fiber","unit":"g","value":0}]}}]}]}'
+    ;;
+  *meal*add*)
+    printf '%s\\n' '{"ok":true,"meal":{"id":"meal_scripted_mixed","nutrition":{"totals":{"calories":344.5,"proteinGrams":18.45,"carbsGrams":45.15,"fatGrams":8.45,"fiberGrams":5.3}}}}'
+    ;;
+  *)
+    printf '%s\\n' '{"ok":false,"error":"unexpected scripted command"}'
+    exit 1
+    ;;
+esac
+`, {
+      encoding: 'utf8',
+      mode: 0o755,
+    })
+
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: ${JSON.stringify(`sed -n '1,150p' ${JSON.stringify(path.join(skillsRoot, 'food-journal', 'SKILL.md'))}`)},
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const generic = JSON.stringify(JSON.stringify([
+  "food", "search-labels-batch", "--query", "rolled oats", "--generic",
+]));
+const branded = JSON.stringify(JSON.stringify([
+  "food", "search-labels-batch", "--query", "Example plain kefir",
+]));
+const result = await tools.exec_command({
+  cmd: ${JSON.stringify(fakeVaultCli)} + " batch --compact --format json --command " + generic + " --command " + branded,
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: ${JSON.stringify(fakeVaultCli)} + " meal add --note 'Rolled oats and plain kefir' --ingredient 'rolled oats, 50 g' --ingredient 'plain kefir, 240 g' --nutrition-calories 344.5 --nutrition-protein-grams 18.45 --nutrition-carbs-grams 45.15 --nutrition-fat-grams 8.45 --nutrition-fiber-grams 5.3 --nutrition-source database --nutrition-confidence high --nutrition-source-detail 'USDA fdc:oats-1 scaled from 100 g; label fdc:kefir-1 scaled to its 240 g serving'",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'Logged it: about 345 calories, 18g protein, 45g carbs, 8g fat, and 5g fiber, based on 50g oats and one 240g kefir serving.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      env: {
+        ...scenario.turnInput.env,
+      },
+      prompt: 'Log a synthetic meal of 50 g rolled oats and one 240 g serving of Example plain kefir, then give me the nutrition summary.',
+    })
+
+    expect(result.finalMessage).toBe(
+      'Logged it: about 345 calories, 18g protein, 45g carbs, 8g fat, and 5g fiber, based on 50g oats and one 240g kefir serving.',
+    )
+    const invocations = (await readFile(commandLog, 'utf8'))
+      .trim()
+      .split('\n')
+    expect(invocations).toHaveLength(2)
+    expect(invocations[0]?.match(/search-labels-batch/gu)).toHaveLength(2)
+    expect(invocations[0]?.match(/--generic/gu)).toHaveLength(1)
+    expect(invocations[0]).not.toContain('--limit')
+    expect(invocations[0]).not.toContain('--full-label')
+    expect(invocations[1]).toContain('--nutrition-calories 344.5')
+    expect(invocations[1]).toContain('USDA fdc:oats-1 scaled from 100 g')
+    expect(invocations[1]).toContain('label fdc:kefir-1 scaled to its 240 g serving')
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain('The default returns one compact')
+    expect(toolOutputs).toContain('fdc:oats-1')
+    expect(toolOutputs).toContain('fdc:kefir-1')
+    expect(toolOutputs).toContain('meal_scripted_mixed')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
   it.each(['direct', 'group'] as const)(
