@@ -11,11 +11,13 @@ import {
 } from "../src/lib/hosted-onboarding/linq-phone-number-inventory";
 import { getHostedOnboardingEnvironment } from "../src/lib/hosted-onboarding/runtime";
 
-async function main(): Promise<void> {
-  const prisma = getPrisma();
+export async function syncHostedLinqLines(
+  argv: readonly string[] = process.argv,
+): Promise<void> {
   const environment = getHostedOnboardingEnvironment();
+  const prisma = getPrisma();
   const observedAt = new Date();
-  const syncProviderInventory = !process.argv.includes("--skip-provider-inventory");
+  const syncProviderInventory = !argv.includes("--skip-provider-inventory");
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -58,7 +60,7 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
-  main().catch((error: unknown) => {
+  syncHostedLinqLines().catch((error: unknown) => {
     console.error(
       sanitizeHostedOnboardingLogString(error instanceof Error ? error.message : String(error))
       ?? "Hosted Linq line sync failed.",
