@@ -145,7 +145,6 @@ function shouldResumeCurrentConnectIndexUrl(
 ): boolean {
   return (
     isHostedOnboardingAccessibleStage(payload.stage)
-    && payload.initialVisitEligible !== true
     && typeof window !== "undefined"
     && window.location.pathname === "/connect"
   );
