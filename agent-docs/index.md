@@ -38,6 +38,14 @@ specified by
 `agent-docs/RELIABILITY.md`, and
 `agent-docs/operations/imessage-deliverability.md`.
 
+The live OC-to-ENAM R2 cutover keeps ordinary hosted runtime admission open,
+uses the existing destination-first/source-fallback bridge during version and
+upload-capability skew, maintenance-fences account deletion until bounded tail
+copy convergence, and reserves the runtime pause for incident containment.
+That contract is jointly specified by `ARCHITECTURE.md`,
+`agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
+`apps/cloudflare/R2_BUNDLES_ENAM_MIGRATION.md`.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

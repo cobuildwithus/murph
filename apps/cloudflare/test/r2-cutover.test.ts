@@ -159,6 +159,61 @@ describe("R2 OC to ENAM cutover bucket", () => {
     ]);
   });
 
+  it("keeps late source writes readable while live promotion routes new writes to ENAM", async () => {
+    const operations: string[] = [];
+    const sourceKeys = new Set<string>();
+    const destinationKeys = new Set<string>();
+    const source = createBucket({
+      get: async (key) => {
+        operations.push(`source:get:${key}`);
+        return sourceKeys.has(key) ? storedObject : null;
+      },
+      name: "source",
+      operations,
+    });
+    source.put = async (key) => {
+      operations.push(`source:put:${key}`);
+      sourceKeys.add(key);
+    };
+    const destination = createBucket({
+      get: async (key) => {
+        operations.push(`destination:get:${key}`);
+        return destinationKeys.has(key) ? storedObject : null;
+      },
+      name: "destination",
+      operations,
+    });
+    destination.put = async (key) => {
+      operations.push(`destination:put:${key}`);
+      destinationKeys.add(key);
+    };
+    const oldRunner = resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+      HOSTED_R2_CUTOVER_PHASE: "source_active",
+    });
+    const promotedRunner = resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+    });
+
+    await oldRunner.bucket.put("late-source", new Uint8Array([1]));
+    expect(await promotedRunner.bucket.get("late-source")).toBe(storedObject);
+    await promotedRunner.bucket.put("new-destination", new Uint8Array([2]));
+    expect(await promotedRunner.bucket.get("new-destination")).toBe(storedObject);
+    await promotedRunner.bucket.list?.({ prefix: "users/" });
+
+    expect(operations).toEqual([
+      "source:put:late-source",
+      "destination:get:late-source",
+      "source:get:late-source",
+      "destination:put:new-destination",
+      "destination:get:new-destination",
+      "destination:list:users/",
+    ]);
+  });
+
   it("does not turn destination operational failures into source fallback reads", async () => {
     const operations: string[] = [];
     const sourceGet = vi.fn(async () => storedObject);

@@ -724,12 +724,16 @@ Last verified: 2026-08-04
   consented-member requests remain checkpoint-gated. Completion ordering uses
   the existing pending-input occurrence proof, and incomplete or invalid index
   evidence rejects the shortcut without repairing state.
-- The temporary R2 cutover write-admission pause is a Worker-route gate before
-  UserRunner dispatch, not a second queue or persisted state owner. A paused
-  signed Temporal ensure returns a one-minute `retry_later`; a paused direct
-  web hint schedules no Durable Object work. Already-accepted inbound remains
-  in the encrypted mailbox, existing invocations drain normally, and service
-  resumes by deploying admission `open` after destination canaries pass.
+- The temporary R2 cutover keeps write admission open during healthy promotion.
+  New current-version writes target ENAM; old source-active Durable Objects and
+  bucket-affine uploads may finish against OC, destination reads fall back after
+  a definitive miss, and bounded exact-key tail copies converge after those
+  source writers drain. This adds no dual write, queue, or persisted migration
+  owner. The existing pause is incident containment only: it is a Worker-route
+  gate before UserRunner dispatch, a paused signed Temporal ensure returns a
+  one-minute `retry_later`, and a paused direct web hint schedules no Durable
+  Object work. Already-accepted inbound remains in the encrypted mailbox while
+  existing invocations drain for forward repair.
 - One-time current-sender Assistant Ask reuses the same mailbox lifecycle,
   deterministic request identity, ten-minute expiry, isolated reviewed
   personal read, completion append, and exact-origin group delivery. Exact

@@ -506,11 +506,12 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
-- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` only after the destination Worker and
-  every relevant Durable Object have converged while paused; use a lowercase
-  SHA-256 digest of a quiescent operator-controlled member, never a raw member ID
-- `HOSTED_R2_WRITE_ADMISSION=open` normally; set `paused` only for the bounded
-  OC-to-ENAM drain in `R2_BUNDLES_ENAM_MIGRATION.md`
+- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` only during a declared destination-
+  active incident that requires paused-admission forward-repair validation; use
+  a lowercase SHA-256 digest of a quiescent operator-controlled member, never a
+  raw member ID
+- `HOSTED_R2_WRITE_ADMISSION=open` normally and throughout the healthy live
+  OC-to-ENAM cutover; `paused` is emergency incident containment only
 
 `CF_PUBLIC_BASE_URL` is a required non-secret Worker variable as well as the standard deploy-and-smoke target. Private-media capability creation uses that exact deployment origin, and hosted Web validates capabilities against its matching `HOSTED_EXECUTION_CONTROL_URL` origin. Production preflight pins both sides to `https://murph-hosted.cobuildwithus.workers.dev`; preview uses its isolated staging Worker origin and must reject production-origin capabilities. Change the production pin and deploy invariant together before moving the production origin. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
 `HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the Worker R2 binding. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
@@ -710,14 +711,15 @@ Core execution tuning:
   direct/local artifact rendering. The manual deploy workflow derives it from
   the selected `preview` or `production` target; do not configure a conflicting
   GitHub Environment value.
-- `HOSTED_R2_WRITE_ADMISSION` defaults to `open`. `paused` returns a bounded
-  `retry_later` from `runtime/ensure-processing` before any UserRunner Durable
-  Object call; deploy it to 100 percent and drain every reported in-flight
-  invocation before starting the direct-upload capability timer.
-- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` is temporary and must be unset while
-  admission is open or the source is active. Keep it unset through the initial
-  `destination_active+paused` deployment and every Durable Object convergence
-  check. After convergence, configure it only for a quiescent
+- `HOSTED_R2_WRITE_ADMISSION` defaults to `open` and remains open throughout a
+  healthy live OC-to-ENAM cutover. Promote `HOSTED_R2_CUTOVER_PHASE` directly to
+  `destination_active`; new writes then target ENAM while definitive destination
+  misses retain OC fallback and old source-bucket upload capabilities drain.
+  `paused` is an incident-containment lever: it returns a bounded `retry_later`
+  from `runtime/ensure-processing` before any UserRunner Durable Object call.
+- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` must be unset during the healthy live
+  cutover, while admission is open, or while the source is active. Configure it
+  only during a declared destination-active paused incident, for a quiescent
   operator-controlled member with no pending mailbox work, retry/recheck/wake,
   alarm, or member-facing ingress. It opens a per-member callback-signed window,
   not a one-shot request; source-active pauses, other members, and direct OIDC
