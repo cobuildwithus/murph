@@ -552,7 +552,8 @@ model HostedMember {
   suspendedAt                    DateTime?                       @map("suspended_at")
   createdAt                      DateTime                        @default(now()) @map("created_at")
   updatedAt                      DateTime                        @updatedAt @map("updated_at")
-  invites                        HostedInvite[]
+  invites                        HostedInvite[]                 @relation("HostedInviteMember")
+  signupReferralInvites          HostedInvite[]                 @relation("HostedInviteReferrer")
   accountGroupsOwned             HostedAccountGroup[]            @relation("HostedAccountGroupOwner")
   accountGroupMemberships        HostedAccountGroupMembership[]   @relation("HostedAccountGroupMember")
   accountGroupInvitesSent        HostedAccountGroupInvite[]       @relation("HostedAccountGroupInviteSender")
@@ -1201,19 +1202,22 @@ model HostedRuntimeLog {
 }
 
 model HostedInvite {
-  id                           String       @id
-  memberId                     String       @map("member_id")
-  inviteCode                   String       @unique @map("invite_code")
-  channel                      String       @default("linq")
-  sentAt                       DateTime?    @map("sent_at")
-  instantStartAdmissionEventId String?      @map("instant_start_admission_event_id")
-  expiresAt                    DateTime     @map("expires_at")
-  createdAt                    DateTime     @default(now()) @map("created_at")
-  updatedAt                    DateTime     @updatedAt @map("updated_at")
-  member                       HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  id                           String        @id
+  memberId                     String        @map("member_id")
+  referrerMemberId             String?       @map("referrer_member_id")
+  inviteCode                   String        @unique @map("invite_code")
+  channel                      String        @default("linq")
+  sentAt                       DateTime?     @map("sent_at")
+  instantStartAdmissionEventId String?       @map("instant_start_admission_event_id")
+  expiresAt                    DateTime      @map("expires_at")
+  createdAt                    DateTime      @default(now()) @map("created_at")
+  updatedAt                    DateTime      @updatedAt @map("updated_at")
+  member                       HostedMember  @relation("HostedInviteMember", fields: [memberId], references: [id], onDelete: Cascade)
+  referrer                     HostedMember? @relation("HostedInviteReferrer", fields: [referrerMemberId], references: [id], onDelete: SetNull)
 
   @@index([memberId, createdAt])
   @@index([memberId, instantStartAdmissionEventId])
+  @@index([referrerMemberId, createdAt])
   @@index([expiresAt])
   @@map("hosted_invite")
 }

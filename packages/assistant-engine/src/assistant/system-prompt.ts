@@ -1360,7 +1360,7 @@ function buildAssistantSkillRouteHintText(): string {
   return [
     "Murph skill router:",
     "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the user's visible outcome and read the primary owner. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.",
-    "- Setup/support: murph-onboarding, hosted-low-usage, experiment-onboarding, behavior-followthrough, self-management-experiments.",
+    "- Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.",
     "- Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
     "- Sleep safety outranks fatigue/clock routing: snoring/gasping, unrefreshing sleep with enough opportunity, unexplained awakenings, morning headache, sleep attacks, or dangerous daytime sleepiness -> sleep-improvement. If driving/work safety is affected, give immediate safety guidance before coaching.",
