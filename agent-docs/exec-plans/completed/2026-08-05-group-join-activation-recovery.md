@@ -1,6 +1,6 @@
 # Group join activation recovery
 
-Status: active
+Status: completed
 Created: 2026-08-05
 Updated: 2026-08-05
 
@@ -50,6 +50,7 @@ Updated: 2026-08-05
 - Grant authorization metadata and data readability are separate facts; absence after an access filter must not be labeled as absence of consent.
 - The device-status projection follows the same readability boundary as encrypted projections. An inactive member's exact grant remains visible as `granted` with `missing` data, but the reader does not synthesize an empty available-device record for a grant excluded from the readable snapshot.
 - The accept form owns its pre-submit secondary destination and replaces that entire state with the success presentation after save. This keeps one truthful `/join` recovery action before save and one fallback action after save without parallel page-level copy or duplicate controls.
+- Parent corrected-head product-purpose verdict: the smallest complete experience is one explicit sharing save, success acknowledgement only after persistence, immediate continuation to canonical setup, and one recovery action if navigation stalls. The corrected `204bac7e` head delivers that journey with no extra concept, screen, state owner, or material evidence gap; no product-experience finding remains.
 
 ## Review remediation
 
@@ -58,7 +59,8 @@ Updated: 2026-08-05
 
 ## Verification
 
-- Local evidence: 77 focused Vitest cases pass across group join client/page, page auth, and shared reads; `pnpm --dir apps/web typecheck`, design-proof checker tests, and the scoped Web lint pass (with one unchanged pre-existing warning in `group-store.ts`). The direct Playwright proof intercepts the real accept request, proves it resolves before `/join` is requested, verifies one setup action after save, and captures the real new-member and existing-member success states at desktop and mobile viewports.
+- Local evidence: 77 focused Vitest cases pass across group join client/page, page auth, and shared reads; `pnpm --dir apps/web typecheck`, `pnpm docs:drift`, design-proof checker tests, and the scoped Web lint pass (with one unchanged pre-existing warning in `group-store.ts`). The direct Playwright proof intercepts the real accept request, proves it resolves before `/join` is requested, verifies one setup action after save, and captures the real new-member and existing-member success states at desktop and mobile viewports. Diff/privacy inspection found no identifier or sensitive-evidence leakage.
 - Claude Code UI double-check: attempted with Fable after the rendered evidence stabilized; explicit usage-credit exhaustion prevented a second-model review, which the completion workflow records as non-blocking without a substitute.
-- Remaining exact-head evidence: rerun docs drift after this remediation update, privacy/identifier scan, exact-head GitHub Actions, a valid preliminary `completion-specialists` retry, and final ReviewGPT round 2.
-- Expected outcomes: no unauthorized projection bytes are decrypted; successful first-checkout saves replace the route with `/join` exactly once; CI and both required review gates pass.
+- Exact-head evidence: all required GitHub Actions passed at `204bac7e`; the valid preliminary `completion-specialists` retry returned `SPECIALIST_OUTCOME: PASS` with no findings and no patch artifact; final ReviewGPT round 2 returned `ROUND_OUTCOME: PASS` with no findings. Both responses were verified as the requested Pro model against the exact pushed head.
+- Verified outcomes: no unauthorized projection bytes are decrypted; successful first-checkout saves replace the route with `/join` exactly once; CI and both required review gates pass.
+Completed: 2026-08-05
