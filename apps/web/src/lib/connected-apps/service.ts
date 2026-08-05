@@ -24,7 +24,13 @@ import {
   getHostedConnectedAppsCustomAuthExecution,
   isHostedConnectedAppsServiceTool,
   readHostedConnectedAppsConfig,
+  readHostedOpenWeatherApiKey,
 } from "./config";
+import {
+  executeOpenWeatherNationalAlerts,
+  HOSTED_OPENWEATHER_NATIONAL_ALERTS_TOOL_SLUG,
+  OpenWeatherAlertsRequestError,
+} from "./openweather-alerts";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
@@ -128,6 +134,13 @@ async function runHostedConnectedAppsRequest(input: {
           arguments: argumentsValue,
           toolSlug,
         } = input.request.input;
+        if (toolSlug === HOSTED_OPENWEATHER_NATIONAL_ALERTS_TOOL_SLUG) {
+          return await executeOpenWeatherNationalAlerts({
+            apiKey: readHostedOpenWeatherApiKey(),
+            arguments: argumentsValue,
+            fetchImpl: input.fetchImpl,
+          });
+        }
         if (isHostedConnectedAppsServiceTool(toolSlug)) {
           const customAuthExecution = getHostedConnectedAppsCustomAuthExecution(toolSlug);
           if (customAuthExecution) {
@@ -759,6 +772,24 @@ function invalidConnectedAppIntent() {
 }
 
 function mapConnectedAppsError(error: unknown): unknown {
+  if (error instanceof OpenWeatherAlertsRequestError) {
+    return hostedOnboardingError({
+      cause: error,
+      code: error.type === "openweather_invalid_arguments"
+        ? "CONNECTED_APPS_REQUEST_INVALID"
+        : "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+      details: {
+        operationName: HOSTED_OPENWEATHER_NATIONAL_ALERTS_TOOL_SLUG,
+        ...(error.status === null ? {} : { statusCode: error.status }),
+        type: error.type,
+      },
+      httpStatus: error.retryable ? 503 : 400,
+      message: error.retryable
+        ? "Connected apps are temporarily unavailable."
+        : "The connected-app request could not be completed.",
+      retryable: error.retryable,
+    });
+  }
   if (!(error instanceof ComposioConnectedAppsRequestError)) {
     return error;
   }

@@ -1295,6 +1295,15 @@ describe('applyMurphManagedAutomations', () => {
     expect(digestRecord?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
     expect(digestRecord?.instructions).toContain('If the reconnect branch applies, it wins over suppression')
     expect(digestRecord?.instructions).toContain('what was probably noise')
+    expect(digestRecord?.instructions).toContain(
+      'An official weather alert alone never clears the proactive send bar',
+    )
+    expect(digestRecord?.instructions).toContain(
+      'Never infer an alert from raw weather, AQI, or Murph-defined thresholds',
+    )
+    expect(digestRecord?.instructions).toContain(
+      'Use only a returned alert about extreme heat, extreme cold, or outdoor air quality',
+    )
     expect(digestRecord?.instructions).toContain('Never restate single-day metric values')
     expect(digestRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}',
@@ -1382,6 +1391,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('Suppress true-but-boring findings')
     expect(insightRecord?.instructions).toContain('missing data, messy tags')
     expect(insightRecord?.instructions).toContain('Murph cannot currently see X')
+    expect(insightRecord?.instructions).toContain(
+      'An official weather alert alone never clears the proactive send bar',
+    )
 
     const improvementCoachRecord = managedAutomationMocks.records.get(
       MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
@@ -1403,6 +1415,9 @@ describe('applyMurphManagedAutomations', () => {
     })
     expect(improvementCoachRecord?.tags).toContain('murph-managed:monthly-improvement-coach')
     expect(improvementCoachRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(improvementCoachRecord?.instructions).toContain(
+      'An official weather alert alone never clears the proactive send bar',
+    )
     expect(improvementCoachRecord?.instructions).toContain(
       'knowledge show improvement-opportunities',
     )

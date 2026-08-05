@@ -508,6 +508,13 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
   );
 
   try {
+    assert.ok(
+      rendered.container.querySelector('[data-slot="dialog-content"]'),
+    );
+    assert.equal(
+      rendered.container.querySelector('[data-slot="drawer-content"]'),
+      null,
+    );
     assert.equal(
       rendered.container.querySelector("h2")?.textContent,
       "Make a one-time contribution",
@@ -523,7 +530,11 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
     assert.equal(groupTrigger.classList.contains("w-full"), true);
     assert.match(
       rendered.container.textContent ?? "",
-      /Choose one explicit contribution of cost-weighted usage credit for this chat\./,
+      /Choose how much usage to add to this chat\./,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /cost-weighted usage credit/i,
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
@@ -878,7 +889,7 @@ test("keeps mobile monthly payment recovery below the open note fields", async (
   }
 });
 
-test("does not reserve mobile sticky-action space for one-time group contributions", async () => {
+test("keeps the one-time contribution action reachable in the mobile drawer", async () => {
   mocks.isMobile.mockReturnValue(true);
   const { GroupSponsorshipDialog } = await import(
     "@/src/components/hosted-groups/group-sponsorship-dialog"
@@ -898,11 +909,74 @@ test("does not reserve mobile sticky-action space for one-time group contributio
   );
 
   try {
+    assert.ok(
+      rendered.container.querySelector('[data-slot="drawer-content"]'),
+    );
+    assert.equal(
+      rendered.container.querySelector('[data-slot="dialog-content"]'),
+      null,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Choose how much usage to add to this chat\./,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /cost-weighted usage credit/i,
+    );
+    const selection = rendered.container.querySelector<HTMLElement>(
+      '[data-slot="usage-top-up-selection"]',
+    );
+    assert.ok(selection);
+    assert.equal(selection.classList.contains("max-md:min-h-full"), true);
     const noteContent = rendered.container
       .querySelector("#group-sponsor-message")
       ?.closest('[data-slot="collapsible-content"]');
     assert.ok(noteContent);
-    assert.equal(noteContent.classList.contains("max-md:pb-24"), false);
+    assert.equal(noteContent.classList.contains("max-md:pb-24"), true);
+    const actions = buttonByText(
+      rendered.container,
+      "Choose an amount",
+    ).parentElement;
+    assert.ok(actions);
+    assert.equal(actions.classList.contains("max-md:sticky"), true);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("pins the one-time contribution action in a short mobile drawer", async () => {
+  mocks.isMobile.mockReturnValue(true);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: false,
+      initialOpen: true,
+      mode: "one_time",
+      offers: groupSponsorshipOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const selection = rendered.container.querySelector<HTMLElement>(
+      '[data-slot="usage-top-up-selection"]',
+    );
+    assert.ok(selection);
+    assert.equal(selection.classList.contains("max-md:min-h-full"), true);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Add a note/u);
+    const actions = buttonByText(
+      rendered.container,
+      "Choose an amount",
+    ).parentElement;
+    assert.ok(actions);
+    assert.equal(actions.classList.contains("max-md:sticky"), true);
+    assert.equal(actions.classList.contains("max-md:mt-auto"), true);
   } finally {
     await rendered.cleanup();
   }
