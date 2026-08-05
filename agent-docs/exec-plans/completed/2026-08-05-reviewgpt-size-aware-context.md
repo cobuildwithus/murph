@@ -41,3 +41,6 @@ snapshot and run a fresh full-patch audit in the existing conversation.
 - Accepted: eliminate split prompt/package selection. The packager owns one
   head-bound PR-shape decision, fails closed if the head changes while it is
   packaging, and writes the mode that the same-thread follow-up prompt obeys.
+Status: completed
+Updated: 2026-08-05
+Completed: 2026-08-05
