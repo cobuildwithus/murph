@@ -1099,48 +1099,49 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
-  it('guides proactive silent structured product feedback capture', () => {
+  it('guides problem-first structured product feedback capture', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Product feedback:')
     expect(prompt).toContain('`murph.submit_product_feedback`')
     expect(prompt).toContain(
-      'capture Murph product frustration, feature requests, shipped-item interest, clear inferred workflow friction, and repeated Murph-observed product/tool friction',
+      'capture explicit Murph product frustration or feature requests, changelog/feature-catalog interest, clear inferred workflow friction, and repeated Murph-observed tool friction',
     )
     expect(prompt).toContain(
-      'Treat a request as high-confidence inferred feedback when a Murph workflow is blocked, degraded, or forced into a manual workaround',
+      'A blocked, degraded, or manual Murph workflow is a high-confidence inferred feature request even without a complaint',
     )
     expect(prompt).toContain(
-      'One gap is enough; no complaint or feature label is required',
+      "Treat requests, bugs, and workarounds as clues to the user's goal, underlying problem, and desired outcome—not automatically the thing to build",
     )
     expect(prompt).toContain(
-      'Select the single most material gap and call at most once per accepted request',
+      'If one missing answer would materially change what Murph should build, ask one concise natural follow-up and do not call the tool yet',
     )
-    expect(prompt).toContain('Keep ordinary feedback silent')
-    expect(prompt).toContain('do not claim it was recorded, flagged, or sent')
-    expect(prompt).toContain('Do not mention the log or ask permission unless asked')
+    expect(prompt).toContain('Ask at most one feedback-discovery question per turn')
+    expect(prompt).toContain('use prior context, never re-ask')
     expect(prompt).toContain(
-      '`Support escalation:` is reserved',
+      'Do not mention logging or ask permission unless asked about it',
+    )
+    expect(prompt).toContain('Still help with the immediate request or best fallback')
+    expect(prompt).toContain(
+      'Otherwise, when the problem is clear or Murph observed the friction, capture it silently',
     )
     expect(prompt).toContain(
-      "follow the Support section's explicit-request, private-scope, and durable-result contract",
+      'select the single most material gap and call the tool at most once for the accepted request',
     )
-    expect(prompt).toContain(
-      'Never retry any result',
-    )
-    expect(prompt).toContain('Persistence is best-effort after reply')
-    expect(prompt).toContain('Continue with the best fallback')
+    expect(prompt).toContain('Do not mention ordinary acceptance')
+    expect(prompt).toContain('persistence is best-effort after the reply')
+    expect(prompt).toContain('Reserved support bypasses discovery/classification; follow Support')
+    expect(prompt).toContain('Never retry after any tool result')
     expect(prompt).toContain('external/transient failures')
-    expect(prompt).toContain('For ordinary feedback, use `feature_request` for missing or unsupported paths')
+    expect(prompt).toContain('Use `feature_request` for a missing path')
     expect(prompt).toContain(
-      'Record only kind, a concise product-only summary, and validated changelog ids when known',
+      'Record only kind, a concise product-only summary, and relevant changelog ids when known; ids are optional',
     )
-    expect(prompt).toContain('ids are optional')
     expect(prompt).toContain('Prefix inferred summaries `Speculative:`')
-    expect(prompt).toContain('assistant-observed ones `Murph-observed:`')
-    expect(prompt).toContain('Skip vague guesses')
+    expect(prompt).toContain('assistant-observed summaries `Murph-observed:`')
+    expect(prompt).toContain('Do not log vague low-confidence guesses')
     expect(prompt).toContain(
-      'Never include tags, topics, raw wording or conversation, health details, identifiers, contacts, secrets, or provider payloads',
+      'raw user wording or conversation text, health details, identifiers, contact details, secrets, or provider payloads',
     )
     expect(prompt).not.toContain('structured kind/topic')
     expect(prompt).not.toContain('feedback tags')
@@ -1418,7 +1419,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Do not add generic consumer-health app examples or proactively name unsupported sources as caveats',
     )
     expect(prompt).toContain(
-      'If the user asks for a wearable/source other than Apple Health, WHOOP, or Zepp/Amazfit that is not in this list, say it is not supported yet',
+      'If the user asks for a wearable/source that is neither in this list nor named in the Apple Health relay section, say it is not supported yet',
     )
     expect(prompt).toContain(
       'Use `murph.device` to list accounts, create a real connection link, or queue reconciliation',
@@ -1431,7 +1432,7 @@ describe('assistant local PDF evidence guidance', () => {
       'It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.',
     )
     expect(prompt).toContain(
-      'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, or Zepp/Amazfit relay setup, open Murph, sign in, and connect Apple Health.',
+      'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.',
     )
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain('WHOOP limits third-party access')
@@ -1443,8 +1444,10 @@ describe('assistant local PDF evidence guidance', () => {
       'Zepp/Amazfit: share with Apple Health in Zepp',
     )
     expect(prompt).toContain(
-      'This relay has no direct cloud access or history backfill',
+      'Apple Health relay paths have no direct cloud access or guaranteed history backfill',
     )
+    expect(prompt).toContain('Xiaomi/Mi Fitness, RingConn, COROS, and Suunto')
+    expect(prompt).toContain('Huawei Health: Apple Health sharing varies')
     expect(prompt).toContain('Starting Murph: if asked how to begin')
     expect(prompt).toContain(MURPH_PRODUCT_ORIGIN)
     expect(prompt).toContain('accounts are created at')
@@ -1534,11 +1537,14 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain(
-      'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, or Zepp/Amazfit relay setup, open Murph, sign in, and connect Apple Health.',
+      'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.',
     )
     expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
     expect(prompt).toContain('WHOOP limits third-party access')
     expect(prompt).toContain('Zepp/Amazfit: share with Apple Health in Zepp')
+    expect(prompt).toContain('Xiaomi/Mi Fitness, RingConn, COROS, and Suunto')
+    expect(prompt).toContain('Huawei Health: Apple Health sharing varies')
+    expect(prompt).toContain('no direct cloud access or guaranteed history backfill')
     expect(prompt).toContain('accounts are created at')
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
     expect(prompt).toContain(
@@ -1907,7 +1913,7 @@ describe('assistant system prompt cache stability', () => {
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(56_000)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2248,7 +2254,7 @@ describe('assistant system prompt cache stability', () => {
     expect(openStablePrefix).toEqual(closedStablePrefix)
     expect(openStablePrefix).toContain('Murph skill router:')
     expect(openStablePrefix).toContain(
-      'Setup/support: murph-onboarding, hosted-low-usage, experiment-onboarding, behavior-followthrough, self-management-experiments.',
+      'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.',
     )
     expect(openStablePrefix).not.toContain('Murph onboarding:')
     expect(openDynamicSuffix).toContain('Murph onboarding:')
@@ -2413,6 +2419,15 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'Before personal improvement or new-goal advice, or whether to take, keep, reorder, or drop a supplement or other intervention, read personal evidence that could change the answer. Open with what it shows (such as the latest panel date and markers), not goals alone; if none exists, say so.',
     )
+    expect(prompt).toContain('For heat/cold/air-quality alerts')
+    expect(prompt).toContain(
+      'Call direct-only `MURPH_OPENWEATHER_GET_NATIONAL_ALERTS` once including retries, without search',
+    )
+    expect(prompt).toContain('never guess coordinates')
+    expect(prompt).toContain('once including retries')
+    expect(prompt).toContain('Only returned alerts count as context, never cause')
+    expect(prompt).toContain('Continue on failure')
+    expect(prompt).toContain('Ask for location only when needed')
 
     // Discovery has no arbitrary question cap, but stays paced and useful.
     expect(prompt).toContain(
@@ -2506,6 +2521,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(groupPrompt).not.toContain(
       'Murph\'s edge is durable context: a progressively complete picture.',
     )
+    expect(groupPrompt).not.toContain(
+      'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS',
+    )
     expect(groupPrompt).not.toContain('Save durable context to its owner')
     expect(groupPrompt).not.toContain('Deepen longitudinal understanding when')
   })
@@ -2542,7 +2560,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'Do not preload skills or call a discovery CLI just to route.',
     )
-    expect(prompt).toContain('Setup/support: murph-onboarding, hosted-low-usage, experiment-onboarding, behavior-followthrough, self-management-experiments.')
+    expect(prompt).toContain('Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.')
     expect(prompt).toContain('Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.')
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
     expect(prompt).toContain('Care logistics: appointment-scheduling.')
@@ -2696,7 +2714,7 @@ describe('assistant Murph onboarding guidance', () => {
     }))
 
     expect(prompt).toContain(
-      'Setup/support: murph-onboarding, hosted-low-usage, experiment-onboarding, behavior-followthrough, self-management-experiments.',
+      'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.',
     )
     expect(prompt).toContain('Murph skill router:')
     expect(prompt).not.toContain('Murph onboarding:')

@@ -216,10 +216,7 @@ export function getHostedConnectedAppsCustomAuthExecution(
     return null;
   }
 
-  const apiKey = source.OPENWEATHER_API_KEY?.trim();
-  if (!apiKey) {
-    throw connectedAppsConfigurationError("OPENWEATHER_API_KEY is not configured.");
-  }
+  const apiKey = readHostedOpenWeatherApiKey(source);
 
   return {
     customAuthParams: {
@@ -231,6 +228,16 @@ export function getHostedConnectedAppsCustomAuthExecution(
     },
     version: HOSTED_CONNECTED_APPS_OPENWEATHER_VERSION,
   };
+}
+
+export function readHostedOpenWeatherApiKey(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const apiKey = source.OPENWEATHER_API_KEY?.trim();
+  if (!apiKey) {
+    throw connectedAppsConfigurationError("OPENWEATHER_API_KEY is not configured.");
+  }
+  return apiKey;
 }
 
 export function getHostedConnectedAppsCalendarWritePolicy(

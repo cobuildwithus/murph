@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-07-29
+Last verified: 2026-08-05
 
 ## Current Posture
 
@@ -117,6 +117,10 @@ default destination for every goal or the definition of activation.
   equivalent would be unsafe or materially unusable. Do not exempt the rest of
   the workflow. When safe, conversation still handles discovery, setup, the
   smallest authorized handoff, and status or confirmation afterward.
+- Group funding keeps that browser handoff plain and device-native: describe
+  purchased capacity as `usage`, present one-time contribution in a bottom
+  drawer on phones and a centered dialog on larger screens, and leave payment
+  confirmation to Stripe.
 - Wearable-provider authorization uses that exception narrowly. A provider
   callback completes automatically only for the browser that can prove it
   started the connection for the signed-in member; that proof-bound return is

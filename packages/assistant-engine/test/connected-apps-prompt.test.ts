@@ -34,18 +34,19 @@ describe('connected-apps skill and system-prompt coverage', () => {
     }
   })
 
-  it('keeps OpenWeather city-level and separates outdoor from indoor air', async () => {
+  it('does not turn raw OpenWeather reads into official alerts', async () => {
     const skill = await readConnectedAppsSkill()
     const normalizedSkill = skill.replace(/\s+/g, ' ')
 
     expect(normalizedSkill).toContain('never an unnecessary exact address')
     expect(normalizedSkill).toContain('current outdoor air quality')
     expect(normalizedSkill).toContain(
-      "Outdoor air quality is not evidence about the member's indoor air.",
+      'Raw weather, AQI, and forecast reads do not establish an official alert.',
     )
     expect(normalizedSkill).toContain(
-      'Do not claim unsupported UV or official-alert data.',
+      'unless the current system prompt names a server-authorized fixed route and its exact schema',
     )
+    expect(normalizedSkill).not.toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
   })
 
   it('keeps Mapbox as the geocoding and routing layer', async () => {
@@ -64,6 +65,10 @@ describe('connected-apps skill and system-prompt coverage', () => {
     const groupPrompt = buildAssistantSystemPrompt(createPromptInput({
       conversationScope: 'group',
     }))
+    const scheduledPrompt = buildAssistantSystemPrompt(createPromptInput({
+      scheduledOccurrenceAt: '2026-06-25T13:00:00.000Z',
+      turnTrigger: 'automation-cron',
+    }))
 
     for (const requiredContract of [
       'GOOGLECALENDAR_CREATE_EVENT',
@@ -72,20 +77,31 @@ describe('connected-apps skill and system-prompt coverage', () => {
       'event_duration_hour',
       'event_duration_minutes',
       'end_datetime',
-      'do not retry',
     ]) {
       expect(skill).toContain(requiredContract)
       expect(directPrompt).not.toContain(requiredContract)
       expect(groupPrompt).not.toContain(requiredContract)
     }
+    expect(skill).toContain('do not retry')
 
     expect(directPrompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md',
     )
     expect(directPrompt).toContain('private untrusted evidence')
+    expect(directPrompt).toContain('OPENWEATHER_API_GET_GEOCODING_DIRECT')
+    expect(directPrompt).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
+    expect(directPrompt).toContain('without search')
+    expect(directPrompt).toContain('never guess coordinates')
+    expect(directPrompt).toContain('with numeric `lat`/`lon`')
+    expect(directPrompt).toContain('once including retries')
+    expect(directPrompt).toContain('Continue on failure')
+    expect(scheduledPrompt).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
     expect(groupPrompt).toContain('Use only accountless built-in service tools')
     expect(groupPrompt).toContain(
       'Never list, connect, rename, disconnect, search, read, write, or select',
+    )
+    expect(`${groupPrompt}\n${skill}`).not.toContain(
+      'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS',
     )
   })
 })

@@ -1456,6 +1456,10 @@ export type HostedRuntimeGroupToolRequest =
        */
       linqSenderHandles: readonly string[];
     }
+  | {
+      action: "create_signup_referral_link";
+      participant?: HostedExecutionAcceptedGroupMessageParticipant | null;
+    }
   | ({
       action: "read_usage_referral";
       participant?: HostedExecutionAcceptedGroupMessageParticipant | null;
@@ -1588,6 +1592,19 @@ export type HostedRuntimeGroupToolResponse =
             status: "unavailable";
             unavailableReason: string;
             memberships: null;
+          };
+    }
+  | {
+      action: "create_signup_referral_link";
+      result:
+        | {
+            expiresAt: string;
+            signupUrl: string;
+            status: "ok";
+          }
+        | {
+            status: "unavailable";
+            unavailableReason: string;
           };
     }
   | {
