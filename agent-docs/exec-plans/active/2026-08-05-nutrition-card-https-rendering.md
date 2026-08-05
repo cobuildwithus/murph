@@ -49,6 +49,9 @@ Updated: 2026-08-05
 - Empty assistant text still preserves the singular card delivery.
 - Ordinary inbound auto-replies carry the trusted provider reply target once as
   a thread binding and never copy it into the explicit-target override.
+- Same-route inputs accepted during the live turn retain that binding, and
+  exact-message reply/reaction tools authorize against it without changing the
+  turn contract.
 - Focused tests prove the exact provider payload and both complete and partial
   layouts.
 
@@ -70,9 +73,10 @@ Updated: 2026-08-05
 5. [x] Run focused verification and inspect the candidate diff.
 6. [x] Complete the HTTPS correction review, merge, and deploy; use physical
    evidence to isolate the remaining hosted-route failure.
-7. [ ] Delete the duplicate explicit auto-reply target, prove the raw reply
-   target remains a thread binding beside the opaque conversation locator, then
-   verify the real hosted reply on a physical device.
+7. [x] Delete the duplicate explicit auto-reply target, including active-turn
+   admission, and move exact-message authorization to the existing thread
+   binding beside the opaque conversation locator.
+8. [ ] Merge, deploy, and verify the real hosted reply on a physical device.
 
 ## Verification log
 
@@ -103,3 +107,22 @@ Updated: 2026-08-05
 - The focused automation, delivery-resolution, and Linq channel suites pass
   with 252 tests. The assistant-engine package typecheck and docs drift check
   also pass.
+- Final ReviewGPT found that active-turn admission could recreate the removed
+  override and that exact-message tools still gated on it. The accepted
+  correction deletes both late override writes and makes the existing
+  thread-kind binding the resolver authority; no new route state or provider
+  path was added.
+- The focused active-turn, targeting-resolver, and turn-planning suites pass
+  with 269 tests. They cover no-late-input and late-input routes, binding-only
+  direct and group tool contracts for Linq and Telegram, exact accepted-event
+  matching, and Telegram business-reaction exclusion. The assistant-engine
+  package typecheck also passes on the corrected head.
+- The refreshed parent product-experience review found no remaining product
+  finding: one ordinary request still uses the existing reply, outbox, and Linq
+  owners to return the card in the same chat, while deterministic text remains
+  the failure recovery. The only material evidence gap is the already-required
+  post-deploy physical transcript proof.
+- Six broader affected assistant-engine files pass with 470 tests. The
+  monolithic local-service file hit its existing 4 GB worker ceiling after 79
+  passing tests when run whole; its three accepted-message authorization and
+  second-pass authority tests pass in isolation.

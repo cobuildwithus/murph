@@ -18,7 +18,11 @@ Last verified: 2026-08-05
   request is no longer recovery authority. An inbound auto-reply carries its
   trusted provider reply thread once as binding delivery; the opaque
   conversation locator is not a provider target, and a duplicate explicit
-  target must not change the route kind. Transport ambiguity, timeouts, rate
+  target must not change the route kind. Active-turn admission preserves that
+  binding while updating only accepted-message and idempotency context. Native
+  reply and reaction authorization rechecks the accepted event against the same
+  thread binding, so deleting the duplicate does not remove those tools or
+  change the provider contract. Transport ambiguity, timeouts, rate
   limits, and server failures remain failed delivery attempts and must not
   start a second send.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
