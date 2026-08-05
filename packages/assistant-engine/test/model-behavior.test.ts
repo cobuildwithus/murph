@@ -1423,7 +1423,7 @@ describe('assistant local PDF evidence guidance', () => {
       'It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.',
     )
     expect(prompt).toContain(
-      'Apple Watch/iPhone/Apple Health, WHOOP, and Zepp/Amazfit relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.',
+      'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, or Zepp/Amazfit relay setup, open Murph, sign in, and connect Apple Health.',
     )
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain('WHOOP limits third-party access')
@@ -1447,9 +1447,12 @@ describe('assistant local PDF evidence guidance', () => {
     )
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
     expect(prompt).toContain(
-      'Never call Apple Health unsupported',
+      'Never call Apple Health unsupported/disabled/coming soon',
     )
-    expect(prompt).toContain('in messages put the URL alone last')
+    expect(prompt).toContain(
+      'Apple Health works now in the Murph iPhone app.',
+    )
+    expect(prompt).toContain('put message URLs alone last')
     expect(prompt).not.toContain('Health Connect')
     expect(prompt).not.toContain('Before creating a connection link')
     expect(prompt).not.toContain('empty `--provider garmin`')
@@ -1498,7 +1501,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      `only ${MURPH_PRODUCT_ORIGIN} and https://apps.apple.com/us/app/murph-ai/id6786145859 need no same-turn proof`,
+      `only ${MURPH_PRODUCT_ORIGIN} and https://apps.apple.com/us/app/murph-ai/id6786145859 are proof-free`,
     )
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
@@ -1523,7 +1526,7 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain(
-      'Apple Watch/iPhone/Apple Health, WHOOP, and Zepp/Amazfit relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.',
+      'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, or Zepp/Amazfit relay setup, open Murph, sign in, and connect Apple Health.',
     )
     expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
     expect(prompt).toContain('WHOOP limits third-party access')
@@ -1534,9 +1537,23 @@ describe('assistant local PDF evidence guidance', () => {
       'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      `only ${MURPH_PRODUCT_ORIGIN} and https://apps.apple.com/us/app/murph-ai/id6786145859 need no same-turn proof`,
+      `only ${MURPH_PRODUCT_ORIGIN} and https://apps.apple.com/us/app/murph-ai/id6786145859 are proof-free`,
     )
   })
+
+  it.each(['disabled', 'coming soon'])(
+    'keeps direct Apple Health %s questions on the supported iPhone path',
+    (staleAvailabilityClaim) => {
+      const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+      const truthfulnessBoundary = prompt.match(
+        /Never call Apple Health ([^;]+);/u,
+      )?.[1]
+
+      expect(truthfulnessBoundary?.split('/')).toContain(staleAvailabilityClaim)
+      expect(prompt).toContain('Apple Health works now in the Murph iPhone app.')
+      expect(prompt).toContain('sign in, and connect Apple Health')
+    },
+  )
 
   it('teaches Codex to inspect local PDF artifacts with Poppler tools', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
@@ -2162,7 +2179,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'c40ea1fc60c705fc3e0d7325543d0b3d54aea465e00e7ad7ffcea6ab01d23c09',
+      'd19758fd9e43558a832e9aa9f880c30e10d30ad6ce6fc35e0d0b360854f7f23e',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

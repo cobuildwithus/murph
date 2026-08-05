@@ -330,7 +330,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   ];
 
   assert.equal(sources.length, 28);
-  assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
+  assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length - 1);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length - 2);
   assert.match(markup, /disabled=""/);
   assert.match(markup, /aria-label="Download app for Apple Health"/);
@@ -608,7 +608,9 @@ test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claimin
     sources: [
       {
         connectionAvailable: false,
+        connected: true,
         description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
+        disconnectConnectionId: "impossible-zepp-provider-state",
         id: "zepp",
         logo: {
           className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
@@ -632,6 +634,14 @@ test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claimin
     'button[aria-label="Set up sync for Zepp / Amazfit"]',
   );
   assert.ok(setupButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(rendered.container.querySelector("[data-connection-state]"), null);
+  assert.equal(rendered.container.querySelector(
+    'button[aria-label="Disconnect Zepp / Amazfit"]',
+  ), null);
+  assert.doesNotMatch(
+    rendered.container.textContent ?? "",
+    /Zepp \/ Amazfit (?:connected|not connected)/u,
+  );
 
   await act(async () => {
     setupButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
@@ -645,6 +655,40 @@ test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claimin
   assert.ok(rendered.container.querySelector(
     'a[href="https://apps.apple.com/us/app/murph-ai/id6786145859"]',
   ));
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid requires account authentication before opening the Zepp guide", async () => {
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    authenticated: false,
+    sources: [
+      {
+        connectionAvailable: false,
+        description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
+        id: "zepp",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 40,
+          src: "/brand-logos/connect/wearable-relay.svg",
+          width: 64,
+        },
+        name: "Zepp / Amazfit",
+        setupGuideActionLabel: "Set up sync",
+        setupGuideId: "zepp-apple-health",
+      },
+    ],
+  }));
+
+  assert.ok(rendered.container.querySelector(
+    'button[aria-label="Log in or sign up to set up Zepp / Amazfit"]',
+  ));
+  assert.equal(rendered.container.querySelector(
+    'button[aria-label="Set up sync for Zepp / Amazfit"]',
+  ), null);
+  assert.equal(rendered.container.querySelector("[data-connection-state]"), null);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Sync Zepp through Apple Health/u);
 
   await rendered.cleanup();
 });
@@ -1870,6 +1914,8 @@ test("SourceCard stacks connection-reset content vertically at the base breakpoi
     ordinaryMarkup,
     /class="ml-auto flex shrink-0 flex-col items-stretch gap-2 self-end sm:mt-auto sm:shrink"/u,
   );
+  assert.match(ordinaryMarkup, /data-connection-state="idle"/u);
+  assert.match(ordinaryMarkup, /Garmin not connected/u);
   assert.match(ordinaryMarkup, /aria-label="Garmin connection is not available yet"[^>]+self-end/u);
 
   const connectedMarkup = renderToStaticMarkup(createElement(SourceCard, {

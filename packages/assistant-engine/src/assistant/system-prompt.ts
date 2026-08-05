@@ -1415,7 +1415,7 @@ function buildAssistantIosAppDownloadGuidanceText(
 
 function buildAssistantAppleHealthRelayGuidanceText(): string {
   return `Apple Health relay:
-- Apple Watch/iPhone/Apple Health, WHOOP, and Zepp/Amazfit relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.
+- Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, or Zepp/Amazfit relay setup, open Murph, sign in, and connect Apple Health.
 - WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.
 - WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.
 - No documented WHOOP settings deeplink; never invent one.
@@ -1424,7 +1424,7 @@ function buildAssistantAppleHealthRelayGuidanceText(): string {
 }
 
 function buildAssistantToolTruthfulnessText(): string {
-  return `Claim actions only from runtime results. Never invent invite/share/auth/wearable URLs; only ${MURPH_PRODUCT_ORIGIN} and ${MURPH_IOS_APP_STORE_URL} need no same-turn proof. Never call Apple Health unsupported; in messages put the URL alone last.`;
+  return `Claim only runtime-proven actions. Never invent invite/share/auth/wearable URLs; only ${MURPH_PRODUCT_ORIGIN} and ${MURPH_IOS_APP_STORE_URL} are proof-free. Never call Apple Health unsupported/disabled/coming soon; put message URLs alone last.`;
 }
 
 function buildAssistantGroupToolTruthfulnessText(): string {

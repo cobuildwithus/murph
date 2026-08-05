@@ -99,6 +99,8 @@ Updated: 2026-08-04
 - Focused Device Sync Vitest: 112 config and public-ingress tests passed.
 - Web, Assistant Engine, and Device Sync typechecks passed. Web lint completed
   with zero errors and only pre-existing warnings.
+- The exhaustive hosted-visible source-card guard passed 7 tests after adding
+  the intentionally display-only Zepp catalog source to its expected set.
 - The real production design-catalog dialog was rendered and inspected at 1440
   CSS pixels and 390 CSS pixels. Both settled screenshots are legible and show
   the relay steps plus the Murph continuation action.
@@ -109,10 +111,27 @@ Updated: 2026-08-04
   `parallel_tool_calls`, `include`, and `text`, including Codex-generated tool
   guidance and schemas; it excluded transport/cache/account metadata equally
   and normalized temporary paths. Direct measured 30,890 tokens / 140,890
-  bytes at base and 31,026 / 141,406 at head (+136 tokens, +0.4403%; +516
-  bytes, +0.3662%). Group measured 26,617 tokens / 121,971 bytes at both base
+  bytes at base and 31,026 / 141,389 at head (+136 tokens, +0.4403%; +499
+  bytes, +0.3542%). Group measured 26,617 tokens / 121,971 bytes at both base
   and head (zero delta) because private setup and account-start guidance is not
   rendered for group scope.
 - The preferred Claude Fable UI reviewer reported explicit credit exhaustion;
   the prescribed Opus fallback was attempted once and timed out without a
   result. No local substitute was added.
+- Exact-head GitHub Actions passed the release build/typecheck, app verification,
+  package and fixture coverage, host matrices, frontend design proof, viewport
+  overflow, and repository-hygiene checks at
+  `4ca4671c716dbcfefd4974cca530750b3308b9ba`.
+- GitHub reports the pushed candidate as cleanly mergeable with the advanced
+  base branch; no manual conflict resolution or unrelated base merge is needed.
+- Final ReviewGPT round 1 on the first candidate found two valid issues: the
+  guide-only Zepp card exposed provider lifecycle semantics and let signed-out
+  visitors bypass account authentication, and the prompt delta weakened the
+  existing Apple Health availability boundary. The remediation reuses the
+  shared authentication owner, resumes successful authentication on `/connect`,
+  omits lifecycle state for guide-only cards, and restores the stronger
+  unsupported/disabled/coming-soon rule with current iPhone-path guidance.
+- Remediation proof passed 104 focused Web tests, 73 Assistant Engine prompt
+  tests, both affected package typechecks, the frontend design-proof suite, the
+  seven-test exhaustive hosted-visible source guard, scoped Web lint, and
+  `git diff --check`.

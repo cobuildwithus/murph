@@ -129,6 +129,7 @@ export function AuthProvider({
 function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): boolean {
   return (
     shouldResumeCurrentActionApprovalUrl(payload)
+    || shouldResumeCurrentConnectIndexUrl(payload)
     || shouldResumeCurrentEnvironmentUrl(payload)
     || shouldResumeCurrentDeviceConnectIntentUrl(payload)
     || shouldResumeCurrentClinicalRecordsIndexUrl(payload)
@@ -138,6 +139,16 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
     || shouldResumeCurrentSettingsPulseTrialPaymentUrl(payload)
+  );
+}
+
+function shouldResumeCurrentConnectIndexUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  return (
+    isHostedOnboardingAccessibleStage(payload.stage)
+    && typeof window !== "undefined"
+    && window.location.pathname === "/connect"
   );
 }
 

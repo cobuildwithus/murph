@@ -29,9 +29,12 @@ export function SourceCard({
 }) {
   const setupGuideActionLabel = source.setupGuideActionLabel;
   const setupGuideId = source.setupGuideId;
+  const guideOnly = Boolean(setupGuideId);
   const isAvailable = Boolean(source.connectTarget);
   const canStart = authenticated && isAvailable;
-  const canDisconnect = authenticated && Boolean(source.disconnectConnectionId);
+  const canDisconnect = !guideOnly
+    && authenticated
+    && Boolean(source.disconnectConnectionId);
   const requiresConnectionReset = source.recoveryKind === "connection_reset";
   const historicalResetIncomplete = source.historicalResetIncomplete === true
     && !source.connected
@@ -63,15 +66,17 @@ export function SourceCard({
 
   return (
     <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
-      <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
-        <SourceStatusDot
-          connected={source.connected}
-          historicalResetIncomplete={historicalResetIncomplete}
-          requiresConnectionReset={requiresConnectionReset}
-          requiresReconnect={source.requiresReconnect}
-          sourceName={source.name}
-        />
-      </div>
+      {!guideOnly ? (
+        <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
+          <SourceStatusDot
+            connected={source.connected}
+            historicalResetIncomplete={historicalResetIncomplete}
+            requiresConnectionReset={requiresConnectionReset}
+            requiresReconnect={source.requiresReconnect}
+            sourceName={source.name}
+          />
+        </div>
+      ) : null}
 
       <div className="mb-3 flex h-11 min-w-0 items-center sm:mb-5 sm:h-14">
         <SourceLogo source={source} />
@@ -93,7 +98,7 @@ export function SourceCard({
           </p>
         </div>
 
-        {source.connected && !source.requiresReconnect ? (
+        {!guideOnly && source.connected && !source.requiresReconnect ? (
           <div className="ml-auto flex shrink-0 flex-col items-end gap-2 self-end sm:mt-auto sm:shrink">
             {errorMessage ? (
               <p role="alert" className="text-xs leading-snug text-destructive">
@@ -164,6 +169,13 @@ export function SourceCard({
               >
                 {source.unavailableActionLabel}
               </Button>
+            ) : setupGuideId && setupGuideActionLabel && !authenticated ? (
+              <AuthButton
+                aria-label={`Log in or sign up to set up ${source.name}`}
+                className="self-end"
+              >
+                Log in or sign up
+              </AuthButton>
             ) : setupGuideId && setupGuideActionLabel ? (
               <Button
                 type="button"
