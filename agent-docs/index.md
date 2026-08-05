@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-04
+Last verified: 2026-08-05
 
 ## Purpose
 
@@ -11,6 +11,10 @@ Static SSH worker archive readiness and executor-owned, resource-qualified
 verification scheduling are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
+`agent-docs/references/testing-ci-map.md`.
+
+Protected-main Junction wearable canary credential derivation, handling, and
+verification ownership are specified by `agent-docs/SECURITY.md` and
 `agent-docs/references/testing-ci-map.md`.
 
 Private generated-image failure diagnostics, their failure-only scope,
