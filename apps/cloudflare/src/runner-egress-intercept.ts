@@ -1069,6 +1069,7 @@ async function maybeHandleHostedTranscribeRequest(input: {
     durationMs: readHostedTranscribeOutputDurationMs(output),
     env: input.env,
     memberId: authorization.userId,
+    occurredAt: new Date(upstreamStartedAt).toISOString(),
   });
 
   let response: Response;
@@ -1125,6 +1126,7 @@ function recordHostedTranscribeUsage(input: {
   durationMs: number | null;
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
+  occurredAt: string;
 }): Promise<void> {
   return (async () => {
     if (!input.memberId) {
@@ -1136,6 +1138,7 @@ function recordHostedTranscribeUsage(input: {
       durationMs: input.durationMs,
       memberId: input.memberId,
       model: HOSTED_TRANSCRIBE_WORKERS_AI_MODEL,
+      occurredAt: input.occurredAt,
     });
     await recordHostedRuntimeUsageRecord({
       boundUserId: input.memberId,
@@ -1962,19 +1965,21 @@ async function maybeHandleElevenLabsRequest(input: {
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("content-type", "application/json");
   headers.set("xi-api-key", token);
+  const upstreamRequest = await createHostedRunnerUpstreamRequest(
+    input.request,
+    createProviderUpstreamUrl(input.url, pathMatch),
+    headers,
+    {
+      body: providerRequest.upstreamBody,
+    },
+  );
+  const providerRequestStartedAt = Date.now();
   const response = await fetchAuthorizedProviderUpstream({
     authorization,
     providerKind: "elevenlabs",
     request: input.request,
     startedAt,
-    upstreamRequest: await createHostedRunnerUpstreamRequest(
-      input.request,
-      createProviderUpstreamUrl(input.url, pathMatch),
-      headers,
-      {
-        body: providerRequest.upstreamBody,
-      },
-    ),
+    upstreamRequest,
     url: input.url,
   });
   if (response.ok) {
@@ -1984,12 +1989,14 @@ async function maybeHandleElevenLabsRequest(input: {
           env: input.env,
           memberId: authorization.userId,
           model: providerRequest.modelId,
+          occurredAt: new Date(providerRequestStartedAt).toISOString(),
         })
       : recordHostedElevenLabsMusicUsage({
           durationMs: providerRequest.durationMs,
           env: input.env,
           memberId: authorization.userId,
           model: providerRequest.modelId,
+          occurredAt: new Date(providerRequestStartedAt).toISOString(),
           providerRequestId: response.headers.get("request-id"),
         });
     if (typeof input.ctx?.waitUntil === "function") {
@@ -2006,6 +2013,7 @@ function recordHostedElevenLabsTtsUsage(input: {
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
   model: string;
+  occurredAt: string;
 }): Promise<void> {
   return (async () => {
     if (!input.memberId) {
@@ -2016,6 +2024,7 @@ function recordHostedElevenLabsTtsUsage(input: {
       characterCount: input.characterCount,
       memberId: input.memberId,
       model: input.model,
+      occurredAt: input.occurredAt,
     });
     await recordHostedRuntimeUsageRecord({
       boundUserId: input.memberId,
@@ -2048,6 +2057,7 @@ function recordHostedElevenLabsMusicUsage(input: {
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
   model: string;
+  occurredAt: string;
   providerRequestId: string | null;
 }): Promise<void> {
   return (async () => {
@@ -2059,6 +2069,7 @@ function recordHostedElevenLabsMusicUsage(input: {
       durationMs: input.durationMs,
       memberId: input.memberId,
       model: input.model,
+      occurredAt: input.occurredAt,
       providerRequestId: input.providerRequestId,
     });
     await recordHostedRuntimeUsageRecord({
@@ -2148,19 +2159,21 @@ async function maybeHandleXaiRequest(input: {
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("content-type", "application/json");
   headers.set("authorization", `Bearer ${token}`);
+  const upstreamRequest = await createHostedRunnerUpstreamRequest(
+    input.request,
+    createProviderUpstreamUrl(input.url, pathMatch),
+    headers,
+    {
+      body: requestBody,
+    },
+  );
+  const providerRequestStartedAt = Date.now();
   const response = await fetchAuthorizedProviderUpstream({
     authorization,
     providerKind: "xai",
     request: input.request,
     startedAt,
-    upstreamRequest: await createHostedRunnerUpstreamRequest(
-      input.request,
-      createProviderUpstreamUrl(input.url, pathMatch),
-      headers,
-      {
-        body: requestBody,
-      },
-    ),
+    upstreamRequest,
     url: input.url,
   });
   if (!response.ok) {
@@ -2194,6 +2207,7 @@ async function maybeHandleXaiRequest(input: {
     env: input.env,
     memberId: authorization.userId,
     model: providerRequest.model,
+    occurredAt: new Date(providerRequestStartedAt).toISOString(),
     providerRequestId: responseMetadata.providerRequestId,
     usage: responseMetadata.usage,
   });
@@ -2221,6 +2235,7 @@ function recordHostedXaiSearchUsage(input: {
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
   model: string;
+  occurredAt: string;
   providerRequestId: string | null;
   usage: Record<string, unknown> | null;
 }): Promise<void> {
@@ -2232,6 +2247,7 @@ function recordHostedXaiSearchUsage(input: {
     const record = buildHostedXaiSearchUsageRecord({
       memberId: input.memberId,
       model: input.model,
+      occurredAt: input.occurredAt,
       providerRequestId: input.providerRequestId,
       usage: input.usage,
     });

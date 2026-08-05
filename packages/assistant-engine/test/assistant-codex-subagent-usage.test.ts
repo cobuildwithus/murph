@@ -8,9 +8,32 @@ import {
 
 import {
   type CodexSubagentTokenUsageSample,
-  extractCodexSubagentUsageDrafts,
+  extractCodexSubagentUsageDrafts as extractCodexSubagentUsageDraftsRaw,
   hashAssistantProviderStableJson,
 } from '../src/assistant/providers/helpers.ts'
+
+const SUBAGENT_PROVIDER_REQUEST_STARTED_AT = '2026-07-23T11:59:00.000Z'
+
+function extractCodexSubagentUsageDrafts(
+  input: Omit<
+    Parameters<typeof extractCodexSubagentUsageDraftsRaw>[0],
+    'providerRequestStartedAtByThread'
+  > & {
+    providerRequestStartedAtByThread?: ReadonlyMap<string, string>
+  },
+) {
+  return extractCodexSubagentUsageDraftsRaw({
+    ...input,
+    providerRequestStartedAtByThread:
+      input.providerRequestStartedAtByThread
+      ?? new Map(
+        [...input.subagentTokenUsageByThread.keys()].map((threadId) => [
+          threadId,
+          SUBAGENT_PROVIDER_REQUEST_STARTED_AT,
+        ]),
+      ),
+  })
+}
 
 function tokenUsageEvent(input: {
   method?: string
@@ -77,6 +100,28 @@ describe('extractCodexSubagentUsageDrafts', () => {
         subagentTokenUsageByThread: new Map(),
       }),
     ).toEqual([])
+  })
+
+  it('does not fall back to the parent turn when a child start is unavailable', () => {
+    const childUsage = tokenUsageEvent({
+      threadId: 'thread-child-without-start',
+      turnId: 'turn-child-without-start',
+      total: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+      last: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+    })
+
+    expect(extractCodexSubagentUsageDrafts({
+      modelProvider: 'openai',
+      ordinalStart: 1,
+      parentRawEvents: [spawnEndEvent({
+        receiverThreadIds: ['thread-child-without-start'],
+      })],
+      providerRequestStartedAtByThread: new Map(),
+      subagentTokenUsageByThread: new Map([[
+        'thread-child-without-start',
+        sampleFromEvents([childUsage]),
+      ]]),
+    })).toEqual([])
   })
 
   it('builds per-thread total deltas with spawn-attributed models', () => {
@@ -184,6 +229,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
 
     expect(drafts).toHaveLength(2)
     expect(drafts[0]).toMatchObject({
+      occurredAt: SUBAGENT_PROVIDER_REQUEST_STARTED_AT,
       provider: 'codex-cli',
       providerRequestOrdinal: 3,
       providerRequestOutcome: 'succeeded',

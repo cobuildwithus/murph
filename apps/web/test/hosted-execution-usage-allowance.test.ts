@@ -1104,6 +1104,7 @@ describe("hosted AI usage allowance pricing", () => {
     const usage = buildHostedXaiSearchUsageRecord({
       memberId: "member_123",
       model: "grok-4.5",
+      occurredAt: "2026-03-29T12:00:00.000Z",
       providerRequestId: "resp_abc123",
       usage: {
         cached_input_tokens: 0,
@@ -1144,6 +1145,7 @@ describe("hosted AI usage allowance pricing", () => {
     const usage = buildHostedXaiSearchUsageRecord({
       memberId: "member_123",
       model: "grok-4.5",
+      occurredAt: "2026-03-29T12:00:00.000Z",
       usage: { cost_in_usd_ticks: 50_000_000 },
     });
 
@@ -1156,6 +1158,7 @@ describe("hosted AI usage allowance pricing", () => {
     const base = buildHostedXaiSearchUsageRecord({
       memberId: "member_123",
       model: "grok-4.5",
+      occurredAt: "2026-03-29T12:00:00.000Z",
       usage: { cost_in_usd_ticks: 37_756_000 },
     });
 
@@ -1918,6 +1921,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         durationMs: 2_940,
         memberId: "member_123",
         model: "@cf/openai/whisper-large-v3-turbo",
+        occurredAt: "2026-03-29T12:00:00.000Z",
       }),
       occurredAt: "2026-03-29T12:00:00.000Z",
     };

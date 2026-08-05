@@ -1362,6 +1362,7 @@ export function extractCodexSubagentUsageDrafts(input: {
   ordinalStart: number
   parentModel?: string | null
   parentRawEvents: readonly unknown[]
+  providerRequestStartedAtByThread: ReadonlyMap<string, string>
   serviceTier?: AssistantProviderServiceTier | null
   subagentTokenUsageByThread: ReadonlyMap<string, CodexSubagentTokenUsageSample>
 }): AssistantProviderUsageDraft[] {
@@ -1378,6 +1379,10 @@ export function extractCodexSubagentUsageDrafts(input: {
   const drafts: AssistantProviderUsageDraft[] = []
   let ordinal = input.ordinalStart
   for (const [threadId, sample] of attributedThreads) {
+    const occurredAt = input.providerRequestStartedAtByThread.get(threadId)
+    if (!occurredAt) {
+      continue
+    }
     const pairs = (
       sample.firstEvent === sample.lastEvent
         ? [sample.firstEvent]
@@ -1403,6 +1408,7 @@ export function extractCodexSubagentUsageDrafts(input: {
       'output_tokens',
     )
     drafts.push({
+      occurredAt,
       provider: 'codex-cli',
       providerRequestOrdinal: ordinal++,
       providerRequestOutcome: 'succeeded',

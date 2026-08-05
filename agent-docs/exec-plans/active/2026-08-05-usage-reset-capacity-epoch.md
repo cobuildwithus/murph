@@ -72,10 +72,13 @@ assistant-engine assertions, and five opt-in real-PostgreSQL ordering,
 notice, and rolling-writer assertions. The preliminary specialist review found
 two release-blocking boundaries: generic billing timestamps and nullable
 legacy state were not safe cutover authority, and detached/additional provider
-work did not own its start time. Remediation now records exact transition
+work did not own its start time. The recovered final-round output additionally
+found that ops recovery omitted the reset epoch from notice identity and that
+several non-core provider paths still used completion time. Remediation now records exact transition
 metadata in the authoritative
 billing writes, backfills existing period high-water state, fails closed on
-unclassified rows, and propagates per-operation provider starts. Corrected-head
+unclassified rows, binds ops recovery to the full notice epoch, and propagates
+per-operation provider starts. Corrected-head
 verification, final ReviewGPT correction review, CI, and plan closure remain.
 
 Status: active

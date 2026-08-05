@@ -187,6 +187,7 @@ describe("Retell phone-call runtime", () => {
       disconnection_reason: "call_transfer",
       duration_ms: 60_000,
       end_timestamp: 1_782_386_400_000,
+      start_timestamp: 1_782_386_340_000,
       ...(transferEnded ? { transfer_end_timestamp: 1_782_408_600_000 } : {}),
     }), {
       headers: {
@@ -208,7 +209,7 @@ describe("Retell phone-call runtime", () => {
       state: "ready",
       usage: {
         combinedCostUsdMicros: 187_500,
-        occurredAt: new Date(1_782_408_600_000),
+        occurredAt: new Date(1_782_386_340_000),
         providerCallId: "retell_call_123",
       },
     });

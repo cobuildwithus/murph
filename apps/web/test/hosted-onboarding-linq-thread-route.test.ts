@@ -4073,6 +4073,7 @@ describe("Linq explicit external-thread routing", () => {
       memberId: "member_prepared_container",
       periodEnd: new Date("2026-08-01T00:00:00.000Z"),
       periodStart: new Date("2026-07-01T00:00:00.000Z"),
+      planResetAt: null,
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
       usageCreditBalanceUsdMicros: 0n,

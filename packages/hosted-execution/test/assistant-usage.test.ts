@@ -10,6 +10,7 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   buildAssistantMaintenanceUsageRecord,
   buildHostedCodexMemoryUsageRecord,
+  buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
   buildHostedXaiSearchUsageRecord,
@@ -20,6 +21,8 @@ import {
   resolveAssistantUsageCredentialSource,
 } from "../src/assistant-usage.ts";
 
+const PROVIDER_REQUEST_STARTED_AT = "2026-06-18T12:00:00.000Z";
+
 test("maintenance usage records parse, attribute, and dedupe like turn usage", () => {
   const record = buildAssistantMaintenanceUsageRecord({
     assistantSessionId: "asst_123",
@@ -28,6 +31,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
     featureKey: "assistant_idle_compact",
     memberId: "member_123",
     model: "gpt-5.6-terra",
+    occurredAt: PROVIDER_REQUEST_STARTED_AT,
     providerName: "hosted-openai",
     tokenPricingBasis: "openai-flex",
     triggerKind: "automation_idle_compact",
@@ -47,6 +51,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
   assert.match(record.turnId, /^turn_maintenance_[0-9a-f]{32}$/u);
   assert.equal(record.usageId, `${record.turnId}.attempt-1`);
   assert.equal(record.credentialSource, "platform");
+  assert.equal(record.occurredAt, PROVIDER_REQUEST_STARTED_AT);
   assert.equal(record.providerName, "hosted-openai");
   assert.equal(record.tokenPricingBasis, "openai-flex");
   // sessionId is the Murph assistant session; the provider thread id lands in
@@ -74,6 +79,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
       featureKey: "assistant_idle_compact",
       memberId: "member_123",
       model: "gpt-5.6-terra",
+      occurredAt: PROVIDER_REQUEST_STARTED_AT,
       triggerKind: "automation_idle_compact",
       usage: {
         cachedInputTokens: null,
@@ -151,6 +157,7 @@ test("usage records default and validate token pricing basis", () => {
     featureKey: "assistant_turn",
     memberId: "member_123",
     model: "gpt-5.6-terra",
+    occurredAt: PROVIDER_REQUEST_STARTED_AT,
     triggerKind: "automation_cron",
     usage: {
       cachedInputTokens: null,
@@ -296,6 +303,7 @@ test("transcription usage records carry the audio cost basis and dedupe like tur
     durationMs: 2_940,
     memberId: "member_123",
     model: "@cf/openai/whisper-large-v3-turbo",
+    occurredAt: PROVIDER_REQUEST_STARTED_AT,
   });
 
   // Round-trips through the canonical parser (build already parses; prove a
@@ -306,6 +314,7 @@ test("transcription usage records carry the audio cost basis and dedupe like tur
   assert.equal(record.sessionId, record.turnId);
   assert.equal(record.credentialSource, "platform");
   assert.equal(record.provider, "workers-ai");
+  assert.equal(record.occurredAt, PROVIDER_REQUEST_STARTED_AT);
   assert.equal(record.featureKey, "audio-transcription");
   assert.equal(record.requestedModel, "@cf/openai/whisper-large-v3-turbo");
   assert.equal(record.surface, "hosted-runner");
@@ -321,6 +330,7 @@ test("transcription usage records carry the audio cost basis and dedupe like tur
       durationMs: null,
       memberId: "member_123",
       model: "@cf/openai/whisper-large-v3-turbo",
+      occurredAt: PROVIDER_REQUEST_STARTED_AT,
     }).rawUsageJson,
     { audioBytes: 64 },
   );
@@ -332,6 +342,7 @@ test("transcription usage records carry the audio cost basis and dedupe like tur
       durationMs: 2_940,
       memberId: "member_123",
       model: "@cf/openai/whisper-large-v3-turbo",
+      occurredAt: PROVIDER_REQUEST_STARTED_AT,
     }).turnId,
     record.turnId,
   );
@@ -406,6 +417,7 @@ test("hosted ElevenLabs TTS usage records carry character cost basis and dedupe 
     characterCount: 27,
     memberId: "member_123",
     model: "eleven_multilingual_v2",
+    occurredAt: PROVIDER_REQUEST_STARTED_AT,
   });
 
   assert.deepEqual(parseAssistantUsageRecord({ ...record }), record);
@@ -418,6 +430,7 @@ test("hosted ElevenLabs TTS usage records carry character cost basis and dedupe 
   assert.equal(record.featureKey, "assistant-reply");
   assert.equal(record.provider, "elevenlabs");
   assert.equal(record.providerName, "ElevenLabs");
+  assert.equal(record.occurredAt, PROVIDER_REQUEST_STARTED_AT);
   assert.equal(record.requestedModel, "eleven_multilingual_v2");
   assert.equal(record.surface, "hosted-runner");
   assert.equal(record.triggerKind, "voice-memo-delivery");
@@ -433,15 +446,31 @@ test("hosted ElevenLabs TTS usage records carry character cost basis and dedupe 
       characterCount: 27,
       memberId: "member_123",
       model: "eleven_multilingual_v2",
+      occurredAt: PROVIDER_REQUEST_STARTED_AT,
     }).turnId,
     record.turnId,
   );
+});
+
+test("hosted ElevenLabs music usage retains the provider request start", () => {
+  const record = buildHostedElevenLabsMusicUsageRecord({
+    durationMs: 45_000,
+    memberId: "member_123",
+    model: "music_v2",
+    occurredAt: PROVIDER_REQUEST_STARTED_AT,
+    providerRequestId: "music_request_123",
+  });
+
+  assert.equal(record.occurredAt, PROVIDER_REQUEST_STARTED_AT);
+  assert.equal(record.providerRequestId, "music_request_123");
+  assert.deepEqual(record.rawUsageJson, { durationMs: 45_000 });
 });
 
 test("hosted xAI search usage records carry the provider-reported cost basis and dedupe like turn usage", () => {
   const record = buildHostedXaiSearchUsageRecord({
     memberId: "member_123",
     model: "grok-4.5",
+    occurredAt: PROVIDER_REQUEST_STARTED_AT,
     providerRequestId: "resp_abc123",
     usage: {
       cost_in_usd_ticks: 123_456_789,
@@ -466,6 +495,7 @@ test("hosted xAI search usage records carry the provider-reported cost basis and
   assert.equal(record.featureKey, "x-search");
   assert.equal(record.provider, "xai");
   assert.equal(record.providerName, "xAI");
+  assert.equal(record.occurredAt, PROVIDER_REQUEST_STARTED_AT);
   assert.equal(record.providerRequestId, "resp_abc123");
   assert.equal(record.requestedModel, "grok-4.5");
   assert.equal(record.surface, "hosted-runner");
@@ -492,6 +522,7 @@ test("hosted xAI search usage records carry the provider-reported cost basis and
     buildHostedXaiSearchUsageRecord({
       memberId: "member_123",
       model: "grok-4.5",
+      occurredAt: PROVIDER_REQUEST_STARTED_AT,
       providerRequestId: null,
       usage: null,
     }).rawUsageJson,
@@ -501,6 +532,7 @@ test("hosted xAI search usage records carry the provider-reported cost basis and
     buildHostedXaiSearchUsageRecord({
       memberId: "member_123",
       model: "grok-4.5",
+      occurredAt: PROVIDER_REQUEST_STARTED_AT,
       usage: {
         cost_in_usd_ticks: 12.5,
         input_tokens: 10,
@@ -525,6 +557,7 @@ test("hosted xAI search usage records carry the provider-reported cost basis and
     buildHostedXaiSearchUsageRecord({
       memberId: "member_123",
       model: "grok-4.5",
+      occurredAt: PROVIDER_REQUEST_STARTED_AT,
       providerRequestId: "resp_abc123",
       usage: { cost_in_usd_ticks: 1 },
     }).turnId,

@@ -3176,6 +3176,8 @@ async function runCodexAppServerTurnOnProcess(
   // collected live so evidenced subagent threads win buffer slots over
   // stale/unattributed foreign threads when the cap is reached.
   const collabReceiverThreadIds = new Set<string>()
+  const collabReceiverObservedAtByThread = new Map<string, string>()
+  const subagentTurnStartedAtByThread = new Map<string, string>()
   let rolloutRelativePath: string | null = null
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
@@ -3273,6 +3275,10 @@ async function runCodexAppServerTurnOnProcess(
       ordinalStart: nextDynamicToolUsageOrdinal,
       parentModel: normalizeNullableString(input.model) ?? null,
       parentRawEvents: jsonEvents,
+      providerRequestStartedAtByThread: new Map([
+        ...collabReceiverObservedAtByThread,
+        ...subagentTurnStartedAtByThread,
+      ]),
       serviceTier: input.serviceTier ?? null,
       subagentTokenUsageByThread,
     })
@@ -4556,8 +4562,15 @@ async function runCodexAppServerTurnOnProcess(
         )
       }
     }
+    const collabReceiverObservedAt = new Date().toISOString()
     for (const receiverThreadId of readCodexCollabReceiverThreadIds(message)) {
       collabReceiverThreadIds.add(receiverThreadId)
+      if (!collabReceiverObservedAtByThread.has(receiverThreadId)) {
+        collabReceiverObservedAtByThread.set(
+          receiverThreadId,
+          collabReceiverObservedAt,
+        )
+      }
     }
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
@@ -4763,7 +4776,12 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    if (!isAssistantCodexTokenUsageEventType(readCodexEventMethod(message))) {
+    const eventMethod = readCodexEventMethod(message)
+    if (eventMethod === 'turn/started') {
+      subagentTurnStartedAtByThread.set(threadId, new Date().toISOString())
+      return
+    }
+    if (!isAssistantCodexTokenUsageEventType(eventMethod)) {
       return
     }
 
