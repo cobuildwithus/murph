@@ -74,8 +74,10 @@ Updated: 2026-08-04
   account or direct integration.
 - Preserve the existing signup and Murph contact owners rather than adding a new
   registration route or messaging workflow.
-- Place Zepp after Garmin and before Fitbit in the existing popularity order;
-  do not pin it beside Apple Health merely because Apple Health is the relay.
+- Place Zepp after Strava and before Withings in the existing popularity order;
+  external adoption proxies do not support placing it ahead of Fitbit, and it
+  should not be pinned beside Apple Health merely because Apple Health is the
+  relay.
 - Keep direct-conversation account-start guidance conversational and first-party:
   web creates the account, the iPhone app signs in, and the assistant neither
   invents a personal link nor pressures the person.
@@ -172,3 +174,8 @@ Updated: 2026-08-04
   the exact “first hosted web visit” boundary instead of equating eligibility
   with member creation, and no longer represents the stale closed-card captures
   as current evidence.
+- A follow-up popularity audit rejected the initial Garmin-to-Fitbit placement.
+  Current official app-distribution proxies put Zepp below Garmin and Fitbit,
+  while US iPhone chart evidence also favors Strava. Zepp now follows Strava and
+  precedes Withings. The focused connect-page suite passes 88 tests, and Web
+  typecheck, scoped lint, and `git diff --check` pass on the correction.

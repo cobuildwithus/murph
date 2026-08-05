@@ -355,10 +355,10 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.doesNotMatch(markup, />Strava</u);
   assert.doesNotMatch(markup, /Whoop V2/u);
   assert.ok(sourceHeadingIndex(markup, "Apple Health") < sourceHeadingIndex(markup, "Garmin"));
-  assert.ok(sourceHeadingIndex(markup, "Garmin") < sourceHeadingIndex(markup, "Zepp / Amazfit"));
-  assert.ok(sourceHeadingIndex(markup, "Zepp / Amazfit") < sourceHeadingIndex(markup, "Fitbit"));
+  assert.ok(sourceHeadingIndex(markup, "Garmin") < sourceHeadingIndex(markup, "Fitbit"));
   assert.ok(sourceHeadingIndex(markup, "Fitbit") < sourceHeadingIndex(markup, "Google Fit"));
-  assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Withings"));
+  assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Zepp / Amazfit"));
+  assert.ok(sourceHeadingIndex(markup, "Zepp / Amazfit") < sourceHeadingIndex(markup, "Withings"));
   assert.ok(sourceHeadingIndex(markup, "Withings") < sourceHeadingIndex(markup, "Oura"));
   assert.ok(sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"));
   assert.ok(sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "Dexcom"));
@@ -548,6 +548,18 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
       logo,
     },
     {
+      id: "fitbit",
+      name: "Fitbit",
+      description: "Activity.",
+      logo,
+    },
+    {
+      id: "google-fit",
+      name: "Google Fit",
+      description: "Activity.",
+      logo,
+    },
+    {
       id: "dexcom",
       name: "Dexcom",
       description: "Glucose.",
@@ -566,7 +578,6 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
       logo,
     },
     {
-      connected: true,
       id: "strava",
       name: "Strava",
       description: "Workouts.",
@@ -577,9 +588,11 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
   assert.deepEqual(
     sortConnectSourcesByConnectionState(sources).map((source) => source.id),
     [
-      "strava",
       "oura",
       "garmin",
+      "fitbit",
+      "google-fit",
+      "strava",
       "zepp",
       "whoop",
       "dexcom",
