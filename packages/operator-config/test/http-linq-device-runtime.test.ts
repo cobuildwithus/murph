@@ -432,7 +432,7 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
             name: 'Murph',
             team_id: 'G9DJH2XUMK',
           },
-          fallback_text: 'Ask Murph for your nutrition totals in text',
+          fallback_text: 'Ask Murph for this card in text',
           interactive: false,
           layout: {
             caption: 'Jul 28 · 4 meals · PARTIAL TOTALS',
