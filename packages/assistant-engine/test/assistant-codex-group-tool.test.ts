@@ -14,6 +14,9 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
 } from "@murphai/hosted-execution/contracts";
 import {
+  HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
+} from "@murphai/hosted-execution/pending-group-setup";
+import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
@@ -111,6 +114,9 @@ describe("murph.group dynamic tool", () => {
       "revoke_disclosure_grant",
       "read_shared",
       "read_current",
+      "prepare_next_group",
+      "read_next_group",
+      "cancel_next_group",
       "read_chat_name",
       "read_usage",
       "read_usage_referral",
@@ -134,6 +140,14 @@ describe("murph.group dynamic tool", () => {
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.permissionText.maxLength)
       .toBe(HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS);
+    expect(
+      MURPH_GROUP_TOOL.inputSchema.properties.setup.properties
+        .roomContextMarkdown.maxLength,
+    ).toBe(HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS);
+    expect(
+      MURPH_GROUP_TOOL.inputSchema.properties.setup.properties
+        .roomContextMarkdown.description,
+    ).toContain("2 KiB UTF-8 envelope");
     expect(MURPH_GROUP_TOOL.inputSchema.properties)
       .not.toHaveProperty("requestedVaultShareProjectionScopes");
     expect(MURPH_GROUP_TOOL.inputSchema.properties)
@@ -318,6 +332,13 @@ describe("murph.group dynamic tool", () => {
     }))).toEqual({
       kind: "group",
       request: { action: "read_chat_name" },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "prepare_next_group",
+    }))).toEqual({
+      kind: "group",
+      request: { action: "prepare_next_group" },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
@@ -860,6 +881,72 @@ describe("murph.group dynamic tool", () => {
       action: "arm_usage_referral",
       policyCodes: ["new_person_activation_v1"],
     });
+  });
+
+  it("allows next-group preparation only from fresh private text input", async () => {
+    const setup = {
+      roomContextMarkdown: "Keep this room low-key.",
+      style: {
+        personality: { humor: 2 },
+        tone: "casual",
+      },
+    } as const;
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "prepare_next_group",
+      setup,
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "prepare_next_group",
+      result: {
+        expiresAt: "2026-07-29T18:30:00.000Z",
+        setup: {},
+        status: "prepared",
+      },
+    }));
+    const freshDirectScope = () => ({
+      acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+      conversationId: "conversation_private",
+      conversationScope: "direct" as const,
+      inboundMailboxItemIds: ["mailbox_private"],
+      originSessionId: "session_private",
+      recipientKey: "recipient_private",
+    });
+    const run = async (input: {
+      conversationScope?: "direct" | "group";
+      returnContactKind?: "email" | "text";
+    }) => executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentHostedDeliveryContext: () => ({
+          conversationId: "conversation_private",
+          recipientKey: "recipient_private",
+          returnContactKind: input.returnContactKind ?? "text",
+        }),
+        currentUserActionScope: input.conversationScope === "group"
+          ? () => ({ ...freshDirectScope(), conversationScope: "group" })
+          : freshDirectScope,
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect((await run({})).rpcResult.success).toBe(true);
+    expect(groupRequest).toHaveBeenCalledExactlyOnceWith({
+      action: "prepare_next_group",
+      setup,
+    });
+    expect((await run({ conversationScope: "group" })).rpcResult.success)
+      .toBe(false);
+    expect((await run({ returnContactKind: "email" })).rpcResult.success)
+      .toBe(false);
+    expect(groupRequest).toHaveBeenCalledTimes(1);
   });
 
   it("parses set_chat_avatar arguments without accepting model-supplied URLs or targets", () => {
@@ -4893,6 +4980,8 @@ function createNewsletterHostedToolContext(input: {
 }
 
 function createGroupHostedToolContext(input: {
+  currentHostedDeliveryContext?:
+    AssistantHostedToolContext["currentHostedDeliveryContext"];
   currentInvocationScope?: AssistantHostedToolContext["currentInvocationScope"];
   currentUserActionScope?: AssistantHostedToolContext["currentUserActionScope"];
   groupPermissionOfferRequest?: GroupPermissionOfferRequest;
@@ -4910,7 +4999,8 @@ function createGroupHostedToolContext(input: {
   const context = {
     connectedApps: null,
     computerToolsAvailable: false,
-    currentHostedDeliveryContext: () => null,
+    currentHostedDeliveryContext:
+      input.currentHostedDeliveryContext ?? (() => null),
     currentHostedMailboxItemIds: () => [],
     currentInvocationScope: input.currentInvocationScope ?? (() => {
       const scope = currentUserActionScope();

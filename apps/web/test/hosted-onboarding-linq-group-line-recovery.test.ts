@@ -41,7 +41,7 @@ describe("Hosted Linq group line recovery copy", () => {
     expect(message).toMatch(/\b(?:existing|same) group chat\b/u);
   });
 
-  it("keys one recovery per member, failed line, and group thread", () => {
+  it("keys recovery by member, failed line, group thread, and optional setup", () => {
     const first = buildHostedLinqGroupLineRecoveryEffectId({
       incomingRecipientPhone: "+1 (555) 010-0000",
       memberId: "member-1",
@@ -57,10 +57,24 @@ describe("Hosted Linq group line recovery copy", () => {
       memberId: "member-1",
       threadId: "chat-group-1",
     });
+    const preparedSetup = buildHostedLinqGroupLineRecoveryEffectId({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      pendingGroupSetupId: "hpgs-1",
+      threadId: "chat-group-1",
+    });
+    const replacementSetup = buildHostedLinqGroupLineRecoveryEffectId({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      pendingGroupSetupId: "hpgs-2",
+      threadId: "chat-group-1",
+    });
 
     expect(first).toBe(second);
     expect(first).toMatch(/^linq-group-line-recovery:[0-9a-f]{32}$/u);
     expect(otherLine).not.toBe(first);
+    expect(preparedSetup).not.toBe(first);
+    expect(replacementSetup).not.toBe(preparedSetup);
   });
 
   it("keys source refs by recovery intent and exact source event", () => {

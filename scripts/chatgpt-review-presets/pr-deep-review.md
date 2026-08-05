@@ -34,27 +34,42 @@ friction.
 
 # Evidence and round scope
 
-Use `codebase.zip` as the sole repository-content source. It is a guarded
-snapshot of the pushed PR head and contains:
+Use the `codebase.zip` files in this conversation as the sole
+repository-content source. Round 1 contains a guarded snapshot of the pushed PR
+head with:
 
 - `review-gpt-pr-context/pr-body.md`, the PR description and intent contract
 - `review-gpt-pr-context/pr.diff`, the full current PR diff
 - `review-gpt-pr-context/changed-files.txt`, the current touched-file list
-- `review-gpt-pr-context/review-round.json`, the round number and exact reviewed
-  heads
+- `review-gpt-pr-context/review-round.json`, the round number, exact reviewed
+  heads, and current full-snapshot context anchor
 - `review-gpt-pr-context/since-first-reviewed-head.diff`, cumulative review
   remediation since the immutable first-reviewed head, empty for round 1
 - `review-gpt-pr-context/since-previous-reviewed-head.diff`, the remediation
   delta, empty for round 1
 - the current source, tests, and repository guidance included by the packager
 
+For round 2 or later, read `contextMode` from `review-round.json`:
+
+- `same_thread_delta` means the current small ZIP contains `pr-body.md`,
+  `review-round.json`, `since-previous-reviewed-head.diff`,
+  `changed-since-previous-reviewed-head.txt`, and current versions of files
+  touched by that delta. Use the most recent earlier `full_snapshot` ZIP in this
+  conversation for unchanged repository context. Its reviewed head must match
+  `contextAnchorHead` in the current `review-round.json`.
+- `full_snapshot` means the current ZIP contains the full guarded snapshot. A
+  later round may use this only when `full-review-reason.txt` gives a concrete
+  reason why the prior conversation or small correction packet is insufficient.
+  This ZIP becomes the context anchor for later delta rounds in this conversation.
+
 Stop as `INVALID` only when the code evidence itself will not support a review:
-`pr.diff`, `changed-files.txt`, `review-round.json`, the round diffs, or the
-source snapshot is missing, unreadable, or does not correspond to the checked
-commit. For round 2 or later, also stop as invalid if either ancestry field in
-`review-round.json` is not `true`, since the remediation delta then cannot be
-trusted to describe the change under review. State the exact evidence gap and
-stop.
+the files required by the declared `contextMode` are missing, unreadable, or do
+not correspond to the checked commit. A `same_thread_delta` round is also
+invalid when its matching earlier full-snapshot ZIP is unavailable in this
+conversation. For round 2 or later, stop as invalid if either reviewed-head
+ancestry field is not `true`. A delta round also requires
+`contextAnchorHeadIsAncestorOfPrevious` to be `true`. State the exact evidence
+gap and stop.
 
 Do not stop for a discrepancy confined to the descriptive content of
 `review-gpt-pr-context/pr-body.md` — change-shape counts, validation claims, or
@@ -68,9 +83,9 @@ For round 2 or later the invocation should state the same first-reviewed head as
 the artifact and summarize the prior round's findings, local dispositions,
 landed corrections, and underlying mechanisms. Treat that summary as process
 metadata, not repository evidence, and verify its code claims against the ZIP.
-When it is absent or thin, reconstruct what you can from
-`since-first-reviewed-head.diff` and `since-previous-reviewed-head.diff`, note
-the gap, and continue.
+When it is absent or thin, reconstruct what you can from the current correction
+packet and earlier packets after the matching full-snapshot anchor. Note the gap
+and continue.
 
 Round 1 is the only full-patch audit. In round 1, review `pr.diff` in repository
 context and classify a qualifying finding as `ORIGINAL_PR`.

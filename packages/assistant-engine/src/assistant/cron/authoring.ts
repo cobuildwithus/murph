@@ -68,6 +68,9 @@ export interface AddAssistantCronJobInput
 
 export interface UpsertAssistantCronAutomationInput {
   activeUntil?: string | null
+  deferUpdateWhileDeliveryPending?: boolean
+  firstOccurrenceAt?: string
+  firstOccurrenceActiveDayCount?: number
   firstOccurrenceActiveUntilLocalTime?: string
   firstOccurrencePolicy?:
     | 'after-current-local-day'
@@ -230,35 +233,86 @@ export async function upsertAssistantCronAutomation(
       return null
     }
 
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
+      resolvedCreation.paths,
+    )
+    const existingRuntimeState = existingAutomation
+      ? findAssistantCronCanonicalRuntimeRecord(
+          runtimeStore,
+          existingAutomation.automationId,
+        )
+      : null
+    // A queued intent carries the source revision that authorized its payload.
+    // Keep that revision in place until the existing outbox owner settles the
+    // intent, so reconciliation cannot erase the occurrence by changing the
+    // identity that delivery finalization observes.
+    if (
+      input.deferUpdateWhileDeliveryPending === true &&
+      existingRuntimeState?.state.pendingDeliveryIntentId
+    ) {
+      return null
+    }
+    const requestedFirstOccurrenceAt = input.firstOccurrenceAt === undefined
+      ? null
+      : normalizeFirstOccurrenceAt(input.firstOccurrenceAt)
+    const firstOccurrenceAt = input.firstOccurrencePolicy === undefined
+      ? null
+      : existingAutomation?.schedule.kind === 'at'
+        ? existingAutomation.schedule.at
+        : existingRuntimeState?.state.pendingOccurrenceAt ??
+          requestedFirstOccurrenceAt ??
+          resolveFirstOccurrenceAfterCurrentLocalDay({
+            now: resolvedCreation.now,
+            schedule: resolvedCreation.resolvedSchedule,
+          })
     const materializeOneShot =
       input.firstOccurrencePolicy === 'once-after-current-local-day'
-    const schedule =
-      materializeOneShot && existingAutomation?.schedule.kind === 'at'
-        ? existingAutomation.schedule
-        : materializeOneShot
-          ? {
-              kind: 'at' as const,
-              at: resolveFirstOccurrenceAfterCurrentLocalDay({
-                now: resolvedCreation.now,
-                schedule: resolvedCreation.resolvedSchedule,
-              }),
-            }
-          : resolvedCreation.schedule
+    const recurringFirstOccurrenceNeedsBinding =
+      input.firstOccurrencePolicy === 'after-current-local-day' &&
+      (
+        existingAutomation?.schedule.kind === 'at' ||
+        existingRuntimeState === null
+      )
+    const deferredSchedule = firstOccurrenceAt === null
+      ? null
+      : {
+          kind: 'at' as const,
+          at: firstOccurrenceAt,
+        }
+    const bindRecurringFirstOccurrence =
+      recurringFirstOccurrenceNeedsBinding && deferredSchedule !== null
+    const desiredSchedule = materializeOneShot && deferredSchedule
+      ? deferredSchedule
+      : resolvedCreation.schedule
+    // Until the canonical runtime cursor durably owns the first occurrence,
+    // keep a recurring seed as the finite one-shot it is replacing. A failed
+    // runtime-state write can therefore under-send, but it cannot expose the
+    // recurring source early on the current local day.
+    const initialSchedule = bindRecurringFirstOccurrence
+      ? deferredSchedule
+      : desiredSchedule
+    const activeWindowFirstOccurrenceAt =
+      requestedFirstOccurrenceAt ?? firstOccurrenceAt
     const activeUntil =
       input.activeUntil === undefined &&
-      materializeOneShot &&
-      input.firstOccurrenceActiveUntilLocalTime !== undefined
-        ? existingAutomation?.schedule.kind === 'at' &&
-          typeof existingAutomation.activeUntil === 'string'
+      input.firstOccurrencePolicy !== undefined &&
+      input.firstOccurrenceActiveUntilLocalTime !== undefined &&
+      activeWindowFirstOccurrenceAt !== null
+        ? typeof existingAutomation?.activeUntil === 'string'
           ? existingAutomation.activeUntil
           : resolveFirstOccurrenceActiveUntil({
+              activeDayCount: input.firstOccurrenceActiveDayCount ?? 1,
               activeUntilLocalTime: input.firstOccurrenceActiveUntilLocalTime,
-              occurrenceSchedule: schedule,
+              now: resolvedCreation.now,
+              occurrenceSchedule: {
+                kind: 'at',
+                at: activeWindowFirstOccurrenceAt,
+              },
               resolvedSchedule: resolvedCreation.resolvedSchedule,
             })
         : input.activeUntil
 
-    const created = await upsertAutomation(
+    let created = await upsertAutomation(
       buildCanonicalAutomationUpsertInput({
         activeUntil,
         vault: resolvedCreation.vault,
@@ -266,7 +320,7 @@ export async function upsertAssistantCronAutomation(
         automation: existingAutomation,
         title: resolvedCreation.name,
         status,
-        schedule,
+        schedule: initialSchedule,
         route: buildCanonicalAutomationRoute(target),
         instructions: resolvedCreation.prompt,
         slug: input.slug,
@@ -274,58 +328,78 @@ export async function upsertAssistantCronAutomation(
         tags: input.tags,
       }),
     )
-    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
-      resolvedCreation.paths,
-    )
     const timeZone = await resolveAssistantCronDefaultTimeZone(resolvedCreation.vault)
-    const source = requireCanonicalAutomationCronRecord(
+    let source = requireCanonicalAutomationCronRecord(
       created.record,
       timeZone,
     )
-    const existingRuntimeState = findAssistantCronCanonicalRuntimeRecord(
-      runtimeStore,
-      source.automationId,
-    )
-    if (existingRuntimeState) {
+    if (existingRuntimeState && !bindRecurringFirstOccurrence) {
       return projectCanonicalAssistantCronJob({
         source,
         runtimeState: existingRuntimeState,
       })
     }
 
-    const runtimeState = createAssistantCronCanonicalRuntimeRecord({
-      jobId: source.automationId,
-      now: resolvedCreation.now.toISOString(),
-    })
+    const runtimeState = existingRuntimeState ??
+      createAssistantCronCanonicalRuntimeRecord({
+        jobId: source.automationId,
+        now: resolvedCreation.now.toISOString(),
+      })
 
     const persistedRuntimeState =
-      input.firstOccurrencePolicy !== 'after-current-local-day'
+      !bindRecurringFirstOccurrence
         ? runtimeState
         : {
             ...runtimeState,
+            updatedAt: resolvedCreation.now.toISOString(),
             state: {
               ...runtimeState.state,
-              pendingOccurrenceAt: resolveFirstOccurrenceAfterCurrentLocalDay({
-                now: resolvedCreation.now,
-                schedule: resolvedCreation.resolvedSchedule,
-              }),
+              pendingOccurrenceAt: deferredSchedule.at,
             },
           }
 
     upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, persistedRuntimeState)
-    // No rollback on write failure: a canonical automation without a runtime
-    // record self-heals (readers synthesize initial state) and re-seeding is
-    // idempotent, so the worst case is losing the first-occurrence deferral.
     await writeAssistantCronCanonicalRuntimeStore(
       resolvedCreation.paths,
       runtimeStore,
     )
+
+    if (bindRecurringFirstOccurrence) {
+      created = await upsertAutomation(
+        buildCanonicalAutomationUpsertInput({
+          activeUntil,
+          vault: resolvedCreation.vault,
+          automationId: source.automationId,
+          automation: created.record,
+          title: resolvedCreation.name,
+          status,
+          schedule: desiredSchedule,
+          route: buildCanonicalAutomationRoute(target),
+          instructions: resolvedCreation.prompt,
+          slug: input.slug,
+          summary: input.summary ?? null,
+          tags: input.tags,
+        }),
+      )
+      source = requireCanonicalAutomationCronRecord(created.record, timeZone)
+    }
 
     return projectCanonicalAssistantCronJob({
       source,
       runtimeState: persistedRuntimeState,
     })
   })
+}
+
+function normalizeFirstOccurrenceAt(value: string): string {
+  const parsed = new Date(value)
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'First-occurrence deferral requires a valid timestamp.',
+    )
+  }
+  return parsed.toISOString()
 }
 
 export async function resolveAssistantCronJobCreationInput(
@@ -418,7 +492,9 @@ function resolveFirstOccurrenceAfterCurrentLocalDay(input: {
 }
 
 function resolveFirstOccurrenceActiveUntil(input: {
+  activeDayCount: number
   activeUntilLocalTime: string
+  now: Date
   occurrenceSchedule: AssistantCronSchedule
   resolvedSchedule:
     | AssistantCronSchedule
@@ -426,42 +502,85 @@ function resolveFirstOccurrenceActiveUntil(input: {
     | ({ kind: 'dailyLocal'; localTime: string; timeZone: string })
 }): string {
   if (
-    input.occurrenceSchedule.kind !== 'at' ||
     input.resolvedSchedule.kind !== 'dailyLocal' ||
     !('timeZone' in input.resolvedSchedule)
   ) {
     throw new VaultCliError(
       'ASSISTANT_CRON_INVALID_SCHEDULE',
-      'A one-shot local cutoff requires a materialized daily-local occurrence.',
+      'A finite local cutoff requires a daily-local occurrence.',
+    )
+  }
+  if (
+    !Number.isSafeInteger(input.activeDayCount) ||
+    input.activeDayCount <= 0
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'A finite local cutoff requires at least one active local day.',
+    )
+  }
+  const firstOccurrenceAt =
+    input.occurrenceSchedule.kind === 'at'
+      ? input.occurrenceSchedule.at
+      : resolveFirstOccurrenceAfterCurrentLocalDay({
+          now: input.now,
+          schedule: input.resolvedSchedule,
+        })
+  const cutoffSchedule = {
+    kind: 'dailyLocal' as const,
+    localTime: input.activeUntilLocalTime,
+    timeZone: input.resolvedSchedule.timeZone,
+  }
+  let activeUntilAnchor = firstOccurrenceAt
+  let activeUntil: string | null = null
+  for (let day = 0; day < input.activeDayCount; day += 1) {
+    activeUntil = computeAssistantCronNextRunAt(
+      cutoffSchedule,
+      new Date(activeUntilAnchor),
+    )
+    if (!activeUntil) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_INVALID_SCHEDULE',
+        'The finite local cutoff does not produce a future boundary.',
+      )
+    }
+    activeUntilAnchor = activeUntil
+  }
+  if (activeUntil === null) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'The finite local cutoff requires at least one active day.',
     )
   }
 
-  const activeUntil = computeAssistantCronNextRunAt(
-    {
-      kind: 'dailyLocal',
-      localTime: input.activeUntilLocalTime,
-      timeZone: input.resolvedSchedule.timeZone,
-    },
-    new Date(input.occurrenceSchedule.at),
-  )
-  if (!activeUntil) {
-    throw new VaultCliError(
-      'ASSISTANT_CRON_INVALID_SCHEDULE',
-      'The one-shot local cutoff does not produce a future boundary.',
-    )
-  }
   const occurrenceDay = formatTimeZoneDateTimeParts(
-    input.occurrenceSchedule.at,
+    firstOccurrenceAt,
     input.resolvedSchedule.timeZone,
   ).dayKey
-  const cutoffDay = formatTimeZoneDateTimeParts(
+  const firstCutoff = computeAssistantCronNextRunAt(
+    cutoffSchedule,
+    new Date(firstOccurrenceAt),
+  )
+  const firstCutoffDay = firstCutoff
+    ? formatTimeZoneDateTimeParts(
+        firstCutoff,
+        input.resolvedSchedule.timeZone,
+      ).dayKey
+    : null
+  if (firstCutoffDay !== occurrenceDay) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'The first local cutoff must fall after the first occurrence on the same local day.',
+    )
+  }
+  const activeUntilDay = formatTimeZoneDateTimeParts(
     activeUntil,
     input.resolvedSchedule.timeZone,
   ).dayKey
-  if (cutoffDay !== occurrenceDay) {
+  if (activeUntilDay < occurrenceDay) {
     throw new VaultCliError(
       'ASSISTANT_CRON_INVALID_SCHEDULE',
-      'The one-shot local cutoff must fall after the occurrence on the same local day.',
+      'The finite local cutoff must not precede its first occurrence.',
     )
   }
 
