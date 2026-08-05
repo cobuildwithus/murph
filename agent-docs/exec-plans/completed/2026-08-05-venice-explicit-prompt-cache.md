@@ -1,6 +1,6 @@
 # Restore Venice GPT-5.6 prompt-cache reuse
 
-Status: active
+Status: completed
 Created: 2026-08-05
 Updated: 2026-08-05
 
@@ -69,7 +69,7 @@ large Codex prompt cache entry when only the conversation tail changes.
 3. [x] Implement the smallest endpoint-aware Venice compatibility transform.
 4. [x] Add focused unit and intercepted-egress regression proof.
 5. [x] Run Cloudflare focused tests, typecheck, and deterministic request proof.
-6. [ ] Commit, push, open a PR, and complete specialist, ReviewGPT, and CI.
+6. [x] Commit, push, open a PR, and complete specialist, ReviewGPT, and CI.
 7. [x] Record deployment order and the capped provider canary or exact blocker.
 
 ## Decisions
@@ -121,3 +121,12 @@ Completed local proof:
   bytes versus an 8,538,983-byte static-closure budget). This PR does not change
   any runner-bundle input or budget; the focused test remains committed for the
   exact-head hosted lane.
+- Preliminary specialists returned one accepted product-experience finding and
+  one accepted coverage finding. Final round 1 independently returned the same
+  activation-canary finding. Both mechanisms were corrected with no production
+  source growth.
+- Final correction-verification round 2 returned `ROUND_OUTCOME: PASS` with no
+  review-induced findings on
+  `77e5e187388047b8b78bef50d4de8d3122670ae8`.
+- All required GitHub Actions checks passed on that exact reviewed head.
+Completed: 2026-08-05
