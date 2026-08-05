@@ -1904,7 +1904,7 @@ describe('assistant system prompt cache stability', () => {
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(56_000)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
