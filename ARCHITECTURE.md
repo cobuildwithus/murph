@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-04
+Last verified: 2026-08-05
 
 ## Accepted-Message Targeting
 
@@ -396,7 +396,7 @@ fan-out, scheduler, policy engine, result table, or second service.
 
 ## Hosted Connected Apps
 
-Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather custom auth for the allowlisted weather tools, agent-approved calendar-create write allowlist, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results, while Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, accountless execution only for server-allowlisted built-in service tools, one generic result-size bound rather than provider-specific tool or result adapters, direct custom-auth execution only for allowlisted OpenWeather read tools, and a separate direct-execute path only for agent-approved primary-calendar event creation with unsupported write arguments rejected before provider execution and failed or ambiguous provider outcomes marked non-retryable.
+Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather authority, agent-approved calendar-create write allowlist, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results for its tools. Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, and accountless execution only for server-allowlisted built-in service tools. The existing current-weather tools use direct custom-auth execution through Composio. One fixed web-owned One Call read accepts only bounded latitude and longitude, requests only official national alerts, and returns a small normalized alert projection. It adds no scheduler, state, cache, or user-defined weather threshold. The direct and scheduled alert guidance must not deploy until One Call 3 is active for the exact production key and a signed Web-control smoke read returns a normalized success, including a valid empty alert list. Deploy Web first when activation and assistant deployment cannot happen together. Primary-calendar creation keeps its separate agent-approved direct-execute path, rejects unsupported write arguments before provider execution, and marks failed or ambiguous provider outcomes non-retryable.
 
 Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, newsletters, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. One structured automation write creates the single group newsletter and stores its delivery choice as a system-owned tag: current-chat editions use the ordinary bound-route conversation outbox, while email editions alone receive the one-shot prepare/send capability. Email preparation derives the group from the signed runtime member rather than a model-supplied group id and persists the private authorization proof plus HTML on the existing assistant outbox parent. The outbox reports an accepted parent to cron immediately, so even a later provider, validation, or persistence error leaves the occurrence in its existing pending-delivery state while retaining the error on the run record. Web marks that parent sent only after durably persisting recipient fanout, and the existing cron reconciler settles the occurrence from the parent state. Recipient intents use only the generic outbox retry lifecycle, so newsletter retries never recompose the body or create a second recipient budget. Because newsletter email `From` identity is spoofable, group-email replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
 
@@ -1343,12 +1343,15 @@ accepted input in the same live turn invalidates an earlier card-only decision,
 and attachment is rejected after the delivery context advances. Every
 card copies the immediately preceding single-date canonical meal-totals read.
 Both versions use the same deterministic text fallback, Linq capability
-boundary, inline URL size bound, and existing outbox idempotency lifecycle.
-Linq owns the always-visible static transcript layout, which marks partial
-totals without exposing their values; tapping the card passes the same inline
-URL to the offline iOS reader. The installed extension does not own initial
-balloon visibility. No card API, database, auth path, cleanup owner, or second
-queue exists.
+boundary, and existing outbox idempotency lifecycle. Linq owns the
+noninteractive static transcript layout, which carries the date, meal count,
+available totals, an explicit partial marker, and the first available exact V2
+goal plus its frozen status in canonical metric order. Its required URL is a
+fixed, non-sensitive HTTPS product URL rather than encoded card state. The
+fallback body remains value-free and names a truthful text-recovery action to
+avoid Apple data-detector downgrade; the installed extension does not own
+balloon visibility. No card API, database, auth path, cleanup owner, extension
+network read, or second queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
@@ -1415,6 +1418,54 @@ authority: the planner repeats route, identity, activation, access, and
 participant checks in its transaction. New thread containers and members whose
 roots or active access are not yet established remain on the transaction-owned
 provisioning path.
+
+A private accepted text turn may arm one expiring
+`HostedPendingGroupSetup` for a person member's current managed Linq line. The
+row is only a one-use transfer envelope: it stores the owner, blinded line key,
+timestamps, and one encrypted strict-version payload containing optional sparse
+existing assistant-style fields and bounded explicit room-context Markdown. It
+stores no plaintext setup, chat id, roster, provider actor, message, contact
+label, or participant handle. Before the transaction for the first inbound on
+an unbound Linq group, Web performs one bounded current-chat read and resolves
+at most 32 active non-Murph roster handles to member ids. Inside the existing
+route transaction, a lone roster-matched intent wins; if several match, only
+the current sender's own intent breaks the tie. Otherwise the canonical
+first-active-sender fallback continues when the provider roster read completed.
+An unavailable roster leaves recovery-backed ownership indeterminate and
+returns a typed retry before route creation; a completed empty or oversized
+roster cannot match another member's setup but may retain the active-sender
+fallback. After the request-local existing-route and roster preflight, explicit
+suspension or health-data-consent withdrawal prevents route creation and setup
+outreach. Other sender inactivity or unresolved sender identity disqualifies
+only the fallback; it does not veto a distinct active roster-matched owner. Only
+after the prepared-route boundary returns no route may an unknown or inactive
+non-withdrawn sender receive the existing group-setup handoff. When first-contact
+admission enforcement is enabled, an unknown sender must pass that gate before
+setup outreach. The setup must cover the provider event time and remain unexpired
+at processing
+time. The selected row stays locked through
+`ensureHostedThreadContainerRouteTx`, which remains the only route and
+`ownerMemberId` owner, and is deleted only when that transaction creates the
+route. Only a newly created route applies sparse style through the synthetic
+member's existing preference owner and carries explicit room context on the
+existing activation wake to initialize the fixed group-room-model page exactly
+once before conversation work. Existing-route convergence and transaction
+rollback leave the envelope unchanged without compensation; a concurrent loser
+re-reads the canonical route and appends its distinct message there. Unreadable
+or future encrypted payloads are consumed as unavailable optional setup so they
+cannot block an accepted group message. Expiry is query-time authority, and
+member deletion removes the intent by foreign-key cascade. Provider add-actor
+fields are not ownership authority. For a hard-blocked-line recovery, the
+existing delivery attempt is the retry owner: transport must durably record its
+provider-accepted milestone before reporting recovery success, and an exact
+uncorrelated attempt makes replacement-line admission retry rather than fall
+through to first-speaker ownership. That exact pinned recovery alone bypasses
+the generic pre-provider claim lease: it replays immediately with the same
+provider idempotency key, compares and advances the row's existing `updatedAt`
+version, and preserves the original `attemptedAt` as the proof that recovery
+preceded the replacement-line event. An uncorrelated recovery provider error
+surfaces without locally settling this shared row; accepted correlation or
+provider-correlated terminal evidence remains the only settlement authority.
 
 For usage-credit Checkout, one `created` purchase row persists before Stripe
 I/O and, together with the single purchase-status lifecycle and stable

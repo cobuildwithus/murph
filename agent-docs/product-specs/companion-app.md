@@ -148,12 +148,17 @@ and missing-consent states render distinct recovery guidance.
 
 The Android home screen treats
 `GET /api/device-sync/companion/status?sourceProviderSlug=health_connect` as
-sync truth. Webhook receipt rows retain a normalized source slug only when the
-provider-owned webhook parser identifies the source of an actual data-bearing
-event. Data-less historical completions, lifecycle events, and legacy rows keep
-that field null. Source-scoped status filters both connected-source availability
-and receipt timestamps, so those null-source rows intentionally do not satisfy
-Android status.
+sync truth. The response's server `observedAt` owns setup age, receipt
+freshness, and relative-time copy; the phone wall clock never does. When a
+refresh is unavailable, Android may retain the cached projection for context
+only if it labels the surface **Last checked online** and suppresses the frozen
+waiting, synced, delayed, needs-attention, and relative-time claims until one
+explicit check succeeds. Webhook receipt rows retain a normalized source slug
+only when the provider-owned webhook parser identifies the source of an actual
+data-bearing event. Data-less historical completions, lifecycle events, and
+legacy rows keep that field null. Source-scoped status filters both
+connected-source availability and receipt timestamps, so those null-source rows
+intentionally do not satisfy Android status.
 
 The client keeps its Junction resource request centralized and starts with four
 minimum-necessary groups: sleep, workouts, steps, and active calories. The

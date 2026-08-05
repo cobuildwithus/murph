@@ -53,6 +53,7 @@ import {
   type AssistantHostedImageGenerationLauncher,
   type AssistantInputEventRecord,
   type MurphManagedAutomationDiagnosticStage,
+  type MurphOnboardingFollowupDiagnostic,
   type AssistantTurnEnvironment,
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
@@ -241,6 +242,8 @@ const HOSTED_RUNTIME_ALLOWED_LOG_KEY_NAMES = new Set([
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 const HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS = 30_000;
 const HOSTED_ASSISTANT_CRON_STATUS_YIELD_POLL_MS = 100;
+const ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE =
+  "ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE";
 const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS = 30_000;
 const HOSTED_MANAGED_AUTOMATION_SETUP_FAILURE_RETRY_DELAYS_MS = [
   30_000,
@@ -265,6 +268,9 @@ const HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS = 1_000;
 const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-update"] as const;
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
   "apply-member-preferences",
+] as const;
+const HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS = [
+  "initialize-group-room-model",
 ] as const;
 const HOSTED_FOREGROUND_CAUSAL_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
@@ -645,6 +651,9 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "leave_membership":
     case "post_disclosure_request":
     case "revoke_disclosure_grant":
+    case "prepare_next_group":
+    case "read_next_group":
+    case "cancel_next_group":
     case "revoke_own_email_share":
       return {
         action: request.action,
@@ -1989,6 +1998,29 @@ export async function runHostedWorkspaceAssistantPhase(
         deviceSyncMaintenanceRan,
       );
 
+    const groupRoomModelInitialization =
+      hasFreshConversationInput
+        ? await runRequiredGroupRoomModelInitializationPhase({
+          executionContext,
+          input,
+        })
+        : {
+            continueAssistantLane: true,
+            result: null,
+          };
+    if (groupRoomModelInitialization.result) {
+      if (!groupRoomModelInitialization.continueAssistantLane) {
+        return mergeContinuingSystemMailboxResult(
+          groupRoomModelInitialization.result,
+        );
+      }
+
+      continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
+        continuingSystemMailboxResult,
+        groupRoomModelInitialization.result,
+      );
+    }
+
     const memberPreferencesPrePlanningStartedAt = Date.now();
     const memberPreferencesPrePlanning =
       hasFreshConversationInput
@@ -2775,12 +2807,16 @@ async function applyHostedManagedAutomationsBestEffort(input: {
   }
 
   let diagnosticStage: MurphManagedAutomationDiagnosticStage | null = null;
+  const onboardingFollowupDiagnostics: MurphOnboardingFollowupDiagnostic[] = [];
   let result: Awaited<ReturnType<typeof applyMurphManagedAutomations>>;
   try {
     result = await applyMurphManagedAutomations({
       now: new Date(resolveHostedAssistantPhaseNowMs(input.input)),
       onDiagnosticStage(stage) {
         diagnosticStage = stage;
+      },
+      onOnboardingFollowupDiagnostic(diagnostic) {
+        onboardingFollowupDiagnostics.push(diagnostic);
       },
       operatorHomeRoot: input.input.restored.operatorHomeRoot,
       ...(input.defaultRoute !== undefined
@@ -2956,6 +2992,31 @@ async function applyHostedManagedAutomationsBestEffort(input: {
     return null;
   }
 
+  const onboardingFollowupDiagnostic =
+    onboardingFollowupDiagnostics.at(-1) ?? null;
+  if (
+    onboardingFollowupDiagnostic
+    && onboardingFollowupDiagnostic.action !== "unchanged"
+  ) {
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        eventCode: "assistant.onboarding_followup_reconciled",
+        level: "info",
+        phase: "invoke",
+        redactedJson: buildHostedOnboardingFollowupDiagnostic(
+          onboardingFollowupDiagnostic,
+        ),
+      },
+      platform: input.input.runtime.platform,
+    });
+  }
+
   await writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields({
@@ -3012,6 +3073,24 @@ function buildHostedManagedAutomationStageDiagnostics(
     ...(diagnostic.seedPosition === undefined
       ? {}
       : { murphManagedAutomationSeedPosition: diagnostic.seedPosition }),
+  };
+}
+
+function buildHostedOnboardingFollowupDiagnostic(
+  diagnostic: MurphOnboardingFollowupDiagnostic,
+): HostedRuntimeRedactedJson {
+  return {
+    onboardingFollowupAction: diagnostic.action,
+    onboardingFollowupActiveUntil: diagnostic.activeUntil,
+    onboardingFollowupFirstOccurrenceAt: diagnostic.firstOccurrenceAt,
+    onboardingFollowupOpportunityDays: diagnostic.opportunityDays,
+    onboardingFollowupPreviousScheduleKind:
+      diagnostic.previousScheduleKind,
+    onboardingFollowupScheduleKind: diagnostic.scheduleKind,
+    onboardingStateCreatedAt: diagnostic.onboardingStateCreatedAt,
+    onboardingStateSource: diagnostic.onboardingStateSource,
+    onboardingStateStatus: diagnostic.onboardingStateStatus,
+    onboardingStateUpdatedAt: diagnostic.onboardingStateUpdatedAt,
   };
 }
 
@@ -4534,6 +4613,100 @@ async function runPrePlanningSystemMailboxPhase(input: {
         },
       }),
     ),
+  };
+}
+
+async function runRequiredGroupRoomModelInitializationPhase(input: {
+  executionContext: AssistantExecutionContext;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<{
+  continueAssistantLane: boolean;
+  result: HostedWorkspaceRunnerAssistantPhaseResult | null;
+}> {
+  const now = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
+  const pendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
+    allowedRouteActions: HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS,
+    now: () => now,
+    vaultRoot: input.input.restored.vaultRoot,
+  });
+  if (!pendingWake.at) {
+    return {
+      continueAssistantLane: true,
+      result: null,
+    };
+  }
+  if (!hostedAssistantPhaseWakeIsDueAt(pendingWake.at, now)) {
+    return {
+      continueAssistantLane: false,
+      result: {
+        nextWakeAt: pendingWake.at,
+        nextWakeReason: "assistant",
+        progressed: false,
+        redactedStatus: {
+          hostedGroupRoomModelInitializationPending: 1,
+        },
+      },
+    };
+  }
+
+  const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
+    allowedRouteActions: HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS,
+    executionContext: input.executionContext,
+    now: () => now,
+    operatorHomeRoot: input.input.restored.operatorHomeRoot,
+    runtime: input.input.runtime,
+    runtimeEnv: input.input.runtimeEnv,
+    vaultRoot: input.input.restored.vaultRoot,
+  });
+  if (!preparation) {
+    const currentPendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
+      allowedRouteActions: HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS,
+      now: () => now,
+      vaultRoot: input.input.restored.vaultRoot,
+    });
+    if (currentPendingWake.at) {
+      return {
+        continueAssistantLane: false,
+        result: {
+          nextWakeAt: currentPendingWake.at,
+          nextWakeReason: "assistant",
+          progressed: false,
+          redactedStatus: {
+            hostedGroupRoomModelInitializationPending: 1,
+          },
+        },
+      };
+    }
+    return {
+      continueAssistantLane: true,
+      result: null,
+    };
+  }
+  if (preparation.status === "retryable_failed") {
+    return {
+      continueAssistantLane: false,
+      result: {
+        checkpointReason: "system_mailbox_receipt",
+        nextWakeAt: preparation.nextWakeAt,
+        nextWakeReason: "assistant",
+        progressed: true,
+        redactedStatus: {
+          hostedGroupRoomModelInitializationErrorCode: preparation.errorCode,
+          hostedGroupRoomModelInitializationRetryableFailed: 1,
+        },
+      },
+    };
+  }
+
+  return {
+    continueAssistantLane: true,
+    result: {
+      checkpointReason: "system_mailbox_receipt",
+      progressed: true,
+      redactedStatus: {
+        hostedGroupRoomModelInitializationProcessed: 1,
+      },
+    },
   };
 }
 
@@ -6117,8 +6290,26 @@ async function drainHostedPostCheckpointDelivery(input: {
   const postBaseNextWake = dropConsumedWorkspaceAssistantWake(
     resolveHostedPostDeliveryBaseNextWake(input),
   );
+  const postDeliveryCronWakeState =
+    outcomes.some((outcome) =>
+      outcome.deliveryErrorCode === ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE
+    )
+      ? await resolveHostedAssistantCronWakeStateBestEffort(input.input)
+      : null;
+  const postDeliveryCronWake = postDeliveryCronWakeState?.available === true
+    ? postDeliveryCronWakeState.wake
+    : postDeliveryCronWakeState
+      ? createHostedRuntimeWakeCandidate(
+          new Date(
+            resolveHostedAssistantPhaseNowMs(input.input)
+              + HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS,
+          ).toISOString(),
+          HOSTED_ASSISTANT_WAKE_REASON,
+        )
+      : null;
   const postNextWake = selectHostedRuntimeWakeCandidate([
     postBaseNextWake,
+    dropConsumedWorkspaceAssistantWake(postDeliveryCronWake),
     input.postDeliveryReconciliationWake,
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
@@ -6471,6 +6662,11 @@ function shouldStageHostedTerminalOutboxFailureInput(
   outcome: HostedAssistantDeliveryOutcome,
 ): boolean {
   if (outcome.deliveryStatus !== "failed" || outcome.retryable === true) {
+    return false;
+  }
+  if (
+    outcome.deliveryErrorCode === ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE
+  ) {
     return false;
   }
   return normalizeHostedTerminalOutboxFailureDirectReplyChannel(

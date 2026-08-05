@@ -34,6 +34,8 @@ import {
 import { readAssistantOutboxIntent } from '../outbox/store.js'
 import { assistantDeliveryErrorPreventsFreshIntentRetry } from '../outbox/retry-policy.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
+import { isRecognizedMurphOnboardingFollowupAutomation } from '../managed-automations.js'
+import { isCurrentMurphOnboardingFollowupAutomation } from '../onboarding-followup-automation.js'
 
 const ASSISTANT_CRON_MISSING_PENDING_DELIVERY_STALE_AFTER_MS = 24 * 60 * 60 * 1000
 
@@ -440,6 +442,15 @@ function assistantCronTerminalDeliveryConsumesOccurrence(
 ): boolean {
   if (terminal.kind === 'sent') {
     return true
+  }
+
+  if (
+    terminal.failureCode === 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE' &&
+    source?.kind === 'automation' &&
+    isRecognizedMurphOnboardingFollowupAutomation(source) &&
+    !isCurrentMurphOnboardingFollowupAutomation(source)
+  ) {
+    return false
   }
 
   if (

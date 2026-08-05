@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-07-29
+Last verified: 2026-08-05
 
 ## Current Posture
 
@@ -117,6 +117,10 @@ default destination for every goal or the definition of activation.
   equivalent would be unsafe or materially unusable. Do not exempt the rest of
   the workflow. When safe, conversation still handles discovery, setup, the
   smallest authorized handoff, and status or confirmation afterward.
+- Group funding keeps that browser handoff plain and device-native: describe
+  purchased capacity as `usage`, present one-time contribution in a bottom
+  drawer on phones and a centered dialog on larger screens, and leave payment
+  confirmation to Stripe.
 - Wearable-provider authorization uses that exception narrowly. A provider
   callback completes automatically only for the browser that can prove it
   started the connection for the signed-in member; that proof-bound return is
@@ -140,6 +144,27 @@ default destination for every goal or the definition of activation.
   another join. Default to the route-bound server-owned like-to-consent offer;
   liking adds only the disclosed snapshot, while the first-party page is the
   customize path.
+- A member who is about to add Murph to an existing iMessage group can prepare
+  ownership in their private Murph text first. That explicit intent applies to
+  one new group on their current Murph number for 30 minutes. If exactly one
+  prepared member is in the new group's current roster, that member owns
+  Murph's group even when someone else speaks first. Competing preparations do
+  not guess; only a prepared current sender breaks the tie, otherwise the
+  existing first-active-sender behavior remains.
+  The same private request may explicitly choose a sparse room style or give
+  compact social guidance for that new group. Murph must not infer or copy
+  private settings, health facts, memories, or contacts into the room. The
+  setup applies only when the route is new; an existing group never changes
+  owner or configuration because someone prepared another group.
+  If Murph requires that member to replace a hard-blocked group line, the
+  still-live setup follows only the exact persisted recovery instruction for
+  that same member and thread, even when another current roster member speaks
+  first on the replacement line. A recovery-pinned message does not create a
+  fallback-owned route if that exact still-live setup cannot be claimed. If
+  recovery delivery correlation or the current roster is temporarily
+  unavailable, Murph retries before accepting the replacement-line group
+  message instead of turning uncertainty into permanent ownership. The setup
+  remains one-use and cannot authorize another group or a later setup.
 - Speaker labels should make authenticated group conversation easier to follow
   without pretending uncertainty is identity. Prefer the member's current
   authorized profile name. Use a human owner's explicitly shared contact label
@@ -177,7 +202,7 @@ Assistant runtime state is never the source of truth for these objects.
   explanatory history or requirements on demand. Do not repeat the same truth
   in a heading, introduction, and row labels.
 - When a member choice materially changes cost-weighted included-capacity
-  drawdown, disclose that difference in the choice and keep it visible in the
+  drawdown, disclose that difference before save and keep it visible in the
   saved-state summary. Do not imply that equal model names have equal provider
   cost.
 - Rank learning, confidence, and life fit before engagement or protocol volume.

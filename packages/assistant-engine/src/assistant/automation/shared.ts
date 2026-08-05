@@ -42,6 +42,7 @@ export interface AssistantRunEvent {
     | 'daemon.failed'
     | 'cron.job.completed'
     | 'cron.occurrence.expired'
+    | 'onboarding.followup.completed'
     | 'cron.scan.job'
     | 'cron.scan.started'
     | 'reply.scan.started'

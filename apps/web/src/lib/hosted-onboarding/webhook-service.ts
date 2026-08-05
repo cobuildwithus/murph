@@ -15,6 +15,7 @@ import {
   getHostedLinqChatSummary,
   startHostedLinqChatTypingIndicator,
   stopHostedLinqChatTypingIndicator,
+  type HostedLinqChatHandleSummary,
 } from "./linq-client";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment } from "./runtime";
@@ -111,6 +112,12 @@ import type {
 import {
   reconcileHostedThreadContainerParticipants,
 } from "../hosted-groups/group-tool";
+import {
+  lookupHostedGroupParticipantMemberIdByHandle,
+} from "../hosted-groups/participant-member";
+import {
+  HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS,
+} from "../hosted-groups/pending-group-setup";
 import {
   reconcileHostedUsageReferralRewardAfterCommit,
 } from "../hosted-growth/usage-referral";
@@ -474,6 +481,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               event: planningEvent,
               firstContactAdmissionDecision,
               instantStartAllowed,
+              pendingGroupParticipantMemberIds:
+                planningResolution.pendingGroupParticipantMemberIds ?? null,
+              pendingGroupRosterUnavailable:
+                planningResolution.pendingGroupRosterUnavailable ?? false,
               requireFirstContactAdmission,
               prisma: transaction,
             }),
@@ -659,6 +670,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     await reconcileHostedLinqGroupRostersAfterCommitBestEffort({
       reconciles: plan.postCommitGroupRosterReconciles ?? [],
+      requestLocalRoster: planningResolution.requestLocalGroupRoster,
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
     await reconcileHostedUsageReferralRewardsAfterCommitBestEffort({
@@ -822,6 +834,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
 interface HostedLinqPlanningEventResolution {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  pendingGroupParticipantMemberIds?: readonly string[];
+  pendingGroupRosterUnavailable?: boolean;
+  requestLocalGroupRoster?: {
+    chatId: string;
+    handles: readonly HostedLinqChatHandleSummary[];
+  };
   /** The route the resolver already read, reused so warming costs no query. */
   threadRoute: HostedThreadRouteSnapshot | null;
 }
@@ -839,15 +857,41 @@ async function resolveHostedLinqPlanningEvent(input: {
   const webhookIsGroup = messageEvent.data.chat?.is_group;
   if (webhookIsGroup === true) {
     logHostedLinqChatClassification("webhook-group");
+    const threadRoute = messageEvent.data.is_from_me
+      ? null
+      : await readHostedThreadRouteByThreadIdentity({
+          channel: "linq",
+          prisma: input.prisma,
+          threadId: messageEvent.data.chat_id,
+        });
+    const pendingGroupRoster =
+      !messageEvent.data.is_from_me && !threadRoute
+        ? await resolveHostedLinqPendingGroupParticipantMemberIds({
+            chatId: messageEvent.data.chat_id,
+            prisma: input.prisma,
+            signal: input.signal,
+          })
+        : null;
     return {
       event: messageEvent,
-      threadRoute: messageEvent.data.is_from_me
-        ? null
-        : await readHostedThreadRouteByThreadIdentity({
-            channel: "linq",
-            prisma: input.prisma,
-            threadId: messageEvent.data.chat_id,
+      ...(pendingGroupRoster?.participantMemberIds == null
+        ? {}
+        : {
+            pendingGroupParticipantMemberIds:
+              pendingGroupRoster.participantMemberIds,
           }),
+      ...(pendingGroupRoster?.unavailable === true
+        ? { pendingGroupRosterUnavailable: true }
+        : {}),
+      ...(pendingGroupRoster?.handles == null
+        ? {}
+        : {
+            requestLocalGroupRoster: {
+              chatId: messageEvent.data.chat_id,
+              handles: pendingGroupRoster.handles,
+            },
+          }),
+      threadRoute,
     };
   }
 
@@ -864,6 +908,7 @@ async function resolveHostedLinqPlanningEvent(input: {
     threadId: messageEvent.data.chat_id,
   });
   let resolvedIsGroup: boolean;
+  let canonicalHandles: readonly HostedLinqChatHandleSummary[] | null = null;
   if (threadRoute) {
     logHostedLinqChatClassification("thread-route-group");
     resolvedIsGroup = true;
@@ -876,6 +921,7 @@ async function resolveHostedLinqPlanningEvent(input: {
         ...(input.signal ? { signal: input.signal } : {}),
       });
       canonicalIsGroup = summary.isGroup;
+      canonicalHandles = summary.handles;
     } catch (error) {
       logHostedLinqChatClassification("canonical-unavailable");
       if (input.signal?.aborted) {
@@ -904,6 +950,15 @@ async function resolveHostedLinqPlanningEvent(input: {
     resolvedIsGroup = canonicalIsGroup;
   }
 
+  const pendingGroupRoster =
+    resolvedIsGroup && !threadRoute
+      ? await resolveHostedLinqPendingGroupParticipantMemberIds({
+          chatId: messageEvent.data.chat_id,
+          handles: canonicalHandles,
+          prisma: input.prisma,
+          signal: input.signal,
+        })
+      : null;
   return {
     event: {
       ...messageEvent,
@@ -916,8 +971,122 @@ async function resolveHostedLinqPlanningEvent(input: {
         },
       },
     },
+    ...(pendingGroupRoster?.participantMemberIds == null
+      ? {}
+      : {
+          pendingGroupParticipantMemberIds:
+            pendingGroupRoster.participantMemberIds,
+        }),
+    ...(pendingGroupRoster?.unavailable === true
+      ? { pendingGroupRosterUnavailable: true }
+      : {}),
+    ...(pendingGroupRoster?.handles == null
+      ? {}
+      : {
+          requestLocalGroupRoster: {
+            chatId: messageEvent.data.chat_id,
+            handles: pendingGroupRoster.handles,
+          },
+        }),
     threadRoute,
   };
+}
+
+async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
+  chatId: string;
+  handles?: readonly HostedLinqChatHandleSummary[] | null;
+  prisma: PrismaClient;
+  signal?: AbortSignal;
+}): Promise<{
+  handles: readonly HostedLinqChatHandleSummary[] | null;
+  participantMemberIds: string[] | null;
+  unavailable: boolean;
+}> {
+  try {
+    const summary = input.handles
+      ? null
+      : await getHostedLinqChatSummary({
+          chatId: input.chatId,
+          timeoutMs: HOSTED_LINQ_CHAT_CLASSIFICATION_TIMEOUT_MS,
+          ...(input.signal ? { signal: input.signal } : {}),
+        });
+    if (summary?.isGroup === false) {
+      logHostedLinqPendingGroupRoster("provider_not_group");
+      return {
+        handles: null,
+        participantMemberIds: null,
+        unavailable: false,
+      };
+    }
+    const handles = input.handles ?? summary?.handles ?? [];
+    if (handles.length === 0) {
+      logHostedLinqPendingGroupRoster("empty_roster");
+      return {
+        handles,
+        participantMemberIds: null,
+        unavailable: false,
+      };
+    }
+    const participantHandles = [...new Set(handles.flatMap((handle) => {
+      const value = handle.handle.trim();
+      const status = handle.status?.trim().toLowerCase() ?? null;
+      return !value
+          || handle.isMe
+          || (status !== null && status !== "active")
+        ? []
+        : [value];
+    }))];
+    if (
+      participantHandles.length
+        > HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS
+    ) {
+      logHostedLinqPendingGroupRoster("oversized_roster");
+      return {
+        handles,
+        participantMemberIds: null,
+        unavailable: false,
+      };
+    }
+    const resolved = await Promise.all(participantHandles.map(async (handle) =>
+      await lookupHostedGroupParticipantMemberIdByHandle({
+        handle,
+        prisma: input.prisma,
+      })
+    ));
+    const memberIds = [...new Set(resolved.flatMap((memberId) =>
+      memberId ? [memberId] : []
+    ))];
+    logHostedLinqPendingGroupRoster("resolved");
+    return {
+      handles,
+      participantMemberIds: memberIds,
+      unavailable: false,
+    };
+  } catch (error) {
+    if (input.signal?.aborted) {
+      throw error;
+    }
+    logHostedLinqPendingGroupRoster("unavailable");
+    return {
+      handles: null,
+      participantMemberIds: null,
+      unavailable: true,
+    };
+  }
+}
+
+function logHostedLinqPendingGroupRoster(
+  outcome:
+    | "empty_roster"
+    | "oversized_roster"
+    | "provider_not_group"
+    | "resolved"
+    | "unavailable",
+): void {
+  logHostedOnboardingDiagnostic(
+    "hosted-onboarding.webhook.linq.pending-group-roster",
+    { outcome },
+  );
 }
 
 function logHostedLinqChatClassification(
@@ -1135,6 +1304,10 @@ function normalizeHostedLinqReadReceiptChatId(value: string | null | undefined):
 
 async function reconcileHostedLinqGroupRostersAfterCommitBestEffort(input: {
   reconciles: readonly HostedOnboardingLinqGroupRosterReconcile[];
+  requestLocalRoster?: {
+    chatId: string;
+    handles: readonly HostedLinqChatHandleSummary[];
+  };
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
 }): Promise<void> {
   if (input.reconciles.length === 0) {
@@ -1147,6 +1320,9 @@ async function reconcileHostedLinqGroupRostersAfterCommitBestEffort(input: {
         await reconcileHostedThreadContainerParticipants({
           chatId: reconcile.chatId,
           containerMemberId: reconcile.containerMemberId,
+          ...(input.requestLocalRoster?.chatId === reconcile.chatId
+            ? { handles: input.requestLocalRoster.handles }
+            : {}),
           prisma: getPrisma(),
         });
       } catch (error) {

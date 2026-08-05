@@ -382,8 +382,9 @@ the right edge of the card; do not add a leading radio dot.
 Unavailable choices stay visible but disabled, with the plan or access
 requirement named directly.
 When a choice materially changes cost-weighted included-capacity drawdown,
-state that difference in the choice copy and keep it visible beside the saved
-selection. Do not hide it in a tooltip or only mention it after save.
+state that difference before save and keep it visible beside the saved
+selection. It may appear in the option copy or the immediate pending-selection
+summary; do not hide it in a tooltip or mention it only after save.
 Keyboard focus rings the whole card. Keep actions outside the card label so the
 full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
@@ -409,8 +410,12 @@ the initial $5 activation purchase, whose amount is shown before payment;
 selecting a maximum alone does not charge the card. Keep both funding actions
 available at every current group-capacity state; capacity changes urgency and
 automatic refill timing, not the ability to fund. Keep an explicit one-time
-contribution as the secondary action. Dollar amounts are cost-weighted usage
-credit, never an owned or promised number of messages. Every cap increase
+contribution as the secondary action. On phones, open that contribution in the
+same bottom-drawer pattern as monthly sponsorship; keep the centered dialog on
+larger screens. Customer-facing amount choices say `usage`; cost weighting is
+an accounting detail, not interface copy. Keep the contribution action at the
+drawer's safe-area edge while its body scrolls. Dollar amounts remain usage
+capacity, never an owned or promised number of messages. Every cap increase
 requires fresh payer confirmation. Keep the alias, note, and eligible temporary
 running bit in one collapsible `Add a note` section, open by default, and attach
 them only to the activation or one-time purchase, never to automatic refills.
