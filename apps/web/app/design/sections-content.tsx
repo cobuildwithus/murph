@@ -12,6 +12,7 @@ import { HowItWorksSection } from "@/src/components/homepage/how-it-works-sectio
 import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
+import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { TogetherSection } from "@/src/components/homepage/together-section";
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
@@ -208,6 +209,18 @@ export function SectionsContent() {
         >
           <TogetherSection />
           <AsksGridSection />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage footer">
+        <div
+          data-design-section="homepage-footer"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <SiteFooter id="design-site-footer-preview" />
         </div>
       </StudySection>
 
