@@ -15665,7 +15665,9 @@ describe("hosted workspace runtime entrypoint", () => {
             snapshotAttempt += 1;
             events.push(`snapshot:${snapshotAttempt}:${snapshotInput.reason}`);
             if (snapshotAttempt === 1) {
-              throw new HostedRuntimeCheckpointInterruptedByWakeError();
+              throw new HostedRuntimeCheckpointInterruptedByWakeError({
+                notification: { notifiedAtEpochMs: Date.now() },
+              });
             }
             return {
               snapshotRef: createBundleRef({

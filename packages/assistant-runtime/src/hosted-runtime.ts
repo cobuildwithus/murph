@@ -3050,6 +3050,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ): void => {
           if (
             input.rearmIdleCheckpointAfterEmptyProbe !== true
+            || input.latencySeed === null
             || !shouldContinue()
           ) {
             return;
