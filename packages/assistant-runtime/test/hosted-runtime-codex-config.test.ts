@@ -11,6 +11,7 @@ import { afterEach, test } from "vitest";
 import {
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   resolveMurphDynamicTools,
+  stopWarmCodexAppServer,
   type CodexAppServerTurnInput,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
@@ -141,6 +142,7 @@ function executeCodexAppServerTurn(
 }
 
 afterEach(async () => {
+  await stopWarmCodexAppServer("hosted-codex-config-test-cleanup");
   await Promise.all(
     temporaryPaths.splice(0).map((target) =>
       removeTemporaryPath(target)
@@ -939,7 +941,7 @@ test("hosted Codex runtime config rejects relative command overrides", async () 
 });
 
 testHostedCodexAuthE2e(
-  "hosted Codex runtime authenticates but the legacy built-in OpenAI config fails",
+  "hosted Codex runtime authenticates, excludes native memory, and rejects legacy OpenAI config",
   async () => {
     const operatorHomeRoot = await createTemporaryDirectory();
     const requests: string[] = [];
@@ -987,23 +989,48 @@ testHostedCodexAuthE2e(
         { encoding: "utf8", mode: 0o600 },
       );
 
-      const fixedResult = await executeCodexAppServerTurn({
-        approvalPolicy: "never",
+      const executeOrdinaryTurn = async (input: {
+        codexHome: string;
+        groupConversation: boolean;
+        prompt: string;
+      }) =>
+        await executeCodexAppServerTurn({
+          approvalPolicy: "never",
+          baseInstructions: input.groupConversation
+            ? "You are Murph in a representative group health conversation."
+            : "You are Murph in a representative individual health conversation.",
+          codexHome: input.codexHome,
+          developerInstructions:
+            "Answer the current message using the ordinary Murph conversation path.",
+          env: {
+            CODEX_HOME: input.codexHome,
+            HOME: operatorHomeRoot,
+            OPENAI_API_KEY: result.runtimeEnv.OPENAI_API_KEY,
+            PATH: result.runtimeEnv.PATH ?? process.env.PATH ?? "",
+          },
+          groupConversation: input.groupConversation,
+          prompt: input.prompt,
+          sandbox: "danger-full-access",
+          workingDirectory: operatorHomeRoot,
+        });
+
+      const individualPrompt = "measure individual native memory input";
+      const groupPrompt = "measure group native memory input";
+      const fixedIndividualResult = await executeOrdinaryTurn({
         codexHome: result.runtimeEnv.CODEX_HOME,
-        env: {
-          CODEX_HOME: result.runtimeEnv.CODEX_HOME,
-          HOME: operatorHomeRoot,
-          OPENAI_API_KEY: result.runtimeEnv.OPENAI_API_KEY,
-          PATH: result.runtimeEnv.PATH ?? process.env.PATH ?? "",
-        },
-        prompt: "hello hosted auth regression",
-        sandbox: "danger-full-access",
-        workingDirectory: operatorHomeRoot,
+        groupConversation: false,
+        prompt: individualPrompt,
+      });
+      const fixedGroupResult = await executeOrdinaryTurn({
+        codexHome: result.runtimeEnv.CODEX_HOME,
+        groupConversation: true,
+        prompt: groupPrompt,
       });
 
       const fixedRequestCount = requests.length;
       assert.ok(fixedRequestCount >= 1);
-      assert.equal(fixedResult.finalMessage, "auth regression ok");
+      assert.equal(fixedIndividualResult.finalMessage, "auth regression ok");
+      assert.equal(fixedGroupResult.finalMessage, "auth regression ok");
       assert.ok(
         authorizationHeaders
           .slice(0, fixedRequestCount)
@@ -1012,7 +1039,12 @@ testHostedCodexAuthE2e(
       assert.ok(
         requests
           .slice(0, fixedRequestCount)
-          .some((request) => /hello hosted auth regression/u.test(request)),
+          .some((request) => request.includes(individualPrompt)),
+      );
+      assert.ok(
+        requests
+          .slice(0, fixedRequestCount)
+          .some((request) => request.includes(groupPrompt)),
       );
       assert.ok(
         requests
@@ -1035,7 +1067,44 @@ testHostedCodexAuthE2e(
               /"role":"developer","content":\[\{"type":"input_text","text":"It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\."\}\]/gu,
             ) ?? [],
         );
-      assert.equal(currentTimeReminders.length, 1);
+      assert.equal(currentTimeReminders.length, 2);
+
+      const enabledCodexHome = path.join(operatorHomeRoot, ".codex-native");
+      await mkdir(enabledCodexHome, { mode: 0o700, recursive: true });
+      await writeFile(
+        path.join(enabledCodexHome, "config.toml"),
+        enableCodexNativeMemoryForRegression(config),
+        { encoding: "utf8", mode: 0o600 },
+      );
+      const enabledMemoryRoot = path.join(enabledCodexHome, "memories");
+      await mkdir(enabledMemoryRoot, { mode: 0o700, recursive: true });
+      await writeFile(
+        path.join(enabledMemoryRoot, "memory_summary.md"),
+        nativeMemoryProbe,
+        { encoding: "utf8", mode: 0o600 },
+      );
+
+      const enabledRequestStart = requests.length;
+      const enabledIndividualResult = await executeOrdinaryTurn({
+        codexHome: enabledCodexHome,
+        groupConversation: false,
+        prompt: individualPrompt,
+      });
+      const enabledGroupResult = await executeOrdinaryTurn({
+        codexHome: enabledCodexHome,
+        groupConversation: true,
+        prompt: groupPrompt,
+      });
+      const enabledRequests = requests.slice(enabledRequestStart);
+      const enabledOrdinaryRequests = enabledRequests.filter((request) =>
+        request.includes(individualPrompt) || request.includes(groupPrompt)
+      );
+      assert.equal(enabledIndividualResult.finalMessage, "auth regression ok");
+      assert.equal(enabledGroupResult.finalMessage, "auth regression ok");
+      assert.equal(enabledOrdinaryRequests.length, 2);
+      assert.ok(
+        enabledOrdinaryRequests.every((request) => request.includes(nativeMemoryProbe)),
+      );
 
       const legacyCodexHome = await prepareLegacyBuiltInOpenAiCodexHome({
         baseUrl: `${readServerBaseUrl(server)}/v1`,
@@ -1072,6 +1141,137 @@ testHostedCodexAuthE2e(
     }
   },
   20_000,
+);
+
+testHostedCodexAuthE2e(
+  "disables native memory startup work for previously eligible rollouts",
+  async () => {
+    const requests: string[] = [];
+    const nativeMemoryRequestMarkers: Array<{
+      memgen: string | null;
+      turnMetadata: string | null;
+    }> = [];
+    const server = await startResponsesStubServer({
+      captureWebSocketMemoryMarkers: true,
+      nativeMemoryRequestMarkers,
+      requiredAuthorization: "Bearer hosted-memory-startup-key",
+      requests,
+      responseText: "memory startup regression ok",
+    });
+
+    const executeTurn = async (input: {
+      codexHome: string;
+      operatorHomeRoot: string;
+      prompt: string;
+    }) =>
+      await executeCodexAppServerTurn({
+        approvalPolicy: "never",
+        codexHome: input.codexHome,
+        env: {
+          CODEX_HOME: input.codexHome,
+          HOME: input.operatorHomeRoot,
+          OPENAI_API_KEY: "hosted-memory-startup-key",
+          PATH: process.env.PATH ?? "",
+        },
+        prompt: input.prompt,
+        sandbox: "danger-full-access",
+        workingDirectory: input.operatorHomeRoot,
+      });
+
+    const prepareEligibleRollout = async (operatorHomeRoot: string) => {
+      const result = await prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
+          [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+            `${readServerBaseUrl(server)}/v1`,
+          NODE_ENV: "test",
+          OPENAI_API_KEY: "hosted-memory-startup-key",
+          PATH: process.env.PATH ?? "",
+        },
+      });
+      const disabledConfig = await readFile(result.codexConfigPath, "utf8");
+      await writeFile(
+        result.codexConfigPath,
+        enableCodexNativeMemoryForRegression(disabledConfig, {
+          minRolloutIdleHours: 0,
+        }),
+        { encoding: "utf8", mode: 0o600 },
+      );
+      await executeTurn({
+        codexHome: result.runtimeEnv.CODEX_HOME,
+        operatorHomeRoot,
+        prompt: "seed a production-format eligible memory rollout",
+      });
+      await stopWarmCodexAppServer("memory-startup-regression-seed-complete");
+      markPersistedCodexRolloutEligibleForMemoryStartup(
+        result.runtimeEnv.CODEX_HOME,
+      );
+      await sleep(1_100);
+      return { disabledConfig, result };
+    };
+
+    try {
+      const enabledOperatorHome = await createTemporaryDirectory();
+      const enabled = await prepareEligibleRollout(enabledOperatorHome);
+      const enabledMarkerStart = nativeMemoryRequestMarkers.length;
+      await executeTurn({
+        codexHome: enabled.result.runtimeEnv.CODEX_HOME,
+        operatorHomeRoot: enabledOperatorHome,
+        prompt: "trigger enabled memory startup positive control",
+      });
+      await waitForNativeMemoryRequest({
+        markers: nativeMemoryRequestMarkers,
+        startIndex: enabledMarkerStart,
+      });
+      await stopWarmCodexAppServer("memory-startup-positive-control-complete");
+
+      const disabledOperatorHome = await createTemporaryDirectory();
+      const disabled = await prepareEligibleRollout(disabledOperatorHome);
+      await writeFile(
+        disabled.result.codexConfigPath,
+        disabled.disabledConfig,
+        { encoding: "utf8", mode: 0o600 },
+      );
+      const disabledMemoryProbe = "disabled-memory-rollout-probe";
+      const disabledMemoryRoot = path.join(
+        disabled.result.runtimeEnv.CODEX_HOME,
+        "memories",
+      );
+      await mkdir(disabledMemoryRoot, { mode: 0o700, recursive: true });
+      await writeFile(
+        path.join(disabledMemoryRoot, "memory_summary.md"),
+        disabledMemoryProbe,
+        { encoding: "utf8", mode: 0o600 },
+      );
+
+      const disabledMarkerStart = nativeMemoryRequestMarkers.length;
+      const disabledRequestStart = requests.length;
+      const disabledPrompt = "trigger disabled memory startup regression";
+      const disabledTurn = await executeTurn({
+        codexHome: disabled.result.runtimeEnv.CODEX_HOME,
+        operatorHomeRoot: disabledOperatorHome,
+        prompt: disabledPrompt,
+      });
+      await sleep(1_500);
+      assert.equal(disabledTurn.finalMessage, "memory startup regression ok");
+      assert.ok(
+        nativeMemoryRequestMarkers
+          .slice(disabledMarkerStart)
+          .every((marker) => !isNativeMemoryRequestMarker(marker)),
+      );
+      const disabledForegroundRequest = requests
+        .slice(disabledRequestStart)
+        .find((request) => request.includes(disabledPrompt));
+      assert.ok(disabledForegroundRequest);
+      assert.equal(disabledForegroundRequest.includes(disabledMemoryProbe), false);
+    } finally {
+      await stopWarmCodexAppServer("memory-startup-regression-complete");
+      await closeHttpServer(server);
+    }
+  },
+  60_000,
 );
 
 testHostedCodexAutocompactionE2e(
@@ -1909,6 +2109,7 @@ function isRetryableTemporaryCleanupError(error: unknown): boolean {
 
 async function startResponsesStubServer(input: {
   authorizationHeaders?: string[];
+  captureWebSocketMemoryMarkers?: boolean;
   compactionOutputKind?: "compaction" | "message";
   compactionRequestIndexes?: ReadonlySet<number>;
   nativeMemoryRequestMarkers?: Array<{
@@ -2031,6 +2232,20 @@ async function startResponsesStubServer(input: {
     });
   });
 
+  if (input.captureWebSocketMemoryMarkers) {
+    server.on("upgrade", (request, socket) => {
+      input.nativeMemoryRequestMarkers?.push({
+        memgen: typeof request.headers["x-openai-memgen-request"] === "string"
+          ? request.headers["x-openai-memgen-request"]
+          : null,
+        turnMetadata: typeof request.headers["x-codex-turn-metadata"] === "string"
+          ? request.headers["x-codex-turn-metadata"]
+          : null,
+      });
+      socket.destroy();
+    });
+  }
+
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
@@ -2095,6 +2310,83 @@ function parseJsonObject(value: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function isNativeMemoryRequestMarker(input: {
+  memgen: string | null;
+  turnMetadata: string | null;
+}): boolean {
+  return input.memgen?.trim().toLowerCase() === "true"
+    || parseJsonObject(input.turnMetadata ?? "")?.request_kind === "memory";
+}
+
+async function waitForNativeMemoryRequest(input: {
+  markers: ReadonlyArray<{ memgen: string | null; turnMetadata: string | null }>;
+  startIndex: number;
+}): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (input.markers.slice(input.startIndex).some(isNativeMemoryRequestMarker)) {
+      return;
+    }
+    await sleep(50);
+  }
+  assert.fail("enabled-memory positive control must extract the eligible rollout");
+}
+
+function markPersistedCodexRolloutEligibleForMemoryStartup(
+  codexHome: string,
+): void {
+  const sqliteModule = process.getBuiltinModule("node:sqlite");
+  assert.ok(sqliteModule);
+  const database = new sqliteModule.DatabaseSync(
+    path.join(codexHome, "state_5.sqlite"),
+  );
+  try {
+    const result = database.prepare(
+      [
+        "UPDATE threads",
+        "SET archived = 0, preview = ?, source = 'vscode',",
+        "memory_mode = 'enabled', history_mode = 'legacy',",
+        "updated_at_ms = (unixepoch() * 1000) - 7200000",
+        "WHERE source = 'vscode'",
+      ].join(" "),
+    ).run("memory startup eligible rollout");
+    assert.equal(result.changes, 1);
+  } finally {
+    database.close();
+  }
+}
+
+function enableCodexNativeMemoryForRegression(
+  config: string,
+  options: { minRolloutIdleHours?: number } = {},
+): string {
+  const enabledFeatureConfig = config.replace(
+    "[features]\nplugins = false\nmemories = false",
+    "[features]\nplugins = false\nmemories = true",
+  );
+  assert.notEqual(enabledFeatureConfig, config);
+
+  const enabledMemoryConfig = enabledFeatureConfig.replace(
+    "[memories]\nuse_memories = false\ngenerate_memories = false",
+    [
+      "[memories]",
+      "use_memories = true",
+      "generate_memories = true",
+      'extract_model = "gpt-5.6-luna"',
+      'consolidation_model = "gpt-5.6-terra"',
+      "disable_on_external_context = false",
+      `min_rollout_idle_hours = ${options.minRolloutIdleHours ?? 1}`,
+      "max_rollouts_per_startup = 1",
+      "max_rollout_age_days = 10",
+      "min_rate_limit_remaining_percent = 25",
+      "max_raw_memories_for_consolidation = 128",
+      "max_unused_days = 30",
+    ].join("\n"),
+  );
+  assert.notEqual(enabledMemoryConfig, enabledFeatureConfig);
+  return enabledMemoryConfig;
 }
 
 function writeResponsesStubStream(input: {
