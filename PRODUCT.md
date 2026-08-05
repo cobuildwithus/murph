@@ -82,6 +82,17 @@ If the referee reads dry and clinical, it's failing; if the private write-ups st
 - Restrained motion. Animations serve hierarchy and affordance, never decoration — reduced-motion users should lose nothing essential.
 - Desktop-first (1440px artboards) but every surface must stay usable at tablet and phone widths.
 
+## First-run onboarding
+
+New members see one onboarding journey whether they begin on the website or in
+the iOS companion: optionally add Murph to Contacts, choose a main and optional
+supporting personality, preview and choose a voice, choose formal or casual
+tone, then see the welcome action. Saving those choices or explicitly skipping
+the personality setup completes onboarding for the account. Completing it on
+one surface suppresses it on the other; existing members do not receive it
+retroactively. Contact-card skip alone advances to personality setup and does
+not count as completion.
+
 ## Murph Safe
 
 Murph Safe is the public product-evidence register. The recurring question is

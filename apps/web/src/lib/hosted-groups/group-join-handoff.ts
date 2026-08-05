@@ -1,22 +1,18 @@
-import {
-  HOSTED_APP_HOME_PATH,
-  HOSTED_APP_INITIAL_VISIT_HOME_PATH,
-} from "@/src/lib/hosted-onboarding/app-routes";
+import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 export const GROUP_JOIN_POST_AUTH_QUERY_KEY = "postJoin";
 
-const GROUP_JOIN_POST_AUTH_HANDOFFS = ["initial-visit", "setup"] as const;
+const GROUP_JOIN_POST_AUTH_HANDOFFS = ["setup"] as const;
 
 export type GroupJoinPostAuthHandoff = (typeof GROUP_JOIN_POST_AUTH_HANDOFFS)[number];
 export type GroupJoinPostJoinDestination =
   | typeof HOSTED_APP_HOME_PATH
-  | typeof HOSTED_APP_INITIAL_VISIT_HOME_PATH
   | "/join";
 type GroupJoinAuthCompletionHandoff = Pick<
   HostedPrivyCompletionPayload,
-  "initialVisitEligible" | "stage"
+  "stage"
 >;
 
 export function buildGroupJoinPostAuthReturnPath(input: {
@@ -46,8 +42,6 @@ export function resolveGroupJoinPostJoinDestination(
   handoff: GroupJoinPostAuthHandoff | null,
 ): GroupJoinPostJoinDestination {
   switch (handoff) {
-    case "initial-visit":
-      return HOSTED_APP_INITIAL_VISIT_HOME_PATH;
     case "setup":
       return "/join";
     default:
@@ -62,5 +56,5 @@ function resolveGroupJoinPostAuthHandoff(
     return "setup";
   }
 
-  return payload.initialVisitEligible === true ? "initial-visit" : null;
+  return null;
 }

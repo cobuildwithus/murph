@@ -210,6 +210,116 @@ test("MurphPersonaPicker skips without writing preferences", async () => {
   }
 });
 
+test("MurphPersonaPicker puts truthful progress and retry on the visible Skip action", async () => {
+  let rejectSkip: ((reason?: unknown) => void) | undefined;
+  const skipPreference = vi.fn()
+    .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+      rejectSkip = reject;
+    }))
+    .mockResolvedValueOnce(undefined);
+  const onComplete = vi.fn();
+  const onOpenChange = vi.fn();
+  const { MurphPersonaPicker } = await import(
+    "@/src/components/murph/murph-persona-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphPersonaPicker, {
+      onComplete,
+      onOpenChange,
+      open: true,
+      skipPreference,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickControlContaining(rendered, "Skip");
+    const skippingButton = Array.from(
+      rendered.container.querySelectorAll("button"),
+    ).find((candidate) => candidate.textContent?.includes("Skipping…"));
+    const continueButton = Array.from(
+      rendered.container.querySelectorAll("button"),
+    ).find((candidate) => candidate.textContent?.trim() === "Continue");
+    assert.ok(skippingButton, "Missing Skipping progress on the Skip action");
+    assert.equal(skippingButton.getAttribute("aria-busy"), "true");
+    assert.equal(skippingButton.hasAttribute("disabled"), true);
+    assert.ok(continueButton, "Missing unchanged Continue action");
+    assert.equal(continueButton.getAttribute("aria-busy"), "false");
+    assert.doesNotMatch(continueButton.textContent ?? "", /Saving/u);
+
+    assert.ok(rejectSkip);
+    await act(async () => {
+      rejectSkip?.(new Error("offline"));
+      await Promise.resolve();
+    });
+
+    const alert = rendered.container.querySelector("[role='alert']");
+    assert.match(alert?.textContent ?? "", /Could not skip setup/u);
+    assert.doesNotMatch(alert?.textContent ?? "", /Could not save your Murph/u);
+    await clickControlContaining(rendered, "Retry skip");
+
+    assert.equal(skipPreference.mock.calls.length, 2);
+    assert.deepEqual(onComplete.mock.calls[0], [null]);
+    assert.deepEqual(onOpenChange.mock.calls[0], [false]);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphPersonaPicker exposes finishing and an explicit retry after dismissing a later step", async () => {
+  let rejectSkip: ((reason?: unknown) => void) | undefined;
+  const skipPreference = vi.fn()
+    .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+      rejectSkip = reject;
+    }))
+    .mockResolvedValueOnce(undefined);
+  const onComplete = vi.fn();
+  const onOpenChange = vi.fn();
+  const { MurphPersonaPicker } = await import(
+    "@/src/components/murph/murph-persona-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphPersonaPicker, {
+      onComplete,
+      onOpenChange,
+      open: true,
+      skipPreference,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickControlContaining(rendered, "Navy SEAL");
+    await clickControlContaining(rendered, "Continue");
+    const dismiss = rendered.container.querySelector("[data-dialog-dismiss]");
+    assert.ok(dismiss instanceof rendered.window.HTMLButtonElement);
+    await act(async () => dismiss.click());
+
+    assert.match(rendered.container.textContent ?? "", /Finishing…/u);
+    assert.match(rendered.container.textContent ?? "", /Navy SEAL leads/u);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Saving…/u);
+
+    assert.ok(rejectSkip);
+    await act(async () => {
+      rejectSkip?.(new Error("offline"));
+      await Promise.resolve();
+    });
+
+    assert.match(
+      rendered.container.querySelector("[role='alert']")?.textContent ?? "",
+      /Could not skip setup/u,
+    );
+    assert.match(rendered.container.textContent ?? "", /Navy SEAL leads/u);
+    await clickControlContaining(rendered, "Retry skip");
+
+    assert.equal(skipPreference.mock.calls.length, 2);
+    assert.deepEqual(onComplete.mock.calls[0], [null]);
+    assert.deepEqual(onOpenChange.mock.calls[0], [false]);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("MurphPersonaPicker chooses a main personality and an optional supporting personality", async () => {
   const { MurphPersonaPicker } = await import(
     "@/src/components/murph/murph-persona-picker"

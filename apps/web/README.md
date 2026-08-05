@@ -38,15 +38,17 @@ Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
 
-Signup-oriented landing-page auth completion for accessible hosted stages routes
-to `/home?initialVisit=true`. The home page treats that query as a one-shot
-browser handoff. Members with a resolved text contact see the contact-card picker
-first and then the production four-step Murph personality picker; members without
-one start at the personality picker. A successful save opens the final Welcome to
-Murph dialog with the resolved messaging action; skipping or dismissing the
-personality picker ends the handoff without it. The page strips the query parameter
-on mount so ordinary `/home` visits are not blocked.
-Login-oriented landing CTAs continue to route to `/home`.
+Accessible auth completion routes to `/home`, which reads the member-owned
+onboarding completion state on every load. Pending members with a resolved text
+contact see the contact-card picker first and then the production four-step Murph
+personality picker; members without one start at the personality picker. A
+successful save opens the final Welcome to Murph dialog with the resolved
+messaging action. Skipping or dismissing completes the durable onboarding state,
+and completed members are suppressed on later Web and companion-app loads.
+Optional contact resolution fails soft to the personality picker. A one-shot
+device or connected-app completion result takes foreground priority; closing it
+refreshes plain Home so pending onboarding appears next instead of mounting a
+second dialog.
 
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs a
@@ -141,6 +143,14 @@ instead of maintaining an app-local provider list or provider-config object.
 Routes and pages that only need connect-target metadata should use the narrower
 `@murphai/device-syncd/connect-config` entrypoint so builds do not pull provider
 runtime factories into static analysis.
+
+The `/connect` catalog may also expose an explicitly guided relay without
+pretending it is a hosted provider account. Zepp/Amazfit uses that path: its
+card explains how to share supported data into Apple Health and then connect
+Apple Health in the native Murph app. It must not create a Zepp provider row,
+claim direct Zepp cloud access, or promise historical backfill. The
+conversation handoff reuses Murph's existing contact routing and runtime voice
+memo tool.
 
 ## Device-sync wake epoch rollout
 
