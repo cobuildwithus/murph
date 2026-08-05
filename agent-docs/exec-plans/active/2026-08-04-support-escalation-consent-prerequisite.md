@@ -97,11 +97,11 @@ Updated: 2026-08-05
   attribution is -36 tokens/-227 bytes for assembled product-feedback guidance,
   +21/+100 for compact base instructions, and +25/+145 for Codex-generated tool
   guidance; schema and other provider-visible input are unchanged. The capture
-  compared `9d1d17fd45` to `e374d58700`; the later base-only merge changed a
-  food skill, provider-usage extraction, and tests but no loaded fixture prompt,
-  tool, schema, configuration, or request assembly, so the rendered totals remain
-  the current base/head totals. The temporary harness and detached measurement
-  worktree were removed.
+  compared `9d1d17fd45` to `e374d58700`; later base-only merges changed a food
+  skill, provider-usage extraction, tests, and Web build tooling/docs but no
+  loaded fixture prompt, tool, schema, provider configuration, or request
+  assembly, so the rendered totals remain the current base/head totals. The
+  temporary harness and detached measurement worktree were removed.
 - Parent privacy review found that the reserved tool rejected known non-direct
   scopes but admitted a missing verification scope. The tool now requires an
   affirmative `direct` scope and focused coverage includes missing, group, and
