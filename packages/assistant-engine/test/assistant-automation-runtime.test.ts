@@ -8337,10 +8337,11 @@ describe('assistant auto-reply runtime', () => {
         conversation: expect.objectContaining({
           threadId: 'hid_thread_initial',
         }),
-        deliveryTarget: 'real_thread_initial',
+        deliveryKind: 'thread',
         deliveryReplyToMessageId: 'real_msg_initial',
       }),
     )
+    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]).not.toHaveProperty('deliveryTarget')
     expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]).not.toHaveProperty('threadId')
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(
@@ -8449,10 +8450,11 @@ describe('assistant auto-reply runtime', () => {
         conversation: expect.objectContaining({
           threadId: 'hid_thread_telegram_initial',
         }),
-        deliveryTarget: '6001234567',
+        deliveryKind: 'thread',
         deliveryReplyToMessageId: '7001234567',
       }),
     )
+    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]).not.toHaveProperty('deliveryTarget')
   })
 
   it('suppresses hosted Telegram auto-replies without a provider delivery target', async () => {
@@ -10549,10 +10551,12 @@ describe('assistant auto-reply runtime', () => {
     expect(inboxServices.show).not.toHaveBeenCalled()
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        deliveryTarget: null,
+        bindingDeliveryTarget: null,
+        deliveryKind: null,
         deliveryReplyToMessageId: null,
       }),
     )
+    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]).not.toHaveProperty('deliveryTarget')
   })
 
   it('uses event-owned attachment evidence for hosted assistant input prompts', async () => {
@@ -10680,10 +10684,11 @@ describe('assistant auto-reply runtime', () => {
         conversation: expect.objectContaining({
           threadId: 'hid_thread_projected',
         }),
-        deliveryTarget: 'real_thread_projected',
+        deliveryKind: 'thread',
         deliveryReplyToMessageId: 'real_msg_projected',
       }),
     )
+    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]).not.toHaveProperty('deliveryTarget')
   })
 
   it('uses deterministic hosted delivery idempotency keys for replayed hosted auto-replies', async () => {
@@ -11437,10 +11442,11 @@ describe('assistant auto-reply runtime', () => {
         conversation: expect.objectContaining({
           threadId: 'safe_thread_minimized',
         }),
+        deliveryKind: null,
         deliveryReplyToMessageId: null,
-        deliveryTarget: null,
       }),
     )
+    expect(messageInput).not.toHaveProperty('deliveryTarget')
     expect(messageInput).not.toEqual(
       expect.objectContaining({
         threadId: routeValue,
@@ -11503,10 +11509,11 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         deliveryReplyToMessageId: '<real-email-msg-initial@example.test>',
-        deliveryTarget: hostedEmailThreadTarget,
         bindingDeliveryTarget: hostedEmailThreadTarget,
+        deliveryKind: 'thread',
       }),
     )
+    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]).not.toHaveProperty('deliveryTarget')
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(
         expect.objectContaining({
@@ -11577,13 +11584,15 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        bindingDeliveryTarget: hostedEmailThreadTarget,
         conversation: expect.objectContaining({
           directness: 'group',
         }),
+        deliveryKind: 'thread',
         deliveryReplyToMessageId: '<group-email-message@example.test>',
-        deliveryTarget: hostedEmailThreadTarget,
       }),
     )
+    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]).not.toHaveProperty('deliveryTarget')
   })
 
   it('withholds email style authority from a mixed-authority captureless group', async () => {
