@@ -155,3 +155,20 @@ Updated: 2026-08-04
   The open-dialog evidence is current; the two closed-card captures must be
   refreshed from the exact pushed head before the same preliminary pass can be
   accepted.
+- Final ReviewGPT round 3 returned `RETROSPECTIVE_REQUIRED` with no tactical
+  correction. The recorded architecture decision is to continue the same PR:
+  retain the derived `guideOnly` presentation boundary, shared authenticated
+  guide access, bounded `/connect` resume, first-visit exclusion, and direct-only
+  truthful prompt boundary. Each concept protects an existing owner, and none
+  adds durable state or a new manager, lifecycle, queue, service, or workflow.
+- The first-reviewed shape was 18 files and `+483/-34`: source `+226/-21`, tests
+  `+123/-13`, docs `+126/-0`, and other `+8/-0`. The three review-remediation
+  commits added source `+50/-23`, tests `+150/-14`, and docs `+41/-2`. The much
+  larger cumulative ancestry delta includes a merged base branch and is not
+  review-driven PR growth.
+- Hosted app-session issuance remains authoritative for first-visit eligibility,
+  AuthProvider for browser completion routing, SourceCard for guide-only
+  presentation, and Apple Health for connection lifecycle. The PR body now uses
+  the exact “first hosted web visit” boundary instead of equating eligibility
+  with member creation, and no longer represents the stale closed-card captures
+  as current evidence.
