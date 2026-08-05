@@ -1094,13 +1094,15 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
     "input.reply-failed",
     "input.reply-skipped",
     "input.reply-started",
+    "onboarding.followup.completed",
     "reply.scan.started",
     "scan.started",
   ]).has(type);
 }
 
 function shouldAlwaysPersistHostedAssistantAutomationEvent(type: string): boolean {
-  return type === "input.reply-failed";
+  return type === "input.reply-failed"
+    || type === "onboarding.followup.completed";
 }
 
 export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {
