@@ -22,7 +22,6 @@ import {
   type HostedMemberStripeBillingRefSnapshot,
 } from "./hosted-member-billing-store";
 import { readHostedMemberCoreState } from "./hosted-member-store";
-import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
   requireHostedStripeBillingPlanConfig,
   requireValidatedHostedStripeBillingPlanConfig,
@@ -551,36 +550,18 @@ function assertHostedStripeCanonicalSourceSubscriptionItems(input: {
   subscription: Stripe.Subscription;
 }): void {
   const items = input.subscription.items?.data ?? [];
-  const recurringItems = items.filter(
-    (item) => item.price?.id === input.sourceConfig.priceId,
-  );
-  const unsupportedItems = items.filter((item) =>
-    item.price?.id !== input.sourceConfig.priceId &&
-    !isHostedStripeLegacyAiUsageMeteredItem(item)
-  );
-
+  const recurringItem = items[0];
   if (
-    recurringItems.length !== 1 ||
-    unsupportedItems.length > 0
+    items.length !== 1 ||
+    !recurringItem ||
+    recurringItem.price?.id !== input.sourceConfig.priceId
   ) {
     throw buildHostedStripeSubscriptionItemsUnsupportedError();
   }
 
-  const recurringItem = recurringItems[0];
-
   if (!isHostedStripeLicensedMonthlyPrice(recurringItem.price) || !isSupportedRecurringQuantity(recurringItem)) {
     throw buildHostedStripeSubscriptionItemsUnsupportedError();
   }
-
-  for (const item of items) {
-    if (
-      item.id !== recurringItem.id &&
-      !isHostedStripeLegacyAiUsageMeteredItem(item)
-    ) {
-      throw buildHostedStripeSubscriptionItemsUnsupportedError();
-    }
-  }
-
 }
 
 function isHostedStripeLicensedMonthlyPrice(price: Stripe.Price | null | undefined): boolean {

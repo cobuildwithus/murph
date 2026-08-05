@@ -692,6 +692,7 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD`
+- `HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MONTHLY` and `HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY` select the dedicated Customer Portal configurations used for exact immediate plan confirmations. Each configuration enables price updates, invoices prorations immediately, and allows only its exact destination Price because Stripe rejects multiple monthly Prices from the same Product in one configuration.
 - `HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID` optionally selects a dedicated Family Billing Portal configuration.
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`

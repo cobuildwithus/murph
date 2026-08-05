@@ -6,6 +6,7 @@ import type {
 
 import { UsageLimitBanner } from "@/src/components/home/usage-limit-banner";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
+import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
 import {
   StartPaidPlanConfirmationContent,
 } from "@/src/components/settings/hosted-start-paid-pulse-button";
@@ -83,6 +84,40 @@ export function GroupMemberPlanStudy() {
             currentPeriodEnd={new Date("2026-08-27T04:00:00.000Z")}
             showGroupPlan
             usageStatus={CORE_USAGE_STATUS}
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Completed Edge upgrade awaiting billing sync"
+        state="plan-update-pending"
+      >
+        <div className="flex flex-col gap-4" inert>
+          <HostedPlanUpdateReturn
+            active={false}
+            pollingEnabled={false}
+            targetPlanCode="launch_edge_monthly"
+          />
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canStartFamily
+            canSwitchToGroup
+            canUpgradeToEdge
+            canUpgradeToPulse
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_group_monthly"
+            currentPeriodEnd={new Date("2026-08-27T04:00:00.000Z")}
+            planChangePending
+            showGroupPlan
+            usageStatus={{
+              ...CORE_USAGE_STATUS,
+              recommendedAction: {
+                kind: "upgrade_edge",
+                label: "Upgrade to Edge",
+                url: "/settings#subscription",
+              },
+            }}
           />
         </div>
       </StudyState>
