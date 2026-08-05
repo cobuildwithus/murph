@@ -516,7 +516,7 @@ working directory, and stdio unchanged. In the current observe-only state it
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`. The
 Vercel package build starts the parent Next process with a direct 1 GiB
 old-space flag and appends a 3 GiB old-space flag to `NODE_OPTIONS`. Node applies
-the direct flag to the parent; Next 16.2.6 rebuilds its non-isolated TypeScript
+the direct flag to the parent; Next 16.3.0 rebuilds its non-isolated TypeScript
 worker options from the parent arguments followed by `NODE_OPTIONS`, so the
 mandatory generated-contract validation receives 3 GiB. Next removes the flag
 from isolated static workers. The same script owns the Vercel package build and
@@ -539,12 +539,18 @@ cold local Turbopack compile then fell from roughly 4.4 minutes to 57 seconds
 and completed all 229 static pages with the same heap policy. Repeated
 exact-head Standard previews remain the external acceptance proof. The
 next exact-head Standard preview still OOM-killed Turbopack, so the catalog
-correction remains a boundary fix but is not sufficient capacity proof.
-Production builds now use Next's supported `--webpack` fallback with the
-explicit Webpack build worker and memory optimizations. Explicit opt-in is
-required because the Workflow integration contributes custom Webpack config;
-local development stays on Turbopack. The worker build retains the same heap
-policy and all route/type validation and completed all 229 pages locally. The
+correction remains a boundary fix but was not sufficient capacity proof on
+Next 16.2.6. Production and Linux CI now use Next 16.3's default Turbopack path
+through the same shared production-build selector. The Workflow integration
+runs through its native Next integration: exact-head CI proves the complete
+compile, type-validation, static-generation, and directive-discovery path,
+while focused Stripe and phone-call suites prove the existing
+`workflow/api.start` wrappers and step contracts. Two forced-cold exact-head
+Standard previews completed without OOM: compilation took 91 and 87 seconds,
+TypeScript validation took 54 and 55 seconds, all 233 pages took 10.0 and 10.8
+seconds, and each Vercel build stage completed in four minutes. These repeated
+previews remain the external memory acceptance proof. The accepted Next 16.3
+candidate preserves the heap policy and all route/type validation. The
 advisory budget is a cgroup-unit machine model
 for Vercel Standard's 8 GB build machine: 7.2 GB available to the build cgroup,
 with a 0.8 GB reserve for OS/container overhead outside it at the ceiling. The
