@@ -2436,8 +2436,7 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "deep-sleep-days.v0",
       },
       {
-        description:
-          "Shares your last 7 days of deep sleep minutes from each available sleep source, including the source name and when Murph recorded that source value.",
+        description: "Shares your last 7 days of deep sleep minutes.",
         label: "Deep sleep by source",
         projectionKind: "deep-sleep-sources-days.v1",
         projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
@@ -2451,8 +2450,7 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "rem-sleep-days.v0",
       },
       {
-        description:
-          "Shares your last 7 days of REM sleep minutes from each available sleep source, including the source name and when Murph recorded that source value.",
+        description: "Shares your last 7 days of REM sleep minutes.",
         label: "REM sleep by source",
         projectionKind: "rem-sleep-sources-days.v1",
         projectionScope: REM_SLEEP_SOURCES_SCOPE,

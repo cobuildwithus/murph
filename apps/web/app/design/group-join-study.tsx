@@ -24,8 +24,7 @@ const DESIGN_ACTIVITY_SCOPE: HostedVaultShareProjectionScope = {
 
 const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   {
-    description:
-      "Shares your last 7 days of deep sleep minutes from each available sleep source, including the source name and when Murph recorded that source value.",
+    description: "Shares your last 7 days of deep sleep minutes.",
     label: "Deep sleep by source",
     projectionScope: { projectionKind: "deep-sleep-sources-days.v1" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -33,8 +32,7 @@ const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description:
-      "Shares your last 7 days of REM sleep minutes from each available sleep source, including the source name and when Murph recorded that source value.",
+    description: "Shares your last 7 days of REM sleep minutes.",
     label: "REM sleep by source",
     projectionScope: { projectionKind: "rem-sleep-sources-days.v1" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
