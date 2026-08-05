@@ -107,6 +107,7 @@ describe("hosted usage-limit notice claim authority", () => {
       linqChatId: "linq_chat_current",
       memberId: "member_usage_notice_1",
       periodStart,
+      planResetAt: null,
       prisma: transaction,
       source: "hosted_webhook_side_effect",
       sourceRef: "usage_event_1",
@@ -249,6 +250,46 @@ describe("hosted usage-limit notice claim authority", () => {
       providerIdempotencyKey: "usage_notice_provider_attempt_1",
       status: "claimed",
     });
+  });
+
+  it("binds notice eligibility and delivery identity to the current plan reset", async () => {
+    const planResetAt = new Date("2026-07-12T14:00:00.000Z");
+    claimMocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "linq_chat_current",
+    });
+
+    await expect(startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
+      attemptedAt,
+      memberId: "member_usage_notice_1",
+      noticeDeliveryTarget: {
+        channel: "linq",
+        replyToMessageId: "linq_message_after_plan_reset",
+        routeAuthority: null,
+        target: "linq_chat_current",
+      },
+      periodStart,
+      planResetAt,
+      prisma: prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "usage_event_after_plan_reset",
+      targetKind: "thread",
+      usageCreditLedgerVersion: 4n,
+    })).resolves.toMatchObject({
+      status: "claimed",
+    });
+
+    const eligibilityCall = transaction.$queryRaw.mock.calls.at(-1) ?? [];
+    const [statement, ...params] = eligibilityCall;
+    expect(Array.isArray(statement) ? statement.join("") : String(statement))
+      .toContain('"plan_reset_at" IS NOT DISTINCT FROM');
+    expect(params).toContain(planResetAt);
+    expect(claimMocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        periodStart,
+        planResetAt,
+        usageCreditLedgerVersion: 4n,
+      }),
+    );
   });
 
   it("locks and reasserts external Linq authority before declining a stale route", async () => {

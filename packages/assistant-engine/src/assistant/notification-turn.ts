@@ -455,6 +455,7 @@ export async function sendAssistantNotificationLocal(
       try {
         const notificationProviderRequestStarted =
           messageInput.onProviderRequestStarted ?? null
+        let notificationProviderRequestStartedAt: string | undefined
         const notificationTurnProfile = resolveAssistantNotificationTurnProfile(input)
         const notificationThreadScope =
           notificationTurnProfile?.threadScope ?? 'session-thread'
@@ -463,14 +464,14 @@ export async function sendAssistantNotificationLocal(
           input: messageInput,
           // Adapt the runner's lean start event to the message-input hook
           // shape; notification turns accept no input items.
-          onProviderRequestStarted: notificationProviderRequestStarted
-            ? (event) =>
-                notificationProviderRequestStarted({
+          onProviderRequestStarted: (event) => {
+            notificationProviderRequestStartedAt = event.startedAt
+            return notificationProviderRequestStarted?.({
                   acceptedInputIds: [],
                   providerRequestOrdinal: event.providerRequestOrdinal ?? 0,
                   startedAt: event.startedAt,
                 })
-            : undefined,
+          },
           onProviderRequestPlanned: messageInput.beforeProviderAcceptedInputs
             ? async () => await messageInput.beforeProviderAcceptedInputs?.({
                 acceptedInputs: [],
@@ -522,6 +523,9 @@ export async function sendAssistantNotificationLocal(
           }
           await recordAssistantUsageEvent({
             executionContext,
+            ...(notificationProviderRequestStartedAt === undefined
+              ? {}
+              : { occurredAt: notificationProviderRequestStartedAt }),
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
             providerResult: failedProviderResult,
             turnId,
@@ -530,6 +534,9 @@ export async function sendAssistantNotificationLocal(
             additionalUsages: providerOutcome.additionalUsages,
             effectiveEnv: messageInput.turnEnvironment?.env ?? process.env,
             executionContext,
+            ...(notificationProviderRequestStartedAt === undefined
+              ? {}
+              : { occurredAt: notificationProviderRequestStartedAt }),
             providerResult: failedProviderResult,
             turnId,
           })
@@ -562,6 +569,9 @@ export async function sendAssistantNotificationLocal(
           })
         await recordAssistantUsageEvent({
           executionContext,
+          ...(notificationProviderRequestStartedAt === undefined
+            ? {}
+            : { occurredAt: notificationProviderRequestStartedAt }),
           providerResult,
           turnId,
         })
@@ -569,6 +579,9 @@ export async function sendAssistantNotificationLocal(
           additionalUsages: providerResult.additionalUsages,
           effectiveEnv: messageInput.turnEnvironment?.env ?? process.env,
           executionContext,
+          ...(notificationProviderRequestStartedAt === undefined
+            ? {}
+            : { occurredAt: notificationProviderRequestStartedAt }),
           providerResult,
           turnId,
         })

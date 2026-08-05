@@ -522,6 +522,7 @@ describe("assistant usage recording seam", () => {
           userEnvKeys: [" CODEX_API_KEY ", "", "CUSTOM_KEY"],
         },
       },
+      occurredAt: "2026-04-08T09:59:58.123Z",
       providerRequestAcceptedInputIds: ["assistant_input_a"],
       providerResult: createProviderResult({
         attemptCount: 3,
@@ -581,7 +582,7 @@ describe("assistant usage recording seam", () => {
         gatewayTags: [],
         inputTokens: 11,
         memberId: "member-42",
-        occurredAt: "2026-04-08T10:00:00.000Z",
+        occurredAt: "2026-04-08T09:59:58.123Z",
         outputTokens: 13,
         provider: "codex-cli",
         providerName: "Runtime Provider",

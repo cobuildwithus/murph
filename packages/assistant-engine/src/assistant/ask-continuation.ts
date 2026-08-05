@@ -256,18 +256,20 @@ export async function sendAssistantAskContinuationLocal(
       const turnId = createAssistantTurnId()
       const turnCreatedAt = new Date().toISOString()
       const providerRequestStarted = messageInput.onProviderRequestStarted ?? null
+      let providerRequestStartedAt: string | undefined
       const providerOutcome = await executeCodexTurnWithRecovery({
         acceptedInputItems: [],
         allowFinishWithoutReply: false,
         hostedToolContext: null,
         input: messageInput,
-        onProviderRequestStarted: providerRequestStarted
-          ? (event) => providerRequestStarted({
+        onProviderRequestStarted: (event) => {
+          providerRequestStartedAt = event.startedAt
+          return providerRequestStarted?.({
               acceptedInputIds: [],
               providerRequestOrdinal: event.providerRequestOrdinal ?? 0,
               startedAt: event.startedAt,
             })
-          : undefined,
+        },
         plan: sharedPlan,
         profile: ASSISTANT_ASK_CONTINUATION_TURN_PROFILE,
         progressDelivery: null,
@@ -289,6 +291,9 @@ export async function sendAssistantAskContinuationLocal(
         }
         await recordAssistantUsageEvent({
           executionContext,
+          ...(providerRequestStartedAt === undefined
+            ? {}
+            : { occurredAt: providerRequestStartedAt }),
           providerRequestOutcome: providerOutcome.providerRequestOutcome,
           providerResult: failedProviderResult,
           turnId,
@@ -297,6 +302,9 @@ export async function sendAssistantAskContinuationLocal(
           additionalUsages: providerOutcome.additionalUsages,
           effectiveEnv: messageInput.turnEnvironment?.env ?? process.env,
           executionContext,
+          ...(providerRequestStartedAt === undefined
+            ? {}
+            : { occurredAt: providerRequestStartedAt }),
           providerResult: failedProviderResult,
           turnId,
         })
@@ -306,6 +314,9 @@ export async function sendAssistantAskContinuationLocal(
       const providerResult = providerOutcome.providerTurn
       await recordAssistantUsageEvent({
         executionContext,
+        ...(providerRequestStartedAt === undefined
+          ? {}
+          : { occurredAt: providerRequestStartedAt }),
         providerResult,
         turnId,
       })
@@ -313,6 +324,9 @@ export async function sendAssistantAskContinuationLocal(
         additionalUsages: providerResult.additionalUsages,
         effectiveEnv: messageInput.turnEnvironment?.env ?? process.env,
         executionContext,
+        ...(providerRequestStartedAt === undefined
+          ? {}
+          : { occurredAt: providerRequestStartedAt }),
         providerResult,
         turnId,
       })

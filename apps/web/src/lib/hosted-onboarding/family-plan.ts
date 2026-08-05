@@ -212,6 +212,7 @@ const hostedAccountGroupMembershipAccessSelect =
     planCode: true,
     role: true,
     status: true,
+    updatedAt: true,
   });
 
 const hostedAccountGroupInviteSelect =
