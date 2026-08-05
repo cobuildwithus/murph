@@ -588,6 +588,75 @@ describe("runHostedAssistantAutomation", () => {
     );
   });
 
+  it("persists metadata-only onboarding follow-up decisions", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onEvent?.({
+        failureContext: {
+          activeUntil: "2026-04-11T15:00:00.000Z",
+          authorityGate: "initial",
+          notificationDecisionKind: "skip",
+          notificationDeliveryOutcomeKind: null,
+          onboardingStateCreatedAt: null,
+          onboardingStateReadError: null,
+          onboardingStateSource: "default_missing",
+          onboardingStateStatus: "open",
+          onboardingStateUpdatedAt: null,
+          occurrenceAt: "2026-04-09T13:30:00.000Z",
+          runOutcome: "skipped",
+          runReason: "notification_skip",
+          scheduleKind: "dailyLocal",
+        },
+        safeDetails: "onboarding_followup_completed",
+        type: "onboarding.followup.completed",
+      });
+      return {
+        nextWakeAt: "2026-04-10T13:30:00.000Z",
+        progressed: true,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_onboarding_followup",
+      {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_onboarding_followup",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-09T13:30:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    );
+
+    expect(result.redactedLogEntries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message:
+            "Hosted assistant automation event: onboarding.followup.completed.",
+          redacted: expect.objectContaining({
+            failureActiveUntil: "2026-04-11T15:00:00.000Z",
+            failureAuthorityGate: "initial",
+            failureNotificationDecisionKind: "skip",
+            failureNotificationDeliveryOutcomeKind: null,
+            failureOnboardingStateSource: "default_missing",
+            failureOnboardingStateStatus: "open",
+            failureOccurrenceAt: "2026-04-09T13:30:00.000Z",
+            failureRunOutcome: "skipped",
+            failureRunReason: "notification_skip",
+            failureScheduleKind: "dailyLocal",
+            safeDetails: "onboarding_followup_completed",
+            type: "onboarding.followup.completed",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("reports active-turn ingestion when automation reads staged conversation input", async () => {
     const listNewConversationInputs = vi.fn(async (query) => ({
       inputs: [
