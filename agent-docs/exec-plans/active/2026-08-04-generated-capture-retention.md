@@ -126,6 +126,10 @@ Updated: 2026-08-04
   same privacy gap; a new index, scheduler, queue, cursor, manager, or repair
   pass duplicates existing owners. Continuation adds no persisted state owner
   and requires production-shaped cold-restore/group and interruption proofs.
+- Round 4 confirmed the execution-context correction and required only PR-body
+  inventory: the shared normalizer is now named as an affected surface with its
+  regression proof, and the hot-path disclosure records the existing cold
+  lookup materialization read. Production source remained unchanged.
 
 ## Verification
 
@@ -136,8 +140,8 @@ Updated: 2026-08-04
   2,039-test assistant-runtime suite (2,036 passed, 3 skipped); 10 static Web
   migration tests; the local PostgreSQL re-arm proof; workspace-boundary
   verification; documentation drift; and diff hygiene.
-- Remaining: exact-head GitHub Actions and ReviewGPT round 4 after the accepted
-  round-3 execution-context finding is pushed.
+- Remaining: exact-head GitHub Actions and ReviewGPT round 5 on the documented
+  round-4 body-only correction.
 - Expected outcomes: old generated media is retired atomically and cannot be
   resurrected; fresh, unrelated, durable, and protected captures remain; all
   checks and reviews pass.
