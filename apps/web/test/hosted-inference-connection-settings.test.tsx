@@ -229,7 +229,7 @@ describe("hosted inference connection pane", () => {
       );
       assert.doesNotMatch(
         view.container.textContent ?? "",
-        /will switch to Murph-managed inference/u,
+        /Inference will return to your managed provider/u,
       );
     } finally {
       await view.cleanup();
