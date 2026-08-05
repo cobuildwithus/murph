@@ -15,7 +15,7 @@ The compact table is presentation, never authority. A tracked table may point to
 
 ## Presentation rules
 
-- In a private direct conversation, use `murph.attach_response_card` with `kind="compact_table"` when the member explicitly asks for a table or asks to refresh an existing tracked table and the card alone completely answers the request.
+- In a private direct conversation, use `murph.attach_response_card` with `kind="compact_table"` when the member explicitly asks for a table, or when their message is an unambiguous update to the single active tracked workout whose table was explicitly established earlier, and the card alone completely answers the request.
 - Use one flexible row-label column plus one to four compact value columns, with at most eight rows.
 - Prefer short human labels. Do not add columns merely because the schema permits them.
 - Never emit Markdown-table syntax on a messaging route. If a native card is not appropriate or important explanation must accompany the answer, use a readable plain-text list instead.
@@ -36,9 +36,9 @@ The compact table is presentation, never authority. A tracked table may point to
 ## Update interpretation
 
 - A message such as “the next set was 8 reps” or “finished set 3” is a request to update the referenced workout when the current conversation clearly owns one active tracked workout.
+- With no active tracked table, do not invent one from an update-like message. If two active or recent workouts are plausible, ask one narrow disambiguating question.
 - Preserve the member's units, exercise order, set order, and clarified notation. Do not infer weight, repetitions, effort, completion, assistance, or rest values that were not stated or already present in the canonical record.
 - Treat member-defined shorthand as ambiguous until the member explains it. Once defined as spotted repetitions, persist a plain set note such as `final rep spotted` or `final 2 reps spotted`; do not reinterpret it as assisted-load data.
-- If two active or recent workouts are plausible, ask one narrow disambiguating question rather than updating both.
 - “Real time” means a fresh verified snapshot after each accepted update. Recurring proactive pushes, timers, reminders, or background check-ins require their own existing authorization and owning workflow.
 
 ## Set-by-set workout tables

@@ -54,6 +54,7 @@ export interface AssistantPrecedingReplySegment {
   deliveryContext?: AssistantReplyDeliveryContext | null
   media?: readonly AssistantResponseMedia[] | null
   response: string
+  transcriptResponse?: string | null
   targetInputId?: string | null
 }
 
@@ -528,6 +529,9 @@ function normalizeAssistantPrecedingReplySegments(input: {
       : { deliveryContextOrdinal: segment.deliveryContextOrdinal }),
     deliveryContext: segment.deliveryContext ?? null,
     response: segment.response,
+    ...(segment.transcriptResponse === undefined
+      ? {}
+      : { transcriptResponse: segment.transcriptResponse }),
     media: normalizeAssistantResponseMediaList(segment.media ?? []),
     ...(segment.targetInputId ? { targetInputId: segment.targetInputId } : {}),
   }))

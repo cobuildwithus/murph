@@ -48,7 +48,7 @@ const LINQ_IMESSAGE_APP_CARD_URL_MAX_LENGTH = 2_048
 
 export type AppCardEnvelopeV3 = {
   schemaVersion: 3
-  card: CompactTableResponseCardV1
+  card: Omit<CompactTableResponseCardV1, 'tracking'>
 }
 
 export type LinqIMessageAppLayout = {
@@ -182,9 +182,10 @@ export function encodeCompactTableAppCardUrl(
   if (parsed.kind !== 'compact_table') {
     throw new TypeError('Expected a compact table response card.')
   }
+  const { tracking: _tracking, ...presentationCard } = parsed
   const envelope: AppCardEnvelopeV3 = {
     schemaVersion: 3,
-    card: parsed,
+    card: presentationCard,
   }
   const encoded = Buffer.from(JSON.stringify(envelope), 'utf8')
     .toString('base64url')

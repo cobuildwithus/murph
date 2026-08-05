@@ -611,11 +611,12 @@ export interface CodexAppServerResponseSegment {
   deliveryContextOrdinal: number
   media: AssistantResponseMedia[]
   response: string
+  transcriptResponse?: string
   targetInputId?: string
 }
 
 interface CodexAppServerTrailingResponseCandidate
-  extends CodexAppServerResponseSegment {
+  extends Omit<CodexAppServerResponseSegment, 'transcriptResponse'> {
   card: AssistantResponseCard | null
 }
 
@@ -3675,12 +3676,17 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    const response = trailingSteerCandidate.card
+      ? renderAssistantResponseCardText(trailingSteerCandidate.card)
+      : trailingSteerCandidate.response
+    const transcriptResponse = trailingSteerCandidate.card
+      ? renderAssistantResponseCardTranscriptText(trailingSteerCandidate.card)
+      : response
     precedingAgentMessageSegments.push({
       deliveryContextOrdinal: trailingSteerCandidate.deliveryContextOrdinal,
       media: [...trailingSteerCandidate.media],
-      response: trailingSteerCandidate.card
-        ? renderAssistantResponseCardTranscriptText(trailingSteerCandidate.card)
-        : trailingSteerCandidate.response,
+      response,
+      ...(transcriptResponse === response ? {} : { transcriptResponse }),
       ...(trailingSteerCandidate.targetInputId
         ? { targetInputId: trailingSteerCandidate.targetInputId }
         : {}),
@@ -5392,6 +5398,9 @@ async function runCodexAppServerTurnOnProcess(
     precedingAgentMessageSegments: filteredPrecedingAgentMessageSegments.map((segment) => ({
       deliveryContextOrdinal: segment.deliveryContextOrdinal,
       response: segment.response,
+      ...(segment.transcriptResponse === undefined
+        ? {}
+        : { transcriptResponse: segment.transcriptResponse }),
       media: [...segment.media],
       ...(segment.targetInputId
         ? { targetInputId: segment.targetInputId }

@@ -76,6 +76,13 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('note=final rep spotted')
     expect(skill).toContain('Do not collapse or discard the fourth set')
     expect(skill).toContain('do not silently truncate it')
+    expect(skill).toContain(
+      'single active tracked workout whose table was explicitly established earlier',
+    )
+    expect(skill).toContain(
+      'With no active tracked table, do not invent one from an update-like message',
+    )
+    expect(skill).toContain('ask one narrow disambiguating question')
     expect(skill).toContain('final 2 reps spotted')
     expect(skill).toContain('Never leave meaningful notation only in conversation text')
   })

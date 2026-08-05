@@ -81,12 +81,13 @@ describe('compact table response cards', () => {
     }).success).toBe(false)
   })
 
-  it('encodes a V3 immutable snapshot without losing tracking authority', () => {
+  it('keeps tracking authority out of the V3 presentation payload', () => {
     const url = encodeCompactTableAppCardUrl(TRACKED_WORKOUT_CARD)
     expect(url.length).toBeLessThan(2_048)
+    const { tracking: _tracking, ...presentationCard } = TRACKED_WORKOUT_CARD
     expect(decodeAppCardUrl(url)).toEqual({
       schemaVersion: 3,
-      card: TRACKED_WORKOUT_CARD,
+      card: presentationCard,
     })
   })
 
