@@ -1043,6 +1043,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260802000000_add_hosted_linq_line_inventory_confirmed_at",
       "20260804170000_add_initial_onboarding_completion",
       "20260805010000_rearm_generated_image_capture_retention",
+      "20260805160000_hosted_usage_plan_reset_epoch",
       "migration_lock.toml",
     ]);
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
