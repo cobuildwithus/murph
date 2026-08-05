@@ -1950,13 +1950,34 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("keeps the canonical phone when the retry's live phone belongs to another member", async () => {
+    it.each([
+      {
+        canonicalPhone: "stored",
+        livePhoneOwner: "another member",
+        phoneOwnedByAnother: true,
+        storedPhoneNumber: "+15551234567",
+      },
+      {
+        canonicalPhone: "absent",
+        livePhoneOwner: "another member",
+        phoneOwnedByAnother: true,
+        storedPhoneNumber: undefined,
+      },
+      {
+        canonicalPhone: "absent",
+        livePhoneOwner: "unowned",
+        phoneOwnedByAnother: false,
+        storedPhoneNumber: undefined,
+      },
+    ])("handles a $livePhoneOwner live phone with a $canonicalPhone canonical phone", async ({
+      phoneOwnedByAnother,
+      storedPhoneNumber,
+    }) => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const fixtureId = randomUUID();
       const memberId = `hbm_email_rebind_retry_phone_${fixtureId}`;
       const phoneOwnerMemberId = `hbm_retry_phone_owner_${fixtureId}`;
       const emailAddress = `rebind-retry-phone-${fixtureId}@example.test`;
-      const storedPhoneNumber = "+15551234567";
       const ownedLivePhoneNumber = "+15557654321";
       const oldPrivyUserId = `did:privy:old-retry-phone-${fixtureId}`;
       const replacementPrivyUserId = `did:privy:replacement-retry-phone-${fixtureId}`;
@@ -1977,18 +1998,20 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         emailAddress,
         memberId,
         oldPrivyUserId,
-        phoneNumber: storedPhoneNumber,
+        ...(storedPhoneNumber ? { phoneNumber: storedPhoneNumber } : {}),
         prisma: observer,
       });
-      await observer.hostedMember.create({ data: { id: phoneOwnerMemberId } });
-      await observer.hostedMemberIdentity.create({
-        data: {
-          memberId: phoneOwnerMemberId,
-          phoneLookupKey: ownedLivePhoneLookupKey,
-          phoneNumberEncrypted: ownedLivePhoneNumber,
-          phoneNumberVerifiedAt: new Date("2026-08-03T11:00:00.000Z"),
-        },
-      });
+      if (phoneOwnedByAnother) {
+        await observer.hostedMember.create({ data: { id: phoneOwnerMemberId } });
+        await observer.hostedMemberIdentity.create({
+          data: {
+            memberId: phoneOwnerMemberId,
+            phoneLookupKey: ownedLivePhoneLookupKey,
+            phoneNumberEncrypted: ownedLivePhoneNumber,
+            phoneNumberVerifiedAt: new Date("2026-08-03T11:00:00.000Z"),
+          },
+        });
+      }
       const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
       process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://join.example.test";
       clearHostedOnboardingEnvCache();
@@ -1997,10 +2020,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           address: emailAddress,
           verifiedAt: 1_754_218_800,
         },
-        phone: {
-          number: storedPhoneNumber,
-          verifiedAt: 1_754_218_800,
-        },
+        phone: storedPhoneNumber
+          ? {
+              number: storedPhoneNumber,
+              verifiedAt: 1_754_218_800,
+            }
+          : null,
         telegram: null,
         userId: replacementPrivyUserId,
       };
@@ -2032,14 +2057,20 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
           where: { memberId },
         })).resolves.toMatchObject({
-          phoneLookupKey: createHostedPhoneLookupKey(storedPhoneNumber),
+          phoneLookupKey: storedPhoneNumber
+            ? createHostedPhoneLookupKey(storedPhoneNumber)
+            : phoneOwnedByAnother
+              ? null
+              : ownedLivePhoneLookupKey,
           privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
         });
-        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
-          where: { memberId: phoneOwnerMemberId },
-        })).resolves.toMatchObject({
-          phoneLookupKey: ownedLivePhoneLookupKey,
-        });
+        if (phoneOwnedByAnother) {
+          await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+            where: { memberId: phoneOwnerMemberId },
+          })).resolves.toMatchObject({
+            phoneLookupKey: ownedLivePhoneLookupKey,
+          });
+        }
         await expect(observer.hostedMemberRouting.findUniqueOrThrow({
           where: { memberId },
         })).resolves.toMatchObject({

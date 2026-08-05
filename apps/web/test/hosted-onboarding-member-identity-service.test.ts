@@ -368,6 +368,7 @@ describe("hosted-onboarding member-identity-service", () => {
         update: vi.fn(),
       },
       hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn().mockResolvedValue({
           maskedPhoneNumberHint: null,
           memberId: "member_123",
@@ -421,6 +422,7 @@ describe("hosted-onboarding member-identity-service", () => {
         update: vi.fn(),
       },
       hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn().mockResolvedValue({
           maskedPhoneNumberHint: null,
           memberId: "member_123",
@@ -743,6 +745,7 @@ describe("hosted-onboarding member-identity-service", () => {
         update: vi.fn(),
       },
       hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn().mockResolvedValue({
           maskedPhoneNumberHint: null,
           memberId: "member_123",

@@ -580,20 +580,34 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
     });
   }
 
+  const canPersistPhone = shouldPersistHostedPrivyPhoneIdentity({
+    authMethod,
+    expectedPhoneLookupKey: input.expectedPhoneLookupKey,
+  }) && !privyUserChanged && canPersistHostedInteractiveLivePhone({
+    allowLiveAuthority: input.allowVerifiedEmailRebinding,
+    bearerIdentity: input.identity,
+    currentIdentity,
+    liveIdentity: identity,
+  });
+  let phoneToPersist = canPersistPhone ? identity.phone : null;
+  if (
+    phoneToPersist
+    && !currentIdentity?.phoneLookupKey
+    && !currentIdentity?.phoneNumber
+  ) {
+    const phoneOwner = await lookupHostedMemberIdentityByPhoneNumber({
+      phoneNumber: phoneToPersist.number,
+      prisma: input.prisma,
+    });
+    if (phoneOwner && phoneOwner.core.id !== currentMember.id) {
+      phoneToPersist = null;
+    }
+  }
+
   const nextPhoneIdentity = buildHostedPersistedPhoneIdentityFields({
     currentIdentity,
     now: input.now,
-    phone: shouldPersistHostedPrivyPhoneIdentity({
-      authMethod,
-      expectedPhoneLookupKey: input.expectedPhoneLookupKey,
-    }) && !privyUserChanged && canPersistHostedInteractiveLivePhone({
-      allowLiveAuthority: input.allowVerifiedEmailRebinding,
-      bearerIdentity: input.identity,
-      currentIdentity,
-      liveIdentity: identity,
-    })
-      ? identity.phone
-      : null,
+    phone: phoneToPersist,
   });
 
   await upsertHostedPrivyMemberIdentity({
