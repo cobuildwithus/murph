@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   hasHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
   lockHostedMemberRow: vi.fn(async () => {}),
+  readHostedAiUsageGate: vi.fn(),
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
   readHostedConfiguredUsageCreditOfferCodes: vi.fn(),
   readHostedGroupUsageFundingTargetByJoinCode: vi.fn(),
@@ -145,6 +146,10 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
     mocks.hasHostedRuntimeActiveAccessForUpdateTx,
 }));
 
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: mocks.requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeApiMode: mocks.requireHostedStripeApiMode,
@@ -176,6 +181,7 @@ import {
   readHostedActiveUsageCreditPurchaseForPayer,
   readHostedUsageCreditPurchaseTargetForPayer,
   readHostedUsageCreditPurchaseStatus,
+  recoverHostedGroupSponsorshipUsageCreditCheckout,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
 import {
   tryChargeHostedUsageCreditSavedCard,
@@ -4329,6 +4335,67 @@ describe("createHostedUsageCreditCheckout", () => {
 });
 
 describe("automatic group refill saved-card recovery", () => {
+  it("repairs a pre-fix failed refill and opens Checkout on the first recovery attempt", async () => {
+    const fake = createFakePrisma();
+    const fixture = installAutomaticGroupRefillFixture(fake, {
+      status: "payment_failed",
+    });
+    const authorization = fake.sponsorshipAuthorizations.get(
+      fixture.authority.authorizationId,
+    );
+    expect(authorization).toBeDefined();
+    Object.assign(authorization!, {
+      recoveryStartedAt: NOW,
+      status: "recovery_required",
+    });
+    fixture.refill.checkoutCancelUrl =
+      "https://join.example.test/groups/fund/group_join_code_1234?usageCheckout=cancel&usagePurchase=hucp_activation_abcdefghijkl";
+    fixture.refill.checkoutSuccessUrl =
+      "https://join.example.test/groups/fund/group_join_code_1234?usageCheckout=success&usagePurchase=hucp_activation_abcdefghijkl";
+    fixture.refill.stripeCustomerIdEncrypted =
+      "encrypted:cus_group_payer";
+    fixture.refill.stripePriceIdEncrypted = "encrypted:price_usage_5";
+    Object.assign(fixture.refill, { terminalAt: NOW });
+    mocks.readHostedAiUsageGate.mockResolvedValueOnce({
+      allowanceSource: "thread_container",
+      allowed: false,
+      limitUsdMicros: 5_000_000n,
+      reason: "ai_usage_limit_exceeded",
+      remainingUsdMicros: 0n,
+    });
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    await expect(recoverHostedGroupSponsorshipUsageCreditCheckout({
+      authorizationId: fixture.authority.authorizationId,
+      beneficiaryMemberId: fixture.authority.beneficiaryMemberId,
+      now: NOW,
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({
+      purchaseId: fixture.refill.id,
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/session",
+    });
+
+    expect(new URL(String(fixture.refill.checkoutSuccessUrl)).searchParams.get(
+      "usagePurchase",
+    )).toBe(fixture.refill.id);
+    expect(new URL(String(fixture.refill.checkoutCancelUrl)).searchParams.get(
+      "usagePurchase",
+    )).toBe(fixture.refill.id);
+    expect(fake.purchases.size).toBe(2);
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ purchaseId: fixture.refill.id }),
+      }),
+      expect.objectContaining({
+        idempotencyKey: expect.stringContaining(fixture.refill.id),
+      }),
+    );
+  });
+
   it("retrieves and confirms the same bound PaymentIntent after a bind-before-confirm crash", async () => {
     const fake = createFakePrisma();
     const fixture = installAutomaticGroupRefillFixture(fake, {
@@ -5531,7 +5598,7 @@ function buildSavedCardPaymentIntent(input: {
 function installAutomaticGroupRefillFixture(
   fake: ReturnType<typeof createFakePrisma>,
   input: {
-    status?: "created" | "payment_pending";
+    status?: "created" | "payment_failed" | "payment_pending";
   } = {},
 ) {
   const authorizationId = "hgsa_abcdefghijklmnop";
@@ -5563,6 +5630,7 @@ function installAutomaticGroupRefillFixture(
     checkoutExpiresAt: periodEndsAt,
     checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v4",
     checkoutSuccessUrl: "https://join.example.test/groups/fund/example",
+    createdAt: periodStartedAt,
     grantUsdMicros: 5_000_000n,
     groupSponsorshipAuthorizationId: authorizationId,
     groupSponsorshipPeriodStartedAt: periodStartedAt,
