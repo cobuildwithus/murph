@@ -47,6 +47,8 @@ test("renders the retained-export ready study from the production content", () =
   const markup = renderToStaticMarkup(createElement(DataExportFlowStudy));
 
   expect(markup).toContain("Download my data");
+  expect(markup).toContain("flex flex-col items-stretch gap-6");
+  expect(markup).toContain("max-w-md");
   expect(markup).not.toContain("Preparing...");
 });
 
@@ -82,4 +84,5 @@ test("renders pending renewed consent from the production prompt", () => {
 
   expect(markup).toContain("Saving...");
   expect(markup).toContain("Use Murph again");
+  expect(markup).toContain("sm:grid-cols-[minmax(0,1fr)_auto]");
 });

@@ -193,13 +193,113 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through July 31 shipment set", () => {
+  it("keeps the August 1 through August 4 privacy and recovery claims bounded", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+
+    expect(items.get("custom-inference-endpoint")).toMatchObject({
+      sourcePullRequests: [1202],
+      details: expect.stringContaining("never silently falls back"),
+    });
+    expect(items.get("custom-inference-endpoint")?.tryIt).toBeUndefined();
+    expect(items.get("health-data-consent-controls")).toMatchObject({
+      sourcePullRequests: [1215],
+      summary: expect.stringContaining("without locking you out"),
+      tryIt: {
+        href: "/settings/data-privacy",
+        label: "Open privacy settings",
+      },
+    });
+    expect(items.get("daily-nutrition-cards")).toMatchObject({
+      sourcePullRequests: [1104, 1280],
+      details: expect.stringContaining("Missing goals stay missing"),
+    });
+    expect(items.get("physical-note-address-completion")).toMatchObject({
+      sourcePullRequests: [1261, 1266],
+      details: expect.stringContaining("cannot discover where someone lives"),
+    });
+    expect(items.get("physical-notes-from-chat")).toMatchObject({
+      sourcePullRequests: [1199, 1248],
+      details: expect.stringContaining(
+        "conversation history follows Murph's existing retention rules",
+      ),
+    });
+    expect(items.get("physical-notes-from-chat")?.details).not.toContain(
+      "plaintext conversation memory",
+    );
+    expect(items.get("phone-transfer-recovery")).toMatchObject({
+      sourcePullRequests: [1191, 1255, 1267],
+      details: expect.stringContaining("stops retrying a terminal transfer"),
+    });
+    expect(items.get("calendar-aware-reminder-availability")).toMatchObject({
+      sourcePullRequests: [1204],
+      details: expect.stringContaining("never enter the model"),
+    });
+    expect(items.get("group-reactions-shape-room-memory")).toMatchObject({
+      sourcePullRequests: [1212],
+      details: expect.stringContaining("out of private member memory"),
+    });
+  });
+
+  it("publishes the complete July 20 through August 4 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 12).map((edition) => ({
+      listChangelogEditions().slice(0, 16).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-08-04",
+        itemIds: [
+          "custom-inference-endpoint",
+          "health-data-consent-controls",
+          "daily-nutrition-cards",
+          "single-source-wearable-disconnect",
+          "database-first-nutrition-estimates",
+          "physical-note-address-completion",
+          "capacity-without-message-estimates",
+          "venice-provider-rate-usage",
+          "device-sync-artifact-retries",
+          "foreground-after-checkpoint-wake",
+          "group-photo-reference-reuse",
+          "usage-denials-preserve-pending-work",
+        ],
+      },
+      {
+        id: "2026-08-03",
+        itemIds: ["connected-app-results-stay-in-turn"],
+      },
+      {
+        id: "2026-08-02",
+        itemIds: [
+          "phone-transfer-recovery",
+          "unknown-group-signup-recovery",
+          "physical-note-claim-recovery",
+          "contact-card-line-recovery",
+        ],
+      },
+      {
+        id: "2026-08-01",
+        itemIds: [
+          "environment-processing-and-print",
+          "physical-notes-from-chat",
+          "direct-product-support-escalation",
+          "calendar-aware-reminder-availability",
+          "one-action-challenge-entry",
+          "group-reactions-shape-room-memory",
+          "group-casing-room-tone",
+          "signup-handoffs-stay-on-course",
+          "wearable-connect-finish-and-recover",
+          "late-followups-stay-eligible",
+          "image-errors-explain-the-failure",
+          "bounded-onboarding-followup",
+          "daily-wrong-line-redirect",
+          "dashboard-refresh-stays-in-place",
+          "faster-first-imessage-reply",
+          "higher-group-daily-text-capacity",
+        ],
+      },
       {
         id: "2026-07-31",
         itemIds: [
@@ -526,8 +626,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-31");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-25");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-04");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-29");
   });
 
   it("resolves only known canonical edition cursors", () => {

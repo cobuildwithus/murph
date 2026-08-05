@@ -1138,7 +1138,7 @@ export function ComponentsContent() {
 
         <Section
           id="assistant-provider-picker"
-          title="Radio Group, Choice Cards & Provider Picker"
+          title="Radio group, choice cards & inference routing"
         >
           <p className="max-w-2xl text-sm text-muted-foreground">
             Compare model choice cards and review the provider privacy and

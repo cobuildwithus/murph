@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -23,6 +24,7 @@ import {
   armCanonicalCheckpointPublicationBarrier,
   armCanonicalCheckpointLostAck,
   armSnapshotPublicationCorruption,
+  armIdleSnapshotStartBarrier,
   armShutdownCheckpointPublicationBarrier,
   HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST,
   readShutdownCheckpointPublicationBarrierState,
@@ -32,6 +34,14 @@ import {
   wrapSnapshotPublicationCorruptionForTest,
   wrapShutdownCheckpointPublicationBarrierForTest,
 } from "../src/hosted-local-test/runner-container.ts";
+import {
+  armForegroundPriorityOrderingObservation,
+  clearForegroundPriorityOrderingObservation,
+  readForegroundPriorityOrderingObservation,
+  recordForegroundPriorityAssistantProviderStart,
+  releaseForegroundPriorityOrderingBarrier,
+  wrapForegroundPriorityOrderingObservationForTest,
+} from "../src/hosted-local-test/foreground-priority-ordering.ts";
 import {
   HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS,
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
@@ -68,6 +78,63 @@ function createCanonicalCheckpointRequest(userId: string): Request {
         [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: userId,
         "content-type": "application/json; charset=utf-8",
       },
+      method: "POST",
+    },
+  );
+}
+
+function createMailboxFetchRequest(
+  userId: string,
+  importedSeq = "0",
+  lanes: readonly { importedSeq: string; lane: string }[] = [
+    { importedSeq, lane: "conversation" },
+    { importedSeq: "0", lane: "system" },
+  ],
+  requestId = "request-foreground-priority-ordering",
+): Request {
+  return new Request(
+    `http://${HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane}`
+      + HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
+    {
+      body: JSON.stringify({
+        lanes,
+        limitPerLane: 25,
+        requestId,
+        userId,
+      }),
+      headers: {
+        [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: userId,
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    },
+  );
+}
+
+function createMailboxFetchResponse(
+  userId: string,
+  conversationSeqs: readonly string[],
+): Response {
+  return new Response(JSON.stringify({
+    items: conversationSeqs.map((laneSeq, index) => ({
+      id: `mailbox-synthetic-${index + 1}`,
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq,
+      userId,
+    })),
+  }), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  });
+}
+
+function createSnapshotStartRequest(userId: string): Request {
+  return new Request(
+    `http://${HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore}`
+      + "/workspace-snapshots/start",
+    {
+      headers: { [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: userId },
       method: "POST",
     },
   );
@@ -280,6 +347,262 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       }
     }
     expect(wrapped[HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST]).toBeTypeOf("function");
+  });
+
+  it("records bounded typed ordering at the mailbox, checkpoint, and provider boundaries", async () => {
+    const userId = "member_foreground_priority_ordering_trace";
+    const realHandler = vi.fn(async (request: Request) => {
+      const pathname = new URL(request.url).pathname;
+      if (pathname === HOSTED_RUNTIME_MAILBOX_FETCH_PATH) {
+        return createMailboxFetchResponse(userId, ["3", "4"]);
+      }
+      if (pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH) {
+        return new Response(JSON.stringify({ checkpointed: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      return new Response("accepted", { status: 200 });
+    });
+    const snapshotHandler = wrapForegroundPriorityOrderingObservationForTest(
+      realHandler,
+      "snapshot-store",
+    );
+    const webHandler = wrapForegroundPriorityOrderingObservationForTest(
+      realHandler,
+      "web-control",
+    );
+    armForegroundPriorityOrderingObservation(userId);
+
+    try {
+      await snapshotHandler(
+        createSnapshotStartRequest(userId),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      await webHandler(
+        createMailboxFetchRequest(userId, "2"),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      await webHandler(
+        createCanonicalCheckpointRequest(userId),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      recordForegroundPriorityAssistantProviderStart(userId);
+
+      expect(readForegroundPriorityOrderingObservation(userId)).toEqual({
+        barrierState: "disabled",
+        barrierTarget: "none",
+        events: [
+          { kind: "snapshot_started", ordinal: 1 },
+          {
+            conversationItemCount: 2,
+            conversationLaneRequested: true,
+            conversationSeqEnd: "4",
+            kind: "mailbox_fetch_finished",
+            ordinal: 2,
+            probeKind: "other",
+            responseStatus: 200,
+          },
+          {
+            kind: "workspace_checkpoint_started",
+            ordinal: 3,
+            reason: "canonical_runtime_commit",
+          },
+          { kind: "canonical_checkpoint_committed", ordinal: 4 },
+          { kind: "assistant_provider_started", ordinal: 5 },
+        ],
+        state: "armed",
+        truncated: false,
+      });
+    } finally {
+      clearForegroundPriorityOrderingObservation(userId);
+    }
+  });
+
+  it("rejects provider evidence without an armed observation", () => {
+    expect(() =>
+      recordForegroundPriorityAssistantProviderStart(
+        "member_foreground_priority_unarmed_provider",
+      )
+    ).toThrow(
+      "Hosted-local foreground-priority provider start requires an armed observation.",
+    );
+  });
+
+  it("bounds the foreground-priority ordering trace", () => {
+    const userId = "member_foreground_priority_ordering_bounded";
+    armForegroundPriorityOrderingObservation(userId);
+
+    try {
+      for (let index = 0; index < 65; index += 1) {
+        recordForegroundPriorityAssistantProviderStart(userId);
+      }
+
+      const observation = readForegroundPriorityOrderingObservation(userId);
+      expect(observation.events).toHaveLength(64);
+      expect(observation.events.at(-1)).toEqual({
+        kind: "assistant_provider_started",
+        ordinal: 64,
+      });
+      expect(observation.truncated).toBe(true);
+    } finally {
+      clearForegroundPriorityOrderingObservation(userId);
+    }
+  });
+
+  it("holds the first empty conversation probe after an idle snapshot starts", async () => {
+    const userId = "member_foreground_priority_empty_probe_barrier";
+    const realHandler = vi.fn(async (request: Request) => {
+      const pathname = new URL(request.url).pathname;
+      if (pathname === HOSTED_RUNTIME_MAILBOX_FETCH_PATH) {
+        return createMailboxFetchResponse(userId, []);
+      }
+      return new Response("accepted", { status: 200 });
+    });
+    const snapshotHandler = wrapForegroundPriorityOrderingObservationForTest(
+      realHandler,
+      "snapshot-store",
+    );
+    const webHandler = wrapForegroundPriorityOrderingObservationForTest(
+      realHandler,
+      "web-control",
+    );
+    armForegroundPriorityOrderingObservation(
+      userId,
+      "empty_conversation_probe",
+    );
+
+    try {
+      await expect(webHandler(
+        createMailboxFetchRequest(userId),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      ).then((response) => response.status)).resolves.toBe(200);
+      expect(readForegroundPriorityOrderingObservation(userId)).toMatchObject({
+        barrierState: "armed",
+      });
+
+      await expect(snapshotHandler(
+        createSnapshotStartRequest(userId),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      ).then((response) => response.status)).resolves.toBe(200);
+
+      await expect(webHandler(
+        createMailboxFetchRequest(userId, "0", [
+          { importedSeq: "0", lane: "system" },
+        ]),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      ).then((response) => response.status)).resolves.toBe(200);
+      expect(readForegroundPriorityOrderingObservation(userId)).toMatchObject({
+        barrierState: "armed",
+      });
+
+      const heldEmptyProbe = webHandler(
+        createMailboxFetchRequest(
+          userId,
+          "0",
+          [
+            { importedSeq: "0", lane: "conversation" },
+            { importedSeq: "0", lane: "system" },
+          ],
+          "hosted-invocation:checkpoint-interrupt-rearm-foreground-prefetch:1",
+        ),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      await vi.waitFor(() => {
+        expect(readForegroundPriorityOrderingObservation(userId)).toEqual({
+          barrierState: "entered",
+          barrierTarget: "empty_conversation_probe",
+          events: [
+            {
+              conversationItemCount: 0,
+              conversationLaneRequested: true,
+              conversationSeqEnd: null,
+              kind: "mailbox_fetch_finished",
+              ordinal: 1,
+              probeKind: "other",
+              responseStatus: 200,
+            },
+            { kind: "snapshot_started", ordinal: 2 },
+            {
+              conversationItemCount: 0,
+              conversationLaneRequested: false,
+              conversationSeqEnd: null,
+              kind: "mailbox_fetch_finished",
+              ordinal: 3,
+              probeKind: "other",
+              responseStatus: 200,
+            },
+            {
+              conversationItemCount: 0,
+              conversationLaneRequested: true,
+              conversationSeqEnd: null,
+              kind: "mailbox_fetch_finished",
+              ordinal: 4,
+              probeKind: "checkpoint_interrupt_rearm",
+              responseStatus: 200,
+            },
+          ],
+          state: "armed",
+          truncated: false,
+        });
+      });
+      expect(releaseForegroundPriorityOrderingBarrier(userId)).toBe(true);
+      await expect(heldEmptyProbe.then((response) => response.status)).resolves.toBe(200);
+    } finally {
+      clearForegroundPriorityOrderingObservation(userId);
+    }
+  });
+
+  it("holds canonical acknowledgement only after the real checkpoint commits", async () => {
+    const userId = "member_foreground_priority_canonical_post_commit";
+    const realHandler = vi.fn(async () => new Response(
+      JSON.stringify({ checkpointed: true }),
+      {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      },
+    ));
+    const handler = wrapForegroundPriorityOrderingObservationForTest(
+      realHandler,
+      "web-control",
+    );
+    armForegroundPriorityOrderingObservation(userId, "canonical_post_commit");
+
+    try {
+      const heldCommit = handler(
+        createCanonicalCheckpointRequest(userId),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      await vi.waitFor(() => {
+        expect(readForegroundPriorityOrderingObservation(userId)).toEqual({
+          barrierState: "entered",
+          barrierTarget: "canonical_post_commit",
+          events: [
+            {
+              kind: "workspace_checkpoint_started",
+              ordinal: 1,
+              reason: "canonical_runtime_commit",
+            },
+            { kind: "canonical_checkpoint_committed", ordinal: 2 },
+          ],
+          state: "armed",
+          truncated: false,
+        });
+      });
+      expect(realHandler).toHaveBeenCalledOnce();
+      expect(releaseForegroundPriorityOrderingBarrier(userId)).toBe(true);
+      await expect(heldCommit.then((response) => response.status)).resolves.toBe(200);
+    } finally {
+      clearForegroundPriorityOrderingObservation(userId);
+    }
   });
 
   it("accepts supported nonempty private-media PUTs on the hosted-local Linq upload path", async () => {
@@ -694,6 +1017,40 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       );
       expect(realHandler).toHaveBeenCalledTimes(4);
       expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(false);
+    } finally {
+      releaseShutdownCheckpointPublicationBarrier(userId);
+    }
+  });
+
+  it("holds snapshot start at the cancellation-aware boundary", async () => {
+    const userId = "member_idle_snapshot_start_barrier";
+    const realHandler = vi.fn(async () => new Response("snapshot started", { status: 200 }));
+    const handler = wrapShutdownCheckpointPublicationBarrierForTest(realHandler);
+    armIdleSnapshotStartBarrier(userId);
+
+    try {
+      const heldStart = handler(
+        createSnapshotStartRequest(userId),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      await vi.waitFor(() => {
+        expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("entered");
+      });
+      expect(realHandler).not.toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: {
+            barrierKind: "snapshot_start_checkpoint_publication",
+          },
+          userId,
+        }),
+      );
+
+      expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(true);
+      await expect(heldStart.then((response) => response.text()))
+        .resolves.toBe("snapshot started");
+      expect(realHandler).toHaveBeenCalledTimes(1);
     } finally {
       releaseShutdownCheckpointPublicationBarrier(userId);
     }

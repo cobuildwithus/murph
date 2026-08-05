@@ -173,6 +173,11 @@ describe("prepareHostedOpsAppReviewMember", () => {
         now: NOW,
       }),
     );
+    expect(dependencies.ensureHostedMemberForPrivyIdentity).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        allowVerifiedEmailRebinding: true,
+      }),
+    );
     const prisma = dependencies.getPrisma.mock.results[0]?.value as {
       $transaction: ReturnType<typeof vi.fn>;
     };
@@ -204,5 +209,49 @@ describe("prepareHostedOpsAppReviewMember", () => {
       suspended: false,
     });
     expect(summary).not.toHaveProperty("metadataSynced");
+  });
+
+  it("keeps dry-run and apply fail-closed when the Privy principal conflicts", async () => {
+    dependencies.ensureHostedMemberForPrivyIdentity.mockRejectedValueOnce({
+      code: "PRIVY_USER_MISMATCH",
+      httpStatus: 409,
+    });
+
+    await expect(prepareHostedOpsAppReviewMember({
+      mode: "dry-run",
+      principal: {
+        kind: "email",
+        value: REVIEW_EMAIL,
+      },
+    })).resolves.toMatchObject({
+      action: "dry-run",
+      billingStatus: null,
+      member: null,
+    });
+    expect(dependencies.ensureHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
+
+    await expect(prepareHostedOpsAppReviewMember({
+      mode: "apply",
+      now: NOW,
+      principal: {
+        kind: "email",
+        value: REVIEW_EMAIL,
+      },
+    })).rejects.toMatchObject({
+      code: "PRIVY_USER_MISMATCH",
+      httpStatus: 409,
+    });
+
+    expect(dependencies.ensureHostedMemberForPrivyIdentity).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        allowVerifiedEmailRebinding: true,
+      }),
+    );
+    expect(dependencies.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(dependencies.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(
+      dependencies.materializePendingHostedGroupJoinConfirmationsBestEffort,
+    ).not.toHaveBeenCalled();
+    expect(dependencies.recordHostedLaunchRequiredConsent).not.toHaveBeenCalled();
   });
 });

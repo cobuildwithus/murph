@@ -1,6 +1,6 @@
 # Captures
 
-Last verified: 2026-07-25
+Last verified: 2026-08-04
 
 ## Current State
 
@@ -15,8 +15,16 @@ Murph-generated images that need later reuse also use this primitive: generated 
 Captures are private canonical vault truth.
 
 - Durable capture records live in the canonical event ledger as `note` events tagged with `capture`.
-- Immutable media files and manifests live under `raw/captures/**`.
-- Generated-image retry lookups live in the compact `derived/captures/generated-image-lookups.json` index as hashed pointers to the capture event and primary media ref. Lookup-backed capture events are immutable after creation except for `deleteEvent`; this keeps retry lookup bounded to the original event shard while preserving deleted tombstone behavior.
+- User-authored immutable media files and manifests live under `raw/captures/**`; assistant-generated payloads use the retention transition below.
+- Generated-image retry and retention lookups live in the compact `derived/captures/generated-image-lookups.json` index as hashed pointers to the capture event and primary media ref. Every generated-image vault write uses this existing lookup-backed capture primitive: tool-call identities remain stable for retry, while writes without one receive a unique retention-only identity. Lookup-backed capture events are immutable after creation except for the standard deleted revision. After 14 days, hosted idle maintenance lazily materializes only the lookup and due raw artifacts, then replaces each assistant-generated image and its manifest artifact metadata with privacy tombstones in one receipt-guarded per-capture transaction and marks the lookup `retiredAt`; replay continues to return deleted instead of recreating the image. A damaged capture is retried later without blocking valid neighbors.
+- A successful hosted generated-image write durably merges its exact 14-day
+  cutoff into the existing inbox-retention wake during the same canonical
+  receipt checkpoint. Hosted private generation fails closed without that
+  persistence boundary, and the generated-image owner materializes the shared
+  lookup before every read so a lazy legacy index cannot be replaced as empty.
+  The earliest cutoff wins across captures. Retirement receipts preserve the
+  inspected raw preimage, so restore can apply the tombstone once, recognize it
+  idempotently, and reject unrelated bytes.
 - `capture` is the user/operator-facing primitive; the durable record shape stays composed from existing event, attachment, tag, and raw-import primitives.
 - Labels, body sites, collections, and tags are lightweight context. They are not a medical ontology and should not require a body-map schema.
 - Medical interpretation belongs with the user and their clinician. Murph can organize the evidence, but it should not infer malignancy, diagnosis, or urgency from photos.
@@ -80,5 +88,5 @@ If the user takes front/side/close-up views of the same mole at the same time, s
 1. A one-off media observation can be saved without inventing a domain-specific schema.
 2. A 20-photo batch can be stored as 20 separate capture events with stable labels and body sites.
 3. The same observed spot can be followed over time by filtering the stable label tag.
-4. Raw media remains immutable and manifest-backed under `raw/captures/**`.
+4. User-authored raw media remains immutable and manifest-backed under `raw/captures/**`; assistant-generated image payloads use the documented 14-day privacy-retention tombstone transition.
 5. Adjacent use cases can reuse the same primitive without turning it into a medical model.

@@ -101,6 +101,22 @@ export interface DeleteEventResult {
   deleted: true;
 }
 
+export function buildDeletedEventTombstone(
+  record: EventRecord,
+  recordedAt: Date,
+): EventRecord {
+  return validateContract(
+    eventRecordSchema,
+    compactObject({
+      ...record,
+      recordedAt: recordedAt.toISOString(),
+      lifecycle: buildEventSpineLifecycle(eventSpineRevision(record) + 1, "deleted"),
+    }),
+    "EVENT_CONTRACT_INVALID",
+    "Deleted event tombstone is invalid.",
+  );
+}
+
 const RESERVED_EVENT_KEYS = new Set([
   "schemaVersion",
   "id",
@@ -538,23 +554,15 @@ async function deleteEventLocked(
   if (!latestMatchedEvent || isDeletedEventSpineRecord(latestMatchedEvent.record)) {
     throw new VaultError("EVENT_MISSING", `Event "${input.eventId}" was not found.`);
   }
-  const tombstoneRecord = validateContract(
-    eventRecordSchema,
-    compactObject({
-      ...latestMatchedEvent.record,
-      recordedAt: new Date().toISOString(),
-      lifecycle: buildEventSpineLifecycle(eventSpineRevision(latestMatchedEvent.record) + 1, "deleted"),
-    }),
-    "EVENT_CONTRACT_INVALID",
-    "Deleted event tombstone is invalid.",
-  );
+  const now = new Date();
+  const tombstoneRecord = buildDeletedEventTombstone(latestMatchedEvent.record, now);
   const tombstoneLedgerFile = toEventLedgerFile(tombstoneRecord.occurredAt);
 
   return runLoadedCanonicalWrite<DeleteEventResult>({
     vaultRoot: input.vaultRoot,
     operationType: "event_delete",
     summary: `Delete event ${input.eventId}`,
-    occurredAt: new Date(),
+    occurredAt: now,
     mutate: async ({ batch }) => {
       await batch.stageJsonlAppend(tombstoneLedgerFile, `${JSON.stringify(tombstoneRecord)}\n`);
       await emitAuditRecord({
@@ -563,7 +571,7 @@ async function deleteEventLocked(
         action: "event_delete",
         commandName: "core.deleteEvent",
         summary: `Deleted ${latestMatchedEvent.record.kind} ${input.eventId}.`,
-        occurredAt: new Date(),
+        occurredAt: now,
         files: [tombstoneLedgerFile],
         targetIds: [input.eventId],
       });
