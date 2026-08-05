@@ -198,6 +198,18 @@ const hostedDataApiLabelContaminantSummarySchema = z.object({
       authority: z.string().min(1),
       name: z.string().min(1),
     }),
+    screeningPolicy: z.object({
+      id: z.string().min(1),
+      assumedBodyWeightKg: z.number().positive(),
+      assumedServingsPerDay: z.number().positive(),
+      servingGrams: z.number().positive(),
+      exposure: z.object({
+        value: z.number().nonnegative(),
+        unit: z.string().min(1),
+        basis: z.string().min(1),
+      }),
+      ratio: z.number().nonnegative(),
+    }).optional(),
     source: hostedDataApiLabelContaminantSummarySourceSchema,
   })).max(5),
   observationCount: z.number().int().nonnegative(),

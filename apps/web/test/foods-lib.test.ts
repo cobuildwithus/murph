@@ -982,6 +982,31 @@ describe("foods query helpers", () => {
       3.714286,
       6,
     );
+    if (!result) {
+      throw new Error("expected exact food result");
+    }
+
+    const compact = toFoodNutritionSearchItem(result);
+    expect(
+      compact.contaminantSummary.alerts[0]?.screeningPolicy,
+    ).toMatchObject({
+      id: "adult_one_serving_per_day_v1",
+      assumedBodyWeightKg: 70,
+      assumedServingsPerDay: 1,
+      servingGrams: 52,
+      exposure: {
+        unit: "ng/kg_bw/day",
+        basis: "oral_total_dietary_exposure",
+      },
+    });
+    expect(
+      compact.contaminantSummary.alerts[0]?.screeningPolicy?.exposure.value,
+    ).toBeCloseTo(0.742857, 6);
+    expect(
+      compact.contaminantSummary.alerts[0]?.screeningPolicy?.ratio,
+    ).toBeCloseTo(3.714286, 6);
+    expect(JSON.stringify(compact)).not.toContain("sourceReportTitle");
+    expect(JSON.stringify(compact)).not.toContain("testedProduct");
   });
 
   it("keeps daily-exposure guidance unknown when serving mass is missing", async () => {

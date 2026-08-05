@@ -73,7 +73,18 @@ Before calculating a meal total:
   a bounded exact-product contaminant summary. Read `contaminantSummary` by
   default: `no_known_product_tests` means evidence is unknown, observations are
   measured or reported findings rather than verdicts, and truncation means more
-  linked evidence exists. Increase `--limit` only for an ambiguous match, and
+  linked evidence exists. When an alert includes `screeningPolicy`, use its
+  exposure and ratio to interpret unlike result/threshold units and state its
+  fixed serving-per-day and body-weight assumptions; that context is not a
+  personalized safety verdict. `murphConcernLevel` is the strongest
+  threshold-screening result among the linked tests, not product safety or
+  personal risk. `none` means no represented comparable observation triggered
+  an alert, not that no contaminants were measured. Alerts are a subset of
+  observations; never add their counts together. For a routine meal log, inspect
+  the summary silently and mention it only when the user asks or a material
+  exact-product alert warrants a brief, source-specific screening caveat. Do not
+  inject unknown or `none` results into every acknowledgment. Increase `--limit`
+  only for an ambiguous match, and
   use `--full-label` whenever the user needs a fact outside that compact
   response. This includes sugars, saturated fat, cholesterol, sodium or other
   micronutrients, ingredients, allergens, or complete contaminant observation,

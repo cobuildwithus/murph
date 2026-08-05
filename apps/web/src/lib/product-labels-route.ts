@@ -35,12 +35,6 @@ type ProductLabelsRouteQueries<TItem> = {
     limit: number;
     q: string;
   }) => Promise<TItem[]>;
-  searchNutrition?: (input: {
-    genericOnly?: boolean;
-    includeOffMarket: boolean;
-    limit: number;
-    q: string;
-  }) => Promise<TItem[]>;
 };
 
 type ProductLabelsRouteConfig<TItem> = ProductLabelsRouteQueries<TItem> & {
@@ -103,7 +97,6 @@ export function createProductLabelsRouteHandlers<TItem>(
       params.get("genericOnly") === "true";
     const nutritionOnly =
       config.projectNutritionItem !== undefined &&
-      config.searchNutrition !== undefined &&
       params.get("nutritionOnly") === "true";
 
     try {
@@ -149,7 +142,6 @@ export function createProductLabelsRouteHandlers<TItem>(
         genericOnly,
         includeOffMarket,
         limit,
-        nutritionOnly,
         q,
       });
 
@@ -201,7 +193,6 @@ export function createProductLabelsRouteHandlers<TItem>(
       payload.genericOnly === true;
     const nutritionOnly =
       config.projectNutritionItem !== undefined &&
-      config.searchNutrition !== undefined &&
       payload.nutritionOnly === true;
 
     try {
@@ -215,7 +206,6 @@ export function createProductLabelsRouteHandlers<TItem>(
             genericOnly,
             includeOffMarket,
             limit,
-            nutritionOnly,
             q,
           }),
         }),
@@ -258,7 +248,6 @@ async function lookupProductLabels<TItem>(
     genericOnly: boolean;
     includeOffMarket: boolean;
     limit: number;
-    nutritionOnly: boolean;
     q: string;
   },
 ): Promise<TItem[]> {
@@ -289,10 +278,7 @@ async function lookupProductLabels<TItem>(
       continue;
     }
 
-    const search = input.nutritionOnly && config.searchNutrition
-      ? config.searchNutrition
-      : config.search;
-    return await search({
+    return await config.search({
       ...(input.genericOnly ? { genericOnly: true } : {}),
       includeOffMarket: input.includeOffMarket,
       limit: input.limit,

@@ -67,6 +67,18 @@ export type FoodContaminantSearchSummary = {
       authority: string;
       name: string;
     };
+    screeningPolicy?: {
+      id: string;
+      assumedBodyWeightKg: number;
+      assumedServingsPerDay: number;
+      servingGrams: number;
+      exposure: {
+        value: number;
+        unit: string;
+        basis: string;
+      };
+      ratio: number;
+    };
     source: {
       name: string;
       reportDate: string | null;
@@ -231,6 +243,24 @@ function toFoodContaminantSearchSummary(
         authority: alert.threshold.authority,
         name: alert.threshold.name,
       },
+      ...(alert.screeningPolicy
+        ? {
+          screeningPolicy: {
+            id: alert.screeningPolicy.id,
+            assumedBodyWeightKg:
+              alert.screeningPolicy.assumedBodyWeightKg,
+            assumedServingsPerDay:
+              alert.screeningPolicy.assumedServingsPerDay,
+            servingGrams: alert.screeningPolicy.servingGrams,
+            exposure: {
+              value: alert.screeningPolicy.exposure.value,
+              unit: alert.screeningPolicy.exposure.unit,
+              basis: alert.screeningPolicy.exposure.basis,
+            },
+            ratio: alert.screeningPolicy.ratio,
+          },
+        }
+        : {}),
       source: {
         name: alert.source.name,
         reportDate: alert.source.reportDate,

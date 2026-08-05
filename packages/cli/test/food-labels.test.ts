@@ -183,6 +183,18 @@ const yogurtContaminantSummary = {
         authority: 'Example Authority',
         name: 'Example screening level',
       },
+      screeningPolicy: {
+        id: 'adult_one_serving_per_day_v1',
+        assumedBodyWeightKg: 70,
+        assumedServingsPerDay: 1,
+        servingGrams: 170,
+        exposure: {
+          value: 0.029,
+          unit: 'ng/kg_bw/day',
+          basis: 'oral_total_dietary_exposure',
+        },
+        ratio: 0.145,
+      },
       source: {
         name: 'Example Source',
         reportDate: '2024-07-11',

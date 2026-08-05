@@ -42,6 +42,27 @@ describe('assistant nutrition source grounding', () => {
       'Read `contaminantSummary` by default: `no_known_product_tests` means evidence is unknown',
     )
     expect(food).toContain(
+      'When an alert includes `screeningPolicy`, use its exposure and ratio to interpret unlike result/threshold units',
+    )
+    expect(food).toContain(
+      'that context is not a personalized safety verdict.',
+    )
+    expect(food).toContain(
+      '`murphConcernLevel` is the strongest threshold-screening result among the linked tests, not product safety or personal risk.',
+    )
+    expect(food).toContain(
+      '`none` means no represented comparable observation triggered an alert, not that no contaminants were measured.',
+    )
+    expect(food).toContain(
+      'Alerts are a subset of observations; never add their counts together.',
+    )
+    expect(food).toContain(
+      'For a routine meal log, inspect the summary silently and mention it only when the user asks or a material exact-product alert warrants a brief, source-specific screening caveat.',
+    )
+    expect(food).toContain(
+      'Do not inject unknown or `none` results into every acknowledgment.',
+    )
+    expect(food).toContain(
       'use `--full-label` whenever the user needs a fact outside that compact response.',
     )
     expect(food).toContain(

@@ -18,7 +18,6 @@ const handlers = createProductLabelsRouteHandlers<FoodSearchItem>({
   numericExactIdPrefix: "fdc:",
   projectNutritionItem: toFoodNutritionSearchItem,
   search: searchFoods,
-  searchNutrition: searchFoods,
   errorCodes: {
     failed: "foods_api_failed",
     unconfigured: "foods_api_unconfigured",
