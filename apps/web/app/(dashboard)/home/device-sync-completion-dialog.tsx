@@ -65,6 +65,17 @@ export function DeviceSyncCompletionDialog({
       ? SendIcon
       : MessageCircleIcon;
 
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      // An unverified result intentionally keeps the marker for its first
+      // retry. Remove it synchronously before the close refresh too, so that
+      // refresh can only request plain Home and reveal canonical onboarding.
+      stripCompletionQueryParams();
+      router.refresh();
+    }
+  }
+
   useEffect(() => {
     if (model.unverified && !hasRetriedUnverifiedCompletionRefresh) {
       hasRetriedUnverifiedCompletionRefresh = true;
@@ -81,13 +92,13 @@ export function DeviceSyncCompletionDialog({
         contactAction={model.contactAction}
         guide={setupGuide}
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={handleOpenChange}
       />
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         data-completion-unverified={model.unverified ? "true" : undefined}
         showCloseButton={false}
@@ -167,7 +178,7 @@ export function DeviceSyncCompletionDialog({
             className="w-full"
             size="xl"
             variant="ghost"
-            onClick={() => setOpen(false)}
+            onClick={() => handleOpenChange(false)}
           >
             Continue exploring
           </Button>

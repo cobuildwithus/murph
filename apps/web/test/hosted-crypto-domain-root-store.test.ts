@@ -2019,6 +2019,7 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
         assistantToneCausalSeq: null,
         assistantVoice: null,
         assistantVoiceCausalSeq: null,
+        initialOnboardingCompletedAt: null,
         billingStatus: input.data.billingStatus ?? HostedBillingStatus.not_started,
         createdAt: now,
         id: input.data.id,

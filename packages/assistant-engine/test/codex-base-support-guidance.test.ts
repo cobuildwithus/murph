@@ -25,16 +25,13 @@ describe("Murph Codex base support guidance", () => {
       "Give support@withmurph.ai only when explicitly asked.",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "For verified-private human support",
+      "explicit verified-private human-support request",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "show the exact product-only summary",
+      "de-identified summary beginning `Support escalation:`",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "disclose potential account linkage",
-    );
-    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "the request alone is not approval",
+      "do not show the summary or ask for separate approval",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "issue saved for triage and account-linked escalation recorded",
@@ -56,6 +53,9 @@ describe("Murph Codex base support guidance", () => {
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       "say a de-identified report is queued and give the address",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
+      "disclose potential account linkage",
     );
   });
 

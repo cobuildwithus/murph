@@ -1125,7 +1125,7 @@ describe('assistant execution prompt contract', () => {
       '`Support escalation:` is reserved',
     )
     expect(prompt).toContain(
-      "follow the Support section's disclosure, approval, and durable-result contract",
+      "follow the Support section's explicit-request, private-scope, and durable-result contract",
     )
     expect(prompt).toContain(
       'Never retry any result',

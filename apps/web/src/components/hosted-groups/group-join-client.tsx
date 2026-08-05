@@ -27,7 +27,6 @@ import {
   buildGroupJoinPostAuthReturnPath,
   type GroupJoinPostJoinDestination,
 } from "@/src/lib/hosted-groups/group-join-handoff";
-import { HOSTED_APP_INITIAL_VISIT_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
@@ -208,11 +207,7 @@ export function GroupJoinAcceptForm(props: {
         <p className="text-base font-medium text-foreground">
           {props.alreadyActiveMember ? "Your sharing is updated." : `You're in ${props.groupName}.`}
         </p>
-        {/* The initial-visit handoff is one-shot: this auth bound the Privy
-            user, so a later sign-in cannot recreate it. It outranks the
-            usual return-to-messaging-channel handoff. */}
-        {props.postJoinContactOption
-          && props.postJoinDestination !== HOSTED_APP_INITIAL_VISIT_HOME_PATH ? (
+        {props.postJoinContactOption ? (
           <MurphContactLink
             actionLabel={GROUP_JOIN_RETURN_LABEL}
             className={buttonVariants({ className: "w-full", size: "xl" })}

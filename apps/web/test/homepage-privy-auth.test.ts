@@ -39,7 +39,6 @@ test("completeHostedPrivyAuth sends active members to home", async () => {
 
 test("completeHostedPrivyAuth sends initial-visit eligible active members through the welcome handoff", async () => {
   mocks.requestHostedPrivyCompletionWithRetry.mockResolvedValueOnce({
-    initialVisitEligible: true,
     inviteCode: "invite-code",
     joinUrl: "https://join.example.test/join/invite-code",
     stage: "active",
@@ -53,7 +52,7 @@ test("completeHostedPrivyAuth sends initial-visit eligible active members throug
       authMethod: "email",
     }),
   ).resolves.toMatchObject({
-    redirectUrl: "/home?initialVisit=true",
+    redirectUrl: "/home",
   });
 });
 

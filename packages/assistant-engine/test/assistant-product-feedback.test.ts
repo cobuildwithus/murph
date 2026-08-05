@@ -131,7 +131,7 @@ describe("assistant product feedback", () => {
     expect(description).toContain("accepted, already accepted, or unavailable");
     expect(description).toContain("Ordinary feedback is best-effort after the reply");
     expect(description).toContain(
-      'A summary beginning "Support escalation:" is reserved for a verified private member who approved the exact shown summary and its potential account linkage',
+      'A summary beginning "Support escalation:" is reserved for an explicit human-support request from a verified private member',
     );
     expect(description).toContain("that mode waits for the durable callback");
     expect(description).toContain("do not retry after any result");

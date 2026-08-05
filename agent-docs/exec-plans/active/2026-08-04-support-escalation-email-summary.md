@@ -2,192 +2,124 @@
 
 Status: active
 Created: 2026-08-04
-Updated: 2026-08-04
+Updated: 2026-08-05
 
 ## Goal
 
-- Include the bounded, de-identified product issue captured for an explicit
-  private-member support escalation in the immediate internal support alert,
-  after the member sees and approves the exact product-only summary and its
-  account linkage, while keeping raw conversation, health, contact, and
-  secret-bearing context out of the member-linked row and email.
+- Include the stored bounded, de-identified product issue in the immediate
+  internal alert created after an explicit verified-private request for Murph
+  human support, without showing the summary or adding a separate approval turn.
 
 ## Success criteria
 
-- Eligible support alerts render the stored anonymous issue summary together
-  with the existing internal feedback and member identifiers.
-- A generic escalation request causes no tool call; Murph first shows the exact
-  product-only summary, discloses account linkage, and waits for affirmative
-  approval before sending it.
-- Exact callback replay reuses the same stored issue text and Resend idempotency
-  key even if the model rewords the callback; a missing, linked, or malformed
-  stored detail fails before provider entry.
-- The member-linked feedback row remains fixed server-authored metadata, the
-  anonymous detail row remains the only durable free-text owner, and daily cap,
-  verified-private-member authority, and plain-text delivery behavior remain
-  unchanged.
-- Focused Web and Assistant Engine tests, affected typechecks, direct payload
-  and conversation proof, provider-input measurement, required ReviewGPT gates,
-  exact-head CI, and parent final review pass.
+- The first three eligible support alerts per member per UTC day render the
+  first stored anonymous issue together with the existing internal feedback and
+  member identifiers.
+- An explicit verified-private human-support request may submit immediately;
+  generic feedback remains anonymous, group or unverified requests stay
+  account-unlinked, and the support address remains opt-in.
+- Exact callback replay reuses the same stored issue and Resend idempotency key
+  even if the callback is reworded. Missing, linked, or malformed stored detail
+  fails before provider entry.
+- The member-linked row remains fixed server-authored metadata, the anonymous
+  detail row remains the only durable free-text owner, and the existing cap,
+  authority, and plain-text delivery behavior stay unchanged.
+- Focused Web and Assistant Engine tests, affected typechecks, docs checks,
+  exact-head CI, required reviews, and parent final review pass.
 
 ## Scope
 
-- In scope: hosted Web product-feedback persistence/readback, support alert
-  formatting, the compact Assistant Engine support guidance, focused tests,
-  and the durable product/security/reliability docs that define the disclosure.
-- Out of scope: raw transcript inclusion, schema changes, recipient or sender
-  changes, daily digest behavior, new retry or queue ownership, and provider or
-  delivery-path changes.
+- In scope: Web-owned stored-detail readback and validation, support-alert
+  formatting, focused regressions, and owning product/security/reliability docs.
+- Composed prerequisite: #1305 owns the one-turn Assistant Engine authority,
+  de-identification guidance, opt-in address, and truthful completion copy.
+- Out of scope: raw transcript inclusion, schema changes, recipients, daily
+  digest behavior, retry or queue ownership, and provider changes.
 
 ## Constraints
 
-- Technical constraints: use the already normalized and scrubbed support detail
-  row; derive retry email content from stored state; preserve the three-per-UTC-
-  day cap and stable provider idempotency key; add no state owner or dependency.
-- Product/process constraints: this is a semantic product and private-data
-  exposure change, so it uses the worktree/PR lane, product-experience and
-  coverage specialist lenses, the final ReviewGPT cross-cutting gate, exact-
-  head CI, and a scoped final commit.
+- Use the existing normalized and scrubbed anonymous detail row as the only text
+  owner. Derive replay email content from stored state, preserve the daily cap
+  and provider key, and add no state owner or dependency.
+- Treat this as a private-data exposure change: run product-experience and
+  coverage specialist review, final cross-cutting ReviewGPT, exact-head CI, and
+  a parent final review.
 
 ## Risks and mitigations
 
-1. Risk: a model-authored summary can retain semantic private detail even after
+1. Risk: a model-authored summary can retain semantic private detail after
    deterministic scrubbing.
-   Mitigation: require Murph to show the exact product-only summary, disclose
-   its account linkage, and obtain affirmative approval before the tool call;
-   email only that bounded summary, keep raw context and the reserved prefix out
-   of the email, and retain semantic-private-context regression proof.
-2. Risk: an idempotency-key replay can regenerate different summary wording for
-   the same accepted input while reusing one provider key.
-   Mitigation: read and validate both deterministic stored rows, treat the first
-   stored detail as canonical, and format replay from it rather than callback
-   memory; reject missing, linked, or malformed stored detail before Resend.
-3. Risk: a legacy alert accepted shortly before rollout can be replayed with
-   the same provider key after the email body changes.
-   Mitigation: retain the key so Resend fails closed instead of duplicating the
-   alert during its 24-hour retention window; monitor the bounded transition
-   without adding compatibility state.
-4. Risk: a new Web build can expose the issue detail while an old hosted runner
-   still follows the prior one-turn escalation policy.
-   Mitigation: deploy the consent-capable Cloudflare runner first with an
-   immediate container rollout, require exact bundle-fingerprint convergence,
-   then deploy Web; roll back Web before the runner.
+   Mitigation: #1305 requires a bounded product-only summary and synthetic
+   semantic-private-context proof; Web emails only the read-back scrubbed
+   anonymous detail and never reads conversation content.
+2. Risk: callback wording changes while replay reuses one provider key.
+   Mitigation: validate both deterministic rows and treat the first stored
+   anonymous detail as canonical; fail before Resend on invalid storage.
+3. Risk: an alert accepted before the email body change is replayed with the
+   same provider key during Resend's 24-hour retention window.
+   Mitigation: retain the key so the provider fails closed instead of
+   duplicating the alert; monitor the bounded transition without compatibility
+   state.
+4. Risk: runner and Web releases deploy at different times.
+   Mitigation: they retain the same callback payload, persisted rows, and result
+   shape. Runner-first temporarily keeps metadata-only email; Web-first enriches
+   already-valid reserved escalations. No compatibility floor is required.
 
 ## Tasks
 
-1. Prove the existing persistence, email, replay, and privacy path.
-2. Extend the existing Web owner to validate and render the stored issue detail,
-   with the compact assistant guidance showing the exact summary and obtaining
-   approval for its potential inclusion in an account-linked escalation first.
-3. Update focused regressions and the owning durable docs.
-4. Run focused verification and direct payload proof; inspect the complete diff.
-5. Commit, push, open a PR, run the required specialist/final ReviewGPT and CI
-   loops, resolve findings, close the plan, and finish the scoped commit.
+1. Preserve the existing persistence, email, replay, and privacy ownership.
+2. Validate both stored rows and render the first anonymous issue in the alert.
+3. Align tests and durable docs with #1305's one-turn direct-send decision.
+4. Run focused verification, inspect the complete diff, and push the restacked
+   exact head.
+5. Run required reviews and CI, resolve findings, close the plan, and finish the
+   scoped commit.
 
 ## Decisions
 
-- The email will contain the normalized issue content after the reserved
-  `Support escalation:` prefix, labeled as a de-identified product issue.
-- A generic request to escalate starts a natural disclosure/approval turn; only
-  approval of the exact shown summary and its potential account linkage
-  authorizes the tool.
+- The explicit verified-private request itself authorizes the reserved call;
+  Murph does not show the issue summary or ask for separate approval.
+- The email contains the normalized content after `Support escalation:`, labeled
+  as the product issue.
 - The anonymous detail row remains the single durable text owner; the linked row
   stays fixed server-authored metadata.
-- Provider retries will format from read-back stored detail rather than the
-  callback payload.
-- The prompt and email changes are a coordinated rollout: the consent-capable
-  runner is the prerequisite and rollback floor for the detailed-email Web
-  build. Existing runner fingerprint admission and managed-container smoke own
-  convergence proof; no durable consent receipt or compatibility state is
-  added.
+- Provider retries format from read-back stored detail, not callback memory.
+- Runner and Web changes are operationally independent. The PR stays stacked
+  only for review and ordinary merge sequencing; no consent version, rollout
+  floor, feature flag, or new state is required.
 
-## Review anomaly retrospective
+## Review history
 
-- Original requirement: put the approved de-identified product issue in the
-  internal alert while preserving the existing account-linkage, privacy, cap,
-  replay, and failure contracts.
-- First-reviewed shape: 23 source additions and 10 deletions added the stored
-  detail readback and alert body, but the existing one-turn assistant policy
-  still allowed submission from a generic escalation request.
-- Current shape before this decision: 36 source additions and 13 deletions.
-  Review remediation added 13 source lines and 3 deletions for exact-summary
-  disclosure, affirmative approval, and canonical stored-detail replay. It
-  added no owner, state machine, queue, lease, compatibility path, migration,
-  or repair process.
-- Repeated mechanism: the privacy correction lives in the hosted runner bundle
-  while the new disclosure lives in Web. Treating the release as Web-only left
-  old-runner/new-Web deployment skew able to reproduce the accepted consent
-  failure.
-- Decision: continue with the current small architecture and remove that
-  rollout seam operationally. New runner plus old Web is safe because the old
-  email remains metadata-only; old runner plus new Web is forbidden; converged
-  new runner plus new Web completes the approved two-turn flow. Deploy
-  Cloudflare/runner first with immediate rollout and exact fingerprint smoke,
-  then Web. Roll back Web first, then the runner only after Web no longer emits
-  detailed alerts. Do not add a second consent authority to the callback or
-  database.
+- Earlier review rounds evaluated a superseded preview, linkage-disclosure, and
+  affirmative-approval design. Their consent-specific conclusions and rollout
+  prerequisite do not apply to the current direct-send product decision.
+- Still-valid implementation findings remain landed: the first stored detail is
+  canonical on replay, and missing, linked, or malformed detail fails before
+  provider entry. The revised exact head requires fresh product/privacy review.
 
 ## Verification
 
-- Commands to run: focused `apps/web` Vitest for support escalation and its
-  callback route; focused Assistant Engine prompt, support, and real-model test
-  definitions; affected typechecks; base/head initial-provider-input capture;
-  `git diff --check`; direct formatter and conversation assertions; and required
-  exact-head CI.
-- Expected outcomes: the alert includes the de-identified issue once, excludes
-  the reserved prefix and forbidden raw context, exact replay keeps the same
-  body/key despite callback rewording, malformed stored detail fails before
-  email, the first conversation turn discloses without calling, the approved
-  resumed turn submits a summary without semantic private context, and all
-  existing authority, rate, anonymous-row, and failure cases remain green.
+- Run the focused Web support service and callback-route suites, the focused
+  Assistant Engine support suites inherited from #1305, Web and Assistant Engine
+  typechecks, docs drift, and diff checks.
+- Expected outcome: an eligible email includes one labeled de-identified issue,
+  excludes the reserved prefix and forbidden context, replay preserves body and
+  key, invalid stored detail prevents provider entry, and the one-turn direct
+  conversation and group rejection contracts remain green.
+- Provider input impact for this stacked Web diff is not applicable: relative to
+  #1305, it changes no prompt, tool schema or description, skill, provider
+  configuration, or request assembly. #1305 owns the complete paired capture for
+  its provider-visible changes.
 
 ## Verification log
 
-- Focused Web support service and route suites passed 14 tests. Focused
-  Assistant Engine support guidance, assembled-prompt, tool-contract, and
-  prompt-budget and real-model scenario-definition suites passed 99 tests with 25 opt-in live
-  model cases compiled and skipped. Web and Assistant Engine typechecks passed.
-- The opt-in live-model conversation scenario could not run locally because no
-  supported provider credential was available. The committed two-turn scenario
-  still compiles, and the exact compact instructions were exercised through a
-  local provider-request capture without external provider entry.
-- Complete base/head initial provider-request capture used `gpt-5.6-terra`, low
-  reasoning, production code mode, the exact support tool, identical synthetic
-  direct/group inputs, and `gpt-tokenizer` 3.4.0 `o200k_harmony`. It counted the
-  serialized `input`, `parallel_tool_calls`, `text`, and `tool_choice` fields,
-  excluding transport-only model, stream, storage, reasoning, service-tier,
-  cache, client-metadata, and output-inclusion fields identically. Direct input
-  moved from 22,938 tokens / 106,468 bytes to 23,020 / 106,951 (+82 tokens,
-  +0.3575%; +483 bytes, +0.4537%). Group moved from 19,504 tokens / 91,094 bytes
-  to 19,586 / 91,577 (+82 tokens, +0.4204%; +483 bytes, +0.5302%). Exact
-  serialized-field measurement attributes +22 tokens/+116 bytes to compact
-  base support guidance (first-reviewed +20/+108 plus correction +2/+8),
-  +30/+190 to the assembled ordinary-feedback
-  exception, and +30/+177 to the support-aware tool description. Tool schema,
-  generated guidance, and other provider-visible fields are unchanged. The
-  temporary capture harness was removed.
-- Corrected-head product-purpose revalidation found no remaining product
-  finding. The extra natural confirmation is the minimum interaction required
-  to make potential account linkage truthful: the member sees the exact
-  product-only summary and its possible inclusion in the linked escalation, may
-  decline or correct it, and only affirmative approval enters the existing
-  bounded callback. Success copy says only that the issue was saved for triage
-  and an account-linked escalation was recorded, not that a capped alert was
-  necessarily sent; failure still gives the direct address. The unavailable
-  opt-in live-model run is the only material evidence gap.
-- The complete stacked correction audit at `e3a3eb99d0` returned no qualifying
-  finding and confirmed deterministic canonical replay, failure-before-provider
-  ordering, the runner-first deployment contract, and Web-first rollback. Its
-  response reported `MODEL_CONFIRMATION: UNKNOWN`, but the exact turn ran for
-  more than 22 minutes with the requested `ModelGPT-5.6 Sol` selected in the UI,
-  matching `gpt-5-6-pro` response metadata, the required completion marker, and
-  substantive correction coverage, so it satisfies the repository's review
-  evidence rule.
-- Composition round 3 at `aad1e3c9b4` returned `PASS` with no qualifying
-  finding. It confirmed the prompt/Web ownership split, canonical replay,
-  failure-before-provider ordering, daily cap, runner-first deployment, and
-  Web-first rollback. Its three PR-body discrepancies were corrected: linkage
-  is conditional, alert delivery is email-eligibility-bound, and the unmerged
-  prerequisite is composed only in the stacked review snapshot. The final
-  prerequisite merge is composed at `db9c98baad`; focused checks pass and
-  exact-head CI is pending.
+- Before the direct-send decision, focused Web support service and route suites
+  passed 14 tests, and the Web typecheck passed. The stored-detail formatting,
+  stable replay, cap, and failure-before-provider implementation did not change.
+- #1305's revised five-suite Assistant Engine proof passes 97 tests with 25
+  credential-gated live-provider cases compiled and skipped; Assistant Engine
+  typecheck, docs drift, and provider-input measurement pass on its pushed head.
+- After restacking the direct-send prerequisite, the two focused Web suites pass
+  14 tests and the five focused Assistant Engine suites pass 97 tests with 25
+  credential-gated cases skipped. Web and Assistant Engine typechecks, docs
+  drift, and diff checks pass on the composed working tree.

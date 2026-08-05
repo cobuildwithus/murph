@@ -2651,7 +2651,7 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
 
 describeRealCodex('real Codex support escalation e2e', () => {
   it(
-    'escalates once with the exact reserved shape in private and never from a group',
+    'sends once from an explicit private request and never from a group',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const commonInput = {
@@ -2684,7 +2684,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
       )
 
       try {
-        const privateOffer = await executeRealCodexAppServerTurn({
+        const privateResult = await executeRealCodexAppServerTurn({
           ...commonInput,
           developerInstructions:
             buildDirectConversationDeveloperInstructions(),
@@ -2693,37 +2693,6 @@ describeRealCodex('real Codex support escalation e2e', () => {
             'My relative\'s diabetes readings from a glucose sensor vanished after syncing at a clinic, and the Murph connection still says it succeeded.',
             'I need Murph human support to take this over.',
           ].join(' '),
-          workingDirectory: privateWorkingDirectory,
-        })
-        expect(
-          readFeedbackCalls(privateOffer.jsonEvents),
-          'no support escalation before exact account-linked approval',
-        ).toHaveLength(0)
-        const offerText = privateOffer.finalMessage.trim()
-        expect(offerText, 'support address not volunteered before approval').not.toContain(
-          'support@withmurph.ai',
-        )
-        expect(offerText, 'account linkage disclosed').toMatch(
-          /(?:linked|tied|associated).{0,40}(?:Murph )?account|(?:Murph )?account.{0,40}(?:linked|tied|associated)/iu,
-        )
-        expect(offerText, 'exact product-only summary shown').toMatch(
-          /connected source|connection/iu,
-        )
-        expect(offerText, 'natural approval question').toMatch(/\?/u)
-        expect(offerText, 'semantic private detail excluded').not.toMatch(
-          /relative|diabetes|glucose|clinic/iu,
-        )
-
-        const privateResult = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          developerInstructions:
-            buildDirectConversationDeveloperInstructions(),
-          productFeedbackRecorder: createRealCodexFeedbackRecorder(),
-          prompt: [
-            'Yes. I affirmatively approve the exact product-only summary you just showed me, linked to my Murph account.',
-            'Send that summary to internal support now.',
-          ].join(' '),
-          resumeSessionId: privateOffer.sessionId,
           workingDirectory: privateWorkingDirectory,
         })
         const privateCalls = readFeedbackCalls(privateResult.jsonEvents)
@@ -2740,14 +2709,6 @@ describeRealCodex('real Codex support escalation e2e', () => {
           throw new Error('Expected a support-escalation summary.')
         }
         expect(privateSummary).toMatch(/^Support escalation:\s*\S/u)
-        const approvedSummary = privateSummary.replace(
-          /^Support escalation:\s*/u,
-          '',
-        )
-        expect(
-          offerText,
-          'submitted summary exactly matches the approved offer',
-        ).toContain(approvedSummary)
         expect(privateSummary).toMatch(/connected source|connection/iu)
         expect(privateSummary).not.toMatch(
           /relative|diabetes|glucose|clinic/iu,

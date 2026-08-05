@@ -908,31 +908,26 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   activation side effects, and email paths must not persist provider payloads
   or expose recipients in logs.
 
-  An exact, disclosed, and affirmatively approved verified-private
-  `Support escalation:` product-feedback write uses two deterministic rows
-  under the existing Web owner: one member-linked row with a fixed
-  server-authored marker and one anonymous row containing the bounded,
-  de-identified product-only issue after the reserved prefix. The member first
-  sees that exact summary and is told it may enter an internal escalation
-  linked to their account. Only after approval, the first three distinct member
-  escalations per UTC day may send an immediate
-  plain-text support alert that pairs the stored anonymous issue summary with
-  the internal feedback and member ids. Web reads back and validates both rows
-  before provider entry and formats from the stored detail, so an exact replay
-  reuses one body and Resend idempotency key. Later callback rewording cannot
-  replace the first stored detail, while a missing, linked, or malformed stored
-  row fails closed.
-  The alert never reads raw conversation, health, contact, secret, provider, or
-  other private context and adds no table, queue, cursor, or delivery owner.
-  The approval policy is bundled into the Cloudflare-hosted runner while the
-  detailed email is Web-owned. The consent-only policy lands separately and
-  reaches exact bundle-fingerprint convergence through immediate container
-  rollout and managed-container smoke before the stacked detailed-email Web PR
-  may merge. New runner plus old Web is safe because the old alert remains
-  metadata-only; old runner plus new Web is forbidden. Rollback removes the
-  detailed Web behavior before returning the runner below the consent-capable
-  bundle. Existing runner fingerprint admission owns this boundary without a
-  flag or second consent owner.
+  Reserved support escalation uses the existing product-feedback callback as a
+  one-turn explicit action. A verified-private request for Murph human support
+  authorizes one account-linked call with a bounded de-identified product-only
+  summary; Murph does not first display that summary or ask for separate
+  approval. A generic bug handoff, group or unverified audience, or summary that
+  cannot be made product-only does not authorize the reserved shape. The
+  callback, storage, and later detailed-email behavior add no second consent or
+  state owner.
+
+  Web persists that call as two deterministic rows under its existing owner:
+  one member-linked row with a fixed server-authored marker and one anonymous
+  row containing the bounded issue after the reserved prefix. The first three
+  distinct member escalations per UTC day may send an immediate plain-text
+  support alert that pairs the stored anonymous issue with the internal
+  feedback and member ids. Web reads back and validates both rows before
+  provider entry and formats from the first stored detail, so replay reuses one
+  body and Resend idempotency key even if a later callback is reworded. Missing,
+  linked, or malformed detail fails closed. The alert never reads raw
+  conversation, health, contact, secret, provider, or other private context and
+  adds no table, queue, cursor, approval state, or delivery owner.
 
   A separate authenticated ten-minute Vercel cron performs work only during the
   6pm Eastern hour and sends one daily internal product-feedback digest through
@@ -1034,6 +1029,37 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/cli`: the published `@murphai/murph` package plus the `murph` and `vault-cli` binaries, an incur-backed typed operator surface over core/importers/query, quick workout capture as a workflow facade over canonical `activity_session`, `body_measurement`, and `workout_format` primitives, env-gated `route estimate` routing through a CLI-owned Mapbox implementation for distance/duration, temporary address or hiking-POI lookup, and optional approximate elevation, env-gated `research scout` routing through a CLI-owned Exa Search client that accepts only compact tag profiles and does not persist provider output, CLI-owned device-sync control-plane composition over the localhost HTTP/device-daemon boundary, Codex App Server-backed assistant session orchestration, optional env-routed client access to `packages/assistantd` for steady-state local assistant open/send/update flows plus session/status/outbox/runtime inspection and serializable automation control, CLI-owned command/UI/client helpers for the selected vault, one shared bound assistant/vault tool catalog with turn-scoped profiles for canonical memory, canonical automation, assistant runtime inspection, and derived knowledge, saved self-target inspection, bounded vault text reads, deterministic inbox document-preservation helpers, and vault query/write operations across assistant turns, outbound Telegram/Linq/AgentMail email channel adapters, an onboarding/setup wizard that can reuse or discover existing AgentMail inboxes before provisioning, and local host setup commands for macOS and Linux. Programmatic assistant, vault/inbox, and setup surfaces stay in workspace-private owner packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/assistant-cli`, and `@murphai/setup-cli`; the release flow bundles those private owners into the public CLI tarball when needed instead of publishing them as standalone npm products.
 - `packages/openclaw-plugin`: published OpenClaw-compatible bundle package in the default Claude bundle layout (`skills/**`) that teaches OpenClaw to use Murph's existing `vault-cli` surface against the operator's configured vault via OpenClaw's built-in `exec` tool, keeping the integration skill-first, vault-first, and free of any second Murph assistant runtime inside OpenClaw
 - `fixtures/` and `e2e/`: deterministic fixture corpus and end-to-end smoke flows
+
+### Cross-platform initial onboarding
+
+Postgres owns the one-time hosted-member onboarding fact through
+`hosted_member.initial_onboarding_completed_at`. The migration backfills every
+member that predates the field as complete. Its rolling-deploy compatibility
+default also marks rows from the still-serving legacy writer complete, while
+the current member creator explicitly writes null so new-version members begin
+pending. Remove that compatibility default only in a later deployment after
+the legacy writer can no longer serve. Every authenticated Home load reads the
+canonical fact and renders the flow while it is pending; query markers and Web
+session history are not eligibility owners. A user-initiated connection result
+temporarily takes foreground priority on Home, then its close refreshes plain
+Home so pending onboarding can render without competing dialogs. The iOS
+companion reads the same fact through the bearer-only companion route. Optional
+contact projection may remove only the contact-card step when unavailable on
+either surface; it cannot block the public catalog or the member's continuation
+to Health. The native
+client receives the closed web-owned persona, voice, tone, and contact-avatar
+catalog and keeps only unsaved presentation state; it has no durable completion
+flag or parallel catalog.
+
+Persona save and explicit persona skip/dismiss both use one shared transaction.
+The transaction locks the member row, refuses to overwrite preferences after a
+prior completion, writes all selected style fields through the existing
+preference owner, and then records completion. The first surface therefore wins
+an app/web race; a stale second surface receives `completedNow: false` and
+closes without replaying the welcome state. Contact-card skip merely advances
+the flow. Foreground native refresh and a fresh website load both re-read the
+same fact. The short-lived native vCard handoff reuses the existing signed card
+claim and never makes the app a routing-data owner.
 
 ### iOS address-book advisory names
 

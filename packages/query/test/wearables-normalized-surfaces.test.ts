@@ -48,6 +48,7 @@ function makeEntity(
 }
 
 function makeObservation(input: {
+  dataOrigin?: DeviceDataOrigin;
   entityId: string;
   metric: string;
   value: number;
@@ -79,6 +80,7 @@ function makeObservation(input: {
         resourceType: input.resourceType ?? "summary",
         resourceId: `${input.entityId}-resource`,
       },
+      ...(input.dataOrigin ? { dataOrigin: input.dataOrigin } : {}),
     },
   });
 }
@@ -319,6 +321,40 @@ test("Junction Oura explicit resting heart rate takes precedence over lowest sle
   assert.equal(latestRecovery?.restingHeartRate.selection.resolution, "direct");
   assert.equal(latestRecovery?.restingHeartRate.selection.fallbackFromMetric, null);
   assert.deepEqual(restingHeartRatePoints.map((point) => point.value), [52]);
+});
+
+test("metric evidence labels an aggregator record with its public source provider", () => {
+  const vault = makeVault([
+    makeObservation({
+      dataOrigin: {
+        aggregatorProvider: "junction",
+        originConfidence: "high",
+        sourceProviderSlug: "garmin",
+        version: 1,
+      },
+      dayKey: "2026-06-05",
+      entityId: "evt_public_source_sleep_deep_01",
+      metric: "sleep-deep-minutes",
+      occurredAt: "2026-06-05T10:00:00.000Z",
+      provider: "junction",
+      recordedAt: "2026-06-05T10:01:00.000Z",
+      unit: "minutes",
+      value: 95,
+    }),
+  ]);
+
+  const deepSleep = buildMetricProjection(vault).wearableMetricRows.find((row) =>
+    row.metricKey === "deep-sleep-minutes"
+  );
+
+  assert.equal(deepSleep?.provider, "garmin");
+  assert.deepEqual(deepSleep?.dataOrigin, {
+    aggregatorProvider: "junction",
+    originConfidence: "high",
+    sourceProviderSlug: "garmin",
+    version: 1,
+  });
+  assert.equal(deepSleep?.sourceLabel, "Garmin");
 });
 
 test("wearable activity projection emits workout count and zone-minute metric points", () => {
