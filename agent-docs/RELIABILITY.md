@@ -340,6 +340,47 @@ Last verified: 2026-08-04
   ownership; delayed observations remain subject to the shared seven-day lease
   and future timestamps are clamped to server time before the canonical
   container decision is re-read.
+- New Linq-group ownership preparation adds one bounded, non-retried provider
+  roster read before the unbound-group transaction. Provider timeout or failure
+  leaves recovery-backed ownership indeterminate and must return the existing
+  typed retry before route creation. A completed empty, oversized, or non-group
+  result cannot select another member's setup; no eligible intent or unresolved
+  ambiguity otherwise preserves the existing active-sender decision. After the
+  request-local existing-route and roster preflight, explicit suspension or
+  health-data-consent withdrawal prevents route creation and setup outreach.
+  Other inactive senders cannot become the fallback owner but do not veto a
+  distinct active roster-matched owner. Unknown or inactive non-withdrawn
+  senders reach the existing group setup handoff only after the prepared-route
+  boundary returns no route. When first-contact admission enforcement is
+  enabled, an unknown sender must pass that gate before setup outreach. The
+  one-use setup claim and route creation share one transaction. Claim
+  eligibility requires
+  the setup to cover the provider event time and to remain unexpired at
+  processing time, so a delayed pre-arm event cannot spend a newer intent. The
+  selected setup row stays locked until route admission finishes and is deleted
+  only when that transaction creates the route; rollback and convergence leave
+  it unchanged without a compensation lifecycle. A concurrent loser re-reads
+  the canonical route and appends its distinct message there. The optional
+  setup payload is encrypted and versioned; unreadable or future bytes are
+  consumed as unavailable optional setup and fall back to ordinary sender
+  admission instead of wedging the room. Hard-blocked-line recovery keeps the
+  existing delivery attempt as its retry owner, awaits provider-accepted
+  correlation before reporting send success, and treats an exact
+  still-uncorrelated attempt as retryable rather than definitive absence. An
+  exact pinned recovery retries immediately through the provider's stable
+  idempotency key instead of inheriting the generic fifteen-minute
+  pre-provider lease. Its claim compares and advances the existing `updatedAt`
+  row version while preserving the original `attemptedAt` authority timestamp,
+  so one concurrent replay wins without erasing proof that recovery preceded
+  an earlier replacement-line event. An uncorrelated recovery provider error
+  never locally settles the shared row; it remains in flight until accepted
+  correlation or provider-correlated terminal evidence establishes an outcome.
+  For a
+  newly created route, sparse style is committed in the same transaction
+  through the existing
+  synthetic-member preference owner. Optional room context rides the existing
+  activation wake; its fixed-page initialization is exact-replay idempotent and
+  fail-open so it cannot block the accepted first group message.
 - Current-chat naming is one on-demand provider read through
   `murph.group action="read_chat_name"`. It uses the current durable route and
   existing bounded Linq or Telegram request timeout and does not retry, cache,

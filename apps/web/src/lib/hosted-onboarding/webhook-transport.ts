@@ -385,6 +385,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       memberId: string;
       occurredAt: string;
       participantContact: HostedLinqGroupLineRecoveryParticipantContact;
+      pendingGroupSetupId?: string | null;
       sourceEventId: string;
       template: typeof HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE;
       threadId: string;
@@ -457,6 +458,7 @@ function buildHostedWebhookLinqMessageEffectId(
     return buildHostedLinqGroupLineRecoveryEffectId({
       incomingRecipientPhone: input.incomingRecipientPhone,
       memberId: input.memberId,
+      pendingGroupSetupId: input.pendingGroupSetupId,
       threadId: input.threadId,
     });
   }
@@ -596,7 +598,8 @@ async function drainHostedLinqSideEffectWithProviderFence(
   if (!requiresProviderFence) {
     return drainHostedLinqSideEffectDirect(effect, {
       ...input,
-      completeProviderOutcomeBeforeReturn: false,
+      completeProviderOutcomeBeforeReturn:
+        isHostedLinqGroupLineRecoverySideEffect(effect),
     });
   }
 
@@ -826,6 +829,7 @@ async function sendHostedLinqSideEffect(
       });
   let deliveryEffect = effect;
   let providerIdempotencyKey = effect.effectId;
+  let providerRequestCompleted = false;
   let usageLimitDispatchClaimed = false;
 
   try {
@@ -871,6 +875,7 @@ async function sendHostedLinqSideEffect(
         signal: options.signal,
         to: [participantContact],
       });
+      providerRequestCompleted = true;
       if (options.providerFenceState) {
         options.providerFenceState.providerRequestCompleted = true;
       }
@@ -959,6 +964,7 @@ async function sendHostedLinqSideEffect(
       replyToMessageId: deliveryEffect.payload.replyToMessageId,
       signal: options.signal,
     });
+    providerRequestCompleted = true;
     if (options.providerFenceState) {
       options.providerFenceState.providerRequestCompleted = true;
     }
@@ -987,9 +993,12 @@ async function sendHostedLinqSideEffect(
     }
   } catch (error) {
     if (
+      effect.payload.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+    ) {
+      await deliveryAttemptTask;
+    } else if (
       effect.payload.template === "invite_signup"
       || effect.payload.template === "invite_signup_fallback"
-      || effect.payload.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
       || effect.payload.template === HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE
     ) {
       await deliveryAttemptTask;
@@ -998,6 +1007,7 @@ async function sendHostedLinqSideEffect(
           !options.providerFenceState
           || options.providerFenceState.providerRequestStarted
         )
+        && !providerRequestCompleted
         && !options.providerFenceState?.providerRequestCompleted
       ) {
         await markHostedLinqDeliveryFailedBestEffort({
