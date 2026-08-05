@@ -71,3 +71,13 @@ Updated: 2026-08-04
 - A regression fixture containing a 500,000-character unrelated source field
   projects below 2,000 characters while preserving the required nutrition and
   serving facts.
+- An identical-path capture through pinned Codex App Server 0.145.0 and the
+  `gpt-5.6-terra` code-mode request boundary measured no initial provider-input
+  change from base `e29a00d2e3` to the candidate: individual Murph remained
+  25,934 `o200k_base` tokens / 116,194 UTF-8 bytes and group Murph remained
+  20,711 tokens / 94,759 bytes. The assembled CLI surface artifacts were also
+  byte-identical. The changed food skill is read only after the initial request,
+  and food search is not one of the eager full-schema CLI commands.
+- Focused verification passed 244 tests across Web, CLI, assistant engine, and
+  hosted execution, all four affected-package typechecks, scoped Web ESLint,
+  generated CLI artifact verification, and `git diff --check`.
