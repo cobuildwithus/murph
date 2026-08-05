@@ -593,6 +593,7 @@ describe("runHostedAssistantAutomation", () => {
       input.onEvent?.({
         failureContext: {
           activeUntil: "2026-04-11T15:00:00.000Z",
+          authorityGate: "initial",
           notificationDecisionKind: "skip",
           notificationDeliveryOutcomeKind: null,
           onboardingStateCreatedAt: null,
@@ -639,6 +640,7 @@ describe("runHostedAssistantAutomation", () => {
             "Hosted assistant automation event: onboarding.followup.completed.",
           redacted: expect.objectContaining({
             failureActiveUntil: "2026-04-11T15:00:00.000Z",
+            failureAuthorityGate: "initial",
             failureNotificationDecisionKind: "skip",
             failureNotificationDeliveryOutcomeKind: null,
             failureOnboardingStateSource: "default_missing",

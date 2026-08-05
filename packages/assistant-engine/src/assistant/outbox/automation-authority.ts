@@ -3,6 +3,7 @@ import {
   isVaultError,
 } from '@murphai/core'
 import type {
+  AssistantOnboardingState,
   AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -11,6 +12,13 @@ import {
   runExperimentLifecycleDeliveryAuthorityPrecondition,
 } from '../experiment-support-automations.js'
 import { isRetiredMurphManagedAutomationId } from '../managed-automations.js'
+import {
+  isAssistantOnboardingStateReadError,
+  readAssistantOnboardingState,
+} from '../onboarding-state.js'
+import {
+  isCurrentMurphOnboardingFollowupAutomation,
+} from '../onboarding-followup-automation.js'
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
   runOnboardingGoalCheckinAuthorityPrecondition,
@@ -35,6 +43,28 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
   })
   if (!current) {
     return createAssistantOutboxAutomationAuthorityStaleError()
+  }
+
+  if (isCurrentMurphOnboardingFollowupAutomation(current.record)) {
+    let onboardingState: AssistantOnboardingState
+    try {
+      onboardingState = await readAssistantOnboardingState(input.vault)
+    } catch (error) {
+      if (!isAssistantOnboardingStateReadError(error)) {
+        throw error
+      }
+      throw new VaultCliError(
+        'ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE',
+        'Onboarding follow-up authority could not be revalidated before delivery.',
+        {
+          reason: error.reason,
+          retryable: true,
+        },
+      )
+    }
+    if (onboardingState.status === 'completed') {
+      return createAssistantOutboxAutomationAuthorityStaleError()
+    }
   }
 
   if (

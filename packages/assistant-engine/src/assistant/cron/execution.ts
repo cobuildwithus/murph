@@ -496,6 +496,12 @@ type DeviceActivityParentAuthority = Awaited<
 
 interface AssistantCronOnboardingFollowupDiagnostic {
   activeUntil: string | null
+  authorityGate:
+    | 'initial'
+    | 'pre_provider'
+    | 'pre_tool'
+    | 'pre_delivery'
+    | 'pre_commit'
   occurrenceAt: string
   onboardingStateCreatedAt: string | null
   onboardingStateReadError: 'invalid-json' | 'invalid-schema' | 'read-failed' | 'unknown' | null
@@ -681,6 +687,7 @@ export async function executeClaimedAssistantCronJob(
     ) {
       const onboardingFollowup =
         await readAssistantCronOnboardingFollowupDiagnostic({
+          authorityGate: 'initial',
           job: input.job,
           occurrenceAt,
           vault: input.vault,
@@ -875,7 +882,9 @@ export async function executeClaimedAssistantCronJob(
               routeAuthorityVerified: !maintenanceJob,
               scheduledInvocationAuthority,
             })
-          const assertNotificationStillAuthorized = async (): Promise<void> => {
+          const assertNotificationStillAuthorized = async (
+            authorityGate: AssistantCronOnboardingFollowupDiagnostic['authorityGate'],
+          ): Promise<void> => {
             const authority = await resolveAssistantCronCanonicalSourceAuthority({
               job: input.job,
               now: new Date(),
@@ -887,7 +896,11 @@ export async function executeClaimedAssistantCronJob(
               throw new AssistantCronCanonicalSourceInvalidatedError(authority)
             }
             await assertAssistantCronLifecycleNotificationStillAuthorized({
+              authorityGate,
               job: input.job,
+              onOnboardingFollowupDiagnostic(diagnostic) {
+                onboardingFollowupDiagnostic = diagnostic
+              },
               occurrenceAt,
               vault: input.vault,
             })
@@ -945,11 +958,14 @@ export async function executeClaimedAssistantCronJob(
                   },
                 }
               : {}),
-            beforeProviderAcceptedInputs: assertNotificationStillAuthorized,
-            beforeDelivery: assertNotificationStillAuthorized,
-            beforeToolExecution: assertNotificationStillAuthorized,
+            beforeProviderAcceptedInputs: () =>
+              assertNotificationStillAuthorized('pre_provider'),
+            beforeDelivery: () =>
+              assertNotificationStillAuthorized('pre_delivery'),
+            beforeToolExecution: () =>
+              assertNotificationStillAuthorized('pre_tool'),
             beforeCommit: async (context) => {
-              await assertNotificationStillAuthorized()
+              await assertNotificationStillAuthorized('pre_commit')
               await preemptAssistantCronNotificationCommitForForeground({
                 allowTerminalNoDelivery:
                   assistantCronDeviceActivitySkipConsumesOccurrence({
@@ -1400,6 +1416,7 @@ async function resolveResearchOrientedManagedAutomationOnboardingSkipError(input
 }
 
 async function readAssistantCronOnboardingFollowupDiagnostic(input: {
+  authorityGate: AssistantCronOnboardingFollowupDiagnostic['authorityGate']
   job: ResolvedAssistantCronJob
   occurrenceAt: string
   vault: string
@@ -1416,6 +1433,7 @@ async function readAssistantCronOnboardingFollowupDiagnostic(input: {
 
   const base = {
     activeUntil: input.job.source.activeUntil,
+    authorityGate: input.authorityGate,
     occurrenceAt: input.occurrenceAt,
     scheduleKind: input.job.source.schedule.kind,
   }
@@ -1434,18 +1452,29 @@ async function readAssistantCronOnboardingFollowupDiagnostic(input: {
       error: null,
     }
   } catch (error) {
+    const onboardingStateReadError = isAssistantOnboardingStateReadError(error)
+    const authorityError = onboardingStateReadError
+      ? new VaultCliError(
+          'ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE',
+          'Onboarding follow-up authority could not be revalidated.',
+          {
+            reason: error.reason,
+            retryable: true,
+          },
+        )
+      : error
     return {
       diagnostic: {
         ...base,
         onboardingStateCreatedAt: null,
-        onboardingStateReadError: isAssistantOnboardingStateReadError(error)
+        onboardingStateReadError: onboardingStateReadError
           ? error.reason
           : 'unknown',
         onboardingStateSource: 'read_error',
         onboardingStateStatus: 'unreadable',
         onboardingStateUpdatedAt: null,
       },
-      error,
+      error: authorityError,
     }
   }
 }
@@ -1475,6 +1504,7 @@ function emitAssistantCronOnboardingFollowupCompletedEvent(input: {
     safeDetails: 'onboarding_followup_completed',
     failureContext: {
       activeUntil: input.diagnostic.activeUntil,
+      authorityGate: input.diagnostic.authorityGate,
       occurrenceAt: input.diagnostic.occurrenceAt,
       notificationDecisionKind: input.notificationDecisionKind,
       notificationDeliveryOutcomeKind:
@@ -1576,7 +1606,11 @@ async function resolveAssistantCronCanonicalSourceAuthority(input: {
 }
 
 async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
+  authorityGate: AssistantCronOnboardingFollowupDiagnostic['authorityGate']
   job: ResolvedAssistantCronJob
+  onOnboardingFollowupDiagnostic?: (
+    diagnostic: AssistantCronOnboardingFollowupDiagnostic
+  ) => void
   occurrenceAt: string
   vault: string
 }): Promise<void> {
@@ -1589,10 +1623,14 @@ async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
 
   const onboardingFollowup =
     await readAssistantCronOnboardingFollowupDiagnostic({
+      authorityGate: input.authorityGate,
       job: input.job,
       occurrenceAt: input.occurrenceAt,
       vault: input.vault,
     })
+  if (onboardingFollowup) {
+    input.onOnboardingFollowupDiagnostic?.(onboardingFollowup.diagnostic)
+  }
   if (onboardingFollowup?.error) {
     throw onboardingFollowup.error
   }

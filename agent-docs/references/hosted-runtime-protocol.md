@@ -2337,11 +2337,25 @@ lossy and must not contain plaintext messages, transcripts, vault data,
 provider payloads, secrets, local paths, or direct personal identifiers. The
 hosted onboarding-follow-up path emits distinct metadata-only records when the
 finite three-day automation is seeded, when an exact recognized seed is
-reconciled, and when each occurrence completes. Those records distinguish a
+reconciled, and when each occurrence completes. Recognized migration sources
+are the exact PR 1203 one-shot, the older exact recurring fingerprint, and the
+bounded original legacy fingerprint; editable metadata grants no authority.
+Those records distinguish a
 persisted onboarding state from the missing-state default and carry only state
-status and timestamps, finite-window and schedule shape, model decision,
-delivery outcome, and run outcome. They do not carry conversation or vault
-content and do not grant execution or state-mutation authority.
+status and timestamps, the last authority gate checked, finite-window and
+schedule shape, model decision, delivery outcome, and run outcome. A later
+provider, tool, delivery, or commit
+gate read replaces the initial state snapshot, including the stable unavailable
+authority failure reason. They do not carry conversation or vault content and
+do not grant execution or state-mutation authority.
+
+The signup-selected daily-local minute remains the schedule source of truth
+during maintenance. An exact one-shot migration derives that minute from its
+stored occurrence and durably binds the occurrence before changing the source
+to daily-local. Hosted queue-only intents retain the exact automation revision;
+the existing outbox authority resolver also reads canonical onboarding state
+at external provider entry, making completed state terminally stale and
+unreadable state retryable without adding another delivery owner.
 
 The `checkpoint.snapshot_plan`, `checkpoint.snapshot_started`, and
 `checkpoint.snapshot_finished` events record the bounded

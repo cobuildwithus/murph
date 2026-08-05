@@ -563,20 +563,41 @@ another scheduled recovery window.
 
 The scheduled turn uses the ordinary notification send-or-skip contract and
 never invokes the completion command or otherwise mutates onboarding state.
-Before provider admission and again before delivery or commit, the runtime
-reads canonical onboarding state: completed state deterministically skips, and
-an unreadable state fails closed and may retry only inside the existing finite
-window. Evidence that the checkpoint is already answered, declined, deferred,
+Before provider admission and again before tool execution, delivery, and
+commit, the runtime reads canonical onboarding state: completed state
+deterministically skips, and an unreadable state fails closed with the stable
+`ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE` retry reason only inside the
+existing finite window. The latest gate read replaces the occurrence's earlier
+diagnostic snapshot, so completion or read failure during model work remains
+visible. Evidence that the checkpoint is already answered, declined, deferred,
 or not useful to reopen produces an ordinary skip. Only a later foreground
 member reply may advance or complete onboarding through the canonical state
 owner. The third-day 3:00 PM cutoff prevents a queued or delayed outbound
 intent from entering the provider after the finite local window.
 
+Migration recognizes PR 1203's exact one-shot fingerprint as well as the older
+exact recurring and original legacy fingerprints. It preserves a one-shot's
+stored occurrence as the window anchor and derives its recurring local minute
+from that occurrence; an existing daily-local record keeps its stored minute,
+so signup and maintenance never compete through different hash identities. A recurring source is exposed only
+after canonical runtime state durably owns that first occurrence; if the state
+write fails, the source remains the finite next-day one-shot and normal managed
+reconciliation completes the conversion on a later pass.
+
+Hosted queue-only delivery carries the automation revision into the existing
+outbox authority fence. Immediately before external provider entry, that owner
+also re-reads canonical onboarding state: completion or overall decline makes
+the intent terminally stale, unreadable state remains retryable inside the
+finite window, and unchanged open state may deliver. Foreground completion does
+not need to race maintenance or rewrite the automation to revoke a queued
+question.
+
 Hosted observability records the seed, exact-seed reconciliation, and each
 occurrence as metadata only. The records distinguish persisted onboarding
 state from the missing-state default and include state status and timestamps,
-the three-day window, schedule shape, model decision, delivery outcome, and run
-outcome. They never contain conversation text, vault content, or direct member
+the last authority gate checked, three-day window, schedule shape, model
+decision, delivery outcome, and run outcome. They never contain conversation
+text, vault content, or direct member
 identifiers and never become a second correctness owner.
 
 ## Post-Onboarding Choice Point

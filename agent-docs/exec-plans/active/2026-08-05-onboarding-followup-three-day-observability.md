@@ -10,6 +10,11 @@ metadata-only hosted runtime logs.
 
 - Rollout reconciliation could transform an old active recurring record into a
   fresh follow-up opportunity instead of respecting its original lifecycle.
+- The first candidate missed the exact deployed one-shot fingerprint, could
+  expose a recurring source before its deferred cursor was durable, and could
+  rehash an existing schedule through a different stable identity.
+- In-turn lifecycle reads did not cover the later queued external-transport
+  boundary.
 - Existing logs expose schedule and delivery mechanics but not the
   onboarding-state source or a stable lifecycle decision reason.
 
@@ -20,6 +25,10 @@ metadata-only hosted runtime logs.
 - A send or skip consumes only that day's opportunity; it does not create work
   beyond the three-day window.
 - Completed or declined onboarding retires the automation before delivery.
+- Completion or unreadable state after queueing is revalidated by the existing
+  outbox authority owner before external provider entry.
+- Signup, rollout migration, and maintenance preserve one local minute and the
+  original first occurrence through partial-write recovery.
 - Existing active members are not granted an unbounded cadence during rollout.
 - Logs identify the managed automation, onboarding-state status and source,
   lifecycle action, execution outcome, and safe reason code without member

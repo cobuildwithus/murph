@@ -51,6 +51,7 @@ const managedAutomationMocks = vi.hoisted(() => ({
   reconcileAutomationSupportSeriesNamespace: vi.fn(),
   records: new Map<string, StoredAutomationRecord>(),
   showAutomation: vi.fn(),
+  upsertAssistantCronAutomation: vi.fn(),
   upsertAutomation: vi.fn(),
 }))
 
@@ -67,6 +68,11 @@ vi.mock('@murphai/core', () => ({
 vi.mock('../src/assistant/experiment-support-automations.ts', () => ({
   prepareExperimentLifecycleAutomations:
     managedAutomationMocks.prepareExperimentLifecycleAutomations,
+}))
+
+vi.mock('../src/assistant/cron/authoring.ts', () => ({
+  upsertAssistantCronAutomation:
+    managedAutomationMocks.upsertAssistantCronAutomation,
 }))
 
 vi.mock('@murphai/operator-config/operator-config', () => ({
@@ -322,6 +328,39 @@ beforeEach(() => {
         created: false,
         record,
       }
+    })
+  managedAutomationMocks.upsertAssistantCronAutomation
+    .mockReset()
+    .mockImplementation(async (input: {
+      activeUntil?: string | null
+      instructions: string
+      route: StoredAutomationRecord['route']
+      schedule: StoredAutomationRecord['schedule']
+      slug: string
+      summary?: string | null
+      tags?: string[]
+      title: string
+    }) => {
+      const existing = [...managedAutomationMocks.records.values()]
+        .find((record) => record.slug === input.slug)
+      if (!existing || existing.status === 'archived') {
+        return null
+      }
+      const record: StoredAutomationRecord = {
+        ...existing,
+        activeUntil:
+          input.activeUntil === undefined
+            ? existing.activeUntil
+            : input.activeUntil,
+        instructions: input.instructions,
+        route: input.route,
+        schedule: input.schedule,
+        summary: input.summary ?? existing.summary,
+        tags: input.tags ?? existing.tags,
+        title: input.title,
+      }
+      managedAutomationMocks.records.set(record.automationId, record)
+      return { jobId: record.automationId }
     })
   managedAutomationMocks.reconcileAutomationSupportSeriesNamespace
     .mockReset()
@@ -1117,7 +1156,7 @@ describe('applyMurphManagedAutomations', () => {
       route: defaultRoute,
       schedule: {
         kind: 'dailyLocal',
-        localTime: '08:00',
+        localTime: '13:47',
       },
       slug: 'finish-onboarding-followup',
       status: 'active',
@@ -2398,7 +2437,7 @@ describe('applyMurphManagedAutomations', () => {
       route: existingRoute,
       schedule: {
         kind: 'dailyLocal',
-        localTime: '08:00',
+        localTime: '13:47',
       },
       slug: 'finish-onboarding-followup',
       status: 'active',
@@ -2417,16 +2456,14 @@ describe('applyMurphManagedAutomations', () => {
       updated: 1,
     })
 
-    expect(managedAutomationMocks.patchAutomation).toHaveBeenCalledWith(
+    expect(managedAutomationMocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
       expect.objectContaining({
         activeUntil: '2026-06-26T15:00:00.000Z',
-        continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
         instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
-        lookup: 'automation_onboarding_followup',
+        firstOccurrencePolicy: 'after-current-local-day',
+        route: existingRoute,
         schedule: {
-          localTime: expect.stringMatching(
-            /^(?:13:[3-5]\d|14:[0-2]\d)$/u,
-          ),
+          localTime: '13:47',
           kind: 'dailyLocal',
         },
         summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
@@ -2434,18 +2471,14 @@ describe('applyMurphManagedAutomations', () => {
         title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       }),
     )
-    expect(managedAutomationMocks.patchAutomation.mock.calls[0]?.[0])
-      .not.toHaveProperty('route')
-    expect(managedAutomationMocks.patchAutomation.mock.calls[0]?.[0])
+    expect(managedAutomationMocks.upsertAssistantCronAutomation.mock.calls[0]?.[0])
       .not.toHaveProperty('status')
     expect(managedAutomationMocks.records.get('automation_onboarding_followup'))
       .toMatchObject({
         activeUntil: '2026-06-26T15:00:00.000Z',
         route: existingRoute,
         schedule: {
-          localTime: expect.stringMatching(
-            /^(?:13:[3-5]\d|14:[0-2]\d)$/u,
-          ),
+          localTime: '13:47',
           kind: 'dailyLocal',
         },
         status: 'active',
@@ -2460,7 +2493,7 @@ describe('applyMurphManagedAutomations', () => {
       route: defaultRoute,
       schedule: {
         kind: 'dailyLocal',
-        localTime: '08:00',
+        localTime: '13:47',
       },
       slug: 'finish-onboarding-followup',
       status: 'paused',
@@ -2479,9 +2512,10 @@ describe('applyMurphManagedAutomations', () => {
       updated: 1,
     })
 
-    expect(managedAutomationMocks.patchAutomation).toHaveBeenCalledWith(
+    expect(managedAutomationMocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
       expect.objectContaining({
-        lookup: 'automation_onboarding_followup',
+        firstOccurrencePolicy: 'after-current-local-day',
+        route: defaultRoute,
       }),
     )
     expect(managedAutomationMocks.records.get('automation_onboarding_followup'))
@@ -2489,9 +2523,7 @@ describe('applyMurphManagedAutomations', () => {
         activeUntil: '2026-06-26T15:00:00.000Z',
         route: defaultRoute,
         schedule: {
-          localTime: expect.stringMatching(
-            /^(?:13:[3-5]\d|14:[0-2]\d)$/u,
-          ),
+          localTime: '13:47',
           kind: 'dailyLocal',
         },
         status: 'paused',

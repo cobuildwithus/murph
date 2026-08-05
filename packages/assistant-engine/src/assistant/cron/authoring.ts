@@ -68,6 +68,7 @@ export interface AddAssistantCronJobInput
 
 export interface UpsertAssistantCronAutomationInput {
   activeUntil?: string | null
+  firstOccurrenceAt?: string
   firstOccurrenceActiveDayCount?: number
   firstOccurrenceActiveUntilLocalTime?: string
   firstOccurrencePolicy?:
@@ -231,36 +232,76 @@ export async function upsertAssistantCronAutomation(
       return null
     }
 
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
+      resolvedCreation.paths,
+    )
+    const existingRuntimeState = existingAutomation
+      ? findAssistantCronCanonicalRuntimeRecord(
+          runtimeStore,
+          existingAutomation.automationId,
+        )
+      : null
+    const requestedFirstOccurrenceAt = input.firstOccurrenceAt === undefined
+      ? null
+      : normalizeFirstOccurrenceAt(input.firstOccurrenceAt)
+    const firstOccurrenceAt = input.firstOccurrencePolicy === undefined
+      ? null
+      : existingAutomation?.schedule.kind === 'at'
+        ? existingAutomation.schedule.at
+        : existingRuntimeState?.state.pendingOccurrenceAt ??
+          requestedFirstOccurrenceAt ??
+          resolveFirstOccurrenceAfterCurrentLocalDay({
+            now: resolvedCreation.now,
+            schedule: resolvedCreation.resolvedSchedule,
+          })
     const materializeOneShot =
       input.firstOccurrencePolicy === 'once-after-current-local-day'
-    const schedule =
-      materializeOneShot && existingAutomation?.schedule.kind === 'at'
-        ? existingAutomation.schedule
-        : materializeOneShot
-          ? {
-              kind: 'at' as const,
-              at: resolveFirstOccurrenceAfterCurrentLocalDay({
-                now: resolvedCreation.now,
-                schedule: resolvedCreation.resolvedSchedule,
-              }),
-            }
-          : resolvedCreation.schedule
+    const recurringFirstOccurrenceNeedsBinding =
+      input.firstOccurrencePolicy === 'after-current-local-day' &&
+      (
+        existingAutomation?.schedule.kind === 'at' ||
+        existingRuntimeState === null
+      )
+    const deferredSchedule = firstOccurrenceAt === null
+      ? null
+      : {
+          kind: 'at' as const,
+          at: firstOccurrenceAt,
+        }
+    const bindRecurringFirstOccurrence =
+      recurringFirstOccurrenceNeedsBinding && deferredSchedule !== null
+    const desiredSchedule = materializeOneShot && deferredSchedule
+      ? deferredSchedule
+      : resolvedCreation.schedule
+    // Until the canonical runtime cursor durably owns the first occurrence,
+    // keep a recurring seed as the finite one-shot it is replacing. A failed
+    // runtime-state write can therefore under-send, but it cannot expose the
+    // recurring source early on the current local day.
+    const initialSchedule = bindRecurringFirstOccurrence
+      ? deferredSchedule
+      : desiredSchedule
+    const activeWindowFirstOccurrenceAt =
+      requestedFirstOccurrenceAt ?? firstOccurrenceAt
     const activeUntil =
       input.activeUntil === undefined &&
       input.firstOccurrencePolicy !== undefined &&
-      input.firstOccurrenceActiveUntilLocalTime !== undefined
+      input.firstOccurrenceActiveUntilLocalTime !== undefined &&
+      activeWindowFirstOccurrenceAt !== null
         ? typeof existingAutomation?.activeUntil === 'string'
           ? existingAutomation.activeUntil
           : resolveFirstOccurrenceActiveUntil({
               activeDayCount: input.firstOccurrenceActiveDayCount ?? 1,
               activeUntilLocalTime: input.firstOccurrenceActiveUntilLocalTime,
               now: resolvedCreation.now,
-              occurrenceSchedule: schedule,
+              occurrenceSchedule: {
+                kind: 'at',
+                at: activeWindowFirstOccurrenceAt,
+              },
               resolvedSchedule: resolvedCreation.resolvedSchedule,
             })
         : input.activeUntil
 
-    const created = await upsertAutomation(
+    let created = await upsertAutomation(
       buildCanonicalAutomationUpsertInput({
         activeUntil,
         vault: resolvedCreation.vault,
@@ -268,7 +309,7 @@ export async function upsertAssistantCronAutomation(
         automation: existingAutomation,
         title: resolvedCreation.name,
         status,
-        schedule,
+        schedule: initialSchedule,
         route: buildCanonicalAutomationRoute(target),
         instructions: resolvedCreation.prompt,
         slug: input.slug,
@@ -276,58 +317,78 @@ export async function upsertAssistantCronAutomation(
         tags: input.tags,
       }),
     )
-    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
-      resolvedCreation.paths,
-    )
     const timeZone = await resolveAssistantCronDefaultTimeZone(resolvedCreation.vault)
-    const source = requireCanonicalAutomationCronRecord(
+    let source = requireCanonicalAutomationCronRecord(
       created.record,
       timeZone,
     )
-    const existingRuntimeState = findAssistantCronCanonicalRuntimeRecord(
-      runtimeStore,
-      source.automationId,
-    )
-    if (existingRuntimeState) {
+    if (existingRuntimeState && !bindRecurringFirstOccurrence) {
       return projectCanonicalAssistantCronJob({
         source,
         runtimeState: existingRuntimeState,
       })
     }
 
-    const runtimeState = createAssistantCronCanonicalRuntimeRecord({
-      jobId: source.automationId,
-      now: resolvedCreation.now.toISOString(),
-    })
+    const runtimeState = existingRuntimeState ??
+      createAssistantCronCanonicalRuntimeRecord({
+        jobId: source.automationId,
+        now: resolvedCreation.now.toISOString(),
+      })
 
     const persistedRuntimeState =
-      input.firstOccurrencePolicy !== 'after-current-local-day'
+      !bindRecurringFirstOccurrence
         ? runtimeState
         : {
             ...runtimeState,
+            updatedAt: resolvedCreation.now.toISOString(),
             state: {
               ...runtimeState.state,
-              pendingOccurrenceAt: resolveFirstOccurrenceAfterCurrentLocalDay({
-                now: resolvedCreation.now,
-                schedule: resolvedCreation.resolvedSchedule,
-              }),
+              pendingOccurrenceAt: deferredSchedule.at,
             },
           }
 
     upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, persistedRuntimeState)
-    // No rollback on write failure: a canonical automation without a runtime
-    // record self-heals (readers synthesize initial state) and re-seeding is
-    // idempotent, so the worst case is losing the first-occurrence deferral.
     await writeAssistantCronCanonicalRuntimeStore(
       resolvedCreation.paths,
       runtimeStore,
     )
+
+    if (bindRecurringFirstOccurrence) {
+      created = await upsertAutomation(
+        buildCanonicalAutomationUpsertInput({
+          activeUntil,
+          vault: resolvedCreation.vault,
+          automationId: source.automationId,
+          automation: created.record,
+          title: resolvedCreation.name,
+          status,
+          schedule: desiredSchedule,
+          route: buildCanonicalAutomationRoute(target),
+          instructions: resolvedCreation.prompt,
+          slug: input.slug,
+          summary: input.summary ?? null,
+          tags: input.tags,
+        }),
+      )
+      source = requireCanonicalAutomationCronRecord(created.record, timeZone)
+    }
 
     return projectCanonicalAssistantCronJob({
       source,
       runtimeState: persistedRuntimeState,
     })
   })
+}
+
+function normalizeFirstOccurrenceAt(value: string): string {
+  const parsed = new Date(value)
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'First-occurrence deferral requires a valid timestamp.',
+    )
+  }
+  return parsed.toISOString()
 }
 
 export async function resolveAssistantCronJobCreationInput(
