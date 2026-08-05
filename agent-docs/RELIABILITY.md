@@ -40,7 +40,13 @@ Last verified: 2026-08-04
   request bodies above 20 MiB
   fail closed before provider egress. Rollback removes Web exposure first; it
   does not add a queue, repair pass, provider fallback, or second preference
-  owner.
+  owner. Codex Responses Lite `/responses` requests also receive one explicit
+  prompt-cache breakpoint at the end of their stable leading developer prefix,
+  while retaining Codex's stable cache key and Venice's implicit-cache fallback.
+  Activation requires two sequential, capped requests with the same stable
+  prefix and key but a changing conversation tail: the second request must
+  report a nonzero cache read and materially fewer cache-write tokens. Otherwise
+  Venice remains hidden and rollback begins at Web exposure.
 - Web selects immutable allowance rates from both the canonical product model
   and recorded provider. Venice standard usage uses Venice's documented
   input, cache-read, cache-write, and output rates and records the provider

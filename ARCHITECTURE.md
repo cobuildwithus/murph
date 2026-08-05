@@ -1220,7 +1220,13 @@ application code.
   OpenAI uses its existing Responses intercept; Venice accepts only the two
   Responses POST paths and rewrites a canonical
   Luna/Terra/Sol model to the matching regular Venice GPT-5.6 provider id at
-  egress. The shared mapping is code-owned and exposes no duplicate operator
+  egress. For Codex Responses Lite requests to `/responses`, that same boundary
+  restores the standard top-level tool field and marks the end of Codex's
+  contiguous leading developer prefix as the explicit prompt-cache boundary;
+  it preserves Codex's session-stable cache key and any caller-owned cache
+  controls. Compact requests and ordinary non-Codex Responses payloads do not
+  receive the compatibility marker. This creates no Murph-owned cache or cache
+  state. The shared mapping is code-owned and exposes no duplicate operator
   model variables, so inference and pricing cannot drift independently. Web
   prices immutable usage rows by canonical model plus recorded provider, using
   Venice's distinct input, cache-read, cache-write, and output rates when

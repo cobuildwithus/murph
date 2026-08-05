@@ -1630,6 +1630,7 @@ async function maybeHandleVeniceRequest(input: {
   }
   const upstreamBody = buildHostedVeniceResponsesRequestBody({
     body,
+    pathnameSuffix: pathMatch.pathnameSuffix,
   });
   if (upstreamBody === null) {
     return disallowedProviderEgress();
