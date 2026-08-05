@@ -26,9 +26,7 @@ import {
 
 export interface HostedSignupReferralLink {
   expiresAt: Date;
-  inviteCode: string;
   signupUrl: string;
-  targetMemberId: string;
 }
 
 type HostedReusableSignupReferralInvite = {
@@ -66,12 +64,10 @@ export async function issueHostedSignupReferralLink(input: {
 
   return {
     expiresAt: invite.expiresAt,
-    inviteCode: invite.inviteCode,
     signupUrl: buildHostedSignupReferralUrl(
       invite.inviteCode,
       input.publicBaseUrl,
     ),
-    targetMemberId: invite.memberId,
   };
 }
 
