@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createServer, type Server, type ServerResponse } from 'node:http'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -191,9 +191,23 @@ describe('real codex app-server with scripted provider', () => {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const skillsRoot = path.resolve(
+    const sourceSkillsRoot = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
       '../skills',
+    )
+    const skillsRoot = path.join(
+      scenario.turnInput.workingDirectory,
+      'skills',
+    )
+    const foodJournalDirectory = path.join(skillsRoot, 'food-journal')
+    await mkdir(foodJournalDirectory, { recursive: true })
+    await writeFile(
+      path.join(foodJournalDirectory, 'SKILL.md'),
+      await readFile(
+        path.join(sourceSkillsRoot, 'food-journal', 'SKILL.md'),
+        'utf8',
+      ),
+      'utf8',
     )
     const commandLog = path.join(
       scenario.turnInput.workingDirectory,
