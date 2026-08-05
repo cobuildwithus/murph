@@ -10,12 +10,14 @@ import {
   ageHostedRuntimeLatencyAlertForTest,
   appendHostedExecutionWakeForTest,
   normalizeHostedLinqLatencyTracesForTest,
+  queryHostedRuntimeWorkflowForTest,
   readHostedMailboxItemForTest,
   seedHostedWorkspaceCheckpointForTest,
   seedHostedWorkspaceInboxMediaRetentionWakeForTest,
   setLatestHostedLinqReplyLatencyForTest,
   signalHostedMailboxAppendRuntimeForTest,
   signalHostedRuntimeRecheckRuntimeForTest,
+  signalHostedRuntimeWakeRuntimeForTest,
 } from "#hosted-web-testing";
 import {
   buildHostedExecutionAssistantAskCompletedWake,
@@ -41,6 +43,9 @@ import {
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
 } from "@murphai/hosted-execution/clinical-records";
 import {
+  HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+} from "@murphai/hosted-execution/orchestration-control";
+import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
   type HostedExecutionSnapshotRef,
@@ -59,6 +64,10 @@ import {
 import {
   buildAssistantProviderShellCommandCall,
 } from "./helpers/hosted-local-e2e-support.js";
+import type {
+  HostedLocalForegroundPriorityOrderingEvent,
+  HostedLocalForegroundPriorityOrderingObservationState,
+} from "../src/hosted-local-test/foreground-priority-ordering.ts";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -85,6 +94,7 @@ const latencyAlertCronSecret = "hosted-local-priority-latency-cron-secret";
 const latencyAlertTimeZone = buildDaytimeTestTimeZone(new Date());
 const productionLikeAssistantModel = "gpt-5.6-terra";
 const productionIdleCheckpointDelayMs = 180_000;
+const orderingIdleCheckpointDelayMs = 10_000;
 const promptReplyDeadlineMs = 30_000;
 const duplicateReplyObservationMs = 3_000;
 const activeTurnDuplicateReplyObservationMs = 22_000;
@@ -99,10 +109,26 @@ interface ProbeIdentity {
   userId: string;
 }
 
+type ForegroundPriorityOrderingEventKind =
+  HostedLocalForegroundPriorityOrderingEvent["kind"];
+type ForegroundPriorityOrderingEventOfKind<
+  Kind extends ForegroundPriorityOrderingEventKind,
+> = Extract<HostedLocalForegroundPriorityOrderingEvent, { kind: Kind }>;
+
 const systemMailboxProbe = createProbeIdentity("system-mailbox");
 const retentionProbe = createProbeIdentity("retention");
 const stuckInvocationProbe = createProbeIdentity("stuck-invocation");
 const activeTurnProbe = createProbeIdentity("active-turn");
+const interruptedSnapshotOrderingProbe = createProbeIdentity(
+  "interrupted-snapshot-ordering",
+);
+const canonicalPublicationOrderingProbe = createProbeIdentity(
+  "canonical-publication-ordering",
+);
+const orderingProbeIdentities = [
+  interruptedSnapshotOrderingProbe,
+  canonicalPublicationOrderingProbe,
+] as const;
 const allProbeIdentities = [
   systemMailboxProbe,
   retentionProbe,
@@ -113,6 +139,8 @@ const allProbeIdentities = [
 let scenario: HostedLocalFullStackScenario | null = null;
 let linqStub: HostedLocalLinqStub | null = null;
 let resendStub: HostedLocalResendStub | null = null;
+let orderingScenario: HostedLocalFullStackScenario | null = null;
+let orderingLinqStub: HostedLocalLinqStub | null = null;
 
 describe.sequential("hosted local foreground reply priority e2e", () => {
   beforeAll(async () => {
@@ -524,6 +552,63 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
   }, 120_000);
 });
 
+// The idle checkpoint delay is process-wide. The scenario registry runs this
+// suite in its own Vitest process so the production-floor latency proofs above
+// remain unchanged while this race reaches a real idle snapshot deterministically.
+describe.sequential("hosted local foreground checkpoint ordering e2e", () => {
+  beforeAll(async () => {
+    orderingLinqStub = await startHostedLocalLinqStub();
+    orderingScenario = await startHostedLocalFullStackScenario({
+      additionalEnv: {
+        HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
+          String(orderingIdleCheckpointDelayMs),
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+        HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
+          orderingProbeIdentities.map((identity) => identity.memberPhone).join(","),
+        LINQ_API_BASE_URL: requireOrderingLinqStub().runnerBaseUrl,
+        LINQ_API_TOKEN: "linq-local-ordering-token",
+        LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+        MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+        OPENAI_API_KEY: "stub-local-ordering-openai-key",
+      },
+      assistantProviderStubModelId: productionLikeAssistantModel,
+      faultInjection: true,
+      localDatabaseUrl,
+      persistDirOverride: workerPersistDirOverride,
+      persistDirPrefix: "murph-hosted-local-foreground-ordering-",
+      requiredRunnerEnvProfile: "linq",
+      scenarioLabel: "Local hosted foreground checkpoint ordering e2e",
+      streamLogs: streamDevLogs,
+      testControls: true,
+    });
+  }, 600_000);
+
+  afterAll(async () => {
+    await orderingScenario?.stop();
+    orderingScenario = null;
+    await orderingLinqStub?.stop();
+    orderingLinqStub = null;
+  }, 120_000);
+
+  it("imports later durable input before retrying an interrupted idle snapshot", async () => {
+    await proveInterruptedSnapshotForegroundOrdering({
+      identity: interruptedSnapshotOrderingProbe,
+      linqStub: requireOrderingLinqStub(),
+      scenario: requireOrderingScenario(),
+    });
+  }, 240_000);
+
+  it("continues with durable foreground input after a committed canonical publication", async () => {
+    await proveCanonicalPublicationForegroundOrdering({
+      identity: canonicalPublicationOrderingProbe,
+      linqStub: requireOrderingLinqStub(),
+      scenario: requireOrderingScenario(),
+    });
+  }, 180_000);
+});
+
 function buildDaytimeTestTimeZone(now: Date): string {
   const unwrappedOffsetHours = 12 - now.getUTCHours();
   const offsetHours = unwrappedOffsetHours > 11
@@ -538,17 +623,760 @@ function buildDaytimeTestTimeZone(now: Date): string {
 }
 
 async function seedProbe(identity: ProbeIdentity): Promise<void> {
-  await requireScenario().seedActiveHostedLinqMember({
+  await seedProbeInScenario(requireScenario(), identity);
+}
+
+async function seedProbeInScenario(
+  targetScenario: HostedLocalFullStackScenario,
+  identity: ProbeIdentity,
+): Promise<void> {
+  await targetScenario.seedActiveHostedLinqMember({
     homePhone: identity.homePhone,
     memberId: identity.userId,
     memberPhone: identity.memberPhone,
   });
-  await requireScenario().bindActiveHostedLinqHomeChat({
+  await targetScenario.bindActiveHostedLinqHomeChat({
     chatId: identity.chatId,
     memberId: identity.userId,
     recipientPhone: identity.memberPhone,
   });
-  await seedActivatedWorkspaceCheckpoint(identity.userId);
+  await seedActivatedWorkspaceCheckpointInScenario(
+    targetScenario,
+    identity.userId,
+  );
+}
+
+async function proveInterruptedSnapshotForegroundOrdering(input: {
+  identity: ProbeIdentity;
+  linqStub: HostedLocalLinqStub;
+  scenario: HostedLocalFullStackScenario;
+}): Promise<void> {
+  const { identity, linqStub: targetLinqStub, scenario: targetScenario } = input;
+  await seedProbeInScenario(targetScenario, identity);
+  await armForegroundPriorityOrderingObservation({
+    mode: "empty-probe",
+    scenario: targetScenario,
+    userId: identity.userId,
+  });
+  let checkpointBarrierArmed = false;
+
+  try {
+    await targetScenario.harness.armIdleSnapshotStartBarrierForTest(
+      identity.userId,
+    );
+    checkpointBarrierArmed = true;
+
+    const warmupText = "Prepare one synthetic foreground turn for the idle checkpoint race.";
+    const warmupReply = "Synthetic checkpoint ordering state prepared.";
+    targetScenario.queueAssistantResponses(
+      [{
+        beforeResponse: async () => {
+          await targetScenario.harness
+            .recordForegroundPriorityAssistantProviderStartForTest(identity.userId);
+        },
+        text: warmupReply,
+      }],
+      { matchInputContains: warmupText },
+    );
+    const warmupResponse = await postSignedLinqWebhookForScenario(
+      targetScenario,
+      buildHostedLinqInboundEvent(identity.userId, identity.chatId, {
+        eventId: `evt_priority_ordering_warmup_${runId}`,
+        messageId: `msg_priority_ordering_warmup_${runId}`,
+        text: warmupText,
+      }),
+    );
+    expect(warmupResponse.status).toBe(202);
+    await expect(warmupResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    const warmupProviderStart = await waitForForegroundPriorityOrderingEvent({
+      kind: "assistant_provider_started",
+      label: "warmup provider start before idle snapshot",
+      scenario: targetScenario,
+      userId: identity.userId,
+    });
+    await waitForAssistantProviderInputInScenario({
+      expectedText: warmupText,
+      scenario: targetScenario,
+      userId: identity.userId,
+    });
+
+    await waitForCheckpointBarrierInScenario(targetScenario, identity.userId);
+    const snapshotStarted = await waitForForegroundPriorityOrderingEvent({
+      afterOrdinal: warmupProviderStart.ordinal,
+      kind: "snapshot_started",
+      label: "interruptible idle snapshot start",
+      scenario: targetScenario,
+      userId: identity.userId,
+    });
+
+    const runtimeWakeStateBefore = await readRuntimeWakeObservation({
+      scenario: targetScenario,
+      userId: identity.userId,
+    });
+    await signalHostedRuntimeWakeRuntimeForTest({
+      environment: targetScenario.runtimeEnv,
+      userId: identity.userId,
+    });
+    await waitForRuntimeWakeExecution({
+      previous: runtimeWakeStateBefore,
+      scenario: targetScenario,
+      userId: identity.userId,
+    });
+    await expect(
+      targetScenario.harness.readShutdownCheckpointPublicationBarrierForTest(
+        identity.userId,
+      ),
+    ).resolves.toEqual({ state: "entered" });
+
+    await expect(
+      targetScenario.harness.releaseShutdownCheckpointPublicationBarrierForTest(
+        identity.userId,
+      ),
+    ).resolves.toEqual({ ok: true, released: true });
+    checkpointBarrierArmed = false;
+
+    const heldEmptyProbe = await waitForForegroundPriorityOrderingObservation({
+      label: "post-interruption empty foreground mailbox probe",
+      predicate: (observation) =>
+        observation.barrierState === "entered"
+        && observation.barrierTarget === "empty_conversation_probe"
+        && foregroundPriorityOrderingEventsOfKind(
+          observation,
+          "mailbox_fetch_finished",
+        ).some((event) =>
+          event.ordinal > snapshotStarted.ordinal
+          && event.responseStatus === 200
+          && event.conversationLaneRequested === true
+          && event.probeKind === "checkpoint_interrupt_rearm"
+          && event.conversationItemCount === 0
+        ),
+      scenario: targetScenario,
+      userId: identity.userId,
+    });
+    const emptyForegroundProbe = foregroundPriorityOrderingEventsOfKind(
+      heldEmptyProbe,
+      "mailbox_fetch_finished",
+    ).find((event) =>
+      event.ordinal > snapshotStarted.ordinal
+      && event.responseStatus === 200
+      && event.conversationLaneRequested === true
+      && event.probeKind === "checkpoint_interrupt_rearm"
+      && event.conversationItemCount === 0
+    );
+    if (!emptyForegroundProbe) {
+      throw new Error("The held foreground mailbox probe lost its typed event.");
+    }
+    assertForegroundPriorityOrderingObservationHealthy(heldEmptyProbe);
+    assertNoBackgroundCheckpointEventBetween({
+      afterOrdinal: snapshotStarted.ordinal,
+      beforeOrdinal: emptyForegroundProbe.ordinal + 1,
+      label: "immediate empty foreground probe",
+      observation: heldEmptyProbe,
+    });
+
+    const laterText = "Process the synthetic conversation persisted after the empty probe.";
+    const laterReply = "The later synthetic conversation ran before checkpoint retry.";
+    const laterEventId = `evt_priority_ordering_later_${runId}`;
+    const laterReplyPath = replyPathFor(identity);
+    const laterMatcher = matchLinqMessageText(laterReply, targetLinqStub);
+    const laterReplyBaseline = targetLinqStub.countAcceptedSends(
+      laterReplyPath,
+      laterMatcher,
+    );
+    targetScenario.queueAssistantResponses(
+      [{
+        beforeResponse: async () => {
+          await targetScenario.harness
+            .recordForegroundPriorityAssistantProviderStartForTest(identity.userId);
+        },
+        text: laterReply,
+      }],
+      { matchInputContains: laterText },
+    );
+    const laterResponse = await postSignedLinqWebhookForScenario(
+      targetScenario,
+      buildHostedLinqInboundEvent(identity.userId, identity.chatId, {
+        eventId: laterEventId,
+        messageId: `msg_priority_ordering_later_${runId}`,
+        text: laterText,
+      }),
+    );
+    expect(laterResponse.status).toBe(202);
+    await expect(laterResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    const laterMailboxItem = await readHostedMailboxItemForTest({
+      dedupeKey: laterEventId,
+      environment: targetScenario.runtimeEnv,
+      userId: identity.userId,
+    });
+    expect(laterMailboxItem).toMatchObject({
+      dedupeKey: laterEventId,
+      kind: "conversation.message",
+      lane: "conversation",
+    });
+    if (!laterMailboxItem) {
+      throw new Error("The later foreground webhook did not persist its mailbox row.");
+    }
+    await expect(readForegroundPriorityOrderingObservation(
+      targetScenario,
+      identity.userId,
+    )).resolves.toMatchObject({
+      barrierState: "entered",
+      barrierTarget: "empty_conversation_probe",
+    });
+
+    await expect(releaseForegroundPriorityOrderingBarrier({
+      scenario: targetScenario,
+      userId: identity.userId,
+    })).resolves.toEqual({ ok: true, released: true });
+
+    const laterMailboxImport = await waitForForegroundPriorityOrderingEvent({
+      afterOrdinal: emptyForegroundProbe.ordinal,
+      kind: "mailbox_fetch_finished",
+      label: "later durable conversation mailbox import",
+      predicate: (event) =>
+        event.responseStatus === 200
+        && event.conversationLaneRequested === true
+        && (event.conversationItemCount ?? 0) > 0
+        && hostedOrderingSeqAtLeast(
+          event.conversationSeqEnd,
+          laterMailboxItem.laneSeq,
+        ),
+      scenario: targetScenario,
+      userId: identity.userId,
+    });
+    const laterProviderStart = await waitForForegroundPriorityOrderingEvent({
+      afterOrdinal: laterMailboxImport.ordinal,
+      kind: "assistant_provider_started",
+      label: "provider start for later durable conversation",
+      scenario: targetScenario,
+      userId: identity.userId,
+    });
+    const finalObservation = await readForegroundPriorityOrderingObservation(
+      targetScenario,
+      identity.userId,
+    );
+    assertForegroundPriorityOrderingObservationHealthy(finalObservation);
+    assertNoBackgroundCheckpointEventBetween({
+      afterOrdinal: emptyForegroundProbe.ordinal,
+      beforeOrdinal: laterProviderStart.ordinal,
+      label: "interrupted idle snapshot retry",
+      observation: finalObservation,
+    });
+
+    await Promise.all([
+      waitForAssistantProviderInputInScenario({
+        expectedText: laterText,
+        scenario: targetScenario,
+        userId: identity.userId,
+      }),
+      waitForAcceptedReplyInScenario({
+        baselineCount: laterReplyBaseline,
+        identity,
+        label: "interrupted snapshot ordering",
+        linqStub: targetLinqStub,
+        matcher: laterMatcher,
+        replyPath: laterReplyPath,
+        scenario: targetScenario,
+      }),
+    ]);
+  } finally {
+    if (checkpointBarrierArmed) {
+      await targetScenario.harness
+        .releaseShutdownCheckpointPublicationBarrierForTest(identity.userId)
+        .catch(() => undefined);
+    }
+    await releaseForegroundPriorityOrderingBarrier({
+      scenario: targetScenario,
+      userId: identity.userId,
+    }).catch(() => undefined);
+    await clearForegroundPriorityOrderingObservation(
+      targetScenario,
+      identity.userId,
+    ).catch(() => undefined);
+  }
+}
+
+async function proveCanonicalPublicationForegroundOrdering(input: {
+  identity: ProbeIdentity;
+  linqStub: HostedLocalLinqStub;
+  scenario: HostedLocalFullStackScenario;
+}): Promise<void> {
+  const { identity, linqStub: targetLinqStub, scenario: targetScenario } = input;
+  await seedProbeInScenario(targetScenario, identity);
+  await armForegroundPriorityOrderingObservation({
+    mode: "canonical",
+    scenario: targetScenario,
+    userId: identity.userId,
+  });
+
+  try {
+    const preferencesWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      eventId: `member.preferences.updated:ordering:${runId}`,
+      memberId: identity.userId,
+      occurredAt: new Date().toISOString(),
+      preferences: {
+        personality: { detail: 6 },
+        tone: "casual",
+      },
+    });
+    const appended = await appendHostedExecutionWakeForTest({
+      environment: targetScenario.runtimeEnv,
+      wake: preferencesWake,
+    });
+    expect(appended.inserted).toBe(true);
+    await signalHostedMailboxAppendRuntimeForTest({
+      environment: targetScenario.runtimeEnv,
+      expectedUserId: identity.userId,
+      mailboxItemId: appended.wake.id,
+    });
+
+    const heldObservation = await waitForForegroundPriorityOrderingObservation({
+      label: "canonical checkpoint post-commit boundary",
+      predicate: (observation) =>
+        observation.barrierState === "entered"
+        && observation.barrierTarget === "canonical_post_commit",
+      scenario: targetScenario,
+      userId: identity.userId,
+    });
+    const canonicalCommit = foregroundPriorityOrderingEventsOfKind(
+      heldObservation,
+      "canonical_checkpoint_committed",
+    ).at(-1);
+    if (!canonicalCommit) {
+      throw new Error("Canonical ordering barrier entered without a committed checkpoint event.");
+    }
+
+    const laterText = "Continue with the synthetic conversation after canonical publication.";
+    const laterReply = "Canonical publication finished before the foreground continuation.";
+    const laterEventId = `evt_priority_canonical_later_${runId}`;
+    const laterReplyPath = replyPathFor(identity);
+    const laterMatcher = matchLinqMessageText(laterReply, targetLinqStub);
+    const laterReplyBaseline = targetLinqStub.countAcceptedSends(
+      laterReplyPath,
+      laterMatcher,
+    );
+    targetScenario.queueAssistantResponses(
+      [{
+        beforeResponse: async () => {
+          await targetScenario.harness
+            .recordForegroundPriorityAssistantProviderStartForTest(identity.userId);
+        },
+        text: laterReply,
+      }],
+      { matchInputContains: laterText },
+    );
+    const laterResponse = await postSignedLinqWebhookForScenario(
+      targetScenario,
+      buildHostedLinqInboundEvent(identity.userId, identity.chatId, {
+        eventId: laterEventId,
+        messageId: `msg_priority_canonical_later_${runId}`,
+        text: laterText,
+      }),
+    );
+    expect(laterResponse.status).toBe(202);
+    await expect(laterResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    const laterMailboxItem = await readHostedMailboxItemForTest({
+      dedupeKey: laterEventId,
+      environment: targetScenario.runtimeEnv,
+      userId: identity.userId,
+    });
+    expect(laterMailboxItem).toMatchObject({
+      dedupeKey: laterEventId,
+      kind: "conversation.message",
+      lane: "conversation",
+    });
+    if (!laterMailboxItem) {
+      throw new Error("Canonical continuation webhook did not persist its mailbox row.");
+    }
+    await expect(readForegroundPriorityOrderingObservation(
+      targetScenario,
+      identity.userId,
+    )).resolves.toMatchObject({
+      barrierState: "entered",
+      barrierTarget: "canonical_post_commit",
+    });
+
+    await expect(releaseForegroundPriorityOrderingBarrier({
+      scenario: targetScenario,
+      userId: identity.userId,
+    })).resolves.toEqual({ ok: true, released: true });
+
+    const laterMailboxImport = await waitForForegroundPriorityOrderingEvent({
+      afterOrdinal: canonicalCommit.ordinal,
+      kind: "mailbox_fetch_finished",
+      label: "canonical continuation mailbox import",
+      predicate: (event) =>
+        event.responseStatus === 200
+        && event.conversationLaneRequested === true
+        && (event.conversationItemCount ?? 0) > 0
+        && hostedOrderingSeqAtLeast(
+          event.conversationSeqEnd,
+          laterMailboxItem.laneSeq,
+        ),
+      scenario: targetScenario,
+      userId: identity.userId,
+    });
+    const laterProviderStart = await waitForForegroundPriorityOrderingEvent({
+      afterOrdinal: laterMailboxImport.ordinal,
+      kind: "assistant_provider_started",
+      label: "canonical continuation provider start",
+      scenario: targetScenario,
+      userId: identity.userId,
+    });
+    const finalObservation = await readForegroundPriorityOrderingObservation(
+      targetScenario,
+      identity.userId,
+    );
+    assertForegroundPriorityOrderingObservationHealthy(finalObservation);
+    assertNoBackgroundCheckpointEventBetween({
+      afterOrdinal: canonicalCommit.ordinal,
+      beforeOrdinal: laterProviderStart.ordinal,
+      label: "canonical publication continuation",
+      observation: finalObservation,
+    });
+
+    await Promise.all([
+      waitForAssistantProviderInputInScenario({
+        expectedText: laterText,
+        scenario: targetScenario,
+        userId: identity.userId,
+      }),
+      waitForAcceptedReplyInScenario({
+        baselineCount: laterReplyBaseline,
+        identity,
+        label: "canonical publication ordering",
+        linqStub: targetLinqStub,
+        matcher: laterMatcher,
+        replyPath: laterReplyPath,
+        scenario: targetScenario,
+      }),
+    ]);
+  } finally {
+    await releaseForegroundPriorityOrderingBarrier({
+      scenario: targetScenario,
+      userId: identity.userId,
+    }).catch(() => undefined);
+    await clearForegroundPriorityOrderingObservation(
+      targetScenario,
+      identity.userId,
+    ).catch(() => undefined);
+  }
+}
+
+async function armForegroundPriorityOrderingObservation(input: {
+  mode: "canonical" | "empty-probe";
+  scenario: HostedLocalFullStackScenario;
+  userId: string;
+}): Promise<void> {
+  await expect(
+    input.scenario.harness.armForegroundPriorityOrderingObservationForTest(
+      input.userId,
+      input.mode === "canonical"
+        ? "canonical_post_commit"
+        : "empty_conversation_probe",
+    ),
+  ).resolves.toEqual({ ok: true });
+}
+
+async function readForegroundPriorityOrderingObservation(
+  targetScenario: HostedLocalFullStackScenario,
+  userId: string,
+): Promise<HostedLocalForegroundPriorityOrderingObservationState> {
+  return await targetScenario.harness
+    .readForegroundPriorityOrderingObservationForTest(userId);
+}
+
+async function releaseForegroundPriorityOrderingBarrier(input: {
+  scenario: HostedLocalFullStackScenario;
+  userId: string;
+}): Promise<{ ok: true; released: boolean }> {
+  return await input.scenario.harness
+    .releaseForegroundPriorityOrderingBarrierForTest(input.userId);
+}
+
+async function clearForegroundPriorityOrderingObservation(
+  targetScenario: HostedLocalFullStackScenario,
+  userId: string,
+): Promise<{ cleared: boolean; ok: true }> {
+  return await targetScenario.harness
+    .clearForegroundPriorityOrderingObservationForTest(userId);
+}
+
+function foregroundPriorityOrderingEventsOfKind<
+  Kind extends ForegroundPriorityOrderingEventKind,
+>(
+  observation: HostedLocalForegroundPriorityOrderingObservationState,
+  kind: Kind,
+): Array<ForegroundPriorityOrderingEventOfKind<Kind>> {
+  return observation.events.filter(
+    (event): event is ForegroundPriorityOrderingEventOfKind<Kind> =>
+      event.kind === kind,
+  );
+}
+
+function assertForegroundPriorityOrderingObservationHealthy(
+  observation: HostedLocalForegroundPriorityOrderingObservationState,
+): void {
+  expect(observation.state).toBe("armed");
+  expect(
+    observation.truncated,
+    "Foreground-priority ordering evidence was truncated at its bounded test limit.",
+  ).toBe(false);
+}
+
+function assertNoBackgroundCheckpointEventBetween(input: {
+  afterOrdinal: number;
+  beforeOrdinal: number;
+  label: string;
+  observation: HostedLocalForegroundPriorityOrderingObservationState;
+}): void {
+  const conflictingEvent = input.observation.events.find((event) =>
+    (
+      event.kind === "snapshot_started"
+      || (
+        event.kind === "workspace_checkpoint_started"
+        && event.reason === "idle_shutdown"
+      )
+    )
+    && event.ordinal > input.afterOrdinal
+    && event.ordinal < input.beforeOrdinal
+  );
+  expect(
+    conflictingEvent,
+    `${input.label} let a background idle checkpoint overtake foreground work.`,
+  ).toBeUndefined();
+}
+
+async function waitForForegroundPriorityOrderingObservation(input: {
+  label: string;
+  predicate: (
+    observation: HostedLocalForegroundPriorityOrderingObservationState,
+  ) => boolean;
+  scenario: HostedLocalFullStackScenario;
+  timeoutMs?: number;
+  userId: string;
+}): Promise<HostedLocalForegroundPriorityOrderingObservationState> {
+  const deadlineAt = Date.now() + (input.timeoutMs ?? 90_000);
+  let lastObservation = await readForegroundPriorityOrderingObservation(
+    input.scenario,
+    input.userId,
+  );
+
+  while (Date.now() < deadlineAt) {
+    lastObservation = await readForegroundPriorityOrderingObservation(
+      input.scenario,
+      input.userId,
+    );
+    if (lastObservation.truncated) {
+      throw new Error(await input.scenario.buildFailureMessage(input.userId, [
+        `Foreground-priority ordering trace was truncated while waiting for ${input.label}.`,
+        `last observation: ${JSON.stringify(lastObservation)}`,
+      ]));
+    }
+    if (lastObservation.state === "armed" && input.predicate(lastObservation)) {
+      return lastObservation;
+    }
+    await sleep(100);
+  }
+
+  throw new Error(await input.scenario.buildFailureMessage(input.userId, [
+    `Timed out waiting for ${input.label}.`,
+    `last observation: ${JSON.stringify(lastObservation)}`,
+  ]));
+}
+
+async function waitForForegroundPriorityOrderingEvent<
+  Kind extends ForegroundPriorityOrderingEventKind,
+>(input: {
+  afterOrdinal?: number;
+  kind: Kind;
+  label: string;
+  predicate?: (event: ForegroundPriorityOrderingEventOfKind<Kind>) => boolean;
+  scenario: HostedLocalFullStackScenario;
+  timeoutMs?: number;
+  userId: string;
+}): Promise<ForegroundPriorityOrderingEventOfKind<Kind>> {
+  let matchedEvent: ForegroundPriorityOrderingEventOfKind<Kind> | null = null;
+  await waitForForegroundPriorityOrderingObservation({
+    label: input.label,
+    predicate: (observation) => {
+      matchedEvent = foregroundPriorityOrderingEventsOfKind(
+        observation,
+        input.kind,
+      ).find((event) =>
+        event.ordinal > (input.afterOrdinal ?? 0)
+        && (input.predicate?.(event) ?? true)
+      ) ?? null;
+      return matchedEvent !== null;
+    },
+    scenario: input.scenario,
+    timeoutMs: input.timeoutMs,
+    userId: input.userId,
+  });
+  if (!matchedEvent) {
+    throw new Error(`Foreground-priority ordering event ${input.kind} disappeared.`);
+  }
+  return matchedEvent;
+}
+
+async function waitForCheckpointBarrierInScenario(
+  targetScenario: HostedLocalFullStackScenario,
+  userId: string,
+): Promise<void> {
+  const deadlineAt = Date.now() + 90_000;
+  let lastStatus = await targetScenario.harness.readUserStatus(userId);
+
+  while (Date.now() < deadlineAt) {
+    const barrier =
+      await targetScenario.harness.readShutdownCheckpointPublicationBarrierForTest(
+        userId,
+      );
+    if (barrier.state === "entered") {
+      return;
+    }
+    lastStatus = await targetScenario.harness.readUserStatus(userId);
+    await sleep(250);
+  }
+
+  throw new Error(await targetScenario.buildFailureMessage(userId, [
+    "Timed out waiting for checkpoint publication to enter the test barrier.",
+    `last status: ${JSON.stringify(lastStatus)}`,
+  ]));
+}
+
+async function waitForAssistantProviderInputInScenario(input: {
+  expectedText: string;
+  scenario: HostedLocalFullStackScenario;
+  timeoutMs?: number;
+  userId: string;
+}): Promise<void> {
+  const deadlineAt = Date.now() + (input.timeoutMs ?? 60_000);
+  while (Date.now() < deadlineAt) {
+    if (
+      input.scenario.assistantProviderRequests.some((request) =>
+        request.url === "/v1/responses"
+        && request.body.includes(input.expectedText)
+      )
+    ) {
+      return;
+    }
+    await sleep(100);
+  }
+
+  throw new Error(await input.scenario.buildFailureMessage(input.userId, [
+    "Timed out waiting for the assistant provider transport to include ordered foreground input.",
+  ]));
+}
+
+interface RuntimeWakeObservation {
+  lastExecutionAt: string | null;
+  signalVersion: number;
+}
+
+async function readRuntimeWakeObservation(input: {
+  scenario: HostedLocalFullStackScenario;
+  userId: string;
+}): Promise<RuntimeWakeObservation> {
+  const value = await queryHostedRuntimeWorkflowForTest({
+    environment: input.scenario.runtimeEnv,
+    queryName: HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+    workflowId: `hosted-user-runtime:${input.userId}`,
+  });
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted runtime workflow query returned an invalid state.");
+  }
+  const lastExecutionAt: unknown = Reflect.get(value, "lastExecutionAt");
+  const signalVersion: unknown = Reflect.get(value, "signalVersion");
+  if (
+    (lastExecutionAt !== null && typeof lastExecutionAt !== "string")
+    || typeof signalVersion !== "number"
+    || !Number.isSafeInteger(signalVersion)
+    || signalVersion < 0
+  ) {
+    throw new TypeError("Hosted runtime workflow query returned an invalid state.");
+  }
+  return { lastExecutionAt, signalVersion };
+}
+
+async function waitForRuntimeWakeExecution(input: {
+  previous: RuntimeWakeObservation;
+  scenario: HostedLocalFullStackScenario;
+  userId: string;
+}): Promise<void> {
+  const deadlineAt = Date.now() + 30_000;
+  let latest = input.previous;
+  while (Date.now() < deadlineAt) {
+    latest = await readRuntimeWakeObservation(input);
+    if (
+      latest.signalVersion > input.previous.signalVersion
+      && latest.lastExecutionAt !== input.previous.lastExecutionAt
+    ) {
+      return;
+    }
+    await sleep(250);
+  }
+  throw new Error(await input.scenario.buildFailureMessage(input.userId, [
+    "Timed out waiting for the active-runtime wake to reach Cloudflare.",
+    `last Temporal state: ${JSON.stringify(latest)}`,
+  ]));
+}
+
+async function waitForAcceptedReplyInScenario(input: {
+  baselineCount: number;
+  identity: ProbeIdentity;
+  label: string;
+  linqStub: HostedLocalLinqStub;
+  matcher: ObservedLinqRequestMatcher;
+  replyPath: string;
+  scenario: HostedLocalFullStackScenario;
+  timeoutMs?: number;
+}): Promise<ObservedLinqRequest> {
+  const deadlineAt = Date.now() + (input.timeoutMs ?? 60_000);
+  while (Date.now() < deadlineAt) {
+    const matching = input.linqStub.acceptedSendRequests.filter((request) =>
+      request.method === "POST"
+      && request.url === input.replyPath
+      && input.matcher(request)
+    );
+    if (matching.length > input.baselineCount) {
+      expect(
+        matching.length,
+        `${input.label} emitted more than one newly accepted Linq reply.`,
+      ).toBe(input.baselineCount + 1);
+      return matching.at(-1)!;
+    }
+    await sleep(100);
+  }
+
+  throw new Error(await input.scenario.buildFailureMessage(input.identity.userId, [
+    `Timed out waiting for accepted Linq delivery in ${input.label}.`,
+    `accepted reply count: ${
+      input.linqStub.countAcceptedSends(input.replyPath, input.matcher)
+    }`,
+  ]));
+}
+
+function hostedOrderingSeqAtLeast(
+  value: string | null | undefined,
+  floor: string,
+): boolean {
+  if (
+    typeof value !== "string"
+    || !/^(?:0|[1-9][0-9]*)$/u.test(value)
+    || !/^(?:0|[1-9][0-9]*)$/u.test(floor)
+  ) {
+    return false;
+  }
+  return BigInt(value) >= BigInt(floor);
 }
 
 async function sendInboundAndRequirePromptReply(input: {
@@ -924,25 +1752,24 @@ async function waitForAssistantProviderInput(
   userId: string,
   timeoutMs = 30_000,
 ): Promise<void> {
-  const deadlineAt = Date.now() + timeoutMs;
-  while (Date.now() < deadlineAt) {
-    if (
-      requireScenario().assistantProviderRequests.some((request) =>
-        request.url === "/v1/responses" && request.body.includes(expectedText)
-      )
-    ) {
-      return;
-    }
-    await sleep(250);
-  }
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the real assistant provider transport to include foreground input.",
-  ]));
+  await waitForAssistantProviderInputInScenario({
+    expectedText,
+    scenario: requireScenario(),
+    timeoutMs,
+    userId,
+  });
 }
 
 async function seedActivatedWorkspaceCheckpoint(userId: string): Promise<void> {
+  await seedActivatedWorkspaceCheckpointInScenario(requireScenario(), userId);
+}
+
+async function seedActivatedWorkspaceCheckpointInScenario(
+  targetScenario: HostedLocalFullStackScenario,
+  userId: string,
+): Promise<void> {
   const root = await mkdtemp(
-    path.join(requireScenario().harness.persistDir, "priority-vault-"),
+    path.join(targetScenario.harness.persistDir, "priority-vault-"),
   );
   const operatorHomeRoot = path.join(root, "operator-home");
   const vaultRoot = path.join(root, "vault");
@@ -960,7 +1787,7 @@ async function seedActivatedWorkspaceCheckpoint(userId: string): Promise<void> {
   const hash = sha256HostedBundleHex(snapshot.bundle);
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: createBrowserVaultReplicaRef(hash),
-    environment: requireScenario().runtimeEnv,
+    environment: targetScenario.runtimeEnv,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: {
@@ -974,7 +1801,7 @@ async function seedActivatedWorkspaceCheckpoint(userId: string): Promise<void> {
   });
   expect(checkpoint.status).toBe("updated");
 
-  await requireScenario().harness.request(
+  await targetScenario.harness.request(
     `/__test/artifacts?userId=${encodeURIComponent(userId)}&sha256=${hash}`,
     {
       body: new Blob([new Uint8Array(snapshot.bundle)]),
@@ -1319,8 +2146,11 @@ function replyPathFor(identity: ProbeIdentity): string {
   return `/chats/${encodeURIComponent(identity.chatId)}/messages`;
 }
 
-function matchLinqMessageText(expectedText: string): ObservedLinqRequestMatcher {
-  return (request) => requireLinqStub().readObservedMessageText(request) === expectedText;
+function matchLinqMessageText(
+  expectedText: string,
+  targetLinqStub: HostedLocalLinqStub = requireLinqStub(),
+): ObservedLinqRequestMatcher {
+  return (request) => targetLinqStub.readObservedMessageText(request) === expectedText;
 }
 
 function observedLinqLatencyAlertRequests(): ObservedLinqRequest[] {
@@ -1388,6 +2218,13 @@ async function requestLatencyAlertCron(): Promise<Response> {
 }
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
+  return await postSignedLinqWebhookForScenario(requireScenario(), event);
+}
+
+async function postSignedLinqWebhookForScenario(
+  targetScenario: HostedLocalFullStackScenario,
+  event: Record<string, unknown>,
+): Promise<Response> {
   const rawBody = JSON.stringify(event);
   const timestamp = String(Math.floor(Date.now() / 1_000));
   const signature = createHmac("sha256", linqWebhookSecret)
@@ -1395,7 +2232,7 @@ async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Re
     .digest("hex");
 
   return await fetch(
-    `${requireScenario().harness.webBaseUrl}/api/hosted-onboarding/linq/webhook`,
+    `${targetScenario.harness.webBaseUrl}/api/hosted-onboarding/linq/webhook`,
     {
       body: rawBody,
       headers: {
@@ -1427,6 +2264,20 @@ function requireLinqStub(): HostedLocalLinqStub {
     throw new Error("Hosted foreground reply priority Linq stub was not initialized.");
   }
   return linqStub;
+}
+
+function requireOrderingScenario(): HostedLocalFullStackScenario {
+  if (!orderingScenario) {
+    throw new Error("Hosted foreground checkpoint ordering scenario was not initialized.");
+  }
+  return orderingScenario;
+}
+
+function requireOrderingLinqStub(): HostedLocalLinqStub {
+  if (!orderingLinqStub) {
+    throw new Error("Hosted foreground checkpoint ordering Linq stub was not initialized.");
+  }
+  return orderingLinqStub;
 }
 
 function requireResendStub(): HostedLocalResendStub {

@@ -132,10 +132,14 @@ import {
   finalizeAssistantTurnFromDeliveryOutcome,
 } from "../src/assistant/delivery-service.ts";
 import {
+  type AssistantGeneratedImageCapturePersistence,
   normalizeAssistantExecutionContext,
   resolveAssistantExecutionDefaultTarget,
   resolveAssistantExecutionOperatorDefaults,
 } from "../src/assistant/execution-context.ts";
+import {
+  createAssistantHostedToolContext,
+} from "../src/assistant/hosted-tool-context.ts";
 import {
   resolveAssistantTurnRoute,
   resolveAssistantTurnRouteForMessage,
@@ -3576,6 +3580,37 @@ describe("assistant execution context normalization", () => {
       },
     });
     expect(createScheduledGroupTools).not.toHaveBeenCalled();
+  });
+
+  it("preserves generated capture persistence into the hosted tool context", async () => {
+    const persistGeneratedImageCapture: AssistantGeneratedImageCapturePersistence =
+      async (write) => await write();
+    const executionContext = normalizeAssistantExecutionContext({
+      hosted: {
+        memberId: "member-generated-capture",
+        persistGeneratedImageCapture,
+        userEnvKeys: [],
+      },
+    });
+    const hostedToolContext = createAssistantHostedToolContext({
+      executionContext: executionContext.hosted,
+      messageInput: {
+        prompt: "Generate a group avatar.",
+        vault: "/vault",
+      },
+      session: createAssistantSession(),
+    });
+    const write = vi.fn(async () => "saved");
+
+    expect(hostedToolContext.persistGeneratedImageCapture).toBe(
+      persistGeneratedImageCapture,
+    );
+    await expect(
+      hostedToolContext.persistGeneratedImageCapture?.(write, {
+        retentionWakeAt: "2026-05-11T00:00:00.000Z",
+      }),
+    ).resolves.toBe("saved");
+    expect(write).toHaveBeenCalledOnce();
   });
 
   it("keeps a valid hosted member id even when no hosted helper functions are injected", () => {

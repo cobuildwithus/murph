@@ -387,6 +387,15 @@ export interface AssistantHostedImageGenerationResult {
   savedImageRef: string | null
 }
 
+export interface AssistantGeneratedImageCapturePersistenceMetadata {
+  retentionWakeAt: string
+}
+
+export type AssistantGeneratedImageCapturePersistence = <T>(
+  write: () => Promise<T>,
+  metadata: AssistantGeneratedImageCapturePersistenceMetadata,
+) => Promise<T>
+
 export interface AssistantHostedImageGenerationLauncher {
   launch(input: {
     operationId: string
@@ -395,7 +404,10 @@ export interface AssistantHostedImageGenerationLauncher {
     scopeId?: string | null
     run(
       signal: AbortSignal,
-      persistCanonicalWrite: <T>(write: () => Promise<T>) => Promise<T>,
+      persistCanonicalWrite: <T>(
+        write: () => Promise<T>,
+        metadata: AssistantGeneratedImageCapturePersistenceMetadata,
+      ) => Promise<T>,
     ): Promise<AssistantHostedImageGenerationResult>
   }): 'already-pending' | 'already-started' | 'started'
   readStatus?(scopeId: string): 'pending' | 'queued' | null
@@ -451,6 +463,7 @@ export interface AssistantHostedExecutionContext {
   dynamicContextPrompts?: readonly string[] | null
   imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  persistGeneratedImageCapture?: AssistantGeneratedImageCapturePersistence | null
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
   productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
@@ -606,6 +619,11 @@ export function normalizeAssistantExecutionContext(
       ...(typeof hosted?.materializeWorkspaceArtifacts === 'function'
         ? {
             materializeWorkspaceArtifacts: hosted.materializeWorkspaceArtifacts,
+          }
+        : {}),
+      ...(typeof hosted?.persistGeneratedImageCapture === 'function'
+        ? {
+            persistGeneratedImageCapture: hosted.persistGeneratedImageCapture,
           }
         : {}),
       ...(defaultTarget

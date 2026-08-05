@@ -11,6 +11,10 @@ import {
   shouldSkipSourceArtifactDirectory,
 } from "./check-no-js.ts";
 import {
+  ensureNextRouteTypeStub,
+  extractNextRootParamsTypesImport,
+} from "./ensure-next-route-type-stubs.ts";
+import {
   generatedArtifactDirectories,
   pruneKnownGeneratedArtifactDirectory,
 } from "./prune-generated-source-sidecars.ts";
@@ -98,6 +102,90 @@ describe("check-no-js hygiene guards", () => {
         buildNextEnvDeclarationArtifact("./.next-dev-e2e-run/types/routes.d.ts"),
       ),
     ).toBe(true);
+  });
+
+  it("requires the Next 16.3 root-params declaration beside route types", () => {
+    const declaration = buildNextEnvDeclarationArtifact("./.next/types/routes.d.ts");
+
+    expect(extractNextRootParamsTypesImport(declaration)).toBe(
+      "./.next/types/root-params.d.ts",
+    );
+    expect(
+      isAllowedDeclarationArtifactContents(
+        "apps/web/next-env.d.ts",
+        declaration.replace("./.next/types/root-params.d.ts", "./src/types/root-params.d.ts"),
+      ),
+    ).toBe(false);
+    expect(
+      isAllowedDeclarationArtifactContents(
+        "apps/web/next-env.d.ts",
+        declaration.replace('import "./.next/types/root-params.d.ts";\n', ""),
+      ),
+    ).toBe(false);
+  });
+
+  it("migrates the generated Next 16.2 declaration before preparing 16.3 stubs", async () => {
+    const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+    if (!testTempRoot) {
+      throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+    }
+
+    const workspaceRoot = await mkdtemp(path.join(testTempRoot, "next-type-stubs-"));
+    const nextEnvPath = path.join(workspaceRoot, "next-env.d.ts");
+    const routeTypesPath = path.join(workspaceRoot, ".next-smoke/dev/types/routes.d.ts");
+    const rootParamsPath = path.join(workspaceRoot, ".next-smoke/dev/types/root-params.d.ts");
+
+    try {
+      const currentDeclaration = buildNextEnvDeclarationArtifact(
+        "./.next-smoke/dev/types/routes.d.ts",
+      );
+      const legacyDeclaration = currentDeclaration.replace(
+        'import "./.next-smoke/dev/types/root-params.d.ts";\n',
+        "",
+      );
+      await writeFile(nextEnvPath, legacyDeclaration);
+
+      await expect(ensureNextRouteTypeStub(nextEnvPath)).resolves.toBe(routeTypesPath);
+      await expect(readFile(nextEnvPath, "utf8")).resolves.toBe(currentDeclaration);
+      await expect(readFile(routeTypesPath, "utf8")).resolves.toContain(
+        "Auto-generated route-type stub",
+      );
+      await expect(readFile(rootParamsPath, "utf8")).resolves.toContain(
+        "Type definitions for Next.js root params",
+      );
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a root-params import outside the accepted route-types directory", async () => {
+    const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+    if (!testTempRoot) {
+      throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+    }
+
+    const workspaceRoot = await mkdtemp(path.join(testTempRoot, "next-type-boundary-"));
+    const escapeRoot = `${workspaceRoot}-escape`;
+    const nextEnvPath = path.join(workspaceRoot, "next-env.d.ts");
+    const escapedRootParamsPath = path.join(escapeRoot, "types/root-params.d.ts");
+    const malformedDeclaration = buildNextEnvDeclarationArtifact(
+      "./.next/types/routes.d.ts",
+    ).replace(
+      "./.next/types/root-params.d.ts",
+      `../${path.basename(escapeRoot)}/types/root-params.d.ts`,
+    );
+
+    try {
+      await writeFile(nextEnvPath, malformedDeclaration);
+
+      await expect(ensureNextRouteTypeStub(nextEnvPath)).rejects.toThrow(
+        "does not match the generated Next 16.2 or 16.3 declaration shape",
+      );
+      await expect(access(escapedRootParamsPath)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+      await rm(escapeRoot, { force: true, recursive: true });
+    }
   });
 
   it("rejects next-env.d.ts variants that point outside allowed Next output directories", () => {
