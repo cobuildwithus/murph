@@ -1430,6 +1430,17 @@ function normalizeAssistantCronRunReason(
     : fallback
 }
 
+const assistantCronNotificationDecisionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('skip'),
+    reasonCode: z.literal('provider_skip'),
+  }).strict(),
+  z.object({
+    kind: z.literal('send_message'),
+    reasonCode: z.literal('provider_send_message'),
+  }).strict(),
+])
+
 export const assistantCronRunRecordSchema = z.preprocess(
   normalizeAssistantCronRunRecordInput,
   z.object({
@@ -1446,6 +1457,9 @@ export const assistantCronRunRecordSchema = z.preprocess(
     response: z.string().nullable(),
     responseLength: z.number().int().nonnegative(),
     error: z.string().nullable(),
+    notificationDecision:
+      assistantCronNotificationDecisionSchema.nullable().optional(),
+    scheduledOccurrenceAt: isoTimestampSchema.optional(),
   })
   .strict(),
 )

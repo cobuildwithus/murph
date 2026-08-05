@@ -453,6 +453,31 @@ describe('assistant CLI delivery contracts', () => {
     expect(run.runId).toBe('cronrun_123')
     expect(run.jobId).toBe('cronjob_123')
     expect(run.sessionId).toBe('session_123')
+    expect(run.notificationDecision).toBeUndefined()
+    expect(run.scheduledOccurrenceAt).toBeUndefined()
+
+    expect(assistantCronRunRecordSchema.parse({
+      ...run,
+      notificationDecision: {
+        kind: 'skip',
+        reasonCode: 'provider_skip',
+      },
+      scheduledOccurrenceAt: '2026-04-12T00:00:00.000Z',
+    })).toMatchObject({
+      notificationDecision: {
+        kind: 'skip',
+        reasonCode: 'provider_skip',
+      },
+      scheduledOccurrenceAt: '2026-04-12T00:00:00.000Z',
+    })
+
+    expect(() => assistantCronRunRecordSchema.parse({
+      ...run,
+      notificationDecision: {
+        kind: 'skip',
+        reasonCode: 'provider_send_message',
+      },
+    })).toThrow()
   })
 
   it('rejects the removed assistant cron deliverResponse field', () => {
