@@ -348,7 +348,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "In a verified private conversation, an explicit request for product support can queue a de-identified escalation to the support team.",
         details:
-          "Murph does not promise a ticket number or response time. Group conversations receive the support email and a direction to continue privately, and the site footer now exposes the same direct support address.",
+          "Murph does not promise a ticket number or response time. Group or unverified support requests move to private Murph without an account-linked escalation, and Murph shares the support address in conversation only when asked for it.",
         relevanceTags: ["support", "assistant", "privacy", "settings"],
         sourcePullRequests: [1247],
       },

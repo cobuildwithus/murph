@@ -1,11 +1,41 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildHostedProductSupportEscalationSummary,
+  isHostedProductSupportEscalationSummary,
+  parseHostedProductSupportEscalationSummary,
+} from "../src/runtime-control.js";
+import {
   parseHostedRuntimeProductFeedbackRecordRequest,
   parseHostedRuntimeProductFeedbackRecordResponse,
 } from "../src/parsers.js";
 
 describe("hosted product feedback contracts", () => {
+  it("uses a closed product issue shape for support escalation", () => {
+    const summary = buildHostedProductSupportEscalationSummary({
+      area: "connected_source",
+      problem: "connection_failed",
+    });
+
+    expect(summary).toBe(
+      "Support escalation: area=connected_source; problem=connection_failed",
+    );
+    expect(parseHostedProductSupportEscalationSummary(summary)).toEqual({
+      area: "connected_source",
+      problem: "connection_failed",
+    });
+    expect(isHostedProductSupportEscalationSummary(summary)).toBe(true);
+    for (const unsafeSummary of [
+      "Support escalation: a named person's diagnosis disappeared.",
+      "Support escalation: area=clinic; problem=data_missing",
+      "Support escalation: area=data; problem=medication_missing",
+      "Support escalation: area=data; problem=data_missing; detail=private",
+    ]) {
+      expect(parseHostedProductSupportEscalationSummary(unsafeSummary)).toBeNull();
+      expect(isHostedProductSupportEscalationSummary(unsafeSummary)).toBe(false);
+    }
+  });
+
   it("parses the bounded record contract", () => {
     const feedback = {
       idempotencyKey: "a".repeat(64),

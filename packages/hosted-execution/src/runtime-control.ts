@@ -868,12 +868,84 @@ export interface HostedRuntimeProductFeedbackRecord {
 
 export const HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX = "Support escalation:";
 
+export const HOSTED_PRODUCT_SUPPORT_AREAS = [
+  "account",
+  "assistant",
+  "billing",
+  "connected_source",
+  "data",
+  "groups",
+  "messaging",
+  "onboarding",
+  "settings",
+  "web_app",
+  "other",
+] as const;
+
+export type HostedProductSupportArea =
+  (typeof HOSTED_PRODUCT_SUPPORT_AREAS)[number];
+
+export const HOSTED_PRODUCT_SUPPORT_PROBLEMS = [
+  "access_failed",
+  "action_failed",
+  "connection_failed",
+  "data_incorrect",
+  "data_missing",
+  "delivery_failed",
+  "feature_missing",
+  "stale_result",
+  "unexpected_error",
+  "unclear_behavior",
+  "visual_issue",
+  "other",
+] as const;
+
+export type HostedProductSupportProblem =
+  (typeof HOSTED_PRODUCT_SUPPORT_PROBLEMS)[number];
+
+export interface HostedProductSupportIssue {
+  area: HostedProductSupportArea;
+  problem: HostedProductSupportProblem;
+}
+
+export function buildHostedProductSupportEscalationSummary(
+  issue: HostedProductSupportIssue,
+): string {
+  return `${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX} area=${issue.area}; problem=${issue.problem}`;
+}
+
+export function parseHostedProductSupportEscalationSummary(
+  value: string | null | undefined,
+): HostedProductSupportIssue | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = /^Support escalation: area=([a-z_]+); problem=([a-z_]+)$/u.exec(
+    value,
+  );
+  if (!match) {
+    return null;
+  }
+  const area = match[1];
+  const problem = match[2];
+  if (
+    !HOSTED_PRODUCT_SUPPORT_AREAS.includes(area as HostedProductSupportArea)
+    || !HOSTED_PRODUCT_SUPPORT_PROBLEMS.includes(
+      problem as HostedProductSupportProblem,
+    )
+  ) {
+    return null;
+  }
+  return {
+    area: area as HostedProductSupportArea,
+    problem: problem as HostedProductSupportProblem,
+  };
+}
+
 export function isHostedProductSupportEscalationSummary(
   value: string | null | undefined,
 ): value is string {
-  return typeof value === "string"
-    && value.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)
-    && value.slice(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX.length).trim().length > 0;
+  return parseHostedProductSupportEscalationSummary(value) !== null;
 }
 
 export function isHostedProductSupportEscalationFeedback(

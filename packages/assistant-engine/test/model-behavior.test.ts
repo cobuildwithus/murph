@@ -1117,9 +1117,7 @@ describe('assistant execution prompt contract', () => {
       'Select the single most material gap and call at most once per accepted request',
     )
     expect(prompt).toContain('Keep ordinary feedback silent')
-    expect(prompt).toContain(
-      'acceptance of a clear Murph product failure may get one brief `flagged for the product team` acknowledgement',
-    )
+    expect(prompt).toContain('do not claim it was recorded, flagged, or sent')
     expect(prompt).toContain('Do not mention the log or ask permission unless asked')
     expect(prompt).toContain(
       '`Support escalation:` is reserved',
@@ -1133,7 +1131,7 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('Persistence is best-effort after reply')
     expect(prompt).toContain('Continue with the best fallback')
     expect(prompt).toContain('external/transient failures')
-    expect(prompt).toContain('Use `feature_request` for missing or unsupported paths')
+    expect(prompt).toContain('For ordinary feedback, use `feature_request` for missing or unsupported paths')
     expect(prompt).toContain(
       'Record only kind, a concise product-only summary, and validated changelog ids when known',
     )
@@ -1147,6 +1145,7 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('structured kind/topic')
     expect(prompt).not.toContain('feedback tags')
     expect(prompt).not.toContain('feedbackTags')
+    expect(prompt).not.toContain('flagged for the product team')
   })
 
   it('keeps only Murph-specific behavior outside the Codex base kernel', () => {

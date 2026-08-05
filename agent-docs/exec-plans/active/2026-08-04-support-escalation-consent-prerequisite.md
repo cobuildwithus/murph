@@ -15,8 +15,8 @@ Updated: 2026-08-05
 - A generic bug handoff or product-team feedback request remains ordinary
   anonymous feedback.
 - An explicit verified-private human-support request submits one reserved
-  product-only summary in the same turn without displaying it or asking for
-  separate approval.
+  closed-vocabulary product issue in the same turn without displaying it or
+  asking for separate approval.
 - Group, unverified, or semantically unsafe contexts receive a private support
   route without an account-linked tool call; the address appears only if asked.
 - Completion copy reports the durable record without claiming that a capped
@@ -24,17 +24,20 @@ Updated: 2026-08-05
 
 ## Scope
 
-- In scope: compact Assistant Engine support guidance, focused prompt and
-  one-turn real-model scenario definitions, and the owning product, security,
-  architecture, deployment, and verification docs.
-- Out of scope: Web email formatting, feedback persistence, schemas, callback
-  shapes, flags, queues, retries, recipients, or provider configuration.
+- In scope: compact Assistant Engine support guidance, the shared closed
+  product-issue contract, focused prompt and one-turn real-model scenario
+  definitions, and the owning product, security, architecture, deployment, and
+  verification docs.
+- Out of scope: Web email formatting and persistence, database schemas, callback
+  envelope changes, flags, queues, retries, recipients, or provider
+  configuration.
 
 ## Risks and mitigations
 
-1. Risk: the generated summary can include semantic private context.
-   Mitigation: keep the bounded product-only model contract, deterministic
-   redaction defense in depth, and a synthetic private-context scenario.
+1. Risk: a generated summary can include semantic private context.
+   Mitigation: the provider supplies only allowlisted product-area and failure
+   codes for support; the tool builds the canonical issue, and synthetic
+   private-context coverage proves raw details do not cross the callback.
 2. Risk: a generic product complaint accidentally becomes account-linked.
    Mitigation: reserve the shape for an explicit Murph human-support request in
    a verified private direct conversation; keep ordinary feedback anonymous.
@@ -59,12 +62,13 @@ Updated: 2026-08-05
   or add a separate approval turn.
 - This removes the former consent-specific runner/Web compatibility dependency.
   The detailed-email PR may remain stacked for ordinary review sequencing, but
-  no consent version, rollout floor, or feature flag is required.
-- Ordinary feedback remains best-effort; a clear accepted Murph product failure
-  may receive one brief product-team acknowledgement. The assembled developer
-  prompt and tool description exclude reserved support escalation from that
-  policy and route an explicit private human-support request to durable
-  completion.
+  no consent version, rollout floor, or feature flag is required. The two PRs
+  still form one product release: direct submission alone does not complete
+  human takeover until the stored issue reaches the support alert.
+- Ordinary feedback remains silent and best-effort because candidate acceptance
+  does not prove post-reply persistence. The assembled developer prompt and tool
+  description route an explicit private human-support request to durable
+  completion through the closed product-issue shape.
 
 ## Verification
 
@@ -83,7 +87,8 @@ Updated: 2026-08-05
   live-provider cases compiled and skipped. Assistant Engine typecheck, docs
   drift, and diff checks pass. The compact runtime literal is 2,958 characters
   / 2,962 UTF-8 bytes and remains below the strict 3,000-byte ratchet.
-- Complete paired first-provider capture used the pinned real Codex App Server,
+- The earlier free-form-summary candidate's paired first-provider capture used
+  the pinned real Codex App Server,
   `gpt-5.6-terra`, low reasoning, production code mode, the exact support tool,
   identical synthetic direct/group requests, and `gpt-tokenizer` 3.4.0
   `o200k_harmony`. It serialized `input`, `parallel_tool_calls`, `text`, and
@@ -97,14 +102,47 @@ Updated: 2026-08-05
   attribution is -36 tokens/-227 bytes for assembled product-feedback guidance,
   +21/+100 for compact base instructions, and +25/+145 for Codex-generated tool
   guidance; schema and other provider-visible input are unchanged. The capture
-  compared `9d1d17fd45` to `e374d58700`; later base-only merges changed a food
-  skill, provider-usage extraction, tests, and Web build tooling/docs but no
-  loaded fixture prompt, tool, schema, provider configuration, or request
-  assembly, so the rendered totals remain the current base/head totals. The
-  temporary harness and detached measurement worktree were removed.
+  compared `9d1d17fd45` to `e374d58700`. The closed-vocabulary remediation
+  changes the prompt and schema again, so those figures are retained only as
+  historical evidence and must be replaced by a fresh complete capture before
+  completion. The temporary harness and detached measurement worktree were
+  removed.
 - Parent privacy review found that the reserved tool rejected known non-direct
   scopes but admitted a missing verification scope. The tool now requires an
   affirmative `direct` scope and focused coverage includes missing, group, and
   unverified-external scope rejection. All five focused suites still pass 97
   tests with 25 credential-gated cases skipped, and Assistant Engine typecheck
   remains clean. This implementation-only guard does not change provider input.
+- The preliminary specialist pass found five material seams: the paired email
+  needed to be treated as part of the same product release; the deterministic
+  unverified-audience responder and public changelog still volunteered the
+  address; ordinary feature-request classification conflicted with the exact
+  reserved support shape; real-provider fixtures lacked affirmative direct and
+  group action scopes; and callback failure lacked provider-boundary no-retry
+  proof. The fixes keep the two PRs as one release, make deterministic and
+  prompt address disclosure opt-in, scope feature-request guidance to ordinary
+  feedback, provide exact scopes, and cover one failed callback with truthful
+  recovery. The supplied coverage patch was inspected and applied through the
+  normal source edit.
+- Final round 1 independently confirmed the ordinary/reserved classification
+  and deterministic address findings and found that the new ordinary
+  `flagged for the product team` line could overstate a best-effort post-reply
+  write. The classification and address corrections are retained; the ordinary
+  success claim was deleted from the compact and assembled guidance and the
+  owning product contract.
+- The stacked email specialist pass proved that capture-time token redaction is
+  not semantic de-identification authority for text emailed beside an internal
+  member identifier. The shared support contract now uses only allowlisted
+  product-area and failure codes. The tool constructs the canonical persisted
+  issue from those codes and rejects free-form reserved summaries, so the Web
+  formatter can validate and render the issue without disclosing model-authored
+  names, health facts, relationships, medications, or locations.
+- Current focused proof passes: 106 Assistant prompt/tool/scenario tests with 26
+  credential-gated provider cases compiled and skipped, the targeted
+  deterministic unverified-audience privacy case, 6 hosted product-feedback
+  contract tests, and 25 changelog tests. Assistant Engine and Hosted Execution
+  typechecks pass; the compact base is 2,973 characters / 2,977 UTF-8 bytes,
+  docs drift passes, and `git diff --check` is clean. After generating Health
+  Commons and Prisma artifacts, Web typecheck reaches only two pre-existing
+  `next.config.ts`/`next-config.test.ts` errors for the unrelated `agentRules`
+  NextConfig extension; exact-head CI remains required.

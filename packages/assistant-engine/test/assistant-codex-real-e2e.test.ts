@@ -2688,6 +2688,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
           ...commonInput,
           developerInstructions:
             buildDirectConversationDeveloperInstructions(),
+          hostedToolContext: createRealCodexSupportHostedToolContext('direct'),
           productFeedbackRecorder: createRealCodexFeedbackRecorder(),
           prompt: [
             'My relative\'s diabetes readings from a glucose sensor vanished after syncing at a clinic, and the Murph connection still says it succeeded.',
@@ -2703,14 +2704,12 @@ describeRealCodex('real Codex support escalation e2e', () => {
         }
         expect(privateCall.argumentsValue.kind).toBe('frustration')
         expect(privateCall.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
-        const privateSummary = readString(privateCall.argumentsValue.summary)
-        expect(privateSummary).not.toBeNull()
-        if (!privateSummary) {
-          throw new Error('Expected a support-escalation summary.')
-        }
-        expect(privateSummary).toMatch(/^Support escalation:\s*\S/u)
-        expect(privateSummary).toMatch(/connected source|connection/iu)
-        expect(privateSummary).not.toMatch(
+        expect(privateCall.argumentsValue.summary).toBe('Support escalation')
+        expect(privateCall.argumentsValue.supportArea).toBe('connected_source')
+        expect(['connection_failed', 'data_missing']).toContain(
+          privateCall.argumentsValue.supportProblem,
+        )
+        expect(JSON.stringify(privateCall.argumentsValue)).not.toMatch(
           /relative|diabetes|glucose|clinic/iu,
         )
         const privateText = privateResult.finalMessage.trim()
@@ -2731,6 +2730,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
           ...commonInput,
           developerInstructions:
             buildGroupPointOfViewDeveloperInstructions(),
+          hostedToolContext: createRealCodexSupportHostedToolContext('group'),
           productFeedbackRecorder: createRealCodexFeedbackRecorder(),
           prompt: [
             '[@Trainer_User] Murph keeps dropping my workout photos in here.',
@@ -2743,9 +2743,8 @@ describeRealCodex('real Codex support escalation e2e', () => {
         ).filter(
           (action) =>
             action.kind === 'dynamic'
-            && readString(action.argumentsValue.summary)?.startsWith(
-              'Support escalation:',
-            ),
+            && (action.argumentsValue.summary === 'Support escalation'
+              || action.argumentsValue.supportArea !== undefined),
         )
         expect(
           groupSupportCalls,
@@ -2762,6 +2761,73 @@ describeRealCodex('real Codex support escalation e2e', () => {
         await removeRealCodexTemporaryPaths([
           privateWorkingDirectory,
           groupWorkingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+
+  it(
+    'reports direct notification failure without retry',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-support-escalation-failure-e2e-'),
+      )
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
+          env: config.env,
+          hostedToolContext: createRealCodexSupportHostedToolContext('direct'),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          productFeedbackRecorder: createFailingRealCodexFeedbackRecorder(),
+          prompt: [
+            'Murph has no way to export my saved goals to CSV.',
+            'I need Murph human support to take this over.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const calls = readCapabilityRoutingActions(result.jsonEvents).filter(
+          (action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+        )
+        expect(calls, 'one failed support escalation call').toHaveLength(1)
+        const call = calls[0]
+        if (call?.kind !== 'dynamic') {
+          throw new Error('Expected one failed support-escalation tool call.')
+        }
+        expect(call.argumentsValue.kind).toBe('frustration')
+        expect(call.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
+        expect(call.argumentsValue.summary).toBe('Support escalation')
+        expect(call.argumentsValue.supportArea).toBe('data')
+        expect(call.argumentsValue.supportProblem).toBe('feature_missing')
+
+        const response = result.finalMessage.trim()
+        expect(response).toMatch(/direct notification failed/iu)
+        expect(response).toMatch(
+          /can still|continue|help|next step|try|troubleshoot|work through/iu,
+        )
+        expect(response).not.toContain('support@withmurph.ai')
+        expect(response).not.toMatch(
+          /account-linked escalation.{0,80}(?:saved|recorded)|(?:issue|summary).{0,80}(?:saved|recorded)|email (?:was|has been) (?:sent|delivered|received)|ticket|case number/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
           ...config.temporaryPaths,
         ])
       }
@@ -3612,10 +3678,45 @@ async function executeRealCodexAppServerTurn(
   }
 }
 
+function createRealCodexSupportHostedToolContext(
+  conversationScope: 'direct' | 'group',
+): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    currentUserActionScope: () => ({
+      acceptedInputIds: ['assistant_input_support'],
+      conversationId: `conversation-support-${conversationScope}`,
+      conversationScope,
+      inboundMailboxItemIds: ['mailbox-support'],
+      originSessionId: `session-support-${conversationScope}`,
+      recipientKey: `recipient-support-${conversationScope}`,
+    }),
+    sendVaultFile: async () => ({
+      filename: 'unused',
+      status: 'denied',
+    }),
+    vaultFileSendAvailable: false,
+  }
+}
+
 function createRealCodexFeedbackRecorder(): AssistantTurnProductFeedbackRecorder {
   return {
     async recordProductFeedback() {
       return { recorded: true }
+    },
+    discardProductFeedback() {},
+    readProductFeedback() {
+      return null
+    },
+  }
+}
+
+function createFailingRealCodexFeedbackRecorder(): AssistantTurnProductFeedbackRecorder {
+  return {
+    async recordProductFeedback() {
+      throw new Error('support callback timed out')
     },
     discardProductFeedback() {},
     readProductFeedback() {
