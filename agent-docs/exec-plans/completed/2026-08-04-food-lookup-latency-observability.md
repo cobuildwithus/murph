@@ -1,8 +1,8 @@
 # Food Lookup Latency And Command Observability
 
-Status: active
+Status: completed
 Created: 2026-08-04
-Updated: 2026-08-04
+Updated: 2026-08-05
 
 ## Goal
 
@@ -45,7 +45,7 @@ Updated: 2026-08-04
 2. [x] Add privacy-safe per-command operation diagnostics and tests.
 3. [x] Reduce food-label result count and payload at the existing owner.
 4. [x] Run focused verification and direct reproduction proof.
-5. [ ] Push the exact candidate, complete ReviewGPT and CI, close the plan, and
+5. [x] Push the exact candidate, complete ReviewGPT and CI, close the plan, and
    record deployment concerns.
 
 ## Evidence
@@ -60,6 +60,12 @@ Updated: 2026-08-04
   card attachment, and one process inspection. The existing profile collapsed
   all nested batch operations to `vault-cli batch`, which prevented a stronger
   attribution after the fact.
+- The batch result owner now emits each child command's duration, output
+  character count, and success status under a shared schema marker. The turn
+  profiler validates that structured result and aggregates every producer-
+  bounded child into a fixed allowlisted family without persisting argv,
+  queries, paths, output, or errors; unavailable attribution falls back to the
+  outer batch label.
 - The current food-journal guidance requires separate generic and branded
   lookups for mixed meals, while the batch API runs three searches concurrently
   and returns full label plus contaminant payloads for every candidate.
@@ -78,6 +84,17 @@ Updated: 2026-08-04
   20,711 tokens / 94,759 bytes. The assembled CLI surface artifacts were also
   byte-identical. The changed food skill is read only after the initial request,
   and food search is not one of the eager full-schema CLI commands.
-- Focused verification passed 244 tests across Web, CLI, assistant engine, and
+- A pinned Codex App Server scenario loads the real food-journal skill, executes
+  one generic and one branded compact lookup through the ordinary command
+  boundary, scales serving facts, saves source detail, and reaches the final
+  reply. Its Linux lane uses the same container-owned Codex sandbox setting as
+  the hosted runner.
+- Focused verification passed 275 tests across Web, CLI, assistant engine, and
   hosted execution, all four affected-package typechecks, scoped Web ESLint,
-  generated CLI artifact verification, and `git diff --check`.
+  generated CLI artifact verification, provider-input capture, and task-diff
+  hygiene checks.
+- ReviewGPT final round 3 returned no findings and `ROUND_OUTCOME: PASS` after
+  the accepted telemetry corrections. Exact-head Murph Host Support CI passed
+  all release, coverage, host-matrix, fixture, and app-verification jobs on
+  commit `8bce82cc7ad2` (run `30980708654`).
+Completed: 2026-08-05
