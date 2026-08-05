@@ -1,31 +1,115 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  assertAssignablePoolReady: vi.fn(),
+  getEnvironment: vi.fn(),
+  getPrisma: vi.fn(),
+  syncConfiguredLines: vi.fn(),
+  syncProviderInventory: vi.fn(),
+}));
+
+vi.mock("../src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
+}));
+vi.mock("../src/lib/hosted-onboarding/linq-line-store", () => ({
+  assertHostedLinqAssignableHomeLinePoolReady: mocks.assertAssignablePoolReady,
+  syncHostedLinqConfiguredLinesTx: mocks.syncConfiguredLines,
+}));
+vi.mock("../src/lib/hosted-onboarding/linq-phone-number-inventory", () => ({
+  HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT: 100,
+  syncHostedLinqPhoneNumberInventory: mocks.syncProviderInventory,
+}));
+vi.mock("../src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: mocks.getEnvironment,
+}));
+
+import { syncHostedLinqLines } from "../scripts/sync-hosted-linq-lines";
 
 const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const TEST_KEY = Buffer.alloc(32, 7).toString("base64url");
 
-describe("sync-hosted-linq-lines script", () => {
-  it("writes configured env lines before attempting provider inventory sync", () => {
-    const source = readFileSync(
-      new URL("../scripts/sync-hosted-linq-lines.ts", import.meta.url),
-      "utf8",
-    );
-    const mainBody = source.slice(source.indexOf("async function main"));
-    const configuredWriteIndex = mainBody.indexOf("syncHostedLinqConfiguredLinesTx({");
-    const configuredLogIndex = mainBody.indexOf("Configured ${environment.linqConversationPhoneNumbers.length}");
-    const assignablePoolCheckIndex =
-      mainBody.indexOf("assertHostedLinqAssignableHomeLinePoolReady({");
-    const inventorySyncIndex = mainBody.indexOf("syncHostedLinqPhoneNumberInventory({");
-    const inventorySkipIndex = mainBody.indexOf("Skipped Linq provider inventory sync.");
+function createPrismaOwner() {
+  const transactionClient = {};
+  const disconnect = vi.fn().mockResolvedValue(undefined);
+  const transaction = vi.fn(async (callback: (tx: object) => Promise<void>) => {
+    await callback(transactionClient);
+  });
 
-    expect(configuredWriteIndex).toBeGreaterThanOrEqual(0);
-    expect(configuredLogIndex).toBeGreaterThan(configuredWriteIndex);
-    expect(inventorySyncIndex).toBeGreaterThan(configuredLogIndex);
-    expect(inventorySkipIndex).toBeGreaterThan(inventorySyncIndex);
-    expect(assignablePoolCheckIndex).toBeGreaterThan(inventorySkipIndex);
+  return {
+    disconnect,
+    prisma: {
+      $disconnect: disconnect,
+      $transaction: transaction,
+    },
+    transaction,
+  };
+}
+
+describe("sync-hosted-linq-lines script", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getEnvironment.mockReturnValue({
+      linqConversationPhoneNumbers: [],
+      linqMaxActiveMembersPerConversationPhone: 1,
+    });
+    mocks.syncConfiguredLines.mockResolvedValue(undefined);
+    mocks.syncProviderInventory.mockResolvedValue({ syncedCount: 0 });
+    mocks.assertAssignablePoolReady.mockResolvedValue(undefined);
+  });
+
+  it("validates the environment before acquiring the Prisma owner", async () => {
+    const invalidEnvironment = new Error("invalid environment");
+    mocks.getEnvironment.mockImplementation(() => {
+      throw invalidEnvironment;
+    });
+
+    await expect(syncHostedLinqLines([])).rejects.toBe(invalidEnvironment);
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+  });
+
+  it("awaits one Prisma disconnect after a successful sync", async () => {
+    const owner = createPrismaOwner();
+    let releaseDisconnect: () => void = () => undefined;
+    owner.disconnect.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      releaseDisconnect = resolve;
+    }));
+    mocks.getPrisma.mockReturnValue(owner.prisma);
+
+    let settled = false;
+    const sync = syncHostedLinqLines([]).finally(() => {
+      settled = true;
+    });
+
+    await vi.waitFor(() => {
+      expect(owner.disconnect).toHaveBeenCalledOnce();
+    });
+
+    expect(owner.transaction).toHaveBeenCalledOnce();
+    expect(mocks.syncConfiguredLines).toHaveBeenCalledOnce();
+    expect(mocks.syncProviderInventory).toHaveBeenCalledOnce();
+    expect(mocks.assertAssignablePoolReady).toHaveBeenCalledOnce();
+    expect(settled).toBe(false);
+
+    releaseDisconnect();
+    await sync;
+    expect(settled).toBe(true);
+  });
+
+  it.each([
+    ["transaction", mocks.syncConfiguredLines],
+    ["provider inventory", mocks.syncProviderInventory],
+    ["readiness", mocks.assertAssignablePoolReady],
+  ])("disconnects once and preserves a %s failure", async (_stage, failingOperation) => {
+    const owner = createPrismaOwner();
+    const failure = new Error(`${_stage} failed`);
+    mocks.getPrisma.mockReturnValue(owner.prisma);
+    failingOperation.mockRejectedValueOnce(failure);
+
+    await expect(syncHostedLinqLines([])).rejects.toBe(failure);
+    expect(owner.disconnect).toHaveBeenCalledOnce();
   });
 
   it("omits malformed configured line values from stderr", () => {
