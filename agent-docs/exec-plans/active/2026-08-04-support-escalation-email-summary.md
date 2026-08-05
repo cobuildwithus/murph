@@ -160,8 +160,9 @@ Updated: 2026-08-04
   moved from 22,938 tokens / 106,468 bytes to 23,020 / 106,951 (+82 tokens,
   +0.3575%; +483 bytes, +0.4537%). Group moved from 19,504 tokens / 91,094 bytes
   to 19,586 / 91,577 (+82 tokens, +0.4204%; +483 bytes, +0.5302%). Exact
-  serialized-field correction measurement attributes +2 tokens/+8 bytes to
-  compact base support guidance, +30/+190 to the assembled ordinary-feedback
+  serialized-field measurement attributes +22 tokens/+116 bytes to compact
+  base support guidance (first-reviewed +20/+108 plus correction +2/+8),
+  +30/+190 to the assembled ordinary-feedback
   exception, and +30/+177 to the support-aware tool description. Tool schema,
   generated guidance, and other provider-visible fields are unchanged. The
   temporary capture harness was removed.
