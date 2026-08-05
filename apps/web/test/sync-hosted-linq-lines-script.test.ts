@@ -72,7 +72,7 @@ describe("sync-hosted-linq-lines script", () => {
 
   it("awaits one Prisma disconnect after a successful sync", async () => {
     const owner = createPrismaOwner();
-    let releaseDisconnect = () => undefined;
+    let releaseDisconnect: () => void = () => undefined;
     owner.disconnect.mockImplementationOnce(() => new Promise<void>((resolve) => {
       releaseDisconnect = resolve;
     }));
