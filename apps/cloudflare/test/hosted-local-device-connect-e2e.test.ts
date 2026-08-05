@@ -93,9 +93,9 @@ describe("hosted local device connect e2e", () => {
     // login values. Capture them at module load and exclude them from every
     // Web, Worker, runner, and Temporal child process started by the harness.
     const restoreProviderLoginEnvironment = temporarilyRemoveProcessEnvironment([
+      "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
       "MURPH_E2E_OURA_EMAIL",
       "MURPH_E2E_OURA_OTP",
-      "MURPH_E2E_OURA_PASSWORD",
       "MURPH_E2E_WHOOP_EMAIL",
       "MURPH_E2E_WHOOP_OTP",
       "MURPH_E2E_WHOOP_PASSWORD",
@@ -199,7 +199,6 @@ describe("hosted local device connect e2e", () => {
       ).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_OURA_EMAIL)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_OURA_OTP)).toBe(false);
-      expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_OURA_PASSWORD)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_EMAIL)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_OTP)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_PASSWORD)).toBe(false);
@@ -351,7 +350,7 @@ describe("hosted local device connect e2e", () => {
   // Junction sandbox users and dedicated provider accounts, and must run as the
   // only selected hosted-local scenario so no unrelated process inherits login
   // credentials.
-  it.runIf(Boolean(liveJunctionWearableConfig))(
+  it.runIf(liveJunctionWearableConfig?.sources.includes("oura") ?? false)(
     "connects Oura through Junction Link in a real browser and reloads persisted state",
     async () => {
       await expect(runLiveJunctionWearableProof("oura")).resolves.toEqual({
@@ -366,7 +365,7 @@ describe("hosted local device connect e2e", () => {
     600_000,
   );
 
-  it.runIf(Boolean(liveJunctionWearableConfig))(
+  it.runIf(liveJunctionWearableConfig?.sources.includes("whoop") ?? false)(
     "connects WHOOP through Junction Link in a real browser and reloads persisted state",
     async () => {
       await expect(runLiveJunctionWearableProof("whoop")).resolves.toEqual({
@@ -385,15 +384,16 @@ describe("hosted local device connect e2e", () => {
 interface LiveProviderCredentials {
   email: string;
   otp: string | null;
-  password: string;
+  password: string | null;
 }
 
 interface LiveJunctionWearableConfig {
   apiKey: string;
   clientUserIdSecret: string;
   headless: boolean;
-  providers: Record<LiveWearableSource, LiveProviderCredentials>;
+  providers: Partial<Record<LiveWearableSource, LiveProviderCredentials>>;
   region: "eu" | "us";
+  sources: readonly LiveWearableSource[];
   timeoutMs: number;
 }
 
@@ -431,6 +431,14 @@ function readLiveJunctionWearableConfig(
       `Live Junction wearable E2E requires a ${region} sandbox JUNCTION_API_KEY.`,
     );
   }
+  const headless = env.MURPH_E2E_WEARABLE_HEADLESS !== "0";
+  const sources = readLiveWearableSources(
+    env.MURPH_E2E_JUNCTION_WEARABLE_SOURCES,
+  );
+  const providers: Partial<Record<LiveWearableSource, LiveProviderCredentials>> = {};
+  for (const source of sources) {
+    providers[source] = readLiveProviderCredentials(env, source, headless);
+  }
 
   return {
     apiKey,
@@ -438,21 +446,55 @@ function readLiveJunctionWearableConfig(
       env,
       "JUNCTION_CLIENT_USER_ID_SECRET",
     ),
-    headless: env.MURPH_E2E_WEARABLE_HEADLESS !== "0",
-    providers: {
-      oura: {
-        email: requireLiveEnvironmentValue(env, "MURPH_E2E_OURA_EMAIL"),
-        otp: env.MURPH_E2E_OURA_OTP?.trim() || null,
-        password: requireLiveEnvironmentValue(env, "MURPH_E2E_OURA_PASSWORD"),
-      },
-      whoop: {
-        email: requireLiveEnvironmentValue(env, "MURPH_E2E_WHOOP_EMAIL"),
-        otp: env.MURPH_E2E_WHOOP_OTP?.trim() || null,
-        password: requireLiveEnvironmentValue(env, "MURPH_E2E_WHOOP_PASSWORD"),
-      },
-    },
+    headless,
+    providers,
     region,
+    sources,
     timeoutMs: readLiveTimeoutMs(env.MURPH_E2E_WEARABLE_TIMEOUT_MS),
+  };
+}
+
+function readLiveWearableSources(value: string | undefined): readonly LiveWearableSource[] {
+  const requested = value?.trim();
+  if (!requested) {
+    throw new Error(
+      "Live Junction wearable E2E requires MURPH_E2E_JUNCTION_WEARABLE_SOURCES.",
+    );
+  }
+  const sources = new Set<LiveWearableSource>();
+  for (const candidate of requested.split(",").map((entry) => entry.trim())) {
+    if (candidate !== "oura" && candidate !== "whoop") {
+      throw new Error(
+        "MURPH_E2E_JUNCTION_WEARABLE_SOURCES must contain only oura or whoop.",
+      );
+    }
+    sources.add(candidate);
+  }
+  return [...sources];
+}
+
+function readLiveProviderCredentials(
+  env: NodeJS.ProcessEnv,
+  source: LiveWearableSource,
+  headless: boolean,
+): LiveProviderCredentials {
+  if (source === "oura") {
+    const otp = env.MURPH_E2E_OURA_OTP?.trim() || null;
+    if (headless && !otp) {
+      throw new Error(
+        "Live Junction Oura E2E requires a current MURPH_E2E_OURA_OTP or MURPH_E2E_WEARABLE_HEADLESS=0 for manual code entry.",
+      );
+    }
+    return {
+      email: requireLiveEnvironmentValue(env, "MURPH_E2E_OURA_EMAIL"),
+      otp,
+      password: null,
+    };
+  }
+  return {
+    email: requireLiveEnvironmentValue(env, "MURPH_E2E_WHOOP_EMAIL"),
+    otp: env.MURPH_E2E_WHOOP_OTP?.trim() || null,
+    password: requireLiveEnvironmentValue(env, "MURPH_E2E_WHOOP_PASSWORD"),
   };
 }
 
@@ -661,6 +703,9 @@ async function runJunctionWearableBrowser(input: {
   webBaseUrl: string;
 }): Promise<JunctionWearableBrowserResult> {
   const providerCredentials = input.config.providers[input.source];
+  if (!providerCredentials) {
+    throw new Error(`Live Junction wearable E2E did not configure ${input.source}.`);
+  }
   const { stdout } = await execFileAsync(
     "pnpm",
     [
@@ -683,7 +728,9 @@ async function runJunctionWearableBrowser(input: {
         ...(providerCredentials.otp
           ? { MURPH_E2E_PROVIDER_OTP: providerCredentials.otp }
           : {}),
-        MURPH_E2E_PROVIDER_PASSWORD: providerCredentials.password,
+        ...(providerCredentials.password
+          ? { MURPH_E2E_PROVIDER_PASSWORD: providerCredentials.password }
+          : {}),
         MURPH_E2E_PROVIDER_SOURCE: input.source,
         MURPH_E2E_PROVIDER_TIMEOUT_MS: String(input.config.timeoutMs),
       },
@@ -712,9 +759,9 @@ function buildBrowserProcessEnvironment(): NodeJS.ProcessEnv {
     "JUNCTION_WEBHOOK_SECRET",
     "MURPH_E2E_CONNECT_URL",
     "MURPH_E2E_HOSTED_SESSION_COOKIE",
+    "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
     "MURPH_E2E_OURA_EMAIL",
     "MURPH_E2E_OURA_OTP",
-    "MURPH_E2E_OURA_PASSWORD",
     "MURPH_E2E_PROVIDER_EMAIL",
     "MURPH_E2E_PROVIDER_HEADLESS",
     "MURPH_E2E_PROVIDER_OTP",

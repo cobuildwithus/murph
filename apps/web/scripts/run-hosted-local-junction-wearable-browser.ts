@@ -11,7 +11,7 @@ interface BrowserConfig {
   hostedSessionCookie: string;
   label: "Oura" | "WHOOP";
   otp: string | null;
-  password: string;
+  password: string | null;
   source: "oura" | "whoop";
   startUrl: string;
   timeoutMs: number;
@@ -170,10 +170,12 @@ async function completeExternalAuthorization(
       'input[name*="email" i]',
       'input[name="username"]',
     ], config.email);
-    await fillVisible(page, [
-      'input[type="password"]',
-      'input[autocomplete="current-password"]',
-    ], config.password);
+    if (config.password) {
+      await fillVisible(page, [
+        'input[type="password"]',
+        'input[autocomplete="current-password"]',
+      ], config.password);
+    }
 
     const otpInput = await findVisibleEditable(page, [
       'input[autocomplete="one-time-code"]',
@@ -329,6 +331,19 @@ async function disconnectJunctionAccount(
 function readBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
   const source = requireWearableSource(env.MURPH_E2E_PROVIDER_SOURCE);
   const label = source === "oura" ? "Oura" : "WHOOP";
+  const headless = env.MURPH_E2E_PROVIDER_HEADLESS !== "0";
+  const otp = env.MURPH_E2E_PROVIDER_OTP?.trim() || null;
+  const password = env.MURPH_E2E_PROVIDER_PASSWORD?.trim() || null;
+  if (source === "whoop" && !password) {
+    throw new Error(
+      "Hosted-local Junction WHOOP browser runner requires MURPH_E2E_PROVIDER_PASSWORD.",
+    );
+  }
+  if (source === "oura" && headless && !otp) {
+    throw new Error(
+      "Hosted-local Junction Oura browser runner requires a current MURPH_E2E_PROVIDER_OTP or MURPH_E2E_PROVIDER_HEADLESS=0 for manual code entry.",
+    );
+  }
   const webBaseUrl = requireEnvironmentValue(env, "MURPH_E2E_WEB_BASE_URL");
   const parsedWebBaseUrl = new URL(webBaseUrl);
   const startUrl = new URL(
@@ -357,14 +372,14 @@ function readBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
 
   return {
     email: requireEnvironmentValue(env, "MURPH_E2E_PROVIDER_EMAIL"),
-    headless: env.MURPH_E2E_PROVIDER_HEADLESS !== "0",
+    headless,
     hostedSessionCookie: requireEnvironmentValue(
       env,
       "MURPH_E2E_HOSTED_SESSION_COOKIE",
     ),
     label,
-    otp: env.MURPH_E2E_PROVIDER_OTP?.trim() || null,
-    password: requireEnvironmentValue(env, "MURPH_E2E_PROVIDER_PASSWORD"),
+    otp,
+    password,
     source,
     startUrl: startUrl.toString(),
     timeoutMs,
@@ -380,6 +395,7 @@ function clearSensitiveBrowserEnvironment(): void {
     "JUNCTION_WEBHOOK_SECRET",
     "MURPH_E2E_CONNECT_URL",
     "MURPH_E2E_HOSTED_SESSION_COOKIE",
+    "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
     "MURPH_E2E_PROVIDER_EMAIL",
     "MURPH_E2E_PROVIDER_HEADLESS",
     "MURPH_E2E_PROVIDER_OTP",
@@ -388,7 +404,6 @@ function clearSensitiveBrowserEnvironment(): void {
     "MURPH_E2E_PROVIDER_TIMEOUT_MS",
     "MURPH_E2E_OURA_EMAIL",
     "MURPH_E2E_OURA_OTP",
-    "MURPH_E2E_OURA_PASSWORD",
     "MURPH_E2E_WHOOP_EMAIL",
     "MURPH_E2E_WHOOP_OTP",
     "MURPH_E2E_WHOOP_PASSWORD",

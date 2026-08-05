@@ -1,4 +1,4 @@
-name: Live Junction Wearable Canary
+name: Live Junction WHOOP Canary
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   connect:
-    name: Connect Oura and WHOOP through Junction
+    name: Connect WHOOP through Junction
     if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}
     environment: junction-wearable-canary
     runs-on: ubuntu-24.04
@@ -67,11 +67,9 @@ jobs:
           JUNCTION_ENV: sandbox
           JUNCTION_REGION: ${{ vars.JUNCTION_REGION || 'us' }}
           MURPH_DEV_TEMPORAL: disabled
-          MURPH_E2E_JUNCTION_OURA_MEMBER_ID: member_e2e_junction_oura_github_canary
           MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"
+          MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop
           MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID: member_e2e_junction_whoop_github_canary
-          MURPH_E2E_OURA_EMAIL: ${{ secrets.OURA_CANARY_EMAIL }}
-          MURPH_E2E_OURA_PASSWORD: ${{ secrets.OURA_CANARY_PASSWORD }}
           MURPH_E2E_WEARABLE_HEADLESS: "1"
           MURPH_E2E_WEARABLE_TIMEOUT_MS: "420000"
           MURPH_E2E_WHOOP_EMAIL: ${{ secrets.WHOOP_CANARY_EMAIL }}

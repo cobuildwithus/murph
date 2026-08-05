@@ -44,8 +44,6 @@ describe("live Junction wearable canary workflow", () => {
     expect(secretNames).toEqual([
       "JUNCTION_API_KEY",
       "JUNCTION_CLIENT_USER_ID_SECRET",
-      "OURA_CANARY_EMAIL",
-      "OURA_CANARY_PASSWORD",
       "WHOOP_CANARY_EMAIL",
       "WHOOP_CANARY_PASSWORD",
     ]);
@@ -60,6 +58,7 @@ describe("live Junction wearable canary workflow", () => {
     expect(workflow).toContain("JUNCTION_ENV: sandbox");
     expect(workflow).toContain("MURPH_DEV_TEMPORAL: disabled");
     expect(workflow).toContain('MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"');
+    expect(workflow).toContain("MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop");
     expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "1"');
     expect(workflow).toContain("run: pnpm hosted-local e2e device-connect");
     expect(workflow).toContain("image: public.ecr.aws/docker/library/postgres:17");
