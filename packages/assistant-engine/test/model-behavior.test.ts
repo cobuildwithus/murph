@@ -2372,6 +2372,15 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'Before personal improvement or new-goal advice, or whether to take, keep, reorder, or drop a supplement or other intervention, read personal evidence that could change the answer. Open with what it shows (such as the latest panel date and markers), not goals alone; if none exists, say so.',
     )
+    expect(prompt).toContain(
+      'When outdoor heat, cold, or air quality could materially change advice about exercise, recovery, sleep, fatigue, symptoms, or time outdoors, reuse a known city/region and use accountless OpenWeather only as needed.',
+    )
+    expect(prompt).toContain(
+      'Treat conditions as context or added load, not proof of cause.',
+    )
+    expect(prompt).toContain(
+      'ask for city/region only when it would materially change the answer',
+    )
 
     // Discovery has no arbitrary question cap, but stays paced and useful.
     expect(prompt).toContain(
@@ -2464,6 +2473,9 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(groupPrompt).not.toContain(
       'Murph\'s edge is durable context: a progressively complete picture.',
+    )
+    expect(groupPrompt).not.toContain(
+      'reuse a known city/region and use accountless OpenWeather only as needed',
     )
     expect(groupPrompt).not.toContain('Save durable context to its owner')
     expect(groupPrompt).not.toContain('Deepen longitudinal understanding when')

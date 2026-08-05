@@ -41,6 +41,12 @@ describe('connected-apps skill and system-prompt coverage', () => {
     expect(normalizedSkill).toContain('never an unnecessary exact address')
     expect(normalizedSkill).toContain('current outdoor air quality')
     expect(normalizedSkill).toContain(
+      'heat, cold, or poor outdoor air that changes advice about exercise, recovery, sleep, fatigue, symptoms, or time outdoors',
+    )
+    expect(normalizedSkill).toContain(
+      'Treat conditions as context or added load, not proof that they caused a health change.',
+    )
+    expect(normalizedSkill).toContain(
       "Outdoor air quality is not evidence about the member's indoor air.",
     )
     expect(normalizedSkill).toContain(
