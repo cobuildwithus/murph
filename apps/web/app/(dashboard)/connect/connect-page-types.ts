@@ -1,11 +1,11 @@
+import type { AppleHealthRelaySetupGuideId } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
+
 export type LogoAsset = {
   className: string;
   height: number;
   src: string;
   width: number;
 };
-
-import type { AppleHealthRelaySetupGuideId } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 
 export type ConnectSourceSetupGuideId =
   | "zepp-apple-health"

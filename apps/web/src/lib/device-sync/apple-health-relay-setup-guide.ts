@@ -67,6 +67,12 @@ const APPLE_HEALTH_RELAY_SETUP_GUIDE_ID_SET = new Set<string>(
   APPLE_HEALTH_RELAY_SETUP_GUIDE_IDS,
 );
 
+export function readAppleHealthRelaySourceName(
+  setupGuideId: AppleHealthRelaySetupGuideId,
+): string {
+  return APPLE_HEALTH_RELAY_SETUP_GUIDES[setupGuideId].sourceName;
+}
+
 export function isAppleHealthRelaySetupGuideId(
   value: unknown,
 ): value is AppleHealthRelaySetupGuideId {

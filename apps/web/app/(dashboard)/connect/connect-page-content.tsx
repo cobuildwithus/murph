@@ -14,6 +14,11 @@ import {
   resolveHostedMurphContactOption,
   resolveHostedMurphContactOptions,
 } from "@/src/components/murph/hosted-murph-contact-action";
+import {
+  APPLE_HEALTH_RELAY_SETUP_GUIDE_IDS,
+  readAppleHealthRelaySourceName,
+  type AppleHealthRelaySetupGuideId,
+} from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
 import type { DeviceSyncCompletionContactAction } from "@/src/lib/device-sync/connect-completion-types";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
@@ -323,13 +328,13 @@ export default async function ConnectPage({
     voiceMemoSources,
     whoopSyncContactAction,
     zeppSyncContactAction,
-    appleHealthRelaySyncContactAction,
+    appleHealthRelaySyncContactActions,
   ] = await Promise.all([
     resolveDeviceConnectRecoveryContactAction(Boolean(auth.authenticatedMember)),
     resolveDeviceSyncVoiceMemoSources(auth.authenticatedMember?.id ?? null),
     resolveWhoopSyncContactAction(Boolean(auth.authenticatedMember)),
     resolveZeppSyncContactAction(Boolean(auth.authenticatedMember)),
-    resolveAppleHealthRelaySyncContactAction(Boolean(auth.authenticatedMember)),
+    resolveAppleHealthRelaySyncContactActions(Boolean(auth.authenticatedMember)),
   ]);
 
   if (auth.authenticatedMember) {
@@ -410,7 +415,7 @@ export default async function ConnectPage({
         whoopSyncContactAction={whoopSyncContactAction}
         whoopSyncVoiceMemoSrc={voiceMemoSources.whoopSync}
         zeppSyncContactAction={zeppSyncContactAction}
-        appleHealthRelaySyncContactAction={appleHealthRelaySyncContactAction}
+        appleHealthRelaySyncContactActions={appleHealthRelaySyncContactActions}
       />
     </div>
   );
@@ -477,13 +482,28 @@ async function resolveZeppSyncContactAction(
   );
 }
 
-async function resolveAppleHealthRelaySyncContactAction(
+type AppleHealthRelaySyncContactActions = Partial<
+  Record<AppleHealthRelaySetupGuideId, DeviceSyncCompletionContactAction | null>
+>;
+
+async function resolveAppleHealthRelaySyncContactActions(
   authenticated: boolean,
-): Promise<DeviceSyncCompletionContactAction | null> {
-  return resolveAppleHealthRelayContactAction(
-    authenticated,
-    "Help me set up my wearable through Apple Health. Please walk me through it with a voice memo.",
+): Promise<AppleHealthRelaySyncContactActions> {
+  if (!authenticated) {
+    return {};
+  }
+
+  const entries = await Promise.all(
+    APPLE_HEALTH_RELAY_SETUP_GUIDE_IDS.map(async (setupGuideId) => [
+      setupGuideId,
+      await resolveAppleHealthRelayContactAction(
+        authenticated,
+        `Help me set up ${readAppleHealthRelaySourceName(setupGuideId)} through Apple Health. Please walk me through it with a voice memo.`,
+      ),
+    ] as const),
   );
+
+  return Object.fromEntries(entries);
 }
 
 async function resolveAppleHealthRelayContactAction(

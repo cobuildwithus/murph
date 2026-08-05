@@ -7,6 +7,7 @@ import { ConnectDisconnectDialog } from "@/app/(dashboard)/connect/connect-page-
 import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { markLocallyDisconnectedSources } from "@/app/(dashboard)/connect/connect-page-helpers";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
+import { buildAppleHealthRelaySetupGuide } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
 
 type ConnectSourceCardStudyCase = {
@@ -294,3 +295,97 @@ export function ZeppAppleHealthSetupStudy() {
     </>
   );
 }
+
+function appleHealthRelayStudySource(
+  source: Pick<ConnectSource, "description" | "id" | "name" | "setupGuideId">,
+): ConnectSource {
+  return {
+    ...source,
+    logo: {
+      className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+      height: 40,
+      src: "/brand-logos/connect/wearable-relay.svg",
+      width: 64,
+    },
+    setupGuideActionLabel: "Set up sync",
+  };
+}
+
+const APPLE_HEALTH_RELAY_STUDY_SOURCES: readonly ConnectSource[] = [
+  appleHealthRelayStudySource({
+    description:
+      "Mi Band, Xiaomi Smart Band, and Redmi Watch activity, sleep, heart rate, and workouts through Apple Health.",
+    id: "xiaomi-mi-fitness",
+    name: "Xiaomi / Mi Fitness",
+    setupGuideId: "xiaomi-mi-fitness-apple-health",
+  }),
+  appleHealthRelayStudySource({
+    description: "Smart-ring sleep, activity, heart rate, and supported data through Apple Health.",
+    id: "ringconn",
+    name: "RingConn",
+    setupGuideId: "ringconn-apple-health",
+  }),
+  appleHealthRelayStudySource({
+    description: "Activity, sleep, heart rate, and supported workouts through Apple Health.",
+    id: "coros",
+    name: "COROS",
+    setupGuideId: "coros-apple-health",
+  }),
+  appleHealthRelayStudySource({
+    description: "Activity, sleep, heart rate, and supported workouts through Apple Health.",
+    id: "suunto",
+    name: "Suunto",
+    setupGuideId: "suunto-apple-health",
+  }),
+  appleHealthRelayStudySource({
+    description: "Selected watch and band data through Apple Health, where supported.",
+    id: "huawei-health",
+    name: "Huawei Health",
+    setupGuideId: "huawei-health-apple-health",
+  }),
+];
+
+export function AppleHealthRelaySetupStudy() {
+  const searchParams = useSearchParams();
+  const open = searchParams?.get("appleHealthRelaySetupStudy") === "open";
+
+  return (
+    <>
+      <div
+        className="rounded-3xl border border-border bg-background px-4 py-8 sm:px-8"
+        data-design-study="apple-health-relay-setup"
+        id="apple-health-relay-setup"
+        inert
+      >
+        <div className="grid items-stretch gap-4 lg:grid-cols-3">
+          {APPLE_HEALTH_RELAY_STUDY_SOURCES.map((source) => (
+            <SourceCard
+              key={source.id}
+              authenticated
+              errorMessage={null}
+              pending={false}
+              pendingDisconnect={false}
+              source={source}
+              onDisconnectTargetChange={() => {}}
+              onSetupGuideOpen={() => {}}
+              onStartConnection={() => Promise.resolve()}
+            />
+          ))}
+        </div>
+      </div>
+
+      <DeviceSyncSetupGuideDialog
+        contactAction={{
+          href: "sms:+15555550100?body=Help%20me%20set%20up%20Xiaomi",
+          kind: "imessage",
+          label: "Text Murph",
+        }}
+        guide={buildAppleHealthRelaySetupGuide("xiaomi-mi-fitness-apple-health")}
+        inert
+        open={open}
+        onOpenChange={() => {}}
+      />
+    </>
+  );
+}
+

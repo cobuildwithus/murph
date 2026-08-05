@@ -187,7 +187,12 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   });
   assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[2]?.[0], {
     message: {
-      body: "Help me set up my wearable through Apple Health. Please walk me through it with a voice memo.",
+      body: "Help me set up Xiaomi / Mi Fitness through Apple Health. Please walk me through it with a voice memo.",
+    },
+  });
+  assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[6]?.[0], {
+    message: {
+      body: "Help me set up Huawei Health through Apple Health. Please walk me through it with a voice memo.",
     },
   });
 
@@ -516,7 +521,7 @@ test("ConnectPage maps the Zepp setup Messages option at the server boundary", a
   });
 });
 
-test("ConnectPage maps the reusable Apple Health relay setup Messages option", async () => {
+test("ConnectPage maps brand-specific Apple Health relay setup Messages options", async () => {
   mocks.resolveHostedMurphContactOptions
     .mockResolvedValueOnce([])
     .mockResolvedValueOnce([])
@@ -531,11 +536,20 @@ test("ConnectPage maps the reusable Apple Health relay setup Messages option", a
   const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const page = await ConnectPage();
 
-  assert.deepEqual(readConnectSourcesGridProp(page, "appleHealthRelaySyncContactAction"), {
-    href: "sms:+15550100001?body=Help%20me%20set%20up%20my%20wearable",
-    kind: "imessage",
-    label: "Text Murph",
-  });
+  assert.deepEqual(
+    readConnectSourcesGridProp(page, "appleHealthRelaySyncContactActions"),
+    {
+      "xiaomi-mi-fitness-apple-health": {
+        href: "sms:+15550100001?body=Help%20me%20set%20up%20my%20wearable",
+        kind: "imessage",
+        label: "Text Murph",
+      },
+      "ringconn-apple-health": null,
+      "coros-apple-health": null,
+      "suunto-apple-health": null,
+      "huawei-health-apple-health": null,
+    },
+  );
 });
 
 test("filterConnectSourcesForSearch matches source names, ids, and descriptions", async () => {
@@ -760,10 +774,12 @@ test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claimin
 test("ConnectSourcesGrid opens a reusable Xiaomi Apple Health setup guide", async () => {
   const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
   const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
-    appleHealthRelaySyncContactAction: {
-      href: "sms:+15550100001?body=Help%20me%20set%20up%20my%20wearable",
-      kind: "imessage",
-      label: "Text Murph",
+    appleHealthRelaySyncContactActions: {
+      "xiaomi-mi-fitness-apple-health": {
+        href: "sms:+15550100001?body=Help%20me%20set%20up%20Xiaomi",
+        kind: "imessage",
+        label: "Text Murph",
+      },
     },
     sources: [
       {

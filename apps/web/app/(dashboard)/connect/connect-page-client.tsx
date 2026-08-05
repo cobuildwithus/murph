@@ -14,6 +14,7 @@ import type { DeviceSyncCompletionContactAction } from "@/src/lib/device-sync/co
 import {
   buildAppleHealthRelaySetupGuide,
   isAppleHealthRelaySetupGuideId,
+  type AppleHealthRelaySetupGuideId,
 } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
@@ -72,7 +73,7 @@ export { filterConnectSourcesForSearch } from "./connect-page-helpers";
 
 export function ConnectSourcesGrid({
   authenticated = true,
-  appleHealthRelaySyncContactAction = null,
+  appleHealthRelaySyncContactActions = {},
   deviceConnectRecoveryContactAction = null,
   garminHistoricalDataVoiceMemoSrc = null,
   initialCallback = null,
@@ -84,7 +85,9 @@ export function ConnectSourcesGrid({
   zeppSyncContactAction = null,
 }: {
   authenticated?: boolean;
-  appleHealthRelaySyncContactAction?: DeviceSyncCompletionContactAction | null;
+  appleHealthRelaySyncContactActions?: Partial<
+    Record<AppleHealthRelaySetupGuideId, DeviceSyncCompletionContactAction | null>
+  >;
   deviceConnectRecoveryContactAction?: MurphContactOption | null;
   garminHistoricalDataVoiceMemoSrc?: string | null;
   initialCallback?: ConnectCallbackInput;
@@ -162,6 +165,9 @@ export function ConnectSourcesGrid({
   const visibleActionError = actionError ?? initialConnectIntentPresentation?.actionError ?? null;
   const activeAppleHealthRelaySetupGuide = isAppleHealthRelaySetupGuideId(activeSetupGuideId)
     ? buildAppleHealthRelaySetupGuide(activeSetupGuideId)
+    : null;
+  const activeAppleHealthRelayContactAction = isAppleHealthRelaySetupGuideId(activeSetupGuideId)
+    ? appleHealthRelaySyncContactActions[activeSetupGuideId] ?? null
     : null;
   // When this load carries a connect intent that the effect below will auto-redirect, show a
   // pending-redirect dialog. Seeded on mount and cleared only if that redirect attempt fails.
@@ -483,7 +489,7 @@ export function ConnectSourcesGrid({
 
       {activeAppleHealthRelaySetupGuide ? (
         <DeviceSyncSetupGuideDialog
-          contactAction={appleHealthRelaySyncContactAction}
+          contactAction={activeAppleHealthRelayContactAction}
           guide={activeAppleHealthRelaySetupGuide}
           open
           onOpenChange={(open) => {
