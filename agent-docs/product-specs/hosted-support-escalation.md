@@ -31,8 +31,8 @@ A member who reaches a Murph-owned product failure should stay focused on recove
 
 ## Deployment contract
 
-- #1305 may merge before #1284 for Git sequencing, but the human-support handoff is incomplete until both land. Deploy Web after #1284 before deploying the hosted runner after #1305, so every newly direct-sent escalation reaches a formatter that understands the canonical issue.
-- The callback payload, validation result, persisted rows, and response shape remain backward compatible during the deployment window. Ordinary deployment smoke remains required; no API version, feature flag, or rollout floor is added.
+- Merge and deploy #1305's hosted runner first, then prove prompt/fingerprint convergence before merging and deploying #1284's Web formatter. The current Web consumer accepts the new canonical prefixed issue and temporarily sends its existing metadata-only alert, so the member flow does not degrade while the runner converges. #1284 then adds the validated issue labels.
+- The new Web formatter intentionally rejects the old free-form producer. Roll back Web before rolling back the runner. The callback envelope, result shape, database schema, and provider key remain unchanged; this ordered rollout needs no API version, feature flag, or compatibility state.
 
 ## Rate and replay behavior
 

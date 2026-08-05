@@ -62,10 +62,10 @@ Updated: 2026-08-05
    duplicating the alert; monitor the bounded transition without compatibility
    state.
 4. Risk: runner and Web releases deploy at different times.
-   Mitigation: merge #1305 first for Git sequencing, then #1284. Deploy Web
-   before the hosted runner so the direct-send producer reaches a canonical-
-   issue-aware consumer. The unchanged callback and response envelopes need no
-   compatibility floor.
+   Mitigation: merge and deploy #1305's runner first, verify prompt/fingerprint
+   convergence, then merge and deploy #1284's Web formatter. Old Web accepts
+   the canonical prefix and retains the current metadata-only alert during the
+   window; new Web never has to accept the old free-form producer.
 
 ## Tasks
 
@@ -87,9 +87,10 @@ Updated: 2026-08-05
 - The anonymous detail row stores the full shared canonical issue; the linked
   row stays fixed server-authored metadata.
 - Provider retries format from read-back stored detail, not callback memory.
-- The two PRs are one product release. #1305 can merge first, then #1284; Web
-  deploys before the hosted runner. No consent version, rollout floor, feature
-  flag, or new state is required.
+- The two PRs are one product release. #1305's runner merges and deploys first;
+  after convergence proof, #1284's Web formatter merges and deploys. Roll back
+  Web before the runner. No consent version, feature flag, or new state is
+  required.
 
 ## Review history
 
