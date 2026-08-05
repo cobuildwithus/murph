@@ -1099,7 +1099,7 @@ function renderAssistantInputProjectionPromptNote(input: {
   }
 
   if (input.projectionStatus === 'pending') {
-    return 'attachment evidence is still hydrating. If the request depends on it and `murph.send_progress_update` is available, call it once with a brief acknowledgment. Keep this turn active for up to 30 seconds total: use brief local shell waits and recheck `raw/inbox/**` for a newly readable file matching this input\'s descriptor metadata; never select an unrelated or stale file. Stop as soon as exact readable evidence appears, then inspect that path and complete the request. If it does not appear within 30 seconds, say the attachment is not yet available. Do not claim inspection or escalate product feedback solely because hydration is still pending.'
+    return 'attachment evidence is still hydrating. If the request does not depend on attachment contents, continue from available context without claiming inspection. If it does depend and `murph.send_progress_update` is available, call it once with a brief acknowledgment. For that attachment-dependent work, keep this turn active for up to 30 seconds total: use brief local shell waits and recheck `raw/inbox/**` for a newly readable file matching this input\'s descriptor metadata; never select an unrelated or stale file. Stop as soon as exact readable evidence appears, then inspect that path and complete the request. If it does not appear within 30 seconds, say the attachment is not yet available. Do not claim inspection or escalate product feedback solely because hydration is still pending.'
   }
 
   if (input.projectionStatus === 'not_attempted') {

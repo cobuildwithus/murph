@@ -71,9 +71,9 @@ Updated: 2026-08-04
 - Direct readback of a descriptor-only `projectionStatus: "pending"` prompt.
 - Pinned Codex App Server complete first-request capture with synthetic direct
   and group PDF fixtures, `gpt-5.6-terra`, low reasoning, code mode, and
-  `gpt-tokenizer` 3.4.0 `o200k_harmony`: direct 30,679 to 30,772 tokens and
-  140,479 to 140,917 bytes (+93 tokens, +0.3031%, +438 bytes); group 26,931
-  to 27,024 tokens and 123,998 to 124,436 bytes (+93 tokens, +0.3453%, +438
+  `gpt-tokenizer` 3.4.0 `o200k_harmony`: direct 30,679 to 30,794 tokens and
+  140,479 to 141,058 bytes (+115 tokens, +0.3748%, +579 bytes); group 26,931
+  to 27,046 tokens and 123,998 to 124,577 bytes (+115 tokens, +0.4270%, +579
   bytes). The complete provider-visible fields were `include`, `input`,
   `parallel_tool_calls`, `text`, and `tool_choice`; only transport controls were
   excluded identically. The temporary capture harness was removed.
@@ -91,3 +91,22 @@ Updated: 2026-08-04
   this task. The PR does not claim prompt wording makes projection readiness a
   runtime guarantee; stronger gating remains a separate product decision.
 - No coverage patch artifact was supplied.
+
+## Corrected-head product purpose verdict
+
+- Irreducible purpose: give a just-arrived attachment a short chance to become
+  readable in the current conversation without delaying ordinary replies or
+  requiring another member message.
+- Smallest selected experience: optional one-line progress, one same-turn local
+  wait bounded at 30 seconds, exact descriptor/new-file matching, then either
+  inspection or a truthful not-yet-available response.
+- Verdict: this is the smallest complete best-effort experience within the
+  explicit prompt-primary constraint. It truthfully avoids promising a runtime
+  readiness or wake guarantee, adds no setup or member choice, and leaves
+  terminal failure and later-message ownership with existing flows.
+- Journey evidence: the assembled prompt regression proves immediate feedback,
+  continuation, evidence, stop, and fallback instructions; the hosted runtime
+  protocol states that successful projection can make raw paths available to
+  the same turn. A real-model delayed-projection journey remains an evidence
+  gap, so the PR is intentionally described as best effort rather than a
+  guaranteed projection barrier.

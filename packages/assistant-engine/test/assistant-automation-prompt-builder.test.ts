@@ -1841,10 +1841,13 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result.prompt).toContain('- raw evidence: not_attempted')
     expect(result.prompt).not.toContain('- parser output:')
     expect(result.prompt).toContain(
-      'If the request depends on it and `murph.send_progress_update` is available, call it once with a brief acknowledgment.',
+      'If the request does not depend on attachment contents, continue from available context without claiming inspection.',
     )
     expect(result.prompt).toContain(
-      'Keep this turn active for up to 30 seconds total',
+      'If it does depend and `murph.send_progress_update` is available, call it once with a brief acknowledgment.',
+    )
+    expect(result.prompt).toContain(
+      'For that attachment-dependent work, keep this turn active for up to 30 seconds total',
     )
     expect(result.prompt).toContain(
       'recheck `raw/inbox/**` for a newly readable file matching this input\'s descriptor metadata',
