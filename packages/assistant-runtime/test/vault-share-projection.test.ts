@@ -691,6 +691,221 @@ describe("selectProjectableDailyMetricDays", () => {
     }
   });
 
+  it("projects every available sleep source with freshness and one canonical selection", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-sleep-sources-"));
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await mkdir(join(vaultRoot, "ledger", "events", "2026"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "vault.json"),
+        `${JSON.stringify({
+          formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+          vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4E",
+          createdAt: "2026-07-03T00:00:00.000Z",
+          title: "Vault share sleep source projection test",
+          timezone: "UTC",
+        })}\n`,
+        "utf8",
+      );
+      const providers = [
+        { deepMinutes: 64, provider: "fitbit", recordedAt: "2026-07-03T06:58:00.000Z" },
+        { deepMinutes: 88, provider: "garmin", recordedAt: "2026-07-03T07:01:00.000Z" },
+        { deepMinutes: 112, provider: "oura", recordedAt: "2026-07-03T07:04:00.000Z" },
+      ] as const;
+      const records = providers.flatMap((provider, index) => [
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_sleep_source_session_${index}`,
+          kind: "sleep_session",
+          occurredAt: "2026-07-02T22:00:00.000Z",
+          recordedAt: provider.recordedAt,
+          dayKey: ACTIVITY_DAY.date,
+          source: "device",
+          title: "Overnight sleep",
+          startAt: "2026-07-02T22:00:00.000Z",
+          endAt: "2026-07-03T07:00:00.000Z",
+          durationMinutes: 540,
+          dataOrigin: {
+            aggregatorProvider: "junction",
+            originConfidence: "high",
+            sourceProviderSlug: provider.provider,
+            version: 1,
+          },
+          externalRef: {
+            system: "junction",
+            resourceType: "sleep",
+            resourceId: `sleep_source_projection_${index}`,
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_sleep_source_deep_${index}`,
+          kind: "observation",
+          occurredAt: "2026-07-03T07:00:00.000Z",
+          recordedAt: provider.recordedAt,
+          dayKey: ACTIVITY_DAY.date,
+          source: "device",
+          title: "Deep sleep",
+          metric: "sleep-deep-minutes",
+          value: provider.deepMinutes,
+          unit: "minutes",
+          dataOrigin: {
+            aggregatorProvider: "junction",
+            originConfidence: "high",
+            sourceProviderSlug: provider.provider,
+            version: 1,
+          },
+          externalRef: {
+            system: "junction",
+            resourceType: "sleep",
+            resourceId: `sleep_source_projection_${index}`,
+          },
+        },
+      ]);
+      await writeFile(
+        join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl"),
+        `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+        "utf8",
+      );
+
+      const selected = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec("deep-sleep-sources-days.v1"),
+      );
+
+      expect(selected).toHaveLength(1);
+      expect(selected[0]?.data).toMatchObject({
+        date: ACTIVITY_DAY.date,
+        metricKey: "deep-sleep-minutes",
+        projectedAt: "2026-07-04T00:00:00.000Z",
+        sourcesDisagree: true,
+        unit: "minutes",
+      });
+      const data = selected[0]?.data;
+      if (
+        !data
+        || !("sources" in data)
+        || !Array.isArray(data.sources)
+        || !("unit" in data)
+        || !("value" in data)
+      ) {
+        throw new Error("Expected source-aware sleep projection data.");
+      }
+      expect(data.sources).toEqual([
+        expect.objectContaining({
+          label: "fitbit",
+          recordedAt: "2026-07-03T06:58:00.000Z",
+          source: "fitbit",
+          value: 64,
+        }),
+        expect.objectContaining({
+          label: "Garmin",
+          recordedAt: "2026-07-03T07:01:00.000Z",
+          source: "garmin",
+          value: 88,
+        }),
+        expect.objectContaining({
+          label: "Oura",
+          recordedAt: "2026-07-03T07:04:00.000Z",
+          source: "oura",
+          value: 112,
+        }),
+      ]);
+      const selectedSources = data.sources.filter((source) =>
+        typeof source === "object"
+        && source !== null
+        && "selected" in source
+        && source.selected === true
+      );
+      expect(selectedSources).toHaveLength(1);
+      expect(selectedSources[0]).toMatchObject({
+        unit: data.unit,
+        value: data.value,
+      });
+      expect(parseHostedVaultShareDeliverRequest({
+        projectionKind: "deep-sleep-sources-days.v1",
+        records: selected,
+      }).records).toEqual(selected);
+      expect(JSON.stringify(selected)).not.toMatch(
+        /sourceInstanceId|connectionId|accountId|timeZone|resourceId/u,
+      );
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("uses canonical source identity to select equal values and fails closed above the source bound", () => {
+    const spec = requireDailyMetricSpec("deep-sleep-sources-days.v1");
+    const sourceRows = [
+      {
+        label: "Fitbit",
+        recordedAt: "2026-07-03T06:58:00.000Z",
+        source: "fitbit",
+        unit: "minutes",
+        value: 88,
+      },
+      {
+        label: "Garmin",
+        recordedAt: "2026-07-03T07:01:00.000Z",
+        source: "garmin",
+        unit: "minutes",
+        value: 88,
+      },
+      {
+        label: "Oura",
+        recordedAt: null,
+        source: "oura",
+        unit: "minutes",
+        value: 112,
+      },
+    ];
+    const point = {
+      date: ACTIVITY_DAY.date,
+      grain: "day" as const,
+      metricKey: "deep-sleep-minutes",
+      sourceLabel: "Garmin",
+      sources: sourceRows,
+      statistic: "value" as const,
+      unit: "minutes",
+      value: 88,
+    };
+
+    const selected = selectProjectableDailyMetricDays([point], spec, nowMs);
+    expect(selected[0]?.data).toMatchObject({
+      projectedAt: "2026-07-04T00:00:00.000Z",
+      sources: [
+        expect.not.objectContaining({ selected: true }),
+        expect.objectContaining({ selected: true, source: "garmin" }),
+        expect.not.objectContaining({ selected: true }),
+      ],
+      sourcesDisagree: true,
+      value: 88,
+    });
+
+    expect(selectProjectableDailyMetricDays([{
+      ...point,
+      sources: [
+        ...sourceRows,
+        {
+          label: "Polar",
+          recordedAt: null,
+          source: "polar",
+          unit: "minutes",
+          value: 90,
+        },
+        {
+          label: "Suunto",
+          recordedAt: null,
+          source: "suunto",
+          unit: "minutes",
+          value: 92,
+        },
+      ],
+    }], spec, nowMs)).toEqual([]);
+  });
+
   it("maps recent selected daily metric rows to generic scalar records", () => {
     const selected = selectProjectableDailyMetricDays([
       {

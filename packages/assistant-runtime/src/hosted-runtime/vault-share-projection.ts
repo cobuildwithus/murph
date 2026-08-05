@@ -28,6 +28,7 @@ import {
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
+  HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES,
   HOSTED_VAULT_SHARE_TIME_ZONE_RECORD_KEY,
   HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
@@ -40,6 +41,7 @@ import {
   type HostedVaultShareDailyMetricProjectionSpec,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionScope,
+  type HostedVaultShareSleepMetricSource,
   type HostedVaultShareWorkout,
 } from "@murphai/hosted-execution/vault-share";
 import {
@@ -52,6 +54,7 @@ import {
   resolveAdherenceObservationActivityKind,
   selectMetricSeries,
   summarizeWearableSleepRuntime,
+  summarizeWearableSourceHealthRuntime,
   type CanonicalEntity,
   type MealNutritionDayTotal,
   type MealNutritionTotalsResult,
@@ -108,8 +111,11 @@ type MetricSourceRevisionPoint = MetricSourceOwnerPoint & Pick<
 
 type DailyMetricProjectionPoint = MetricSourceRevisionPoint & Pick<
   MetricSeriesPoint,
-  "context" | "date" | "grain" | "metricKey" | "statistic" | "unit" | "value"
-> & { provisional?: boolean };
+  "context" | "date" | "grain" | "metricKey" | "sourceLabel" | "statistic" | "unit" | "value"
+> & {
+  provisional?: boolean;
+  sources?: readonly HostedVaultShareSleepMetricSource[];
+};
 
 type WorkoutMetricProjectionRow = MetricSourceRevisionPoint & Pick<
   MetricSeriesPoint,
@@ -514,17 +520,131 @@ export async function readProjectableDailyMetricDays(
     points,
     statistic: "value",
   });
-  const completedDateScope = ["deep-sleep-days.v0", "rem-sleep-days.v0"].includes(spec.projectionKind);
-  if (!completedDateScope) return selectProjectableDailyMetricDays(series.rows, spec, nowMs);
+  let rows: readonly DailyMetricProjectionPoint[] = series.rows;
+  if (spec.sourceMode === "all-public-sleep-sources") {
+    const sourcesByDate = await readProjectableSleepMetricSourcesByDate({
+      cutoffDate,
+      spec,
+      vaultRoot,
+    });
+    if (!sourcesByDate) {
+      return [];
+    }
+    rows = rows.map((row) => ({
+      ...row,
+      sources: sourcesByDate.get(row.date) ?? [],
+    }));
+  }
+
+  const completedDateScope = [
+    "deep-sleep-days.v0",
+    "deep-sleep-sources-days.v1",
+    "rem-sleep-days.v0",
+    "rem-sleep-sources-days.v1",
+  ].includes(spec.projectionKind);
+  if (!completedDateScope) return selectProjectableDailyMetricDays(rows, spec, nowMs);
 
   const vaultTimeZone = await readProjectableVaultTimeZone(vaultRoot);
-  return selectProjectableDailyMetricDays(series.rows.flatMap((row) => {
+  return selectProjectableDailyMetricDays(rows.flatMap((row) => {
     const timeZone = normalizeIanaTimeZone(readContextString(row.context, "timeZone"))
       ?? vaultTimeZone;
     if (!timeZone) return [];
     const currentDate = formatTimeZoneDateTimeParts(nowMs, timeZone).dayKey;
     return row.date > currentDate ? [] : [{ ...row, provisional: row.date === currentDate }];
   }), spec, nowMs);
+}
+
+async function readProjectableSleepMetricSourcesByDate(input: {
+  cutoffDate: string;
+  spec: HostedVaultShareDailyMetricProjectionSpec;
+  vaultRoot: string;
+}): Promise<Map<string, HostedVaultShareSleepMetricSource[]> | null> {
+  const summaryMetricKey = input.spec.metricKey === "deep-sleep-minutes"
+    ? "deepMinutes"
+    : input.spec.metricKey === "rem-sleep-minutes"
+      ? "remMinutes"
+      : null;
+  if (!summaryMetricKey) {
+    return null;
+  }
+
+  const sourceHealth = await summarizeWearableSourceHealthRuntime(
+    input.vaultRoot,
+    { from: input.cutoffDate },
+  );
+  const providers = sourceHealth
+    .filter((source) =>
+      source.provider !== "unknown"
+      && source.metricsContributed.includes(summaryMetricKey)
+    )
+    .sort((left, right) => left.provider.localeCompare(right.provider));
+  if (providers.length > HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES) {
+    return null;
+  }
+
+  const summariesByProvider = await Promise.all(providers.map(async (source) => ({
+    source,
+    summaries: await summarizeWearableSleepRuntime(input.vaultRoot, {
+      from: input.cutoffDate,
+      limit: HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW,
+      providers: [source.provider],
+    }),
+  })));
+  const sourcesByDate = new Map<string, HostedVaultShareSleepMetricSource[]>();
+
+  for (const { source, summaries } of summariesByProvider) {
+    const sourceKey = sanitizeProjectionSourceKey(source.provider);
+    const sourceLabel = sanitizeProjectionSourceLabel(source.providerDisplayName);
+    if (!sourceKey || !sourceLabel) {
+      return null;
+    }
+
+    for (const summary of summaries) {
+      const metric = summaryMetricKey === "deepMinutes"
+        ? summary.deepMinutes
+        : summary.remMinutes;
+      const value = metric.selection.value;
+      if (value === null) {
+        continue;
+      }
+      if (
+        !Number.isFinite(value)
+        || value < input.spec.minValue
+        || value > input.spec.maxValue
+      ) {
+        return null;
+      }
+      const unit = sanitizeProjectionUnit(metric.selection.unit);
+      if (
+        input.spec.expectedUnit !== undefined
+        && unit !== input.spec.expectedUnit
+      ) {
+        return null;
+      }
+      const recordedAt = metric.selection.recordedAt;
+      if (recordedAt !== null && !isStrictIsoDateTime(recordedAt)) {
+        return null;
+      }
+
+      const sources = sourcesByDate.get(summary.date) ?? [];
+      if (sources.some((candidate) => candidate.source === sourceKey)) {
+        return null;
+      }
+      sources.push({
+        label: sourceLabel,
+        recordedAt,
+        source: sourceKey,
+        unit,
+        value,
+      });
+      sourcesByDate.set(summary.date, sources);
+    }
+  }
+
+  for (const sources of sourcesByDate.values()) {
+    sources.sort((left, right) => left.source.localeCompare(right.source));
+  }
+  return sourcesByDate;
 }
 
 export async function readProjectableWorkoutDays(
@@ -792,6 +912,14 @@ export function selectProjectableDailyMetricDays(
       continue;
     }
 
+    const sources = spec.sourceMode === "all-public-sleep-sources"
+      ? selectProjectableSleepMetricSources(point, value)
+      : null;
+    if (spec.sourceMode === "all-public-sleep-sources" && !sources) {
+      continue;
+    }
+    const projectedAt = new Date(nowMs).toISOString();
+
     records.push({
       data: {
         date: point.date,
@@ -802,13 +930,24 @@ export function selectProjectableDailyMetricDays(
                 HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
             }
           : {}),
+        ...(sources
+          ? {
+              projectedAt,
+              sources,
+              sourcesDisagree: sleepMetricSourcesDisagree(sources),
+            }
+          : {}),
         ...(point.provisional ? { provisional: true } : {}),
         unit: sanitizeProjectionUnit(point.unit),
         value,
       },
       occurredAt: `${point.date}T00:00:00.000Z`,
       recordKey: point.date,
-      ...sourceRevisionField(deriveMetricSeriesPointSourceRevision(point)),
+      ...sourceRevisionField(
+        sources
+          ? deriveSourceAwareMetricSeriesPointSourceRevision(point, sources)
+          : deriveMetricSeriesPointSourceRevision(point),
+      ),
     });
 
     if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
@@ -817,6 +956,52 @@ export function selectProjectableDailyMetricDays(
   }
 
   return records;
+}
+
+function selectProjectableSleepMetricSources(
+  point: DailyMetricProjectionPoint,
+  selectedValue: number,
+): HostedVaultShareSleepMetricSource[] | null {
+  const sourceRows = point.sources ?? [];
+  if (
+    sourceRows.length === 0
+    || sourceRows.length > HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES
+  ) {
+    return null;
+  }
+
+  const selectedUnit = sanitizeProjectionUnit(point.unit);
+  const exactMatches = sourceRows.filter((source) =>
+    source.value === selectedValue && source.unit === selectedUnit
+  );
+  const labelMatches = exactMatches.filter((source) =>
+    typeof point.sourceLabel === "string"
+    && source.label === point.sourceLabel.trim()
+  );
+  const selectedSource = labelMatches.length === 1
+    ? labelMatches[0]
+    : exactMatches.length === 1
+      ? exactMatches[0]
+      : null;
+  if (!selectedSource) {
+    return null;
+  }
+
+  return sourceRows.map(({ selected: _selected, ...source }) => ({
+    ...source,
+    ...(source.source === selectedSource.source ? { selected: true as const } : {}),
+  }));
+}
+
+function sleepMetricSourcesDisagree(
+  sources: readonly HostedVaultShareSleepMetricSource[],
+): boolean {
+  const first = sources[0];
+  return first
+    ? sources.some((source) =>
+        source.unit !== first.unit || source.value !== first.value
+      )
+    : false;
 }
 
 export async function readProjectableMealNutritionDays(
@@ -1959,6 +2144,25 @@ function deriveMetricSeriesPointSourceRevision(
   });
 }
 
+function deriveSourceAwareMetricSeriesPointSourceRevision(
+  point: MetricSourceRevisionPoint,
+  sources: readonly HostedVaultShareSleepMetricSource[],
+): string | undefined {
+  const canonicalRevision = deriveMetricSeriesPointSourceRevision(point);
+  if (!canonicalRevision) {
+    return undefined;
+  }
+  return hashOpaqueSourceRevision({
+    canonicalRevision,
+    sources: sources.map((source) => ({
+      recordedAt: source.recordedAt,
+      source: source.source,
+      unit: source.unit,
+      value: source.value,
+    })),
+  });
+}
+
 function deriveCompositeMetricSeriesSourceRevision(
   points: readonly MetricSourceRevisionPoint[],
 ): string | undefined {
@@ -2018,6 +2222,24 @@ function sanitizeProjectionUnit(unit: string | null): string | null {
   const trimmed = unit.trim();
   return trimmed.length > 0
     && trimmed.length <= 40
+    && !/[\u0000-\u001f\u007f]/u.test(trimmed)
+    ? trimmed
+    : null;
+}
+
+function sanitizeProjectionSourceKey(value: string): string | null {
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0
+    && normalized.length <= 80
+    && /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(normalized)
+    ? normalized
+    : null;
+}
+
+function sanitizeProjectionSourceLabel(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed.length > 0
+    && trimmed.length <= 80
     && !/[\u0000-\u001f\u007f]/u.test(trimmed)
     ? trimmed
     : null;

@@ -276,7 +276,13 @@ const RENAMED_GROUP_SUMMARY = {
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const SLEEP_DURATION_SCOPE = { projectionKind: "sleep-duration-days.v0" } as const;
 const DEEP_SLEEP_SCOPE = { projectionKind: "deep-sleep-days.v0" } as const;
+const DEEP_SLEEP_SOURCES_SCOPE = {
+  projectionKind: "deep-sleep-sources-days.v1",
+} as const;
 const REM_SLEEP_SCOPE = { projectionKind: "rem-sleep-days.v0" } as const;
+const REM_SLEEP_SOURCES_SCOPE = {
+  projectionKind: "rem-sleep-sources-days.v1",
+} as const;
 const WORKOUTS_SCOPE = {
   projectionKind: "workouts.v0",
 } as const;
@@ -2377,7 +2383,9 @@ describe("hosted group join policy", () => {
       { projectionKind: "sleep-times.v0" },
       SLEEP_DURATION_SCOPE,
       DEEP_SLEEP_SCOPE,
+      DEEP_SLEEP_SOURCES_SCOPE,
       REM_SLEEP_SCOPE,
+      REM_SLEEP_SOURCES_SCOPE,
       { projectionKind: "activity-days.v0" },
       WORKOUTS_SCOPE,
       RUNNING_SCOPE,
@@ -2428,11 +2436,27 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "deep-sleep-days.v0",
       },
       {
+        description:
+          "Shares your last 7 days of deep sleep minutes from each available sleep source, including the source name and when Murph recorded that source value.",
+        label: "Deep sleep by source",
+        projectionKind: "deep-sleep-sources-days.v1",
+        projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+        projectionScopeKey: "deep-sleep-sources-days.v1",
+      },
+      {
         description: "Shares your last 7 days of REM sleep minutes.",
         label: "REM sleep",
         projectionKind: "rem-sleep-days.v0",
         projectionScope: REM_SLEEP_SCOPE,
         projectionScopeKey: "rem-sleep-days.v0",
+      },
+      {
+        description:
+          "Shares your last 7 days of REM sleep minutes from each available sleep source, including the source name and when Murph recorded that source value.",
+        label: "REM sleep by source",
+        projectionKind: "rem-sleep-sources-days.v1",
+        projectionScope: REM_SLEEP_SOURCES_SCOPE,
+        projectionScopeKey: "rem-sleep-sources-days.v1",
       },
       {
         description: "Shares your last 7 days of active minutes.",
