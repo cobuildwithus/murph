@@ -68,7 +68,31 @@ Before calculating a meal total:
   generic row is preferable; use normal lookup for branded, packaged, menu, UPC,
   or exact-FDC searches. Because `--generic` applies to the whole batch, split a
   mixed meal into at most two lookups: one generic USDA batch and one normal
-  branded/menu/package batch.
+  branded/menu/package batch. The default returns one compact nutrition match
+  per component with serving, calories, protein, carbohydrate, fat, fiber, and
+  a bounded exact-product contaminant summary. Read `contaminantSummary` by
+  default: `no_known_product_tests` means evidence is unknown, observations are
+  measured or reported findings rather than verdicts, and truncation means more
+  linked evidence exists. When an alert includes `screeningPolicy`, use its
+  exposure and ratio to interpret unlike result/threshold units and state its
+  fixed serving-per-day and body-weight assumptions; that context is not a
+  personalized safety verdict. `murphConcernLevel` is the strongest
+  threshold-screening result among the linked tests, not product safety or
+  personal risk. `none` means no represented comparable observation triggered
+  an alert, not that no contaminants were measured. Alerts are a subset of
+  observations; never add their counts together. For a routine meal log, inspect
+  the summary silently and mention it only when the user asks or a material
+  exact-product alert warrants a brief, source-specific screening caveat. For a
+  material alert, attribute the measured result to `source`, and attribute the
+  concern level, exposure, and ratio to Murph's comparison against the named
+  `threshold.authority` and threshold. Never say the source reported a concern
+  level unless the evidence explicitly states that. Do not inject unknown or
+  `none` results into every acknowledgment. Increase `--limit`
+  only for an ambiguous match, and
+  use `--full-label` whenever the user needs a fact outside that compact
+  response. This includes sugars, saturated fat, cholesterol, sodium or other
+  micronutrients, ingredients, allergens, or complete contaminant observation,
+  sample, source, and threshold details.
 - Prefer an exact visible or user-named product, restaurant item, variant, UPC,
   or FDC id over a nearby generic substitute. Never merge nutrition from
   similarly named variants without evidence that they are the same item.
@@ -81,8 +105,8 @@ Before calculating a meal total:
   could materially move the total. Avoid fake precision; set confidence from
   the weakest material identity, quantity, or preparation assumption.
 
-Increase the default result limit only when the first match is ambiguous or
-missing a likely variant. If the database is unavailable or incomplete, use an
+Increase the result limit only when the first match is ambiguous or missing a
+likely variant. If the database is unavailable or incomplete, use an
 official label, manufacturer, or restaurant menu source. Only after those fail
 may you use a clearly marked memory-based estimate with the assumptions and
 material uncertainty stated. Never invent an exact label or imply that a visual

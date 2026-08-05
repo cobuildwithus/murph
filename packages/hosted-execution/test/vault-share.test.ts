@@ -34,7 +34,13 @@ const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const ACTIVITY_SCOPE = { projectionKind: "activity-days.v0" } as const;
 const STEPS_SCOPE = { projectionKind: "steps-days.v0" } as const;
 const DEEP_SLEEP_SCOPE = { projectionKind: "deep-sleep-days.v0" } as const;
+const DEEP_SLEEP_SOURCES_SCOPE = {
+  projectionKind: "deep-sleep-sources-days.v1",
+} as const;
 const REM_SLEEP_SCOPE = { projectionKind: "rem-sleep-days.v0" } as const;
+const REM_SLEEP_SOURCES_SCOPE = {
+  projectionKind: "rem-sleep-sources-days.v1",
+} as const;
 const WORKOUT_SCOPE = { projectionKind: "workout-days.v0" } as const;
 const WORKOUTS_SCOPE = {
   projectionKind: "workouts.v0",
@@ -81,6 +87,43 @@ const VALID_DAILY_METRIC_RECORD = {
     metricKey: "steps",
     unit: "count",
     value: 12_345,
+  },
+  occurredAt: "2026-07-03T00:00:00.000Z",
+  recordKey: "2026-07-03",
+};
+
+const VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD = {
+  data: {
+    date: "2026-07-03",
+    metricKey: "deep-sleep-minutes",
+    projectedAt: "2026-07-03T12:00:00.000Z",
+    sources: [
+      {
+        label: "fitbit",
+        recordedAt: "2026-07-03T06:58:00.000Z",
+        source: "fitbit",
+        unit: "minutes",
+        value: 64,
+      },
+      {
+        label: "Garmin",
+        recordedAt: "2026-07-03T07:01:00.000Z",
+        selected: true as const,
+        source: "garmin",
+        unit: "minutes",
+        value: 88,
+      },
+      {
+        label: "Oura",
+        recordedAt: null,
+        source: "oura",
+        unit: "minutes",
+        value: 112,
+      },
+    ],
+    sourcesDisagree: true,
+    unit: "minutes",
+    value: 88,
   },
   occurredAt: "2026-07-03T00:00:00.000Z",
   recordKey: "2026-07-03",
@@ -197,7 +240,9 @@ describe("vault-share contracts", () => {
       "sleep-times.v0",
       "sleep-duration-days.v0",
       "deep-sleep-days.v0",
+      "deep-sleep-sources-days.v1",
       "rem-sleep-days.v0",
+      "rem-sleep-sources-days.v1",
       "activity-days.v0",
       "workout-days.v0",
       "workouts.v0",
@@ -305,19 +350,24 @@ describe("vault-share contracts", () => {
     expect(new Set(HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS).size).toBe(
       HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS.length,
     );
-    expect(
-      new Set(
-        HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS.map(
-          (spec) => spec.metricKey,
-        ),
-      ).size,
-    ).toBe(HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS.length);
-
     for (const spec of HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS) {
       expect(
         getHostedVaultShareDailyMetricProjectionSpec(spec.projectionKind),
       ).toEqual(spec);
     }
+
+    expect(getHostedVaultShareDailyMetricProjectionSpec(
+      DEEP_SLEEP_SOURCES_SCOPE.projectionKind,
+    )).toMatchObject({
+      metricKey: "deep-sleep-minutes",
+      sourceMode: "all-public-sleep-sources",
+    });
+    expect(getHostedVaultShareDailyMetricProjectionSpec(
+      REM_SLEEP_SOURCES_SCOPE.projectionKind,
+    )).toMatchObject({
+      metricKey: "rem-sleep-minutes",
+      sourceMode: "all-public-sleep-sources",
+    });
   });
 
   it("parses a valid deliver request", () => {
@@ -894,20 +944,184 @@ describe("daily metric vault-share delivery records", () => {
     }
   });
 
+  it("parses every bounded public sleep source with one canonical selection", () => {
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: DEEP_SLEEP_SOURCES_SCOPE.projectionKind,
+      records: [VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD],
+    })).toEqual({
+      projectionKind: DEEP_SLEEP_SOURCES_SCOPE.projectionKind,
+      projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      records: [VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD],
+    });
+
+    const remRecord = {
+      ...VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD,
+      data: {
+        ...VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD.data,
+        metricKey: "rem-sleep-minutes",
+      },
+    };
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: REM_SLEEP_SOURCES_SCOPE.projectionKind,
+      records: [remRecord],
+    }).records).toEqual([remRecord]);
+  });
+
+  it("keeps legacy sleep grants provider-neutral", () => {
+    expect(() => parseHostedVaultShareDeliverRequest({
+      projectionKind: DEEP_SLEEP_SCOPE.projectionKind,
+      records: [VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD],
+    })).toThrow(/does not accept source-aware sleep data/u);
+  });
+
+  it("rejects malformed, ambiguous, or internally inconsistent source-aware sleep data", () => {
+    const expectInvalidSources = (
+      data: Record<string, unknown>,
+      pattern: RegExp,
+    ) => {
+      expect(() => parseHostedVaultShareDeliverRequest({
+        projectionKind: DEEP_SLEEP_SOURCES_SCOPE.projectionKind,
+        records: [{
+          ...VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD,
+          data,
+        }],
+      })).toThrow(pattern);
+    };
+    const validData = VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD.data;
+
+    expectInvalidSources({ ...validData, projectedAt: "not-a-time" }, /projectedAt/u);
+    expectInvalidSources({ ...validData, privateAccountId: "must-not-land" }, /must not include/u);
+    expectInvalidSources({
+      ...validData,
+      projectedAt: "2999-01-01T00:00:00.000Z",
+    }, /must not be in the future/u);
+    expectInvalidSources({ ...validData, sources: [] }, /1-4 entries/u);
+    expectInvalidSources({
+      ...validData,
+      sources: Array.from({ length: 5 }, (_, index) => ({
+        label: `Source ${index}`,
+        recordedAt: null,
+        ...(index === 0 ? { selected: true } : {}),
+        source: `source-${index}`,
+        unit: "minutes",
+        value: 88,
+      })),
+      sourcesDisagree: false,
+    }, /1-4 entries/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source) => ({ ...source, selected: undefined })),
+    }, /exactly one selected/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => ({
+        ...source,
+        ...(index === 0 ? { selected: true } : {}),
+      })),
+    }, /exactly one selected/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 1
+        ? { ...source, value: 94 }
+        : source),
+    }, /selected source must match/u);
+    expectInvalidSources({ ...validData, sourcesDisagree: false }, /must match the source values/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 0
+        ? { ...source, label: "Garmin", source: "garmin" }
+        : source),
+    }, /source keys must be unique/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 0
+        ? { ...source, source: "Private Provider" }
+        : source),
+    }, /canonical public provider slugs/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 0
+        ? { ...source, label: "Bad\nLabel" }
+        : source),
+    }, /bounded text without control characters/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 0
+        ? { ...source, label: "  " }
+        : source),
+    }, /bounded text without control characters/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 0
+        ? { ...source, label: "Bedroom Fitbit" }
+        : source),
+    }, /canonical public provider keys and labels/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 0
+        ? { ...source, label: "Junction", source: "junction" }
+        : source),
+    }, /canonical public provider keys and labels/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 0
+        ? { ...source, recordedAt: "not-a-time" }
+        : source),
+    }, /recordedAt/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 0
+        ? { ...source, recordedAt: "2999-01-01T00:00:00.000Z" }
+        : source),
+    }, /must not be in the future/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 0
+        ? { ...source, unit: "hours" }
+        : source),
+    }, /unit must be minutes/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 0
+        ? { ...source, value: 1_441 }
+        : source),
+    }, /value must be between/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 0
+        ? { ...source, selected: false }
+        : source),
+    }, /selected must be true when present/u);
+  });
+
   it("preserves provisional state only for completed-date daily scopes", () => {
     for (const [projectionScope, metricKey] of [
       [DEEP_SLEEP_SCOPE, "deep-sleep-minutes"],
+      [DEEP_SLEEP_SOURCES_SCOPE, "deep-sleep-minutes"],
       [REM_SLEEP_SCOPE, "rem-sleep-minutes"],
+      [REM_SLEEP_SOURCES_SCOPE, "rem-sleep-minutes"],
     ] as const) {
       const record = {
-        ...VALID_DAILY_METRIC_RECORD,
-        data: {
-          ...VALID_DAILY_METRIC_RECORD.data,
-          metricKey,
-          provisional: true,
-          unit: "minutes",
-          value: 480,
-        },
+        ...(projectionScope === DEEP_SLEEP_SOURCES_SCOPE
+          || projectionScope === REM_SLEEP_SOURCES_SCOPE
+          ? {
+              ...VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD,
+              data: {
+                ...VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD.data,
+                metricKey,
+                provisional: true as const,
+              },
+            }
+          : {
+              ...VALID_DAILY_METRIC_RECORD,
+              data: {
+                ...VALID_DAILY_METRIC_RECORD.data,
+                metricKey,
+                provisional: true as const,
+                unit: "minutes",
+                value: 480,
+              },
+            }),
       };
       expect(parseHostedVaultShareDeliverRequest({
         projectionKind: projectionScope.projectionKind,

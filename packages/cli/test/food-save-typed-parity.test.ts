@@ -223,7 +223,7 @@ test('food search-labels calls the hosted data API with the hosted provider cred
     assert.equal(requireData(result.envelope).source, 'murph-data-api')
     assert.equal(requireData(result.envelope).items[0]?.id, 'fdc:2259794')
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
-    assert.equal(requestUrl.href, 'http://murph-data-api.worker/api/foods?q=plain+greek+yogurt&limit=1')
+    assert.equal(requestUrl.href, 'http://murph-data-api.worker/api/foods?q=plain+greek+yogurt&limit=1&nutritionOnly=true')
     const init = fetchMock.mock.calls[0]?.[1]
     assert.equal(
       init?.headers instanceof Headers
@@ -282,7 +282,7 @@ test('food search-labels --generic requests USDA generic food rows', async () =>
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(
       requestUrl.href,
-      'http://murph-data-api.worker/api/foods?q=chicken+breast+cooked+skinless&limit=5&genericOnly=true',
+      'http://murph-data-api.worker/api/foods?q=chicken+breast+cooked+skinless&limit=1&genericOnly=true&nutritionOnly=true',
     )
   } finally {
     vi.unstubAllGlobals()
@@ -352,6 +352,7 @@ test('food search-labels-batch calls the hosted data API with the hosted provide
       queries: ['plain greek yogurt', 'white rice'],
       limit: 1,
       includeOffMarket: false,
+      nutritionOnly: true,
     })
     assert.equal(
       init?.headers instanceof Headers
@@ -437,9 +438,10 @@ test('food search-labels-batch --generic requests USDA generic food rows', async
     assert.equal(init?.method, 'POST')
     assert.deepEqual(JSON.parse(String(init?.body)), {
       queries: ['chicken breast', 'spinach'],
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
       genericOnly: true,
+      nutritionOnly: true,
     })
   } finally {
     vi.unstubAllGlobals()
