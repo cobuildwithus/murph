@@ -2160,6 +2160,25 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       ? queuedResponses.splice(scriptedResponseIndex, 1)[0]
       : undefined
     if (!scripted) {
+      const latestSummary = requestSummaries.at(-1)
+      const customToolCallOutputs = latestSummary?.customToolCallOutputs ?? []
+      console.error(JSON.stringify({
+        customToolCallOutputCount: customToolCallOutputs.length,
+        event: 'scripted_provider_unmatched_request',
+        includesFoodIds: customToolCallOutputs.some((output) =>
+          output.includes('fdc:oats-1') && output.includes('fdc:kefir-1')
+        ),
+        includesMealId: customToolCallOutputs.some((output) =>
+          output.includes('meal_scripted_mixed')
+        ),
+        includesSkillRule: customToolCallOutputs.some((output) =>
+          output.includes('Increase `--limit` only for an ambiguous match')
+        ),
+        queuedIncludeMatches: queuedResponses.map((candidate) =>
+          (candidate.requestIncludes ?? []).map((value) => requestBody.includes(value))
+        ),
+        queuedResponseCount: queuedResponses.length,
+      }))
       response.statusCode = 500
       response.end(JSON.stringify({
         error: 'scripted responses stub received a request without a queued response',
