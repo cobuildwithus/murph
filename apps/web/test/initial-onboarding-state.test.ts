@@ -147,7 +147,7 @@ describe("cross-platform initial onboarding state", () => {
     })).toThrow("Choose a valid Murph persona, tone, and voice");
   });
 
-  it("backfills pre-existing members while leaving the new-column default nullable", () => {
+  it("backfills pre-existing members and protects legacy rolling-deploy writers", () => {
     const migration = readFileSync(
       new URL(
         "../prisma/migrations/20260804170000_add_initial_onboarding_completion/migration.sql",
@@ -159,9 +159,11 @@ describe("cross-platform initial onboarding state", () => {
     expect(migration).toContain(
       'ADD COLUMN "initial_onboarding_completed_at" TIMESTAMP(3)',
     );
-    expect(migration).not.toMatch(/DEFAULT/iu);
     expect(migration).toContain(
       'SET "initial_onboarding_completed_at" = "created_at"',
+    );
+    expect(migration).toContain(
+      'ALTER COLUMN "initial_onboarding_completed_at" SET DEFAULT CURRENT_TIMESTAMP',
     );
   });
 });

@@ -95,8 +95,12 @@ Last verified: 2026-08-04
 ## Runtime Expectations
 
 - Initial onboarding has one Postgres completion owner across website and
-  native clients. Existing members are backfilled complete. New-member save or
-  skip locks the member row and records preferences plus completion in one
+  native clients. Existing members are backfilled complete. During the
+  migration-first rolling deploy, a temporary database default also completes
+  inserts from the still-serving legacy writer; the current member creator
+  explicitly writes null for genuine new-flow members. Retire that default in
+  a later migration only after the legacy writer has drained. New-member save
+  or skip locks the member row and records preferences plus completion in one
   transaction; the first completion wins and later attempts return an
   idempotent completed projection without preference mutation. A failed write
   leaves the picker mounted with its unsaved choices, while an unavailable

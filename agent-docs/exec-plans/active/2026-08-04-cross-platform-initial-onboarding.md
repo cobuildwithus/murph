@@ -45,8 +45,9 @@ Updated: 2026-08-04
 ## Risks and mitigations
 
 1. Risk: existing members with no new field appear newly pending.
-   Mitigation: backfill all pre-migration members as completed while leaving
-   newly created members pending.
+   Mitigation: backfill all pre-migration members as completed, use a temporary
+   database default for legacy writers still serving during the rolling
+   deploy, and make the current member creator write null explicitly.
 2. Risk: app and web race after both have already displayed onboarding.
    Mitigation: make completion atomic/idempotent and re-read on foreground;
    explicitly avoid a lease/state machine for the narrow simultaneous-open
@@ -77,6 +78,10 @@ Updated: 2026-08-04
 
 - Canonical ownership is a nullable completion timestamp on the hosted member,
   backfilled for all members that predate the migration.
+- The initial migration keeps a compatibility default so a legacy writer that
+  omits the column during deployment cannot re-enroll its member. The current
+  creator explicitly writes null. A later deployment removes the default only
+  after legacy writers have drained.
 - A member has completed onboarding after saving persona preferences or
   explicitly skipping/dismissing the persona picker. The contact-card step
   alone does not complete onboarding.
@@ -89,16 +94,22 @@ Updated: 2026-08-04
 
 - Completed: focused web Vitest suites, Prisma client generation and schema
   validation, web typecheck and ESLint, the full affected web verification
-  lane (644 files and 8,614 tests passed), focused iOS API/session/UI tests,
+  lane (644 files and 8,617 tests passed), focused iOS API/session/UI tests,
   the full iOS simulator suite, XcodeGen, SwiftFormat lint, visual-proof
   verifier tests, and simulator inspection of all six native states.
+- Completed: the preliminary specialist found three material gaps. The
+  rolling-deploy writer gap, truthful skip progress/retry, and real
+  first-writer-wins proof were accepted and corrected. The new opt-in local
+  PostgreSQL suite applies the exact migration SQL and proves both controlled
+  Web-save/iOS-skip winner orderings with independent Prisma clients.
 - Completed: production `/design?tab=sections` onboarding renders at desktop
   and mobile sizes. The required Claude Code UI double-check was attempted and
   stopped at explicit Fable credit exhaustion as the completion workflow
   directs.
-- Remaining: candidate commits, exact-head visual-proof PR metadata, green PR
-  workflows, the preliminary specialist ReviewGPT pass, and the separate
-  final ReviewGPT gate in both repositories.
+- Completed: refreshed exact-head visual evidence for the truthful skip-saving
+  and retry states at desktop and mobile sizes.
+- Remaining: publish the web correction commit, finish green PR workflows and
+  the separate final ReviewGPT gate in both repositories, then close this plan.
 - Expected outcomes: every check is clean; screenshots represent each
   materially changed native state; ReviewGPT reports zero blocking findings on
   each exact pushed PR head.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 import {
   MurphPersonaPicker,
@@ -9,7 +9,19 @@ import {
 import { Button } from "@/src/components/ui/button";
 
 export function PersonaOnboardingStudy() {
-  const [open, setOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [proofClosed, setProofClosed] = useState(false);
+  const skipProof = useSyncExternalStore(
+    subscribeToStaticDesignProof,
+    readSkipProof,
+    readServerSkipProof,
+  );
+  const open = previewOpen || (!proofClosed && skipProof !== "success");
+
+  const setOpen = (nextOpen: boolean) => {
+    setPreviewOpen(nextOpen);
+    if (!nextOpen) setProofClosed(true);
+  };
 
   return (
     <div id="onboarding-persona-picker" className="scroll-mt-24">
@@ -40,7 +52,13 @@ export function PersonaOnboardingStudy() {
         onOpenChange={setOpen}
         open={open}
         savePreference={preservePreviewPreferences}
-        skipPreference={preservePreviewSkip}
+        skipPreference={
+          skipProof === "pending"
+            ? holdPreviewSkip
+            : skipProof === "error"
+              ? rejectPreviewSkip
+              : preservePreviewSkip
+        }
       />
     </div>
   );
@@ -54,4 +72,27 @@ function preservePreviewPreferences(
 
 function preservePreviewSkip(): Promise<void> {
   return Promise.resolve();
+}
+
+function holdPreviewSkip(): Promise<void> {
+  return new Promise(() => undefined);
+}
+
+function rejectPreviewSkip(): Promise<void> {
+  return Promise.reject(new Error("Design proof skip failure"));
+}
+
+function subscribeToStaticDesignProof(): () => void {
+  return () => undefined;
+}
+
+function readSkipProof(): "error" | "pending" | "success" {
+  const proof = new URLSearchParams(window.location.search).get(
+    "onboardingSkipProof",
+  );
+  return proof === "error" || proof === "pending" ? proof : "success";
+}
+
+function readServerSkipProof(): "success" {
+  return "success";
 }

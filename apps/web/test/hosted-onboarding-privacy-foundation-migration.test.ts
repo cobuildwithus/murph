@@ -76,7 +76,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
     'groupSponsorshipsReceived HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")',
     "inferenceConnection HostedInferenceConnection?",
-    'initialOnboardingCompletedAt DateTime? @map("initial_onboarding_completed_at")',
+    'initialOnboardingCompletedAt DateTime? @default(now()) @map("initial_onboarding_completed_at")',
     "linqContactCardShares HostedLinqContactCardShare[]",
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',

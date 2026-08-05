@@ -1003,8 +1003,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 
 Postgres owns the one-time hosted-member onboarding fact through
 `hosted_member.initial_onboarding_completed_at`. The migration backfills every
-member that predates the field as complete; members created afterward begin
-pending. The website reads that fact before rendering `?initialVisit=true`, and
+member that predates the field as complete. Its rolling-deploy compatibility
+default also marks rows from the still-serving legacy writer complete, while
+the current member creator explicitly writes null so new-version signups begin
+pending. Remove that compatibility default only in a later deployment after
+the legacy writer can no longer serve. The website reads the canonical fact
+before rendering `?initialVisit=true`, and
 the iOS companion reads it through the bearer-only companion route. The native
 client receives the closed web-owned persona, voice, tone, and contact-avatar
 catalog and keeps only unsaved presentation state; it has no durable completion

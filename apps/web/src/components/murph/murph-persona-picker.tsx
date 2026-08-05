@@ -48,6 +48,7 @@ export interface MurphPersonaPreferences {
 }
 
 type PersonaPickerStep = "main" | "supporting" | "voices" | "tone";
+type PersonaPickerOperation = "save" | "skip";
 
 export function MurphPersonaPicker({
   initialPersona = "classic",
@@ -92,8 +93,10 @@ export function MurphPersonaPicker({
   const [voice, setVoice] = useState<AssistantVoiceOptionId>(
     initialVoice ?? initialOption.defaultVoiceId,
   );
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [pendingOperation, setPendingOperation] =
+    useState<PersonaPickerOperation | null>(null);
+  const [failedOperation, setFailedOperation] =
+    useState<PersonaPickerOperation | null>(null);
   const mountedRef = useRef(false);
   const stepTitleRef = useRef<HTMLDivElement | null>(null);
   const previousStepRef = useRef<PersonaPickerStep>(step);
@@ -133,6 +136,7 @@ export function MurphPersonaPicker({
   const otherVoiceOptions = assistantVoiceOptions
     .filter((option) => !recommendedVoiceIds.has(option.id))
     .map((option) => ({ ...option, previewPath: option.previewPath }));
+  const saving = pendingOperation !== null;
 
   const selectPersona = (nextPersona: AssistantBasePersonaId) => {
     const next = resolveAssistantBasePersonaOption(nextPersona);
@@ -143,8 +147,9 @@ export function MurphPersonaPicker({
   };
 
   const handleSave = async () => {
-    setSaving(true);
-    setError(null);
+    if (saving) return;
+    setPendingOperation("save");
+    setFailedOperation(null);
     try {
       const saved = await savePreference({
         persona: resolveAssistantPersonaCombinationId(persona, supportingPersona),
@@ -158,17 +163,17 @@ export function MurphPersonaPicker({
       onOpenChange(false);
     } catch {
       if (mountedRef.current) {
-        setError("Could not save your Murph. Your choices are still here. Try again.");
+        setFailedOperation("save");
       }
     } finally {
-      if (mountedRef.current) setSaving(false);
+      if (mountedRef.current) setPendingOperation(null);
     }
   };
 
   const handleSkip = async () => {
     if (saving) return;
-    setSaving(true);
-    setError(null);
+    setPendingOperation("skip");
+    setFailedOperation(null);
     try {
       await skipPreference?.();
       if (!mountedRef.current) return;
@@ -178,10 +183,10 @@ export function MurphPersonaPicker({
       onOpenChange(false);
     } catch {
       if (mountedRef.current) {
-        setError("Could not save your Murph. Your choices are still here. Try again.");
+        setFailedOperation("skip");
       }
     } finally {
-      if (mountedRef.current) setSaving(false);
+      if (mountedRef.current) setPendingOperation(null);
     }
   };
 
@@ -390,27 +395,54 @@ export function MurphPersonaPicker({
           : toneContent;
 
   const actions = (
-    <div className="flex flex-col gap-2">
-      {error ? (
+    <div aria-busy={saving} className="flex flex-col gap-2">
+      {pendingOperation === "skip" && step !== "main" ? (
         <p
-          role="alert"
-          className="rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          aria-live="polite"
+          className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground"
         >
-          {error}
+          <Loader2Icon data-icon="inline-start" className="animate-spin" />
+          Finishing…
         </p>
+      ) : null}
+      {failedOperation ? (
+        <div
+          className="rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span>
+              {failedOperation === "skip"
+                ? "Could not skip setup. Your choices are still here."
+                : "Could not save your Murph. Your choices are still here. Try again."}
+            </span>
+            {failedOperation === "skip" ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={saving}
+                onClick={() => void handleSkip()}
+              >
+                Retry skip
+              </Button>
+            ) : null}
+          </div>
+        </div>
       ) : null}
       <div className="grid grid-cols-2 gap-2">
         <Button
           type="button"
           size="lg"
           variant="ghost"
+          aria-busy={step === "main" && pendingOperation === "skip"}
           disabled={saving}
           onClick={() => {
             if (step === "main") {
               void handleSkip();
               return;
             }
-            setError(null);
+            setFailedOperation(null);
             setStep(
               step === "tone"
                 ? "voices"
@@ -420,12 +452,19 @@ export function MurphPersonaPicker({
             );
           }}
         >
-          {step === "main" ? "Skip" : "Back"}
+          {step === "main" && pendingOperation === "skip" ? (
+            <Loader2Icon data-icon="inline-start" className="animate-spin" />
+          ) : null}
+          {step === "main" && pendingOperation === "skip"
+            ? "Skipping…"
+            : step === "main"
+              ? "Skip"
+              : "Back"}
         </Button>
         <Button
           type="button"
           size="lg"
-          aria-busy={step === "tone" && saving}
+          aria-busy={pendingOperation === "save"}
           disabled={saving}
           onClick={() => {
             if (step === "main") {
@@ -443,10 +482,10 @@ export function MurphPersonaPicker({
             void handleSave();
           }}
         >
-          {saving ? (
+          {pendingOperation === "save" ? (
             <Loader2Icon data-icon="inline-start" className="animate-spin" />
           ) : null}
-          {saving ? "Saving…" : "Continue"}
+          {pendingOperation === "save" ? "Saving…" : "Continue"}
         </Button>
       </div>
     </div>
