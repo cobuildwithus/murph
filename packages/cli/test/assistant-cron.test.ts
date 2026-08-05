@@ -582,9 +582,15 @@ test('assistant cron manual runs record history and remove completed one-shot jo
   assert.equal(result.removedAfterRun, true)
   assert.equal(result.run.sessionId, 'asst_cron_manual')
   assert.equal(result.run.response, 'Drink water now.')
+  const instructions =
+    cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.instructions ?? ''
   assert.equal(
-    cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.instructions,
-    'Remind me to drink water.',
+    instructions.startsWith('Remind me to drink water.\n\n'),
+    true,
+  )
+  assert.match(
+    instructions,
+    /Independent automation authority \(engine-supplied\):/u,
   )
   assert.equal(
     cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.channel,
