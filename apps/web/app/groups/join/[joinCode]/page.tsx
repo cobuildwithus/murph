@@ -17,7 +17,10 @@ import {
 } from "@/src/lib/hosted-groups/group-join-handoff";
 import { readHostedGroupJoinView } from "@/src/lib/hosted-groups/group-store";
 import { readHostedInitialOnboardingState } from "@/src/lib/hosted-onboarding/initial-onboarding";
-import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import {
+  getHostedPageAuthSnapshot,
+  readHostedDashboardCheckoutRequired,
+} from "@/src/lib/hosted-onboarding/page-auth";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import {
   readHostedConsentStatus,
@@ -72,32 +75,37 @@ export default async function GroupJoinPage({
     searchParams ?? Promise.resolve<GroupJoinSearchParams>({}),
   ]);
   const inviteCode = readSingleSearchParam(resolvedSearchParams.invite);
-  const postJoinDestination = resolveGroupJoinPostJoinDestination(
+  const defaultPostJoinDestination = resolveGroupJoinPostJoinDestination(
     readGroupJoinPostAuthHandoff(resolvedSearchParams.postJoin),
   );
   const auth = await getHostedPageAuthSnapshot();
   const prisma = getPrisma();
-  const view = await readHostedGroupJoinView({
-    joinCode,
-    memberId: auth.authenticatedMember?.id ?? null,
-    prisma,
-  });
-  const launchConsentStatus = auth.authenticatedMember
-    ? await readGroupJoinLaunchConsentStatus({
-        memberId: auth.authenticatedMember.id,
-        prisma,
-      })
-    : null;
+  const memberId = auth.authenticatedMember?.id ?? null;
+  const [
+    view,
+    launchConsentStatus,
+    resolvedPostJoinContactOption,
+    checkoutRequired,
+  ] = await Promise.all([
+    readHostedGroupJoinView({ joinCode, memberId, prisma }),
+    memberId
+      ? readGroupJoinLaunchConsentStatus({ memberId, prisma })
+      : Promise.resolve(null),
+    memberId
+      ? resolveGroupJoinPostJoinContactOption({ memberId, prisma })
+      : Promise.resolve(null),
+    readHostedDashboardCheckoutRequired(auth),
+  ]);
+  const postJoinDestination = checkoutRequired
+    ? "/join"
+    : defaultPostJoinDestination;
   // Most members live in a chat thread, not the dashboard, so the post-join
   // hand-off returns completed members to the channel Murph already reaches
-  // them on. Pending members go through Home, whose canonical onboarding read
-  // owns the one-time flow.
-  const postJoinContactOption = auth.authenticatedMember
-    ? await resolveGroupJoinPostJoinContactOption({
-        memberId: auth.authenticatedMember.id,
-        prisma,
-      })
-    : null;
+  // them on. The dashboard auth owner identifies first-checkout members, who
+  // continue directly into its existing setup route instead.
+  const postJoinContactOption = postJoinDestination === "/join"
+    ? null
+    : resolvedPostJoinContactOption;
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-8 px-6 py-16">
@@ -215,14 +223,6 @@ function renderGroupJoin(input: {
             )}
             {view.viewerCanLeave ? (
               <GroupJoinLeaveButton groupName={groupName} joinCode={input.joinCode} />
-            ) : null}
-            {input.launchConsentStatus?.launchGranted ? (
-              <Link
-                href={input.postJoinDestination}
-                className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-              >
-                {alreadyActiveMember ? "Go home" : "Not now"}
-              </Link>
             ) : null}
           </div>
         ) : (
