@@ -109,9 +109,10 @@ export const compactTableResponseCardV1Schema = z
       }
     }
 
+    const { tracking: _tracking, ...presentationCard } = card;
     const envelope = JSON.stringify({
       schemaVersion: 3,
-      card,
+      card: presentationCard,
     });
     const payloadByteLength = new TextEncoder().encode(envelope).byteLength;
     const base64PaddingLength =

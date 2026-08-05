@@ -34,11 +34,19 @@ const TRACKED_WORKOUT_CARD = {
   },
 } satisfies AssistantResponseCard
 
+const APP_CARD_URL_PREFIX = 'https://murph.ai/#murph-card='
+
+function encodeEnvelopeUrl(card: unknown): string {
+  return `${APP_CARD_URL_PREFIX}${Buffer.from(
+    JSON.stringify({ schemaVersion: 3, card }),
+    'utf8',
+  ).toString('base64url')}`
+}
+
 function decodeAppCardUrl(url: string): unknown {
-  const prefix = 'https://murph.ai/#murph-card='
-  expect(url.startsWith(prefix)).toBe(true)
+  expect(url.startsWith(APP_CARD_URL_PREFIX)).toBe(true)
   return JSON.parse(
-    Buffer.from(url.slice(prefix.length), 'base64url').toString('utf8'),
+    Buffer.from(url.slice(APP_CARD_URL_PREFIX.length), 'base64url').toString('utf8'),
   )
 }
 
@@ -89,6 +97,39 @@ describe('compact table response cards', () => {
       schemaVersion: 3,
       card: presentationCard,
     })
+  })
+
+  it('measures the actual V3 presentation at the inline URL boundary', () => {
+    const makeBoundaryCard = (cellLength: number) => ({
+      ...TRACKED_WORKOUT_CARD,
+      title: 'Eight-exercise workout',
+      subtitle: 'Verified canonical workout snapshot for today',
+      columns: ['Set 1', 'Set 2', 'Set 3', 'Set 4'],
+      rows: Array.from({ length: 8 }, (_, rowIndex) => ({
+        label: `Exercise ${rowIndex + 1} movement pattern`,
+        values: Array.from({ length: 4 }, (_, columnIndex) =>
+          `${rowIndex + columnIndex + 1}`.padEnd(cellLength, 'x')
+        ),
+      })),
+      footer: 'Assists and spotted reps remain on the exact set note.',
+    })
+
+    const trackedCard = makeBoundaryCard(20)
+    const { tracking: _tracking, ...presentationCard } = trackedCard
+    expect(encodeEnvelopeUrl(trackedCard).length).toBeGreaterThanOrEqual(2_048)
+    expect(encodeEnvelopeUrl(presentationCard).length).toBeLessThan(2_048)
+    expect(assistantResponseCardSchema.parse(trackedCard)).toEqual(trackedCard)
+    expect(encodeCompactTableAppCardUrl(trackedCard).length).toBeLessThan(2_048)
+
+    const presentationOversizedCard = makeBoundaryCard(24)
+    const {
+      tracking: _oversizedTracking,
+      ...oversizedPresentationCard
+    } = presentationOversizedCard
+    expect(encodeEnvelopeUrl(oversizedPresentationCard).length)
+      .toBeGreaterThanOrEqual(2_048)
+    expect(assistantResponseCardSchema.safeParse(presentationOversizedCard).success)
+      .toBe(false)
   })
 
   it('keeps internal tracking out of the pipe-free user fallback', () => {
