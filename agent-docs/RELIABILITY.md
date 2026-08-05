@@ -412,7 +412,17 @@ Last verified: 2026-08-04
   the same reply remains alertable. The existing seven-day ingress-trace cleanup
   retires a trace only after both its original ingress and latest activity are
   stale, so a resumed trace survives quiet-hour deferral without making
-  inactive traces unbounded.
+  inactive traces unbounded. Slow completed alerts classify the larger
+  accepted-to-provider-start or provider-start-to-visible-response boundary
+  without guessing across missing or invalid chronology. Unresolved alerts
+  separately count missing terminal evidence and terminal non-replies that
+  still lack durable checkpoint acknowledgement. Checkpoint lifecycle telemetry
+  exposes the bounded exact-item batch count plus whether that selected batch
+  contains the exact conversation frontier, without logging identifiers. The
+  plan/start/failure phases prove only local selection; a finished event
+  separately says whether Web accepted the checkpoint. Only the accepted
+  frontier combination routes an unconsumed row toward downstream Web stamping;
+  the count alone never chooses an owner.
   Outbound paging requires the shared Resend operational-email sender and
   recipients plus a valid IANA operator timezone; it never falls back to
   Linq/iMessage. It suppresses sends from 11 PM through 7 AM local time and

@@ -374,8 +374,14 @@ supported provider credential.
   and separately stages system-mailbox, retention-only, stale-owner, and active
   foreground contention. Each real signed Linq inbound must produce exactly one
   accepted outbound Linq request within 30 seconds while any staged background
-  checkpoint remains held. Its separately named workflow leg makes this latency
-  invariant visible without replacing the two aggregate required checks.
+  checkpoint remains held. The same scenario command then starts a clean Vitest
+  process with a 10-second idle floor and typed, bounded ordering observation.
+  That process proves a later durable conversation reaches mailbox import and
+  provider start before an interrupted idle snapshot can retry, and proves the
+  same foreground continuation after a committed canonical publication. The
+  two process profiles cannot share process-scoped hosted crypto state. Its
+  separately named workflow leg makes these invariants visible without
+  replacing the two aggregate required checks.
 - `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
   same exact 30-second boundary for completed and still-unresolved Linq traces,
   excludes chronologically valid AI usage-denied traces before grouping while

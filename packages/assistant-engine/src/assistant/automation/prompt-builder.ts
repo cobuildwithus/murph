@@ -139,6 +139,7 @@ export function buildAssistantAutoReplyPrompt(
           projectionReasonCode: entry.projection?.reasonCode ?? null,
           projectionStatus: entry.projection?.status ?? null,
         }),
+        projectionStatus: entry.projection?.status ?? null,
         renderedAttachmentSections: entry.attachmentEvidence.attachments
           .map((attachment) => renderAttachmentEvidencePromptSection(attachment))
           .filter((section): section is string => section !== null),
@@ -216,6 +217,7 @@ export async function prepareAssistantAutoReplyInput(
           projectionReasonCode: entry.projection?.reasonCode ?? null,
           projectionStatus: entry.projection?.status ?? null,
         }),
+        projectionStatus: entry.projection?.status ?? null,
         renderedAttachmentSections: entry.attachmentBundles
           .map((attachment) => renderPreparedAttachmentPromptSection(attachment))
           .filter((section): section is string => section !== null),
@@ -536,7 +538,9 @@ function renderAssistantAutoReplyInputSection(input: {
   if (input.correctionContext) {
     sections.push(input.correctionContext)
   }
-  const projectionNote = input.hasAttachmentContext && input.attachmentSections.length === 0
+  const projectionNote = input.hasAttachmentContext && (
+    input.projectionStatus === 'pending' || input.attachmentSections.length === 0
+  )
     ? renderAssistantInputProjectionPromptNote({
         evidenceReasonCode: input.evidenceReasonCode,
         evidenceStatus: input.evidenceStatus,
@@ -584,11 +588,13 @@ function hasAssistantInputAttachmentContext(input: AssistantAutoReplyPromptInput
 
 function buildAssistantAutoReplyAttachmentSections(input: {
   lifecycleSection: string | null
+  projectionStatus: AssistantInputProjectionStatus | null
   renderedAttachmentSections: readonly string[]
 }): string[] {
   if (input.lifecycleSection) {
     const sections = [input.lifecycleSection, ...input.renderedAttachmentSections]
     if (
+      input.projectionStatus !== 'pending' &&
       input.renderedAttachmentSections.length === 0 &&
       input.lifecycleSection.includes('content: unavailable')
     ) {
@@ -1093,7 +1099,7 @@ function renderAssistantInputProjectionPromptNote(input: {
   }
 
   if (input.projectionStatus === 'pending') {
-    return 'attachment evidence is pending; use the staged message text and available metadata only.'
+    return 'attachment evidence is still hydrating. If the request does not depend on attachment contents, continue from available context without claiming inspection. If it does depend and `murph.send_progress_update` is available, call it once with a brief acknowledgment. For that attachment-dependent work, keep this turn active for up to 30 seconds total: use brief local shell waits and recheck `raw/inbox/**` for a newly readable file matching this input\'s descriptor metadata; never select an unrelated or stale file. Stop as soon as exact readable evidence appears, then inspect that path and complete the request. If it does not appear within 30 seconds, say the attachment is not yet available. Do not claim inspection or escalate product feedback solely because hydration is still pending.'
   }
 
   if (input.projectionStatus === 'not_attempted') {
