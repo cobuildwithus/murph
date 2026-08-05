@@ -181,5 +181,12 @@ Updated: 2026-08-04
   more than 22 minutes with the requested `ModelGPT-5.6 Sol` selected in the UI,
   matching `gpt-5-6-pro` response metadata, the required completion marker, and
   substantive correction coverage, so it satisfies the repository's review
-  evidence rule. The updated prerequisite was composed at `172cbd3926`;
-  focused checks pass and exact-head CI is pending.
+  evidence rule.
+- Composition round 3 at `aad1e3c9b4` returned `PASS` with no qualifying
+  finding. It confirmed the prompt/Web ownership split, canonical replay,
+  failure-before-provider ordering, daily cap, runner-first deployment, and
+  Web-first rollback. Its three PR-body discrepancies were corrected: linkage
+  is conditional, alert delivery is email-eligibility-bound, and the unmerged
+  prerequisite is composed only in the stacked review snapshot. The final
+  prerequisite merge is composed at `db9c98baad`; focused checks pass and
+  exact-head CI is pending.
