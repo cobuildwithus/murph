@@ -890,6 +890,10 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
       'utf8',
     )
+    const reviewGptContextPolicy = readFileSync(
+      path.join(repoRoot, 'scripts', 'review-gpt-context-policy.sh'),
+      'utf8',
+    )
     const reviewGptDriver = readFileSync(
       path.join(
         repoRoot,
@@ -1253,7 +1257,15 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('REVIEW_GPT_FULL_REVIEW_REASON')
+    expect(reviewGptConfig).toContain('review_gpt_default_full_review_reason')
     expect(reviewGptConfig).toContain('pr-correction-review.md')
+    expect(reviewGptContextPolicy).toContain(
+      'REVIEW_GPT_LARGE_PR_CHANGED_LINES_THRESHOLD=500',
+    )
+    expect(reviewGptContextPolicy).toContain(
+      'REVIEW_GPT_LARGE_PR_CHANGED_FILES_THRESHOLD=10',
+    )
+    expect(reviewGptContextPolicy).toContain('review_gpt_load_pr_shape')
     expect(reviewGptConfig).toContain(
       'managed_browser_background_mode="${managed_browser_background_mode:-balanced}"',
     )
@@ -1311,8 +1323,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
     expect(prDeepReviewPrompt).toContain('Our utmost priority is clean, simple, long-term maintainable')
     expect(prDeepReviewPrompt).toContain('Default to deletion and radical')
-    expect(prDeepReviewPrompt).toContain('Round 1 is the only full-patch audit')
-    expect(prDeepReviewPrompt).toContain('correction-verification rounds, not fresh full-PR audits')
+    expect(prDeepReviewPrompt).toContain('`full` is a fresh full-patch audit')
+    expect(prDeepReviewPrompt).toContain(
+      '`correction` is a same-thread correction-verification round',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'another independent pass',
+    )
     expect(prDeepReviewPrompt).toContain('`ORIGINAL_PR`')
     expect(prDeepReviewPrompt).toContain('`REVIEW_INDUCED`')
     expect(prDeepReviewPrompt).toContain('`PRE_EXISTING_OR_ADJACENT`')
@@ -1466,7 +1483,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('REVIEW_GPT_ROUND_NUMBER')
     expect(prReviewGptLoop).toContain('REVIEW_GPT_FIRST_REVIEWED_HEAD')
     expect(prReviewGptLoop).toContain('REVIEW_GPT_PREVIOUS_REVIEWED_HEAD')
-    expect(prReviewGptLoop).toContain('Round 1 is the only full-patch')
+    expect(prReviewGptLoop).toContain('Round 1 is always a full-patch')
+    expect(prReviewGptLoop).toContain('at least 500 changed lines or 10 changed files')
     expect(prReviewGptLoop).toMatch(/Keep that line and baseline\s+immutable/u)
     expect(prReviewGptLoop).toContain('ReviewGPT first-reviewed head: <full-sha>')
     expect(prReviewGptLoop).toContain('`ROUND_OUTCOME: INVALID`')
@@ -1505,7 +1523,9 @@ describe('monorepo release flow coverage audit', () => {
       'For prompt-primary changes, apply the prompt lens inside the preliminary specialist ReviewGPT pass',
     )
     expect(agentsGuide).toContain('isolated regression test or explanatory doc')
-    expect(agentsGuide).toContain('later rounds verify remediation deltas')
+    expect(agentsGuide).toContain(
+      'at least 500 changed lines or 10 changed files gets a fresh full-patch audit',
+    )
     expect(agentWorkflowRouting).toContain('final-ReviewGPT-eligible PR-lane work')
     expect(agentWorkflowRouting).toContain('scope-anomaly signal')
     expect(prReviewGptLoop).toContain('final cross-cutting gate for eligible work')
@@ -1636,6 +1656,7 @@ describe('monorepo release flow coverage audit', () => {
   it('keeps ReviewGPT browser preferences local and reuses correction threads', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-browser-'))
     const localConfigRoot = path.join(harnessRoot, 'config')
+    const fakeBin = path.join(harnessRoot, 'bin')
     const configHarness = `
 set -euo pipefail
 review_gpt_register_dir_preset() { :; }
@@ -1645,6 +1666,16 @@ printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_c
 `
 
     try {
+      writeHarnessFile(
+        fakeBin,
+        'gh',
+        `#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == *"--json additions,deletions,changedFiles"* ]]
+printf '%s\\t%s\\t%s\\n' "$TEST_PR_ADDITIONS" "$TEST_PR_DELETIONS" "$TEST_PR_CHANGED_FILES"
+`,
+        true,
+      )
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
@@ -1737,6 +1768,31 @@ printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_c
       expect(correctionPresetResult.stdout.trim().split('\n').at(-1)).toBe(
         'pr-correction-review.md',
       )
+
+      const largePrHarness = `${configHarness}\nprintf '%s\\n' "$review_gpt_pr_review_prompt_file"\nprintf '%s\\n' "$REVIEW_GPT_FULL_REVIEW_REASON"\nprintf '%s\\n' "\${chatgpt_url:-new-conversation}"`
+      const largePrResult = spawnSync('bash', ['-c', largePrHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...withoutNodeV8Coverage(),
+          HOME: harnessRoot,
+          PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ''}`,
+          REPO_ROOT: repoRoot,
+          REVIEW_GPT_PR_URL: '123',
+          REVIEW_GPT_REVIEW_PHASE: 'final',
+          REVIEW_GPT_ROUND_NUMBER: '2',
+          TEST_PR_ADDITIONS: '499',
+          TEST_PR_CHANGED_FILES: '1',
+          TEST_PR_DELETIONS: '1',
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(largePrResult.status, largePrResult.stderr).toBe(0)
+      expect(largePrResult.stdout.trim().split('\n').slice(-3)).toEqual([
+        'pr-deep-review.md',
+        'Automatic full audit: current PR has 500 changed lines across 1 files; the cutoff is 500 lines or 10 files.',
+        'new-conversation',
+      ])
 
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true })
@@ -2947,6 +3003,15 @@ Updated: 2026-04-24
       )
       writeHarnessFile(
         harnessRoot,
+        'scripts/review-gpt-context-policy.sh',
+        readFileSync(
+          path.join(repoRoot, 'scripts', 'review-gpt-context-policy.sh'),
+          'utf8',
+        ),
+        true,
+      )
+      writeHarnessFile(
+        harnessRoot,
         'scripts/repo-tools.config.sh',
         `#!/usr/bin/env bash
 export COBUILD_REPO_ROOT="$(pwd)"
@@ -2973,6 +3038,12 @@ set -euo pipefail
         `#!/usr/bin/env bash
 set -euo pipefail
 case "$*" in
+  *"additions,deletions,changedFiles"*)
+    printf '%s\\t%s\\t%s\\n' \
+      "\${TEST_PR_ADDITIONS:-1}" \
+      "\${TEST_PR_DELETIONS:-1}" \
+      "\${TEST_PR_CHANGED_FILES:-1}"
+    ;;
   *".baseRefName"*) printf 'main\\n' ;;
   *".baseRefOid"*) printf '%s\\n' "$TEST_BASE_SHA" ;;
   *".headRefOid"*) printf '%s\\n' "$TEST_HEAD_SHA" ;;
@@ -3253,6 +3324,8 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         roundNumber: 1,
         reviewScope: 'full',
         contextMode: 'full_snapshot',
+        prChangedLines: 2,
+        prChangedFiles: 1,
         contextAnchorHead: firstHead,
         currentBaseHead: baseHead,
         firstReviewedHead: firstHead,
@@ -3314,6 +3387,8 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         roundNumber: 2,
         reviewScope: 'correction',
         contextMode: 'same_thread_delta',
+        prChangedLines: 2,
+        prChangedFiles: 1,
         contextAnchorHead: firstHead,
         currentBaseHead: baseHead,
         firstReviewedHead: firstHead,
@@ -3377,6 +3452,89 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       ])
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
+      const roundTwoLargeByLines = invokePackager('round-two-large-lines', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+        TEST_PR_ADDITIONS: '499',
+        TEST_PR_CHANGED_FILES: '1',
+        TEST_PR_DELETIONS: '1',
+      })
+      expect(
+        roundTwoLargeByLines.result.status,
+        roundTwoLargeByLines.result.stderr,
+      ).toBe(0)
+      const roundTwoLargeByLinesMetadata = JSON.parse(
+        execFileSync(
+          'unzip',
+          [
+            '-p',
+            roundTwoLargeByLines.zipPath,
+            'review-gpt-pr-context/review-round.json',
+          ],
+          { encoding: 'utf8' },
+        ),
+      ) as Record<string, unknown>
+      expect(roundTwoLargeByLinesMetadata).toMatchObject({
+        contextAnchorHead: currentHead,
+        contextMode: 'full_snapshot',
+        prChangedFiles: 1,
+        prChangedLines: 500,
+        reviewScope: 'full',
+        roundNumber: 2,
+      })
+      expect(
+        execFileSync(
+          'unzip',
+          [
+            '-p',
+            roundTwoLargeByLines.zipPath,
+            'review-gpt-pr-context/full-review-reason.txt',
+          ],
+          { encoding: 'utf8' },
+        ),
+      ).toBe(
+        'Automatic full audit: current PR has 500 changed lines across 1 files; the cutoff is 500 lines or 10 files.\n',
+      )
+      expect(listZipEntries(roundTwoLargeByLines.zipPath)).toEqual(
+        expect.arrayContaining([
+          '.crabbox.yaml',
+          'review-gpt-pr-context/pr.diff',
+          'review-gpt-pr-context/since-first-reviewed-head.diff',
+        ]),
+      )
+
+      const roundTwoLargeByFiles = invokePackager('round-two-large-files', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+        TEST_PR_ADDITIONS: '1',
+        TEST_PR_CHANGED_FILES: '10',
+        TEST_PR_DELETIONS: '1',
+      })
+      expect(
+        roundTwoLargeByFiles.result.status,
+        roundTwoLargeByFiles.result.stderr,
+      ).toBe(0)
+      expect(
+        JSON.parse(
+          execFileSync(
+            'unzip',
+            [
+              '-p',
+              roundTwoLargeByFiles.zipPath,
+              'review-gpt-pr-context/review-round.json',
+            ],
+            { encoding: 'utf8' },
+          ),
+        ),
+      ).toMatchObject({
+        contextMode: 'full_snapshot',
+        prChangedFiles: 10,
+        prChangedLines: 2,
+        reviewScope: 'full',
+      })
+
       const roundTwoFull = invokePackager('round-two-full', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
         REVIEW_GPT_FULL_REVIEW_REASON: 'The prior ChatGPT conversation is unavailable.',
@@ -3395,7 +3553,9 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         contextMode: 'full_snapshot',
         contextAnchorHead: currentHead,
         contextAnchorHeadIsAncestorOfPrevious: null,
-        reviewScope: 'correction',
+        prChangedFiles: 1,
+        prChangedLines: 2,
+        reviewScope: 'full',
         roundNumber: 2,
       })
       expect(listZipEntries(roundTwoFull.zipPath)).toEqual(

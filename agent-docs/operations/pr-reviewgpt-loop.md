@@ -33,9 +33,12 @@ a later `PASS` on the resulting patch.
 ## Outcome and Completion Bar
 
 Certify the exact pushed PR patch against its stated user outcome and repository
-invariants using the guarded repository snapshot. Round 1 is the only full-patch
-audit. Later substantive rounds verify the remediation delta and its directly
-affected paths; they do not reopen unchanged code for novelty. The gate
+invariants using the guarded repository snapshot. Round 1 is always a full-patch
+audit. On round 2 or later, the packager measures the complete current PR against
+its base: at least 500 changed lines or 10 changed files starts a new conversation
+with a fresh full snapshot and full-patch audit; a smaller PR reuses the current
+conversation with the remediation delta and its directly affected paths. An
+explicit `REVIEW_GPT_FULL_REVIEW_REASON` also selects the full audit. The gate
 completes when the exact patch receives `ROUND_OUTCOME: PASS`, local triage has
 zero accepted findings, and CI is green on the final head. Missing or stale
 evidence, an invalid model/response, unresolved accepted findings, a required
@@ -166,7 +169,7 @@ directly into `git apply`, and never treat the attachment as landed code.
 Resolve accepted product-experience, prompt, and frontend findings in the
 parent, rerun focused proof, and push the resulting candidate. If final round 1
 ran concurrently, preserve its first-reviewed-head baseline and verify the
-combined behavior-bearing remediation in a final correction-delta round. If accepted
+combined behavior-bearing remediation in the next substantive round. If accepted
 product-experience remediation materially changed a product-owned dimension,
 the parent must reapply `agent-docs/prompts/product-experience-review.md` to that
 corrected pushed head and updated direct journey evidence, then record a
@@ -250,8 +253,9 @@ requires it or the current user explicitly asks for it.
    - `review-gpt-pr-context/since-first-reviewed-head.diff`
    - `review-gpt-pr-context/since-previous-reviewed-head.diff`
 
-   Later rounds replace this with a small correction packet in the same
-   conversation, as described below.
+   Later rounds either resend the full guarded snapshot in a new conversation
+   or use a small correction packet in the same conversation, as described
+   below.
 
    Round 1 defaults `REVIEW_GPT_FIRST_REVIEWED_HEAD` to the current PR head and
    leaves the remediation delta empty. For round 2 or later, preserve the
@@ -283,7 +287,7 @@ requires it or the current user explicitly asks for it.
        --wait-timeout 120m \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
-       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Correction-verification round <k>. Prior findings, dispositions, landed fixes, and mechanisms: <compact-summary>. Retrospective status: <not-required-or-current-decision>."
+       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Substantive round <k>; follow review-round.json for full-audit versus correction scope. Prior findings, dispositions, landed fixes, and mechanisms: <compact-summary>. Retrospective status: <not-required-or-current-decision>."
    ```
 
    The later-round summary is required process metadata. Include each prior
@@ -292,16 +296,20 @@ requires it or the current user explicitly asks for it.
    repository contents. If a completed retrospective permits continuation, name
    its decision and why the current delta stays inside it.
 
-   Round 1 opens a new conversation and attaches the full guarded snapshot.
-   Later rounds reuse that conversation. They send a short follow-up prompt and
-   attach only the immediate patch, its changed-file list, round metadata, and
-   current versions of files touched by the patch. If that context is
-   insufficient, omit `REVIEW_GPT_THREAD_URL` and set
-   `REVIEW_GPT_FULL_REVIEW_REASON` to a concrete reason. This starts a new
-   conversation with the full prompt and snapshot. It does not reset the round
-   number or immutable first-reviewed head. Save the new conversation URL and
-   reviewed head. Later delta rounds reuse that conversation and pass its full
-   snapshot head as `REVIEW_GPT_CONTEXT_ANCHOR_HEAD`.
+   Round 1 opens a new conversation and attaches the full guarded snapshot. On
+   later rounds, the wrapper measures the full current PR shape reported by
+   GitHub. At 500 changed lines or 10 changed files, it starts another new
+   conversation, attaches a fresh full snapshot, and requests a full audit of
+   the current PR. Below both cutoffs, it reuses the current conversation with a
+   short follow-up prompt containing only the immediate patch, its changed-file
+   list, round metadata, and current versions of files touched by the patch.
+   The size decision uses the current base-to-head PR, not only the immediate
+   remediation delta. If a smaller PR still needs full context, omit
+   `REVIEW_GPT_THREAD_URL` and set `REVIEW_GPT_FULL_REVIEW_REASON` to a concrete
+   reason; this also starts a new full audit. Neither path resets the round
+   number or immutable first-reviewed head. Save each new full-audit conversation
+   URL and reviewed head. Later delta rounds reuse the most recent conversation
+   and pass its full snapshot head as `REVIEW_GPT_CONTEXT_ANCHOR_HEAD`.
 
    The repo wrapper chooses one usable ReviewGPT browser lane per run:
    `Eragon.app` on CDP port `9448`, `Phlebas.app` on `9442`,
@@ -351,16 +359,18 @@ requires it or the current user explicitly asks for it.
    failure before considering another run against the same pushed head.
 
    Verify `review-round.json` names the intended round, context anchor,
-   first-reviewed head, previous reviewed head, and current pushed head. Round 1
-   must have `full` scope, `full_snapshot` context, and empty cumulative and
-   immediate remediation deltas. Later rounds must have `correction` scope,
-   `same_thread_delta` context unless a packaged reason justifies
-   `full_snapshot`, a previous head different from the current head, and `true`
-   first/previous ancestry. A delta also requires the context anchor to be an
-   ancestor of the previous reviewed head. The packaged first head must match
-   the immutable PR-body line and the invocation. Missing, mismatched,
-   unavailable, or non-ancestral baseline evidence invalidates the run; restore
-   or reconstruct the lineage before retrying the same substantive round.
+   first-reviewed head, previous reviewed head, current PR changed-line/file
+   counts, and current pushed head. Round 1 must have `full` scope,
+   `full_snapshot` context, and empty cumulative and immediate remediation
+   deltas. A later large or explicitly justified round must have `full` scope
+   and `full_snapshot` context. A later small round must have `correction` scope
+   and `same_thread_delta` context. Every later round requires a previous head
+   different from the current head and `true` first/previous ancestry. A delta
+   also requires the context anchor to be an ancestor of the previous reviewed
+   head. The packaged first head must match the immutable PR-body line and the
+   invocation. Missing, mismatched, unavailable, or non-ancestral baseline
+   evidence invalidates the run; restore or reconstruct the lineage before
+   retrying the same substantive round.
 
    A response with `ROUND_OUTCOME: INVALID` does not count as a substantive
    round. Correct its evidence or invocation gap and retry the same round number
@@ -406,12 +416,15 @@ requires it or the current user explicitly asks for it.
    - **Rejected**: wrong, already handled, speculative, not worth the added
      complexity, or missing the required reproduction/proof. Note the reason.
 
-   In round 2 or later, accept a reported bug only when the remediation delta
-   introduced it or made it materially worse. A serious issue in unchanged
-   original PR work triggers the retrospective path; a pre-existing or adjacent
-   issue belongs outside this PR unless the stated outcome cannot ship without
-   resolving it. A claimed correction that fails to resolve its prior accepted
-   finding counts as review-induced and must be corrected before `PASS`.
+   In a `same_thread_delta` round, accept a reported bug only when the remediation
+   delta introduced it or made it materially worse. A serious issue in unchanged
+   original PR work triggers the retrospective path. In a later `full_snapshot`
+   round, the reviewer audits the complete current PR again, so either an
+   original-PR or review-induced issue may be accepted and fixed normally. A
+   pre-existing or adjacent issue belongs outside this PR unless the stated
+   outcome cannot ship without resolving it. A claimed correction that fails to
+   resolve its prior accepted finding counts as review-induced and must be
+   corrected before `PASS`.
 
    ReviewGPT findings are adversarial signals, not implementation instructions.
    Before accepting a finding, identify the invariant it protects and any
@@ -473,10 +486,11 @@ requires it or the current user explicitly asks for it.
    `agent-docs/operations/verification-and-runtime.md` for the touched owners,
    update the current change-shape table, and push to the PR branch.
 
-7. Fire a correction-verification round immediately after a pushed accepted fix
+7. Fire the next substantive round immediately after a pushed accepted fix
    changes production source, runtime config, schema, behavior, or manual
-   conflict resolution. Run it in parallel with the new CI run. If CI later
-   fails on a reviewed head, the round's findings still count.
+   conflict resolution. The packager selects a fresh full audit or same-thread
+   correction from the full current PR shape. Run it in parallel with the new CI
+   run. If CI later fails on a reviewed head, the round's findings still count.
 
    Isolated regression-test additions, PR-body updates, finding-disposition
    comments, and explanatory durable-doc edits do not create a new substantive
@@ -543,7 +557,7 @@ the touched surface, push it, and use the ordinary review-loop rules.
 - When both stages run concurrently, package the same exact pushed head, use
   separate managed browser lanes, keep their response files and markers
   distinct, and preserve the final round-one baseline if specialist remediation
-  creates a later correction round.
+  creates a later substantive round.
 - Do not run local Codex `deep-review` for a completed change that uses this PR
   gate. An explicit request for deep review or a final bug hunt is fulfilled by
   this cross-cutting ReviewGPT review and does not create a second pass.

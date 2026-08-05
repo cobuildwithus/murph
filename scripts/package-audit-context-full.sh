@@ -5,6 +5,8 @@ cd "$ROOT_DIR"
 review_gpt_repo_root_absolute="$(realpath -q "$ROOT_DIR")"
 pnpm no-js
 source scripts/repo-tools.config.sh
+# shellcheck source=review-gpt-context-policy.sh
+source scripts/review-gpt-context-policy.sh
 
 review_gpt_pr_ref="${REVIEW_GPT_PR_URL:-${REVIEW_GPT_PR_REF:-}}"
 review_gpt_pr_context_dir="review-gpt-pr-context"
@@ -183,6 +185,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       echo "Error: REVIEW_GPT_ROUND_NUMBER must be a positive integer." >&2
       exit 1
     fi
+    review_gpt_load_pr_shape "$review_gpt_pr_ref" || exit 1
     review_gpt_recorded_first_head="$(
       printf '%s\n' "$review_gpt_pr_body" \
         | sed -nE 's/^ReviewGPT first-reviewed head: ([0-9a-f]{40})$/\1/p'
@@ -234,6 +237,12 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       if [[ "$review_gpt_previous_reviewed_head" == "$review_gpt_head_oid" ]]; then
         echo "Error: later ReviewGPT rounds require a new PR head; tooling retries reuse the same round." >&2
         exit 1
+      fi
+      if [[ -z "$review_gpt_full_review_reason" ]]; then
+        review_gpt_full_review_reason="$(review_gpt_default_full_review_reason)"
+        if [[ -n "$review_gpt_full_review_reason" ]]; then
+          export REVIEW_GPT_FULL_REVIEW_REASON="$review_gpt_full_review_reason"
+        fi
       fi
       if [[ -z "$review_gpt_full_review_reason" ]]; then
         review_gpt_context_mode="same_thread_delta"
@@ -309,7 +318,11 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
         printf '%s\n' "$review_gpt_full_review_reason" \
           > "$review_gpt_pr_context_dir/full-review-reason.txt"
       fi
-      review_gpt_review_scope="correction"
+      if [[ "$review_gpt_context_mode" == "full_snapshot" ]]; then
+        review_gpt_review_scope="full"
+      else
+        review_gpt_review_scope="correction"
+      fi
       review_gpt_previous_head_json="\"$review_gpt_previous_reviewed_head\""
       review_gpt_previous_head_is_ancestor_json="$(
         review_gpt_is_ancestor "$review_gpt_previous_reviewed_head" "$review_gpt_head_oid"
@@ -331,6 +344,8 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       printf '  "roundNumber": %s,\n' "$review_gpt_round_number"
       printf '  "reviewScope": "%s",\n' "$review_gpt_review_scope"
       printf '  "contextMode": "%s",\n' "$review_gpt_context_mode"
+      printf '  "prChangedLines": %s,\n' "$review_gpt_pr_changed_lines"
+      printf '  "prChangedFiles": %s,\n' "$review_gpt_pr_changed_files"
       printf '  "contextAnchorHead": "%s",\n' "$review_gpt_context_anchor_head"
       printf '  "currentBaseHead": "%s",\n' "$review_gpt_base_oid"
       printf '  "firstReviewedHead": "%s",\n' "$review_gpt_first_reviewed_head"

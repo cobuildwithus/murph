@@ -3,6 +3,8 @@
 review_gpt_config_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 review_gpt_repo_root="$(CDPATH= cd -- "$review_gpt_config_dir/.." && pwd -P)"
 review_gpt_local_config="${XDG_CONFIG_HOME:-$HOME/.config}/murph/review-gpt.conf"
+# shellcheck source=review-gpt-context-policy.sh
+source "$review_gpt_config_dir/review-gpt-context-policy.sh"
 
 if [[ -r "$review_gpt_local_config" ]]; then
   # This optional user-owned file contains local workflow preferences only.
@@ -172,8 +174,19 @@ if [[ -n "$review_gpt_full_review_reason" ]] \
 fi
 if [[ "$review_gpt_review_phase" == "final" ]] \
   && [[ "$review_gpt_round_number" =~ ^([2-9]|[1-9][0-9]+)$ ]]; then
+  review_gpt_pr_ref="${REVIEW_GPT_PR_URL:-${REVIEW_GPT_PR_REF:-}}"
+  if [[ -z "$review_gpt_full_review_reason" ]] \
+    && [[ -n "$review_gpt_pr_ref" ]]; then
+    review_gpt_load_pr_shape "$review_gpt_pr_ref" || {
+      return 1 2>/dev/null || exit 1
+    }
+    review_gpt_full_review_reason="$(review_gpt_default_full_review_reason)"
+    if [[ -n "$review_gpt_full_review_reason" ]]; then
+      export REVIEW_GPT_FULL_REVIEW_REASON="$review_gpt_full_review_reason"
+    fi
+  fi
   if [[ -n "$review_gpt_full_review_reason" ]]; then
-    : # A justified full-context correction starts a new ChatGPT conversation.
+    : # A full-patch audit starts a new ChatGPT conversation.
   else
     review_gpt_thread_url="${REVIEW_GPT_THREAD_URL:-}"
     case "$review_gpt_thread_url" in

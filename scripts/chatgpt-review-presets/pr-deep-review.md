@@ -58,9 +58,10 @@ For round 2 or later, read `contextMode` from `review-round.json`:
   conversation for unchanged repository context. Its reviewed head must match
   `contextAnchorHead` in the current `review-round.json`.
 - `full_snapshot` means the current ZIP contains the full guarded snapshot. A
-  later round may use this only when `full-review-reason.txt` gives a concrete
-  reason why the prior conversation or small correction packet is insufficient.
-  This ZIP becomes the context anchor for later delta rounds in this conversation.
+  later round uses this when the current PR meets the repository's large-change
+  cutoff or `full-review-reason.txt` gives another concrete reason for a full
+  audit. Review the complete current PR from this ZIP. It becomes the context
+  anchor for later delta rounds in this conversation.
 
 Stop as `INVALID` only when the code evidence itself will not support a review:
 the files required by the declared `contextMode` are missing, unreadable, or do
@@ -87,25 +88,33 @@ When it is absent or thin, reconstruct what you can from the current correction
 packet and earlier packets after the matching full-snapshot anchor. Note the gap
 and continue.
 
-Round 1 is the only full-patch audit. In round 1, review `pr.diff` in repository
-context and classify a qualifying finding as `ORIGINAL_PR`.
+Read `reviewScope` from `review-round.json` and follow it exactly:
 
-Round 2 and later are correction-verification rounds, not fresh full-PR audits.
-Review `since-previous-reviewed-head.diff` and only its directly affected
-callers, owners, invariants, tests, and production paths. Classify every issue
-considered as:
+- `full` is a fresh full-patch audit. Review `pr.diff` in the current guarded
+  repository snapshot, including unchanged portions of the PR that another
+  full pass may examine differently. Round 1 is always `full`; a later large or
+  explicitly justified round may also be `full`.
+- `correction` is a same-thread correction-verification round. Review
+  `since-previous-reviewed-head.diff` and only its directly affected callers,
+  owners, invariants, tests, and production paths.
+
+Classify every issue considered as:
 
 - `REVIEW_INDUCED`: caused by the remediation delta;
 - `ORIGINAL_PR`: present in the PR before the remediation delta; or
 - `PRE_EXISTING_OR_ADJACENT`: equivalent on the base branch or outside the PR's
   stated outcome.
 
-Report a later-round finding only when it is `REVIEW_INDUCED`. Do not
-novelty-mine unchanged portions of a previously reviewed patch. If a later
-round exposes a serious `ORIGINAL_PR` issue that an earlier full audit missed,
-return `RETROSPECTIVE_REQUIRED` and name the issue as retrospective evidence
-instead of prescribing another tactical correction. Do not report
-`PRE_EXISTING_OR_ADJACENT` issues as PR findings.
+In a `full` audit, report either `ORIGINAL_PR` or `REVIEW_INDUCED` findings that
+meet the finding bar. A later full audit exists specifically to give a large PR
+another independent pass, so a newly found `ORIGINAL_PR` issue is an ordinary
+finding rather than a retrospective trigger. In a `correction` round, report a
+finding only when it is `REVIEW_INDUCED`; do not novelty-mine unchanged portions
+of the previously reviewed patch. If a correction round exposes a serious
+`ORIGINAL_PR` issue that the earlier full audit missed, return
+`RETROSPECTIVE_REQUIRED` and name it as retrospective evidence instead of
+prescribing another tactical correction. Never report `PRE_EXISTING_OR_ADJACENT`
+issues as PR findings.
 
 When the invocation explicitly identifies a disclosure-only verification retry
 for the same pushed head and substantive round, review only the corrected
