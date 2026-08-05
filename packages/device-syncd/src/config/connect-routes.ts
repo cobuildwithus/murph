@@ -212,6 +212,15 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
     routes: [junctionSdkRoute("apple_health_kit", { aliases: ["apple_health", "apple_healthkit"] })],
   },
   {
+    connectSourceId: "zepp",
+    label: "Zepp / Amazfit",
+    routes: [
+      unavailableRoute(
+        "Zepp and Amazfit sync through Apple Health in the Murph iOS app.",
+      ),
+    ],
+  },
+  {
     connectSourceId: "health-connect",
     label: "Health Connect",
     routes: [unavailableRoute("Health Connect is a mobile/local device flow, not hosted Junction Link.")],

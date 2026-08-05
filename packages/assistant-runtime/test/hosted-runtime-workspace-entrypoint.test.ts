@@ -10,14 +10,19 @@ import { promisify } from "node:util";
 import { gzipSync } from "node:zlib";
 
 import {
+  addCaptureWithLookup,
   CURRENT_VAULT_FORMAT_VERSION,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   buildIntegrationEvidencePart,
   buildIntegrationIngestRecord,
+  findCaptureByLookup,
   initializeVault,
+  readJsonlRecords,
+  repairVault,
   runCanonicalWrite,
   showAutomation,
   upsertAutomation,
+  validateVault,
 } from "@murphai/core";
 import {
   openInboxRuntime,
@@ -354,6 +359,7 @@ import {
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
   recordHostedMaterializedArtifactPaths,
+  resolveHostedMaterializedArtifactStateRelativePath,
 } from "../src/hosted-runtime/materialized-artifact-state.ts";
 import {
   createHostedAssistantTurnEnvironment,
@@ -5063,6 +5069,295 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, null);
     } finally {
       await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("a rearmed dormant snapshot retires generated image bytes and restores the tombstone", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-15T00:00:00.000Z"));
+    const workspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-generated-image-retention-proof-"),
+    );
+    const sourceVaultRoot = path.join(workspaceRoot, "source-vault");
+    const liveVaultRoot = path.join(workspaceRoot, "live-vault");
+    const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+    const finalVaultRoot = path.join(workspaceRoot, "final-vault");
+    const sourceImagePath = path.join(workspaceRoot, "generated-image.webp");
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const crashCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const recoveredCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const checkpointedWorkspaces: HostedWorkspaceState[] = [];
+    const abortController = new AbortController();
+    const abortReason = new Error(
+      "Synthetic stop after generated-image retirement receipt checkpoint.",
+    );
+    const lookupKey = "generated:workspace-retention-proof";
+    const recordedAt = "2026-04-01T00:00:00.000Z";
+
+    try {
+      await initializeVault({ createdAt: recordedAt, vaultRoot: sourceVaultRoot });
+      await writeFile(sourceImagePath, "private-generated-image-bytes");
+      const capture = await addCaptureWithLookup({
+        attachments: [{ role: "media_1", sourcePath: sourceImagePath }],
+        draft: {
+          note: "Assistant-generated image saved for later visual reuse.",
+          occurredAt: recordedAt,
+          recordedAt,
+          source: "derived",
+          tags: ["assistant-generated-image", "generated-image"],
+          title: "Generated image",
+        },
+        lookupAttachmentRole: "media_1",
+        lookupKey,
+        rawImport: {
+          importKind: "capture",
+          importedAt: recordedAt,
+          provenance: {
+            family: "capture",
+            generatedImage: { schema: "murph.generated-image.v1" },
+            mediaCount: 1,
+          },
+          source: "murph.generate_image",
+        },
+        vaultRoot: sourceVaultRoot,
+      });
+      const imageRef = capture.event.attachments?.[0]?.relativePath ?? null;
+      assert.ok(imageRef);
+
+      const baseBundle = await snapshotHostedBundleRoots({
+        externalizeFile: async (file) => {
+          if (!file.path.startsWith("raw/")) {
+            return null;
+          }
+          const sha256 = sha256HostedBundleHex(file.bytes);
+          artifactBytesByHash.set(sha256, file.bytes);
+          return { byteSize: file.bytes.byteLength, sha256 };
+        },
+        kind: "vault",
+        roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      artifactBytesByHash.set(baseHash, baseBundle);
+      const baseSnapshotRef = createBundleRef({
+        hash: baseHash,
+        key: `synthetic/generated-image-retention/${baseHash}.bundle`,
+        size: baseBundle.byteLength,
+      });
+
+      await expect(runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_generated_image_retention",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            processingMode: "inbox_media_retention",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error(
+              "Interrupted generated-image retirement must not publish a snapshot.",
+            );
+          },
+          async importItem() {
+            throw new Error(
+              "Generated-image retention-only processing must not import mailbox items.",
+            );
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: crashCheckpointRequests,
+              events: [],
+              checkpointWorkspace(request) {
+                const workspace = createWorkspaceState({
+                  inboxMediaRetentionWakeAt:
+                    request.inboxMediaRetentionWakeAt ?? null,
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+                checkpointedWorkspaces.push(workspace);
+                if (
+                  request.reason === "canonical_runtime_commit"
+                  && !abortController.signal.aborted
+                ) {
+                  abortController.abort(abortReason);
+                }
+                return workspace;
+              },
+              workspace: createWorkspaceState({
+                inboxMediaRetentionWakeAt: "2026-04-15T00:00:00.000Z",
+                snapshotRef: baseSnapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error(
+              "Generated-image retention-only processing must not enter the assistant phase.",
+            );
+          },
+          signal: abortController.signal,
+          vaultRoot: liveVaultRoot,
+        },
+      )).rejects.toBe(abortReason);
+
+      assert.deepEqual(
+        crashCheckpointRequests.map((request) => request.reason),
+        ["canonical_runtime_commit"],
+      );
+      const workspaceAfterCrash = checkpointedWorkspaces[0];
+      assert.ok(workspaceAfterCrash);
+      assert.deepEqual(workspaceAfterCrash.snapshotRef, baseSnapshotRef);
+      assert.equal(
+        workspaceAfterCrash.inboxMediaRetentionWakeAt,
+        "2026-04-15T00:00:00.000Z",
+      );
+      assert.equal(
+        typeof workspaceAfterCrash.redactedStatus
+          ?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_generated_image_retention_recovery",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "8",
+            processingMode: "inbox_media_retention",
+            userId: TEST_USER_ID,
+            workspaceVersion: workspaceAfterCrash.version,
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            await expect(readFile(path.join(restoredVaultRoot, imageRef), "utf8"))
+              .resolves.toContain("generated_image_retention");
+            const bundle = await snapshotHostedBundleRoots({
+              externalizeFile: async (file) => {
+                if (!file.path.startsWith("raw/")) {
+                  return null;
+                }
+                const sha256 = sha256HostedBundleHex(file.bytes);
+                artifactBytesByHash.set(sha256, file.bytes);
+                return { byteSize: file.bytes.byteLength, sha256 };
+              },
+              kind: "vault",
+              roots: [{
+                root: restoredVaultRoot,
+                rootKey: "vault",
+                shouldIncludeRelativePath: (relativePath) =>
+                  relativePath !== resolveHostedMaterializedArtifactStateRelativePath(),
+              }],
+            });
+            assert.ok(bundle);
+            const hash = sha256HostedBundleHex(bundle);
+            artifactBytesByHash.set(hash, bundle);
+            return {
+              snapshotRef: createBundleRef({
+                hash,
+                key: `synthetic/generated-image-retention/${hash}.bundle`,
+                size: bundle.byteLength,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error(
+              "Generated-image retention recovery must not import mailbox items.",
+            );
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: recoveredCheckpointRequests,
+              events: [],
+              workspace: workspaceAfterCrash,
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error(
+              "Generated-image retention recovery must not enter the assistant phase.",
+            );
+          },
+          vaultRoot: restoredVaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "idle");
+      assert.deepEqual(
+        recoveredCheckpointRequests.map((request) => request.reason),
+        ["idle_shutdown"],
+      );
+      const retainedSnapshotRef =
+        recoveredCheckpointRequests.at(-1)?.snapshotRef ?? null;
+      assert.ok(retainedSnapshotRef);
+      const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createPlatform({
+          artifactBytesByHash,
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState({
+              snapshotRef: retainedSnapshotRef,
+              version: "1",
+            }),
+          }),
+        }),
+        vaultRoot: finalVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: retainedSnapshotRef,
+          version: "1",
+        }),
+      });
+      await restored.materializeWorkspaceArtifacts([
+        "derived/captures/generated-image-lookups.json",
+        imageRef,
+        ...(capture.manifestPath ? [capture.manifestPath] : []),
+      ]);
+
+      const tombstone = JSON.parse(
+        await readFile(path.join(finalVaultRoot, imageRef), "utf8"),
+      );
+      expect(tombstone).toMatchObject({
+        purgedAt: "2026-04-15T00:00:00.000Z",
+        reason: "generated_image_retention",
+      });
+      await expect(findCaptureByLookup({
+        lookupKey,
+        vaultRoot: finalVaultRoot,
+      })).resolves.toMatchObject({
+        eventId: capture.eventId,
+        status: "deleted",
+      });
+      const ledger = await readJsonlRecords({
+        relativePath: capture.ledgerFile,
+        vaultRoot: finalVaultRoot,
+      });
+      expect(ledger).toHaveLength(2);
+      expect(ledger[1]).toMatchObject({
+        id: capture.eventId,
+        lifecycle: { revision: 2, state: "deleted" },
+      });
+      // Bundles do not encode empty directories; restore the ordinary vault
+      // scaffold before asking the full validator to inspect the checkpoint.
+      await repairVault({ vaultRoot: finalVaultRoot });
+      expect(await validateVault({ vaultRoot: finalVaultRoot })).toMatchObject({
+        issues: [],
+        valid: true,
+      });
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(workspaceRoot);
     }
   });
 
@@ -15739,6 +16034,138 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       ]);
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
+      assert.equal(result.status, "idle");
+    } finally {
+      if (lateWakeTimer) {
+        clearTimeout(lateWakeTimer);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("rearms after a terminally skipped safe system continuation before a later conversation wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_safe_system_rearm_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let lateWakeTimer: ReturnType<typeof setTimeout> | null = null;
+    let snapshotAttempt = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_safe_system_rearm",
+            idleCheckpointDelayMs: 250,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            snapshotAttempt += 1;
+            events.push(`snapshot:${snapshotAttempt}:${snapshotInput.reason}`);
+            if (snapshotAttempt === 1) {
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_safe_system_rearm_system",
+                kind: "runtime.pending-effects-reconcile-requested",
+                lane: "system",
+                laneSeq: "1",
+              }));
+              throw new HostedRuntimeCheckpointInterruptedByWakeError({
+                notification: { notifiedAtEpochMs: Date.now() },
+              });
+            }
+            return {
+              snapshotRef: createBundleRef({
+                hash: `${snapshotAttempt}`.repeat(64).slice(0, 64),
+                key:
+                  "users/bundles/member-synthetic/"
+                  + `runtime-safe-system-rearm-${snapshotAttempt}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane === "system") {
+              lateWakeTimer = setTimeout(() => {
+                mailboxItems.push(createMailboxItem({
+                  id: "mailbox_item_entrypoint_safe_system_rearm_late",
+                  laneSeq: "2",
+                }));
+                runtimeWakeSignal.notify({ notifiedAtEpochMs: Date.now() });
+              }, 100);
+              return {
+                reasonCode: "synthetic_terminal_skip",
+                status: "skipped",
+              };
+            }
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            events,
+            logRequests,
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
+        "snapshot:1:idle_shutdown",
+        "snapshot:2:idle_shutdown",
+      ]);
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_safe_system_rearm_system",
+        ) < requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_safe_system_rearm_late",
+        ),
+        events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_safe_system_rearm_late",
+        ) < requireEventIndex(events, "snapshot:2:idle_shutdown"),
+        events.join(","),
+      );
+      assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), [
+        "4",
+      ]);
+      const systemProbeLog = logRequests
+        .flatMap((request) => request.entries)
+        .find((entry) =>
+          entry.eventCode === "mailbox.imported"
+          && entry.redactedJson?.foregroundProbeOutcome === "no_runnable_work"
+          && entry.redactedJson?.fetchedCount === 1
+        );
+      assert.equal(systemProbeLog?.redactedJson?.checkpointDeferred, true);
+      assert.equal(systemProbeLog?.redactedJson?.idleCheckpointTimerRearmed, true);
+      assert.equal(systemProbeLog?.redactedJson?.importedCount, 0);
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
+      assert.equal(result.redactedStatus?.hostedMailboxSystemImportedSeq, "1");
       assert.equal(result.status, "idle");
     } finally {
       if (lateWakeTimer) {
@@ -28482,6 +28909,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const checkpointSnapshotFrontierSelections: boolean[] = [];
     const connectionId = "device_sync_connection_pending_retry";
     const firstNow = "2026-04-27T00:00:00.000Z";
     const deviceSyncWakeAt = "2026-04-27T00:10:00.000Z";
@@ -28554,6 +28982,9 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
+            checkpointSnapshotFrontierSelections.push(
+              snapshotInput.handledConversationFrontierSelected ?? false,
+            );
             return {
               snapshotRef: createBundleRef({
                 hash: "6".repeat(64),
@@ -28649,6 +29080,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(checkpoint.handledConversationMailboxItemIds, [
         "mailbox_item_entrypoint_device_sync_pending_retry",
       ]);
+      assert.deepEqual(checkpointSnapshotFrontierSelections, [true]);
 
       vi.useRealTimers();
       vi.useFakeTimers({ toFake: ["Date"] });
@@ -30831,6 +31263,253 @@ describe("hosted runtime shutdown signal", () => {
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
+    }
+  }, 30_000);
+
+  test("generated captures preserve the earliest exact retention wake through shutdown", async () => {
+    const workspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-image-retention-wake-"),
+    );
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const sourceImagePath = path.join(workspaceRoot, "generated-source.webp");
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const shutdownController = new AbortController();
+    const capturesQueued = createDeferred<void>();
+    const assistantRelease = createDeferred<void>();
+    let assistantPhaseCalls = 0;
+    let canonicalCheckpointCount = 0;
+    let originInputId: string | null = null;
+    const synchronousRecordedAt = "2026-04-27T02:00:00.000Z";
+    const firstRecordedAt = "2026-04-27T01:00:00.000Z";
+    const secondRecordedAt = TEST_NOW;
+    const synchronousWakeAt = "2026-05-11T02:00:00.000Z";
+    const firstWakeAt = "2026-05-11T01:00:00.000Z";
+    const secondWakeAt = "2026-05-11T00:00:00.000Z";
+    const mailboxItems = [createMailboxItem({
+      id: "mailbox_item_generated_retention_wake_origin",
+      laneSeq: "1",
+    })];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await writeFile(sourceImagePath, "generated image bytes");
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{ root: vaultRoot, rootKey: "vault" }],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      artifactBytesByHash.set(baseHash, baseBundle);
+      const baseSnapshotRef = createBundleRef({
+        hash: baseHash,
+        key: `synthetic/generated-retention-wake/${baseHash}.bundle`,
+        size: baseBundle.byteLength,
+      });
+      const persistCapture = async (input: {
+        lookupKey: string;
+        recordedAt: string;
+        persistCanonicalWrite: <T>(
+          write: () => Promise<T>,
+          metadata: { retentionWakeAt: string },
+        ) => Promise<T>;
+        retentionWakeAt: string;
+      }) => {
+        await input.persistCanonicalWrite(
+          () => addCaptureWithLookup({
+            attachments: [{ role: "media_1", sourcePath: sourceImagePath }],
+            draft: {
+              note: "Assistant-generated image saved for later visual reuse.",
+              occurredAt: input.recordedAt,
+              recordedAt: input.recordedAt,
+              source: "derived",
+              tags: ["assistant-generated-image", "generated-image"],
+              title: "Generated image",
+            },
+            lookupAttachmentRole: "media_1",
+            lookupKey: input.lookupKey,
+            rawImport: {
+              importKind: "capture",
+              importedAt: input.recordedAt,
+              provenance: {
+                family: "capture",
+                generatedImage: { schema: "murph.generated-image.v1" },
+                mediaCount: 1,
+              },
+              source: "murph.generate_image",
+            },
+            vaultRoot,
+          }),
+          { retentionWakeAt: input.retentionWakeAt },
+        );
+        return {
+          media: null,
+          runtimeIssue: null,
+          savedImageRef: null,
+        };
+      };
+
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_generated_retention_wake_shutdown",
+            idleCheckpointDelayMs: 120_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            assert.equal(snapshotInput.idleCheckpointTrigger, "shutdown_signal");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/generated-retention-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            originInputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            mailboxItems.length = 0;
+            return { assistantInputId: originInputId, status: "imported" };
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointWorkspace(request) {
+                if (
+                  request.reason === "canonical_runtime_commit"
+                  && request.inboxMediaRetentionWakeAt !== null
+                ) {
+                  canonicalCheckpointCount += 1;
+                }
+                const workspace = createWorkspaceState({
+                  inboxMediaRetentionWakeAt:
+                    request.inboxMediaRetentionWakeAt ?? null,
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+                return workspace;
+              },
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: baseSnapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls > 1) {
+              return { progressed: false };
+            }
+            assert.ok(originInputId);
+            const releaseProviderInputs =
+              await input.beforeProviderAcceptedInputs?.({
+                acceptedInputs: [{
+                  id: originInputId,
+                  source: "assistant-input",
+                }],
+              });
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId: originInputId,
+              vaultRoot,
+            });
+            assert.ok(input.persistGeneratedImageCapture);
+            await persistCapture({
+              lookupKey: "generated:retention-wake-synchronous-group",
+              persistCanonicalWrite: input.persistGeneratedImageCapture,
+              recordedAt: synchronousRecordedAt,
+              retentionWakeAt: synchronousWakeAt,
+            });
+            assert.equal(input.imageGenerationLauncher?.launch({
+              operationId: "image_operation_retention_wake_later",
+              originAssistantInputId: originInputId,
+              originAssistantInputIdExact: true,
+              run: async (_signal, persistCanonicalWrite) =>
+                await persistCapture({
+                  lookupKey: "generated:retention-wake-later",
+                  persistCanonicalWrite,
+                  recordedAt: firstRecordedAt,
+                  retentionWakeAt: firstWakeAt,
+                }),
+            }), "started");
+            assert.equal(input.imageGenerationLauncher?.launch({
+              operationId: "image_operation_retention_wake_earlier",
+              originAssistantInputId: originInputId,
+              originAssistantInputIdExact: true,
+              run: async (_signal, persistCanonicalWrite) =>
+                await persistCapture({
+                  lookupKey: "generated:retention-wake-earlier",
+                  persistCanonicalWrite,
+                  recordedAt: secondRecordedAt,
+                  retentionWakeAt: secondWakeAt,
+                }),
+            }), "started");
+            await releaseProviderInputs?.();
+            capturesQueued.resolve();
+            await assistantRelease.promise;
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              progressed: true,
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+      await withRealTimeout(capturesQueued.promise, 5_000, () => JSON.stringify({
+        assistantPhaseCalls,
+        events,
+      }, null, 2));
+      shutdownController.abort(
+        new DOMException("Synthetic container SIGTERM.", "AbortError"),
+      );
+      assistantRelease.resolve();
+      await withRealTimeout(resultPromise, 10_000, () => JSON.stringify({
+        canonicalCheckpointCount,
+        checkpointRequests,
+        events,
+      }, null, 2));
+
+      const canonicalWakes = checkpointRequests
+        .filter((request) =>
+          request.reason === "canonical_runtime_commit"
+          && request.inboxMediaRetentionWakeAt !== null
+        )
+        .map((request) => request.inboxMediaRetentionWakeAt);
+      assert.deepEqual(
+        canonicalWakes,
+        [synchronousWakeAt, firstWakeAt, secondWakeAt],
+        JSON.stringify({ checkpointRequests, events }, null, 2),
+      );
+      const idleCheckpoint = checkpointRequests.at(-1);
+      assert.equal(idleCheckpoint?.reason, "idle_shutdown");
+      assert.equal(idleCheckpoint?.idleCheckpointTrigger, "shutdown_signal");
+      assert.equal(idleCheckpoint?.inboxMediaRetentionWakeAt, secondWakeAt);
+    } finally {
+      assistantRelease.resolve();
+      if (!shutdownController.signal.aborted) {
+        shutdownController.abort(
+          new DOMException("Synthetic test cleanup.", "AbortError"),
+        );
+      }
+      await removeTempRoot(workspaceRoot);
     }
   }, 30_000);
 

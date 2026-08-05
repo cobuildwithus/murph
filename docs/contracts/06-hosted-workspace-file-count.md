@@ -216,19 +216,40 @@ landing; record the chosen posture here so the decision is reviewable.
 - `derived/captures/generated-image-lookups.json`
   (`murph.capture-lookup.v1`) is a compact derived index for generated-image
   retry identity. It is included in hosted workspace snapshots because replay
-  after restore must know whether a stable generated-image tool identity already
-  saved a capture or was later deleted. One ordinary generated-image request can
-  add at most one small map entry; retries of the same tool identity update no
-  file count and either reuse the saved capture or return the deleted outcome.
+  after restore must know whether a generated-image write already saved a
+  capture or was later deleted. Every generated-image vault write adds at most
+  one small map entry: an available tool-call identity remains stable for
+  replay, while a write without one receives a unique retention-only identity.
+  The generated-image owner materializes this shared file before every lookup
+  read; hosted private generation requires the workspace runner's existing
+  persistence boundary, so a lazy legacy index cannot be replaced as empty and
+  the capture cannot commit without its deadline checkpoint.
+  Retries of a stable identity update no file count and either reuse the saved
+  capture or return the deleted outcome.
   The index is one file per workspace, not one sidecar per image. Lookup-backed
-  generated-image capture events are immutable after creation except for
-  `deleteEvent`, so each entry can store the original event shard and primary raw
-  media ref without scanning the event ledger. The map grows with user-created
-  generated-image captures, matching the product-owned raw capture history, and
-  deletion intentionally keeps the entry so a retry cannot resurrect deleted
-  media. No rotation is planned while the file stays a single compact owner
-  document; future retention for generated captures must prune the capture event,
-  raw media, and matching lookup entry in one core-owned repair flow.
+  generated-image capture events are immutable after creation except for a
+  standard deleted revision, so each entry can store the original event shard
+  and primary raw media ref without scanning the event ledger. Assistant-generated image bytes
+  are retained for 14 days from the original capture `recordedAt`. Hosted idle
+  maintenance lazily materializes the compact lookup and only due raw artifacts,
+  then runs bounded core-owned per-capture canonical transactions. Each
+  transaction receipt-checks the lookup, event, raw manifest, and image;
+  replaces the image at its existing raw path with a small privacy tombstone;
+  updates the manifest receipt; appends the standard deleted event revision when
+  needed; and marks the lookup entry `retiredAt`. A damaged capture remains
+  unchanged and receives a future retry while valid neighboring captures still
+  retire. Keeping that compact lookup tombstone is intentional: replay of
+  the original stable tool identity returns deleted and cannot regenerate or
+  resurrect expired media. The map therefore remains one accepted-unbounded
+  small owner document while the large generated payloads have bounded lifetime;
+  the cleanup adds no scheduler, queue, sidecar, or persisted cursor. The
+  generated-image rollout re-arms persisted snapshots once through the existing
+  `inbox_media_retention` workspace wake and bounded cron so dormant workspaces
+  do not require unrelated member activity. New generated-image writes merge
+  their exact 14-day cutoff into that wake in the same canonical receipt
+  checkpoint, preserving the earliest cutoff through shutdown. Retirement uses
+  that boundary too: guarded raw text-replacement receipts carry the inspected
+  preimage, and legacy lazy restore materializes receipt targets before replay.
 
 - `assistant-state/hosted-provider-cleanup.json`
   (`murph.hosted-provider-cleanup.v1`) is compact durable operational-continuity

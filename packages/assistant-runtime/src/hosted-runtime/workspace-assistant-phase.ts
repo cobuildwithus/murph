@@ -1784,6 +1784,12 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.imageGenerationLauncher
           ? { imageGenerationLauncher: input.imageGenerationLauncher }
           : {}),
+        ...(input.persistGeneratedImageCapture
+          ? {
+              persistGeneratedImageCapture:
+                input.persistGeneratedImageCapture,
+            }
+          : {}),
         ...(input.runtime.platform.productFeedbackPort
           ? {
               productFeedbackCandidateSink: {

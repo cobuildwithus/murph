@@ -214,6 +214,7 @@ function createHostedToolContext(input: {
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     groupTool: input.groupTool ?? null,
+    persistGeneratedImageCapture: async (write) => await write(),
     sendVaultFile: input.sendVaultFile ?? vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
@@ -1942,6 +1943,9 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         env: { OPENAI_API_KEY: 'openai-test-key' },
         fetchImpl,
+        hostedToolContext: createHostedToolContext({
+          computerToolsAvailable: false,
+        }),
         prompt: 'generate then clear media',
         requireHostedPrivateImageDelivery: true,
         vaultRoot,
@@ -3877,6 +3881,9 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         env: { OPENAI_API_KEY: 'openai-test-key' },
         fetchImpl,
+        hostedToolContext: createHostedToolContext({
+          computerToolsAvailable: false,
+        }),
         progressDelivery,
         prompt: 'generate with progress',
         requireHostedPrivateImageDelivery: true,
@@ -4027,6 +4034,9 @@ describe('assistant codex runtime', () => {
     const result = await executeCodexAppServerTurn({
       env: { OPENAI_API_KEY: 'openai-test-key' },
       fetchImpl,
+      hostedToolContext: createHostedToolContext({
+        computerToolsAvailable: false,
+      }),
       prompt: 'attach media then exceed the limit',
       requireHostedPrivateImageDelivery: true,
       vaultRoot,
@@ -7952,6 +7962,9 @@ describe('assistant codex runtime', () => {
           PATH: '/custom/bin',
         },
         fetchImpl,
+        hostedToolContext: createHostedToolContext({
+          computerToolsAvailable: false,
+        }),
         prompt: 'start the warm process',
         requireHostedPrivateImageDelivery: true,
         sandbox: 'workspace-write',
@@ -7972,6 +7985,9 @@ describe('assistant codex runtime', () => {
           PATH: '/custom/bin',
         },
         fetchImpl,
+        hostedToolContext: createHostedToolContext({
+          computerToolsAvailable: false,
+        }),
         prompt: 'write from the current warm turn',
         requireHostedPrivateImageDelivery: true,
         sandbox: 'workspace-write',
@@ -18478,6 +18494,9 @@ describe('assistant codex event shaping', () => {
           PATH: '/custom/bin',
         },
         fetchImpl,
+        hostedToolContext: createHostedToolContext({
+          computerToolsAvailable: false,
+        }),
         prompt: 'generate an image while a child reports usage',
         requireHostedPrivateImageDelivery: true,
         sandbox: 'workspace-write',
@@ -19976,6 +19995,23 @@ describe('steered final segments', () => {
       response:
         'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals.',
     }])
+  })
+
+  it('keeps a response card when the model finishes without authored text', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        card: DAILY_NUTRITION_RESPONSE_CARD,
+        expectedText: 'response card attached',
+        id: 87,
+        kind: 'attach-response-card',
+      },
+    ], { responseCardsAvailable: true })
+
+    expect(result.responseCard).toEqual(DAILY_NUTRITION_RESPONSE_CARD)
+    expect(result.providerAuthoredFinalMessage).toBe('')
+    expect(result.finalMessage).toBe(
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals.',
+    )
   })
 
   it('invalidates a card-only response when a live steer adds accepted work', async () => {

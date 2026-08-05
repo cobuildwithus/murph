@@ -24,7 +24,6 @@ import {
 import { createHostedMemberReplyAliasRoute } from "./hosted-email-reply-alias";
 import {
   projectHostedMemberRoutingState,
-  syncHostedMemberTelegramRoutingBinding,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-store";
 import {
@@ -43,7 +42,7 @@ import {
 import {
   createHostedPrivyIdentityConflictError,
   ensureHostedMemberForPrivyIdentityResolutionTx,
-  reconcileHostedPrivyIdentityOnMemberTx,
+  reconcileHostedPrivyIdentityOnMemberResolutionTx,
 } from "./member-identity-service";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -54,8 +53,9 @@ import { hostedOnboardingError } from "./errors";
 
 type HostedPrivyCompletionMemberResolution = {
   bindingAuthMethod: HostedPrivyAuthMethod;
+  identity: HostedPrivyIdentity;
   member: HostedMemberCoreState;
-  primaryBindingSynced: boolean;
+  primaryEmailBindingSynced: boolean;
 };
 
 export async function completeHostedPrivyVerification(input: {
@@ -114,9 +114,10 @@ export async function completeHostedPrivyVerification(input: {
             authMethod: inviteAuthMethod,
             identity: input.identity,
           });
-          const member = await prisma.$transaction(
+          const reconciliation = await prisma.$transaction(
             (tx) => runWithHostedDomainRootUnwrapCache(async () => {
-              const reconciledMember = await reconcileHostedPrivyIdentityOnMemberTx({
+              const reconciled = await reconcileHostedPrivyIdentityOnMemberResolutionTx({
+                allowVerifiedEmailRebinding: true,
                 authMethod: inviteAuthMethod,
                 expectedEmailLookupKey: pendingEmailContact?.lookupKey,
                 expectedPhoneHint: pendingEmailContact
@@ -130,27 +131,27 @@ export async function completeHostedPrivyVerification(input: {
                 prisma: tx,
                 now,
               });
-              await syncHostedPrivyPrimaryBindingTx({
+              await syncHostedPrivyTransactionalBindingsTx({
                 authMethod: inviteAuthMethod,
-                identity: input.identity,
-                memberId: reconciledMember.id,
+                identity: reconciled.identity,
+                memberId: reconciled.member.id,
                 prisma: tx,
               });
               await syncHostedMemberPendingActivationTimeZoneTx({
-                memberId: reconciledMember.id,
+                memberId: reconciled.member.id,
                 prisma: tx,
                 timeZone,
               });
-              return reconciledMember;
+              return reconciled;
             }),
             HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
           );
 
           return {
             bindingAuthMethod: inviteAuthMethod,
-            member,
-            primaryBindingSynced:
-              inviteAuthMethod === "email" || inviteAuthMethod === "telegram",
+            identity: reconciliation.identity,
+            member: reconciliation.member,
+            primaryEmailBindingSynced: inviteAuthMethod === "email",
           };
         })()
       : {
@@ -158,14 +159,15 @@ export async function completeHostedPrivyVerification(input: {
           ...(await prisma.$transaction(
             (tx) => runWithHostedDomainRootUnwrapCache(async () => {
               const memberResolution = await ensureHostedMemberForPrivyIdentityResolutionTx({
+                allowVerifiedEmailRebinding: true,
                 authMethod,
                 identity: input.identity,
                 prisma: tx,
                 now,
               });
-              await syncHostedPrivyPrimaryBindingTx({
+              await syncHostedPrivyTransactionalBindingsTx({
                 authMethod,
-                identity: input.identity,
+                identity: memberResolution.identity,
                 memberId: memberResolution.member.id,
                 prisma: tx,
               });
@@ -176,8 +178,9 @@ export async function completeHostedPrivyVerification(input: {
               });
 
               return {
+                identity: memberResolution.identity,
                 member: memberResolution.member,
-                primaryBindingSynced: authMethod === "email" || authMethod === "telegram",
+                primaryEmailBindingSynced: authMethod === "email",
               };
             }),
             HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -189,9 +192,9 @@ export async function completeHostedPrivyVerification(input: {
 
     await syncHostedPrivyBindings({
       authMethod: memberResolution.bindingAuthMethod,
-      identity: input.identity,
+      identity: memberResolution.identity,
       memberId: member.id,
-      primaryBindingSynced: memberResolution.primaryBindingSynced,
+      primaryEmailBindingSynced: memberResolution.primaryEmailBindingSynced,
       prisma,
     });
 
@@ -225,7 +228,7 @@ export async function completeHostedPrivyVerification(input: {
     const messagingSetupRequired = isHostedMemberMessagingSetupRequired({
       identity: {
         ...(messagingSetupState?.identity ?? {}),
-        emailLinked: Boolean(input.identity.email?.verifiedAt),
+        emailLinked: Boolean(memberResolution.identity.email?.verifiedAt),
       },
       routing: messagingSetupState?.routing ?? null,
     });
@@ -273,12 +276,12 @@ async function syncHostedPrivyBindings(input: {
   authMethod: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   memberId: string;
-  primaryBindingSynced: boolean;
+  primaryEmailBindingSynced: boolean;
   prisma: PrismaClient;
 }): Promise<void> {
   if (
     input.identity.email?.verifiedAt &&
-    !(input.authMethod === "email" && input.primaryBindingSynced)
+    !(input.authMethod === "email" && input.primaryEmailBindingSynced)
   ) {
     const email = input.identity.email;
     const syncEmailBinding = async () => {
@@ -298,24 +301,6 @@ async function syncHostedPrivyBindings(input: {
       await syncEmailBinding().catch(mapHostedPrivyPrimaryEmailBindingError);
     } else {
       await syncHostedPrivySecondaryEmailBindingBestEffort(syncEmailBinding);
-    }
-  }
-
-  if (
-    input.identity.telegram?.telegramUserId &&
-    !(input.authMethod === "telegram" && input.primaryBindingSynced)
-  ) {
-    const telegramUserId = input.identity.telegram.telegramUserId;
-    const syncTelegramBinding = () => syncHostedMemberTelegramRoutingBinding({
-      memberId: input.memberId,
-      prisma: input.prisma,
-      telegramUserId,
-    });
-
-    if (input.authMethod === "telegram") {
-      await syncTelegramBinding();
-    } else {
-      await syncTelegramBinding();
     }
   }
 }
@@ -379,7 +364,7 @@ function assertHostedPrivyAuthMethodSatisfied(input: {
   }
 }
 
-async function syncHostedPrivyPrimaryBindingTx(input: {
+async function syncHostedPrivyTransactionalBindingsTx(input: {
   authMethod: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   memberId: string;
@@ -396,10 +381,9 @@ async function syncHostedPrivyPrimaryBindingTx(input: {
       replyAliasLookupKey: replyAlias?.replyAliasLookupKey ?? null,
       verifiedAt: new Date(input.identity.email.verifiedAt * 1000),
     }).catch(mapHostedPrivyPrimaryEmailBindingError);
-    return;
   }
 
-  if (input.authMethod === "telegram" && input.identity.telegram?.telegramUserId) {
+  if (input.identity.telegram?.telegramUserId) {
     await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: input.memberId,
       prisma: input.prisma,

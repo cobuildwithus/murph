@@ -93,6 +93,11 @@ export interface HostedLocalE2eScenario {
   name: Exclude<HostedLocalE2eScenarioName, "all">;
   requiresParserToolchain?: boolean;
   /**
+   * Run one matching suite per Vitest process when a scenario needs multiple
+   * process-scoped full-stack profiles from the same test file.
+   */
+  vitestProcessTestNamePatterns?: readonly [string, ...string[]];
+  /**
    * Normal hosted E2E scenarios run the production Worker/Runner/UserRunner
    * graph. Set this only for deliberate fault-injection scenarios that need
    * hosted-local test RPCs such as active-operation drop, activity expiry, or
@@ -345,6 +350,10 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-foreground-reply-priority-e2e.test.ts",
     name: "foreground-reply-priority",
     testControls: true,
+    vitestProcessTestNamePatterns: [
+      "^hosted local foreground reply priority e2e",
+      "^hosted local foreground checkpoint ordering e2e",
+    ],
   },
 ] as const;
 
@@ -723,25 +732,42 @@ async function runHostedLocalVitestForScenarios(input: {
   label: string;
   scenarios: readonly HostedLocalE2eScenario[];
 }): Promise<void> {
-  await runForegroundCommand({
-    args: [
-      "exec",
-      "vitest",
-      "run",
-      "--config",
-      "apps/cloudflare/vitest.e2e.config.ts",
-      ...input.scenarios.map((scenario) => scenario.file),
-      ...(input.scenarios.length > 1 ? ["--bail", "1"] : []),
-      "--no-coverage",
-    ],
-    command: "pnpm",
-    cwd: hostedLocalHarnessRepoRoot,
-    env: buildHostedLocalVitestScenarioEnv({
-      env: input.env,
-      scenarios: input.scenarios,
-    }),
-    label: input.label,
-  });
+  const testNamePatterns = input.scenarios.length === 1
+    ? input.scenarios[0]?.vitestProcessTestNamePatterns ?? [null]
+    : [null];
+
+  for (let index = 0; index < testNamePatterns.length; index += 1) {
+    const testNamePattern = testNamePatterns[index] ?? null;
+    await runForegroundCommand({
+      args: [
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "apps/cloudflare/vitest.e2e.config.ts",
+        ...input.scenarios.map((scenario) => scenario.file),
+        ...(testNamePattern ? ["--testNamePattern", testNamePattern] : []),
+        ...(input.scenarios.length > 1 ? ["--bail", "1"] : []),
+        "--no-coverage",
+      ],
+      command: "pnpm",
+      cwd: hostedLocalHarnessRepoRoot,
+      env: buildHostedLocalVitestScenarioEnv({
+        env: input.env,
+        scenarios: input.scenarios,
+      }),
+      label: testNamePatterns.length > 1
+        ? `${input.label} process ${index + 1}/${testNamePatterns.length}`
+        : input.label,
+    });
+    if (index < testNamePatterns.length - 1) {
+      await cleanupHostedLocalE2eRunnerArtifacts(input.env, {
+        ignoreRunnerCleanupErrors: false,
+        removeRunnerImages: false,
+        runnerCleanupTimeoutMs: SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS,
+      });
+    }
+  }
 }
 
 function foregroundSignalExitCode(signal: NodeJS.Signals): number {

@@ -420,10 +420,10 @@ export function HostedDataExportDialogContent({
   pending: boolean;
 }) {
   return (
-    <>
+    <div className="flex flex-col items-stretch gap-6">
       <div className="space-y-2 pr-10">
         <h2
-          className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground"
+          className="font-serif text-2xl/7 font-semibold tracking-normal text-balance text-foreground"
           id="hosted-data-export-title"
         >
           Export your data
@@ -444,7 +444,7 @@ export function HostedDataExportDialogContent({
           {errorMessage}
         </p>
       ) : null}
-      <div className="flex items-start gap-4 text-sm leading-relaxed text-foreground">
+      <div className="flex items-start gap-3 text-sm leading-relaxed text-foreground">
         <Checkbox
           checked={acknowledgedSensitiveDownload}
           className="size-7 shrink-0"
@@ -452,7 +452,7 @@ export function HostedDataExportDialogContent({
           onCheckedChange={onAcknowledgedChange}
         />
         <label
-          className="cursor-pointer"
+          className="cursor-pointer pt-0.5 text-pretty"
           htmlFor="hosted-data-export-acknowledge"
         >
           This export may contain sensitive health data and private notes.
@@ -480,7 +480,7 @@ export function HostedDataExportDialogContent({
           Cancel
         </Button>
       </div>
-    </>
+    </div>
   );
 }
 

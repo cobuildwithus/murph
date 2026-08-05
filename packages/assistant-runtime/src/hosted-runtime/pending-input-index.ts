@@ -74,6 +74,7 @@ interface HostedPendingAssistantInputStateReadResult {
 
 interface HostedPendingAssistantInputCompactionResult {
   handledConversationBatchCursorInputId: string | null;
+  handledConversationFrontierInputId: string | null;
   handledConversationInputIds: string[];
   runnableInputIds: string[];
   unresolvedInputIds: string[];
@@ -86,7 +87,13 @@ export interface HostedConversationMailboxHandledItemCandidate {
 
 export interface HostedConversationMailboxHandledItemBatch {
   candidates: HostedConversationMailboxHandledItemCandidate[];
+  frontierSelected: boolean;
   nextCursorInputId: string | null;
+}
+
+export interface HostedConversationMailboxHandledItemSelection {
+  frontierSelected: boolean;
+  itemIds: string[];
 }
 
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
@@ -570,6 +577,15 @@ export async function compactHostedConversationMailboxHandledItemIds(input: {
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<string[]> {
+  const selection = await compactHostedConversationMailboxHandledItemSelection(input);
+  return selection.itemIds;
+}
+
+export async function compactHostedConversationMailboxHandledItemSelection(input: {
+  consumedThroughSeq: string | null;
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<HostedConversationMailboxHandledItemSelection> {
   const compacted = await compactHostedPendingAssistantInputState({
     ...input,
     collectHandledConversationInputIds: true,
@@ -591,6 +607,7 @@ export async function compactHostedConversationMailboxHandledItemIds(input: {
   const batch = selectHostedConversationMailboxHandledItemBatch({
     candidates,
     cursorInputId: compacted.handledConversationBatchCursorInputId,
+    frontierInputId: compacted.handledConversationFrontierInputId,
   });
   if (batch.nextCursorInputId !== null) {
     await advanceHostedConversationMailboxHandledBatchCursor({
@@ -599,16 +616,21 @@ export async function compactHostedConversationMailboxHandledItemIds(input: {
       vaultRoot: input.vaultRoot,
     });
   }
-  return batch.candidates.map((candidate) => candidate.mailboxItemId);
+  return {
+    frontierSelected: batch.frontierSelected,
+    itemIds: batch.candidates.map((candidate) => candidate.mailboxItemId),
+  };
 }
 
 export function selectHostedConversationMailboxHandledItemBatch(input: {
   candidates: readonly HostedConversationMailboxHandledItemCandidate[];
   cursorInputId: string | null;
+  frontierInputId: string | null;
 }): HostedConversationMailboxHandledItemBatch {
   if (input.candidates.length === 0) {
     return {
       candidates: [],
+      frontierSelected: false,
       nextCursorInputId: null,
     };
   }
@@ -630,6 +652,9 @@ export function selectHostedConversationMailboxHandledItemBatch(input: {
   );
   return {
     candidates,
+    frontierSelected:
+      input.frontierInputId !== null
+      && candidates.some((candidate) => candidate.inputId === input.frontierInputId),
     nextCursorInputId: candidates.at(-1)?.inputId ?? null,
   };
 }
@@ -774,6 +799,7 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     }
     return {
       handledConversationBatchCursorInputId: null,
+      handledConversationFrontierInputId: null,
       handledConversationInputIds: [],
       runnableInputIds: [],
       unresolvedInputIds: [],
@@ -792,6 +818,9 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     cursor: AssistantInputCursor;
     inputId: string;
   }[] = [];
+  const handledConversationFrontierSeq =
+    (input.consumedConversationThroughSeq ?? 0n) + 1n;
+  let handledConversationFrontierInputId: string | null = null;
   for (const inputId of input.state.inputIds) {
     input.signal?.throwIfAborted();
     const event = await readAssistantInputEvent({
@@ -840,6 +869,11 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
             cursor: event.cursor,
             inputId,
           });
+          if (
+            laneSeq === handledConversationFrontierSeq
+          ) {
+            handledConversationFrontierInputId = inputId;
+          }
         }
         // Keep terminal conversation IDs in the snapshot being checkpointed.
         // A later checkpoint removes them only after the server-provided floor
@@ -886,6 +920,7 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
   return {
     handledConversationBatchCursorInputId:
       remainingState.handledBatchCursorInputId,
+    handledConversationFrontierInputId,
     handledConversationInputIds: handledConversationInputs
       .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor))
       .map((item) => item.inputId),

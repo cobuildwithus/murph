@@ -348,8 +348,12 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
   assert.equal(productionNextConfig.experimental?.cpus, HOSTED_WEB_PRODUCTION_BUILD_CPUS);
 });
 
+test("next.config leaves agent guidance under repository ownership", () => {
+  assert.equal(productionNextConfig.agentRules, false);
+});
+
 test("production build uses the isolated memory-optimized Webpack path", () => {
-  assert.equal(productionNextConfig.experimental?.turbopackMemoryLimit, undefined);
+  assert.equal(productionNextConfig.experimental?.turbopackFileSystemCacheForBuild, false);
   assert.equal(productionNextConfig.experimental?.turbopackSourceMaps, false);
   assert.equal(productionNextConfig.experimental?.webpackBuildWorker, true);
   assert.equal(productionNextConfig.experimental?.webpackMemoryOptimizations, true);

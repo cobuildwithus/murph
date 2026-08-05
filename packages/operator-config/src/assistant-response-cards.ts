@@ -48,6 +48,7 @@ export type LinqIMessageAppLayout = {
   caption: 'Murph'
   subcaption: 'Nutrition summary'
   trailing_caption: 'OPEN'
+  trailing_subcaption?: 'PARTIAL TOTALS'
 }
 
 export {
@@ -82,11 +83,14 @@ export function renderAssistantResponseCardText(
 export function buildLinqIMessageAppLayout(
   card: AssistantResponseCard,
 ): LinqIMessageAppLayout {
-  assistantResponseCardSchema.parse(card)
+  const parsed = assistantResponseCardSchema.parse(card)
   return {
     caption: 'Murph',
     subcaption: 'Nutrition summary',
     trailing_caption: 'OPEN',
+    ...(renderPartialNutritionLabel(parsed) === null
+      ? {}
+      : { trailing_subcaption: 'PARTIAL TOTALS' }),
   }
 }
 
