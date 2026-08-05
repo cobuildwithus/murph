@@ -573,7 +573,6 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         description: 'Search USDA generic foods for an ordinary ingredient.',
         options: {
           generic: true,
-          limit: 5,
         },
       },
     ],
@@ -585,7 +584,11 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         .positive()
         .max(MAX_HOSTED_DATA_API_LABEL_LIMIT)
         .optional()
-        .describe('Maximum label matches to return. Defaults to 5.'),
+        .describe('Maximum label matches to return. Defaults to 1.'),
+      fullLabel: z
+        .boolean()
+        .optional()
+        .describe('Return the complete source label when the requested fact is absent from compact serving, calorie, macro, and fiber facts.'),
       generic: z
         .boolean()
         .optional()
@@ -598,6 +601,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
     output: foodLabelSearchResultSchema,
     async run(context) {
       return await searchFoodLabels({
+        fullLabel: context.options.fullLabel,
         genericOnly: context.options.generic,
         includeOffMarket: context.options.includeOffMarket,
         limit: context.options.limit,
@@ -616,7 +620,6 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
           query: [
             "'greek yogurt' --query 'whole milk' --query 'sourdough bread'",
           ],
-          limit: 5,
         },
       },
     ],
@@ -633,7 +636,11 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         .positive()
         .max(MAX_HOSTED_DATA_API_LABEL_LIMIT)
         .optional()
-        .describe('Maximum label matches to return per query. Defaults to 5.'),
+        .describe('Maximum label matches to return per query. Defaults to 1.'),
+      fullLabel: z
+        .boolean()
+        .optional()
+        .describe('Return complete source labels when a requested fact is absent from compact serving, calorie, macro, and fiber facts.'),
       generic: z
         .boolean()
         .optional()
@@ -646,6 +653,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
     output: foodLabelBatchSearchResultSchema,
     async run(context) {
       return await searchFoodLabelsBatch({
+        fullLabel: context.options.fullLabel,
         genericOnly: context.options.generic,
         includeOffMarket: context.options.includeOffMarket,
         limit: context.options.limit,

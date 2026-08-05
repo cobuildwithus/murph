@@ -1082,6 +1082,16 @@ function requireValidTurnProfileJson(
       ) {
         throw new TypeError(`${toolLabel}.label must be a short sanitized tool label.`);
       }
+      if (tool.failedCalls !== undefined && !isNonNegativeInteger(tool.failedCalls)) {
+        throw new TypeError(`${toolLabel}.failedCalls must be a non-negative integer.`);
+      }
+      if (
+        typeof tool.failedCalls === "number"
+        && typeof tool.calls === "number"
+        && tool.failedCalls > tool.calls
+      ) {
+        throw new TypeError(`${toolLabel}.failedCalls must not exceed calls.`);
+      }
 
       return {
         ...normalizeTurnProfileIntegerRecord(tool, toolLabel, [
@@ -1089,6 +1099,9 @@ function requireValidTurnProfileJson(
           "durationMs",
           "outputChars",
         ]),
+        ...(tool.failedCalls === undefined
+          ? {}
+          : { failedCalls: tool.failedCalls }),
         label: tool.label,
       };
     }),

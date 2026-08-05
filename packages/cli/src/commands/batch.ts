@@ -5,7 +5,10 @@ import {
   resolveRootOptionTokenWithValue,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
-import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
+import {
+  pathSchema,
+  VAULT_CLI_BATCH_RESULT_SCHEMA,
+} from '@murphai/operator-config/vault-cli-contracts'
 
 const batchCommandOptionSchema = z.string().min(1)
 
@@ -14,6 +17,7 @@ const batchCommandResultSchema = z.object({
   argv: z.array(z.string().min(1)),
   durationMs: z.number().int().nonnegative(),
   ok: z.boolean(),
+  outputChars: z.number().int().nonnegative(),
   stdout: z.string(),
   data: z.unknown().optional(),
   error: z.object({
@@ -22,6 +26,7 @@ const batchCommandResultSchema = z.object({
 })
 
 export const batchRunResultSchema = z.object({
+  schema: z.string().min(1),
   vault: pathSchema,
   count: z.number().int().nonnegative(),
   failed: z.number().int().nonnegative(),
@@ -61,6 +66,7 @@ export function registerBatchCommands(cli: Cli.Cli) {
       }
 
       return {
+        schema: VAULT_CLI_BATCH_RESULT_SCHEMA,
         vault: options.vault,
         count: commands.length,
         failed: commands.filter((command) => !command.ok).length,
@@ -219,16 +225,19 @@ async function runBatchCommand(input: {
       argv,
       durationMs: elapsedMs(startedAt),
       ok: true,
+      outputChars: output.length,
       stdout: input.compact && parsedOutput.ok ? '' : output,
       ...(parsedOutput.ok ? { data: parsedOutput.data } : {}),
     }
   } catch (error) {
+    const output = stdout.join('')
     return {
       index: input.index,
       argv,
       durationMs: elapsedMs(startedAt),
       ok: false,
-      stdout: stdout.join(''),
+      outputChars: output.length,
+      stdout: output,
       error: {
         message: error instanceof Error ? error.message : 'Batch command failed.',
       },

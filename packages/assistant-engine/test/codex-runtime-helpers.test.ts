@@ -35,6 +35,9 @@ import {
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  VAULT_CLI_BATCH_RESULT_SCHEMA,
+} from '@murphai/operator-config/vault-cli-contracts'
 
 import {
   assistantModelTargetToProviderConfigInput,
@@ -677,6 +680,233 @@ describe('Codex assistant registry helpers', () => {
     expect(JSON.stringify(profile)).not.toContain('private-record')
     expect(JSON.stringify(profile)).not.toContain('private-script')
     expect(JSON.stringify(profile)).not.toContain('private output')
+  })
+
+  it.each([
+    {
+      command: 'bash -lc "vault-cli batch --compact --format json --command \'[\\\"food\\\",\\\"search-labels-batch\\\",\\\"--query\\\",\\\"private-query-a\\\"]\'"',
+      wrapper: 'double-quoted',
+    },
+    {
+      command: "bash -lc 'vault-cli batch --compact --format json --command '\\''[\"food\",\"search-labels-batch\",\"--query\",\"private-query-a\"]'\\'''",
+      wrapper: 'POSIX-spliced',
+    },
+  ])('attributes structured batch children through the $wrapper shell wrapper', ({
+    command,
+  }) => {
+    const aggregatedOutput = JSON.stringify({
+      schema: VAULT_CLI_BATCH_RESULT_SCHEMA,
+      count: 4,
+      failed: 2,
+      commands: [
+        {
+          argv: ['food', 'search-labels-batch', '--query', 'private-query-a'],
+          data: { privateResult: 'private-output-a' },
+          durationMs: 12_000,
+          index: 0,
+          ok: true,
+          outputChars: 300_000,
+          stdout: '',
+        },
+        {
+          argv: ['food', 'search-labels-batch', '--query', 'private-query-b'],
+          durationMs: 7_000,
+          error: { message: 'private-failure-a' },
+          index: 1,
+          ok: false,
+          outputChars: 200_000,
+          stdout: 'private-output-b',
+        },
+        {
+          argv: ['meal', 'totals', '--from', '2026-01-01'],
+          data: { privateResult: 'private-output-c' },
+          durationMs: 1_000,
+          index: 2,
+          ok: true,
+          outputChars: 900,
+          stdout: '',
+        },
+        {
+          argv: ['memory', 'private-health-command'],
+          durationMs: 400,
+          error: { message: 'private-failure-b' },
+          index: 3,
+          ok: false,
+          outputChars: 50,
+          stdout: 'private-output-d',
+        },
+      ],
+      vault: '/private/member/vault',
+    })
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_batch_commands' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              aggregatedOutput,
+              command,
+              durationMs: 22_060,
+              exitCode: 0,
+              id: 'item_batch_commands',
+              type: 'commandExecution',
+            },
+          },
+        },
+      ],
+      turnId: 'turn_batch_commands',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 2,
+        durationMs: 19_000,
+        failedCalls: 1,
+        label: 'food.search-labels-batch',
+        outputChars: 500_000,
+      },
+      {
+        calls: 1,
+        durationMs: 1_000,
+        label: 'meal.totals',
+        outputChars: 900,
+      },
+      {
+        calls: 1,
+        durationMs: 400,
+        failedCalls: 1,
+        label: 'other',
+        outputChars: 50,
+      },
+    ])
+    const persisted = parseAssistantUsageRecord({
+      attemptCount: 1,
+      credentialSource: 'platform',
+      inputTokens: 1,
+      occurredAt: '2026-06-10T12:00:00.000Z',
+      outputTokens: 1,
+      provider: 'codex-cli',
+      schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: 'session_batch_profile',
+      turnId: 'turn_batch_commands',
+      turnProfileJson: profile,
+      usageId: 'turn_batch_commands.attempt-1',
+    })
+    expect(persisted.turnProfileJson).toEqual(profile)
+    const serialized = JSON.stringify(profile)
+    for (const privateValue of [
+      'private-query-a',
+      'private-query-b',
+      'private-health-command',
+      'private-output-a',
+      'private-output-b',
+      'private-output-c',
+      'private-output-d',
+      'private-failure-a',
+      'private-failure-b',
+      '/private/member/vault',
+    ]) {
+      expect(serialized).not.toContain(privateValue)
+    }
+  })
+
+  it('attributes every structured batch child before the profile family cap', () => {
+    const commands = Array.from({ length: 10 }, (_, index) => ({
+      argv: index < 8
+        ? ['goal', 'list', '--private-filter', `private-${index}`]
+        : index === 8
+          ? ['food', 'search-labels-batch', '--query', `private-${index}`]
+          : ['meal', 'add', '--note', `private-${index}`],
+      data: { privateResult: `private-output-${index}` },
+      durationMs: index === 8 ? 12_000 : index === 9 ? 100 : index + 1,
+      error: index === 8 ? { message: 'private-failure' } : undefined,
+      index,
+      ok: index !== 8,
+      outputChars: index === 8 ? 500_000 : index === 9 ? 200 : 10,
+      stdout: index === 8 ? 'private-large-output' : '',
+    }))
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_batch_cap' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              aggregatedOutput: JSON.stringify({
+                schema: VAULT_CLI_BATCH_RESULT_SCHEMA,
+                commands,
+                count: commands.length,
+                failed: 1,
+                vault: '/private/member/vault',
+              }),
+              command: 'vault-cli batch --compact --format json',
+              durationMs: 100,
+              id: 'item_batch_cap',
+              type: 'commandExecution',
+            },
+          },
+        },
+      ],
+      turnId: 'turn_batch_cap',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 1,
+        durationMs: 12_000,
+        failedCalls: 1,
+        label: 'food.search-labels-batch',
+        outputChars: 500_000,
+      },
+      {
+        calls: 1,
+        durationMs: 100,
+        label: 'meal.add',
+        outputChars: 200,
+      },
+      {
+        calls: 8,
+        durationMs: 36,
+        label: 'goal.list',
+        outputChars: 80,
+      },
+    ])
+    expect(profile?.toolsTruncated).toBe(false)
+    expect(JSON.stringify(profile)).not.toContain('private-')
+    expect(JSON.stringify(profile)).not.toContain('/private/member/vault')
+  })
+
+  it('falls back to the outer batch label when structured output is unavailable', () => {
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_batch_fallback' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              aggregatedOutput: 'private malformed output',
+              command: `vault-cli batch --command '["memory","private-health-term"]'`,
+              durationMs: 10,
+              id: 'item_batch_fallback',
+              type: 'commandExecution',
+            },
+          },
+        },
+      ],
+      turnId: 'turn_batch_fallback',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 1,
+        durationMs: 10,
+        label: 'vault-cli batch',
+        outputChars: 24,
+      },
+    ])
+    expect(JSON.stringify(profile)).not.toContain('private-health-term')
+    expect(JSON.stringify(profile)).not.toContain('private malformed output')
   })
 
   it('uses the full safe structured chain when raw shell quoting fails closed', () => {

@@ -276,7 +276,7 @@ never reads production feedback or enters Resend.
   environment, cwd, and stdio. It does not currently write `memory.max`,
   `memory.swap.max`, or `memory.oom.group`. The Vercel package build gives the
   parent Next process a direct 1 GiB old-space flag and appends a 3 GiB flag to
-  `NODE_OPTIONS`. Node applies the direct flag to the parent; Next 16.2.6
+  `NODE_OPTIONS`. Node applies the direct flag to the parent; Next 16.3.0
   rebuilds its non-isolated TypeScript worker options from the parent arguments
   followed by `NODE_OPTIONS`, while removing the flag from isolated static
   workers. The same script owns the Vercel package build and CI memory-
@@ -299,13 +299,19 @@ never reads production feedback or enters Resend.
   seconds instead of roughly 4.4 minutes and completed all 229 static pages.
   Repeated exact-head Standard previews remain the external acceptance proof.
   The next exact-head Standard preview still OOM-killed Turbopack, so the
-  catalog correction is retained as a boundary fix but not sufficient capacity
-  proof. Production builds therefore use Next's supported `--webpack` fallback
-  with `webpackBuildWorker` and `webpackMemoryOptimizations` enabled. The
-  Workflow integration contributes custom Webpack configuration, so the worker
-  must be explicit. Local development remains on Turbopack. The worker build
-  preserves the same heap split and all route/type validation and completed all
-  229 pages locally. The advisory budget is
+  catalog correction is retained as a boundary fix but was not sufficient
+  capacity proof on Next 16.2.6. Production and Linux CI now use Next 16.3's
+  default Turbopack path through the same shared production-build selector. The
+  Workflow integration runs through its native Next integration: exact-head CI
+  proves the complete compile, type-validation, static-generation, and
+  directive-discovery path, while focused Stripe and phone-call suites prove
+  the existing `workflow/api.start` wrappers and step contracts. Two
+  forced-cold exact-head Standard previews completed without OOM: compilation
+  took 91 and 87 seconds, TypeScript validation took 54 and 55 seconds, all 233
+  pages took 10.0 and 10.8 seconds, and each Vercel build stage completed in
+  four minutes. These repeated previews remain the external memory acceptance
+  proof. The accepted candidate preserves the heap split and all route/type
+  validation. The advisory budget is
   a cgroup-unit model of Vercel Standard's 8 GB build machine: 7.2 GB available
   to the build cgroup and a 0.8 GB reserve for OS/container overhead outside it
   at the ceiling. The legacy-named guard budget override must stay strictly
@@ -676,7 +682,7 @@ keep the one-second presentation-only deadline and late-result rejection.
   recipient observation; `--assert-progress-typing-visible` fails unless typing
   is visibly present both before and after the outbound progress-message boundary.
 - No automated check hits a live AgentMail endpoint; email provisioning, polling, and in-thread reply behavior are currently verified through mocked CLI and inboxd tests only.
-- No automated check hits a live WHOOP or other wearable OAuth provider; device-syncd auth/webhook behavior is currently verified through local service tests, route tests, stubbed control-plane callers, and the hosted-local device-connect smoke that creates a signed WHOOP connect link against synthetic provider config.
+- No pull-request check hits a live wearable OAuth provider. The default hosted-local device-connect smoke remains hermetic and creates signed Oura and WHOOP links against synthetic Junction config. Its explicit `MURPH_E2E_JUNCTION_WEARABLE_LIVE=1` mode runs alone, uses `MURPH_E2E_JUNCTION_WEARABLE_SOURCES` to select one or both real providers, drives each selected signed intent through Junction and provider browser authorization, verifies the proof-bound automatic callback plus persisted reload, and disconnects each provider during cleanup. The suite owner strips all live-mode Junction authority, provider login values, browser controls, and the retired `MURPH_E2E_OURA_PASSWORD` name from generic bundle, image, generated-artifact, cleanup, runtime, and browser commands, forwarding only current selected-provider inputs to the isolated owners. The test then keeps Junction authority in the hosted platform and passes only the current provider login to the browser driver. `.github/workflows/junction-wearable-canary.yml` runs the unattended WHOOP proof after every push to protected `main` and by manual dispatch under the dedicated `junction-wearable-canary` GitHub Environment, with read-only repository permission, fixed non-overlapping concurrency, sandbox-only configuration, step-scoped credentials, no uploaded artifacts, and Temporal disabled because connection persistence does not own orchestration. Oura's current passwordless web login requires a fresh emailed code, so its full live proof runs headfully from an operator shell with the Oura account email and manual code entry; the code and a nonexistent reusable Oura password are not persisted as CI secrets. Device-syncd auth/webhook behavior otherwise remains covered through local service tests, route tests, and stubbed control-plane callers; the private integration matrix retains the production-shaped external Temporal worker proof.
 - Automatic meal-photo capture is covered by hosted-web enrollment/upload, companion bearer-consent status/acceptance, verified-email route fallback and current-recipient resolution, accepted-capture member-wide engagement, and model-gate-with-system-lag tests; hosted-execution wake/route parsing tests; Cloudflare private-object, processing-mode, and signed control-proxy tests; Temporal blocked-system and foreground-fairness tests; assistant-runtime system-only cron projection/post-checkpoint cleanup, canonical import/idempotency/automation-postcondition, and fail-closed email-authority tests; managed-automation tests; oldest-first closeout-work CLI tests; and canonical meal photo-retirement tests. Routine CI does not grant a real iPhone Photos permission or upload to the production R2 bucket, so deployed product proof still requires an explicit physical-device capture.
 - The temporary R2 cutover write-admission gate has focused Cloudflare route
   coverage for both callback-signed Temporal ensures and Vercel OIDC direct
