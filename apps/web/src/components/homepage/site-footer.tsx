@@ -34,6 +34,11 @@ const footerLinks = {
   murph: [
     { label: "Clubs", href: "/clubs", external: false },
     { label: "Changelog", href: "/changelog", external: false },
+    {
+      label: "Status",
+      href: "https://status.withmurph.ai",
+      external: true,
+    },
     { label: "Design", href: "/design", external: false },
     { label: "Security", href: "/security", external: false },
     {
