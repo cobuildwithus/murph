@@ -224,58 +224,62 @@ export function HostedHealthDataConsentControl({
   const unavailable = presentation === "unavailable";
 
   return (
-    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-3 border-b border-border pb-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-      {active ? (
-        <ShieldCheck
-          aria-hidden="true"
-          className="mt-0.5 size-[18px] shrink-0 text-muted-foreground"
-          strokeWidth={1.6}
-        />
-      ) : (
-        <ShieldOff
-          aria-hidden="true"
-          className="mt-0.5 size-[18px] shrink-0 text-muted-foreground"
-          strokeWidth={1.6}
-        />
-      )}
-      <div className="min-w-0">
-        <div className="font-serif text-base tracking-tight text-foreground">
-          Health data use
-        </div>
-        <p
-          aria-live="polite"
-          className={`mt-0.5 text-xs leading-5 ${
-            unavailable && errorMessage
-              ? "text-destructive"
-              : "text-muted-foreground"
-          }`}
-        >
-          {active
-            ? "Used to personalize Murph"
-            : paused
-              ? "Processing paused"
-              : presentation === "not-enabled"
-                ? "Not enabled"
-                : statusPending
-                  ? "Checking status..."
-                  : errorMessage ?? "Status unavailable"}
-        </p>
-        {active || paused ? (
-          <div className="mt-2">
-            <Link
-              className="relative inline-flex self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:-inset-y-2 before:content-['']"
-              href="/connect"
-            >
-              {paused ? "Review source disconnections" : "Review or reconnect sources"}
-            </Link>
+    <div className="grid grid-cols-1 items-start gap-4 border-b border-border pb-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="flex min-w-0 items-start gap-3">
+        {active ? (
+          <ShieldCheck
+            aria-hidden="true"
+            className="mt-0.5 size-[18px] shrink-0 text-muted-foreground"
+            strokeWidth={1.6}
+          />
+        ) : (
+          <ShieldOff
+            aria-hidden="true"
+            className="mt-0.5 size-[18px] shrink-0 text-muted-foreground"
+            strokeWidth={1.6}
+          />
+        )}
+        <div className="min-w-0">
+          <div className="font-serif text-base tracking-tight text-foreground">
+            Health data use
           </div>
-        ) : null}
+          <p
+            aria-live="polite"
+            className={`mt-0.5 text-xs leading-5 ${
+              unavailable && errorMessage
+                ? "text-destructive"
+                : "text-muted-foreground"
+            }`}
+          >
+            {active
+              ? "Used to personalize Murph"
+              : paused
+                ? "Processing paused"
+                : presentation === "not-enabled"
+                  ? "Not enabled"
+                  : statusPending
+                    ? "Checking status..."
+                    : errorMessage ?? "Status unavailable"}
+          </p>
+          {active || paused ? (
+            <div className="mt-2">
+              <Link
+                className="relative inline-flex min-h-10 items-center self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:content-['']"
+                href="/connect"
+              >
+                {paused ? "Review source disconnections" : "Review or reconnect sources"}
+              </Link>
+            </div>
+          ) : null}
+        </div>
       </div>
       <Button
         className={
-          active
-            ? "col-start-2 justify-self-start sm:col-start-auto sm:justify-self-end"
-            : "col-span-2 w-full sm:col-span-1 sm:w-auto sm:self-start"
+          paused
+            ? "w-full sm:col-span-2"
+            : active
+              ? "ml-[30px] justify-self-start sm:ml-0 sm:justify-self-end"
+              : "w-full sm:w-auto sm:self-start"
         }
         disabled={pending}
         onClick={onAction}

@@ -67,7 +67,7 @@ interface ConnectionMutationResponse {
 
 /**
  * Endpoint pane of the provider dialog: verify, replace, and delete the one
- * personal connection. Selecting it for core replies is the dialog's job, so a
+ * personal connection. Selecting it for inference is the dialog's job, so a
  * successful verification here deliberately leaves the connection inactive.
  */
 export function HostedInferenceConnectionPane(
@@ -146,7 +146,7 @@ export function HostedInferenceConnectionPane(
       setConfirmDelete(false);
       setStatus({
         message:
-          "Verified and saved. Choose Your endpoint and save to route new core replies to it.",
+          "Verified and saved. Choose Your endpoint and save to route inference to it.",
         tone: "neutral",
       });
       requestAnimationFrame(() => connectionHeadingRef.current?.focus());
@@ -181,7 +181,7 @@ export function HostedInferenceConnectionPane(
       setSecret("");
       setStatus({
         announcement:
-          "Connection deleted. New core replies use Murph-managed inference.",
+          "Connection deleted. Inference is now Murph-managed.",
         message: "Connection deleted.",
         tone: "neutral",
       });
@@ -273,7 +273,7 @@ export function HostedInferenceConnectionPane(
                   id="hosted-inference-delete-description"
                 >
                   {props.selected
-                    ? "Delete the saved endpoint and credential? New core replies will switch to Murph-managed inference."
+                    ? "Delete the saved endpoint and credential? Inference will return to your managed provider."
                     : "Delete the saved endpoint and credential?"}
                 </span>
                 <Button
