@@ -187,7 +187,18 @@ test("AuthProvider keeps a pending device connect intent ahead of the first-visi
   await rendered.cleanup();
 });
 
-test("AuthProvider returns a signed-in source browser to the Connect page", async () => {
+test.each([
+  {
+    expectedDestination: "connect",
+    initialVisitEligible: false,
+    label: "returns an existing member to the Connect page",
+  },
+  {
+    expectedDestination: "initial-visit",
+    initialVisitEligible: true,
+    label: "preserves first-visit onboarding for a new member from Connect",
+  },
+] as const)("AuthProvider $label", async ({ expectedDestination, initialVisitEligible }) => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
@@ -224,15 +235,20 @@ test("AuthProvider returns a signed-in source browser to the Connect page", asyn
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       activationPending: false,
-      initialVisitEligible: true,
+      initialVisitEligible,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       stage: "active",
     });
   });
 
-  expect(rendered.reload).toHaveBeenCalledTimes(1);
-  expect(rendered.assign).not.toHaveBeenCalled();
+  if (expectedDestination === "connect") {
+    expect(rendered.reload).toHaveBeenCalledTimes(1);
+    expect(rendered.assign).not.toHaveBeenCalled();
+  } else {
+    expect(rendered.assign).toHaveBeenCalledWith("/home?initialVisit=true");
+    expect(rendered.reload).not.toHaveBeenCalled();
+  }
 
   await rendered.cleanup();
 });

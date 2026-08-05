@@ -139,3 +139,19 @@ Updated: 2026-08-04
   tests, both affected package typechecks, the frontend design-proof suite, the
   seven-test exhaustive hosted-visible source guard, scoped Web lint, and
   `git diff --check`.
+- Exact-head GitHub Actions also passed on the merged-base remediation head
+  `5c214beb2da49ddd88200d77f571a76f1a715e70`, including every required release,
+  app, package, frontend, and repository-hygiene check.
+- Final ReviewGPT correction round 2 confirmed the guide-only lifecycle and
+  Apple Health prompt fixes, then found that a blanket `/connect` auth resume
+  would consume a brand-new member's canonical one-shot first-visit journey.
+  The accepted correction keeps existing members on `/connect` after auth but
+  lets first-visit-eligible signups continue through `/home?initialVisit=true`;
+  focused tests cover both outcomes without adding continuation state or a new
+  onboarding owner. The resulting focused Web suite passes 111 tests, along
+  with Web typecheck, scoped lint, and `git diff --check`.
+- The preliminary specialist retry remains invalid only because its closed-card
+  desktop and mobile images predate the exact-head removal of the lifecycle dot.
+  The open-dialog evidence is current; the two closed-card captures must be
+  refreshed from the exact pushed head before the same preliminary pass can be
+  accepted.
