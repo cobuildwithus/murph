@@ -18,7 +18,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
   upsertHostedMemberIdentity: mocks.upsertHostedMemberIdentity,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/environment", () => ({
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: mocks.getHostedOnboardingEnvironment,
   requireHostedOnboardingPublicBaseUrl: () => "https://www.withmurph.ai",
 }));
