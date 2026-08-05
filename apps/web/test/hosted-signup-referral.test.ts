@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   generateHostedMemberId: vi.fn(),
   getHostedOnboardingEnvironment: vi.fn(),
   lockHostedMemberRow: vi.fn(),
+  readHostedMemberIdentity: vi.fn(),
   upsertHostedMemberIdentity: vi.fn(),
 }));
 
@@ -15,6 +16,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+  readHostedMemberIdentity: mocks.readHostedMemberIdentity,
   upsertHostedMemberIdentity: mocks.upsertHostedMemberIdentity,
 }));
 
@@ -39,40 +41,63 @@ import {
   buildHostedSignupReferralUrl,
   issueHostedSignupReferralLink,
 } from "@/src/lib/hosted-growth/signup-referral";
+import type {
+  HostedMemberIdentityState,
+} from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 
 type ExistingInvite = {
   expiresAt: Date;
+  id: string;
   inviteCode: string;
   memberId: string;
 };
 
+function pristineIdentity(memberId: string): HostedMemberIdentityState {
+  return {
+    maskedPhoneNumberHint: null,
+    memberId,
+    phoneLookupKey: null,
+    phoneNumber: null,
+    phoneNumberVerifiedAt: null,
+    privyUserId: null,
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumber: null,
+    walletAddress: null,
+    walletChainType: null,
+    walletCreatedAt: null,
+    walletProvider: null,
+  };
+}
+
 function createPrisma(input: {
-  currentPrivyLookupKey?: string | null;
   existingInvite?: ExistingInvite | null;
+  identity?: HostedMemberIdentityState | null;
   referrer?: { id: string; suspendedAt: Date | null } | null;
 }) {
   const existingInvite = input.existingInvite ?? null;
   const referrer = input.referrer === undefined
     ? { id: "member_referrer", suspendedAt: null }
     : input.referrer;
+  const createdInvite = {
+    expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+    id: "invite_id",
+    inviteCode: "new_invite",
+    memberId: "member_target_new",
+  };
   const tx = {
     hostedInvite: {
-      create: vi.fn().mockResolvedValue({
-        expiresAt: new Date("2026-08-06T22:30:00.000Z"),
-        inviteCode: "new_invite",
-        memberId: "member_target_new",
-      }),
+      create: vi.fn().mockResolvedValue(createdInvite),
       findFirst: vi.fn().mockResolvedValue(existingInvite),
+      update: vi.fn().mockResolvedValue({
+        ...createdInvite,
+        id: existingInvite?.id ?? createdInvite.id,
+        memberId: existingInvite?.memberId ?? createdInvite.memberId,
+      }),
     },
     hostedMember: {
       findUnique: vi.fn().mockResolvedValue(referrer),
-    },
-    hostedMemberIdentity: {
-      findUnique: vi.fn().mockResolvedValue(
-        existingInvite
-          ? { privyUserLookupKey: input.currentPrivyLookupKey ?? null }
-          : null,
-      ),
     },
   };
   const prisma = {
@@ -80,6 +105,11 @@ function createPrisma(input: {
       (run: (client: typeof tx) => Promise<unknown>) => run(tx),
     ),
   };
+  mocks.readHostedMemberIdentity.mockResolvedValue(
+    input.identity === undefined && existingInvite
+      ? pristineIdentity(existingInvite.memberId)
+      : (input.identity ?? null),
+  );
 
   return { prisma, tx };
 }
@@ -113,17 +143,15 @@ describe("hosted signup referral links", () => {
     ).toBe("https://www.withmurph.ai/join/a%20b%2Fc");
   });
 
-  it("reuses the current unclaimed attributed invite under both row locks", async () => {
+  it("reuses a live pristine attributed invite under both member-row locks", async () => {
     const now = new Date("2026-08-04T22:30:00.000Z");
     const existingInvite = {
       expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+      id: "invite_existing",
       inviteCode: "existing_invite",
       memberId: "member_target_existing",
     };
-    const { prisma, tx } = createPrisma({
-      currentPrivyLookupKey: null,
-      existingInvite,
-    });
+    const { prisma, tx } = createPrisma({ existingInvite });
 
     await expect(issueHostedSignupReferralLink({
       now,
@@ -139,16 +167,21 @@ describe("hosted signup referral links", () => {
       orderBy: { createdAt: "desc" },
       select: {
         expiresAt: true,
+        id: true,
         inviteCode: true,
         memberId: true,
       },
       where: {
-        expiresAt: { gt: now },
         referrerMemberId: "member_referrer",
       },
     });
+    expect(mocks.readHostedMemberIdentity).toHaveBeenCalledWith({
+      memberId: "member_target_existing",
+      prisma: tx,
+    });
     expect(mocks.createHostedMember).not.toHaveBeenCalled();
     expect(tx.hostedInvite.create).not.toHaveBeenCalled();
+    expect(tx.hostedInvite.update).not.toHaveBeenCalled();
     expect(mocks.lockHostedMemberRow).toHaveBeenNthCalledWith(
       1,
       tx,
@@ -159,6 +192,81 @@ describe("hosted signup referral links", () => {
       tx,
       "member_target_existing",
     );
+  });
+
+  it("rotates an expired pristine invite in place without another placeholder member", async () => {
+    const existingInvite = {
+      expiresAt: new Date("2026-08-04T21:30:00.000Z"),
+      id: "invite_existing",
+      inviteCode: "expired_invite",
+      memberId: "member_target_existing",
+    };
+    const { prisma, tx } = createPrisma({ existingInvite });
+
+    await expect(issueHostedSignupReferralLink({
+      now: new Date("2026-08-04T22:30:00.000Z"),
+      prisma: prisma as never,
+      publicBaseUrl: "https://www.withmurph.ai",
+      referrerMemberId: "member_referrer",
+    })).resolves.toEqual({
+      expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+      signupUrl: "https://www.withmurph.ai/join/new_invite",
+    });
+
+    expect(tx.hostedInvite.update).toHaveBeenCalledWith({
+      data: {
+        channel: "share",
+        expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+        inviteCode: "new_invite",
+      },
+      select: {
+        expiresAt: true,
+        id: true,
+        inviteCode: true,
+        memberId: true,
+      },
+      where: {
+        id: "invite_existing",
+      },
+    });
+    expect(mocks.createHostedMember).not.toHaveBeenCalled();
+    expect(tx.hostedInvite.create).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse an invite after any recipient onboarding activity", async () => {
+    const memberId = "member_target_started";
+    const { prisma, tx } = createPrisma({
+      existingInvite: {
+        expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+        id: "invite_started",
+        inviteCode: "started_invite",
+        memberId,
+      },
+      identity: {
+        ...pristineIdentity(memberId),
+        signupPhoneCodeSendAttemptStartedAt:
+          new Date("2026-08-04T22:00:00.000Z"),
+        signupPhoneNumber: "+14045550123",
+      },
+    });
+
+    await expect(issueHostedSignupReferralLink({
+      now: new Date("2026-08-04T22:30:00.000Z"),
+      prisma: prisma as never,
+      publicBaseUrl: "https://www.withmurph.ai",
+      referrerMemberId: "member_referrer",
+    })).resolves.toEqual({
+      expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+      signupUrl: "https://www.withmurph.ai/join/new_invite",
+    });
+
+    expect(tx.hostedInvite.update).not.toHaveBeenCalled();
+    expect(mocks.createHostedMember).toHaveBeenCalledWith({
+      billingStatus: "not_started",
+      memberId: "member_target_new",
+      prisma: tx,
+    });
+    expect(tx.hostedInvite.create).toHaveBeenCalled();
   });
 
   it("fails closed when the referring account no longer exists", async () => {
@@ -194,53 +302,5 @@ describe("hosted signup referral links", () => {
 
     expect(tx.hostedInvite.findFirst).not.toHaveBeenCalled();
     expect(mocks.createHostedMember).not.toHaveBeenCalled();
-  });
-
-  it("rotates to a fresh attributed invite after the prior link is claimed", async () => {
-    const { prisma, tx } = createPrisma({
-      currentPrivyLookupKey: "hbidx:privy-user:v1:claimed",
-      existingInvite: {
-        expiresAt: new Date("2026-08-06T22:30:00.000Z"),
-        inviteCode: "claimed_invite",
-        memberId: "member_target_claimed",
-      },
-    });
-
-    await expect(issueHostedSignupReferralLink({
-      now: new Date("2026-08-04T22:30:00.000Z"),
-      prisma: prisma as never,
-      publicBaseUrl: "https://www.withmurph.ai",
-      referrerMemberId: "member_referrer",
-    })).resolves.toEqual({
-      expiresAt: new Date("2026-08-06T22:30:00.000Z"),
-      signupUrl: "https://www.withmurph.ai/join/new_invite",
-    });
-
-    expect(mocks.createHostedMember).toHaveBeenCalledWith({
-      billingStatus: "not_started",
-      memberId: "member_target_new",
-      prisma: tx,
-    });
-    expect(mocks.upsertHostedMemberIdentity).toHaveBeenCalledWith(
-      expect.objectContaining({
-        memberId: "member_target_new",
-        phoneLookupKey: null,
-        phoneNumber: null,
-        prisma: tx,
-        privyUserId: null,
-      }),
-    );
-    expect(tx.hostedInvite.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        channel: "share",
-        memberId: "member_target_new",
-        referrerMemberId: "member_referrer",
-      }),
-      select: {
-        expiresAt: true,
-        inviteCode: true,
-        memberId: true,
-      },
-    });
   });
 });
