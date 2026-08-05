@@ -51,8 +51,8 @@ export async function recordHostedProductFeedback(input: {
     feedback: input.feedback,
   });
   // The reserved prefix is itself the support-path discriminator. Fail closed
-  // below when the remainder is not the exact closed-vocabulary shape instead
-  // of persisting a malformed or free-form escalation as ordinary feedback.
+  // below when the remainder is missing or the reserved kind/linkage contract
+  // is invalid instead of persisting it as ordinary feedback.
   const supportEscalation = feedback.summary.startsWith(
     HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   );

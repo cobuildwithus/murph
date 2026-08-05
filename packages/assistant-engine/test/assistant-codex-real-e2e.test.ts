@@ -3064,11 +3064,11 @@ describeRealCodex('real Codex support escalation e2e', () => {
         }
         expect(privateCall.argumentsValue.kind).toBe('frustration')
         expect(privateCall.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
-        expect(privateCall.argumentsValue.summary).toBe('Support escalation')
-        expect(privateCall.argumentsValue.supportArea).toBe('connected_source')
-        expect(['connection_failed', 'data_missing']).toContain(
-          privateCall.argumentsValue.supportProblem,
+        expect(privateCall.argumentsValue.summary).toMatch(
+          /^Support escalation: \S/iu,
         )
+        expect(privateCall.argumentsValue.supportArea).toBeUndefined()
+        expect(privateCall.argumentsValue.supportProblem).toBeUndefined()
         expect(JSON.stringify(privateCall.argumentsValue)).not.toMatch(
           /relative|diabetes|glucose|clinic/iu,
         )
@@ -3103,8 +3103,8 @@ describeRealCodex('real Codex support escalation e2e', () => {
         ).filter(
           (action) =>
             action.kind === 'dynamic'
-            && (action.argumentsValue.summary === 'Support escalation'
-              || action.argumentsValue.supportArea !== undefined),
+            && typeof action.argumentsValue.summary === 'string'
+            && action.argumentsValue.summary.startsWith('Support escalation:'),
         )
         expect(
           groupSupportCalls,
@@ -3172,9 +3172,9 @@ describeRealCodex('real Codex support escalation e2e', () => {
         }
         expect(call.argumentsValue.kind).toBe('frustration')
         expect(call.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
-        expect(call.argumentsValue.summary).toBe('Support escalation')
-        expect(call.argumentsValue.supportArea).toBe('data')
-        expect(call.argumentsValue.supportProblem).toBe('feature_missing')
+        expect(call.argumentsValue.summary).toMatch(/^Support escalation: \S/iu)
+        expect(call.argumentsValue.supportArea).toBeUndefined()
+        expect(call.argumentsValue.supportProblem).toBeUndefined()
 
         const response = result.finalMessage.trim()
         expect(response).toMatch(/direct notification failed/iu)

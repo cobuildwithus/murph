@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildHostedProductSupportEscalationSummary } from "@murphai/hosted-execution/runtime-control";
-
 import {
   buildAssistantProductFeedbackIdempotencyKey,
   createAssistantProductFeedbackRecorder,
 } from "../src/assistant/turn-progress.js";
+
+const SUPPORT_SUMMARY =
+  "Support escalation: a connected source reports success but Murph does not finish the connection.";
 
 describe("assistant product support escalation", () => {
   it("replaces only an unpersisted ordinary candidate when explicit escalation arrives", async () => {
@@ -33,10 +34,7 @@ describe("assistant product support escalation", () => {
     const supportFeedback = {
       kind: "frustration" as const,
       relatedChangelogItemIds: [],
-      summary: buildHostedProductSupportEscalationSummary({
-        area: "connected_source",
-        problem: "connection_failed",
-      }),
+      summary: SUPPORT_SUMMARY,
     };
     await expect(
       recorder.recordProductFeedback(supportFeedback),
@@ -66,10 +64,7 @@ describe("assistant product support escalation", () => {
     const first = {
       kind: "frustration" as const,
       relatedChangelogItemIds: [],
-      summary: buildHostedProductSupportEscalationSummary({
-        area: "connected_source",
-        problem: "connection_failed",
-      }),
+      summary: SUPPORT_SUMMARY,
     };
 
     await expect(recorder.recordProductFeedback(first)).resolves.toEqual({
@@ -77,10 +72,8 @@ describe("assistant product support escalation", () => {
     });
     await expect(recorder.recordProductFeedback({
       ...first,
-      summary: buildHostedProductSupportEscalationSummary({
-        area: "data",
-        problem: "data_missing",
-      }),
+      summary:
+        "Support escalation: Murph does not show an expected connected-source result.",
     })).resolves.toEqual({ recorded: false });
 
     expect(recorder.readProductFeedback()?.summary).toBe(first.summary);
@@ -106,10 +99,7 @@ describe("assistant product support escalation", () => {
     const supportFeedback = {
       kind: "frustration" as const,
       relatedChangelogItemIds: [],
-      summary: buildHostedProductSupportEscalationSummary({
-        area: "connected_source",
-        problem: "connection_failed",
-      }),
+      summary: SUPPORT_SUMMARY,
     };
 
     await expect(recorder.recordProductFeedback(supportFeedback)).resolves.toEqual({
@@ -157,10 +147,7 @@ describe("assistant product support escalation", () => {
     await expect(recorder.recordProductFeedback({
       kind: "frustration",
       relatedChangelogItemIds: [],
-      summary: buildHostedProductSupportEscalationSummary({
-        area: "connected_source",
-        problem: "action_failed",
-      }),
+      summary: SUPPORT_SUMMARY,
     })).resolves.toEqual({ recorded: true });
 
     expect(deliverProductSupportEscalation).toHaveBeenCalledOnce();
@@ -187,10 +174,7 @@ describe("assistant product support escalation", () => {
     await expect(recorder.recordProductFeedback({
       kind: "frustration",
       relatedChangelogItemIds: [],
-      summary: buildHostedProductSupportEscalationSummary({
-        area: "connected_source",
-        problem: "connection_failed",
-      }),
+      summary: SUPPORT_SUMMARY,
     })).rejects.toThrow("callback timed out");
 
     expect(recorder.readProductFeedback()).toBeNull();

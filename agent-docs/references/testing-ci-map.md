@@ -308,8 +308,9 @@ Hosted support-escalation conversation coverage is Assistant Engine-owned.
 private-direct authority, immediate reserved submission without a separate
 approval turn, and truthful saved/failure copy. The opt-in support scenario in
 `assistant-codex-real-e2e.test.ts` defines the real one-turn App Server journey:
-an explicit private human-support request submits one product-only summary while
-excluding synthetic semantic private context; the group case remains tool-free.
+an explicit private human-support request submits one Murph-written,
+de-identified product-only summary while excluding synthetic semantic private
+context and raw wording; the group case remains tool-free.
 Routine CI compiles the live-provider scenario but skips it without an explicit
 supported provider credential.
 

@@ -6,9 +6,6 @@ import {
 import type {
   HostedRuntimeProductFeedbackRecord,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  buildHostedProductSupportEscalationSummary,
-} from "@murphai/hosted-execution/runtime-control";
 
 import {
   createHostedRuntimeProductFeedbackPort,
@@ -26,10 +23,8 @@ const SUPPORT_ESCALATION: HostedRuntimeProductFeedbackRecord = {
   idempotencyKey: "b".repeat(64),
   kind: "frustration",
   relatedChangelogItemIds: [],
-  summary: buildHostedProductSupportEscalationSummary({
-    area: "connected_source",
-    problem: "connection_failed",
-  }),
+  summary:
+    "Support escalation: a connected source reports success but Murph does not finish the connection.",
 };
 
 describe("hosted product feedback port", () => {

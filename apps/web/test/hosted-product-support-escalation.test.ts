@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  buildHostedProductSupportEscalationSummary,
-} from "@murphai/hosted-execution/runtime-control";
-
 const prismaMocks = vi.hoisted(() => ({
   count: vi.fn(),
   createMany: vi.fn(),
@@ -40,6 +36,8 @@ const EMAIL_ENV = {
   HOSTED_LINQ_ALERT_EMAIL_FROM: "Murph <support@withmurph.ai>",
   RESEND_API_KEY: "resend_test_key",
 };
+const ISSUE_SUMMARY =
+  "a connected source reports success but Murph does not finish the connection.";
 
 type TransactionClientMock = {
   $executeRaw: typeof prismaMocks.executeRaw;
@@ -122,7 +120,7 @@ describe("hosted product support escalation", () => {
           kind: "frustration",
           memberId: null,
           relatedChangelogItemIdsJson: [],
-          summary: "area=connected_source; problem=connection_failed",
+          summary: ISSUE_SUMMARY,
         }),
       ],
       skipDuplicates: true,
@@ -149,10 +147,10 @@ describe("hosted product support escalation", () => {
     const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
     expect(emailText).toContain(`Feedback ID: ${feedbackId}`);
     expect(emailText).not.toContain(feedback.summary);
-    expect(emailText).not.toContain("connected_source");
+    expect(emailText).not.toContain(ISSUE_SUMMARY);
   });
 
-  it("keeps the canonical product issue out of the member-linked row and email", async () => {
+  it("keeps Murph's written product issue out of the member-linked row and metadata-only email", async () => {
     const feedback = makeSupportFeedback({
       idempotencyKey: "9".repeat(64),
     });
@@ -183,15 +181,12 @@ describe("hosted product support escalation", () => {
     expect(memberRow?.summary).toBe(
       HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
     );
-    expect(memberRow?.summary).not.toContain("connected_source");
-    expect(anonymousRow?.summary).toBe(
-      "area=connected_source; problem=connection_failed",
-    );
+    expect(memberRow?.summary).not.toContain(ISSUE_SUMMARY);
+    expect(anonymousRow?.summary).toBe(ISSUE_SUMMARY);
     expect(anonymousRow?.memberId).toBeNull();
 
     const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
-    expect(emailText).not.toContain("connected_source");
-    expect(emailText).not.toContain("connection_failed");
+    expect(emailText).not.toContain(ISSUE_SUMMARY);
     expect(emailText).toContain(`Member ID: ${MEMBER_ID}`);
   });
 
@@ -284,13 +279,12 @@ describe("hosted product support escalation", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("rejects a free-form reserved payload before persistence", async () => {
+  it("rejects an empty reserved payload before persistence", async () => {
     await expect(recordHostedProductFeedback({
       env: EMAIL_ENV,
       feedback: {
         ...makeSupportFeedback(),
-        summary:
-          `${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX} a connected source failed.`,
+        summary: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
       },
       memberId: MEMBER_ID,
     })).rejects.toMatchObject({
@@ -353,10 +347,7 @@ function makeSupportFeedback(input: {
     idempotencyKey: input.idempotencyKey ?? "c".repeat(64),
     kind: "frustration" as const,
     relatedChangelogItemIds: [],
-    summary: buildHostedProductSupportEscalationSummary({
-      area: "connected_source",
-      problem: "connection_failed",
-    }),
+    summary: `${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX} ${ISSUE_SUMMARY}`,
   };
 }
 

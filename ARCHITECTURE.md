@@ -920,12 +920,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 
   Reserved support escalation uses the existing product-feedback callback as a
   one-turn explicit action. A verified-private request for Murph human support
-  authorizes one account-linked call with allowlisted product-area and failure
-  codes; the tool builds the canonical product-only issue, and Murph does not
-  first display it or ask for separate approval. A generic bug handoff, group or
-  unverified audience, or issue that cannot fit the closed product vocabulary
-  does not authorize the reserved shape. The callback, storage, and paired
-  detailed-email behavior add no second consent or state owner.
+  authorizes one account-linked call with Murph's bounded, de-identified
+  product-only explanation after the reserved prefix; Murph does not first
+  display it or ask for separate approval. A generic bug handoff, group, or
+  unverified audience does not authorize the reserved shape. The callback keeps
+  the linked marker server-authored and the written issue in a separate
+  anonymous detail row; the paired detailed-email behavior reads that row back
+  before provider entry. This adds no second consent or state owner.
 
   A separate authenticated ten-minute Vercel cron performs work only during the
   6pm Eastern hour and sends one daily internal product-feedback digest through
