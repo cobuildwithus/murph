@@ -2405,21 +2405,15 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'Before personal improvement or new-goal advice, or whether to take, keep, reorder, or drop a supplement or other intervention, read personal evidence that could change the answer. Open with what it shows (such as the latest panel date and markers), not goals alone; if none exists, say so.',
     )
+    expect(prompt).toContain('For heat/cold/air-quality alerts')
     expect(prompt).toContain(
-      'For local heat, cold, or air-quality context, reuse a known location.',
-    )
-    expect(prompt).toContain(
-      'Call direct-only `MURPH_OPENWEATHER_GET_NATIONAL_ALERTS` without search',
+      'Call direct-only `MURPH_OPENWEATHER_GET_NATIONAL_ALERTS` once including retries, without search',
     )
     expect(prompt).toContain('never guess coordinates')
     expect(prompt).toContain('once including retries')
-    expect(prompt).toContain('On failure, do not retry; answer without it.')
-    expect(prompt).toContain(
-      'Raw weather/AQI never establishes an alert',
-    )
-    expect(prompt).toContain(
-      'Ask only if location could change the answer',
-    )
+    expect(prompt).toContain('Only returned alerts count as context, never cause')
+    expect(prompt).toContain('Continue on failure')
+    expect(prompt).toContain('Ask for location only when needed')
 
     // Discovery has no arbitrary question cap, but stays paced and useful.
     expect(prompt).toContain(

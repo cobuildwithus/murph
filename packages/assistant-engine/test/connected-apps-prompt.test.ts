@@ -92,9 +92,9 @@ describe('connected-apps skill and system-prompt coverage', () => {
     expect(directPrompt).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
     expect(directPrompt).toContain('without search')
     expect(directPrompt).toContain('never guess coordinates')
-    expect(directPrompt).toContain('with only numeric `lat`/`lon`')
+    expect(directPrompt).toContain('with numeric `lat`/`lon`')
     expect(directPrompt).toContain('once including retries')
-    expect(directPrompt).toContain('On failure, do not retry')
+    expect(directPrompt).toContain('Continue on failure')
     expect(scheduledPrompt).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
     expect(groupPrompt).toContain('Use only accountless built-in service tools')
     expect(groupPrompt).toContain(
