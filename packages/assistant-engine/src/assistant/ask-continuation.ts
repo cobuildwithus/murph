@@ -302,9 +302,6 @@ export async function sendAssistantAskContinuationLocal(
           additionalUsages: providerOutcome.additionalUsages,
           effectiveEnv: messageInput.turnEnvironment?.env ?? process.env,
           executionContext,
-          ...(providerRequestStartedAt === undefined
-            ? {}
-            : { occurredAt: providerRequestStartedAt }),
           providerResult: failedProviderResult,
           turnId,
         })
@@ -324,9 +321,6 @@ export async function sendAssistantAskContinuationLocal(
         additionalUsages: providerResult.additionalUsages,
         effectiveEnv: messageInput.turnEnvironment?.env ?? process.env,
         executionContext,
-        ...(providerRequestStartedAt === undefined
-          ? {}
-          : { occurredAt: providerRequestStartedAt }),
         providerResult,
         turnId,
       })

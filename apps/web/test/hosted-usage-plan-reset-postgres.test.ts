@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import {
   accountHostedAiUsageForAllowanceTx,
   reconcileHostedAiUsageAllowancePeriodForMemberTx,
+  resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import {
   startAuthorizedHostedAiUsageLimitNoticeDispatchTx,
@@ -319,6 +320,263 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it.each(["direct", "family"] as const)(
+      "seeds an old Web %s allowance insert before the exact upgrade cutover",
+      async (allowanceSource) => {
+        const fixture = await createUsageResetFixture();
+        const resetAt = new Date("2026-07-12T15:00:00.000Z");
+        const downgradeAt = new Date("2026-07-12T15:10:00.000Z");
+        const reupgradeAt = new Date("2026-07-12T15:15:00.000Z");
+        const postResetRecord: AssistantUsageRecord = {
+          ...fixture.record,
+          occurredAt: "2026-07-12T15:00:01.000Z",
+          providerRequestId: "post_" + fixture.record.providerRequestId,
+          turnId: "post_" + fixture.record.turnId,
+          usageId: "post_" + fixture.record.usageId,
+        };
+        const groupId = "family_old_writer_" + randomUUID();
+        const membershipId = "family_old_writer_membership_" + randomUUID();
+        const ownerMemberId = "family_old_writer_owner_" + randomUUID();
+
+        try {
+          await fixture.observer.hostedAiUsagePeriod.delete({
+            where: {
+              memberId_periodStart: {
+                memberId: fixture.memberId,
+                periodStart: fixture.periodStart,
+              },
+            },
+          });
+          await fixture.observer.$executeRaw`
+            INSERT INTO "hosted_ai_usage_period" (
+              "member_id",
+              "period_start",
+              "period_end",
+              "billing_plan_code",
+              "limit_usd_micros",
+              "spent_usd_micros",
+              "blocked_at",
+              "updated_at"
+            ) VALUES (
+              ${fixture.memberId},
+              ${fixture.periodStart},
+              ${fixture.periodEnd},
+              'launch_monthly',
+              ${getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly")},
+              ${6_000_000n},
+              ${new Date("2026-07-12T14:58:00.000Z")},
+              ${new Date("2026-07-12T14:59:00.000Z")}
+            )
+          `;
+          await expect(fixture.observer.hostedAiUsagePeriod.findUniqueOrThrow({
+            select: { highestBillingPlanCode: true, planResetAt: true },
+            where: {
+              memberId_periodStart: {
+                memberId: fixture.memberId,
+                periodStart: fixture.periodStart,
+              },
+            },
+          })).resolves.toEqual({
+            highestBillingPlanCode: "launch_monthly",
+            planResetAt: null,
+          });
+
+          if (allowanceSource === "direct") {
+            await applyOldWebDirectPlanTransition({
+              at: resetAt,
+              memberId: fixture.memberId,
+              planCode: "launch_edge_monthly",
+              prisma: fixture.observer,
+            });
+          } else {
+            await fixture.observer.hostedMember.create({
+              data: { id: ownerMemberId },
+            });
+            await fixture.observer.hostedMemberBillingRef.update({
+              data: { currentBillingPhase: null },
+              where: { memberId: fixture.memberId },
+            });
+            await fixture.observer.hostedAccountGroup.create({
+              data: {
+                billingStatus: HostedBillingStatus.active,
+                id: groupId,
+                memberships: {
+                  create: {
+                    id: membershipId,
+                    memberId: fixture.memberId,
+                    planCode: "pulse",
+                    role: "member",
+                    status: "active",
+                  },
+                },
+                ownerMemberId,
+              },
+            });
+            await applyOldWebFamilyPlanTransition({
+              at: resetAt,
+              membershipId,
+              planCode: "edge",
+              prisma: fixture.observer,
+            });
+          }
+
+          await expect(resolveHostedAiUsageGate({
+            memberId: fixture.memberId,
+            now: "2026-07-12T15:00:05.000Z",
+            prisma: fixture.observer,
+          })).resolves.toMatchObject({
+            allowed: true,
+            billingPlanCode: "launch_edge_monthly",
+            spentUsdMicros: 0n,
+          });
+          await expect(fixture.observer.hostedAiUsagePeriod.findUniqueOrThrow({
+            select: {
+              billingPlanCode: true,
+              blockedAt: true,
+              highestBillingPlanCode: true,
+              planResetAt: true,
+              spentUsdMicros: true,
+            },
+            where: {
+              memberId_periodStart: {
+                memberId: fixture.memberId,
+                periodStart: fixture.periodStart,
+              },
+            },
+          })).resolves.toEqual({
+            billingPlanCode: "launch_edge_monthly",
+            blockedAt: null,
+            highestBillingPlanCode: "launch_edge_monthly",
+            planResetAt: resetAt,
+            spentUsdMicros: 0n,
+          });
+
+          await fixture.observer.$transaction(async (tx) => {
+            await accountHostedAiUsageForAllowanceTx({
+              memberId: fixture.memberId,
+              now: new Date("2026-07-12T15:00:06.000Z"),
+              record: fixture.record,
+              tx,
+            });
+          }, transactionOptions);
+          await insertUsageResetRecord({
+            prisma: fixture.observer,
+            record: postResetRecord,
+          });
+          await fixture.observer.$transaction(async (tx) => {
+            await accountHostedAiUsageForAllowanceTx({
+              memberId: fixture.memberId,
+              now: new Date("2026-07-12T15:00:07.000Z"),
+              record: postResetRecord,
+              tx,
+            });
+          }, transactionOptions);
+
+          const [preResetUsage, postResetUsage, periodAfterPostResetUsage] =
+            await Promise.all([
+              fixture.observer.hostedAiUsage.findUniqueOrThrow({
+                select: { allowanceCounted: true },
+                where: { id: fixture.record.usageId },
+              }),
+              fixture.observer.hostedAiUsage.findUniqueOrThrow({
+                select: { allowanceCounted: true },
+                where: { id: postResetRecord.usageId },
+              }),
+              fixture.observer.hostedAiUsagePeriod.findUniqueOrThrow({
+                select: { spentUsdMicros: true },
+                where: {
+                  memberId_periodStart: {
+                    memberId: fixture.memberId,
+                    periodStart: fixture.periodStart,
+                  },
+                },
+              }),
+            ]);
+          expect(preResetUsage.allowanceCounted).toBe(false);
+          expect(postResetUsage.allowanceCounted).toBe(true);
+          expect(periodAfterPostResetUsage.spentUsdMicros).toBeGreaterThan(0n);
+          await expect(fixture.observer.hostedMember.findUniqueOrThrow({
+            select: {
+              usageCreditBalanceUsdMicros: true,
+              usageCreditLedgerVersion: true,
+            },
+            where: { id: fixture.memberId },
+          })).resolves.toEqual({
+            usageCreditBalanceUsdMicros: 1_000_000n,
+            usageCreditLedgerVersion: 3n,
+          });
+
+          if (allowanceSource === "direct") {
+            await applyOldWebDirectPlanTransition({
+              at: downgradeAt,
+              memberId: fixture.memberId,
+              planCode: "launch_monthly",
+              prisma: fixture.observer,
+            });
+          } else {
+            await applyOldWebFamilyPlanTransition({
+              at: downgradeAt,
+              membershipId,
+              planCode: "pulse",
+              prisma: fixture.observer,
+            });
+          }
+          await resolveHostedAiUsageGate({
+            memberId: fixture.memberId,
+            now: downgradeAt.toISOString(),
+            prisma: fixture.observer,
+          });
+
+          if (allowanceSource === "direct") {
+            await applyOldWebDirectPlanTransition({
+              at: reupgradeAt,
+              memberId: fixture.memberId,
+              planCode: "launch_edge_monthly",
+              prisma: fixture.observer,
+            });
+          } else {
+            await applyOldWebFamilyPlanTransition({
+              at: reupgradeAt,
+              membershipId,
+              planCode: "edge",
+              prisma: fixture.observer,
+            });
+          }
+          await resolveHostedAiUsageGate({
+            memberId: fixture.memberId,
+            now: reupgradeAt.toISOString(),
+            prisma: fixture.observer,
+          });
+
+          await expect(fixture.observer.hostedAiUsagePeriod.findUniqueOrThrow({
+            select: {
+              highestBillingPlanCode: true,
+              planResetAt: true,
+              spentUsdMicros: true,
+            },
+            where: {
+              memberId_periodStart: {
+                memberId: fixture.memberId,
+                periodStart: fixture.periodStart,
+              },
+            },
+          })).resolves.toEqual({
+            highestBillingPlanCode: "launch_edge_monthly",
+            planResetAt: resetAt,
+            spentUsdMicros: periodAfterPostResetUsage.spentUsdMicros,
+          });
+        } finally {
+          await fixture.observer.hostedAccountGroup.deleteMany({
+            where: { id: groupId },
+          });
+          await fixture.observer.hostedMember.deleteMany({
+            where: { id: ownerMemberId },
+          });
+          await cleanupUsageResetFixture(fixture);
+        }
+      },
+    );
+
     it("captures an old Web Family membership cutover", async () => {
       const fixture = await createUsageResetFixture();
       const groupId = "family_plan_reset_" + randomUUID();
@@ -481,6 +739,36 @@ async function applyEdgePlanReset(input: {
   });
 }
 
+async function applyOldWebDirectPlanTransition(input: {
+  at: Date;
+  memberId: string;
+  planCode: "launch_edge_monthly" | "launch_monthly";
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.$executeRaw`
+    UPDATE "hosted_member_billing_ref"
+    SET
+      "current_billing_plan_code" = ${input.planCode},
+      "last_stripe_event_created_at" = ${input.at}
+    WHERE "member_id" = ${input.memberId}
+  `;
+}
+
+async function applyOldWebFamilyPlanTransition(input: {
+  at: Date;
+  membershipId: string;
+  planCode: "edge" | "pulse";
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.$executeRaw`
+    UPDATE "hosted_account_group_membership"
+    SET
+      "plan_code" = ${input.planCode},
+      "updated_at" = ${input.at}
+    WHERE "id" = ${input.membershipId}
+  `;
+}
+
 async function createUsageResetFixture(): Promise<UsageResetFixture> {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required for the PostgreSQL ordering proof.");
@@ -560,14 +848,39 @@ async function createUsageResetFixture(): Promise<UsageResetFixture> {
       usageCreditLedgerVersion: 3n,
     },
   });
-  await observer.hostedAiUsage.create({
+  await insertUsageResetRecord({
+    prisma: observer,
+    record,
+  });
+
+  return {
+    memberId,
+    observer,
+    periodEnd,
+    periodStart,
+    record,
+    resetClient,
+    usageClient,
+    usageId,
+  };
+}
+
+async function insertUsageResetRecord(input: {
+  prisma: PrismaClient;
+  record: AssistantUsageRecord;
+}): Promise<void> {
+  const { record } = input;
+  if (!record.memberId) {
+    throw new Error("Usage reset proof records require a member id.");
+  }
+  await input.prisma.hostedAiUsage.create({
     data: {
       attemptCount: record.attemptCount,
       cachedInputTokens: record.cachedInputTokens,
       credentialSource: record.credentialSource,
       id: record.usageId,
       inputTokens: record.inputTokens,
-      memberId,
+      memberId: record.memberId,
       occurredAt: new Date(record.occurredAt),
       outputTokens: record.outputTokens,
       provider: record.provider,
@@ -582,17 +895,6 @@ async function createUsageResetFixture(): Promise<UsageResetFixture> {
       usageExtractionVersion: record.usageExtractionVersion,
     },
   });
-
-  return {
-    memberId,
-    observer,
-    periodEnd,
-    periodStart,
-    record,
-    resetClient,
-    usageClient,
-    usageId,
-  };
 }
 
 async function cleanupUsageResetFixture(

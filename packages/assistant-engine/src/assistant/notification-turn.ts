@@ -534,9 +534,6 @@ export async function sendAssistantNotificationLocal(
             additionalUsages: providerOutcome.additionalUsages,
             effectiveEnv: messageInput.turnEnvironment?.env ?? process.env,
             executionContext,
-            ...(notificationProviderRequestStartedAt === undefined
-              ? {}
-              : { occurredAt: notificationProviderRequestStartedAt }),
             providerResult: failedProviderResult,
             turnId,
           })
@@ -579,9 +576,6 @@ export async function sendAssistantNotificationLocal(
           additionalUsages: providerResult.additionalUsages,
           effectiveEnv: messageInput.turnEnvironment?.env ?? process.env,
           executionContext,
-          ...(notificationProviderRequestStartedAt === undefined
-            ? {}
-            : { occurredAt: notificationProviderRequestStartedAt }),
           providerResult,
           turnId,
         })

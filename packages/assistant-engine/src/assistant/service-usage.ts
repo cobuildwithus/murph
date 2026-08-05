@@ -128,7 +128,6 @@ export async function recordAdditionalAssistantUsageEvents(input: {
   additionalUsages: readonly AssistantProviderUsageDraft[] | null | undefined
   effectiveEnv: Readonly<Record<string, string | undefined>>
   executionContext: AssistantExecutionContext
-  occurredAt?: string
   providerRequestAcceptedInputIds?: readonly string[]
   providerResult: AssistantUsageProviderResult
   turnId: string
@@ -154,11 +153,7 @@ export async function recordAdditionalAssistantUsageEvents(input: {
       : null
     await recordAssistantUsageEvent({
       executionContext: input.executionContext,
-      ...(usageDraft.occurredAt !== undefined
-        ? { occurredAt: usageDraft.occurredAt }
-        : input.occurredAt === undefined
-          ? {}
-          : { occurredAt: input.occurredAt }),
+      occurredAt: usageDraft.occurredAt,
       ...(input.providerRequestAcceptedInputIds === undefined
         ? {}
         : {

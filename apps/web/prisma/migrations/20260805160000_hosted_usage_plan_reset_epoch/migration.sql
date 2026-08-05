@@ -1,3 +1,14 @@
+BEGIN;
+
+-- Acquire every rolling-writer boundary before changing or backfilling any of
+-- them, so an old insert or billing transition cannot land between setup
+-- statements and escape the compatibility bridges.
+LOCK TABLE
+  "hosted_ai_usage_period",
+  "hosted_member_billing_ref",
+  "hosted_account_group_membership"
+IN ACCESS EXCLUSIVE MODE;
+
 ALTER TABLE "hosted_ai_usage_period"
   ADD COLUMN "highest_billing_plan_code" TEXT,
   ADD COLUMN "plan_reset_at" TIMESTAMP(3);
@@ -5,6 +16,27 @@ ALTER TABLE "hosted_ai_usage_period"
 UPDATE "hosted_ai_usage_period"
 SET "highest_billing_plan_code" = "billing_plan_code"
 WHERE "highest_billing_plan_code" IS NULL;
+
+-- Draining Web instances insert the old allowance-period column set. Seed
+-- their plan high-water from the plan they observed so a later exact upgrade
+-- can still be recognized. Remove this bridge only after every pre-migration
+-- Web deployment has drained and no rollback can restore one.
+CREATE FUNCTION initialize_hosted_usage_period_highest_plan()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.highest_billing_plan_code IS NULL THEN
+    NEW.highest_billing_plan_code := NEW.billing_plan_code;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "hosted_usage_period_highest_plan_bridge"
+BEFORE INSERT ON "hosted_ai_usage_period"
+FOR EACH ROW
+EXECUTE FUNCTION initialize_hosted_usage_period_highest_plan();
 
 ALTER TABLE "hosted_member_billing_ref"
   ADD COLUMN "usage_plan_transition_at" TIMESTAMP(3),
@@ -120,3 +152,5 @@ BEFORE UPDATE OF "plan_code", "status"
 ON "hosted_account_group_membership"
 FOR EACH ROW
 EXECUTE FUNCTION capture_hosted_family_usage_plan_transition();
+
+COMMIT;

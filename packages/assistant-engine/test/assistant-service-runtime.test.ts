@@ -655,7 +655,6 @@ describe("assistant usage recording seam", () => {
         },
       },
       providerRequestAcceptedInputIds: ["assistant_input_a", "assistant_input_b"],
-      occurredAt: "2026-04-08T09:59:58.000Z",
       providerResult: {
         ...createProviderResult(),
         usageAttribution: {
