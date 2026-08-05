@@ -89,6 +89,37 @@ describe("hosted runtime latency health", () => {
     });
   });
 
+  it("attributes slow completed replies to the dominant measured boundary", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:59:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:50.000Z",
+          providerStartAt: "2026-07-26T15:59:05.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:58:50.000Z",
+          providerStartAt: "2026-07-26T15:58:40.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:57:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:57:50.000Z",
+          providerStartAt: "2026-07-26T15:56:59.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      invalidChronologyCount: 1,
+      recentSlowInitialResponseCount: 3,
+      recentSlowPreProviderDominantCount: 1,
+      recentSlowProviderExecutionDominantCount: 1,
+      recentSlowUnknownBoundaryCount: 1,
+    });
+  });
+
   it("counts one unresolved turn for traces sharing a provider request", () => {
     const rows = [
       "2026-07-26T15:58:00.000Z",
@@ -225,7 +256,31 @@ describe("hosted runtime latency health", () => {
       anomalous: true,
       invalidChronologyCount: 0,
       oldestUnresolvedAgeMs: 6 * 60_000,
+      unresolvedCheckpointAcknowledgementCount: 1,
+      unresolvedMissingTerminalEvidenceCount: 0,
       unresolvedReplyCount: 1,
+    });
+  });
+
+  it("separates missing terminal evidence from overdue checkpoint acknowledgement", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:57:00.000Z",
+          checkpointPublicationExpectedBy: "2026-07-26T15:59:59.999Z",
+          terminalNonReplyCommittedAt: "2026-07-26T15:57:10.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      unresolvedCheckpointAcknowledgementCount: 1,
+      unresolvedMissingTerminalEvidenceCount: 1,
+      unresolvedReplyCount: 2,
     });
   });
 
@@ -509,6 +564,7 @@ describe("hosted runtime latency alert monitor", () => {
       latencyRow({
         acceptedAt: "2026-07-26T15:58:00.000Z",
         deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+        providerStartAt: "2026-07-26T15:58:05.000Z",
       }),
     ]);
     const sendAlert = vi.fn(async (_input: AlertSendInput) => {
@@ -548,8 +604,36 @@ describe("hosted runtime latency alert monitor", () => {
       to: ["operator@example.test"],
     }));
     const sentMessage = sendAlert.mock.calls[0]?.[0].text;
+    expect(sentMessage).toContain(
+      "Slow boundary: 1 provider/assistant execution dominant",
+    );
     expect(sentMessage).not.toContain("operator@example.test");
     expect(sentMessage).not.toContain("resend-email-1");
+  });
+
+  it("names overdue terminal checkpoint acknowledgement in the alert", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+        checkpointPublicationExpectedBy: "2026-07-26T15:59:59.999Z",
+        terminalNonReplyCommittedAt: "2026-07-26T15:58:05.000Z",
+      }),
+    ]);
+    const sendAlert = vi.fn(async (_input: AlertSendInput) => {
+      void _input;
+      return { providerMessageId: "resend-email-checkpoint" };
+    });
+
+    await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+
+    expect(sendAlert.mock.calls[0]?.[0].text).toContain(
+      "Unresolved boundary: 1 terminal non-reply lacks durable checkpoint acknowledgement",
+    );
   });
 
   it("rate-limits a failed alert before retrying the exact provider effect", async () => {

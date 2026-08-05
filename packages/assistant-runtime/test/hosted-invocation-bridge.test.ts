@@ -856,6 +856,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     ]) {
       const entry = entries.find((candidate) => candidate.eventCode === eventCode);
       expect(entry?.redactedJson).toMatchObject({
+        handledConversationMailboxItemCount: 1,
         idleCheckpointTrigger: "shutdown_signal",
         runtimeWakePendingAtCheckpoint: false,
       });

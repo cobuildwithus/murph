@@ -50,6 +50,9 @@ Conversation import and handling progress remain distinct. The imported
 watermark records local staging; terminal inputs stay in the hosted pending
 index until an accepted idle checkpoint stamps their exact Web-owned mailbox
 rows and a later fetch confirms the resulting contiguous consumed floor. The
+checkpoint lifecycle logs expose the bounded exact-item candidate count but
+never the item identifiers, allowing acknowledgement gaps to be localized
+without turning observability into correctness state. The
 v2 index rotates capped exact-id checkpoint batches with a snapshot-persisted
 cursor, so an earlier unresolved sequence cannot starve later terminal rows.
 V1 migration preserves recorded pending IDs and recovers omitted events only

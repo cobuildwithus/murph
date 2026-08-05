@@ -876,6 +876,8 @@ async function writeHostedCheckpointSnapshotLifecycleLog(input: {
 
   const redactedJson: HostedRuntimeRedactedJson = {
     checkpointReason: input.request.reason,
+    handledConversationMailboxItemCount:
+      input.request.handledConversationMailboxItemIds?.length ?? 0,
     ...(input.request.idleCheckpointTrigger
       ? { idleCheckpointTrigger: input.request.idleCheckpointTrigger }
       : {}),
@@ -1132,6 +1134,8 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   const redactedJson: HostedRuntimeRedactedJson = {
     browserVaultReplicaState: "omitted",
     checkpointReason: input.request.reason,
+    handledConversationMailboxItemCount:
+      input.request.handledConversationMailboxItemIds?.length ?? 0,
     ...(input.request.idleCheckpointTrigger
       ? { idleCheckpointTrigger: input.request.idleCheckpointTrigger }
       : {}),
