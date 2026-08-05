@@ -110,6 +110,9 @@ import {
   readHostedLinqIncomingLineState,
 } from "./linq-line-store";
 import {
+  readHostedLinqGroupLineRecoveryAuthorityTx,
+} from "./linq-delivery-store";
+import {
   resolveHostedLinqSignupWelcomeDailyLimit,
 } from "./linq-routing-policy";
 import {
@@ -123,9 +126,16 @@ import {
 } from "./contact-privacy";
 import { normalizePhoneNumber } from "./phone";
 import {
-  ensureHostedThreadContainerRouteTx,
   refreshHostedThreadContainerDeliveryRouteTx,
 } from "../hosted-routing/thread-container-service";
+import {
+  ensureHostedPreparedLinqThreadContainerRouteTx,
+} from "../hosted-groups/prepared-thread-container";
+import {
+  readHostedPendingGroupSetup,
+  readHostedPendingGroupSetupCandidatesForParticipantsTx,
+  selectHostedPendingGroupSetupCandidate,
+} from "../hosted-groups/pending-group-setup";
 import type {
   HostedLinqFirstContactAdmissionDecision,
   HostedLinqFirstContactAdmissionRequest,
@@ -161,7 +171,6 @@ import {
   type HostedLinqParticipantIdentity,
 } from "./linq-participant-contact";
 import {
-  bindArmedHostedUsageReferralToNewContainerTx,
   observeHostedUsageReferralInboundTx,
 } from "../hosted-growth/usage-referral";
 import {
@@ -801,6 +810,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
   firstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecision | null;
   instantStartAllowed?: boolean;
+  pendingGroupParticipantMemberIds?: readonly string[] | null;
+  pendingGroupRosterUnavailable?: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -836,46 +847,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
     threadId: summary.chatId,
   });
   if (explicitThreadRoute) {
-    let routeAccountLookupKey = accountLookupKey;
-    let sourceMailboxConsumedAt: Date | null = null;
-    if (requiresHostedThreadDeliveryRouteRefresh({
-      accountLookupKey,
-      route: explicitThreadRoute,
-      threadId: summary.chatId,
-    })) {
-      if (!accountLookupKey) {
-        throw new TypeError(
-          "Hosted Linq thread route refresh requires the current account lookup key.",
-        );
-      }
-      const refreshedRoute = await refreshHostedThreadContainerDeliveryRouteTx({
-        accountLookupKey,
-        accountLookupKeys: threadRouteAccountLookupKeys,
-        mailboxDedupeKey: input.event.event_id,
-        prisma: input.prisma,
-        route: explicitThreadRoute,
-        threadId: summary.chatId,
-      });
-      if (refreshedRoute.deliveryRoute?.channel === "linq") {
-        routeAccountLookupKey = refreshedRoute.deliveryRoute.accountLookupKey;
-      }
-      sourceMailboxConsumedAt = refreshedRoute.demotedMailboxConsumedAt;
-    } else if (isHostedLinqGroupChat(messageEvent)) {
-      const demotion = await demoteHostedMemberLinqGroupChatBindingsTx({
-        linqChatId: summary.chatId,
-        mailboxDedupeKey: input.event.event_id,
-        prisma: input.prisma,
-      });
-      sourceMailboxConsumedAt = demotion.mailboxConsumedAt;
-    }
-    return planHostedLinqExplicitThreadRouteWebhook({
+    return planHostedLinqExistingThreadRouteWebhook({
       ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
-      accountLookupKey: routeAccountLookupKey,
+      accountLookupKey,
+      accountLookupKeys: threadRouteAccountLookupKeys,
       context,
       event: input.event,
       prisma: input.prisma,
       route: explicitThreadRoute,
-      sourceMailboxConsumedAt,
     });
   }
 
@@ -885,6 +864,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
       context,
       event: input.event,
       firstContactAdmissionDecision: input.firstContactAdmissionDecision,
+      participantMemberIds: input.pendingGroupParticipantMemberIds ?? [],
+      rosterUnavailable: input.pendingGroupRosterUnavailable ?? false,
       prisma: input.prisma,
       requireFirstContactAdmission: input.requireFirstContactAdmission,
       threadRouteAccountLookupKeys,
@@ -2189,6 +2170,70 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
   };
 }
 
+/**
+ * Canonical convergence boundary for a route that already exists by thread
+ * identity. It recovers the stored delivery account before building the
+ * mailbox wake, so another Linq line cannot fork conversation or delivery
+ * authority.
+ */
+async function planHostedLinqExistingThreadRouteWebhook(input: {
+  accountLookupKey: string | null;
+  accountLookupKeys: readonly string[];
+  affirmativeReaction?: boolean;
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  event: HostedLinqWebhookEvent;
+  prisma: Prisma.TransactionClient;
+  resolvedParticipantMemberId?: string;
+  route: HostedThreadRouteSnapshot;
+}): Promise<HostedOnboardingLinqDirectPlan> {
+  const { messageEvent, summary } = input.context;
+  let routeAccountLookupKey = input.accountLookupKey;
+  let sourceMailboxConsumedAt: Date | null = null;
+  if (requiresHostedThreadDeliveryRouteRefresh({
+    accountLookupKey: input.accountLookupKey,
+    route: input.route,
+    threadId: summary.chatId,
+  })) {
+    if (!input.accountLookupKey) {
+      throw new TypeError(
+        "Hosted Linq thread route refresh requires the current account lookup key.",
+      );
+    }
+    const refreshedRoute = await refreshHostedThreadContainerDeliveryRouteTx({
+      accountLookupKey: input.accountLookupKey,
+      accountLookupKeys: input.accountLookupKeys,
+      mailboxDedupeKey: input.event.event_id,
+      prisma: input.prisma,
+      route: input.route,
+      threadId: summary.chatId,
+    });
+    if (refreshedRoute.deliveryRoute?.channel === "linq") {
+      routeAccountLookupKey = refreshedRoute.deliveryRoute.accountLookupKey;
+    }
+    sourceMailboxConsumedAt = refreshedRoute.demotedMailboxConsumedAt;
+  } else if (isHostedLinqGroupChat(messageEvent)) {
+    const demotion = await demoteHostedMemberLinqGroupChatBindingsTx({
+      linqChatId: summary.chatId,
+      mailboxDedupeKey: input.event.event_id,
+      prisma: input.prisma,
+    });
+    sourceMailboxConsumedAt = demotion.mailboxConsumedAt;
+  }
+
+  return planHostedLinqExplicitThreadRouteWebhook({
+    ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
+    accountLookupKey: routeAccountLookupKey,
+    context: input.context,
+    event: input.event,
+    prisma: input.prisma,
+    ...(input.resolvedParticipantMemberId
+      ? { resolvedParticipantMemberId: input.resolvedParticipantMemberId }
+      : {}),
+    route: input.route,
+    sourceMailboxConsumedAt,
+  });
+}
+
 async function planHostedLinqExplicitThreadRouteWebhook(input: {
   accountLookupKey?: string | null;
   affirmativeReaction?: boolean;
@@ -2620,20 +2665,23 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "suspended-member";
 
 /**
- * Group chats with no explicit thread route stay ignored unless the sender is
- * an active member and the recipient resolves to either an assignable Murph
- * Linq line or that member's exact assigned AT_RISK line; only then is the
- * dedicated thread-container runtime provisioned and the triggering message
- * routed into it. A hard-blocked assigned line never provisions the group: it
- * plans a private recovery prompt to add a healthy backup number instead. The
- * webhook recipient alone is never line authority. Existing routes are handled
- * before this admission path.
+ * An unbound group can be admitted by either one roster-matched pending setup
+ * or the existing active-sender fallback when the recipient line is
+ * assignable. An AT_RISK or HARD_BLOCKED line retains the stricter recovery
+ * boundary: only its exact active assigned sender may proceed, and a hard
+ * block plans the private backup-number prompt instead of provisioning.
+ * Once that private recovery is provider-correlated, its exact live setup can
+ * be selected from the current roster independently of who speaks first on
+ * the replacement line. The webhook recipient alone is never line authority.
+ * Existing routes are handled before this admission path.
  */
 async function planHostedLinqGroupChatWebhook(input: {
   affirmativeReaction?: boolean;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
   firstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecision | null;
+  participantMemberIds: readonly string[];
+  rosterUnavailable: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
   threadRouteAccountLookupKeys: readonly string[];
@@ -2724,6 +2772,8 @@ async function planHostedLinqGroupChatWebhook(input: {
       })
     : null;
   const senderAccessAllowed = senderAccess?.allowed ?? false;
+  const activeSenderMemberId = senderAccessAllowed ? sender?.id ?? null : null;
+  const inactiveSender = sender !== null && !senderAccessAllowed;
 
   if (senderSuspended) {
     return ignored("suspended-member", senderIdentityMatch);
@@ -2738,7 +2788,6 @@ async function planHostedLinqGroupChatWebhook(input: {
   ) {
     return ignored("sender-inactive", senderIdentityMatch);
   }
-
   const lineState = await readHostedLinqIncomingLineState({
     phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
     prisma: input.prisma,
@@ -2772,9 +2821,15 @@ async function planHostedLinqGroupChatWebhook(input: {
       "group-chat-line-unavailable",
     );
   }
-
+  if (!("phoneNumberLookupKey" in lineState)) {
+    return ignored(
+      "recipient-line-authority-unresolved",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
   if (
-    (!sender || !senderAccessAllowed)
+    !activeSenderMemberId
     && hostedLinqFirstContactContainsBlockedContent({
       event: messageEvent,
       participantContact,
@@ -2782,9 +2837,53 @@ async function planHostedLinqGroupChatWebhook(input: {
   ) {
     return ignored("blocked-first-contact-content", senderIdentityMatch);
   }
-
-  if (!sender || !senderAccessAllowed) {
-    if (lineState.kind !== "assignable") {
+  if (
+    (
+      lineState.kind === "at_risk"
+      || lineState.kind === "hard_blocked"
+    )
+    && !isHostedLinqIMessageService(messageEvent.data.service)
+  ) {
+    return ignored(
+      "recipient-line-service-unavailable",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  let pendingSetupParticipantMemberIds: readonly string[];
+  let pendingSetupRecipientPhoneLookupKeys =
+    input.threadRouteAccountLookupKeys;
+  let requiredPendingSetupCandidateId: string | null = null;
+  if (lineState.kind === "at_risk" || lineState.kind === "hard_blocked") {
+    if (!activeSenderMemberId) {
+      return ignored(
+        inactiveSender ? "sender-inactive" : "sender-identity-unresolved",
+        senderIdentityMatch,
+        "group-chat-line-unavailable",
+      );
+    }
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: activeSenderMemberId,
+      prisma: input.prisma,
+    });
+    if (
+      !(await readHostedRuntimeAiAccessDecision({
+        memberId: activeSenderMemberId,
+        prisma: input.prisma,
+      })).allowed
+    ) {
+      return ignored("sender-inactive", senderIdentityMatch);
+    }
+    const senderAuthority = readHostedLinqHomeLineAuthority(
+      await readHostedMemberRoutingState({
+        memberId: activeSenderMemberId,
+        prisma: input.prisma,
+      }),
+    );
+    if (
+      senderAuthority.kind === "none"
+      || senderAuthority.recipientPhone !== incomingRecipientPhone
+    ) {
       return ignored(
         "recipient-line-not-assigned",
         senderIdentityMatch,
@@ -2792,10 +2891,148 @@ async function planHostedLinqGroupChatWebhook(input: {
       );
     }
 
-    // A setup link is a reply to a stranger, so it goes through the same
-    // first-contact admission gate that screens unknown direct senders rather
-    // than running a second, looser policy. The service layer acts on the
-    // returned request and re-plans with the decision.
+    if (lineState.kind === "hard_blocked") {
+      const pendingSetup = await readHostedPendingGroupSetup({
+        ownerMemberId: activeSenderMemberId,
+        prisma: input.prisma,
+      });
+      const pendingGroupSetupId = pendingSetup
+        && pendingSetup.armedAt <= new Date(occurredAt)
+        && pendingSetup.recipientPhoneLookupKey
+          === lineState.phoneNumberLookupKey
+        ? pendingSetup.id
+        : null;
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildGroupLineRecoveryResponse({
+          incomingRecipientPhone,
+          memberId: activeSenderMemberId,
+          occurredAt,
+          participantContact: {
+            kind: participantContact.kind,
+            value: participantContact.value,
+          },
+          pendingGroupSetupId,
+          sourceEventId: input.event.event_id,
+          threadId: summary.chatId,
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+          existingMemberMatch: senderIdentityMatch,
+          reason: "recipient-line-hard-blocked",
+          routeStage: "new-group-line-recovery-planned",
+        }),
+      );
+    }
+    pendingSetupParticipantMemberIds = [activeSenderMemberId];
+  } else {
+    if (input.rosterUnavailable) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_PENDING_GROUP_ROSTER_UNAVAILABLE",
+        httpStatus: 502,
+        message:
+          "Linq group roster authority is temporarily unavailable.",
+        retryable: true,
+      });
+    }
+    const recoveryParticipantMemberIds = activeSenderMemberId
+      ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
+      : input.participantMemberIds;
+    const recoveredPendingSetup = recoveryParticipantMemberIds.length > 0
+      ? await resolveHostedLinqRecoveredPendingGroupSetup({
+          occurredAt: new Date(occurredAt),
+          participantMemberIds: recoveryParticipantMemberIds,
+          recoveredRecipientPhoneLookupKey: lineState.phoneNumberLookupKey,
+          senderMemberId: activeSenderMemberId,
+          threadId: summary.chatId,
+          tx: input.prisma,
+        })
+      : null;
+    if (recoveredPendingSetup) {
+      pendingSetupParticipantMemberIds = [
+        recoveredPendingSetup.ownerMemberId,
+      ];
+      pendingSetupRecipientPhoneLookupKeys = [
+        ...new Set([
+          ...input.threadRouteAccountLookupKeys,
+          recoveredPendingSetup.recipientPhoneLookupKey,
+        ]),
+      ];
+      requiredPendingSetupCandidateId = recoveredPendingSetup.id;
+    } else {
+      pendingSetupParticipantMemberIds = activeSenderMemberId
+        ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
+        : input.participantMemberIds;
+    }
+  }
+
+  let createdContainerMemberId: string | null = null;
+  let demotedMailboxConsumedAt: Date | null = null;
+  let routeEnsured = false;
+  try {
+    const preparedResult = await ensureHostedPreparedLinqThreadContainerRouteTx({
+      accountLookupKey,
+      accountLookupKeys: input.threadRouteAccountLookupKeys,
+      fallbackOwnerMemberId: activeSenderMemberId,
+      linqService: messageEvent.data.service ?? null,
+      mailboxDedupeKey: input.event.event_id,
+      occurredAt: new Date(occurredAt),
+      participantMemberIds: pendingSetupParticipantMemberIds,
+      recipientPhoneLookupKeys: pendingSetupRecipientPhoneLookupKeys,
+      requiredPendingSetupCandidateId,
+      senderMemberId: activeSenderMemberId,
+      threadId: summary.chatId,
+      tx: input.prisma,
+    });
+    if (preparedResult.kind !== "ensured") {
+      if (
+        preparedResult.pendingSetupResolution
+          === "recipient_line_unmanaged"
+      ) {
+        return ignored("recipient-line-unmanaged", senderIdentityMatch);
+      }
+      // A concurrent setup claimant may have committed this route while the
+      // row lock was held. The canonical re-read below decides whether this
+      // distinct message can append to that winner.
+    } else {
+      const ensureResult = preparedResult.ensure;
+      routeEnsured = true;
+      createdContainerMemberId = ensureResult.created
+        ? ensureResult.containerMemberId
+        : null;
+      demotedMailboxConsumedAt = ensureResult.demotedMailboxConsumedAt;
+    }
+  } catch (error) {
+    if (
+      !isHostedOnboardingError(error)
+      || !HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES.has(error.code)
+    ) {
+      throw error;
+    }
+    // A concurrent first message may have bound this thread while this webhook
+    // was in flight (pooled lines allow two members of the same group to race).
+    // Fall through to the re-read and converge on the committed route instead
+    // of dropping an authorized inbound; a missing route still fails closed.
+  }
+
+  const route = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.prisma,
+    threadId: summary.chatId,
+  });
+  if (!route) {
+    if (activeSenderMemberId || requiredPendingSetupCandidateId) {
+      return ignored("provision-unavailable", senderIdentityMatch);
+    }
+    if (lineState.kind !== "assignable") {
+      return ignored(
+        inactiveSender ? "sender-inactive" : "sender-identity-unresolved",
+        senderIdentityMatch,
+        "group-chat-line-unavailable",
+      );
+    }
+
+    // Only offer ordinary setup after the roster-authorized prepared-owner
+    // path has conclusively found no route. Unknown senders use the same
+    // first-contact admission gate as direct conversations.
     if (
       sender === null
       && input.requireFirstContactAdmission === true
@@ -2819,9 +3056,6 @@ async function planHostedLinqGroupChatWebhook(input: {
       );
     }
 
-    const reason = sender
-      ? "sender-inactive"
-      : "sender-identity-unresolved";
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildGroupSetupRequiredResponse({
         chatId: summary.chatId,
@@ -2838,135 +3072,39 @@ async function planHostedLinqGroupChatWebhook(input: {
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
         existingMemberActive: false,
         existingMemberMatch: senderIdentityMatch,
-        reason,
+        reason: inactiveSender
+          ? "sender-inactive"
+          : "sender-identity-unresolved",
         routeStage: "new-group-setup-planned",
       }),
     );
   }
-  if (
-    (
-      lineState.kind === "at_risk"
-      || lineState.kind === "hard_blocked"
-    )
-    && !isHostedLinqIMessageService(messageEvent.data.service)
-  ) {
-    return ignored(
-      "recipient-line-service-unavailable",
-      senderIdentityMatch,
-      "group-chat-line-unavailable",
-    );
-  }
-  if (lineState.kind === "at_risk" || lineState.kind === "hard_blocked") {
-    await lockHostedMemberRow(input.prisma, sender.id);
-    await acquireHostedMemberHomeLinqRouteLockTx({
-      memberId: sender.id,
-      prisma: input.prisma,
-    });
-    if (
-      !(await readHostedRuntimeAiAccessDecision({
-        memberId: sender.id,
-        prisma: input.prisma,
-      })).allowed
-    ) {
-      return ignored("sender-inactive", senderIdentityMatch);
-    }
-    const senderAuthority = readHostedLinqHomeLineAuthority(
-      await readHostedMemberRoutingState({
-        memberId: sender.id,
-        prisma: input.prisma,
-      }),
-    );
-    if (
-      senderAuthority.kind === "none"
-      || senderAuthority.recipientPhone !== incomingRecipientPhone
-    ) {
-      return ignored(
-        "recipient-line-not-assigned",
-        senderIdentityMatch,
-        "group-chat-line-unavailable",
-      );
-    }
 
-    if (lineState.kind === "hard_blocked") {
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildGroupLineRecoveryResponse({
-          incomingRecipientPhone,
-          memberId: sender.id,
-          occurredAt,
-          participantContact: {
-            kind: participantContact.kind,
-            value: participantContact.value,
-          },
-          sourceEventId: input.event.event_id,
-          threadId: summary.chatId,
-        }),
-        buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-          existingMemberMatch: senderIdentityMatch,
-          reason: "recipient-line-hard-blocked",
-          routeStage: "new-group-line-recovery-planned",
-        }),
-      );
-    }
-  }
-
-  let createdContainerMemberId: string | null = null;
-  let demotedMailboxConsumedAt: Date | null = null;
-  try {
-    const ensureResult = await ensureHostedThreadContainerRouteTx({
-      accountLookupKey,
-      accountLookupKeys: input.threadRouteAccountLookupKeys,
-      channel: "linq",
-      mailboxDedupeKey: input.event.event_id,
-      occurredAt: new Date(occurredAt),
-      ownerMemberId: sender.id,
-      prisma: input.prisma,
-      threadId: summary.chatId,
-    });
-    createdContainerMemberId = ensureResult.created
-      ? ensureResult.containerMemberId
-      : null;
-    if (ensureResult.created) {
-      await bindArmedHostedUsageReferralToNewContainerTx({
-        occurredAt: new Date(occurredAt),
-        ownerMemberId: sender.id,
-        targetChannel: "linq",
-        targetLinqService: messageEvent.data.service ?? null,
-        targetContainerMemberId: ensureResult.containerMemberId,
-        tx: input.prisma,
+  const plan = routeEnsured
+    ? await planHostedLinqExplicitThreadRouteWebhook({
+        ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
+        accountLookupKey,
+        context: input.context,
+        event: input.event,
+        prisma: input.prisma,
+        ...(activeSenderMemberId
+          ? { resolvedParticipantMemberId: activeSenderMemberId }
+          : {}),
+        route,
+        sourceMailboxConsumedAt: demotedMailboxConsumedAt,
+      })
+    : await planHostedLinqExistingThreadRouteWebhook({
+        ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
+        accountLookupKey,
+        accountLookupKeys: input.threadRouteAccountLookupKeys,
+        context: input.context,
+        event: input.event,
+        prisma: input.prisma,
+        ...(activeSenderMemberId
+          ? { resolvedParticipantMemberId: activeSenderMemberId }
+          : {}),
+        route,
       });
-    }
-    demotedMailboxConsumedAt = ensureResult.demotedMailboxConsumedAt;
-  } catch (error) {
-    if (
-      !isHostedOnboardingError(error)
-      || !HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES.has(error.code)
-    ) {
-      throw error;
-    }
-    // A concurrent first message may have bound this thread while this webhook
-    // was in flight (pooled lines allow two members of the same group to race).
-    // Fall through to the re-read and converge on the committed route instead
-    // of dropping an authorized inbound; a missing route still fails closed.
-  }
-
-  const route = await readHostedThreadRouteByThreadIdentity({
-    channel: "linq",
-    prisma: input.prisma,
-    threadId: summary.chatId,
-  });
-  if (!route) {
-    return ignored("provision-unavailable", senderIdentityMatch);
-  }
-
-  const plan = await planHostedLinqExplicitThreadRouteWebhook({
-    ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
-    context: input.context,
-    event: input.event,
-    prisma: input.prisma,
-    resolvedParticipantMemberId: sender.id,
-    route,
-    sourceMailboxConsumedAt: demotedMailboxConsumedAt,
-  });
   if (createdContainerMemberId && route.containerMemberId === createdContainerMemberId) {
     return {
       ...plan,
@@ -3676,6 +3814,102 @@ function isLocalHostedDomainRootAuthorityMismatch(error: unknown): boolean {
     && error instanceof Error
     && error.message === "Hosted domain root envelope authority signature verification failed."
   );
+}
+
+export async function resolveHostedLinqRecoveredPendingGroupSetup(input: {
+  occurredAt: Date;
+  participantMemberIds: readonly string[];
+  recoveredRecipientPhoneLookupKey: string;
+  senderMemberId?: string | null;
+  threadId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<{
+  id: string;
+  ownerMemberId: string;
+  recipientPhoneLookupKey: string;
+} | null> {
+  const candidates =
+    await readHostedPendingGroupSetupCandidatesForParticipantsTx({
+      occurredAt: input.occurredAt,
+      participantMemberIds: input.participantMemberIds,
+      tx: input.tx,
+    });
+  const recoveredCandidates: typeof candidates = [];
+  for (const candidate of candidates) {
+    const authority = readHostedLinqHomeLineAuthority(
+      await readHostedMemberRoutingState({
+        memberId: candidate.ownerMemberId,
+        prisma: input.tx,
+      }),
+    );
+    if (authority.kind === "none") {
+      continue;
+    }
+    const originalRecipientPhone = normalizePhoneNumber(
+      authority.recipientPhone,
+    );
+    if (!originalRecipientPhone) {
+      continue;
+    }
+    const originalRecipientPhoneLookupKeys =
+      createHostedPhoneLookupKeyReadCandidates(originalRecipientPhone);
+    if (
+      !originalRecipientPhoneLookupKeys.includes(
+        candidate.recipientPhoneLookupKey,
+      )
+      || originalRecipientPhoneLookupKeys.includes(
+        input.recoveredRecipientPhoneLookupKey,
+      )
+    ) {
+      continue;
+    }
+    const recoveryAuthority =
+      await readHostedLinqGroupLineRecoveryAuthorityTx({
+        memberId: candidate.ownerMemberId,
+        occurredAt: input.occurredAt,
+        originalRecipientPhone,
+        pendingGroupSetupId: candidate.id,
+        prisma: input.tx,
+        recoveredRecipientPhoneLookupKey:
+          input.recoveredRecipientPhoneLookupKey,
+        setupArmedAt: candidate.armedAt,
+        threadId: input.threadId,
+      });
+    if (recoveryAuthority === "in_flight") {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT",
+        httpStatus: 503,
+        message:
+          "The group line recovery message is still recovering. Retry this webhook after the current delivery attempt completes.",
+        retryable: true,
+      });
+    }
+    if (recoveryAuthority !== "accepted") {
+      continue;
+    }
+    recoveredCandidates.push(candidate);
+  }
+  const selection = selectHostedPendingGroupSetupCandidate({
+    candidates: recoveredCandidates,
+    senderMemberId: input.senderMemberId,
+  });
+  if (selection.kind === "none") {
+    return null;
+  }
+  const selected = recoveredCandidates.find(
+    (candidate) =>
+      candidate.id === selection.candidate.id
+      && candidate.ownerMemberId === selection.candidate.ownerMemberId,
+  );
+  if (!selected) {
+    return null;
+  }
+
+  return {
+    id: selected.id,
+    ownerMemberId: selected.ownerMemberId,
+    recipientPhoneLookupKey: selected.recipientPhoneLookupKey,
+  };
 }
 
 function isHostedLinqGroupChat(messageEvent: HostedLinqMessageReceivedEvent): boolean {

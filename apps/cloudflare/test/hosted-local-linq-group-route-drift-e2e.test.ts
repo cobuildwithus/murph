@@ -135,13 +135,13 @@ describe("hosted local Linq group route drift e2e", () => {
     expect(firstSend.authorizationStatus).toBe("hosted-sentinel");
 
     const provisionReads = await requireLinqStub().waitForMatchingRequestCount({
-      expectedCount: canonicalReadBaseline + 2,
+      expectedCount: canonicalReadBaseline + 1,
       expectedMethod: "GET",
       expectedPath: canonicalChatPath,
       scenario: requireScenario(),
       userId: ownerMemberId,
     });
-    expect(provisionReads.slice(canonicalReadBaseline)).toHaveLength(2);
+    expect(provisionReads.slice(canonicalReadBaseline)).toHaveLength(1);
     expect(provisionReads.slice(canonicalReadBaseline).every((request) =>
       request.authorizationStatus === "expected"
     )).toBe(true);

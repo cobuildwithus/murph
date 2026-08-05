@@ -1418,6 +1418,54 @@ participant checks in its transaction. New thread containers and members whose
 roots or active access are not yet established remain on the transaction-owned
 provisioning path.
 
+A private accepted text turn may arm one expiring
+`HostedPendingGroupSetup` for a person member's current managed Linq line. The
+row is only a one-use transfer envelope: it stores the owner, blinded line key,
+timestamps, and one encrypted strict-version payload containing optional sparse
+existing assistant-style fields and bounded explicit room-context Markdown. It
+stores no plaintext setup, chat id, roster, provider actor, message, contact
+label, or participant handle. Before the transaction for the first inbound on
+an unbound Linq group, Web performs one bounded current-chat read and resolves
+at most 32 active non-Murph roster handles to member ids. Inside the existing
+route transaction, a lone roster-matched intent wins; if several match, only
+the current sender's own intent breaks the tie. Otherwise the canonical
+first-active-sender fallback continues when the provider roster read completed.
+An unavailable roster leaves recovery-backed ownership indeterminate and
+returns a typed retry before route creation; a completed empty or oversized
+roster cannot match another member's setup but may retain the active-sender
+fallback. After the request-local existing-route and roster preflight, explicit
+suspension or health-data-consent withdrawal prevents route creation and setup
+outreach. Other sender inactivity or unresolved sender identity disqualifies
+only the fallback; it does not veto a distinct active roster-matched owner. Only
+after the prepared-route boundary returns no route may an unknown or inactive
+non-withdrawn sender receive the existing group-setup handoff. When first-contact
+admission enforcement is enabled, an unknown sender must pass that gate before
+setup outreach. The setup must cover the provider event time and remain unexpired
+at processing
+time. The selected row stays locked through
+`ensureHostedThreadContainerRouteTx`, which remains the only route and
+`ownerMemberId` owner, and is deleted only when that transaction creates the
+route. Only a newly created route applies sparse style through the synthetic
+member's existing preference owner and carries explicit room context on the
+existing activation wake to initialize the fixed group-room-model page exactly
+once before conversation work. Existing-route convergence and transaction
+rollback leave the envelope unchanged without compensation; a concurrent loser
+re-reads the canonical route and appends its distinct message there. Unreadable
+or future encrypted payloads are consumed as unavailable optional setup so they
+cannot block an accepted group message. Expiry is query-time authority, and
+member deletion removes the intent by foreign-key cascade. Provider add-actor
+fields are not ownership authority. For a hard-blocked-line recovery, the
+existing delivery attempt is the retry owner: transport must durably record its
+provider-accepted milestone before reporting recovery success, and an exact
+uncorrelated attempt makes replacement-line admission retry rather than fall
+through to first-speaker ownership. That exact pinned recovery alone bypasses
+the generic pre-provider claim lease: it replays immediately with the same
+provider idempotency key, compares and advances the row's existing `updatedAt`
+version, and preserves the original `attemptedAt` as the proof that recovery
+preceded the replacement-line event. An uncorrelated recovery provider error
+surfaces without locally settling this shared row; accepted correlation or
+provider-correlated terminal evidence remains the only settlement authority.
+
 For usage-credit Checkout, one `created` purchase row persists before Stripe
 I/O and, together with the single purchase-status lifecycle and stable
 purchase-derived idempotency key, permits identical creation retries for a

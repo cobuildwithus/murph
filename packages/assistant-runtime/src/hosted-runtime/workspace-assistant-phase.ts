@@ -266,6 +266,9 @@ const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-updat
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
   "apply-member-preferences",
 ] as const;
+const HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS = [
+  "initialize-group-room-model",
+] as const;
 const HOSTED_FOREGROUND_CAUSAL_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
   "continue-assistant-ask",
@@ -645,6 +648,9 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "leave_membership":
     case "post_disclosure_request":
     case "revoke_disclosure_grant":
+    case "prepare_next_group":
+    case "read_next_group":
+    case "cancel_next_group":
     case "revoke_own_email_share":
       return {
         action: request.action,
@@ -1988,6 +1994,29 @@ export async function runHostedWorkspaceAssistantPhase(
         }),
         deviceSyncMaintenanceRan,
       );
+
+    const groupRoomModelInitialization =
+      hasFreshConversationInput
+        ? await runRequiredGroupRoomModelInitializationPhase({
+          executionContext,
+          input,
+        })
+        : {
+            continueAssistantLane: true,
+            result: null,
+          };
+    if (groupRoomModelInitialization.result) {
+      if (!groupRoomModelInitialization.continueAssistantLane) {
+        return mergeContinuingSystemMailboxResult(
+          groupRoomModelInitialization.result,
+        );
+      }
+
+      continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
+        continuingSystemMailboxResult,
+        groupRoomModelInitialization.result,
+      );
+    }
 
     const memberPreferencesPrePlanningStartedAt = Date.now();
     const memberPreferencesPrePlanning =
@@ -4534,6 +4563,100 @@ async function runPrePlanningSystemMailboxPhase(input: {
         },
       }),
     ),
+  };
+}
+
+async function runRequiredGroupRoomModelInitializationPhase(input: {
+  executionContext: AssistantExecutionContext;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<{
+  continueAssistantLane: boolean;
+  result: HostedWorkspaceRunnerAssistantPhaseResult | null;
+}> {
+  const now = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
+  const pendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
+    allowedRouteActions: HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS,
+    now: () => now,
+    vaultRoot: input.input.restored.vaultRoot,
+  });
+  if (!pendingWake.at) {
+    return {
+      continueAssistantLane: true,
+      result: null,
+    };
+  }
+  if (!hostedAssistantPhaseWakeIsDueAt(pendingWake.at, now)) {
+    return {
+      continueAssistantLane: false,
+      result: {
+        nextWakeAt: pendingWake.at,
+        nextWakeReason: "assistant",
+        progressed: false,
+        redactedStatus: {
+          hostedGroupRoomModelInitializationPending: 1,
+        },
+      },
+    };
+  }
+
+  const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
+    allowedRouteActions: HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS,
+    executionContext: input.executionContext,
+    now: () => now,
+    operatorHomeRoot: input.input.restored.operatorHomeRoot,
+    runtime: input.input.runtime,
+    runtimeEnv: input.input.runtimeEnv,
+    vaultRoot: input.input.restored.vaultRoot,
+  });
+  if (!preparation) {
+    const currentPendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
+      allowedRouteActions: HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS,
+      now: () => now,
+      vaultRoot: input.input.restored.vaultRoot,
+    });
+    if (currentPendingWake.at) {
+      return {
+        continueAssistantLane: false,
+        result: {
+          nextWakeAt: currentPendingWake.at,
+          nextWakeReason: "assistant",
+          progressed: false,
+          redactedStatus: {
+            hostedGroupRoomModelInitializationPending: 1,
+          },
+        },
+      };
+    }
+    return {
+      continueAssistantLane: true,
+      result: null,
+    };
+  }
+  if (preparation.status === "retryable_failed") {
+    return {
+      continueAssistantLane: false,
+      result: {
+        checkpointReason: "system_mailbox_receipt",
+        nextWakeAt: preparation.nextWakeAt,
+        nextWakeReason: "assistant",
+        progressed: true,
+        redactedStatus: {
+          hostedGroupRoomModelInitializationErrorCode: preparation.errorCode,
+          hostedGroupRoomModelInitializationRetryableFailed: 1,
+        },
+      },
+    };
+  }
+
+  return {
+    continueAssistantLane: true,
+    result: {
+      checkpointReason: "system_mailbox_receipt",
+      progressed: true,
+      redactedStatus: {
+        hostedGroupRoomModelInitializationProcessed: 1,
+      },
+    },
   };
 }
 

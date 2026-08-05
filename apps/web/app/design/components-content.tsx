@@ -1142,7 +1142,8 @@ export function ComponentsContent() {
         >
           <p className="max-w-2xl text-sm text-muted-foreground">
             Compare model choice cards, provider privacy labels, and the
-            included-capacity disclosure shown after Venice is selected.
+            included-capacity disclosure and its accessible Save association
+            shown after Venice is selected.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"

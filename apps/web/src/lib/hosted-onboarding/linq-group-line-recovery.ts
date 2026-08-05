@@ -77,10 +77,12 @@ export type HostedLinqGroupLineRecoveryParticipantContact = {
 export function buildHostedLinqGroupLineRecoveryEffectId(input: {
   incomingRecipientPhone: string;
   memberId: string;
+  pendingGroupSetupId?: string | null;
   threadId: string;
 }): string {
   const incomingRecipientPhone = normalizePhoneNumber(input.incomingRecipientPhone);
   const memberId = input.memberId.trim();
+  const pendingGroupSetupId = input.pendingGroupSetupId?.trim() || null;
   const threadId = input.threadId.trim();
   if (!incomingRecipientPhone || !memberId || !threadId) {
     throw new TypeError(
@@ -92,6 +94,7 @@ export function buildHostedLinqGroupLineRecoveryEffectId(input: {
     sha256Hex(JSON.stringify({
       incomingRecipientPhone,
       memberId,
+      ...(pendingGroupSetupId ? { pendingGroupSetupId } : {}),
       threadId,
     })).slice(0, 32)
   }`;
@@ -185,6 +188,21 @@ export function isHostedLinqGroupLineRecoverySourceRefForSameIntent(input: {
     candidate
       && expected
       && candidate.intentDigest === expected.intentDigest
+  );
+}
+
+export function isHostedLinqGroupLineRecoverySourceRefForEffect(input: {
+  candidate: string | null;
+  effectId: string;
+}): boolean {
+  const candidate = parseHostedLinqGroupLineRecoverySourceRef(input.candidate);
+  const effect = HOSTED_LINQ_GROUP_LINE_RECOVERY_EFFECT_ID_PATTERN.exec(
+    input.effectId.trim(),
+  );
+  return Boolean(
+    candidate
+      && effect
+      && candidate.intentDigest === effect[1]
   );
 }
 
