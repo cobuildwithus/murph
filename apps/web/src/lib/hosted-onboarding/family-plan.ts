@@ -71,7 +71,9 @@ import {
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
   HOSTED_PLAN_CODES,
+  getHostedBillingPlanCodeForPlan,
   getHostedFamilyBillingOfferDefinition,
+  isHostedBillingPlanImmediateUpgrade,
   parseHostedBillingPlanCode,
   parseHostedBillingPhase,
   parseHostedPlanCode,
@@ -212,6 +214,10 @@ const hostedAccountGroupMembershipAccessSelect =
     planCode: true,
     role: true,
     status: true,
+    usagePlanTransitionAt: true,
+    usagePlanTransitionFromCode: true,
+    usagePlanTransitionKind: true,
+    usagePlanTransitionToCode: true,
     updatedAt: true,
   });
 
@@ -1936,6 +1942,19 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
         data: {
           pendingPlanCode: null,
           planCode: targetPlanCode,
+          ...(isHostedBillingPlanImmediateUpgrade({
+            currentPlanCode: getHostedBillingPlanCodeForPlan(sourcePlanCode),
+            targetPlanCode: getHostedBillingPlanCodeForPlan(targetPlanCode),
+          })
+            ? {
+                usagePlanTransitionAt: eventCreatedAt,
+                usagePlanTransitionFromCode:
+                  getHostedBillingPlanCodeForPlan(sourcePlanCode),
+                usagePlanTransitionKind: "plan_upgrade",
+                usagePlanTransitionToCode:
+                  getHostedBillingPlanCodeForPlan(targetPlanCode),
+              }
+            : {}),
         },
         where: {
           id: pendingMembership.id,

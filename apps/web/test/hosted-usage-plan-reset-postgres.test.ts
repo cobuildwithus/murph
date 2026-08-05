@@ -21,6 +21,9 @@ import {
   getHostedAiUsageMonthlyAllowanceUsdMicros,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
+  readHostedMemberBillingSnapshot,
+} from "@/src/lib/hosted-onboarding/hosted-member-store";
+import {
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-telegram";
 import {
@@ -29,6 +32,9 @@ import {
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  writeHostedMemberStripeBillingTx,
+} from "@/src/lib/hosted-onboarding/stripe-billing-policy";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -242,6 +248,131 @@ describe.skipIf(!runPostgresProof)(
         await cleanupUsageResetFixture(fixture);
       }
     });
+
+    it("bridges an old Web billing write without granting a second reset", async () => {
+      const fixture = await createUsageResetFixture();
+      const resetAt = new Date("2026-07-12T15:00:00.000Z");
+      const postResetSpendUsdMicros = 700_000n;
+
+      try {
+        await fixture.observer.$transaction(async (tx) => {
+          await tx.$executeRaw`
+            UPDATE "hosted_member_billing_ref"
+            SET
+              "current_billing_plan_code" = 'launch_edge_monthly',
+              "last_stripe_event_created_at" = ${resetAt}
+            WHERE "member_id" = ${fixture.memberId}
+          `;
+          await tx.$executeRaw`
+            UPDATE "hosted_ai_usage_period"
+            SET
+              "billing_plan_code" = 'launch_edge_monthly',
+              "blocked_at" = NULL,
+              "limit_usd_micros" = ${getHostedAiUsageMonthlyAllowanceUsdMicros("launch_edge_monthly")},
+              "spent_usd_micros" = ${postResetSpendUsdMicros}
+            WHERE "member_id" = ${fixture.memberId}
+              AND "period_start" = ${fixture.periodStart}
+          `;
+        }, transactionOptions);
+
+        await fixture.observer.$transaction(async (tx) => {
+          await reconcileHostedAiUsageAllowancePeriodForMemberTx({
+            memberId: fixture.memberId,
+            now: new Date("2026-07-12T15:05:00.000Z"),
+            tx,
+          });
+        }, transactionOptions);
+
+        await expect(fixture.observer.hostedMemberBillingRef.findUniqueOrThrow({
+          select: {
+            usagePlanTransitionAt: true,
+            usagePlanTransitionFromCode: true,
+            usagePlanTransitionKind: true,
+            usagePlanTransitionToCode: true,
+          },
+          where: { memberId: fixture.memberId },
+        })).resolves.toEqual({
+          usagePlanTransitionAt: resetAt,
+          usagePlanTransitionFromCode: "launch_monthly",
+          usagePlanTransitionKind: "plan_upgrade",
+          usagePlanTransitionToCode: "launch_edge_monthly",
+        });
+        await expect(fixture.observer.hostedAiUsagePeriod.findUniqueOrThrow({
+          select: {
+            highestBillingPlanCode: true,
+            planResetAt: true,
+            spentUsdMicros: true,
+          },
+          where: {
+            memberId_periodStart: {
+              memberId: fixture.memberId,
+              periodStart: fixture.periodStart,
+            },
+          },
+        })).resolves.toEqual({
+          highestBillingPlanCode: "launch_edge_monthly",
+          planResetAt: resetAt,
+          spentUsdMicros: postResetSpendUsdMicros,
+        });
+      } finally {
+        await cleanupUsageResetFixture(fixture);
+      }
+    });
+
+    it("captures an old Web Family membership cutover", async () => {
+      const fixture = await createUsageResetFixture();
+      const groupId = "family_plan_reset_" + randomUUID();
+      const membershipId = "family_membership_plan_reset_" + randomUUID();
+      const resetAt = new Date("2026-07-12T15:00:00.000Z");
+
+      try {
+        await fixture.observer.hostedAccountGroup.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: groupId,
+            memberships: {
+              create: {
+                id: membershipId,
+                memberId: fixture.memberId,
+                planCode: "pulse",
+                role: "member",
+                status: "active",
+              },
+            },
+            ownerMemberId: fixture.memberId,
+          },
+        });
+        await fixture.observer.$executeRaw`
+          UPDATE "hosted_account_group_membership"
+          SET
+            "plan_code" = 'edge',
+            "updated_at" = ${resetAt}
+          WHERE "id" = ${membershipId}
+        `;
+
+        await expect(
+          fixture.observer.hostedAccountGroupMembership.findUniqueOrThrow({
+            select: {
+              usagePlanTransitionAt: true,
+              usagePlanTransitionFromCode: true,
+              usagePlanTransitionKind: true,
+              usagePlanTransitionToCode: true,
+            },
+            where: { id: membershipId },
+          }),
+        ).resolves.toEqual({
+          usagePlanTransitionAt: resetAt,
+          usagePlanTransitionFromCode: "launch_monthly",
+          usagePlanTransitionKind: "plan_upgrade",
+          usagePlanTransitionToCode: "launch_edge_monthly",
+        });
+      } finally {
+        await fixture.observer.hostedAccountGroup.deleteMany({
+          where: { id: groupId },
+        });
+        await cleanupUsageResetFixture(fixture);
+      }
+    });
   },
 );
 
@@ -320,12 +451,28 @@ async function applyEdgePlanReset(input: {
   resetAt: Date;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
-  await input.tx.hostedMemberBillingRef.update({
-    data: {
-      currentBillingPlanCode: "launch_edge_monthly",
-      updatedAt: input.resetAt,
+  const member = await readHostedMemberBillingSnapshot({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  if (!member) {
+    throw new Error("Hosted member fixture disappeared before plan reset.");
+  }
+  await writeHostedMemberStripeBillingTx({
+    billingStatus: HostedBillingStatus.active,
+    canonicalBillingStatus: HostedBillingStatus.active,
+    currentBillingPhase: "paid",
+    currentBillingPlanCode: "launch_edge_monthly",
+    currentPeriodEnd: member.billingRef?.currentPeriodEnd ?? null,
+    currentPeriodStart: member.billingRef?.currentPeriodStart ?? null,
+    dispatchContext: {
+      eventCreatedAt: input.resetAt,
+      occurredAt: input.resetAt.toISOString(),
+      sourceEventId: `evt_plan_reset_${input.memberId}`,
+      sourceType: "stripe.customer.subscription.updated",
     },
-    where: { memberId: input.memberId },
+    member,
+    tx: input.tx,
   });
   await reconcileHostedAiUsageAllowancePeriodForMemberTx({
     memberId: input.memberId,

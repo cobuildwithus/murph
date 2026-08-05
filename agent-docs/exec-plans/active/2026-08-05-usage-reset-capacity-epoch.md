@@ -22,6 +22,8 @@ the same upgrade can grant the allowance again.
 - Do not add a queue, service, manager, or compatibility state owner.
 - Preserve same-plan allowance changes, downgrades, and exact replay behavior.
 - Keep the schema migration additive and safe for rolling Web deployments.
+- Activate provider-start timestamps before Web classifies usage across a
+  reset, and fail closed on ambiguous historical rows.
 
 ## Working Set
 
@@ -65,10 +67,16 @@ the same upgrade can grant the allowance again.
 Active.
 
 Focused proof completed on the candidate implementation: hosted Web and
-assistant-engine typechecks, 230 focused hosted Web assertions, 242 focused
-assistant-engine assertions, and three opt-in real-PostgreSQL ordering/notice
-assertions. Candidate diff review and the privacy/diff checks are clean.
-Exact-head CI and both required ReviewGPT stages remain pending.
+assistant-engine typechecks, 348 focused hosted Web assertions, 246 focused
+assistant-engine assertions, and five opt-in real-PostgreSQL ordering,
+notice, and rolling-writer assertions. The preliminary specialist review found
+two release-blocking boundaries: generic billing timestamps and nullable
+legacy state were not safe cutover authority, and detached/additional provider
+work did not own its start time. Remediation now records exact transition
+metadata in the authoritative
+billing writes, backfills existing period high-water state, fails closed on
+unclassified rows, and propagates per-operation provider starts. Corrected-head
+verification, final ReviewGPT correction review, CI, and plan closure remain.
 
 Status: active
 Updated: 2026-08-05

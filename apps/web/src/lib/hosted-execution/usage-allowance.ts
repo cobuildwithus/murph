@@ -301,7 +301,10 @@ interface HostedAiUsageAllowanceBillingRef {
   currentTrialStartedAt: Date | null;
   pulseTrialPolicyVersion: string | null;
   pulseTrialRedeemedAt: Date | null;
-  updatedAt: Date | null;
+  usagePlanTransitionAt?: Date | null;
+  usagePlanTransitionFromCode?: string | null;
+  usagePlanTransitionKind?: string | null;
+  usagePlanTransitionToCode?: string | null;
   usageLimitUsdMicrosOverride?: bigint | null;
 }
 
@@ -404,7 +407,10 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
     currentTrialStartedAt: null,
     pulseTrialPolicyVersion: null,
     pulseTrialRedeemedAt: null,
-    updatedAt: familyAccess.updatedAt,
+    usagePlanTransitionAt: familyAccess.usagePlanTransitionAt,
+    usagePlanTransitionFromCode: familyAccess.usagePlanTransitionFromCode,
+    usagePlanTransitionKind: familyAccess.usagePlanTransitionKind,
+    usagePlanTransitionToCode: familyAccess.usagePlanTransitionToCode,
     usageLimitUsdMicrosOverride:
       getHostedFamilyAiUsageMonthlyAllowanceForPlan(planCode),
   };
@@ -959,7 +965,10 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
           currentTrialStartedAt: true,
           pulseTrialPolicyVersion: true,
           pulseTrialRedeemedAt: true,
-          updatedAt: true,
+          usagePlanTransitionAt: true,
+          usagePlanTransitionFromCode: true,
+          usagePlanTransitionKind: true,
+          usagePlanTransitionToCode: true,
         },
       },
       threadContainer: {
@@ -1297,7 +1306,10 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
             currentTrialStartedAt: true,
             pulseTrialPolicyVersion: true,
             pulseTrialRedeemedAt: true,
-            updatedAt: true,
+            usagePlanTransitionAt: true,
+            usagePlanTransitionFromCode: true,
+            usagePlanTransitionKind: true,
+            usagePlanTransitionToCode: true,
           },
         },
         threadContainer: {
@@ -1435,7 +1447,10 @@ export async function readHostedAiUsageGate(input: {
             currentTrialStartedAt: true,
             pulseTrialPolicyVersion: true,
             pulseTrialRedeemedAt: true,
-            updatedAt: true,
+            usagePlanTransitionAt: true,
+            usagePlanTransitionFromCode: true,
+            usagePlanTransitionKind: true,
+            usagePlanTransitionToCode: true,
           },
         },
         threadContainer: {
@@ -1771,7 +1786,10 @@ export async function reconcileHostedAiUsageAllowancePeriodForMemberTx(input: {
           currentTrialStartedAt: true,
           pulseTrialPolicyVersion: true,
           pulseTrialRedeemedAt: true,
-          updatedAt: true,
+          usagePlanTransitionAt: true,
+          usagePlanTransitionFromCode: true,
+          usagePlanTransitionKind: true,
+          usagePlanTransitionToCode: true,
         },
       },
       billingStatus: true,
@@ -1876,9 +1894,15 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
 
   const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
     ?? resolved.billingPlanCode;
+  const storedHighestBillingPlanCode =
+    parseHostedBillingPlanCode(current.highestBillingPlanCode);
   const highestBillingPlanCode =
-    parseHostedBillingPlanCode(current.highestBillingPlanCode)
-    ?? currentBillingPlanCode;
+    storedHighestBillingPlanCode ?? currentBillingPlanCode;
+  const nextHighestBillingPlanCode =
+    resolveHostedAiUsageObservedHighestPlanCode({
+      highestBillingPlanCode,
+      observedBillingPlanCode: resolved.billingPlanCode,
+    });
   const periodIdentityMatches =
     currentBillingPlanCode === resolved.billingPlanCode &&
     current.periodEnd.getTime() === resolved.periodEnd.getTime();
@@ -1901,10 +1925,10 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     currentPeriodEnd: current.periodEnd,
     currentPeriodStart: current.periodStart,
     highestBillingPlanCode,
-    now: input.now,
+    planHistoryInitialized: storedHighestBillingPlanCode !== null,
     resolved,
   });
-  const resetForPlanUpgrade = planResetAt !== null;
+  const resetForPlanUpgrade = planResetAt !== null && !periodMatches;
 
   if (periodMatches) {
     const blockedAt = resolveHostedAiUsageAllowanceBlockedAt({
@@ -1915,7 +1939,14 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
     });
 
-    if (!sameNullableTime(current.blockedAt, blockedAt)) {
+    if (
+      !sameNullableTime(current.blockedAt, blockedAt) ||
+      storedHighestBillingPlanCode === null ||
+      (
+        planResetAt !== null &&
+        !sameNullableTime(current.planResetAt, planResetAt)
+      )
+    ) {
       await input.tx.hostedAiUsagePeriod.update({
         where: {
           memberId_periodStart: {
@@ -1925,6 +1956,8 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
         },
         data: {
           blockedAt,
+          highestBillingPlanCode: nextHighestBillingPlanCode,
+          ...(planResetAt ? { planResetAt } : {}),
           updatedAt: input.now,
         },
       });
@@ -1934,11 +1967,11 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       kind: "period",
       allowanceSource: resolved.allowanceSource,
       billingPlanCode: currentBillingPlanCode,
-      highestBillingPlanCode,
+      highestBillingPlanCode: nextHighestBillingPlanCode,
       limitUsdMicros: current.limitUsdMicros,
       periodEnd: current.periodEnd,
       periodStart: current.periodStart,
-      planResetAt: current.planResetAt,
+      planResetAt: planResetAt ?? current.planResetAt,
       blockedAt,
       spentUsdMicros: current.spentUsdMicros,
       usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
@@ -1965,9 +1998,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     data: {
       billingPlanCode: resolved.billingPlanCode,
       blockedAt,
-      highestBillingPlanCode: resetForPlanUpgrade
-        ? resolved.billingPlanCode
-        : highestBillingPlanCode,
+      highestBillingPlanCode: nextHighestBillingPlanCode,
       limitUsdMicros: resolved.limitUsdMicros,
       periodEnd: resolved.periodEnd,
       ...(resetForPlanUpgrade
@@ -2063,9 +2094,15 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
   if (current) {
     const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
       ?? resolved.billingPlanCode;
+    const storedHighestBillingPlanCode =
+      parseHostedBillingPlanCode(current.highestBillingPlanCode);
     const highestBillingPlanCode =
-      parseHostedBillingPlanCode(current.highestBillingPlanCode)
-      ?? currentBillingPlanCode;
+      storedHighestBillingPlanCode ?? currentBillingPlanCode;
+    const nextHighestBillingPlanCode =
+      resolveHostedAiUsageObservedHighestPlanCode({
+        highestBillingPlanCode,
+        observedBillingPlanCode: resolved.billingPlanCode,
+      });
     const periodIdentityMatches =
       currentBillingPlanCode === resolved.billingPlanCode &&
       current.periodEnd.getTime() === resolved.periodEnd.getTime();
@@ -2085,10 +2122,10 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       currentPeriodEnd: current.periodEnd,
       currentPeriodStart: current.periodStart,
       highestBillingPlanCode,
-      now: input.at,
+      planHistoryInitialized: storedHighestBillingPlanCode !== null,
       resolved,
     });
-    const resetForPlanUpgrade = planResetAt !== null;
+    const resetForPlanUpgrade = planResetAt !== null && !periodMatches;
     const limitUsdMicros = periodMatches ? current.limitUsdMicros : resolved.limitUsdMicros;
 
     return {
@@ -2096,13 +2133,11 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       allowanceSource: resolved.allowanceSource,
       billingPlanCode: periodMatches ? currentBillingPlanCode : resolved.billingPlanCode,
       blockedAt: resetForPlanUpgrade ? null : current.blockedAt,
-      highestBillingPlanCode: resetForPlanUpgrade
-        ? resolved.billingPlanCode
-        : highestBillingPlanCode,
+      highestBillingPlanCode: nextHighestBillingPlanCode,
       limitUsdMicros,
       periodEnd: periodMatches ? current.periodEnd : resolved.periodEnd,
       periodStart: periodMatches ? current.periodStart : resolved.periodStart,
-      planResetAt: resetForPlanUpgrade ? planResetAt : current.planResetAt,
+      planResetAt: planResetAt ?? current.planResetAt,
       spentUsdMicros: resetForPlanUpgrade ? 0n : current.spentUsdMicros,
       usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
       usageCreditLedgerVersion: input.usageCreditLedgerVersion,
@@ -2132,24 +2167,47 @@ function resolveHostedAiUsagePlanResetAt(input: {
   currentPeriodEnd: Date;
   currentPeriodStart: Date;
   highestBillingPlanCode: HostedBillingPlanCode;
-  now: Date;
+  planHistoryInitialized: boolean;
   resolved: Extract<HostedAiUsageAllowancePeriodResolution, { kind: "period" }>;
 }): Date | null {
   if (
-    input.resolved.allowanceSource !== "direct_paid_member_plan" &&
-    input.resolved.allowanceSource !== "family_sponsored_plan"
+    !input.planHistoryInitialized ||
+    (
+      input.resolved.allowanceSource !== "direct_paid_member_plan" &&
+      input.resolved.allowanceSource !== "family_sponsored_plan"
+    )
   ) {
     return null;
   }
 
-  if (isHostedBillingPlanImmediateUpgrade({
-    currentPlanCode: input.highestBillingPlanCode,
-    targetPlanCode: input.resolved.billingPlanCode,
-  })) {
-    return resolveHostedAiUsagePlanAppliedAt(input);
+  const transition = readHostedAiUsagePlanTransition(input.billingRef);
+  if (!transition || transition.toPlanCode !== input.resolved.billingPlanCode) {
+    return null;
   }
 
-  if (input.resolved.allowanceSource !== "direct_paid_member_plan") {
+  if (
+    transition.kind === "plan_upgrade" &&
+    isHostedBillingPlanImmediateUpgrade({
+      currentPlanCode: transition.fromPlanCode,
+      targetPlanCode: transition.toPlanCode,
+    }) &&
+    isHostedBillingPlanImmediateUpgrade({
+      currentPlanCode: input.highestBillingPlanCode,
+      targetPlanCode: input.resolved.billingPlanCode,
+    })
+  ) {
+    return resolveHostedAiUsagePlanAppliedAt({
+      appliedAt: transition.at,
+      resolved: input.resolved,
+    });
+  }
+
+  if (
+    input.resolved.allowanceSource !== "direct_paid_member_plan" ||
+    transition.kind !== "trial_conversion" ||
+    transition.fromPlanCode !== "launch_monthly" ||
+    transition.toPlanCode !== "launch_monthly"
+  ) {
     return null;
   }
 
@@ -2167,21 +2225,55 @@ function resolveHostedAiUsagePlanResetAt(input: {
     input.currentLimitUsdMicros === HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS &&
     input.resolved.limitUsdMicros > input.currentLimitUsdMicros
   )
-    ? resolveHostedAiUsagePlanAppliedAt(input)
+    ? resolveHostedAiUsagePlanAppliedAt({
+        appliedAt: transition.at,
+        resolved: input.resolved,
+      })
     : null;
 }
 
 function resolveHostedAiUsagePlanAppliedAt(input: {
-  billingRef: HostedAiUsageAllowanceBillingRef | null;
-  now: Date;
+  appliedAt: Date;
   resolved: Extract<HostedAiUsageAllowancePeriodResolution, { kind: "period" }>;
-}): Date {
-  const appliedAt = input.billingRef?.updatedAt;
-  return appliedAt
-      && appliedAt.getTime() >= input.resolved.periodStart.getTime()
-      && appliedAt.getTime() < input.resolved.periodEnd.getTime()
-    ? appliedAt
-    : input.now;
+}): Date | null {
+  return input.appliedAt.getTime() >= input.resolved.periodStart.getTime() &&
+      input.appliedAt.getTime() < input.resolved.periodEnd.getTime()
+    ? input.appliedAt
+    : null;
+}
+
+function readHostedAiUsagePlanTransition(
+  billingRef: HostedAiUsageAllowanceBillingRef | null,
+): {
+  at: Date;
+  fromPlanCode: HostedBillingPlanCode;
+  kind: "plan_upgrade" | "trial_conversion";
+  toPlanCode: HostedBillingPlanCode;
+} | null {
+  const at = billingRef?.usagePlanTransitionAt ?? null;
+  const fromPlanCode = parseHostedBillingPlanCode(
+    billingRef?.usagePlanTransitionFromCode,
+  );
+  const toPlanCode = parseHostedBillingPlanCode(
+    billingRef?.usagePlanTransitionToCode,
+  );
+  const kind = billingRef?.usagePlanTransitionKind;
+  return at && fromPlanCode && toPlanCode &&
+      (kind === "plan_upgrade" || kind === "trial_conversion")
+    ? { at, fromPlanCode, kind, toPlanCode }
+    : null;
+}
+
+function resolveHostedAiUsageObservedHighestPlanCode(input: {
+  highestBillingPlanCode: HostedBillingPlanCode;
+  observedBillingPlanCode: HostedBillingPlanCode;
+}): HostedBillingPlanCode {
+  return isHostedBillingPlanImmediateUpgrade({
+    currentPlanCode: input.highestBillingPlanCode,
+    targetPlanCode: input.observedBillingPlanCode,
+  })
+    ? input.observedBillingPlanCode
+    : input.highestBillingPlanCode;
 }
 
 function shouldPreserveExistingPaidPeriodLimit(input: {
@@ -2426,6 +2518,7 @@ function resolveHostedRetainedTrialCutoverPeriod(input: {
   const trialStart = billingRef?.currentTrialStartedAt ?? null;
   const trialEnd = billingRef?.currentTrialEndsAt ?? null;
   const paidPeriodStart = billingRef?.currentPeriodStart ?? null;
+  const transition = readHostedAiUsagePlanTransition(billingRef);
   if (
     parseHostedBillingPhase(billingRef?.currentBillingPhase) !== "paid"
     || parseHostedBillingPlanCode(billingRef?.currentBillingPlanCode)
@@ -2436,6 +2529,11 @@ function resolveHostedRetainedTrialCutoverPeriod(input: {
     || !trialStart
     || !trialEnd
     || !paidPeriodStart
+    || transition?.kind !== "trial_conversion"
+    || transition.fromPlanCode !== "launch_monthly"
+    || transition.toPlanCode !== "launch_monthly"
+    || transition.at.getTime() < trialStart.getTime()
+    || input.at.getTime() >= transition.at.getTime()
     || paidPeriodStart.getTime() === trialStart.getTime()
     || input.at.getTime() < trialStart.getTime()
     || input.at.getTime() >= trialEnd.getTime()
@@ -2449,7 +2547,7 @@ function resolveHostedRetainedTrialCutoverPeriod(input: {
     limitUsdMicros: trialPolicy.usageLimitUsdMicros,
     periodEnd: trialEnd,
     periodStart: trialStart,
-    planResetAt: billingRef?.updatedAt ?? paidPeriodStart,
+    planResetAt: transition.at,
   };
 }
 
