@@ -1199,6 +1199,7 @@ describe("device sync companion routes", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
         lastDataReceivedAt: null,
+        observedAt: "2026-07-09T12:00:00.000Z",
         resources: {},
       });
       expect(mocks.listRecentConnectionWebhookSignals).not.toHaveBeenCalled();
@@ -1263,6 +1264,7 @@ describe("device sync companion routes", () => {
         // Lifecycle events such as provider.connection.created never count as
         // received data; only resource-bearing webhook receipts do.
         lastDataReceivedAt: "2026-06-11T08:00:00.000Z",
+        observedAt: "2026-07-09T12:00:00.000Z",
         resources: {
           heartrate: { lastReceivedAt: "2026-06-11T06:30:00.000Z" },
           sleep: { lastReceivedAt: "2026-06-11T08:00:00.000Z" },
@@ -1309,6 +1311,7 @@ describe("device sync companion routes", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
         lastDataReceivedAt: "2026-07-25T18:00:00.000Z",
+        observedAt: "2026-07-09T12:00:00.000Z",
         resources: {
           workouts: { lastReceivedAt: "2026-07-25T18:00:00.000Z" },
         },
@@ -1357,6 +1360,7 @@ describe("device sync companion routes", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
         lastDataReceivedAt: null,
+        observedAt: "2026-07-09T12:00:00.000Z",
         resources: {},
       });
     });
@@ -1392,6 +1396,7 @@ describe("device sync companion routes", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
         lastDataReceivedAt: "2026-07-25T19:00:00.000Z",
+        observedAt: "2026-07-09T12:00:00.000Z",
         resources: {
           workouts: { lastReceivedAt: "2026-07-25T19:00:00.000Z" },
         },
@@ -1426,6 +1431,7 @@ describe("device sync companion routes", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
         lastDataReceivedAt: "2026-07-25T18:00:00.000Z",
+        observedAt: "2026-07-09T12:00:00.000Z",
         resources: {
           workouts: { lastReceivedAt: "2026-07-25T18:00:00.000Z" },
         },
@@ -1448,6 +1454,7 @@ describe("device sync companion routes", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
         lastDataReceivedAt: null,
+        observedAt: "2026-07-09T12:00:00.000Z",
         resources: {},
       });
       expect(mocks.listConnectionSources).not.toHaveBeenCalled();
