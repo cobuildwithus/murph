@@ -154,7 +154,11 @@ export async function recordAdditionalAssistantUsageEvents(input: {
       : null
     await recordAssistantUsageEvent({
       executionContext: input.executionContext,
-      ...(input.occurredAt === undefined ? {} : { occurredAt: input.occurredAt }),
+      ...(usageDraft.occurredAt !== undefined
+        ? { occurredAt: usageDraft.occurredAt }
+        : input.occurredAt === undefined
+          ? {}
+          : { occurredAt: input.occurredAt }),
       ...(input.providerRequestAcceptedInputIds === undefined
         ? {}
         : {

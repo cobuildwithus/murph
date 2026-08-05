@@ -46,6 +46,7 @@ export interface OpenAiImageGenerationUsage {
 
 export interface OpenAiImageGenerationResult {
   imageBytes: Uint8Array
+  occurredAt: string
   providerRequestId: string | null
   rawUsageJson: Record<string, unknown> | null
   usage: OpenAiImageGenerationUsage | null
@@ -150,7 +151,10 @@ async function requestOpenAiImage(input: {
         signal: buildOpenAiImageAbortSignal(input.abortSignal),
       },
     )
-    return await readOpenAiImageGenerationResult(response, input.operation)
+    return {
+      ...await readOpenAiImageGenerationResult(response, input.operation),
+      occurredAt: new Date(startedAtMs).toISOString(),
+    }
   } catch (error) {
     if (error instanceof VaultCliError) {
       throw error
@@ -191,7 +195,7 @@ function buildOpenAiImageAbortSignal(abortSignal: AbortSignal | null): AbortSign
 async function readOpenAiImageGenerationResult(
   response: Response,
   operation: OpenAiImageOperation,
-): Promise<OpenAiImageGenerationResult> {
+): Promise<Omit<OpenAiImageGenerationResult, 'occurredAt'>> {
   const headerProviderRequestId =
     readBoundedErrorString(
       response.headers.get('x-request-id'),
@@ -287,7 +291,7 @@ async function readOpenAiJsonResponse(
 function parseOpenAiImageGenerationPayload(
   payload: unknown,
   providerRequestId: string | null,
-): OpenAiImageGenerationResult {
+): Omit<OpenAiImageGenerationResult, 'occurredAt'> {
   const record = asRecord(payload)
   const data = Array.isArray(record?.data) ? record.data : []
   const first = asRecord(data[0])

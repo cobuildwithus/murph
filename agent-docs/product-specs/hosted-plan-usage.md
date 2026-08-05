@@ -520,23 +520,30 @@ unimplemented.
 
 ## Deployment
 
-Apply the nullable usage-period capacity-epoch columns before the Web code that
-reads them. Existing Web code ignores the additive columns, and new Web code
-accepts usage records from an older runtime. Deploy the new Web reconciliation
-owner before the assistant runtime that timestamps usage at provider-request
-start; keep that compatibility window brief because the older runtime's
-completion timestamp cannot classify every in-flight pre-reset request. Roll
-back the runtime before Web; the nullable columns may remain.
+For the capacity-epoch change, deploy the assistant runtime that timestamps
+every provider operation at its own request start, then wait for work accepted
+by the previous runtime to drain. Apply the additive usage-period and
+billing-transition columns and promote the Web reconciliation owner only after
+that drain. Existing Web code ignores the new columns. Migration-owned
+transition bridges snapshot the exact Stripe event time for direct billing and
+the local membership cutover for Family changes made by a draining Web
+instance. New Web adopts such an already-applied reset without erasing usage
+accrued afterward. It otherwise fails closed if a row lacks historical plan
+classification or an exact transition marker: spend is preserved and no
+duplicate reset is granted. Audit current-period rows immediately after
+promotion for missing transition or high-water metadata. Roll back Web before
+the runtime; the nullable columns and bridges may remain.
 
-Apply the additive mailbox-claim migration, then deploy Web, then deploy the
-Cloudflare runtime. An old runtime continues to send the empty plan-usage
-request, and new Web omits `subscriptionActionQuote`, preserving the old strict
-response shape. The new runtime opts into the quote field only after Web can
-parse that request and serve the durable action claim. A new runtime against
-old Web is unsupported because old Web rejects the opt-in request and does not
-provide the durable claim. Roll back Cloudflare before Web; the nullable column
-may remain. This order also preserves the originating-notice-target
-compatibility contract described in `hosted-plan-downgrades.md`.
+For the subscription-action quote contract, apply the additive mailbox-claim
+migration, then deploy Web, then deploy the Cloudflare runtime. An old runtime
+continues to send the empty plan-usage request, and new Web omits
+`subscriptionActionQuote`, preserving the old strict response shape. The new
+runtime opts into the quote field only after Web can parse that request and
+serve the durable action claim. A new runtime against old Web is unsupported
+because old Web rejects the opt-in request and does not provide the durable
+claim. Roll back Cloudflare before Web; the nullable column may remain. This
+order also preserves the originating-notice-target compatibility contract
+described in `hosted-plan-downgrades.md`.
 
 Existing billing mechanics remain in:
 

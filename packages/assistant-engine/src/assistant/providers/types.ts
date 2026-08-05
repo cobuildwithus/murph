@@ -207,6 +207,7 @@ export interface AssistantProviderUsage {
 }
 
 export interface AssistantProviderUsageDraft {
+  occurredAt?: string
   provider: string
   providerRequestOrdinal: number
   providerRequestOutcome?: AssistantProviderRequestOutcome
