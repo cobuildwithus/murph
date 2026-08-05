@@ -127,14 +127,19 @@ Updated: 2026-08-04
   marker-bearing Home and strand onboarding. The existing close owner now
   strips that marker synchronously before refreshing; focused proof asserts
   cleanup precedes the close refresh and that it observes plain Home.
+- Completed: Web ReviewGPT round four passed with no findings on the close-path
+  correction. The subsequent `main` integration keeps its new verified-email
+  rebinding concurrency coverage while continuing to delete the obsolete
+  Web-session first-visit eligibility test and import.
 - Completed: production `/design?tab=sections` onboarding renders at desktop
   and mobile sizes. The required Claude Code UI double-check was attempted and
   stopped at explicit Fable credit exhaustion as the completion workflow
   directs.
 - Completed: refreshed exact-head visual evidence for the truthful skip-saving
   and retry states at desktop and mobile sizes.
-- Remaining: publish the correction commits, finish green PR workflows and the
-  separate final ReviewGPT gate in both repositories, then close this plan.
+- Remaining: verify and publish the resolved `main` integration, complete the
+  final exact-head Web ReviewGPT round, finish the in-flight iOS ReviewGPT gate
+  and green hosted checks, then close this plan.
 - Expected outcomes: every check is clean; screenshots represent each
   materially changed native state; ReviewGPT reports zero blocking findings on
   each exact pushed PR head.

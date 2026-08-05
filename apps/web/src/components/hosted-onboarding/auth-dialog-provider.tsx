@@ -19,6 +19,10 @@ import {
   HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM,
   HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
+import {
+  HOSTED_BILLING_PLAN_CHANGE_RETURN_PARAM,
+  parseHostedBillingPlanChangeReturnValue,
+} from "@/src/lib/hosted-onboarding/billing-plan-change-contract";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { subscribeBrowserVaultSessionInvalidation } from "@/src/lib/browser-vault/session-invalidation";
@@ -130,8 +134,27 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
     || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
+    || shouldResumeCurrentSettingsPlanChangeUrl(payload)
     || shouldResumeCurrentSettingsPulseTrialPaymentUrl(payload)
   );
+}
+
+function shouldResumeCurrentSettingsPlanChangeUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined" || window.location.pathname !== SETTINGS_PATH) {
+    return false;
+  }
+
+  const returnValues = new URLSearchParams(window.location.search).getAll(
+    HOSTED_BILLING_PLAN_CHANGE_RETURN_PARAM,
+  );
+  return returnValues.length === 1
+    && parseHostedBillingPlanChangeReturnValue(returnValues[0]) !== null;
 }
 
 function shouldResumeCurrentEnvironmentUrl(

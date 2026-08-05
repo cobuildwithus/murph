@@ -1,11 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type Stripe from "stripe";
 
-import {
-  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY,
-  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
-} from "@/src/lib/hosted-onboarding/legacy-usage-price";
-
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
@@ -134,7 +129,7 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
       phases: [
         makeSchedulePhase({
           endDate: 1_778_068_800,
-          priceIds: ["price_edge_recurring", "price_edge_usage"],
+          priceIds: ["price_edge_recurring"],
           startDate: 1_775_606_400,
         }),
       ],
@@ -144,7 +139,7 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
       phases: [
         makeSchedulePhase({
           endDate: 1_778_068_800,
-          priceIds: ["price_edge_recurring", "price_edge_usage"],
+          priceIds: ["price_edge_recurring"],
           startDate: 1_775_606_400,
         }),
       ],
@@ -414,7 +409,7 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
       phases: [
         makeSchedulePhase({
           endDate: 1_778_068_800,
-          priceIds: ["price_edge_recurring", "price_edge_usage"],
+          priceIds: ["price_edge_recurring"],
           startDate: 1_775_606_400,
         }),
       ],
@@ -477,7 +472,7 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
       phases: [
         makeSchedulePhase({
           endDate: 1_778_068_800,
-          priceIds: ["price_edge_recurring", "price_edge_usage"],
+          priceIds: ["price_edge_recurring"],
           startDate: 1_775_606_400,
         }),
         makeSchedulePhase({
@@ -491,7 +486,7 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
             trialPolicyVersion: "",
             trialUsageLimitUsdMicros: "",
           },
-          priceIds: ["price_pulse_recurring", "price_pulse_usage"],
+          priceIds: ["price_pulse_recurring"],
           startDate: 1_778_068_800,
         }),
       ],
@@ -515,8 +510,8 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     ["past due", makeSubscription({ status: "past_due" }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
     ["cancel at period end", makeSubscription({ cancelAtPeriodEnd: true }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
     ["pending update", makeSubscription({ pendingUpdate: true }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
-    ["unknown item", makeSubscription({ items: ["price_edge_recurring", "price_edge_usage", "price_unknown"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
-    ["unmarked metered item", makeSubscription({ items: ["price_edge_recurring", "price_edge_usage", "price_unknown_usage"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
+    ["unknown item", makeSubscription({ items: ["price_edge_recurring", "price_unknown"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
+    ["metered item", makeSubscription({ items: ["price_edge_recurring", "price_unknown_usage"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
     ["duplicate recurring item", makeSubscription({ items: ["price_edge_recurring", "price_edge_recurring"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
   ])("rejects %s before schedule mutation", async (_label, subscription, code) => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(subscription);
@@ -533,7 +528,9 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
   });
 
   test("rejects metered usage items with unsupported quantities", async () => {
-    const subscription = makeSubscription();
+    const subscription = makeSubscription({
+      items: ["price_edge_recurring", "price_edge_usage"],
+    });
     Object.assign(subscription.items.data[1] ?? {}, {
       quantity: 1,
     });
@@ -851,7 +848,7 @@ function makeSubscription(input?: {
   schedule?: string | null;
   status?: Stripe.Subscription.Status;
 }): Stripe.Subscription {
-  const itemPriceIds = input?.items ?? ["price_edge_recurring", "price_edge_usage"];
+  const itemPriceIds = input?.items ?? ["price_edge_recurring"];
 
   // @ts-expect-error - the synthetic fixture only includes the Stripe fields exercised here.
   return {
@@ -886,12 +883,7 @@ function makePrice(priceId: string): Stripe.Price {
 
   return {
     id: priceId,
-    metadata: isLegacyUsagePriceId(priceId)
-      ? {
-          [HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY]:
-            HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
-        }
-      : {},
+    metadata: {},
     object: "price",
     recurring: {
       interval: "month",
@@ -899,10 +891,6 @@ function makePrice(priceId: string): Stripe.Price {
       usage_type: usageType,
     },
   } as Stripe.Price;
-}
-
-function isLegacyUsagePriceId(priceId: string): boolean {
-  return priceId === "price_pulse_usage" || priceId === "price_edge_usage";
 }
 
 function makeCompatibleSchedule(input?: {

@@ -118,6 +118,7 @@ describe("hosted app session", () => {
     expect(result.cookie).toContain("HttpOnly");
     expect(result.cookie).toContain("SameSite=Lax");
     expect(result.cookie).toContain("Max-Age=2592000");
+    expect(result.cookie).not.toContain("Secure");
     expect(storedSession).toEqual(expect.objectContaining({
       createdAt: now,
       expiresAt: new Date("2026-06-01T00:00:00.000Z"),
