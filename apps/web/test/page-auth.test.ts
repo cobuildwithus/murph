@@ -327,6 +327,25 @@ describe("hosted dashboard page auth", () => {
     expect(mocks.redirect).toHaveBeenCalledWith("/join");
   });
 
+  it("exposes the same first-checkout requirement to authenticated recovery surfaces", async () => {
+    const member = createHostedMember({
+      billingStatus: HostedBillingStatus.not_started,
+    });
+    const auth = {
+      authenticated: true,
+      authenticatedMember: member,
+      session: null,
+    };
+    const { readHostedDashboardCheckoutRequired } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(readHostedDashboardCheckoutRequired(auth)).resolves.toBe(true);
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
+      memberId: "member_123",
+    });
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
   it("keeps an incomplete member who already owns a subscription out of the checkout redirect", async () => {
     mocks.readHostedMemberOwnsSubscription.mockResolvedValue(true);
     mocks.getHostedAppSession.mockResolvedValue({
