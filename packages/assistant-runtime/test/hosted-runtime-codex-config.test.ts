@@ -944,9 +944,14 @@ testHostedCodexAuthE2e(
     const operatorHomeRoot = await createTemporaryDirectory();
     const requests: string[] = [];
     const authorizationHeaders: string[] = [];
+    const nativeMemoryRequestMarkers: Array<{
+      memgen: string | null;
+      turnMetadata: string | null;
+    }> = [];
     const expectedAuthorization = ["Bearer", "hosted-auth-regression-key"].join(" ");
     const server = await startResponsesStubServer({
       authorizationHeaders,
+      nativeMemoryRequestMarkers,
       requiredAuthorization: expectedAuthorization,
       requests,
       responseText: "auth regression ok",
@@ -972,6 +977,15 @@ testHostedCodexAuthE2e(
       assert.match(config, /^env_key = "OPENAI_API_KEY"$/mu);
       assert.match(config, /^requires_openai_auth = false$/mu);
       assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
+
+      const nativeMemoryProbe = "native-memory-probe-must-not-reach-provider";
+      const nativeMemoryRoot = path.join(result.runtimeEnv.CODEX_HOME, "memories");
+      await mkdir(nativeMemoryRoot, { mode: 0o700, recursive: true });
+      await writeFile(
+        path.join(nativeMemoryRoot, "memory_summary.md"),
+        nativeMemoryProbe,
+        { encoding: "utf8", mode: 0o600 },
+      );
 
       const fixedResult = await executeCodexAppServerTurn({
         approvalPolicy: "never",
@@ -999,6 +1013,19 @@ testHostedCodexAuthE2e(
         requests
           .slice(0, fixedRequestCount)
           .some((request) => /hello hosted auth regression/u.test(request)),
+      );
+      assert.ok(
+        requests
+          .slice(0, fixedRequestCount)
+          .every((request) => !request.includes(nativeMemoryProbe)),
+      );
+      assert.ok(
+        nativeMemoryRequestMarkers
+          .slice(0, fixedRequestCount)
+          .every(({ memgen, turnMetadata }) =>
+            memgen?.trim().toLowerCase() !== "true"
+            && parseJsonObject(turnMetadata ?? "")?.request_kind !== "memory"
+          ),
       );
       const currentTimeReminders = requests
         .slice(0, fixedRequestCount)
@@ -1884,6 +1911,10 @@ async function startResponsesStubServer(input: {
   authorizationHeaders?: string[];
   compactionOutputKind?: "compaction" | "message";
   compactionRequestIndexes?: ReadonlySet<number>;
+  nativeMemoryRequestMarkers?: Array<{
+    memgen: string | null;
+    turnMetadata: string | null;
+  }>;
   requiredAuthorization?: string;
   requests: string[];
   requestUrls?: string[];
@@ -1916,6 +1947,14 @@ async function startResponsesStubServer(input: {
           ? request.headers.authorization
           : "",
       );
+      input.nativeMemoryRequestMarkers?.push({
+        memgen: typeof request.headers["x-openai-memgen-request"] === "string"
+          ? request.headers["x-openai-memgen-request"]
+          : null,
+        turnMetadata: typeof request.headers["x-codex-turn-metadata"] === "string"
+          ? request.headers["x-codex-turn-metadata"]
+          : null,
+      });
 
       const requestUrl = request.url ?? "";
       if (
