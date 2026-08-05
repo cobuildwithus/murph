@@ -195,3 +195,9 @@ Updated: 2026-08-05
   The focused Web recorder test proves malformed legacy input cannot reach the
   transaction, and the existing callback-failure scenario proves truthful
   no-retry recovery.
+- Exact-head CI on `527ffccdec` passed the full Web suite (8,854 tests) and all
+  other jobs, then exposed one stale Cloudflare timeout test that still built
+  the retired free-form support summary. The fixture now uses the shared
+  canonical builder, preserving the intended 12-second support-email bound;
+  the exact `cloudflare-node-platform` test passes all 5 cases. A new pushed
+  head and fresh final ReviewGPT round remain required.
