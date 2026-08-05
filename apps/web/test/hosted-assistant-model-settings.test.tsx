@@ -261,6 +261,10 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     }),
   );
   assert.match(view.container.textContent ?? "", /Inference on OpenAI/u);
+  assert.equal(
+    findButton(view.container, "Save change").getAttribute("aria-describedby"),
+    null,
+  );
   assert.doesNotMatch(
     view.container.textContent ?? "",
     /higher provider rates use included AI capacity faster/u,
@@ -318,6 +322,13 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   assert.match(
     view.container.textContent ?? "",
     /Venice’s higher provider rates use included AI capacity faster\./u,
+  );
+  const saveButton = findButton(view.container, "Save change");
+  const usageDisclosureId = saveButton.getAttribute("aria-describedby");
+  assert.ok(usageDisclosureId);
+  assert.equal(
+    view.document.getElementById(usageDisclosureId)?.textContent,
+    "Venice’s higher provider rates use included AI capacity faster.",
   );
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   await act(async () => {
@@ -712,6 +723,27 @@ test("a deployment without Venice does not offer it in the routing dialog", asyn
     null,
   );
   assert.match(view.document.body.textContent ?? "", /Your endpoint/u);
+  view.cleanup();
+});
+
+test("hidden provider controls do not leave a dangling Save description", async () => {
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      customInferenceAvailable: false,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: false,
+    }),
+  );
+
+  assert.equal(
+    findButton(view.container, "Save change").getAttribute("aria-describedby"),
+    null,
+  );
   view.cleanup();
 });
 
