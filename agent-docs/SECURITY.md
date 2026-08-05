@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-04
+Last verified: 2026-08-05
 
 ## Non-Negotiable Rules
 
@@ -712,6 +712,8 @@ Last verified: 2026-08-04
   GitHub canary. It accepts the dedicated Oura account email only, waits for
   manual code entry without persisting the code or a password, and retains the
   same credential partitioning, artifact prohibition, and cleanup boundaries.
+  Retain the retired `MURPH_E2E_OURA_PASSWORD` name only in scrub lists so a
+  stale operator-shell export cannot reach preparation, runtimes, or Chromium.
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
 - Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.

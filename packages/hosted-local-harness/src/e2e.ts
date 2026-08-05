@@ -24,6 +24,9 @@ const HOSTED_LOCAL_E2E_TEST_CONTROLS_ENV =
   "MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS";
 const FINAL_RUNNER_CLEANUP_TIMEOUT_MS = 60_000;
 const JUNCTION_WEARABLE_LIVE_ENV = "MURPH_E2E_JUNCTION_WEARABLE_LIVE";
+const JUNCTION_WEARABLE_RETIRED_ENV_KEYS = [
+  "MURPH_E2E_OURA_PASSWORD",
+] as const;
 const JUNCTION_WEARABLE_LIVE_ENV_KEYS = [
   "JUNCTION_API_KEY",
   "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -451,6 +454,9 @@ function partitionLiveWearableEnvironment(input: {
 
   const genericEnv = { ...input.env };
   const vitestEnvOverlay: NodeJS.ProcessEnv = {};
+  for (const key of JUNCTION_WEARABLE_RETIRED_ENV_KEYS) {
+    delete genericEnv[key];
+  }
   for (const key of JUNCTION_WEARABLE_LIVE_ENV_KEYS) {
     const value = genericEnv[key];
     if (value !== undefined) {

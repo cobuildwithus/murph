@@ -494,6 +494,7 @@ describe("hosted-local E2E suite preparation", () => {
   });
 
   test("gives live wearable login values only to the isolated device-connect Vitest child", async () => {
+    const retiredOuraPassword = "retired-sentinel-oura-password";
     const liveValues = {
       JUNCTION_API_KEY: "sk_us_sentinel",
       JUNCTION_CLIENT_USER_ID_SECRET: "sentinel-client-user-secret",
@@ -513,7 +514,10 @@ describe("hosted-local E2E suite preparation", () => {
     };
 
     await runHostedLocalE2eSuite({
-      env: liveValues,
+      env: {
+        ...liveValues,
+        MURPH_E2E_OURA_PASSWORD: retiredOuraPassword,
+      },
       scenario: "device-connect",
     });
 
@@ -522,10 +526,14 @@ describe("hosted-local E2E suite preparation", () => {
       .filter((call) => call.args.includes("vitest"));
     expect(vitestCalls).toHaveLength(1);
     expect(vitestCalls[0]?.env).toEqual(expect.objectContaining(liveValues));
+    expect(vitestCalls[0]?.env.MURPH_E2E_OURA_PASSWORD).toBeUndefined();
+    expect(JSON.stringify(vitestCalls[0]?.env)).not.toContain(retiredOuraPassword);
     for (const [call] of runForegroundCommand.mock.calls) {
       if (call.args.includes("vitest")) {
         continue;
       }
+      expect(call.env.MURPH_E2E_OURA_PASSWORD).toBeUndefined();
+      expect(JSON.stringify(call.env)).not.toContain(retiredOuraPassword);
       for (const key of Object.keys(liveValues)) {
         expect(call.env[key]).toBeUndefined();
       }
@@ -534,6 +542,8 @@ describe("hosted-local E2E suite preparation", () => {
       ...cleanupHostedRunnerContainers.mock.calls,
       ...cleanupHostedRunnerImages.mock.calls,
     ]) {
+      expect(cleanupInput.env.MURPH_E2E_OURA_PASSWORD).toBeUndefined();
+      expect(JSON.stringify(cleanupInput.env)).not.toContain(retiredOuraPassword);
       for (const key of Object.keys(liveValues)) {
         expect(cleanupInput.env[key]).toBeUndefined();
       }

@@ -96,6 +96,7 @@ describe("hosted local device connect e2e", () => {
       "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
       "MURPH_E2E_OURA_EMAIL",
       "MURPH_E2E_OURA_OTP",
+      "MURPH_E2E_OURA_PASSWORD",
       "MURPH_E2E_WHOOP_EMAIL",
       "MURPH_E2E_WHOOP_OTP",
       "MURPH_E2E_WHOOP_PASSWORD",
@@ -199,6 +200,7 @@ describe("hosted local device connect e2e", () => {
       ).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_OURA_EMAIL)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_OURA_OTP)).toBe(false);
+      expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_OURA_PASSWORD)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_EMAIL)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_OTP)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_PASSWORD)).toBe(false);
@@ -762,6 +764,7 @@ function buildBrowserProcessEnvironment(): NodeJS.ProcessEnv {
     "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
     "MURPH_E2E_OURA_EMAIL",
     "MURPH_E2E_OURA_OTP",
+    "MURPH_E2E_OURA_PASSWORD",
     "MURPH_E2E_PROVIDER_EMAIL",
     "MURPH_E2E_PROVIDER_HEADLESS",
     "MURPH_E2E_PROVIDER_OTP",

@@ -404,6 +404,7 @@ function clearSensitiveBrowserEnvironment(): void {
     "MURPH_E2E_PROVIDER_TIMEOUT_MS",
     "MURPH_E2E_OURA_EMAIL",
     "MURPH_E2E_OURA_OTP",
+    "MURPH_E2E_OURA_PASSWORD",
     "MURPH_E2E_WHOOP_EMAIL",
     "MURPH_E2E_WHOOP_OTP",
     "MURPH_E2E_WHOOP_PASSWORD",
