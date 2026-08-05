@@ -1074,6 +1074,9 @@ describe('applyMurphManagedAutomations', () => {
       'Never copy a raw handle into the page',
     )
     expect(seed.instructions).toContain('exact `expectedDigest` returned by show')
+    expect(seed.instructions).toContain('`## Explicit setup` section')
+    expect(seed.instructions).toContain('preserve that section verbatim')
+    expect(seed.instructions).toContain('explicit request to revise or forget it')
     expect(seed.instructions).toContain('Treat the page as advisory')
     expect(seed.instructions).toContain(
       `{"kind":"skip","privateSummary":"${MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY}"}`,
