@@ -65,9 +65,13 @@ Updated: 2026-08-04
 3. Risk: a legacy alert accepted shortly before rollout can be replayed with
    the same provider key after the email body changes.
    Mitigation: retain the key so Resend fails closed instead of duplicating the
-   alert during its 24-hour retention window; document the normal Web-only
-   rollout and monitor the bounded transition without adding compatibility
-   state.
+   alert during its 24-hour retention window; monitor the bounded transition
+   without adding compatibility state.
+4. Risk: a new Web build can expose the issue detail while an old hosted runner
+   still follows the prior one-turn escalation policy.
+   Mitigation: deploy the consent-capable Cloudflare runner first with an
+   immediate container rollout, require exact bundle-fingerprint convergence,
+   then deploy Web; roll back Web before the runner.
 
 ## Tasks
 
@@ -90,6 +94,37 @@ Updated: 2026-08-04
   stays fixed server-authored metadata.
 - Provider retries will format from read-back stored detail rather than the
   callback payload.
+- The prompt and email changes are a coordinated rollout: the consent-capable
+  runner is the prerequisite and rollback floor for the detailed-email Web
+  build. Existing runner fingerprint admission and managed-container smoke own
+  convergence proof; no durable consent receipt or compatibility state is
+  added.
+
+## Review anomaly retrospective
+
+- Original requirement: put the approved de-identified product issue in the
+  internal alert while preserving the existing account-linkage, privacy, cap,
+  replay, and failure contracts.
+- First-reviewed shape: 23 source additions and 10 deletions added the stored
+  detail readback and alert body, but the existing one-turn assistant policy
+  still allowed submission from a generic escalation request.
+- Current shape before this decision: 36 source additions and 13 deletions.
+  Review remediation added 13 source lines and 3 deletions for exact-summary
+  disclosure, affirmative approval, and canonical stored-detail replay. It
+  added no owner, state machine, queue, lease, compatibility path, migration,
+  or repair process.
+- Repeated mechanism: the privacy correction lives in the hosted runner bundle
+  while the new disclosure lives in Web. Treating the release as Web-only left
+  old-runner/new-Web deployment skew able to reproduce the accepted consent
+  failure.
+- Decision: continue with the current small architecture and remove that
+  rollout seam operationally. New runner plus old Web is safe because the old
+  email remains metadata-only; old runner plus new Web is forbidden; converged
+  new runner plus new Web completes the approved two-turn flow. Deploy
+  Cloudflare/runner first with immediate rollout and exact fingerprint smoke,
+  then Web. Roll back Web first, then the runner only after Web no longer emits
+  detailed alerts. Do not add a second consent authority to the callback or
+  database.
 
 ## Verification
 

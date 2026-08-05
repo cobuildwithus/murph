@@ -36,9 +36,15 @@ A member who reaches a Murph-owned product blocker should not be left at a hard 
 - The first three distinct escalation records for one member in one UTC day are email-eligible. Record timestamps are captured after the member-scoped advisory lock is held, so concurrent same-member escalations rank in lock-acquisition order and cannot overshoot the cap.
 - Later records remain persisted but do not send another email that day.
 - Callback replay validates both deterministic feedback rows, treats the first stored anonymous issue detail as canonical when the same accepted-input identity produces different wording, and may retry an eligible provider request with that stored body and the same Resend idempotency key. Missing, member-linked, or malformed stored detail fails before provider entry, and replay must not create a duplicate recipient-visible email.
-- This payload-only Web rollout deliberately retains the existing provider key. During Resend's 24-hour key-retention window, a legacy alert that was already accepted before deployment and then replayed after deployment can return `invalid_idempotent_request` because the body changed; the original alert remains delivered and no duplicate is sent. Do not version the key for rollout. Monitor that provider error for 24 hours after deployment; the existing 12-second current-turn callback bound and absence of a retry queue keep the practical overlap narrow.
+- This coordinated runner-and-Web rollout deliberately retains the existing provider key. During Resend's 24-hour key-retention window, a legacy alert that was already accepted before deployment and then replayed after deployment can return `invalid_idempotent_request` because the body changed; the original alert remains delivered and no duplicate is sent. Do not version the key for rollout. Monitor that provider error for 24 hours after deployment; the existing 12-second current-turn callback bound and absence of a retry queue keep the practical overlap narrow.
 - Ordinary feedback keeps the existing two-second callback bound; only the exact explicit support shape receives a bounded 12-second callback allowance, spent inside the turn where the model can truthfully report the outcome.
 - Murph never retries the model tool in the same turn or attempts to evade the server limit.
+
+## Deployment contract
+
+- The affirmative-approval policy is runner-bundle behavior, while the detailed support email is Web behavior. Deploy Cloudflare/runner first with `container_rollout=immediate`, and require managed-container smoke to report the exact new bundle fingerprint before deploying Web.
+- New runner plus old Web is safe: the member sees and approves the exact account-linked summary, while the old Web alert remains metadata-only. Old runner plus new Web is unsafe and must not be admitted because the old policy can submit without that approval. New runner plus new Web completes the intended flow.
+- The consent-capable runner is the rollback floor while detailed-email Web is deployed. Roll back Web first; only after Web no longer emits detailed alerts may Cloudflare/runner return to the earlier policy. Use the existing bundle/source fingerprint admission and deploy smoke rather than adding consent-version state to the callback or database.
 
 ## Public source context
 

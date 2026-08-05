@@ -914,6 +914,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   row fails closed.
   The alert never reads raw conversation, health, contact, secret, provider, or
   other private context and adds no table, queue, cursor, or delivery owner.
+  The approval policy is bundled into the Cloudflare-hosted runner while the
+  detailed email is Web-owned, so release order is runner first with immediate
+  container rollout and exact bundle-fingerprint smoke, then Web. New runner
+  plus old Web is safe because the old alert remains metadata-only; old runner
+  plus new Web is forbidden. Rollback removes the detailed Web behavior before
+  returning the runner below the consent-capable bundle. Existing runner
+  fingerprint admission owns this boundary without a second consent owner.
 
   A separate authenticated ten-minute Vercel cron performs work only during the
   6pm Eastern hour and sends one daily internal product-feedback digest through
