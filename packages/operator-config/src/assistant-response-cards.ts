@@ -3,6 +3,8 @@ import {
   type AssistantResponseCard,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
+  type NutritionCardGoalSnapshot,
+  type NutritionCardGoalStatus,
   type NutritionCardMetric,
 } from '@murphai/contracts'
 import { z } from 'zod'
@@ -25,9 +27,17 @@ const NUTRITION_CARD_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 3,
   useGrouping: true,
 })
+const NUTRITION_CARD_GOAL_STATUS_LABELS = {
+  far_over_target: 'FAR OVER TARGET',
+  far_under_target: 'FAR UNDER TARGET',
+  on_target: 'ON TARGET',
+  over_target: 'OVER TARGET',
+  unavailable: 'STATUS UNAVAILABLE',
+  under_target: 'UNDER TARGET',
+} as const satisfies Record<NutritionCardGoalStatus, string>
 
 export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
-  'Open your Murph nutrition summary'
+  'Ask Murph for your nutrition totals in text'
 export const LINQ_IMESSAGE_APP_CARD_URL = 'https://murph.ai'
 
 export type LinqIMessageAppLayout = {
@@ -72,36 +82,38 @@ export function buildLinqIMessageAppLayout(
   const parsed = assistantResponseCardSchema.parse(card)
   const mealLabel = parsed.mealCount === 1 ? 'meal' : 'meals'
   const calorieTotal = readRequiredCalorieTotal(parsed)
-  const proteinTotal = parsed.totals.proteinGrams.total
-  const trailingTotals = [
+  const partial = renderPartialNutritionLabel(parsed) !== null
+  const primaryGoal = isDailyNutritionResponseCardV2(parsed)
+    ? renderPrimaryNutritionGoal(parsed)
+    : null
+  const trailingCaption = [
+    renderNutritionMetric(parsed.totals.proteinGrams, 'g protein'),
     renderNutritionMetric(parsed.totals.carbsGrams, 'g carbs'),
-    renderNutritionMetric(parsed.totals.fatGrams, 'g fat'),
   ].filter((value): value is string => value !== null)
-  const trailingDetails = [
+  const trailingSubcaption = [
+    renderNutritionMetric(parsed.totals.fatGrams, 'g fat'),
     ...(isDailyNutritionResponseCardV2(parsed)
       ? [renderNutritionMetric(parsed.totals.fiberGrams, 'g fiber')]
       : []),
-    ...(renderPartialNutritionLabel(parsed) === null
-      ? []
-      : ['PARTIAL TOTALS']),
   ].filter((value): value is string => value !== null)
 
   return {
-    caption: `${formatNutritionCardDate(parsed.localDate)} · ${
-      parsed.mealCount
-    } ${mealLabel}`,
+    caption: [
+      `${formatNutritionCardDate(parsed.localDate)} · ${
+        parsed.mealCount
+      } ${mealLabel}`,
+      ...(partial ? ['PARTIAL TOTALS'] : []),
+    ].join(' · '),
     subcaption: [
       `${formatNutritionCardNumber(calorieTotal)} cal`,
-      ...(proteinTotal === null
-        ? []
-        : [`${formatNutritionCardNumber(proteinTotal)}g protein`]),
+      ...(primaryGoal === null ? [] : [primaryGoal]),
     ].join(' · '),
-    ...(trailingTotals.length === 0
+    ...(trailingCaption.length === 0
       ? {}
-      : { trailing_caption: trailingTotals.join(' · ') }),
-    ...(trailingDetails.length === 0
+      : { trailing_caption: trailingCaption.join(' · ') }),
+    ...(trailingSubcaption.length === 0
       ? {}
-      : { trailing_subcaption: trailingDetails.join(' · ') }),
+      : { trailing_subcaption: trailingSubcaption.join(' · ') }),
   }
 }
 
@@ -145,6 +157,32 @@ function renderNutritionMetric(
   return metric.total === null
     ? null
     : `${formatNutritionCardNumber(metric.total)}${unit}`
+}
+
+function renderPrimaryNutritionGoal(
+  card: DailyNutritionResponseCardV2,
+): string | null {
+  const candidates: ReadonlyArray<readonly [
+    NutritionCardGoalSnapshot | null,
+    string,
+  ]> = [
+    [card.goals.calories, ' cal goal'],
+    [card.goals.proteinGrams, 'g protein goal'],
+    [card.goals.carbsGrams, 'g carbs goal'],
+    [card.goals.fatGrams, 'g fat goal'],
+    [card.goals.fiberGrams, 'g fiber goal'],
+  ]
+  const selected = candidates.find(([goal]) => goal !== null)
+  if (selected === undefined) {
+    return null
+  }
+  const [goal, unit] = selected
+  if (goal === null) {
+    return null
+  }
+  return `${formatNutritionCardNumber(goal.target)}${unit} · ${
+    NUTRITION_CARD_GOAL_STATUS_LABELS[goal.status]
+  }`
 }
 
 function readRequiredCalorieTotal(card: DailyNutritionResponseCard): number {

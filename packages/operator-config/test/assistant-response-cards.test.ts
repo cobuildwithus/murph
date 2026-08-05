@@ -358,8 +358,42 @@ describe('assistant response cards', () => {
     }).endsWith('Some calorie and macro estimates were partial.')).toBe(true)
   })
 
-  it('renders complete and partial totals in the Linq static layout', () => {
+  it('omits unavailable layout metrics while retaining the partial marker', () => {
+    expect(buildLinqIMessageAppLayout({
+      ...COMPLETE_CARD_V2,
+      totals: {
+        calories: { total: 1_490.25, mealCount: 3 },
+        proteinGrams: { total: null, mealCount: 0 },
+        carbsGrams: { total: null, mealCount: 0 },
+        fatGrams: { total: null, mealCount: 0 },
+        fiberGrams: { total: null, mealCount: 0 },
+      },
+      goals: {
+        calories: null,
+        proteinGrams: null,
+        carbsGrams: null,
+        fatGrams: null,
+        fiberGrams: null,
+      },
+    })).toEqual({
+      caption: 'Jul 28 · 3 meals · PARTIAL TOTALS',
+      subcaption: '1,490.25 cal',
+    })
+  })
+
+  it('renders complete, goal-aware, and partial Linq static layouts', () => {
     const completeLayout = buildLinqIMessageAppLayout(COMPLETE_CARD)
+    const goalLayout = buildLinqIMessageAppLayout(COMPLETE_CARD_V2)
+    const proteinGoalLayout = buildLinqIMessageAppLayout({
+      ...COMPLETE_CARD_V2,
+      goals: {
+        calories: null,
+        proteinGrams: { target: 100, status: 'on_target' },
+        carbsGrams: null,
+        fatGrams: null,
+        fiberGrams: null,
+      },
+    })
     const partialLayout = buildLinqIMessageAppLayout({
       ...COMPLETE_CARD_V2,
       mealCount: 4,
@@ -372,21 +406,31 @@ describe('assistant response cards', () => {
       },
     })
     expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
-      'Open your Murph nutrition summary',
+      'Ask Murph for your nutrition totals in text',
     )
     expect(LINQ_IMESSAGE_APP_CARD_URL).toBe('https://murph.ai')
     expect(LINQ_IMESSAGE_APP_CARD_URL.length).toBeLessThanOrEqual(2_048)
     expect(new URL(LINQ_IMESSAGE_APP_CARD_URL).protocol).toBe('https:')
     expect(completeLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
-      subcaption: '1,490.25 cal · 94.5g protein',
-      trailing_caption: '193.125g carbs · 34.75g fat',
+      subcaption: '1,490.25 cal',
+      trailing_caption: '94.5g protein · 193.125g carbs',
+      trailing_subcaption: '34.75g fat',
     })
+    expect(goalLayout).toEqual({
+      caption: 'Jul 28 · 3 meals',
+      subcaption: '1,490.25 cal · 2,100 cal goal · UNDER TARGET',
+      trailing_caption: '94.5g protein · 193.125g carbs',
+      trailing_subcaption: '34.75g fat · 26.5g fiber',
+    })
+    expect(proteinGoalLayout.subcaption).toBe(
+      '1,490.25 cal · 100g protein goal · ON TARGET',
+    )
     expect(partialLayout).toEqual({
-      caption: 'Jul 28 · 4 meals',
-      subcaption: '1,490.25 cal · 94.5g protein',
-      trailing_caption: '193.125g carbs · 34.75g fat',
-      trailing_subcaption: '26.5g fiber · PARTIAL TOTALS',
+      caption: 'Jul 28 · 4 meals · PARTIAL TOTALS',
+      subcaption: '1,490.25 cal',
+      trailing_caption: '94.5g protein · 193.125g carbs',
+      trailing_subcaption: '34.75g fat · 26.5g fiber',
     })
     expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).not.toMatch(
       /\d|today|day|time/iu,

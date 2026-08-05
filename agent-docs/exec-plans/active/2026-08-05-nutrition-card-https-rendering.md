@@ -27,6 +27,8 @@ Updated: 2026-08-05
 - The Linq app-card request uses a fixed, non-sensitive HTTPS URL.
 - The noninteractive static layout contains the card's date, meal count,
   available nutrition totals, and an explicit marker when any total is partial.
+- A V2 layout preserves the first available exact goal and frozen status in
+  canonical metric order instead of making goal-resolution work invisible.
 - The fallback text remains short and value-free so Apple data detection cannot
   downgrade the app-card presentation.
 - Empty assistant text still preserves the singular card delivery.
@@ -53,7 +55,7 @@ Updated: 2026-08-05
 
 ## Verification log
 
-- The operator-config focused suite passed with 54 tests across the response
+- The operator-config focused suite passed with 55 tests across the response
   card and exact Linq request-body owners.
 - The operator-config package typecheck passed.
 - Three focused assistant-engine regressions passed for empty-text card
@@ -62,3 +64,13 @@ Updated: 2026-08-05
   member state.
 - The candidate diff passes `git diff --check`, and stale inline-URL encoder
   references are absent from the active implementation and owner docs.
+- The preliminary specialist review identified lost goal/status presentation,
+  misleading degraded-state copy, and an unproved unavailable-metric branch.
+  The corrected layout retains one exact goal/status, the fallback names a real
+  text-recovery action, and the accepted coverage patch adds the missing branch
+  proof. Physical transcript rendering remains the explicit post-deploy gate.
+- Final ReviewGPT round 1 recommended deleting goal-resolution work because the
+  first reviewed layout did not consume it. That remedy was rejected against
+  the shipped goal-aware product promise; the corrected layout instead makes
+  the first canonical available goal and status observable without adding an
+  owner. A correction-delta review is pending.
