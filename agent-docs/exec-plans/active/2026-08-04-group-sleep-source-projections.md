@@ -42,6 +42,14 @@ Make consented group sleep reads truthful when a participant has multiple connec
 - The source-aware runtime path measures 10,159,653 bytes in the macOS runner assembly; the bundle baseline records that intended growth while retaining the existing 32 KiB ratchet tolerance and forbidden-boot-input guard.
 - The real consent component renders in a dedicated design-catalog study at desktop and mobile widths; local and hosted lossless captures remain legible at native resolution.
 - The required fresh Fable UI double-check was attempted after the rendered surface stabilized but could not run because the account reported explicit usage-credit exhaustion.
+- The mandatory round-3 anomaly retrospective compared the immutable
+  first-reviewed and current shapes, attributed the review-driven growth, and
+  chose explicitly justified continuation: the production correction remains
+  small and inside existing owners, while nearly all added churn is
+  production-path test evidence. No new state or lifecycle owner was added;
+  another accepted finding in the same prompt-selection mechanism or any cure
+  needing a new owner/state/lifecycle/compatibility path requires redesign or a
+  scope split.
 
 ## Privacy and rollout
 
