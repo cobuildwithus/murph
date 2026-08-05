@@ -1,8 +1,8 @@
 # Hosted reply latency diagnostics
 
-Status: active
+Status: completed
 Created: 2026-08-04
-Updated: 2026-08-04
+Updated: 2026-08-05
 
 ## Goal
 
@@ -78,7 +78,11 @@ Updated: 2026-08-04
   checkpoint stamping tests (46 tests), focused assistant-runtime index/bridge
   tests (73 tests), the production workspace entrypoint scenario, Web and
   assistant-runtime typechecks, and focused Web lint with no errors.
-- Remaining: required ReviewGPT passes and exact-head GitHub Actions.
-- Expected outcomes: aggregate classifications are deterministic, invalid
-  chronology remains fail-visible, checkpoint logs contain only bounded counts
-  and booleans, and all required checks are green.
+- Passed: the preliminary specialist review was triaged and its tests-only
+  coverage patch was inspected and applied; final ReviewGPT correction round 2
+  returned `PASS` with no findings after the accepted frontier-selection fix.
+- Passed: all required GitHub Actions on the behavior-bearing candidate head.
+- Parent final review found no remaining proof gap: aggregate classifications
+  are deterministic, invalid chronology remains fail-visible, and checkpoint
+  logs contain only bounded counts and booleans.
+Completed: 2026-08-05
