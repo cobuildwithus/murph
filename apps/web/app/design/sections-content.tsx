@@ -20,6 +20,7 @@ import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
+import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
 import {
   AppleHealthRelaySetupStudy,
   ConnectSourceCardStudy,
@@ -249,6 +250,12 @@ export function SectionsContent() {
 
       <StudySection title="Connect source actions and disconnect lifecycle">
         <ConnectSourceCardStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Connected app authorization handoff">
+        <ConnectedAppAuthorizationStudy />
       </StudySection>
 
       <Separator />
