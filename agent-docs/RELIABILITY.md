@@ -325,13 +325,14 @@ Last verified: 2026-08-04
   leaves recovery-backed ownership indeterminate and must return the existing
   typed retry before route creation. A completed empty, oversized, or non-group
   result cannot select another member's setup; no eligible intent or unresolved
-  ambiguity otherwise preserves the existing active-sender decision. For an
-  unbound thread, explicit suspension or health-data-consent withdrawal stops
-  before roster preparation or setup outreach. Other inactive senders cannot
-  become the fallback owner but do not veto a distinct active roster-matched
-  owner. Unknown or inactive non-withdrawn senders reach the existing group
-  setup handoff only after the prepared-route boundary returns no route, and an
-  unknown sender must first pass the existing first-contact admission gate. The
+  ambiguity otherwise preserves the existing active-sender decision. After the
+  request-local existing-route and roster preflight, explicit suspension or
+  health-data-consent withdrawal prevents route creation and setup outreach.
+  Other inactive senders cannot become the fallback owner but do not veto a
+  distinct active roster-matched owner. Unknown or inactive non-withdrawn
+  senders reach the existing group setup handoff only after the prepared-route
+  boundary returns no route. When first-contact admission enforcement is
+  enabled, an unknown sender must pass that gate before setup outreach. The
   one-use setup claim and route creation share one transaction. Claim
   eligibility requires
   the setup to cover the provider event time and to remain unexpired at
