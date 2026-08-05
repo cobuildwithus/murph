@@ -13,7 +13,7 @@ describe("hosted runtime checkpoint publication expectation", () => {
   it("uses the default idle window and bounded publication operations", () => {
     const dirtyAtMs = Date.parse("2026-04-27T00:00:00.000Z");
 
-    expect(HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS).toBe(90_000);
+    expect(HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS).toBe(60_000);
     expect(resolveHostedRuntimeIdleCheckpointDelayMs(null)).toBe(
       HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS,
     );
@@ -21,7 +21,7 @@ describe("hosted runtime checkpoint publication expectation", () => {
       checkpointStartByMs:
         dirtyAtMs + resolveHostedRuntimeIdleCheckpointDelayMs(null),
       commitTimeoutMs: null,
-    })).toBe(Date.parse("2026-04-27T00:25:30.000Z"));
+    })).toBe(Date.parse("2026-04-27T00:25:00.000Z"));
   });
 
   it("derives the expectation from configured idle and control-plane bounds", () => {

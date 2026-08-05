@@ -29,7 +29,7 @@ describe("readHostedExecutionEnvironment", () => {
     );
     expect(environment.hostedCrypto.HOSTED_CRYPTO_ENV).toBe("test");
     expect(environment.maxEventAttempts).toBe(3);
-    expect(environment.idleCheckpointDelayMs).toBe(90_000);
+    expect(environment.idleCheckpointDelayMs).toBe(60_000);
     expect(environment.retryDelayMs).toBe(30_000);
     expect(environment.runnerCommitTimeoutMs).toBe(45_000);
     expect(environment.runnerReadyTimeoutMs).toBe(20_000);
@@ -171,22 +171,22 @@ describe("readHostedExecutionEnvironment", () => {
     ).toThrow(/HOSTED_WEB_BASE_URL must not use HTTP in production/u);
   });
 
-  it("rejects a production idle checkpoint delay below 90 seconds", () => {
+  it("rejects a production idle checkpoint delay below 60 seconds", () => {
     expect(() =>
       readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv({
         HOSTED_CRYPTO_ENV: "production",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "89999",
+        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "59999",
       })),
     ).toThrow(
-      /HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS must be at least 90000 in production/u,
+      /HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS must be at least 60000 in production/u,
     );
 
     expect(
       readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv({
         HOSTED_CRYPTO_ENV: "production",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "90000",
+        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "60000",
       })).idleCheckpointDelayMs,
-    ).toBe(90_000);
+    ).toBe(60_000);
   });
 
   it("aligns production owner rechecks with the idle checkpoint horizon", () => {
@@ -194,12 +194,12 @@ describe("readHostedExecutionEnvironment", () => {
       HOSTED_CRYPTO_ENV: "production",
     }));
 
-    expect(environment.idleCheckpointDelayMs).toBe(90_000);
+    expect(environment.idleCheckpointDelayMs).toBe(60_000);
     expect(environment.runnerCommitTimeoutMs).toBe(45_000);
     expect(computeHostedRuntimeProcessingRecheckDelayMs({
       idleCheckpointDelayMs: environment.idleCheckpointDelayMs,
       runnerCommitTimeoutMs: environment.runnerCommitTimeoutMs,
-    })).toBe(140_000);
+    })).toBe(110_000);
   });
 
   it("reads the configured Vercel OIDC environment when provided", () => {

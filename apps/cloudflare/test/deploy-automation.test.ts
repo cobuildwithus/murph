@@ -433,7 +433,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBe("preview");
   });
 
-  it.each(["180000", "90000"])(
+  it.each(["180000", "60000"])(
     "passes an explicit %s idle checkpoint delay through to generated Worker vars",
     (idleCheckpointDelayMs) => {
       const environment = readHostedDeployAutomationEnvironment({
