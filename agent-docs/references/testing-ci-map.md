@@ -303,6 +303,17 @@ the privacy-foundation migration inventory and production migration guard keep
 the new index and approved ten-minute cron registration aligned. Routine CI
 never reads production feedback or enters Resend.
 
+Hosted support-escalation conversation coverage is Assistant Engine-owned.
+`codex-base-support-guidance.test.ts` pins opt-in contact details, explicit
+private-direct authority, immediate reserved submission without a separate
+approval turn, and truthful saved/failure copy. The opt-in support scenario in
+`assistant-codex-real-e2e.test.ts` defines the real one-turn App Server journey:
+an explicit private human-support request submits one Murph-written,
+de-identified product-only summary while excluding synthetic semantic private
+context and raw wording; the group case remains tool-free.
+Routine CI compiles the live-provider scenario but skips it without an explicit
+supported provider credential.
+
 ## Current CI Workflows
 
 - Linux CI `apps/web verify` invocations default to wrapping the hosted-web production

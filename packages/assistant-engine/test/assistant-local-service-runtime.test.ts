@@ -296,9 +296,9 @@ test('sendAssistantMessageLocal delivers an exact approval URL without persistin
   )
 })
 
-test('sendAssistantMessageLocal replies safely without starting the provider for an unverified external audience', async () => {
+test('sendAssistantMessageLocal does not volunteer support contact for an unverified external audience', async () => {
   const safetyResponse =
-    "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph. If you're reporting a Murph product problem, you can also email support@withmurph.ai directly."
+    "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph."
   const session = createAssistantSession({
     binding: {
       actorId: 'stored-direct-actor',
@@ -361,7 +361,7 @@ test('sendAssistantMessageLocal replies safely without starting the provider for
   })
 
   expect(result.response).toBe(safetyResponse)
-  expect(result.response).toContain('support@withmurph.ai')
+  expect(result.response).not.toContain('support@withmurph.ai')
   expect(result.delivery).toEqual(expect.objectContaining({
     target: 'external-thread',
   }))
