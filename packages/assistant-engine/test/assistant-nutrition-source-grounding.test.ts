@@ -60,6 +60,12 @@ describe('assistant nutrition source grounding', () => {
       'For a routine meal log, inspect the summary silently and mention it only when the user asks or a material exact-product alert warrants a brief, source-specific screening caveat.',
     )
     expect(food).toContain(
+      "For a material alert, attribute the measured result to `source`, and attribute the concern level, exposure, and ratio to Murph's comparison against the named `threshold.authority` and threshold.",
+    )
+    expect(food).toContain(
+      'Never say the source reported a concern level unless the evidence explicitly states that.',
+    )
+    expect(food).toContain(
       'Do not inject unknown or `none` results into every acknowledgment.',
     )
     expect(food).toContain(

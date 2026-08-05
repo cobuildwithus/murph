@@ -82,8 +82,12 @@ Before calculating a meal total:
   an alert, not that no contaminants were measured. Alerts are a subset of
   observations; never add their counts together. For a routine meal log, inspect
   the summary silently and mention it only when the user asks or a material
-  exact-product alert warrants a brief, source-specific screening caveat. Do not
-  inject unknown or `none` results into every acknowledgment. Increase `--limit`
+  exact-product alert warrants a brief, source-specific screening caveat. For a
+  material alert, attribute the measured result to `source`, and attribute the
+  concern level, exposure, and ratio to Murph's comparison against the named
+  `threshold.authority` and threshold. Never say the source reported a concern
+  level unless the evidence explicitly states that. Do not inject unknown or
+  `none` results into every acknowledgment. Increase `--limit`
   only for an ambiguous match, and
   use `--full-label` whenever the user needs a fact outside that compact
   response. This includes sugars, saturated fat, cholesterol, sodium or other

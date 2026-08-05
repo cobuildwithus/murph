@@ -393,7 +393,7 @@ text(result.output);
         },
       },
       {
-        text: 'Logged it: about 345 calories, 18g protein, 45g carbs, 8g fat, and 5g fiber. Example Source also reported a high BPA screening alert for the kefir: assumed exposure was 3.43 ng/kg/day versus 0.2 guidance (17.1x), based on one 240g serving per day and a 70kg adult. The compact evidence list was truncated. This is screening context, not a personalized safety verdict.',
+        text: 'Logged it: about 345 calories, 18g protein, 45g carbs, 8g fat, and 5g fiber. Example Source reported BPA at 1 ng/g in the kefir. Against Example Authority’s 0.2 ng/kg/day screening level, Murph’s fixed one-240g-serving-per-day, 70kg screen estimates 3.43 ng/kg/day (17.1x), a high threshold-screening result. The compact evidence list was truncated. This is screening context, not a personalized safety verdict.',
       },
     )
 
@@ -408,7 +408,7 @@ text(result.output);
     })
 
     expect(result.finalMessage).toBe(
-      'Logged it: about 345 calories, 18g protein, 45g carbs, 8g fat, and 5g fiber. Example Source also reported a high BPA screening alert for the kefir: assumed exposure was 3.43 ng/kg/day versus 0.2 guidance (17.1x), based on one 240g serving per day and a 70kg adult. The compact evidence list was truncated. This is screening context, not a personalized safety verdict.',
+      'Logged it: about 345 calories, 18g protein, 45g carbs, 8g fat, and 5g fiber. Example Source reported BPA at 1 ng/g in the kefir. Against Example Authority’s 0.2 ng/kg/day screening level, Murph’s fixed one-240g-serving-per-day, 70kg screen estimates 3.43 ng/kg/day (17.1x), a high threshold-screening result. The compact evidence list was truncated. This is screening context, not a personalized safety verdict.',
     )
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
       .flatMap((summary) => summary.customToolCallOutputs ?? [])
