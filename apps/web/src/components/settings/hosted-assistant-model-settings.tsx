@@ -13,7 +13,7 @@ import {
   type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
 import Image from "next/image";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import {
   HostedOnboardingApiError,
@@ -187,6 +187,7 @@ interface AssistantProviderSummaryProps {
   disabled?: boolean;
   draftRouting: AssistantRoutingChoice;
   onChangeClick: () => void;
+  usageDisclosureId?: string;
 }
 
 export function AssistantProviderSummary({
@@ -195,7 +196,11 @@ export function AssistantProviderSummary({
   disabled = false,
   draftRouting,
   onChangeClick,
+  usageDisclosureId,
 }: AssistantProviderSummaryProps) {
+  const generatedUsageDisclosureId = useId();
+  const resolvedUsageDisclosureId =
+    usageDisclosureId ?? generatedUsageDisclosureId;
   const currentName = readRoutingName(currentRouting);
   const draftName = readRoutingName(draftRouting);
   const hasPendingChange = currentRouting !== draftRouting;
@@ -238,7 +243,10 @@ export function AssistantProviderSummary({
         </Button>
       </div>
       {draftRouting === HOSTED_ASSISTANT_VENICE_PROVIDER ? (
-        <p className="mt-2 max-w-2xl text-xs/5 text-pretty text-muted-foreground">
+        <p
+          className="mt-2 max-w-2xl text-xs/5 text-pretty text-muted-foreground"
+          id={resolvedUsageDisclosureId}
+        >
           {VENICE_USAGE_DISCLOSURE}
         </p>
       ) : null}
@@ -519,6 +527,7 @@ function HostedAssistantModelSettingsForm(
   );
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const veniceUsageDisclosureId = useId();
   const [status, setStatus] = useState<{
     message: string;
     tone: "destructive" | "neutral";
@@ -538,6 +547,8 @@ function HostedAssistantModelSettingsForm(
   const hasChanges = draftModel !== currentModel
     || routingChanged
     || dormantSolPreference;
+  const providerControlsVisible = veniceAvailable
+    || props.customInferenceAvailable === true;
 
   async function saveModel() {
     setIsSaving(true);
@@ -774,13 +785,14 @@ function HostedAssistantModelSettingsForm(
           </RadioGroup>
         </FieldSet>
 
-        {veniceAvailable || props.customInferenceAvailable ? (
+        {providerControlsVisible ? (
           <AssistantProviderSummary
             connection={connection}
             currentRouting={currentRouting}
             disabled={controlsDisabled}
             draftRouting={draftRouting}
             onChangeClick={() => setProviderDialogOpen(true)}
+            usageDisclosureId={veniceUsageDisclosureId}
           />
         ) : null}
 
@@ -803,9 +815,15 @@ function HostedAssistantModelSettingsForm(
 
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-48">
           <Button
-            type="submit"
+            aria-describedby={
+              providerControlsVisible
+                && draftRouting === HOSTED_ASSISTANT_VENICE_PROVIDER
+                ? veniceUsageDisclosureId
+                : undefined
+            }
             disabled={controlsDisabled || !hasChanges}
             className="w-full sm:w-auto"
+            type="submit"
           >
             {isSaving ? <Spinner aria-hidden="true" /> : null}
             {isSaving ? "Saving…" : "Save change"}
@@ -823,7 +841,7 @@ function HostedAssistantModelSettingsForm(
           />
         </div>
       </form>
-      {veniceAvailable || props.customInferenceAvailable ? (
+      {providerControlsVisible ? (
         <AssistantProviderDialog
           chatCompletionsAvailable={props.chatCompletionsAvailable}
           configurationAvailable={props.configurationAvailable}

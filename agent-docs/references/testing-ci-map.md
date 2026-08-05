@@ -28,6 +28,7 @@ Last verified: 2026-07-31
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for deterministic hosted usage replay. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | A first writer holds an uncommitted deterministic usage row while an exact concurrent replay waits; both transactions complete after release and the ledger retains one immutable row |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-accepted-attempt-recheck-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof that the accepted-attempt recheck cooldown elects one owner. The claim replaced a runtime-log-row election, so exactly-one-winner is now PostgreSQL conditional-update semantics rather than application logic. Runs in the hosted E2E PostgreSQL job after migrations. | Two concurrent claims at the same logical time yield exactly one winner; a claim at the cooldown boundary is denied; a claim past the boundary succeeds |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-home-routing-postgres.test.ts` | Opt-in real-PostgreSQL proof for hosted Linq proactive-capacity, edit-source, and member-route concurrency. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | One blind source-message key serializes concurrent edit lineage reads, while an edit racing an uncommitted ordinary source append sees the retryable missing-source state and resolves the source after commit; the final daily slot admits exactly one claim; concurrent direct-Telegram contact requests converge on one encrypted home-line assignment without a chat binding or proactive-capacity claim; activation, first-contact, reclassification, and participant routing serialize on the member owner; and real Telegram/Linq planners complete in both routing orders for already-active members and for an inbound reclassified after an uncommitted activation, while retaining both bindings and exactly one mailbox item per event |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-pending-group-setup-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for the encrypted one-use next-Linq-group transfer envelope. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Two simultaneous group claims yield exactly one decrypted setup; exact restore preserves its payload, a stale restore cannot overwrite a replacement, corrupt ciphertext is consumed without blocking admission, a provider-correlated replacement-line intent retains the exact prepared owner when another roster member speaks first while rejecting a foreign roster and thread, the setup is consumed once, and deleting the owner cascades re-armed state |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-recent-message-load-postgres.test.ts` | Opt-in real-PostgreSQL proof for Hosted Linq recent line-load derivation and its bounded query plan. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Canonical accepted delivery and inbound-message ledgers count only effects in the inclusive trailing seven-day window, while the exact production query uses both partial `(line, time)` indexes under representative historical load |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-group-join-outreach-reply-recovery-postgres.test.ts` | Opt-in real-PostgreSQL proof for group-join outreach, reply recovery, and deletion fences. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Focused cases prove provider-native replies select the exact older or newer accepted opener when two group intents share one direct chat and an unmatched anchor selects neither; exact reply occurrence and direct outreach correlation survive retries; failed and distinct replies remain independently recoverable; generic/group terminal receipts converge in both orders; phone-bound member creation, opener dispatch, and immediate reply planning serialize on the same participant lock; a committed inactive member still receives the opener, activation and opener dispatch converge in either lock order, and that member's reply retains the exact group-aware signup context; a concurrently accepted group link suppresses a fresh generic dispatch under that member lock; membership appearing before a fresh dispatch forces canonical replanning without a provider call; opener dispatch and account deletion converge with either fence winning; group-reply deletion races preserve daily suppression until the final live delivery is gone; and provider-body stalls, drain contention, and buffered terminal failure remain bounded and recoverable |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-member-lock-postgres.test.ts` | Opt-in real-PostgreSQL proof for bounded hosted-member Stripe mutation lock acquisition, reversal freshness/suspension ownership, and the Privy deletion/authentication handoff. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | One transaction holds the production member row, an independent same-member contender fails with the typed busy error before its callback can run, and a foreground retry succeeds after the owner commits; full-refund and withdrawn-dispute progress commits and exact replay stays idempotent; two distinct reversals defeat an older restore in sequential and concurrent schedules; terminal Privy cleanup deletes the provider principal and receipt before stale authentication resumes, after which live-provider authority rejects replacement member, identity, and session state |
@@ -208,6 +209,41 @@ hosted-local group-isolation scenario carries a unique addition through Web,
 the encrypted route sidecar, mailbox import, and the next real assistant
 provider request, where both the anonymous fallback and exact handle context
 must be present.
+
+Pending Linq-group ownership coverage is split at its actual owners.
+Hosted-execution parser tests lock the closed prepare/read/cancel setup and
+activation wire contracts; assistant-engine tests lock the private fresh-text
+gate, skill guidance, and exact-replay room-model initialization; Hosted Web
+group-tool tests lock current-line preparation, encrypted payload validation,
+and status handling. Selection and prepared-route tests prove lone-candidate
+ownership, sender-only conflict resolution, canonical route composition,
+new-route-only style and room-context application, referral binding, and
+existing-route restoration. Assistant-runtime tests prove activation applies
+only a categorical, secret-safe result and fails open. Linq webhook tests prove
+the bounded provider roster read happens before the transaction and only
+resolved member ids cross that boundary, while provider failure retries before
+route creation and a completed oversized roster preserves sender-owner
+admission. Transport tests prove group-line recovery persists its accepted
+milestone before returning provider success, retries that write with the stable
+provider idempotency key, and does not misclassify a provider-successful send as
+failed. They also prove an uncorrelated recovery provider error does not invoke
+local failure settlement. Delivery-store tests prove the exact pinned replay
+bypasses the generic lease, rejects changed source or target identity, and
+preserves its original authority timestamp. The opt-in PostgreSQL concurrency
+proof verifies one encrypted setup can be claimed at most once, exact restore
+preserves its payload, stale restore cannot overwrite a replacement, corrupt
+payload does not block admission, and member deletion cascades pending state.
+The same real-database proof composes a provider-correlated line-recovery
+delivery with a different roster member's first message: the exact prepared
+owner is selected, an accepted-milestone failure leaves the exact attempt
+route-free, one immediate concurrent replay wins on the same delivery row
+without changing its pre-event authority timestamp, advances the row version
+while leaving the uncorrelated delivery in flight, rejects foreign rosters and
+threads, and preserves the encrypted style/context payload as one-use even with
+less than the generic lease left before setup expiry. Prepared-route coverage
+also keeps a recovery-pinned message
+route-free when its exact claim races or disappears, instead of committing the
+first speaker as a fallback owner.
 
 Scheduled Telegram group route-authority coverage is owner-split. Hosted Web
 tests bind the signed callback member to the exact current thread-container

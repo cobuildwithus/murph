@@ -33,21 +33,22 @@ describe('onboarding follow-up automation', () => {
     )
   })
 
-  it('reserves at least 30 minutes after the latest jitter slot', () => {
+  it('ends after the third local-day cutoff across timezone transitions', () => {
     expect(resolveMurphOnboardingFollowupActiveUntil({
       scheduledAt: '2026-04-09T17:47:00.000Z',
       timeZone: 'America/New_York',
-    })).toBe('2026-04-09T19:00:00.000Z')
+    })).toBe('2026-04-11T19:00:00.000Z')
     expect(resolveMurphOnboardingFollowupActiveUntil({
       scheduledAt: '2026-11-01T19:29:00.000Z',
       timeZone: 'America/New_York',
-    })).toBe('2026-11-01T20:00:00.000Z')
+    })).toBe('2026-11-03T20:00:00.000Z')
   })
 
-  it('defines a single reply-oriented final attempt', () => {
-    expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary).toContain('One finite')
+  it('defines three finite reply-oriented daily opportunities', () => {
+    expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays).toBe(3)
+    expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary).toContain('three days')
     expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
-      .toContain('This one-shot is consumed whether you send or skip.')
+      .toContain('Each scheduled occurrence is consumed whether you send or skip.')
     expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
       .toContain('send at most one')
     expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
@@ -57,6 +58,6 @@ describe('onboarding follow-up automation', () => {
     expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
       .toContain('Only a later foreground user reply may advance or complete onboarding.')
     expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
-      .toContain('finite next-day recovery rule')
+      .toContain('finite three-day recovery rule')
   })
 })

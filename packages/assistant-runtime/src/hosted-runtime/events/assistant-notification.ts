@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { AutomationRoute } from "@murphai/contracts";
 import {
   buildHostedAssistantContextFingerprintDetails,
+  initializeAssistantGroupRoomModel,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   resolveMurphOnboardingFollowupSchedule,
   sendAssistantNotification,
@@ -44,21 +45,52 @@ export async function executeHostedMemberActivatedWake(input: {
   turnEnvironment?: AssistantTurnEnvironment | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
+  const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
+  const initialGroupRoomModelMarkdown =
+    input.wake.initialGroupRoomModelMarkdown;
+  if (initialGroupRoomModelMarkdown) {
+    try {
+      const result = await initializeAssistantGroupRoomModel({
+        body: initialGroupRoomModelMarkdown,
+        vaultRoot: input.vaultRoot,
+      });
+      redactedLogEntries.push(
+        emitHostedGroupRoomModelSeedLifecycleLog({
+          message: "Hosted group room model activation seed applied.",
+          outcome: result.kind,
+          wake: input.wake,
+        }),
+      );
+    } catch (error) {
+      redactedLogEntries.push(
+        emitHostedGroupRoomModelSeedLifecycleLog({
+          error,
+          level: "warn",
+          message: "Hosted group room model activation seed will retry.",
+          outcome: "unavailable",
+          wake: input.wake,
+        }),
+      );
+      throw error;
+    }
+  }
+
   const signupWelcome = input.wake.signupWelcome;
   if (!signupWelcome) {
     return createNoopMailboxEffect({
       conversationMetrics: null,
       mailboxLane: "member-activated",
+      redactedLogEntries,
     });
   }
 
-  const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [
+  redactedLogEntries.push(
     emitHostedMemberActivationSignupWelcomeLifecycleLog({
       message: "Hosted member activation signup welcome started.",
       phase: "wake.running",
       wake: input.wake,
     }),
-  ];
+  );
   let seededOnboardingFollowupWakeAt: string | null = null;
   let notificationDecisionKind: string | null = null;
 
@@ -229,9 +261,11 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
     // delivery source) is enforced by upsertAssistantCronAutomation's target
     // validation; an undeliverable route lands in the catch below.
     const job = await upsertAssistantCronAutomation({
+      firstOccurrenceActiveDayCount:
+        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
       firstOccurrenceActiveUntilLocalTime:
         MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.activeUntilLocalTime,
-      firstOccurrencePolicy: "once-after-current-local-day",
+      firstOccurrencePolicy: "after-current-local-day",
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: buildOnboardingFollowupAutomationRoute(input.route),
       schedule: resolveMurphOnboardingFollowupSchedule(input.stableKey),
@@ -241,6 +275,18 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
       title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       vault: input.vaultRoot,
     });
+    try {
+      input.redactedLogEntries.push(
+        emitHostedOnboardingFollowupSeededLog({
+          details: input.logDetails,
+          job,
+          wake: input.wake,
+        }),
+      );
+    } catch {
+      // This diagnostic must never turn a successful canonical upsert into a
+      // failed onboarding-follow-up seed.
+    }
     return job?.enabled ? job.state.nextRunAt : null;
   } catch (error) {
     input.redactedLogEntries.push(
@@ -252,6 +298,40 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
     );
     return null;
   }
+}
+
+function emitHostedOnboardingFollowupSeededLog(input: {
+  details: HostedExecutionStructuredLogDetails;
+  job: Awaited<ReturnType<typeof upsertAssistantCronAutomation>>;
+  wake: HostedExecutionSystemWake;
+}): HostedExecutionRedactedLogEntry {
+  const details = {
+    ...input.details,
+    eventCode: "assistant.onboarding_followup_seeded",
+    onboardingFollowupEnabled: input.job?.enabled === true,
+    onboardingFollowupNextRunAt: input.job?.state.nextRunAt ?? null,
+    onboardingFollowupOpportunityDays:
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
+    onboardingFollowupScheduleKind: input.job?.schedule?.kind ?? null,
+  };
+
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details,
+    level: "info",
+    message: "Hosted onboarding follow-up automation seeded.",
+    phase: "wake.running",
+    wake: input.wake,
+  });
+
+  return {
+    component: "runtime",
+    eventId: input.wake.eventId,
+    level: "info",
+    message: "Hosted onboarding follow-up automation seeded.",
+    phase: "wake.running",
+    redacted: details,
+  };
 }
 
 function didAssistantNotificationAcceptDelivery(
@@ -447,6 +527,26 @@ function emitHostedMemberActivationSignupWelcomeLifecycleLog(input: {
       ...buildHostedMemberActivationSignupWelcomeLogDetails(input.wake),
       ...(input.extraDetails ?? {}),
     },
+  });
+}
+
+function emitHostedGroupRoomModelSeedLifecycleLog(input: {
+  error?: unknown;
+  level?: HostedExecutionLogLevel;
+  message: string;
+  outcome: "already_initialized" | "initialized" | "unavailable";
+  wake: HostedExecutionMemberActivatedWake;
+}): HostedExecutionRedactedLogEntry {
+  return emitHostedNotificationLifecycleLog({
+    details: {
+      eventCode: "assistant.group_room_model_activation_seed",
+      outcome: input.outcome,
+    },
+    ...(input.error === undefined ? {} : { error: input.error }),
+    ...(input.level === undefined ? {} : { level: input.level }),
+    message: input.message,
+    phase: "wake.running",
+    wake: input.wake,
   });
 }
 
