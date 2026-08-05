@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   hostedThreadContainerParticipantUpsert: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   isHostedMemberSuspended: vi.fn(),
+  issueHostedSignupReferralLink: vi.fn(),
   leaveHostedGroupMemberTx: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
@@ -60,6 +61,10 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
 });
+
+vi.mock("@/src/lib/hosted-growth/signup-referral", () => ({
+  issueHostedSignupReferralLink: mocks.issueHostedSignupReferralLink,
+}));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
@@ -358,6 +363,10 @@ describe("handleHostedRuntimeGroupTool", () => {
     );
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
+    mocks.issueHostedSignupReferralLink.mockResolvedValue({
+      expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+      signupUrl: "https://www.withmurph.ai/join/signup_invite",
+    });
     mocks.getHostedLinqChatSummary.mockResolvedValue({
       displayName: "Weekend Warriors",
       handles: [],
@@ -488,6 +497,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       ask_member: "participant_aware",
       arm_usage_referral: "participant_aware",
       cancel_usage_referral: "participant_aware",
+      create_signup_referral_link: "participant_aware",
       create_join_link: "owner_active",
       leave_membership: "participant_aware",
       list_memberships: "personal_active",
@@ -506,6 +516,61 @@ describe("handleHostedRuntimeGroupTool", () => {
       set_chat_avatar: "owner_active",
       share_contact_card: "owner_active",
       update_display_name: "owner_active",
+    });
+  });
+
+  it("attributes a direct signup link to the current member", async () => {
+    mocks.hostedThreadContainerFindUnique.mockResolvedValueOnce(null);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_direct",
+      request: {
+        action: "create_signup_referral_link",
+      },
+    })).resolves.toEqual({
+      action: "create_signup_referral_link",
+      result: {
+        expiresAt: "2026-08-06T22:30:00.000Z",
+        signupUrl: "https://www.withmurph.ai/join/signup_invite",
+        status: "ok",
+      },
+    });
+
+    expect(mocks.issueHostedSignupReferralLink).toHaveBeenCalledWith({
+      referrerMemberId: "member_direct",
+    });
+  });
+
+  it("attributes a group signup link to the exact accepted sender", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce({
+      core: {
+        id: "member_referrer",
+      },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "create_signup_referral_link",
+        participant: {
+          assistantInputId: `ain_${"a".repeat(32)}`,
+          senderHandle: "+14045550100",
+          source: "linq",
+        },
+      },
+    })).resolves.toMatchObject({
+      action: "create_signup_referral_link",
+      result: {
+        status: "ok",
+      },
+    });
+
+    expect(mocks.hasHostedMemberActivationProof).toHaveBeenCalledWith({
+      memberId: "member_referrer",
+      prisma: expect.any(Object),
+    });
+    expect(mocks.issueHostedSignupReferralLink).toHaveBeenCalledWith({
+      referrerMemberId: "member_referrer",
     });
   });
 
