@@ -38,6 +38,8 @@ const EMAIL_ENV = {
 };
 const ISSUE_SUMMARY =
   "a connected source reports success but Murph does not finish the connection.";
+const SANITIZER_UNRECOGNIZED_PRIVATE_PROSE =
+  "a relative named Rowan says their glucose sensor stopped syncing after a metformin change at the downtown clinic.";
 
 type TransactionClientMock = {
   $executeRaw: typeof prismaMocks.executeRaw;
@@ -234,6 +236,43 @@ describe("hosted product support escalation", () => {
     const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
     expect(emailText).toContain(`Product issue: ${scrubbedIssue}`);
     expect(emailText).not.toContain("member@example.com");
+  });
+
+  it("makes the accepted residual semantic risk explicit for model-written prose", async () => {
+    const feedback = makeSupportFeedback({
+      idempotencyKey: "7".repeat(64),
+      issueSummary: SANITIZER_UNRECOGNIZED_PRIVATE_PROSE,
+    });
+    const feedbackId = buildHostedProductFeedbackId({ feedback });
+    const sendEmail = vi.fn().mockResolvedValue({ providerMessageId: null });
+    prismaMocks.createMany.mockResolvedValue({ count: 2 });
+    prismaMocks.findFeedbackRows.mockResolvedValue(makeStoredSupportFeedbackRows({
+      detailSummary: SANITIZER_UNRECOGNIZED_PRIVATE_PROSE,
+      feedback,
+      feedbackId,
+    }));
+    prismaMocks.count.mockResolvedValue(1);
+
+    await recordHostedProductFeedback({
+      env: EMAIL_ENV,
+      feedback,
+      memberId: MEMBER_ID,
+      now: NOW,
+      sendEmail,
+    });
+
+    expect(prismaMocks.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          memberId: null,
+          summary: SANITIZER_UNRECOGNIZED_PRIVATE_PROSE,
+        }),
+      ]),
+      skipDuplicates: true,
+    });
+    expect(sendEmail.mock.calls[0]?.[0].text).toContain(
+      `Product issue: ${SANITIZER_UNRECOGNIZED_PRIVATE_PROSE}`,
+    );
   });
 
   it("records later escalations without sending more than three emails per UTC day", async () => {

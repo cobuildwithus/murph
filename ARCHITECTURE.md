@@ -937,9 +937,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   before provider entry and formats from the first stored issue, so replay
   reuses one body and Resend idempotency key even if a later callback supplies
   different wording. Missing, linked, unsanitized, still-prefixed, or malformed
-  detail fails closed. The alert never reads or copies the member's raw message,
-  conversation, health, contact, secret, provider, or other private context and
-  adds no table, queue, cursor, approval state, or delivery owner.
+  detail fails closed. The alert has no raw-message, transcript, or provider-
+  payload input and formats only the stored model-authored issue. The model
+  contract forbids copied wording and private categories, while the deterministic
+  sanitizer remains best-effort rather than semantic proof; the explicit request
+  accepts that documented residual risk for the dedicated internal recipient.
+  The path adds no table, queue, cursor, approval state, or delivery owner.
 
   A separate authenticated ten-minute Vercel cron performs work only during the
   6pm Eastern hour and sends one daily internal product-feedback digest through

@@ -239,7 +239,7 @@ describe("hosted product feedback digest", () => {
   it("sends only the anonymous written issue from a stored support pair", async () => {
     const memberId = "member_support_digest";
     const writtenIssue =
-      "a connected source reports success but Murph does not finish the connection.";
+      "a relative named Rowan says their glucose sensor stopped syncing after a metformin change at the downtown clinic.";
     const storedRows = [
       {
         kind: "frustration",
