@@ -2,6 +2,13 @@
 
 review_gpt_config_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 review_gpt_repo_root="$(CDPATH= cd -- "$review_gpt_config_dir/.." && pwd -P)"
+review_gpt_local_config="${XDG_CONFIG_HOME:-$HOME/.config}/murph/review-gpt.conf"
+
+if [[ -r "$review_gpt_local_config" ]]; then
+  # This optional user-owned file contains local workflow preferences only.
+  # shellcheck source=/dev/null
+  source "$review_gpt_local_config"
+fi
 
 review_gpt_invalid_browser_lane() {
   echo "Error: unsupported ReviewGPT browser lane '$1'. Use random, eragon, phlebas, hercules, or mountain." >&2
@@ -67,10 +74,17 @@ review_gpt_browser_lane_is_usable() {
 
 review_gpt_requested_browser_lane="${REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_PROFILE_SLUG:-random}}}"
 review_gpt_requested_browser_lane="$(printf '%s' "$review_gpt_requested_browser_lane" | tr '[:upper:]' '[:lower:]')"
+review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4}}"
+
+if [[ ! "$review_gpt_browser_lane_count" =~ ^[1-4]$ ]]; then
+  echo "Error: REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 4." >&2
+  return 1 2>/dev/null || exit 1
+fi
 
 case "$review_gpt_requested_browser_lane" in
   "" | auto | random)
-    review_gpt_browser_lanes=(eragon phlebas hercules mountain)
+    review_gpt_all_browser_lanes=(eragon phlebas hercules mountain)
+    review_gpt_browser_lanes=("${review_gpt_all_browser_lanes[@]:0:review_gpt_browser_lane_count}")
     review_gpt_usable_browser_lanes=()
 
     for review_gpt_candidate_browser_lane in "${review_gpt_browser_lanes[@]}"; do
@@ -147,6 +161,37 @@ app_connector="current"
 model="gpt-5.6-sol"
 thinking="current"
 
+review_gpt_review_phase="${REVIEW_GPT_REVIEW_PHASE:-final}"
+review_gpt_round_number="${REVIEW_GPT_ROUND_NUMBER:-}"
+review_gpt_full_review_reason="${REVIEW_GPT_FULL_REVIEW_REASON:-}"
+review_gpt_pr_review_prompt_file="pr-deep-review.md"
+if [[ -n "$review_gpt_full_review_reason" ]] \
+  && [[ -z "${review_gpt_full_review_reason//[[:space:]]/}" ]]; then
+  echo "Error: REVIEW_GPT_FULL_REVIEW_REASON must contain a concrete reason." >&2
+  return 1 2>/dev/null || exit 1
+fi
+if [[ "$review_gpt_review_phase" == "final" ]] \
+  && [[ "$review_gpt_round_number" =~ ^([2-9]|[1-9][0-9]+)$ ]]; then
+  if [[ -n "$review_gpt_full_review_reason" ]]; then
+    : # A justified full-context correction starts a new ChatGPT conversation.
+  else
+    review_gpt_thread_url="${REVIEW_GPT_THREAD_URL:-}"
+    case "$review_gpt_thread_url" in
+      https://chatgpt.com/c/*)
+        chatgpt_url="$review_gpt_thread_url"
+        review_gpt_pr_review_prompt_file="pr-correction-review.md"
+        ;;
+      *)
+        echo "Error: later ReviewGPT rounds require REVIEW_GPT_THREAD_URL for the current context conversation." >&2
+        return 1 2>/dev/null || exit 1
+        ;;
+    esac
+  fi
+elif [[ -n "$review_gpt_full_review_reason" ]]; then
+  echo "Error: REVIEW_GPT_FULL_REVIEW_REASON is only valid for round 2 or later." >&2
+  return 1 2>/dev/null || exit 1
+fi
+
 review_gpt_register_dir_preset "security" "security-audit.md" \
   "General correctness and security audit focused on trust boundaries." \
   "security-audit" \
@@ -199,7 +244,7 @@ review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
   "legacy-cleanup" \
   "hard-cut" \
   "greenfield-hard-cut"
-review_gpt_register_dir_preset "pr-review" "pr-deep-review.md" \
+review_gpt_register_dir_preset "pr-review" "$review_gpt_pr_review_prompt_file" \
   "Deep PR review for serious bugs, invariant drift, and material simplification using the guarded codebase ZIP." \
   "pr-deep-review" \
   "deep-pr-review" \
