@@ -26,6 +26,17 @@ Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
 unrelated check sufficient.
 
+Verification evidence belongs to the exact file state it checked. After the
+last code, test, or config edit, rerun every focused command whose inputs or
+compiled graph changed; in particular, any later TypeScript edit invalidates an
+earlier typecheck result even when the edit appears test-only or mechanical.
+
+For resource acquisition and cleanup changes, prefer executable lifecycle proof
+over source-text or statement-order assertions. Exercise the real owner with
+narrow injected boundaries and prove acquisition ordering, success, relevant
+failure exits, exactly-once release, and awaited cleanup. Text inspection may
+supplement that proof, but it cannot establish runtime cleanup behavior.
+
 ## Expensive And Stochastic Proof Order
 
 When a change needs a real-model, live-provider, browser, or external review

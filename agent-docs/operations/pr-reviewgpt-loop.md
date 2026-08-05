@@ -311,6 +311,12 @@ requires it or the current user explicitly asks for it.
    `aragon` is accepted as an alias for `eragon`. Leave it unset for normal
    PR-review rounds.
 
+   After a concrete pre-completion staging, attachment, or profile failure, do
+   not leave the immediate retry on the random selector: pin a different lane
+   already known to be healthy and retry the same round number against the same
+   pushed head. This prevents the random selector from choosing the failed
+   profile again; return to the normal unpinned path on later independent runs.
+
 3. Confirm the captured output is an actual completed review before triaging
    it. If the run leaves an empty/preliminary response, lacks
    `REVIEW_COMPLETE`, or reports a missing/unreadable `codebase.zip`, the round
