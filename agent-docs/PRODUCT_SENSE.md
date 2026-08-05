@@ -181,7 +181,7 @@ Assistant runtime state is never the source of truth for these objects.
   explanatory history or requirements on demand. Do not repeat the same truth
   in a heading, introduction, and row labels.
 - When a member choice materially changes cost-weighted included-capacity
-  drawdown, disclose that difference in the choice and keep it visible in the
+  drawdown, disclose that difference before save and keep it visible in the
   saved-state summary. Do not imply that equal model names have equal provider
   cost.
 - Rank learning, confidence, and life fit before engagement or protocol volume.
