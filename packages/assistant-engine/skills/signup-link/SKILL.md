@@ -16,5 +16,7 @@ shareable link to forward, call `murph.group` with
 
 Use only the exact returned `signupUrl`; mention `expiresAt` only when useful.
 Return the link to the requester. Never choose, contact, or message the
-recipient. The link records signup attribution only and does not earn usage,
+recipient. Keep the reply focused on this handoff; do not append billing,
+low-usage, mission, or sponsorship options unless the user also asked about
+them. The link records signup attribution only and does not earn usage,
 complete a mission, or guarantee a reward.
