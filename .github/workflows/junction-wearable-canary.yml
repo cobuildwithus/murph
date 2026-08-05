@@ -1,0 +1,77 @@
+name: Live Junction WHOOP Canary
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Dedicated provider accounts cannot safely authorize overlapping Junction
+# sessions. Never cancel a run after cleanup or authorization has started.
+concurrency:
+  group: live-junction-wearable-canary
+  cancel-in-progress: false
+
+jobs:
+  connect:
+    name: Connect WHOOP through Junction
+    if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}
+    environment: junction-wearable-canary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: public.ecr.aws/docker/library/postgres:17
+        env:
+          POSTGRES_DB: murph_device_sync
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d murph_device_sync"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      # Keep credentials off every checkout, install, bundle, and browser-install
+      # step. The hosted-local suite further partitions Junction authority into
+      # the platform and one provider login at a time into the Chromium child.
+      - name: Run live Junction wearable browser canary
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync
+          JUNCTION_API_KEY: ${{ secrets.JUNCTION_API_KEY }}
+          JUNCTION_CLIENT_USER_ID_SECRET: ${{ secrets.JUNCTION_CLIENT_USER_ID_SECRET }}
+          JUNCTION_ENV: sandbox
+          JUNCTION_REGION: ${{ vars.JUNCTION_REGION || 'us' }}
+          MURPH_DEV_TEMPORAL: disabled
+          MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"
+          MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop
+          MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID: member_e2e_junction_whoop_github_canary
+          MURPH_E2E_WEARABLE_HEADLESS: "1"
+          MURPH_E2E_WEARABLE_TIMEOUT_MS: "420000"
+          MURPH_E2E_WHOOP_EMAIL: ${{ secrets.WHOOP_CANARY_EMAIL }}
+          MURPH_E2E_WHOOP_PASSWORD: ${{ secrets.WHOOP_CANARY_PASSWORD }}
+        run: pnpm hosted-local e2e device-connect

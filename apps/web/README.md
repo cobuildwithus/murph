@@ -1107,9 +1107,12 @@ pnpm --dir apps/web release:production:migrate
 pnpm --dir apps/web release:production:contract-migrate
 ```
 
-The checked-in Vercel build command runs
-`pnpm release:production:migrate && pnpm build`, so Vercel deploys still run
-the guarded production migration wrapper automatically before building. The
+The checked-in Vercel build command runs the guarded production migration
+wrapper before building. That wrapper generates the Prisma client because the
+post-migration Linq sync needs it, then passes an explicit build-only handoff so
+the following production build reuses that client instead of generating it a
+second time. The handoff is accepted only for a main-branch Vercel production
+deploy; ordinary and preview builds still generate Prisma themselves. The
 generic `pnpm --dir apps/web build` script is intentionally non-mutating and
 only generates artifacts plus validation output. The predeploy migration
 wrapper uses `DIRECT_DATABASE_URL` when it is set, requires it in Vercel
@@ -1409,7 +1412,7 @@ does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 The production build launches the parent Next process explicitly through Node
 with `--max-old-space-size=1024` while appending
 `--max-old-space-size=3072` to `NODE_OPTIONS`. Node gives the direct CLI flag
-precedence in the parent. Next 16.2.6 reconstructs its non-isolated TypeScript
+precedence in the parent. Next 16.3 reconstructs its non-isolated TypeScript
 worker options from the parent arguments followed by `NODE_OPTIONS`, so the
 mandatory generated-contract validation receives the 3 GiB limit. Next removes
 that option from its isolated static workers. The existing caller options are
@@ -1419,20 +1422,17 @@ later validation worker or changing the compiled application. Repeated
 forced-cold Standard previews remain the direct acceptance evidence, and a Next
 upgrade must revalidate this worker boundary.
 
-Production builds explicitly use Next's supported `--webpack` fallback with
-`experimental.webpackBuildWorker=true` and
-`experimental.webpackMemoryOptimizations=true`. The Workflow integration
-contributes custom Webpack configuration, so the worker is opted in explicitly
-instead of relying on Next's automatic selection. The worker isolates Webpack
-compilation to reduce build-memory pressure, while the memory-optimization mode
-trades some compile speed for a lower peak. Local development remains on
-Turbopack by default.
+Production builds use Next 16.3's default Turbopack path. The production script
+does not pass `--webpack`, and the Next config does not retain Webpack-only
+worker or memory flags. The hosted local-development wrapper also selects
+Turbopack unconditionally and rejects an explicit Webpack flag. Workflow
+directive discovery runs through its native Next integration without a custom
+repository Webpack configuration.
 
-Next 16.2.6 accepts `experimental.turbopackMemoryLimit` at the JavaScript/native
-boundary but discards the `_memory_limit` argument when creating its native
-backend. The option is therefore omitted rather than documented or tested as a
-4 GiB governor that does not exist. A Next upgrade must re-audit that behavior
-before reintroducing the option.
+Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
+`experimental.turbopackMemoryEviction`, is documented for development sessions
+with the Turbopack filesystem cache. Production filesystem caching is disabled
+while that new state owner is evaluated, so memory eviction remains omitted.
 
 A 2 GiB parent-old-space candidate passed one forced-cold Standard preview but
 the next identical build was still killed by the 8 GB container OOM boundary.
@@ -1459,13 +1459,15 @@ preview nevertheless OOM-killed Turbopack, so the catalog correction is kept
 for its proven boundary and graph improvement but is not claimed as sufficient
 capacity relief.
 
-The memory-optimized Webpack worker compiled the complete application within
-the local heap policy and enforced stricter route contracts. It exposed a
-browser-vault parser re-export through a server-heavy cursor, an extra helper
-export from a page module, optional page props, and one synchronous route-param
-compatibility union. Those boundaries now use their narrow owners and Next 16
-route signatures; validation remains enabled. A complete local Webpack build
-then passed TypeScript and generated all 229 pages.
+The historical memory-optimized Webpack fallback compiled the complete
+application within the local heap policy and exposed stricter route-contract
+issues: a browser-vault parser re-export through a server-heavy cursor, an
+extra helper export from a page module, optional page props, and one synchronous
+route-param compatibility union. Those corrections remain in place, but the
+fallback itself is no longer active. A forced-cold Next 16.3 Standard preview
+subsequently completed with Turbopack on 4 vCPUs and 8 GB RAM: compilation took
+91 seconds, the complete Vercel build stage took four minutes, and all 233
+static pages were generated without an out-of-memory failure.
 
 The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
 machine model minus a 0.8 GB reserve for OS/container overhead outside the build
