@@ -83,8 +83,13 @@ uses only the observed child start, and calculates one cumulative-total delta
 per operation. The fresh-database migration proof applied all 163 migrations;
 direct and Family old-column-set inserts now prove exact reset, reused-child
 pre/post-cutover accounting, credit preservation, and no second reset. Final
-ReviewGPT correction review, exact-head CI, corrected-head product
-revalidation, and plan closure remain.
+ReviewGPT round 4 passed the per-child-turn correction. The parent cap audit
+then found that the first correction spent the existing 32-thread buffer limit
+per turn; the follow-up preserves the original distinct-thread cap while
+allowing every observed turn on a tracked child to remain independently
+billable. The full 257-assertion Codex proof includes a reused turn after all
+32 thread slots are occupied. Final ReviewGPT delta review, exact-head CI,
+corrected-head product revalidation, and plan closure remain.
 
 Status: active
 Updated: 2026-08-05

@@ -18542,7 +18542,7 @@ describe('assistant codex event shaping', () => {
       })
     })
 
-    it('caps tracked subagent usage threads', async () => {
+    it('caps distinct subagent usage threads without charging reused turns against the cap', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-cap-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-cap-home-')
       const spawnedChildren: MockChildProcess[] = []
@@ -18638,6 +18638,30 @@ describe('assistant codex event shaping', () => {
                 },
               },
             }))
+            writeStartedTurn(
+              child,
+              'thread-subagent-cap-1',
+              'turn-subagent-cap-reused',
+            )
+            writeTokenUsage({
+              child,
+              last: {
+                totalTokens: 50,
+                inputTokens: 40,
+                cachedInputTokens: 0,
+                outputTokens: 10,
+                reasoningOutputTokens: 0,
+              },
+              threadId: 'thread-subagent-cap-1',
+              total: {
+                totalTokens: 150,
+                inputTokens: 120,
+                cachedInputTokens: 0,
+                outputTokens: 30,
+                reasoningOutputTokens: 0,
+              },
+              turnId: 'turn-subagent-cap-reused',
+            })
             writeCodexV2AssistantEventTurn({
               child,
               finalMessage: 'Survived the spawn storm',
@@ -18662,7 +18686,7 @@ describe('assistant codex event shaping', () => {
       })
 
       expect(result.finalMessage).toBe('Survived the spawn storm')
-      expect(result.additionalUsages).toHaveLength(trackedThreadCount)
+      expect(result.additionalUsages).toHaveLength(trackedThreadCount + 1)
       expect(result.additionalUsages[0]).toMatchObject({
         providerRequestOrdinal: 1,
         usage: {
@@ -18673,6 +18697,12 @@ describe('assistant codex event shaping', () => {
         providerRequestOrdinal: trackedThreadCount,
         usage: {
           totalTokens: trackedThreadCount * 100,
+        },
+      })
+      expect(result.additionalUsages[trackedThreadCount]).toMatchObject({
+        providerRequestOrdinal: trackedThreadCount + 1,
+        usage: {
+          totalTokens: 50,
         },
       })
       expect(

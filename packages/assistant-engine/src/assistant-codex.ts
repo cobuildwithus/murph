@@ -203,9 +203,9 @@ const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_TYPE =
   'assistant.codex.transport_diagnostics'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
-// Bound on distinct subagent provider turns whose token usage is tracked per
-// parent turn. Operations past the cap are ignored.
-const MAX_CODEX_SUBAGENT_USAGE_TURNS = 32
+// Bound on distinct subagent threads whose token usage is tracked per parent
+// turn. Far above any sane spawn fan-out; threads past the cap are ignored.
+const MAX_CODEX_SUBAGENT_USAGE_THREADS = 32
 
 type CodexAppServerProcessState =
   | 'idle'
@@ -3179,6 +3179,7 @@ async function runCodexAppServerTurnOnProcess(
   const askGrokTurnState = createAskGrokTurnState()
   const subagentTokenUsageByTurn =
     new Map<string, CodexSubagentTurnTokenUsageSample>()
+  const trackedSubagentUsageThreadIds = new Set<string>()
   // Thread ids named by this turn's collab tool calls (spawn/sendInput/...),
   // collected live so evidenced subagent threads win buffer slots over
   // stale/unattributed foreign threads when the cap is reached.
@@ -4783,17 +4784,26 @@ async function runCodexAppServerTurnOnProcess(
       if (subagentTokenUsageByTurn.has(usageKey)) {
         return
       }
-      if (subagentTokenUsageByTurn.size >= MAX_CODEX_SUBAGENT_USAGE_TURNS) {
-        const evictableUsageKey = collabReceiverThreadIds.has(threadId)
-          ? [...subagentTokenUsageByTurn].find(
-            ([, sample]) => !collabReceiverThreadIds.has(sample.threadId),
-          )?.[0]
+      if (
+        !trackedSubagentUsageThreadIds.has(threadId)
+        && trackedSubagentUsageThreadIds.size >= MAX_CODEX_SUBAGENT_USAGE_THREADS
+      ) {
+        const evictableThreadId = collabReceiverThreadIds.has(threadId)
+          ? [...trackedSubagentUsageThreadIds].find(
+            (trackedThreadId) => !collabReceiverThreadIds.has(trackedThreadId),
+          )
           : undefined
-        if (evictableUsageKey === undefined) {
+        if (evictableThreadId === undefined) {
           return
         }
-        subagentTokenUsageByTurn.delete(evictableUsageKey)
+        trackedSubagentUsageThreadIds.delete(evictableThreadId)
+        for (const [trackedUsageKey, sample] of subagentTokenUsageByTurn) {
+          if (sample.threadId === evictableThreadId) {
+            subagentTokenUsageByTurn.delete(trackedUsageKey)
+          }
+        }
       }
+      trackedSubagentUsageThreadIds.add(threadId)
       subagentTokenUsageByTurn.set(usageKey, {
         firstEvent: null,
         lastEvent: null,
