@@ -129,11 +129,7 @@ describe("assistant product feedback", () => {
     expect(description).toContain("current accepted request");
     expect(description).toContain("optional related changelog item ids");
     expect(description).toContain("accepted, already accepted, or unavailable");
-    expect(description).toContain("Ordinary feedback is best-effort after the reply");
-    expect(description).toContain(
-      'A summary beginning "Support escalation:" is reserved for a verified private member who approved the exact shown summary and its potential account linkage',
-    );
-    expect(description).toContain("that mode waits for the durable callback");
+    expect(description).toContain("persistence is best-effort after the reply");
     expect(description).toContain("do not retry after any result");
     expect(schema).toContain('"minItems":0');
     expect(schema).toContain('"feature_interest"');

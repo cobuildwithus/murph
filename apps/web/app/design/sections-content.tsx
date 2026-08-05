@@ -20,7 +20,10 @@ import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
-import { ConnectSourceCardStudy } from "./connect-source-card-study";
+import {
+  ConnectSourceCardStudy,
+  ZeppAppleHealthSetupStudy,
+} from "./connect-source-card-study";
 import { DataExportFlowStudy } from "./data-export-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
@@ -243,6 +246,12 @@ export function SectionsContent() {
 
       <StudySection title="Connect source actions and disconnect lifecycle">
         <ConnectSourceCardStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Zepp/Amazfit Apple Health setup">
+        <ZeppAppleHealthSetupStudy />
       </StudySection>
 
       <Separator />

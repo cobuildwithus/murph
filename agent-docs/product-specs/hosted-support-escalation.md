@@ -1,48 +1,40 @@
 # Hosted support escalation
 
-Last verified: 2026-08-04
+Last verified: 2026-08-05
 
-Consent prerequisite plan: `agent-docs/exec-plans/completed/2026-08-04-support-escalation-consent-prerequisite.md`.
+Prior implementation plan: `agent-docs/exec-plans/completed/2026-08-01-hosted-support-escalation.md`.
 
 ## User purpose
 
-A member who reaches a Murph-owned product blocker should not be left at a hard wall. Murph must provide a real support address immediately and, after truthful disclosure and approval in the member's private Murph conversation, can record a de-identified product-only issue and an account-linked escalation. A follow-up release may include that approved issue in the account-linked support notification only after the consent-capable runner has converged in production.
+A member who reaches a Murph-owned product failure should stay focused on recovery, not support plumbing. Murph should capture a de-identified product issue through the existing background feedback path, give at most a short truthful acknowledgement after candidate acceptance, and show the support address only when the member asks for it. Account-linked Murph human support remains a separate explicit action.
 
 ## Conversation contract
 
-- For a Murph product problem, connection failure, or hard product wall, give `support@withmurph.ai` directly. Do not route the member through legal or privacy pages to discover it.
-- In a verified private direct conversation, Murph may offer escalation only by showing the exact de-identified product-only summary, stating that it may be included in an internal support escalation linked to the member's Murph account, and asking a natural confirmation question. The offer itself sends nothing. This maximum-disclosure wording remains truthful during the split rollout: the prerequisite records the issue separately from the account-linked escalation, while the follow-up may include the approved issue in the support email.
-- A generic request to alert humans, escalate, or open support does not authorize unseen account linkage or an unseen summary. One report for the current issue is authorized only after the member affirmatively approves that exact disclosed summary and potential linkage.
-- Reuse `murph.submit_product_feedback` with `kind: "frustration"` and a sanitized product-only summary beginning exactly `Support escalation:`.
-- In a group or unverified audience, give the support address but do not create an account-linked escalation from the synthetic room or uncertain audience. Direct the requester to their private Murph conversation for that action. The deterministic unverified-audience safety reply also names the support address so an unverifiable conversation is never a dead end.
-- A summary beginning with the reserved `Support escalation:` prefix must carry the exact shape (`frustration` kind, no changelog references, non-empty de-identified content after the prefix); any other prefixed payload is rejected synchronously at the tool boundary so the model can correct it instead of silently degrading.
-- The tool boundary also rejects a reserved support payload when the hosted user-action scope is not a verified direct conversation, as defense in depth ahead of the Web synthetic-room check.
-- In the hosted runtime, the exact support shape is recorded through the Web callback inside the turn, before the model may confirm anything, so the member-facing confirmation is backed by a durable member-linked record. Ordinary feedback keeps the existing best-effort post-delivery flush.
-- After the tool reports the record accepted, say the product issue was saved for triage and an account-linked escalation was recorded, then give the support address. This is the strongest completion claim shared by metadata-only delivery, the later detailed-email delivery, daily email suppression, and exact replay. Do not claim the issue was emailed or seen, that a ticket exists, that Murph will automatically message later, or that a fix has a deadline.
-- If the tool is unavailable or the durable record fails, say the direct notification did not complete and give the support address.
+- For a clear Murph-owned product failure, call `murph.submit_product_feedback` at most once with `kind: "frustration"` and a concise de-identified product-only summary that does not begin `Support escalation:`.
+- Ordinary feedback remains best-effort after the reply. If the tool reports accepted or already accepted, Murph may briefly say it flagged the issue for the product team. If unavailable, Murph must not imply it was recorded or sent. Continue with the best available recovery or fallback.
+- Do not mention the tool, feedback ids, queues, email, tickets, or internal escalation mechanics unless the member asks.
+- Give `support@withmurph.ai` only when the member explicitly asks for the support email or address, or asks how to contact support.
+- A request for a bug handoff, explanation, workaround, or product-team feedback is not by itself a request for account-linked Murph human support.
+- Only an explicit request for Murph human support in a verified private direct conversation authorizes the reserved shape: `kind: "frustration"`, no changelog references, and a non-empty de-identified summary beginning exactly `Support escalation:`.
+- The reserved support tool remains unavailable outside a verified private direct conversation. Move that action to private Murph without volunteering the address; provide the address only if explicitly requested.
+- The tool boundary continues to reject malformed reserved payloads and reserved payloads outside verified private direct conversations.
+- For the reserved shape, accepted or already accepted means Murph may say the report is queued. Failure means Murph may say direct notification failed. Do not add the address unless requested.
+- Never promise a ticket, response, fix, follow-up, or timing, and never retry in the same turn.
 
 ## Data and privacy
 
-- Ordinary feedback remains anonymous.
-- Ordinary feedback alone follows the silent, best-effort post-reply capture policy. A reserved `Support escalation:` summary is excluded from that policy: it requires the Support section's disclosed approval and waits for the durable callback result before the assistant confirms anything.
-- Explicit support escalation is member-linked because support needs to identify the affected private account, but the member-linked row and the support email carry only server-authored text and internal ids — never model-authored free text. The shared redaction pass is best-effort over recognizable shapes, and the repository accepts its residual free-text risk only for anonymous rows, so model-authored summaries must never sit beside member identity in a row, email, or digest.
-- The model-authored de-identified issue text (the content after the reserved prefix) is persisted as a separate anonymous feedback row with a deterministic derived id, where it reaches the product team through the ordinary anonymous digest.
-- Member-linked support rows are excluded from the daily product-feedback digest; only anonymous rows enter that audience.
-- The support email contains exactly: a fixed escalation sentence, the internal feedback id, and the internal member id.
-- Never include raw conversation or voice text, names, handles, email addresses, phone numbers, health facts, measurements, diagnoses, medications, precise locations, secrets, provider payloads, or any other unsanitized context in the support summary or email.
-
-## Deployment prerequisite
-
-- This consent-only release changes the hosted runner prompt but leaves Web's support email metadata-only. Land it separately, deploy Cloudflare/runner with `container_rollout=immediate`, and require managed-container smoke to report the exact new bundle fingerprint.
-- A follow-up release may place the approved issue beside the member id in email only after that convergence proof. Until then, the existing metadata-only email is the safe compatibility boundary. Do not replace the split landing with a feature flag or model-asserted consent version.
+- Ordinary feedback stays de-identified and uses the existing anonymous feedback path.
+- Explicit support escalation remains member-linked because support may need the affected account, but the member-linked row and immediate support email contain only server-authored text and internal ids.
+- Model-authored issue text remains in a separate anonymous feedback row and reaches the product team through the ordinary digest.
+- Member-linked support rows stay excluded from the digest.
+- Never include raw conversation or voice text, names, handles, contact details, health facts or values, diagnoses, medications, precise locations, secrets, provider payloads, or unrelated context in a feedback summary or support email.
 
 ## Rate and replay behavior
 
-- The first three distinct escalation records for one member in one UTC day are email-eligible. Record timestamps are captured after the member-scoped advisory lock is held, so concurrent same-member escalations rank in lock-acquisition order and cannot overshoot the cap.
-- Later records remain persisted but do not send another email that day.
-- Exact callback replay may retry an eligible provider request with the same Resend idempotency key and must not create a duplicate recipient-visible email.
-- Ordinary feedback keeps the existing two-second callback bound; only the exact explicit support shape receives a bounded 12-second callback allowance, spent inside the turn where the model can truthfully report the outcome.
-- Murph never retries the model tool in the same turn or attempts to evade the server limit.
+- The existing three-per-member UTC-day email cap, member advisory lock, provider idempotency key, and replay behavior apply only to explicit reserved support escalation.
+- Later explicit support records remain persisted without another email that day.
+- Ordinary feedback keeps the existing two-second callback bound and best-effort post-reply flush. The exact reserved support shape keeps its bounded in-turn callback so Murph can report its outcome truthfully.
+- Murph never retries the tool in the same turn or attempts to evade server limits.
 
 ## Public source context
 
