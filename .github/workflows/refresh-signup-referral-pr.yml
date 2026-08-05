@@ -1,0 +1,35 @@
+name: Refresh signup referral PR branch
+
+on:
+  push:
+    branches:
+      - feat/explicit-signup-referral-links
+    paths:
+      - .github/workflows/refresh-signup-referral-pr.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Merge current main and remove this transport
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          if ! git merge --no-commit --no-ff origin/main; then
+            echo "Conflicting files:"
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
+          rm .github/workflows/refresh-signup-referral-pr.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "chore: refresh signup referral branch from main"
+          git push
