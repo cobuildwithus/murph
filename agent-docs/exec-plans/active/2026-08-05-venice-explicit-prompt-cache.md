@@ -70,7 +70,7 @@ large Codex prompt cache entry when only the conversation tail changes.
 4. [x] Add focused unit and intercepted-egress regression proof.
 5. [x] Run Cloudflare focused tests, typecheck, and deterministic request proof.
 6. [ ] Commit, push, open a PR, and complete specialist, ReviewGPT, and CI.
-7. [ ] Record deployment order and the capped provider canary or exact blocker.
+7. [x] Record deployment order and the capped provider canary or exact blocker.
 
 ## Decisions
 
@@ -86,6 +86,14 @@ large Codex prompt cache entry when only the conversation tail changes.
   developer-message prefix. Codex Responses Lite emits tools, base
   instructions, then other initial developer context before conversation
   content; the Worker already converts the tool envelope before forwarding.
+- 2026-08-05: Accepted the preliminary and final ReviewGPT finding that a
+  hand-authored canary could bypass the Responses Lite compatibility path. The
+  activation contract now requires one resumed thread through the candidate's
+  pinned Codex App Server and exact pre-/post-transform shape proof.
+- 2026-08-05: Accepted the preliminary coverage patch after inspecting its
+  full test-only diff and passing `git apply --check`. The existing hosted-local
+  warm-reuse scenario now feeds the body emitted by real pinned Codex through
+  the production Venice transform and checks its key, tools, and breakpoint.
 
 ## Verification
 
@@ -106,3 +114,10 @@ Completed local proof:
 - `pnpm --dir apps/cloudflare typecheck`.
 - `pnpm docs:drift`.
 - `git diff --check`.
+- `pnpm hosted-local e2e warm-reuse-egress --profile e2e:stub` did not reach
+  the scenario. The first attempt hit a 60-second CLI-manifest build timeout;
+  the retry cleared that step and then stopped at the current-main runner bundle
+  size guard (10,237,027 bytes versus a 10,219,693-byte total budget; 8,551,202
+  bytes versus an 8,538,983-byte static-closure budget). This PR does not change
+  any runner-bundle input or budget; the focused test remains committed for the
+  exact-head hosted lane.
