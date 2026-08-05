@@ -149,7 +149,9 @@ describe("murph.group dynamic tool", () => {
       .toEqual(expect.arrayContaining([
         "sleep-times.v0",
         "deep-sleep-days.v0",
+        "deep-sleep-sources-days.v1",
         "rem-sleep-days.v0",
+        "rem-sleep-sources-days.v1",
         "steps-days.v0",
         "workouts.v0",
       ]));
@@ -1179,6 +1181,112 @@ describe("murph.group dynamic tool", () => {
         status: "ok",
       },
     });
+  });
+
+  it("passes source-aware sleep values and freshness through the model boundary", async () => {
+    const groupSharedReadRequest = vi.fn(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_internal_sleep_sources",
+        participantId: "participant_sleep_sources",
+        projections: [{
+          dataStatus: "available" as const,
+          grantStatus: "granted" as const,
+          projectionScope: {
+            projectionKind: "deep-sleep-sources-days.v1" as const,
+          },
+          projectionScopeKey: "deep-sleep-sources-days.v1",
+          records: [{
+            data: {
+              date: "2026-07-18",
+              metricKey: "deep-sleep-minutes",
+              projectedAt: "2026-07-18T12:00:00.000Z",
+              sources: [
+                {
+                  label: "Fitbit",
+                  recordedAt: "2026-07-18T06:58:00.000Z",
+                  source: "fitbit",
+                  unit: "minutes",
+                  value: 64,
+                },
+                {
+                  label: "Garmin",
+                  recordedAt: "2026-07-18T07:01:00.000Z",
+                  selected: true as const,
+                  source: "garmin",
+                  unit: "minutes",
+                  value: 88,
+                },
+                {
+                  label: "Oura",
+                  recordedAt: null,
+                  source: "oura",
+                  unit: "minutes",
+                  value: 112,
+                },
+              ],
+              sourcesDisagree: true,
+              unit: "minutes",
+              value: 88,
+            },
+            occurredAt: "2026-07-18T00:00:00.000Z",
+            recordKey: "2026-07-18",
+          }],
+        }],
+      }],
+      requestedProjectionScopeKeys: ["deep-sleep-sources-days.v1"],
+      status: "ok" as const,
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "deep-sleep-sources-days.v1" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    const payload = readGroupToolPayload(result);
+    expect(payload).toMatchObject({
+      action: "read_shared",
+      result: {
+        members: [{
+          participantId: "participant_sleep_sources",
+          projections: {
+            "deep-sleep-sources-days.v1": {
+              records: [{
+                data: {
+                  projectedAt: "2026-07-18T12:00:00.000Z",
+                  sources: [
+                    { source: "fitbit", value: 64 },
+                    { selected: true, source: "garmin", value: 88 },
+                    { source: "oura", value: 112 },
+                  ],
+                  sourcesDisagree: true,
+                  value: 88,
+                },
+              }],
+              status: "available",
+            },
+          },
+        }],
+        status: "ok",
+      },
+    });
+    expect(JSON.stringify(payload)).not.toContain("member_internal_sleep_sources");
   });
 
   it("passes bounded workout arrays through the model-facing boundary", async () => {

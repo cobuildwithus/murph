@@ -129,6 +129,29 @@ Revoke and regrant clear the ciphertext in the same authority transaction, and
 regrant rotates the share id, so a stale producer cannot write into a later
 grant generation.
 
+Deep and REM sleep have separate source-aware v1 scopes. The legacy
+`deep-sleep-days.v0` and `rem-sleep-days.v0` scopes remain provider-neutral and
+continue disclosing one canonical daily value only. The exact
+`deep-sleep-sources-days.v1` and `rem-sleep-sources-days.v1` grants disclose the
+canonical value plus one bounded entry for every public sleep source that has
+that metric on the date, up to four sources. Each entry carries the canonical
+public source key and label, its value and unit, its nullable canonical
+source-record time, and whether it supplied the canonical selected value. The
+record also carries `projectedAt`
+and a literal `sourcesDisagree` flag. Source-aware records fail closed instead
+of truncating when the source bound is exceeded or the selected source cannot
+be proved. Existing v0 grants are never upgraded or broadened in place; a v1
+scope requires its own server-owned access approval.
+
+`projectedAt` is snapshot generation time, not proof of a provider fetch or a
+fresh sync. A source entry's `recordedAt` is canonical source-record evidence,
+not proof of a live fetch. A group response may describe the stored source
+values and their timestamps, but it must never call a `read_shared` result a
+live provider check or imply that a new provider read occurred. When
+`sourcesDisagree` is true, Murph reports the source values separately; the
+top-level canonical value remains the scoring selection and is not presented
+as every provider's answer.
+
 The retired `vault-share.delivery` and `vault-share.revoke` mailbox rows are
 terminally skipped from their plaintext metadata before payload fetch or
 decryption. They do not mutate a workspace or schedule cleanup. Both v2 archive
@@ -166,7 +189,7 @@ to each `in` participant and stops at the first match:
 
 | Evidence | Public status | Smallest action |
 | --- | --- | --- |
-| Current challenge-metric data eligible under the scope's producer-owned completion marker | Include the participant in settled ranked standings. For deep/REM sleep, `data.provisional: true` remains pending. For `workouts.v0`, only dates at or before `calendarClosedThroughDate` are settled. | None. Device status cannot override current metric evidence. |
+| Current challenge-metric data eligible under the scope's producer-owned completion marker | Include the participant in settled ranked standings. For deep/REM sleep, including the source-aware v1 scopes, `data.provisional: true` remains pending. A v1 top-level value is the canonical scoring selection; source entries remain explanatory evidence. For `workouts.v0`, only dates at or before `calendarClosedThroughDate` are settled. | None. Device status cannot override current metric evidence. |
 | Current challenge-metric data exists but is not yet eligible under that completion marker | Keep the participant pending and unranked. This is not missing data or a zero. | Do not diagnose, offer permission, or advance completion from the reader's clock. |
 | No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Include the exact scope in one proactive offer after the current read only when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
 | Metric scope granted, but no `device-sync-status.v0` grant | The current shared read lacks a usable metric; its cause is unverified. Connection status was not shared, but that does not explain the absence. | Include only the diagnostic scope in one proactive offer after the current read when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |

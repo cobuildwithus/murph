@@ -680,6 +680,14 @@ test("assistant usage parsing drops out-of-contract turn profiles without failin
     { ...validProfile, requests: [{ cachedInput: 0, input: 10.5, output: 5 }] },
     { ...validProfile, requests: [{ cachedInput: 0, input: 2 ** 53, output: 5 }] },
     { ...validProfile, modelContextWindow: -1 },
+    {
+      ...validProfile,
+      tools: [{ calls: 1, durationMs: 0, failedCalls: -1, label: "tool", outputChars: 1 }],
+    },
+    {
+      ...validProfile,
+      tools: [{ calls: 1, durationMs: 0, failedCalls: 2, label: "tool", outputChars: 1 }],
+    },
     // Series longer than the producer-side caps mean an untrusted producer.
     {
       ...validProfile,
@@ -720,6 +728,46 @@ test("assistant usage parsing drops out-of-contract turn profiles without failin
     assert.equal(parsed.inputTokens, 10);
     assert.equal(parsed.outputTokens, 5);
   }
+});
+
+test("assistant usage parsing preserves optional failed tool counts", () => {
+  const baseRecord = {
+    attemptCount: 1,
+    credentialSource: "platform",
+    inputTokens: 10,
+    occurredAt: "2026-03-29T12:00:00.000Z",
+    outputTokens: 5,
+    provider: "codex-cli",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: "asst_123",
+    turnId: "turn_123",
+    usageId: "turn_123.attempt-1",
+  };
+  const profile = {
+    modelContextWindow: null,
+    requestCount: 0,
+    requests: [],
+    requestsTruncated: false,
+    schema: "murph.assistant-turn-profile.v1",
+    tools: [
+      {
+        calls: 2,
+        durationMs: 100,
+        failedCalls: 1,
+        label: "vault-cli batch food.search-labels-batch",
+        outputChars: 20,
+      },
+    ],
+    toolsTruncated: false,
+  };
+
+  assert.deepEqual(
+    parseAssistantUsageRecord({
+      ...baseRecord,
+      turnProfileJson: profile,
+    }).turnProfileJson,
+    profile,
+  );
 });
 
 test("assistant usage parsing allows only token-count raw usage metadata", () => {
