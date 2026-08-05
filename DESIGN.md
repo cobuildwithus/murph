@@ -382,8 +382,9 @@ the right edge of the card; do not add a leading radio dot.
 Unavailable choices stay visible but disabled, with the plan or access
 requirement named directly.
 When a choice materially changes cost-weighted included-capacity drawdown,
-state that difference in the choice copy and keep it visible beside the saved
-selection. Do not hide it in a tooltip or only mention it after save.
+state that difference before save and keep it visible beside the saved
+selection. It may appear in the option copy or the immediate pending-selection
+summary; do not hide it in a tooltip or mention it only after save.
 Keyboard focus rings the whole card. Keep actions outside the card label so the
 full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
