@@ -205,7 +205,7 @@ type LinqIMessageAppCardRequest = {
       }
       interactive: false
       url: string
-      fallback_text: 'Open your Murph nutrition summary'
+      fallback_text: typeof LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT
       layout: LinqIMessageAppLayout
     }]
   }

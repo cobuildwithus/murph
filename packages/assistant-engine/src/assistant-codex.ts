@@ -20,6 +20,7 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   renderAssistantResponseCardText,
+  renderAssistantResponseCardTranscriptText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import type {
@@ -3678,7 +3679,7 @@ async function runCodexAppServerTurnOnProcess(
       deliveryContextOrdinal: trailingSteerCandidate.deliveryContextOrdinal,
       media: [...trailingSteerCandidate.media],
       response: trailingSteerCandidate.card
-        ? renderAssistantResponseCardText(trailingSteerCandidate.card)
+        ? renderAssistantResponseCardTranscriptText(trailingSteerCandidate.card)
         : trailingSteerCandidate.response,
       ...(trailingSteerCandidate.targetInputId
         ? { targetInputId: trailingSteerCandidate.targetInputId }
@@ -5380,7 +5381,7 @@ async function runCodexAppServerTurnOnProcess(
     providerAuthoredFinalMessage: modelFinalMessage,
     transcriptMessage:
       finalResponseCard
-        ? renderAssistantResponseCardText(finalResponseCard)
+        ? renderAssistantResponseCardTranscriptText(finalResponseCard)
         : normalizeNullableString(modelFinalMessage) ??
           (finalResponseMedia.length > 0 ? '' : null),
     reactions: reactionPatches.map((entry) => ({

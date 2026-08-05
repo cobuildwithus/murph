@@ -49,87 +49,120 @@ describe('assistant response cards', () => {
   it('derives the model-facing JSON schema from the runtime contract', () => {
     expect(assistantResponseCardJsonSchema).not.toHaveProperty('$schema')
     expect(assistantResponseCardJsonSchema).toMatchObject({
+      description: expect.stringContaining('compact_table'),
       anyOf: [
         {
-          additionalProperties: false,
-          properties: {
-            goals: {
+          anyOf: [
+            {
+              additionalProperties: false,
               properties: {
-                calories: {
-                  anyOf: [
-                    {
-                      properties: {
-                        status: {
-                          enum: [
-                            'far_under_target',
-                            'under_target',
-                            'on_target',
-                            'over_target',
-                            'far_over_target',
-                            'unavailable',
-                          ],
+                goals: {
+                  properties: {
+                    calories: {
+                      anyOf: [
+                        {
+                          properties: {
+                            status: {
+                              enum: [
+                                'far_under_target',
+                                'under_target',
+                                'on_target',
+                                'over_target',
+                                'far_over_target',
+                                'unavailable',
+                              ],
+                            },
+                            target: { type: 'number' },
+                          },
                         },
-                        target: { type: 'number' },
-                      },
+                        { type: 'null' },
+                      ],
                     },
-                    { type: 'null' },
-                  ],
+                  },
                 },
+                kind: { const: 'daily_nutrition' },
+                totals: {
+                  properties: {
+                    fiberGrams: {
+                      anyOf: [
+                        {
+                          properties: {
+                            total: { type: 'number' },
+                          },
+                        },
+                        {
+                          properties: {
+                            mealCount: { const: 0 },
+                            total: { type: 'null' },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+                version: { const: 2 },
               },
             },
-            kind: { const: 'daily_nutrition' },
-            totals: {
+            {
+              additionalProperties: false,
               properties: {
-                fiberGrams: {
-                  anyOf: [
-                    {
+                kind: { const: 'daily_nutrition' },
+                totals: {
+                  properties: {
+                    calories: {
                       properties: {
                         total: { type: 'number' },
                       },
                     },
-                    {
-                      properties: {
-                        mealCount: { const: 0 },
-                        total: { type: 'null' },
-                      },
+                    proteinGrams: {
+                      anyOf: [
+                        {
+                          additionalProperties: false,
+                          properties: {
+                            total: { type: 'number' },
+                          },
+                        },
+                        {
+                          additionalProperties: false,
+                          properties: {
+                            mealCount: { const: 0 },
+                            total: { type: 'null' },
+                          },
+                        },
+                      ],
                     },
-                  ],
+                  },
                 },
               },
             },
-            version: { const: 2 },
-          },
+          ],
         },
         {
           additionalProperties: false,
           properties: {
-            kind: { const: 'daily_nutrition' },
-            totals: {
-              properties: {
-                calories: {
+            columns: {
+              maxItems: 4,
+              minItems: 1,
+              type: 'array',
+            },
+            kind: { const: 'compact_table' },
+            rows: {
+              maxItems: 8,
+              minItems: 1,
+              type: 'array',
+            },
+            tracking: {
+              anyOf: [
+                {
+                  additionalProperties: false,
                   properties: {
-                    total: { type: 'number' },
+                    kind: { const: 'workout' },
                   },
                 },
-                proteinGrams: {
-                  anyOf: [
-                    {
-                      additionalProperties: false,
-                      properties: {
-                        total: { type: 'number' },
-                      },
-                    },
-                    {
-                      additionalProperties: false,
-                      properties: {
-                        mealCount: { const: 0 },
-                        total: { type: 'null' },
-                      },
-                    },
-                  ],
-                },
-              },
+                { type: 'null' },
+              ],
             },
+            version: { const: 1 },
           },
         },
       ],
@@ -385,37 +418,19 @@ describe('assistant response cards', () => {
     }).endsWith('Some calorie and macro estimates were partial.')).toBe(true)
   })
 
-  it('keeps the Linq static layout value-free and labels partial totals', () => {
-    const completeLayout = buildLinqIMessageAppLayout(COMPLETE_CARD)
-    const partialLayout = buildLinqIMessageAppLayout({
-      ...COMPLETE_CARD_V2,
-      mealCount: 4,
-      goals: {
-        calories: null,
-        proteinGrams: null,
-        carbsGrams: null,
-        fatGrams: null,
-        fiberGrams: null,
-      },
-    })
+  it('keeps the Linq fallback and layout static and value-free', () => {
+    const layout = buildLinqIMessageAppLayout(COMPLETE_CARD)
     expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
-      'Open your Murph nutrition summary',
+      'Open your Murph card',
     )
-    expect(completeLayout).toEqual({
+    expect(layout).toEqual({
       caption: 'Murph',
       subcaption: 'Nutrition summary',
       trailing_caption: 'OPEN',
-    })
-    expect(partialLayout).toEqual({
-      caption: 'Murph',
-      subcaption: 'Nutrition summary',
-      trailing_caption: 'OPEN',
-      trailing_subcaption: 'PARTIAL TOTALS',
     })
     const staticPresentation = JSON.stringify({
       fallbackText: LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
-      completeLayout,
-      partialLayout,
+      layout,
     })
     expect(staticPresentation).not.toMatch(/1490|94|193|34|2026-07-28|today|day|time/iu)
   })

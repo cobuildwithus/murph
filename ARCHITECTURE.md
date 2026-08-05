@@ -2165,3 +2165,19 @@ workspace owners into the relevant tarballs, a local device-sync runtime with
 service/http tests, and inbox/parser package tests that exercise runtime rebuild,
 audio/video parser workers, parser-toolchain discovery, and parsed-pipeline
 flows inside the local TypeScript workspace.
+
+## Tracked Compact Table Response Cards
+
+Compact table response cards reuse the existing outbox-owned immutable effect
+and provider-rendered static Linq balloon. A compact card is a bounded
+presentation snapshot, never a mutable tracker: canonical workout events remain
+the only workout authority, qualitative set annotations live on canonical set
+notes, and an update is complete only after a successful workout re-read
+followed by a new V3 snapshot.
+
+The optional tracking reference is one exact canonical event ULID plus a
+canonical UTC snapshot instant. That reference remains in semantic transcript
+history so a later turn can reopen the workout without a second table store.
+The Messages extension remains offline and read-only. This adds no card API,
+database, background synchronization owner, authentication surface, or mutable
+message state.
