@@ -178,3 +178,20 @@ Updated: 2026-08-05
   unrelated existing `next.config.ts` and `next-config.test.ts` `agentRules`
   type errors, neither of which is in this PR's diff; exact-head CI remains
   pending.
+- Final ReviewGPT round 2 on `9b7046f27f` returned
+  `RETROSPECTIVE_REQUIRED` because the ordinary-versus-reserved classification
+  collision from round 1 recurred at the Web compatibility boundary. The
+  requirement-level decision is to define the reserved namespace by the exact
+  `Support escalation:` prefix independently of canonical-shape acceptance.
+  Current closed-vocabulary values proceed through the existing support owner;
+  legacy free-form values fail closed before any member-linked or ordinary
+  persistence and yield the existing truthful unavailable result. Deployment
+  should roll the current runner bundle first, wait for warm old runners to
+  drain, and then deploy the paired Web issue renderer and recorder. Current
+  runner to old Web remains accepted by the old prefix contract; old runner to
+  current Web is bounded fail-closed rather than falsely successful or private.
+  Rollback in either direction retains those same safe outcomes. No queue,
+  compatibility row, replay path, migration, or new state owner is justified.
+  The focused Web recorder test proves malformed legacy input cannot reach the
+  transaction, and the existing callback-failure scenario proves truthful
+  no-retry recovery.
