@@ -1,6 +1,6 @@
 # Expose exact-label contaminant evidence in compact food lookup
 
-Status: active
+Status: completed
 Created: 2026-08-05
 Updated: 2026-08-05
 
@@ -61,15 +61,15 @@ Updated: 2026-08-05
 
 ## Tasks
 
-1. Inspect the current compact projection, contaminant owner, response parser,
+1. [x] Inspect the current compact projection, contaminant owner, response parser,
    model guidance, and focused test coverage.
-2. Add a bounded compact contaminant projection backed by the existing exact
+2. [x] Add a bounded compact contaminant projection backed by the existing exact
    product summary and route default food searches through that owner.
-3. Extend the CLI schema and food-journal guidance so Murph reads the default
+3. [x] Extend the CLI schema and food-journal guidance so Murph reads the default
    evidence correctly and requests `--full-label` only for deeper detail.
-4. Add focused regression, size-bound, absence-is-unknown, and compatibility
+4. [x] Add focused regression, size-bound, absence-is-unknown, and compatibility
    tests; run relevant tests and type checks.
-5. Push the exact candidate head, run required specialist/final ReviewGPT and
+5. [x] Push the exact candidate head, run required specialist/final ReviewGPT and
    CI gates, resolve findings, perform the parent review, and close the plan.
 
 ## Decisions
@@ -79,6 +79,18 @@ Updated: 2026-08-05
   create needless deploy skew.
 - Put the additive compact evidence in `contaminantSummary`, leaving
   `contaminants` as the full-label field so both contracts remain unambiguous.
+- Preserve the existing scorer's bounded `screeningPolicy` so unlike-unit
+  measurements and daily-exposure thresholds remain intelligible without a
+  full-label lookup.
+- Delete the duplicate compact-search callback and use the canonical food
+  search owner before optional projection.
+- Attribute the reported measurement to its source, but attribute concern,
+  exposure, and ratio to Murph's comparison with the named threshold authority.
+  A threshold screen is not a source conclusion, product-safety verdict, or
+  personalized risk assessment.
+- Continue through one explicit post-cap verification round because the
+  round-five correction tightened only the existing prompt owner and tests;
+  reverting would preserve a known health-evidence provenance error.
 
 ## Verification
 
@@ -90,3 +102,28 @@ Updated: 2026-08-05
   results, an untested item reports unknown, large label and lab payloads are
   absent, output remains within the asserted bound, full-label output is
   unchanged, and every required check is green.
+
+## Completion evidence
+
+- Web compact food library and route tests: 82 passed.
+- CLI food-label and typed-parity tests: 26 passed.
+- Food-journal prompt contracts: 4 passed after the attribution correction.
+- Pinned App Server mixed-meal scenario: passed with unknown evidence,
+  truncated exact-product evidence, named measurement source, named threshold
+  authority, fixed screening assumptions, and no full-label lookup.
+- Web, CLI, and assistant-engine typechecks: passed; scoped Web ESLint and
+  `git diff --check`: passed.
+- Synthetic compact projection: below 3,000 characters with a 500,000-character
+  unrelated label field while retaining calories, nutrients, bounded evidence,
+  screening context, provenance, and truncation.
+- Privacy scan: no member identifier, screenshot wording, local username, or
+  home-directory path in the task diff.
+- Exact correction-head PR CI: 13 checks passed, one skipped, none failed.
+- Preliminary specialist findings were resolved without a patch artifact.
+  Final ReviewGPT round 6 returned `ROUND_OUTCOME: PASS` and
+  `REVIEW_COMPLETE` on the corrected head after the recorded hard-cap
+  continuation decision.
+- The round-six base note was rejected: GitHub's PR API identifies the PR base
+  used for the change-shape counts, while the cited local tracking snapshot was
+  unrelated and had no merge base with the task head.
+Completed: 2026-08-05
