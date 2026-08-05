@@ -233,6 +233,7 @@ text(result.output);
 `,
           name: 'exec',
         },
+        requestIncludes: ['Log a synthetic meal'],
       },
       {
         customToolCall: {
@@ -250,6 +251,7 @@ text(result.output);
 `,
           name: 'exec',
         },
+        requestIncludes: ['Increase `--limit` only for an ambiguous match'],
       },
       {
         customToolCall: {
@@ -261,8 +263,10 @@ text(result.output);
 `,
           name: 'exec',
         },
+        requestIncludes: ['fdc:oats-1', 'fdc:kefir-1'],
       },
       {
+        requestIncludes: ['meal_scripted_mixed'],
         text: 'Logged it: about 345 calories, 18g protein, 45g carbs, 8g fat, and 5g fiber, based on 50g oats and one 240g kefir serving.',
       },
     )
