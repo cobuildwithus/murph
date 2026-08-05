@@ -405,15 +405,26 @@ interface HostedGroupSharedMemberSource {
   memberId: string;
 }
 
-interface HostedGroupSharedProjectionSnapshotEntry
-  extends HostedVaultShareProjectionSnapshotEntry {
+interface HostedGroupSharedProjectionGrantEntry {
+  destinationMemberId: string;
   grantedAt: Date;
+  grantorMemberId: string;
+  id: string;
+  projectionKind: string;
+  projectionScope: HostedVaultShareProjectionScope;
+  projectionScopeKey: string;
+}
+
+interface HostedGroupSharedProjectionSnapshotEntry
+  extends HostedGroupSharedProjectionGrantEntry {
+  ciphertext: string | null | undefined;
 }
 
 type HostedGroupSharedReadCapture =
   | {
       status: "ok";
       connections: HostedGroupSharedDeviceConnectionSnapshot[];
+      grants: HostedGroupSharedProjectionGrantEntry[];
       members: Array<{
         currentTurnHandles: string[];
         memberId: string;
@@ -651,10 +662,11 @@ export async function readHostedGroupParticipantDisplayNameCandidatesByRuntimeMe
 }
 
 /**
- * Captures current group membership, active grants, encrypted snapshots, and only the
- * narrow device connection evidence authorized by an active device-status grant in one
- * repeatable-read transaction. Snapshot decryption happens after the transaction so key
- * access cannot extend the database authority window.
+ * Captures current group membership, unsuspended consented grants, encrypted snapshots
+ * readable under current access, and only the narrow device connection evidence
+ * authorized by a readable device-status grant in one repeatable-read transaction.
+ * Snapshot decryption happens after the transaction so key access cannot extend the
+ * database authority window.
  */
 export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
   linqSenderHandles?: readonly string[];
@@ -754,14 +766,13 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
               projectionKind: true,
               projectionScopeJson: true,
               projectionScopeKey: true,
-              projectionSnapshotCiphertext: true,
             },
             take: HOSTED_GROUP_SHARED_READ_MAX_GRANTS + 1,
             where: {
               destinationMemberId: input.runtimeMemberId,
               grantor: {
                 AND: [
-                  activeHostedMemberAccessWhere(),
+                  { suspendedAt: null },
                   hostedHealthDataConsentNotRevokedWhere(),
                 ],
               },
@@ -777,8 +788,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
         };
       }
 
-      const shares: HostedGroupSharedProjectionSnapshotEntry[] = [];
-      const deviceMemberIds = new Set<string>();
+      const grants: HostedGroupSharedProjectionGrantEntry[] = [];
       for (const row of grantRows) {
         const projectionScope = parseHostedVaultShareRowProjectionScope(row);
         if (!projectionScope) {
@@ -787,8 +797,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
             unavailableReason: "shared_data_authority_invalid",
           };
         }
-        shares.push({
-          ciphertext: row.projectionSnapshotCiphertext,
+        grants.push({
           destinationMemberId: row.destinationMemberId,
           grantedAt: row.grantedAt,
           grantorMemberId: row.grantorMemberId,
@@ -797,8 +806,50 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
           projectionScope,
           projectionScopeKey: row.projectionScopeKey,
         });
-        if (row.projectionScopeKey === HOSTED_GROUP_SHARED_READ_DEVICE_SCOPE_KEY) {
-          deviceMemberIds.add(row.grantorMemberId);
+      }
+
+      const snapshotRows = grants.length === 0
+        ? []
+        : await tx.hostedVaultShare.findMany({
+            orderBy: [{ id: "asc" }],
+            select: {
+              id: true,
+              projectionSnapshotCiphertext: true,
+            },
+            take: HOSTED_GROUP_SHARED_READ_MAX_GRANTS + 1,
+            where: {
+              grantor: {
+                AND: [
+                  activeHostedMemberAccessWhere(),
+                  hostedHealthDataConsentNotRevokedWhere(),
+                ],
+              },
+              id: { in: grants.map((grant) => grant.id) },
+            },
+          });
+      if (snapshotRows.length > HOSTED_GROUP_SHARED_READ_MAX_GRANTS) {
+        return {
+          status: "unavailable",
+          unavailableReason: "shared_data_snapshot_too_large",
+        };
+      }
+      const grantsById = new Map(grants.map((grant) => [grant.id, grant]));
+      const shares: HostedGroupSharedProjectionSnapshotEntry[] = [];
+      const deviceMemberIds = new Set<string>();
+      for (const row of snapshotRows) {
+        const grant = grantsById.get(row.id);
+        if (!grant) {
+          return {
+            status: "unavailable",
+            unavailableReason: "shared_data_authority_invalid",
+          };
+        }
+        shares.push({
+          ...grant,
+          ciphertext: row.projectionSnapshotCiphertext,
+        });
+        if (grant.projectionScopeKey === HOSTED_GROUP_SHARED_READ_DEVICE_SCOPE_KEY) {
+          deviceMemberIds.add(grant.grantorMemberId);
         }
       }
 
@@ -849,7 +900,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
         };
       }
 
-      return { connections, members, shares, status: "ok" };
+      return { connections, grants, members, shares, status: "ok" };
     },
     {
       ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -892,18 +943,19 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
       recordsByMemberAndScope.set(share.grantorMemberId, memberRecords);
     }
 
+    const readableGrantIds = new Set(capture.shares.map((share) => share.id));
     const grantsByMember = new Map<
       string,
-      Map<string, HostedGroupSharedProjectionSnapshotEntry>
+      Map<string, HostedGroupSharedProjectionGrantEntry>
     >();
-    for (const share of capture.shares) {
-      const memberGrants = grantsByMember.get(share.grantorMemberId)
-        ?? new Map<string, HostedGroupSharedProjectionSnapshotEntry>();
-      if (memberGrants.has(share.projectionScopeKey)) {
+    for (const grant of capture.grants) {
+      const memberGrants = grantsByMember.get(grant.grantorMemberId)
+        ?? new Map<string, HostedGroupSharedProjectionGrantEntry>();
+      if (memberGrants.has(grant.projectionScopeKey)) {
         throw new Error("Hosted group shared authority contains duplicate grants.");
       }
-      memberGrants.set(share.projectionScopeKey, share);
-      grantsByMember.set(share.grantorMemberId, memberGrants);
+      memberGrants.set(grant.projectionScopeKey, grant);
+      grantsByMember.set(grant.grantorMemberId, memberGrants);
     }
 
     const connectionsByMember = new Map<string, HostedGroupSharedDeviceConnectionSnapshot[]>();
@@ -948,11 +1000,13 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
           }
 
           const records = projectionScopeKey === HOSTED_GROUP_SHARED_READ_DEVICE_SCOPE_KEY
-            ? [buildHostedGroupSharedDeviceSyncRecord({
-                connections: connectionsByMember.get(memberId) ?? [],
-                now,
-                projectionScope,
-              })]
+            ? readableGrantIds.has(grant.id)
+              ? [buildHostedGroupSharedDeviceSyncRecord({
+                  connections: connectionsByMember.get(memberId) ?? [],
+                  now,
+                  projectionScope,
+                })]
+              : null
             : storedRecords?.get(projectionScopeKey) ?? null;
           const normalizedRecords = records ?? [];
           return {
