@@ -32,9 +32,11 @@ Done:
 - Made the optional alert read non-retryable across the prompt and tool-failure boundary while preserving the generic retry contract for other connected apps.
 - Added a real-model journey covering a successful official heat alert, provider failure fallback, and alert-only scheduled suppression.
 - Passed 201 focused tests, assistant and web typechecks, and the focused real-model journey.
+- Final ReviewGPT round 2 found that the alert failure result still combined generic retry guidance with the alert-specific no-retry rule. The required retrospective chose a shrinking fix at the existing tool boundary.
+- Removed the conflicting retry sentence for this route, preserved generic retry guidance elsewhere, and expanded the real-model journey to cover scheduled provider failure.
 
 Now:
-- Commit and push the combined review remediation, then run final correction review.
+- Commit and push the round-2 remediation, then run final correction review.
 
 Next:
 - Reconcile the branch with `main`, confirm exact-head CI, run the signed production-runtime smoke read after the web route is deployed, then close the plan.

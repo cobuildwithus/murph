@@ -340,6 +340,7 @@ describe("murph connected-app dynamic tools", () => {
     expect(text).toContain("CONNECTED_APPS_PROVIDER_UNAVAILABLE");
     expect(text).toContain("Do not retry this optional alert read");
     expect(text).toContain("continue without alert context");
+    expect(text).not.toContain("one retry is reasonable");
   });
 
   it("withholds an unstructured transport failure body from the model", async () => {

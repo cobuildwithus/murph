@@ -171,7 +171,7 @@ export async function executeConnectedAppsDynamicTool(input: {
     if (isConnectedAppsOfficialAlertRequest(requestBody)) {
       return connectedAppsTextResult(
         false,
-        `${describeConnectedAppsFailure(error)} Do not retry this optional alert read; continue without alert context.`,
+        `${describeConnectedAppsFailure(error, 'none')} Do not retry this optional alert read; continue without alert context.`,
       )
     }
     return connectedAppsTextResult(false, describeConnectedAppsFailure(error))
@@ -183,7 +183,10 @@ export async function executeConnectedAppsDynamicTool(input: {
 // Rejected arguments, oversized reads, and revoked access are all decidable
 // from the control-plane error, so pass the code, status, and retry posture
 // through instead of flattening them.
-function describeConnectedAppsFailure(error: unknown): string {
+function describeConnectedAppsFailure(
+  error: unknown,
+  retryGuidance: 'generic' | 'none' = 'generic',
+): string {
   const failure = readConnectedAppsControlPlaneFailure(error)
   if (!failure) {
     return 'connected apps API is unavailable'
@@ -195,7 +198,7 @@ function describeConnectedAppsFailure(error: unknown): string {
   }
 
   const detail = failure.message ? `: ${failure.message}` : ''
-  const posture = failure.retryable === true
+  const posture = failure.retryable === true && retryGuidance === 'generic'
     ? ' This failure is transient; one retry is reasonable.'
     : failure.retryable === false
       ? ' Repeating this call unchanged will fail the same way; change the request or tell the user what is wrong.'

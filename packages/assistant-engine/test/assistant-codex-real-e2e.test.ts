@@ -1189,6 +1189,18 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
           ].join('\n\n'),
           scheduled: true,
         },
+        {
+          alertFailure: true,
+          kind: 'scheduled-alert-failure',
+          prompt: [
+            weeklyHealthDigest.instructions,
+            'Current synthetic evidence for this focused run:',
+            '- The member has a routine outdoor walk in Phoenix, but all tracked recovery, sleep, symptoms, and behavior are stable.',
+            '- Complete the relevant official-alert check for the known location before deciding.',
+            '- The alert is the only possible new context.',
+          ].join('\n\n'),
+          scheduled: true,
+        },
       ] as const
 
       try {
