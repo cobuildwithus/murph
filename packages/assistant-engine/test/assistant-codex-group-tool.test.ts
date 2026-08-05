@@ -2,7 +2,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { initializeVault } from "@murphai/core";
+import {
+  initializeVault,
+  runGeneratedImageCaptureRetention,
+} from "@murphai/core";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
@@ -3300,6 +3303,20 @@ describe("murph.group dynamic tool", () => {
         { action: "set_chat_avatar", groupChatIconUrl: SIGNED_PRIVATE_IMAGE_URL },
       );
       expect(result.usageDraft).toMatchObject({ providerRequestOrdinal: 7 });
+
+      const savedImageRef = generatedImageRefFromPayload(
+        readGroupToolPayload(result),
+      );
+      await expect(runGeneratedImageCaptureRetention({
+        now: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
+        vaultRoot,
+      })).resolves.toMatchObject({
+        blockedCaptureCount: 0,
+        retiredCaptureCount: 1,
+      });
+      await expect(readFile(join(vaultRoot, savedImageRef), "utf8"))
+        .resolves.toContain("generated_image_retention");
+      expect(groupRequest).toHaveBeenCalledTimes(2);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

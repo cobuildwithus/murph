@@ -387,6 +387,10 @@ export interface AssistantHostedImageGenerationResult {
   savedImageRef: string | null
 }
 
+export interface AssistantGeneratedImageCapturePersistenceMetadata {
+  retentionWakeAt: string
+}
+
 export interface AssistantHostedImageGenerationLauncher {
   launch(input: {
     operationId: string
@@ -395,7 +399,10 @@ export interface AssistantHostedImageGenerationLauncher {
     scopeId?: string | null
     run(
       signal: AbortSignal,
-      persistCanonicalWrite: <T>(write: () => Promise<T>) => Promise<T>,
+      persistCanonicalWrite: <T>(
+        write: () => Promise<T>,
+        metadata: AssistantGeneratedImageCapturePersistenceMetadata,
+      ) => Promise<T>,
     ): Promise<AssistantHostedImageGenerationResult>
   }): 'already-pending' | 'already-started' | 'started'
   readStatus?(scopeId: string): 'pending' | 'queued' | null

@@ -196,12 +196,16 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       canonicalWriteReceiptRecoveryFailed: true,
     };
   };
-  const recoverCanonicalWriteReceipts = async (vaultRoot: string) => {
+  const recoverCanonicalWriteReceipts = async (
+    vaultRoot: string,
+    materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null,
+  ) => {
     try {
       return {
         count: await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
           platform: input.platform,
           status: input.workspace?.redactedStatus ?? null,
+          materializeWorkspaceArtifacts,
           vaultRoot,
         }),
         restored: null,
@@ -241,7 +245,10 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       workspace: input.workspace ?? null,
     });
     if (warmRestored) {
-      const receiptRecovery = await recoverCanonicalWriteReceipts(warmRestored.vaultRoot);
+      const receiptRecovery = await recoverCanonicalWriteReceipts(
+        warmRestored.vaultRoot,
+        warmRestored.materializeWorkspaceArtifacts,
+      );
       if (receiptRecovery.restored) {
         return receiptRecovery.restored;
       }
@@ -407,24 +414,28 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     });
   }
 
-  const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
-  if (receiptRecovery.restored) {
-    return receiptRecovery.restored;
-  }
   const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
     vaultRoot: restored.vaultRoot,
   });
+  const materializeWorkspaceArtifacts = createHostedWorkspaceRuntimeArtifactMaterializer({
+    materializedArtifactPaths: restoredMaterializedArtifactPaths,
+    platform: input.platform,
+    restored,
+    readBundles: materializerBundles,
+  });
+  const receiptRecovery = await recoverCanonicalWriteReceipts(
+    restored.vaultRoot,
+    materializeWorkspaceArtifacts,
+  );
+  if (receiptRecovery.restored) {
+    return receiptRecovery.restored;
+  }
 
   return {
     ...restored,
     canonicalWriteReceiptCount: receiptRecovery.count,
     canonicalWriteReceiptRecoveryFailed: false,
-    materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-      materializedArtifactPaths: restoredMaterializedArtifactPaths,
-      platform: input.platform,
-      restored,
-      readBundles: materializerBundles,
-    }),
+    materializeWorkspaceArtifacts,
     materializedArtifactPaths: restoredMaterializedArtifactPaths,
     mode: "snapshot",
     restoreWasCold,
@@ -1041,6 +1052,7 @@ function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
 }
 
 async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   platform: HostedRuntimePlatform;
   status: HostedWorkspaceState["redactedStatus"] | null | undefined;
   vaultRoot: string;
@@ -1076,6 +1088,9 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
     for (const domain of listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(parsed)) {
       dirtyDomains.add(domain);
     }
+    await input.materializeWorkspaceArtifacts?.(
+      parsed.actions.map((action) => action.targetRelativePath),
+    );
     await applyHostedCanonicalWriteReceipt({
       readPayload: async (ref) =>
         await readHostedCanonicalWritePayloadForRestore({
@@ -1162,7 +1177,12 @@ function parseHostedCanonicalWriteReceiptActionForRestore(
       if (
         !isSha256(raw.sha256) ||
         !isNonNegativeInteger(raw.byteLength) ||
-        !isTextUpsertEffect(raw.effect)
+        !isTextUpsertEffect(raw.effect) ||
+        ((raw.expectedSha256 === undefined) !==
+          (raw.expectedByteLength === undefined)) ||
+        (raw.expectedSha256 !== undefined && !isSha256(raw.expectedSha256)) ||
+        (raw.expectedByteLength !== undefined &&
+          !isNonNegativeInteger(raw.expectedByteLength))
       ) {
         throw new Error("Hosted canonical text write receipt action is invalid.");
       }
@@ -1173,6 +1193,14 @@ function parseHostedCanonicalWriteReceiptActionForRestore(
         sha256: raw.sha256,
         byteLength: raw.byteLength,
         effect: raw.effect,
+        ...(raw.allowRaw === true ? { allowRaw: true as const } : {}),
+        ...(typeof raw.expectedSha256 === "string"
+          && typeof raw.expectedByteLength === "number"
+          ? {
+              expectedSha256: raw.expectedSha256,
+              expectedByteLength: raw.expectedByteLength,
+            }
+          : {}),
         ...(contentRef ? { contentRef } : {}),
       };
     }

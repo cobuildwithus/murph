@@ -13,7 +13,7 @@ Updated: 2026-08-04
 ## Success criteria
 
 - Generated image captures older than 14 days lose their raw media bytes through
-  one canonical, receipt-guarded mutation.
+  one per-capture canonical, receipt-guarded mutation.
 - Fresh generated captures, non-generated captures, explicitly durable visual
   tracking captures, and protected in-flight work are not retired incorrectly.
 - Generated-image retry lookup semantics cannot resurrect expired media and
@@ -46,8 +46,8 @@ Updated: 2026-08-04
 
 1. Risk: deleting canonical media without updating retry lookup state can
    resurrect or corrupt a generated capture.
-   Mitigation: use one core-owned atomic operation that validates all coupled
-   state before mutation and tests replay after expiry.
+   Mitigation: use one core-owned per-capture atomic operation that validates
+   all coupled state before mutation and tests replay after expiry.
 2. Risk: a new background subsystem duplicates existing retention scheduling.
    Mitigation: extend the current hosted retention maintenance/wake path only.
 3. Risk: age calculation or interrupted cleanup deletes fresh or protected
@@ -74,12 +74,37 @@ Updated: 2026-08-04
   durable.
 - No new scheduler, queue, manager, or database state owner is permitted unless
   current primitives are proven insufficient.
+- Every generated-image vault write uses the existing capture lookup. A stable
+  tool-call identity keeps its replay behavior; a write without one receives a
+  unique retention-only identity so it remains discoverable without inventing
+  a second index.
+- Retirement commits each capture independently so an integrity-blocked capture
+  remains unchanged and scheduled for retry while valid neighbors progress.
+- Hosted restore keeps `raw/**` and `derived/**` lazy. Retention therefore
+  materializes the lookup before discovery and only due image/manifest paths
+  before their receipt checks.
+- Dormant pre-deploy snapshots are enrolled once by
+  `20260805010000_rearm_generated_image_capture_retention`, which reuses the
+  existing `inbox_media_retention` wake, workspace CAS version, and bounded
+  hourly dispatcher.
+- Each successful generated-image canonical write carries its exact 14-day
+  cutoff into the same receipt checkpoint. Multiple writes keep the earliest
+  cutoff, including when shutdown begins before the idle snapshot.
+- Retirement itself runs inside the existing hosted canonical-write boundary.
+  Guarded text-replacement receipts preserve raw-write authority and the
+  inspected preimage, so replay is idempotent at the tombstone, replaces only
+  the original bytes, and rejects a third state. Legacy lazy snapshots
+  materialize receipt targets before checking that preimage.
 
 ## Verification
 
-- Commands to run: focused package tests for changed owners, affected package
-  typechecks, direct retention/replay proof, exact-head GitHub Actions, and the
-  required ReviewGPT gates.
+- Passed locally: core, assistant-engine, assistant-runtime, and hosted-Web
+  typechecks; 48 focused core tests; 94 image-generation/group-tool tests; the
+  complete 2,039-test assistant-runtime suite (2,036 passed, 3 skipped); 10
+  static Web migration tests; the local PostgreSQL re-arm proof;
+  workspace-boundary verification; documentation drift; and diff hygiene.
+- Remaining: exact-head GitHub Actions and final ReviewGPT correction
+  verification after accepted findings are pushed.
 - Expected outcomes: old generated media is retired atomically and cannot be
   resurrected; fresh, unrelated, durable, and protected captures remain; all
   checks and reviews pass.

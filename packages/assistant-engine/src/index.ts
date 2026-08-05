@@ -40,6 +40,7 @@ export * from './assistant/hosted-image-completion.js'
 export type {
   AssistantGroupParticipantDisplayName,
   AssistantGroupParticipantDisplayNameSource,
+  AssistantGeneratedImageCapturePersistenceMetadata,
   AssistantHostedGroupParticipantDisplayNameReader,
   AssistantHostedGroupPermissionOfferRequest,
   AssistantHostedGroupPermissionOfferTool,

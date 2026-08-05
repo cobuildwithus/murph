@@ -107,6 +107,7 @@ beforeEach(() => {
   });
   runGeneratedImageCaptureRetention.mockReset();
   runGeneratedImageCaptureRetention.mockResolvedValue({
+    blockedCaptureCount: 0,
     hasMoreEligibleCaptures: false,
     nextEligibleAt: null,
     retiredByteCount: 0,
@@ -430,6 +431,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       vaultRoot: "/vault",
     });
     expect(runGeneratedImageCaptureRetention).toHaveBeenCalledWith({
+      materializeCandidatePaths: materializeRetentionCandidatePaths,
       protectedCaptureIds: ["cap_pending"],
       protectedStoredPaths: ["raw/inbox/linq/self/2026/06/cap_pending/attachments/01__photo.webp"],
       signal: expect.any(AbortSignal),
@@ -439,6 +441,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
   it("schedules generated-image cleanup on the shared retention wake", async () => {
     runGeneratedImageCaptureRetention.mockResolvedValue({
+      blockedCaptureCount: 0,
       hasMoreEligibleCaptures: false,
       nextEligibleAt: "2026-07-10T00:00:00.000Z",
       retiredByteCount: 0,

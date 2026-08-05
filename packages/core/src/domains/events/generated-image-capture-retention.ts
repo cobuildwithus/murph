@@ -9,7 +9,7 @@ import {
 } from "@murphai/contracts";
 
 import { emitAuditRecord } from "../../audit.ts";
-import { VaultError } from "../../errors.ts";
+import { isVaultError, VaultError } from "../../errors.ts";
 import { readUtf8File } from "../../fs.ts";
 import {
   eventSpineRevision,
@@ -24,7 +24,6 @@ import {
 } from "../../operations/write-batch.ts";
 import { normalizeRelativeVaultPath } from "../../path-safety.ts";
 import { statAndHashVaultFile } from "../../raw-artifact-integrity.ts";
-import { loadVault } from "../../vault.ts";
 import {
   CAPTURE_LOOKUP_INDEX_PATH,
   CAPTURE_LOOKUP_SCHEMA,
@@ -48,10 +47,11 @@ export const GENERATED_IMAGE_CAPTURE_TAGS = [
 const GENERATED_IMAGE_RETENTION_REASON = "generated_image_retention";
 const GENERATED_IMAGE_RETENTION_TOMBSTONE_SCHEMA =
   "murph.generated-image-retention-tombstone.v1";
-const GENERATED_IMAGE_RETENTION_PROTECTED_RECHECK_MS = 24 * 60 * 60 * 1000;
+const GENERATED_IMAGE_RETENTION_RECHECK_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_GENERATED_IMAGE_RETENTION_BATCH_SIZE = 100;
 
 export interface RunGeneratedImageCaptureRetentionInput {
+  materializeCandidatePaths?: ((storedPaths: readonly string[]) => Promise<unknown>) | null;
   maxCaptures?: number;
   now?: Date;
   protectedCaptureIds?: Iterable<string>;
@@ -61,6 +61,7 @@ export interface RunGeneratedImageCaptureRetentionInput {
 }
 
 export interface RunGeneratedImageCaptureRetentionResult {
+  blockedCaptureCount: number;
   hasMoreEligibleCaptures: boolean;
   nextEligibleAt: string | null;
   retiredByteCount: number;
@@ -97,15 +98,22 @@ export async function runGeneratedImageCaptureRetention(
   if (maxCaptures === 0) {
     return emptyRetentionResult();
   }
+  await input.materializeCandidatePaths?.([CAPTURE_LOOKUP_INDEX_PATH]);
+  throwIfGeneratedImageRetentionAborted(input.signal);
+  const initialLookupIndex = await readStoredCaptureLookupIndex({
+    vaultRoot: input.vaultRoot,
+  });
+  if (Object.keys(initialLookupIndex.entries).length === 0) {
+    return emptyRetentionResult();
+  }
 
-  return withCanonicalWriteLock(input.vaultRoot, async () => {
-    await loadVault({ vaultRoot: input.vaultRoot });
-    return runGeneratedImageCaptureRetentionLocked({
+  return withCanonicalWriteLock(input.vaultRoot, () =>
+    runGeneratedImageCaptureRetentionLocked({
       ...input,
       maxCaptures,
       now,
-    });
-  });
+    }),
+  );
 }
 
 async function runGeneratedImageCaptureRetentionLocked(
@@ -114,7 +122,7 @@ async function runGeneratedImageCaptureRetentionLocked(
     now: Date;
   },
 ): Promise<RunGeneratedImageCaptureRetentionResult> {
-  const lookupIndex = await readStoredCaptureLookupIndex({
+  let lookupIndex = await readStoredCaptureLookupIndex({
     vaultRoot: input.vaultRoot,
   });
   const lookupEntries = Object.entries(lookupIndex.entries)
@@ -122,7 +130,6 @@ async function runGeneratedImageCaptureRetentionLocked(
   if (lookupEntries.length === 0) {
     return emptyRetentionResult();
   }
-
   const lookupIntegrity = await statAndHashVaultFile(
     input.vaultRoot,
     CAPTURE_LOOKUP_INDEX_PATH,
@@ -133,18 +140,20 @@ async function runGeneratedImageCaptureRetentionLocked(
       "Generated-image lookup index disappeared during retention planning.",
     );
   }
-  const lookupReceipt = toCommittedReceipt(lookupIntegrity);
+  let lookupReceipt = toCommittedReceipt(lookupIntegrity);
   const protectedCaptureIds = new Set(input.protectedCaptureIds ?? []);
   const protectedStoredPaths = normalizeProtectedStoredPaths(
     input.protectedStoredPaths ?? [],
   );
-  const protectedRecheckAt = new Date(
-    input.now.getTime() + GENERATED_IMAGE_RETENTION_PROTECTED_RECHECK_MS,
+  const recheckAt = new Date(
+    input.now.getTime() + GENERATED_IMAGE_RETENTION_RECHECK_MS,
   ).toISOString();
   const ledgerRecords = new Map<string, EventRecord[]>();
-  const candidates: GeneratedImageRetentionCandidate[] = [];
+  let blockedCaptureCount = 0;
   let hasMoreEligibleCaptures = false;
   let nextEligibleAt: string | null = null;
+  let retiredByteCount = 0;
+  let retiredCaptureCount = 0;
   let scannedCaptureCount = 0;
 
   for (const [lookupKeyHash, lookup] of lookupEntries) {
@@ -154,135 +163,166 @@ async function runGeneratedImageCaptureRetentionLocked(
     }
     scannedCaptureCount += 1;
 
-    const records = await readLookupEventRecords({
-      cache: ledgerRecords,
-      ledgerFile: lookup.ledgerFile,
-      vaultRoot: input.vaultRoot,
-    });
-    const spine = records
-      .filter((record) => record.id === lookup.eventId)
-      .map((record) => ({ relativePath: lookup.ledgerFile, record }));
-    const latest = selectLatestEventSpineEntry(spine);
-    const origin = spine
-      .map(({ record }) => record)
-      .sort((left, right) => eventSpineRevision(left) - eventSpineRevision(right))[0];
-    if (!latest || !origin) {
-      throw new VaultError(
-        "GENERATED_IMAGE_RETENTION_EVENT_MISSING",
-        "Generated-image lookup target event is missing.",
-        { relativePath: lookup.ledgerFile },
-      );
-    }
-    if (!isGeneratedImageCaptureEvent(origin)) {
+    let candidate: GeneratedImageRetentionCandidate;
+    try {
+      const records = await readLookupEventRecords({
+        cache: ledgerRecords,
+        ledgerFile: lookup.ledgerFile,
+        vaultRoot: input.vaultRoot,
+      });
+      const spine = records
+        .filter((record) => record.id === lookup.eventId)
+        .map((record) => ({ relativePath: lookup.ledgerFile, record }));
+      const latest = selectLatestEventSpineEntry(spine);
+      const origin = spine
+        .map(({ record }) => record)
+        .sort((left, right) => eventSpineRevision(left) - eventSpineRevision(right))[0];
+      if (!latest || !origin) {
+        throw new VaultError(
+          "GENERATED_IMAGE_RETENTION_EVENT_MISSING",
+          "Generated-image lookup target event is missing.",
+          { relativePath: lookup.ledgerFile },
+        );
+      }
+      if (!isGeneratedImageCaptureEvent(origin)) {
+        continue;
+      }
+      assertGeneratedImageLookupEvent({ lookup, origin });
+
+      const recordedAtMs = Date.parse(origin.recordedAt);
+      if (!Number.isFinite(recordedAtMs)) {
+        throw new VaultError(
+          "GENERATED_IMAGE_RETENTION_EVENT_INVALID",
+          "Generated-image capture recordedAt is invalid.",
+          { relativePath: lookup.ledgerFile },
+        );
+      }
+      const eligibleAtMs = recordedAtMs + GENERATED_IMAGE_CAPTURE_RETENTION_WINDOW_MS;
+      if (eligibleAtMs > input.now.getTime()) {
+        nextEligibleAt = selectEarlierTimestamp(
+          nextEligibleAt,
+          new Date(eligibleAtMs).toISOString(),
+        );
+        continue;
+      }
+
+      if (
+        protectedCaptureIds.has(lookup.eventId) ||
+        protectedStoredPaths.has(lookup.attachmentRef) ||
+        (lookup.manifestPath !== null && protectedStoredPaths.has(lookup.manifestPath))
+      ) {
+        nextEligibleAt = selectEarlierTimestamp(nextEligibleAt, recheckAt);
+        continue;
+      }
+
+      if (retiredCaptureCount >= input.maxCaptures) {
+        hasMoreEligibleCaptures = true;
+        break;
+      }
+      await input.materializeCandidatePaths?.([
+        lookup.attachmentRef,
+        ...(lookup.manifestPath ? [lookup.manifestPath] : []),
+      ]);
+      candidate = await prepareRetentionCandidate({
+        latest: latest.record,
+        lookup,
+        lookupKeyHash,
+        now: input.now,
+        origin,
+        signal: input.signal,
+        vaultRoot: input.vaultRoot,
+      });
+    } catch (error) {
+      throwIfGeneratedImageRetentionAborted(input.signal);
+      if (!isGeneratedImageRetentionBlockedCaptureError(error)) {
+        throw error;
+      }
+      blockedCaptureCount += 1;
+      nextEligibleAt = selectEarlierTimestamp(nextEligibleAt, recheckAt);
       continue;
     }
-    assertGeneratedImageLookupEvent({ lookup, origin });
 
-    const recordedAtMs = Date.parse(origin.recordedAt);
-    if (!Number.isFinite(recordedAtMs)) {
-      throw new VaultError(
-        "GENERATED_IMAGE_RETENTION_EVENT_INVALID",
-        "Generated-image capture recordedAt is invalid.",
-        { relativePath: lookup.ledgerFile },
-      );
-    }
-    const eligibleAtMs = recordedAtMs + GENERATED_IMAGE_CAPTURE_RETENTION_WINDOW_MS;
-    if (eligibleAtMs > input.now.getTime()) {
-      nextEligibleAt = selectEarlierTimestamp(
-        nextEligibleAt,
-        new Date(eligibleAtMs).toISOString(),
-      );
-      continue;
-    }
-
-    if (
-      protectedCaptureIds.has(lookup.eventId) ||
-      protectedStoredPaths.has(lookup.attachmentRef) ||
-      (lookup.manifestPath !== null && protectedStoredPaths.has(lookup.manifestPath))
-    ) {
-      nextEligibleAt = selectEarlierTimestamp(nextEligibleAt, protectedRecheckAt);
-      continue;
-    }
-
-    if (candidates.length >= input.maxCaptures) {
-      hasMoreEligibleCaptures = true;
-      break;
-    }
-    candidates.push(await prepareRetentionCandidate({
-      latest: latest.record,
-      lookup,
-      lookupKeyHash,
+    const committed = await commitRetentionCandidate({
+      candidate,
+      lookupIndex,
+      lookupReceipt,
       now: input.now,
-      origin,
       signal: input.signal,
       vaultRoot: input.vaultRoot,
-    }));
-  }
-
-  if (candidates.length === 0) {
-    return {
-      hasMoreEligibleCaptures,
-      nextEligibleAt,
-      retiredByteCount: 0,
-      retiredCaptureCount: 0,
-      scannedCaptureCount,
-    };
-  }
-
-  const purgedAt = input.now.toISOString();
-  const nextLookupIndex: StoredCaptureLookupIndex = structuredClone(lookupIndex);
-  for (const candidate of candidates) {
-    const entry = nextLookupIndex.entries[candidate.lookupKeyHash];
-    if (!entry) {
-      throw new VaultError(
-        "GENERATED_IMAGE_RETENTION_LOOKUP_INVALID",
-        "Generated-image lookup entry disappeared during retention planning.",
-      );
+    });
+    lookupIndex = committed.lookupIndex;
+    lookupReceipt = committed.lookupReceipt;
+    retiredByteCount += candidate.originalReceipt.byteLength;
+    retiredCaptureCount += 1;
+    if (candidate.nextEventRecord) {
+      ledgerRecords.get(candidate.ledgerFile)?.push(candidate.nextEventRecord);
     }
-    entry.retiredAt = purgedAt;
   }
 
-  const retiredByteCount = candidates.reduce(
-    (total, candidate) => total + candidate.originalReceipt.byteLength,
-    0,
-  );
+  return {
+    blockedCaptureCount,
+    hasMoreEligibleCaptures,
+    nextEligibleAt,
+    retiredByteCount,
+    retiredCaptureCount,
+    scannedCaptureCount,
+  };
+}
+
+async function commitRetentionCandidate(input: {
+  candidate: GeneratedImageRetentionCandidate;
+  lookupIndex: StoredCaptureLookupIndex;
+  lookupReceipt: CommittedPayloadReceipt;
+  now: Date;
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<{
+  lookupIndex: StoredCaptureLookupIndex;
+  lookupReceipt: CommittedPayloadReceipt;
+}> {
+  const nextLookupIndex: StoredCaptureLookupIndex = structuredClone(input.lookupIndex);
+  const entry = nextLookupIndex.entries[input.candidate.lookupKeyHash];
+  if (!entry) {
+    throw new VaultError(
+      "GENERATED_IMAGE_RETENTION_LOOKUP_INVALID",
+      "Generated-image lookup entry disappeared during retention planning.",
+    );
+  }
+  entry.retiredAt = input.now.toISOString();
+  const nextLookupContent = `${JSON.stringify(nextLookupIndex, null, 2)}\n`;
+
   await runCanonicalWrite({
     assertCanContinue: () => throwIfGeneratedImageRetentionAborted(input.signal),
     mutate: async ({ batch }) => {
-      const ledgerAppends = new Map<string, string[]>();
-      for (const candidate of candidates) {
-        await batch.stageTextWrite(
-          candidate.attachmentRef,
-          candidate.tombstoneContent,
-          {
-            allowRaw: true,
-            expectedTargetReceipt: candidate.originalReceipt,
-            overwrite: true,
-          },
+      await batch.stageTextWrite(
+        input.candidate.attachmentRef,
+        input.candidate.tombstoneContent,
+        {
+          allowRaw: true,
+          expectedTargetReceipt: input.candidate.originalReceipt,
+          overwrite: true,
+        },
+      );
+      await batch.stageTextWrite(
+        input.candidate.manifest.relativePath,
+        `${JSON.stringify(input.candidate.manifest.manifest, null, 2)}\n`,
+        {
+          allowRaw: true,
+          expectedTargetReceipt: input.candidate.manifest.contentReceipt,
+          overwrite: true,
+        },
+      );
+      if (input.candidate.nextEventRecord) {
+        await batch.stageJsonlAppend(
+          input.candidate.ledgerFile,
+          `${JSON.stringify(input.candidate.nextEventRecord)}\n`,
         );
-        await batch.stageTextWrite(
-          candidate.manifest.relativePath,
-          `${JSON.stringify(candidate.manifest.manifest, null, 2)}\n`,
-          {
-            allowRaw: true,
-            expectedTargetReceipt: candidate.manifest.contentReceipt,
-            overwrite: true,
-          },
-        );
-        if (candidate.nextEventRecord) {
-          const records = ledgerAppends.get(candidate.ledgerFile) ?? [];
-          records.push(JSON.stringify(candidate.nextEventRecord));
-          ledgerAppends.set(candidate.ledgerFile, records);
-        }
-      }
-      for (const [ledgerFile, records] of ledgerAppends) {
-        await batch.stageJsonlAppend(ledgerFile, `${records.join("\n")}\n`);
       }
       await batch.stageTextWrite(
         CAPTURE_LOOKUP_INDEX_PATH,
-        `${JSON.stringify(nextLookupIndex, null, 2)}\n`,
+        nextLookupContent,
         {
-          expectedTargetReceipt: lookupReceipt,
+          expectedTargetReceipt: input.lookupReceipt,
           overwrite: true,
         },
       );
@@ -292,30 +332,25 @@ async function runGeneratedImageCaptureRetentionLocked(
         commandName: "core.runGeneratedImageCaptureRetention",
         files: [
           CAPTURE_LOOKUP_INDEX_PATH,
-          ...new Set(candidates.flatMap((candidate) => [
-            candidate.attachmentRef,
-            candidate.manifest.relativePath,
-            ...(candidate.nextEventRecord ? [candidate.ledgerFile] : []),
-          ])),
+          input.candidate.attachmentRef,
+          input.candidate.manifest.relativePath,
+          ...(input.candidate.nextEventRecord ? [input.candidate.ledgerFile] : []),
         ],
         occurredAt: input.now,
-        summary: `Retired ${candidates.length} assistant-generated image capture(s).`,
-        targetIds: candidates.map((candidate) => candidate.eventId),
+        summary: "Retired one assistant-generated image capture.",
+        targetIds: [input.candidate.eventId],
         vaultRoot: input.vaultRoot,
       });
     },
     occurredAt: input.now,
     operationType: "generated_image_capture_retention",
-    summary: `Retire ${candidates.length} assistant-generated image capture(s)`,
+    summary: "Retire one assistant-generated image capture",
     vaultRoot: input.vaultRoot,
   });
 
   return {
-    hasMoreEligibleCaptures,
-    nextEligibleAt,
-    retiredByteCount,
-    retiredCaptureCount: candidates.length,
-    scannedCaptureCount,
+    lookupIndex: nextLookupIndex,
+    lookupReceipt: createContentReceipt(nextLookupContent),
   };
 }
 
@@ -574,8 +609,20 @@ function throwIfGeneratedImageRetentionAborted(signal?: AbortSignal | null): voi
   signal?.throwIfAborted();
 }
 
+function isGeneratedImageRetentionBlockedCaptureError(error: unknown): boolean {
+  return isVaultError(error) && [
+    "GENERATED_IMAGE_RETENTION_ATTACHMENT_INVALID",
+    "GENERATED_IMAGE_RETENTION_EVENT_INVALID",
+    "GENERATED_IMAGE_RETENTION_EVENT_MISSING",
+    "GENERATED_IMAGE_RETENTION_MANIFEST_INVALID",
+    "GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED",
+    "VAULT_FILE_MISSING",
+  ].includes(error.code);
+}
+
 function emptyRetentionResult(): RunGeneratedImageCaptureRetentionResult {
   return {
+    blockedCaptureCount: 0,
     hasMoreEligibleCaptures: false,
     nextEligibleAt: null,
     retiredByteCount: 0,

@@ -7,6 +7,7 @@ import {
   upsertAssistantInputEvent,
   type AssistantHostedImageGenerationLauncher,
   type AssistantHostedImageGenerationResult,
+  type AssistantGeneratedImageCapturePersistenceMetadata,
   type AssistantRuntimeIssueInput,
 } from "@murphai/assistant-engine";
 import {
@@ -23,6 +24,7 @@ interface CompletedImageGeneration {
 }
 
 interface PendingCanonicalWrite {
+  metadata: AssistantGeneratedImageCapturePersistenceMetadata;
   reject(reason: unknown): void;
   run(): Promise<void>;
 }
@@ -31,7 +33,10 @@ export interface HostedImageGenerationController {
   readonly launcher: AssistantHostedImageGenerationLauncher;
   close(): Promise<void>;
   flushCanonicalWrites(
-    persist: (write: () => Promise<void>) => Promise<void>,
+    persist: (
+      write: () => Promise<void>,
+      metadata: AssistantGeneratedImageCapturePersistenceMetadata,
+    ) => Promise<void>,
   ): Promise<number>;
   hasCompleted(): boolean;
   hasWork(): boolean;
@@ -77,10 +82,14 @@ export function createHostedImageGenerationController(input: {
   const tasks = new Set<Promise<void>>();
   const enqueuePendingInputId =
     input.enqueuePendingInputId ?? enqueueHostedPendingAssistantInputId;
-  const persistCanonicalWrite = <T>(write: () => Promise<T>): Promise<T> =>
+  const persistCanonicalWrite = <T>(
+    write: () => Promise<T>,
+    metadata: AssistantGeneratedImageCapturePersistenceMetadata,
+  ): Promise<T> =>
     input.withCanonicalWritePersistence(
       () => new Promise<T>((resolve, reject) => {
         canonicalWrites.push({
+          metadata,
           reject,
           async run() {
             try {
@@ -219,7 +228,7 @@ export function createHostedImageGenerationController(input: {
       while (canonicalWrites.length > 0) {
         const pending = canonicalWrites[0]!;
         try {
-          await persist(pending.run);
+          await persist(pending.run, pending.metadata);
         } catch (error) {
           pending.reject(error);
         }

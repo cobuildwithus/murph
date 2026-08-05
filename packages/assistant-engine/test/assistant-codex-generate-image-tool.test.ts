@@ -130,6 +130,8 @@ describe('executeGenerateImageTool', () => {
           total_tokens: 8,
         },
       }))
+    let retentionWakeAt: string | null = null
+    const startedAt = Date.now()
 
     const result = await executeGenerateImageTool({
       args: {
@@ -143,6 +145,10 @@ describe('executeGenerateImageTool', () => {
         OPENAI_API_KEY: 'openai-test-key',
       },
       fetchImpl,
+      persistGeneratedImageCapture: async (write, metadata) => {
+        retentionWakeAt = metadata.retentionWakeAt
+        return await write()
+      },
       providerRequestOrdinal: 4,
       requireHostedPrivateImageDelivery: true,
       vaultRoot,
@@ -169,6 +175,10 @@ describe('executeGenerateImageTool', () => {
     ])
     await expect(readFile(path.join(vaultRoot, result.savedImageRef!)))
       .resolves.toEqual(Buffer.from(webpBytes))
+    const retentionWakeMs = Date.parse(retentionWakeAt ?? '')
+    const retentionWindowMs = 14 * 24 * 60 * 60 * 1000
+    expect(retentionWakeMs).toBeGreaterThanOrEqual(startedAt + retentionWindowMs)
+    expect(retentionWakeMs).toBeLessThanOrEqual(Date.now() + retentionWindowMs)
     expect(result.usageDraft?.providerRequestOrdinal).toBe(4)
     expect(result.usageDraft?.providerRequestOutcome).toBe('succeeded')
     expect(result.usageDraft?.usage).toMatchObject({

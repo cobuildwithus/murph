@@ -1,6 +1,6 @@
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -88,6 +88,21 @@ async function readLookupIndex(vaultRoot: string): Promise<{
 }
 
 describe("generated image capture retention", () => {
+  it("is a no-op when an empty checkpoint workspace has no lookup index", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-empty-retention-"));
+    cleanupPaths.push(vaultRoot);
+
+    await expect(runGeneratedImageCaptureRetention({ vaultRoot })).resolves.toEqual({
+      blockedCaptureCount: 0,
+      hasMoreEligibleCaptures: false,
+      nextEligibleAt: null,
+      retiredByteCount: 0,
+      retiredCaptureCount: 0,
+      scannedCaptureCount: 0,
+    });
+    await expect(readdir(vaultRoot)).resolves.toEqual([]);
+  });
+
   it("atomically retires generated image bytes at 14 days and blocks replay", async () => {
     const vaultRoot = await createTempVault();
     const recordedAt = "2026-07-01T12:00:00.000Z";
@@ -186,6 +201,7 @@ describe("generated image capture retention", () => {
     });
 
     expect(result).toEqual({
+      blockedCaptureCount: 0,
       hasMoreEligibleCaptures: false,
       nextEligibleAt: "2026-07-24T00:00:00.000Z",
       retiredByteCount: 0,
@@ -255,7 +271,7 @@ describe("generated image capture retention", () => {
     })).resolves.toMatchObject({ status: "live" });
   });
 
-  it("fails before mutation when any candidate loses canonical integrity", async () => {
+  it("retires valid captures when a neighboring capture loses canonical integrity", async () => {
     const vaultRoot = await createTempVault();
     const first = await addGeneratedCapture({
       lookupKey: "generated:atomic-one",
@@ -269,22 +285,32 @@ describe("generated image capture retention", () => {
     });
     const firstRef = first.event.attachments![0]!.relativePath;
     const secondRef = second.event.attachments![0]!.relativePath;
-    const firstBefore = await readFile(path.join(vaultRoot, firstRef), "utf8");
     await writeFile(path.join(vaultRoot, secondRef), "tampered-image");
+    const now = new Date("2026-07-15T00:00:00.000Z");
 
     await expect(runGeneratedImageCaptureRetention({
-      now: new Date("2026-07-15T00:00:00.000Z"),
+      now,
       vaultRoot,
-    })).rejects.toMatchObject({
-      code: "GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED",
+    })).resolves.toMatchObject({
+      blockedCaptureCount: 1,
+      nextEligibleAt: "2026-07-16T00:00:00.000Z",
+      retiredCaptureCount: 1,
     });
 
     await expect(readFile(path.join(vaultRoot, firstRef), "utf8"))
-      .resolves.toBe(firstBefore);
+      .resolves.toContain("generated_image_retention");
+    await expect(readFile(path.join(vaultRoot, secondRef), "utf8"))
+      .resolves.toBe("tampered-image");
     const index = await readLookupIndex(vaultRoot);
-    expect(Object.values(index.entries).every((entry) => entry.retiredAt === undefined))
-      .toBe(true);
-    expect(await readJsonlRecords({ relativePath: first.ledgerFile, vaultRoot }))
-      .toHaveLength(2);
+    expect(Object.values(index.entries).filter((entry) => entry.retiredAt === now.toISOString()))
+      .toHaveLength(1);
+    await expect(findCaptureByLookup({
+      lookupKey: "generated:atomic-one",
+      vaultRoot,
+    })).resolves.toMatchObject({ status: "deleted" });
+    await expect(findCaptureByLookup({
+      lookupKey: "generated:atomic-two",
+      vaultRoot,
+    })).resolves.toMatchObject({ status: "live" });
   });
 });

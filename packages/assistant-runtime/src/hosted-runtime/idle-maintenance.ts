@@ -95,6 +95,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   memberId: string;
   model: string | null;
   pendingWork: boolean;
+  persistGeneratedImageRetention?: (<T>(write: () => Promise<T>) => Promise<T>) | null;
   protectedAttachmentIds?: readonly string[];
   protectedCaptureIds?: readonly string[];
   protectedStoredPaths?: readonly string[];
@@ -132,6 +133,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   try {
     let retentionWake: HostedIdleMaintenanceWake = {};
     if (input.vaultRoot) {
+      const vaultRoot = input.vaultRoot;
       try {
         const pendingInputRetention =
           await runHostedPendingAssistantInputContentRetention({
@@ -165,13 +167,24 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           retentionWake,
           resolveInboxMediaRetentionWake(retentionResult),
         );
-        const generatedImageRetention = await runGeneratedImageCaptureRetention({
+        const retireGeneratedImages = () => runGeneratedImageCaptureRetention({
+          materializeCandidatePaths:
+            input.materializeRetentionCandidatePaths ?? undefined,
           ...(input.pendingWork ? { maxCaptures: 1 } : {}),
           protectedCaptureIds: input.protectedCaptureIds,
           protectedStoredPaths: input.protectedStoredPaths,
           signal: abortController.signal,
-          vaultRoot: input.vaultRoot,
+          vaultRoot,
         });
+        const generatedImageRetention = input.persistGeneratedImageRetention
+          ? await input.persistGeneratedImageRetention(retireGeneratedImages)
+          : await retireGeneratedImages();
+        if (generatedImageRetention.blockedCaptureCount > 0) {
+          emitGeneratedImageRetentionBlockedLog({
+            memberId: input.memberId,
+            result: generatedImageRetention,
+          });
+        }
         retentionWake = mergeInboxRetentionWakes(
           retentionWake,
           resolveGeneratedImageRetentionWake(generatedImageRetention),
@@ -386,6 +399,25 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     wakeWatchAbort.abort();
     await wakeWatch;
   }
+}
+
+function emitGeneratedImageRetentionBlockedLog(input: {
+  memberId: string;
+  result: RunGeneratedImageCaptureRetentionResult;
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      failureCode: "generated_image_retention_capture_blocked",
+      generatedImageRetentionBlockedCaptures: input.result.blockedCaptureCount,
+      generatedImageRetentionRetiredCaptures: input.result.retiredCaptureCount,
+    },
+    level: "warn",
+    message:
+      "Hosted idle maintenance retired valid generated images, but one or more captures require repair.",
+    phase: "checkpoint",
+    userId: input.memberId,
+  });
 }
 
 function emitIntegrationIngestArchiveLog(input: {

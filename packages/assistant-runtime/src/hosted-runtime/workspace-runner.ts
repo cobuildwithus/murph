@@ -1241,12 +1241,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   };
 }
 
-export async function runHostedWorkspaceCanonicalWriteAtBoundary(input: {
+export async function runHostedWorkspaceCanonicalWriteAtBoundary<TResult>(input: {
   previousRedactedStatus: HostedRuntimeRedactedJson | null;
   runnerInput: HostedWorkspaceRunnerInput;
-  write(): Promise<void>;
+  write(): Promise<TResult>;
 }): Promise<{
+  canonicalWritePersisted: boolean;
   redactedStatus: HostedRuntimeRedactedJson | null;
+  result: TResult;
   workspace: HostedWorkspaceState | null;
 }> {
   const checkpointRequestSession = createHostedWorkspaceCheckpointRequestSession(
@@ -1264,7 +1266,7 @@ export async function runHostedWorkspaceCanonicalWriteAtBoundary(input: {
       ),
       writeStatus,
     );
-  const port = createHostedWorkspaceCanonicalWritePort({
+  const canonicalWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
     input: input.runnerInput,
     readPreviousRedactedStatus: readCurrentStatus,
@@ -1272,10 +1274,19 @@ export async function runHostedWorkspaceCanonicalWriteAtBoundary(input: {
       writeStatus = mergeHostedRuntimeRedactedStatusValues(writeStatus, status);
     },
   });
+  let canonicalWritePersisted = false;
+  const port: HostedCanonicalWritePort = {
+    async persistCanonicalWrite(writeInput) {
+      await canonicalWritePort.persistCanonicalWrite(writeInput);
+      canonicalWritePersisted = true;
+    },
+  };
 
-  await withHostedCanonicalWritePort(port, input.write);
+  const result = await withHostedCanonicalWritePort(port, input.write);
   return {
-    redactedStatus: readCurrentStatus(),
+    canonicalWritePersisted,
+    redactedStatus: canonicalWritePersisted ? readCurrentStatus() : writeStatus,
+    result,
     workspace:
       checkpointRequestSession.latestWorkspace() ?? input.runnerInput.workspace,
   };
