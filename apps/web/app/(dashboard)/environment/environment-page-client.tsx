@@ -360,7 +360,7 @@ async function requestEnvironmentVoiceProcessingRecheck(): Promise<void> {
   }
 }
 
-function EnvironmentShell({
+export function EnvironmentShell({
   actions,
   children,
 }: {
@@ -368,7 +368,7 @@ function EnvironmentShell({
   children: ReactNode;
 }) {
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-10">
+    <div className="flex w-full flex-col gap-10">
       <div className="flex items-end justify-between gap-4">
         <PageHeader
           eyebrow="Habitat"
@@ -442,9 +442,6 @@ export function EnvironmentEmptyState({
             />
           </div>
 
-          <p className="mt-7 max-w-[58ch] text-pretty text-base text-muted-foreground sm:text-sm">
-            Missing answers and optional equipment never lower your grade.
-          </p>
         </div>
 
         <div className="border-t border-border bg-muted/20 px-6 py-7 sm:px-8 sm:py-9 lg:border-l lg:border-t-0 lg:px-8 lg:py-10">
@@ -481,7 +478,7 @@ export function EnvironmentEmptyState({
   );
 }
 
-function EnvironmentReport({
+export function EnvironmentReport({
   values,
   scene,
   notes,

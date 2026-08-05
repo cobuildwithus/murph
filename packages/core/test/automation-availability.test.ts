@@ -141,6 +141,52 @@ describe("automation availability conflicts", () => {
     )).toBe(BASE_INSTRUCTIONS);
   });
 
+  it.each([
+    [
+      "missing end marker",
+      `${BASE_INSTRUCTIONS}\n\n${CONFLICT_BLOCK.replace(
+        AVAILABILITY_CONFLICT_BLOCK_END,
+        "incomplete evidence",
+      )}`,
+    ],
+    [
+      "markerless snapshot",
+      `${BASE_INSTRUCTIONS}\n\n${CONFLICT_BLOCK
+        .replace(`${AVAILABILITY_CONFLICT_BLOCK_START}\n`, "")
+        .replace(`\n${AVAILABILITY_CONFLICT_BLOCK_END}`, "")}`,
+    ],
+    [
+      "duplicate start marker",
+      `${BASE_INSTRUCTIONS}\n\n${CONFLICT_BLOCK.replace(
+        AVAILABILITY_CONFLICT_BLOCK_START,
+        `${AVAILABILITY_CONFLICT_BLOCK_START}\n${AVAILABILITY_CONFLICT_BLOCK_START}`,
+      )}`,
+    ],
+    [
+      "misplaced end marker",
+      `${BASE_INSTRUCTIONS}\n\n${AVAILABILITY_CONFLICT_BLOCK_END}\n\n${CONFLICT_BLOCK}`,
+    ],
+  ])("normalizes %s residue when refreshing the snapshot", (_label, instructions) => {
+    const refreshed = replaceAutomationAvailabilityConflictSnapshot({
+      busyIntervals: [],
+      expiresAt: "2026-08-06T03:00:00.000Z",
+      generatedAt: "2026-07-30T03:00:00.000Z",
+      instructions,
+      now: new Date("2026-07-30T04:00:00.000Z"),
+    });
+
+    const { base, block } = splitAutomationAvailabilityConflictBlock(refreshed);
+    expect(base).toBe(BASE_INSTRUCTIONS);
+    expect(stripAutomationAvailabilityConflictEvidenceForProvider(refreshed)).toBe(
+      BASE_INSTRUCTIONS,
+    );
+    expect(parseAutomationAvailabilityConflictBlock(block ?? "")).toMatchObject({
+      busyIntervals: [],
+      generatedAt: "2026-07-30T03:00:00.000Z",
+    });
+    expect(refreshed.match(/Availability conflict snapshot:/gu) ?? []).toHaveLength(1);
+  });
+
   it("normalizes exact-time reminders to fixed delivery without availability state", () => {
     expect(normalizeAutomationAvailabilityForSchedule({
       instructions: `${BASE_INSTRUCTIONS}\n\n${CONFLICT_BLOCK}`,

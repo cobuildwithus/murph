@@ -60,6 +60,12 @@ import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
+  ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
+} from '../src/assistant/cron/execution.ts'
+import {
+  parseAssistantNotificationDecision,
+} from '../src/assistant/notification-turn.ts'
+import {
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
@@ -1501,6 +1507,84 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
     },
     720_000,
   )
+})
+
+describeRealCodex('real Codex independent scheduled reminder authority e2e', () => {
+  it.each([
+    {
+      context: [
+        'Related context:',
+        '- The linked four-week training plan is marked complete.',
+        '- There is no evidence that today\'s separately scheduled workout reminder was delivered or completed.',
+      ].join('\n'),
+      expectedKind: 'send_message',
+      savedInstructions:
+        'Send the separately requested workout reminder for today.',
+      scenario: 'keeps a separate reminder deliverable after a related plan completes',
+    },
+    {
+      context: [
+        'Related context:',
+        '- The linked four-week training plan is marked complete.',
+      ].join('\n'),
+      expectedKind: 'skip',
+      savedInstructions: [
+        'Send the workout reminder for today.',
+        'Skip this reminder once the linked training plan is marked complete.',
+      ].join('\n'),
+      scenario: 'honors an explicit saved completion skip condition',
+    },
+    {
+      context: [
+        'Current occurrence evidence:',
+        '- A trusted delivery receipt proves this exact scheduled reminder occurrence was already delivered.',
+      ].join('\n'),
+      expectedKind: 'skip',
+      savedInstructions:
+        'Send the separately requested workout reminder for today.',
+      scenario: 'skips when current evidence proves the occurrence already happened',
+    },
+  ])('$scenario', async ({ context, expectedKind, savedInstructions }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-independent-reminder-e2e-'),
+    )
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildIndependentReminderDeveloperInstructions(),
+        dynamicTools: [],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          savedInstructions,
+          ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
+          context,
+        ].join('\n\n'),
+        reasoningEffort: 'medium',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+
+      const decision = parseAssistantNotificationDecision(
+        result.finalMessage,
+      )
+      expect(decision.kind).toBe(expectedKind)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 360_000)
 })
 
 describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
@@ -4336,6 +4420,29 @@ function buildExperimentOnboardingDeveloperInstructions(): string {
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
+  })
+}
+
+function buildIndependentReminderDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-05',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    scheduledOccurrenceAt: '2026-08-05T13:00:00.000Z',
+    turnTrigger: 'automation-cron',
   })
 }
 
