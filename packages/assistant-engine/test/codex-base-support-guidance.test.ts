@@ -16,25 +16,25 @@ describe("Murph Codex base support guidance", () => {
       "Support escalation:",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "In a verified private direct conversation",
+      "In verified private direct chat",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "show the exact de-identified product-only summary",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "it may be included in an internal support escalation linked to their Murph account",
+      "it may enter an internal escalation linked to their Murph account",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "A generic request does not approve unseen linkage or summary; wait for affirmative approval.",
+      "Generic escalation approves neither; wait for affirmative approval.",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "If no safe summary exists, or outside private direct chat, give the address and do not call.",
+      "If no safe summary or chat not private, give the address only; do not call.",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "the product issue was saved for triage and an account-linked escalation was recorded",
+      "issue saved for triage and account-linked escalation recorded",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Never claim the issue was emailed or seen",
+      "Never claim email delivery/receipt",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       "a de-identified report is queued",
@@ -43,7 +43,7 @@ describe("Murph Codex base support guidance", () => {
       "Never promise a ticket, response, fix, follow-up, or timing",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "never retry or evade daily limits",
+      "never retry or evade limits",
     );
   });
 
