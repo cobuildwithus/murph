@@ -50,9 +50,15 @@ Make consented group sleep reads truthful when a participant has multiple connec
   another accepted finding in the same prompt-selection mechanism or any cure
   needing a new owner/state/lifecycle/compatibility path requires redesign or a
   scope split.
+- Final ReviewGPT correction-verification round 4 returned `ROUND_OUTCOME:
+  PASS` with no findings, and every required GitHub check passed on that exact
+  reviewed head.
 
 ## Privacy and rollout
 
 - Only safe provider display labels and already-consented metric values cross the existing encrypted exact-scope boundary.
 - No provider account IDs, connection IDs, raw payloads, member identifiers, or local paths enter records, fixtures, diagnostics, or docs.
 - Producer and reader changes must remain backward compatible so Web and runtime deploys can overlap safely.
+Status: completed
+Updated: 2026-08-05
+Completed: 2026-08-05
