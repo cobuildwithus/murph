@@ -51,6 +51,9 @@ import { ensureAssistantState } from './store/persistence.js'
 import type { AssistantStatePaths } from './store/paths.js'
 
 const ASSISTANT_RUNTIME_RESIDUE_RETENTION_LIMIT = 100
+// Input events are the durable group-message and reaction spine. Retain a
+// deeper bounded history without expanding every other runtime residue class.
+const ASSISTANT_INPUT_EVENT_RETENTION_LIMIT = 1_000
 const ASSISTANT_RUNTIME_RESIDUE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 
 export interface AssistantRuntimeResiduePruneResult {
@@ -726,7 +729,7 @@ function planAssistantRuntimeResiduePrune(input: {
     for (const [index, event] of orphanEvents.entries()) {
       const timestampMs = resolveInputEventTimestampMs(event.record)
       if (
-        index >= ASSISTANT_RUNTIME_RESIDUE_RETENTION_LIMIT ||
+        index >= ASSISTANT_INPUT_EVENT_RETENTION_LIMIT ||
         timestampMs < cutoffMs
       ) {
         inputEventPaths.add(event.filePath)

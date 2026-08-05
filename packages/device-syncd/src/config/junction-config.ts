@@ -1,4 +1,5 @@
 import {
+  JUNCTION_API_BASE_URL_ENV_KEYS,
   JUNCTION_API_KEY_ENV_KEYS,
   JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS,
   JUNCTION_ENV_ENV_KEYS,
@@ -53,6 +54,7 @@ export function readConfiguredJunctionDeviceSyncProviderConfig(
     clientUserIdSecret,
     environment: parseJunctionEnvironment(environment),
     region: parseJunctionRegion(region),
+    apiBaseUrl: optionalEnv(env, JUNCTION_API_BASE_URL_ENV_KEYS),
     providerFilter: parseCsvEnv(env, JUNCTION_PROVIDER_FILTER_ENV_KEYS),
     summaryResources: parseCsvEnv(env, JUNCTION_SUMMARY_RESOURCES_ENV_KEYS),
     summaryBackfillDays: parseIntegerEnv(env, JUNCTION_SUMMARY_BACKFILL_DAYS_ENV_KEYS),

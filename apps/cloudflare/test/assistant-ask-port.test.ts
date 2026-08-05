@@ -1,33 +1,25 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
 } from "@murphai/hosted-execution/routes";
-
-const mocks = vi.hoisted(() => ({
-  fetchHostedWebControlPlaneJson: vi.fn(),
-}));
-
-vi.mock("../src/runtime-platform/web-control-transport.ts", async () => {
-  const actual = await vi.importActual<
-    typeof import("../src/runtime-platform/web-control-transport.ts")
-  >("../src/runtime-platform/web-control-transport.ts");
-  return {
-    ...actual,
-    fetchHostedWebControlPlaneJson: mocks.fetchHostedWebControlPlaneJson,
-  };
-});
-
 import { createHostedRuntimeAssistantAskPort } from "../src/runtime-platform/assistant-ask-port.ts";
 import {
   readHostedRunnerWebControlPolicy,
 } from "../src/runner-outbound/shared-web-control-policy.ts";
+import {
+  startHostedWebControlStub,
+  type HostedWebControlStub,
+} from "./helpers/hosted-web-control-support.js";
+
+let webControl: HostedWebControlStub | null = null;
+
+afterEach(async () => {
+  await webControl?.stop();
+  webControl = null;
+});
 
 describe("Hosted Assistant Ask control-plane port", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it("allowlists only the exact POST control route", () => {
     expect(readHostedRunnerWebControlPolicy({
       method: "POST",
@@ -46,26 +38,31 @@ describe("Hosted Assistant Ask control-plane port", () => {
     }).allowed).toBe(false);
   });
 
-  it("forwards the opaque request id with cancellation and parses the bounded response", async () => {
-    const signal = new AbortController().signal;
-    mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
-      action: "prepare",
-      disclosure: { permissionText: "Share calendar availability." },
-      question: "What is today's workout?",
-      status: "ready",
-      targetLabel: "100 Club",
+  it("forwards the opaque request id with cancellation over signed HTTP and parses the bounded response", async () => {
+    webControl = await startHostedWebControlStub({
+      respond: () => ({
+        body: {
+          action: "prepare",
+          disclosure: { permissionText: "Share calendar availability." },
+          question: "What is today's workout?",
+          status: "ready",
+          targetLabel: "100 Club",
+        },
+      }),
     });
+    const signal = new AbortController().signal;
     const port = createHostedRuntimeAssistantAskPort({
       boundUserId: "member-group-runtime",
-      fetchImpl: vi.fn() as never,
+      fetchImpl: fetch,
       timeoutMs: 5_000,
-      transport: { mode: "proxy" },
+      transport: webControl.transport,
     });
-
-    await expect(port.request({
-      action: "prepare",
+    const request = {
+      action: "prepare" as const,
       requestId: "aask_req_one",
-    }, { signal })).resolves.toEqual({
+    };
+
+    await expect(port.request(request, { signal })).resolves.toEqual({
       action: "prepare",
       disclosure: { permissionText: "Share calendar availability." },
       question: "What is today's workout?",
@@ -73,31 +70,32 @@ describe("Hosted Assistant Ask control-plane port", () => {
       targetLabel: "100 Club",
     });
 
-    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith({
-      body: { action: "prepare", requestId: "aask_req_one" },
-      boundUserId: "member-group-runtime",
-      description: "Hosted Assistant Ask control",
-      fetchImpl: expect.any(Function),
-      path: HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
-      sensitiveResponseBody: { maxBytes: 16_384 },
-      signal,
-      timeoutMs: 5_000,
-      transport: { mode: "proxy" },
+    expect(webControl.observedRequests).toHaveLength(1);
+    expect(webControl.observedRequests[0]).toMatchObject({
+      body: JSON.stringify(request),
+      keyId: "v1",
+      method: "POST",
+      url: HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
+      userId: "member-group-runtime",
     });
   });
 
   it("rejects an invalid Web response instead of widening the port", async () => {
-    mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
-      action: "prepare",
-      question: "unbounded",
-      status: "unexpected",
-      targetLabel: null,
+    webControl = await startHostedWebControlStub({
+      respond: () => ({
+        body: {
+          action: "prepare",
+          question: "unbounded",
+          status: "unexpected",
+          targetLabel: null,
+        },
+      }),
     });
     const port = createHostedRuntimeAssistantAskPort({
       boundUserId: "member-group-runtime",
-      fetchImpl: vi.fn() as never,
+      fetchImpl: fetch,
       timeoutMs: 5_000,
-      transport: { mode: "proxy" },
+      transport: webControl.transport,
     });
 
     await expect(port.request({

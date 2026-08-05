@@ -62,35 +62,41 @@ const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
 const execFileAsync = promisify(execFile)
 
-type ScriptedResponse =
-  | { delayMs?: number; text: string }
+interface ScriptedResponseRoute {
+  completionLabel?: string
+  delayMs?: number
+  requestExcludes?: readonly string[]
+  requestIncludes?: readonly string[]
+}
+
+type ScriptedResponse = ScriptedResponseRoute & (
+  | { text: string }
   | {
-    customToolCall: {
-      input: string
-      name: string
+      customToolCall: {
+        input: string
+        name: string
+      }
     }
-    delayMs?: number
-  }
   | {
-    delayMs?: number
-    toolSearchCall: {
-      limit?: number
-      query: string
+      toolSearchCall: {
+        limit?: number
+        query: string
+      }
     }
-  }
   | {
-    delayMs?: number
-    functionCall: {
-      arguments: Record<string, unknown>
-      name: string
-      namespace?: string
+      functionCall: {
+        arguments: Record<string, unknown>
+        name: string
+        namespace?: string
+      }
     }
-  }
+)
 
 interface ScriptedStub {
   baseUrl: string
   captureProviderRequestDiagnostics(): void
   close(): Promise<void>
+  completedResponseLabelsSinceBaseline(): string[]
   markRequestBaseline(): void
   queue(...responses: readonly ScriptedResponse[]): void
   requestCountSinceBaseline(): number
@@ -180,6 +186,91 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
   })
+
+  it.each(['direct', 'group'] as const)(
+    'carries a delayed V2 child completion into a later %s root turn without waiting',
+    { timeout: TURN_TIMEOUT_MS },
+    async (conversationScope) => {
+      const scenario = await prepareScriptedTurnScenario({
+        multiAgentV2: true,
+      })
+      const scopeLabel = conversationScope.toUpperCase()
+      const childResult = `LATE_CHILD_RESULT_${scopeLabel}`
+      const firstPrompt = `SPAWN_LATE_CHILD_${scopeLabel}`
+      const laterPrompt = `USE_LATE_CHILD_${scopeLabel}`
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: {
+              fork_turns: 'none',
+              message: `Return exactly ${childResult}.`,
+              task_name: `late_child_${conversationScope}`,
+            },
+            name: 'spawn_agent',
+            namespace: 'collaboration',
+          },
+          requestIncludes: [firstPrompt],
+        },
+        {
+          completionLabel: childResult,
+          delayMs: 1_500,
+          requestIncludes: [
+            'Message Type: NEW_TASK',
+            `late_child_${conversationScope}`,
+          ],
+          text: childResult,
+        },
+        {
+          requestExcludes: ['Message Type: FINAL_ANSWER'],
+          requestIncludes: [firstPrompt],
+          text: `ROOT_REPLIED_WITHOUT_WAIT_${scopeLabel}`,
+        },
+      )
+
+      const first = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        baseInstructions: buildScriptedHostedSystemPrompt(conversationScope),
+        groupConversation: conversationScope === 'group',
+        prompt: firstPrompt,
+      })
+
+      expect(first.finalMessage).toBe(`ROOT_REPLIED_WITHOUT_WAIT_${scopeLabel}`)
+      expect(first.sessionId).toEqual(expect.any(String))
+      expect(
+        scenario.stub.completedResponseLabelsSinceBaseline(),
+      ).not.toContain(childResult)
+
+      const childDeadline = Date.now() + 5_000
+      while (
+        !scenario.stub.completedResponseLabelsSinceBaseline().includes(childResult)
+        && Date.now() < childDeadline
+      ) {
+        await delay(20)
+      }
+      expect(
+        scenario.stub.completedResponseLabelsSinceBaseline(),
+      ).toContain(childResult)
+      await delay(100)
+
+      scenario.stub.queue({
+        requestIncludes: [
+          laterPrompt,
+          childResult,
+        ],
+        text: `INCORPORATED_${childResult}`,
+      })
+      const later = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        groupConversation: conversationScope === 'group',
+        prompt: laterPrompt,
+        resumeSessionId: first.sessionId,
+      })
+
+      expect(later.finalMessage).toBe(`INCORPORATED_${childResult}`)
+      expect(later.threadId).toBe(first.threadId)
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
+    },
+  )
 
   it('composes a reviewed group continuation through the real provider and queues one reply', {
     timeout: TURN_TIMEOUT_MS,
@@ -1736,7 +1827,36 @@ function createScriptedSongRuntime(
   }
 }
 
-async function prepareScriptedTurnScenario(): Promise<{
+function buildScriptedHostedSystemPrompt(
+  conversationScope: 'direct' | 'group',
+): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: 'Stable CLI contract for scripted hosted proof.',
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: true,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: true,
+    channel: 'telegram',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope,
+    currentLocalDate: '2026-07-30',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    ordinaryInboundTurn: true,
+    turnTrigger: 'automation-auto-reply',
+  })
+}
+
+async function prepareScriptedTurnScenario(
+  options: {
+    multiAgentV2?: boolean
+  } = {},
+): Promise<{
   stub: ScriptedStub
   turnInput: {
     codexCommand: string
@@ -1759,7 +1879,7 @@ async function prepareScriptedTurnScenario(): Promise<{
   temporaryPaths.push(workingDirectory)
   await writeFile(
     path.join(codexHome, 'config.toml'),
-    buildScriptedCodexConfigToml(scriptedStub.baseUrl),
+    buildScriptedCodexConfigToml(scriptedStub.baseUrl, options),
     {
       encoding: 'utf8',
       mode: 0o600,
@@ -1835,7 +1955,12 @@ async function writeOpenAiFlexModelCatalogJson(input: {
   return modelCatalogJson
 }
 
-function buildScriptedCodexConfigToml(baseUrl: string): string {
+function buildScriptedCodexConfigToml(
+  baseUrl: string,
+  options: {
+    multiAgentV2?: boolean
+  } = {},
+): string {
   return [
     `model = "${SCRIPTED_MODEL}"`,
     `model_provider = "${SCRIPTED_MODEL_PROVIDER}"`,
@@ -1856,12 +1981,21 @@ function buildScriptedCodexConfigToml(baseUrl: string): string {
     'request_max_retries = 4',
     'stream_max_retries = 5',
     '',
+    ...(options.multiAgentV2
+      ? [
+          '[features.multi_agent_v2]',
+          'enabled = true',
+          'max_concurrent_threads_per_session = 4',
+          '',
+        ]
+      : []),
   ].join('\n')
 }
 
 async function startScriptedResponsesStub(): Promise<ScriptedStub> {
   const queuedResponses: ScriptedResponse[] = []
   const requestSummaries: ScriptedProviderRequestSummary[] = []
+  const completedResponseLabels: string[] = []
   let responseSequence = 0
   let responsesRequestCount = 0
   let requestBaseline = 0
@@ -1886,7 +2020,12 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       requestBody,
       providerRequestDiagnosticsEnabled,
     ))
-    const scripted = queuedResponses.shift()
+    const scriptedResponseIndex = queuedResponses.findIndex((candidate) =>
+      scriptedResponseMatchesRequest(candidate, requestBody)
+    )
+    const scripted = scriptedResponseIndex >= 0
+      ? queuedResponses.splice(scriptedResponseIndex, 1)[0]
+      : undefined
     if (!scripted) {
       response.statusCode = 500
       response.end(JSON.stringify({
@@ -1956,6 +2095,9 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       response,
       responseId,
     })
+    if (scripted.completionLabel) {
+      completedResponseLabels.push(scripted.completionLabel)
+    }
   })
 
   await new Promise<void>((resolve, reject) => {
@@ -1977,7 +2119,9 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
         server.close(() => resolve())
       })
     },
+    completedResponseLabelsSinceBaseline: () => [...completedResponseLabels],
     markRequestBaseline: () => {
+      completedResponseLabels.splice(0)
       providerRequestDiagnosticsEnabled = false
       requestBaseline = responsesRequestCount
       requestSummaryBaseline = requestSummaries.length
@@ -1989,6 +2133,17 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
     requestSummariesSinceBaseline: () =>
       requestSummaries.slice(requestSummaryBaseline),
   }
+}
+
+function scriptedResponseMatchesRequest(
+  response: ScriptedResponse,
+  requestBody: string,
+): boolean {
+  return (response.requestIncludes ?? []).every((value) =>
+    requestBody.includes(value)
+  ) && (response.requestExcludes ?? []).every((value) =>
+    !requestBody.includes(value)
+  )
 }
 
 function readScriptedProviderRequestSummary(

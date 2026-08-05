@@ -3,6 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
 
 const mocks = vi.hoisted(() => ({
+  issueHostedAppSessionForTest: vi.fn(async (input: { secureCookieMode: boolean }) => ({
+    cookieName: input.secureCookieMode ? "__Host-murph-session" : "murph-session",
+    cookieValue: "session-token",
+    secureCookieMode: input.secureCookieMode,
+    sessionId: "session-id",
+  })),
   listHostedRuntimeLogsForTest: vi.fn(async () => []),
   startHostedLocalDevHarness: vi.fn(),
   startHostedLocalOidcFixture: vi.fn(async () => ({
@@ -16,6 +22,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("#hosted-web-testing", () => ({
   bindHostedActiveLinqHomeChat: vi.fn(async () => {}),
   bindHostedActiveTelegramMember: vi.fn(async () => {}),
+  issueHostedAppSessionForTest: mocks.issueHostedAppSessionForTest,
   listHostedRuntimeLogsForTest: mocks.listHostedRuntimeLogsForTest,
   readHostedJunctionDeviceSyncReplayDrainStatus: vi.fn(async () => ({})),
   seedHostedActiveLinqMember: vi.fn(async () => {}),
@@ -80,6 +87,32 @@ describe("hosted local full-stack web process environment", () => {
     })).toEqual({});
   });
 });
+
+it.each([false, true])(
+  "mints an app-session cookie for the selected Web process mode (%s)",
+  async (webUsesProductionArtifact) => {
+    const harness = createScenarioHarness({ webUsesProductionArtifact });
+    mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+
+    const scenario = await startScenario();
+    try {
+      await scenario.issueHostedAppSession({
+        memberId: "member_cookie_mode",
+        privyUserId: "did:privy:cookie_mode",
+      });
+
+      expect(mocks.issueHostedAppSessionForTest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          memberId: "member_cookie_mode",
+          privyUserId: "did:privy:cookie_mode",
+          secureCookieMode: webUsesProductionArtifact,
+        }),
+      );
+    } finally {
+      await scenario.stop();
+    }
+  },
+);
 
 it("requires progress from the prior completed status before a later completion", async () => {
   const baselineStatus = createCompletedStatus("1", "2026-07-10T12:00:00.000Z");
@@ -188,10 +221,33 @@ it("keeps Wrangler inspector traffic out of streamed hosted E2E logs", async () 
   }
 });
 
+it("forwards explicitly supplied provider credentials to the worker harness", async () => {
+  const harness = createScenarioHarness();
+  mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+
+  const scenario = await startScenario({
+    additionalEnv: {
+      VENICE_API_KEY: "synthetic-local-venice-key",
+    },
+  });
+  try {
+    expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          VENICE_API_KEY: "synthetic-local-venice-key",
+        }),
+      }),
+    );
+  } finally {
+    await scenario.stop();
+  }
+});
+
 function createScenarioHarness(input: {
   assertNoInterventions?: () => void;
   completionStatuses?: HostedRunnerStatusResponse[];
   progressStatus?: HostedRunnerStatusResponse;
+  webUsesProductionArtifact?: boolean;
 } = {}) {
   const completionStatuses = [...(input.completionStatuses ?? [])];
   const fallbackStatus = input.progressStatus
@@ -207,16 +263,21 @@ function createScenarioHarness(input: {
     waitForHostedCompletion: vi.fn(async () => completionStatuses.shift() ?? fallbackStatus),
     waitForHostedIdle: vi.fn(async () => fallbackStatus),
     waitForHostedProgress: vi.fn(async () => input.progressStatus ?? fallbackStatus),
+    webUsesProductionArtifact: input.webUsesProductionArtifact ?? false,
     workerRuntimeEnv: null,
   };
 }
 
-async function startScenario(input: { faultInjection?: boolean } = {}) {
+async function startScenario(input: {
+  additionalEnv?: NodeJS.ProcessEnv;
+  faultInjection?: boolean;
+} = {}) {
   const { startHostedLocalFullStackScenario } = await import(
     "./hosted-local-full-stack-scenario.js"
   );
 
   return await startHostedLocalFullStackScenario({
+    additionalEnv: input.additionalEnv,
     assistantProviderMode: "live",
     faultInjection: input.faultInjection,
     localDatabaseUrl: "postgresql://127.0.0.1:5432/murph_test",

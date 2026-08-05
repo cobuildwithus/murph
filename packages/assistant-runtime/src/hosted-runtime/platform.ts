@@ -64,6 +64,9 @@ import type {
   AssistantResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import type {
+  AssistantResponseCard,
+} from "@murphai/operator-config/assistant-response-cards";
+import type {
   HostedBrowserVaultReplicaRef,
   HostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution/contracts";
@@ -85,7 +88,12 @@ import type {
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
+  HostedPhysicalNoteSendRequest,
+  HostedPhysicalNoteSendResponse,
+} from "@murphai/hosted-execution/physical-notes";
+import type {
   HostedPlanUsageStatus,
+  HostedPlanUsageToolRequest,
 } from "@murphai/hosted-execution/plan-usage";
 import type {
   HostedRuntimeSubscriptionControlRequest,
@@ -151,6 +159,21 @@ export class HostedRuntimeArtifactReadError extends Error {
       { cause: input.cause },
     );
     this.name = "HostedRuntimeArtifactReadError";
+    this.retryable = input.retryable;
+  }
+}
+
+export class HostedRuntimeArtifactWriteError extends Error {
+  readonly retryable: boolean;
+
+  constructor(input: { cause: unknown; retryable: boolean }) {
+    super(
+      input.cause instanceof Error
+        ? input.cause.message
+        : "Hosted runtime artifact write failed.",
+      { cause: input.cause },
+    );
+    this.name = "HostedRuntimeArtifactWriteError";
     this.retryable = input.retryable;
   }
 }
@@ -253,6 +276,7 @@ export function parseHostedRuntimeAssistantResponseMedia(
 }
 
 export interface HostedRuntimeLinqSendRequest {
+  card?: AssistantResponseCard | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -263,9 +287,11 @@ export interface HostedRuntimeLinqSendRequest {
   replyToMessageId?: string | null;
   target: string;
   targetKind?: HostedRuntimeProviderTargetKind | null;
+  threadIsDirect?: boolean | null;
 }
 
 export interface HostedRuntimeLinqSendResponse {
+  idempotencyKey?: string | null;
   providerMessageId?: string | null;
   providerMessageIds?: string[] | null;
   providerThreadId?: string | null;
@@ -327,6 +353,7 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   intentId?: string | null;
   lineLookupKey?: string | null;
   providerMessageId?: string | null;
+  providerMessageIds?: string[] | null;
   providerTarget?: string | null;
   providerThreadId?: string | null;
   target: string | null;
@@ -359,6 +386,8 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedRuntimeTelegramGetFileRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeTelegramFile | null>;
+  deleteEnvironmentVoice?(audioKey: string): Promise<void>;
+  readEnvironmentVoice?(audioKey: string): Promise<Uint8Array | null>;
   deleteMealPhoto?(mealPhotoKey: string): Promise<void>;
   readMealPhoto?(mealPhotoKey: string): Promise<Uint8Array | null>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
@@ -465,7 +494,7 @@ export interface HostedRuntimeFamilyPlanToolPort {
 }
 
 export interface HostedRuntimePlanUsageToolPort {
-  read(): Promise<HostedPlanUsageStatus>;
+  read(request: HostedPlanUsageToolRequest): Promise<HostedPlanUsageStatus>;
 }
 
 export interface HostedRuntimeIMessageContactToolPort {
@@ -497,6 +526,7 @@ export interface HostedRuntimeAssistantPersonalizationToolPort {
 export interface HostedRuntimeGroupToolPort {
   request(
     request: HostedRuntimeGroupToolRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeGroupToolResponse>;
 }
 
@@ -517,6 +547,15 @@ export interface HostedRuntimePhoneCallPort {
       signal?: AbortSignal | null;
     },
   ): Promise<HostedPhoneCallStartResponse>;
+}
+
+export interface HostedRuntimePhysicalNotePort {
+  send(
+    request: HostedPhysicalNoteSendRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhysicalNoteSendResponse>;
 }
 
 export interface HostedRuntimeMailboxPort {
@@ -662,6 +701,7 @@ export interface HostedRuntimePlatform {
   mailboxPort?: HostedRuntimeMailboxPort | null;
   newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
+  physicalNotes?: HostedRuntimePhysicalNotePort | null;
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null;
   subscriptionToolPort?: HostedRuntimeSubscriptionToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;

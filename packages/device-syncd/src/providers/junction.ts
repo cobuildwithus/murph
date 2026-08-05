@@ -28,6 +28,7 @@ import {
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
+import type { JunctionDeviceSyncJobPayloads } from "../config/provider-manifests.ts";
 import {
   isHostedRuntimeIdShapedDiagnosticToken,
   sanitizeHostedRuntimeDiagnosticText,
@@ -52,6 +53,8 @@ import {
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  isDeviceSyncSourceAdmitted,
   isJunctionHistoricalResetProviderSlug,
   requiresHistoricalResetDeviceSyncSource,
 } from "../public-account.ts";
@@ -67,6 +70,7 @@ import {
 } from "../shared.ts";
 import {
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
+  JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
   JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
@@ -533,6 +537,30 @@ export function createJunctionDeviceSyncProvider(
     });
   }
 
+  async function isSourceAccessActive(
+    account: DeviceSyncAccount,
+    sourceProviderSlug: string,
+  ): Promise<boolean> {
+    const userId = normalizeString(account.externalAccountId);
+    const targetProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+    if (!userId || !targetProviderSlug) {
+      throw deviceSyncError({
+        code: "JUNCTION_SOURCE_STATUS_INPUT_INVALID",
+        message: "Junction source status requires a stored user and provider slug.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
+    return (await client.listUserProviders(userId)).some((provider) =>
+      mapJunctionSourceStatus(provider.status) !== "disconnected"
+      && (
+        normalizeProviderSlug(provider.origin.sourceProviderSlug)
+        ?? normalizeProviderSlug(provider.slug)
+      ) === targetProviderSlug
+    );
+  }
+
   function createScheduledJobs(
     account: StoredDeviceSyncAccount,
     now: string,
@@ -601,7 +629,7 @@ export function createJunctionDeviceSyncProvider(
       payload: {
         silentSinceAt: due.silentSinceAt,
         sourceProviderSlug: due.sourceProviderSlug,
-      },
+      } satisfies JunctionDeviceSyncJobPayloads["push_source_recovery"],
       priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
       availableAt: now,
       // One attempt per episode may be queued at a time.
@@ -1535,7 +1563,9 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
   ): Promise<ProviderJobResult> {
-    if (normalizeString(job.payload.resource) === COMPANION_HRV_RMSSD_RESOURCE) {
+    const resourceName = normalizeString(job.payload.resource);
+
+    if (resourceName === COMPANION_HRV_RMSSD_RESOURCE) {
       let observation;
       let admissionId;
       try {
@@ -1559,6 +1589,12 @@ export function createJunctionDeviceSyncProvider(
         });
       }
 
+      if (!await isJunctionCompanionSourceCurrentlyAdmitted(
+        context,
+        JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
+      )) {
+        return {};
+      }
       await context.importSnapshot({
         provider: "junction",
         accountId: buildJunctionImportAccountId(context.account.externalAccountId),
@@ -1572,6 +1608,12 @@ export function createJunctionDeviceSyncProvider(
     const window = resolveJobWindow(job, context.now, reconcileDays);
     if (normalizeString(job.payload.resource) === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE) {
       const records = parseJunctionCompanionHealthMetadataJob(job);
+      if (!await isJunctionCompanionSourceCurrentlyAdmitted(
+        context,
+        JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      )) {
+        return {};
+      }
       await importJunctionCompanionHealthMetadataSnapshot(context, records);
       return {
         nextReconcileAt: clampWebhookJobNextReconcileAt(context),
@@ -2565,6 +2607,7 @@ export function createJunctionDeviceSyncProvider(
     connectionHandler: {
       beginConnection,
       completeConnection,
+      isSourceAccessActive,
       revokeAccess,
       revokeSourceAccess,
     },
@@ -3923,6 +3966,7 @@ function toClientConfig(config: JunctionDeviceSyncProviderConfig): JunctionClien
     apiKey: config.apiKey,
     environment: config.environment,
     region: config.region,
+    apiBaseUrl: config.apiBaseUrl,
     allowedLinkHosts: config.allowedLinkHosts,
     requestTimeoutMs: config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     fetchImpl: config.fetchImpl,
@@ -5107,10 +5151,15 @@ function buildConnectHistoricalBackfillWindow(
   };
 }
 
-function buildWindowJob(input: {
-  kind: "backfill" | "reconcile";
+type JunctionWindowJobPayload<Kind extends "backfill" | "reconcile"> = Omit<
+  JunctionDeviceSyncJobPayloads[Kind],
+  "windowStart" | "windowEnd"
+>;
+
+function buildWindowJob<Kind extends "backfill" | "reconcile">(input: {
+  kind: Kind;
   now: string;
-  payload?: Record<string, unknown>;
+  payload?: JunctionWindowJobPayload<Kind>;
   windowStart: string;
   priority: number;
 }): DeviceSyncJobInput {
@@ -5127,15 +5176,16 @@ function buildWindowJob(input: {
   });
 }
 
-function buildExactWindowJob(input: {
+function buildExactWindowJob<Kind extends "backfill" | "reconcile">(input: {
   availableAt?: string;
-  kind: "backfill" | "reconcile";
-  payload?: Record<string, unknown>;
+  kind: Kind;
+  payload?: JunctionWindowJobPayload<Kind>;
   windowStart: string;
   windowEnd: string;
   priority: number;
 }): DeviceSyncJobInput {
-  const sourceProviderSlug = normalizeString(input.payload?.sourceProviderSlug);
+  const windowPayload: { sourceProviderSlug?: string } | undefined = input.payload;
+  const sourceProviderSlug = normalizeString(windowPayload?.sourceProviderSlug);
   const dedupeIdentity = [
     "junction",
     input.kind,
@@ -5207,7 +5257,7 @@ function buildJunctionWebhookJobs(input: {
         ...(webhookDataJson ? { webhookDataJson } : {}),
         windowStart: input.window.windowStart,
         windowEnd: input.window.windowEnd,
-      },
+      } satisfies JunctionDeviceSyncJobPayloads["resource"],
       priority: 65,
       dedupeKey: webhookDataJson
         ? sha256Text(JSON.stringify([
@@ -6301,6 +6351,57 @@ function isJunctionSourceAdmittedForImport(
   );
   return matchingSources.length === 0
     || matchingSources.some((source) => source.status !== "disconnected");
+}
+
+async function isJunctionCompanionSourceCurrentlyAdmitted(
+  context: ProviderJobContext,
+  sourceProviderSlug: string,
+): Promise<boolean> {
+  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  if (!context.listConnectionSources) {
+    throw junctionCompanionSourceStateUnavailableError();
+  }
+  if (!normalizedSourceProviderSlug) {
+    throw junctionCompanionSourceStateUnavailableError();
+  }
+
+  let sources;
+  try {
+    sources = await context.listConnectionSources({
+      sourceProviderSlug: normalizedSourceProviderSlug,
+    });
+  } catch (error) {
+    if (isDeviceSyncError(error) && error.retryable) {
+      throw error;
+    }
+    throw junctionCompanionSourceStateUnavailableError(error);
+  }
+
+  if (isDeviceSyncSourceAdmitted(sources, normalizedSourceProviderSlug)) {
+    return true;
+  }
+  if (sources.some(
+    (source) => source.lastErrorCode === DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  )) {
+    return false;
+  }
+
+  throw deviceSyncError({
+    code: "JUNCTION_COMPANION_SOURCE_NOT_READY",
+    message: "Current companion source authorization is not ready. Retry shortly.",
+    retryable: true,
+    httpStatus: 503,
+  });
+}
+
+function junctionCompanionSourceStateUnavailableError(cause?: unknown): DeviceSyncError {
+  return deviceSyncError({
+    code: "JUNCTION_COMPANION_SOURCE_STATE_UNAVAILABLE",
+    message: "Current companion source authorization is unavailable. Retry shortly.",
+    retryable: true,
+    httpStatus: 503,
+    ...(cause === undefined ? {} : { cause }),
+  });
 }
 
 interface ProjectedJunctionSource {

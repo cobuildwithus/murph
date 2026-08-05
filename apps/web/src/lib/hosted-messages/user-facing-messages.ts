@@ -1,4 +1,12 @@
 const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20
+const HOME_REDIRECT_MESSAGE_MIN_VARIANT_COUNT = 100
+const HOME_REDIRECT_EXPLICIT_RESEND_PATTERN =
+  /\b(?:resend (?:(?:the|this|your)(?: last)? message|what you just wrote)|send (?:(?:the|this|your)(?: last)? message|that)(?: again)?)\b/iu
+const HOME_REDIRECT_RESEND_FALLBACK =
+  "That message can't move between threads. Resend it to the number above."
+
+export const HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE =
+  "Murph is paused in this chat right now."
 
 /**
  * A percentage stands in for the hidden credit balance on the personal notices.
@@ -8,6 +16,7 @@ const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20
 const USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS = new Set<string>([
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
+  "linq.ai_usage.group_upgrade_pulse",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.trial_limit_reached",
 ])
@@ -23,6 +32,7 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.ai_usage.trial_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
+  "linq.ai_usage.group_upgrade_pulse",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
   "linq.ai_usage.thread_limit_funding",
@@ -56,6 +66,9 @@ export interface UserFacingMessageContextByKey {
     homeUrl: string
   }
   "linq.ai_usage.family_limit_reached": {
+    homeUrl: string
+  }
+  "linq.ai_usage.group_upgrade_pulse": {
     homeUrl: string
   }
   "linq.ai_usage.pulse_upgrade_edge": {
@@ -313,11 +326,11 @@ Sound good?`,
 {homeRecipientPhone}`,
     `Heads up, you've got another Murph line that I reply on. Use:
 {homeRecipientPhone}`,
-    `Quick redirect. I reply from your main Murph number:
+    `Quick redirect. Continue on your main Murph number:
 {homeRecipientPhone}`,
-    `Your active Murph line lives here. Easier if we keep things on:
+    `Your active Murph line lives here. Continue on:
 {homeRecipientPhone}`,
-    `Looks like you're texting the wrong thread. Your active line is:
+    `Looks like you're texting the wrong thread. Move to your active line:
 {homeRecipientPhone}`,
     `I'm on another number for you. Move the conversation over to:
 {homeRecipientPhone}`,
@@ -325,7 +338,7 @@ Sound good?`,
 {homeRecipientPhone}`,
     `Save my number and we'll continue there:
 {homeRecipientPhone}`,
-    `Two threads going. The one I actually reply on is:
+    `Two threads going. Use the one I actually reply on:
 {homeRecipientPhone}`,
     `I'm running from a different number for you. Switch to:
 {homeRecipientPhone}`,
@@ -335,17 +348,185 @@ Sound good?`,
 {homeRecipientPhone}`,
     `Already running on another line for you. Save:
 {homeRecipientPhone}`,
-    `Wrong thread, easy fix. Your Murph line is:
+    `Wrong thread, easy fix. Continue on your Murph line:
 {homeRecipientPhone}`,
     `That's the line I reply on for you. Continue our Murph chat at:
 {homeRecipientPhone}`,
     `Tap to save and we can pick this up at:
 {homeRecipientPhone}`,
-    `I keep replies on one Murph line per person. Yours is here:
+    `I keep replies on one Murph line per person. Continue on yours:
 {homeRecipientPhone}`,
-    `Got you, just on a different number than this one. Your line:
+    `Got you, just on a different number than this one. Send your message to:
 {homeRecipientPhone}`,
     `Let's move this over. My number for you:
+{homeRecipientPhone}`,
+    `I can't continue from this thread. Resend your message to my active line:
+{homeRecipientPhone}`,
+    `This chat is on a different Murph line. Send your message again here:
+{homeRecipientPhone}`,
+    `Your Murph replies belong on your main line. Continue there:
+{homeRecipientPhone}`,
+    `This number isn't your active Murph thread. Message me at:
+{homeRecipientPhone}`,
+    `I'm active for you on another line. Resend your last message to:
+{homeRecipientPhone}`,
+    `Send that again on your current Murph number and I'll pick it up:
+{homeRecipientPhone}`,
+    `We need to switch threads before I can help. Text me here:
+{homeRecipientPhone}`,
+    `I've got you, but not in this chat. Move your message to:
+{homeRecipientPhone}`,
+    `This isn't your main Murph thread. Use:
+{homeRecipientPhone}`,
+    `Your working Murph number is below. Resend your message there:
+{homeRecipientPhone}`,
+    `Let's keep your Murph conversation on the line connected to you:
+{homeRecipientPhone}`,
+    `I'm not set up to continue in this thread. Reach me at:
+{homeRecipientPhone}`,
+    `The conversation continues on your active Murph number. Text:
+{homeRecipientPhone}`,
+    `Please resend what you just wrote to your main Murph line:
+{homeRecipientPhone}`,
+    `I can't carry messages from this thread to your main Murph line:
+{homeRecipientPhone}`,
+    `I'm ready for your message on the Murph line assigned to you:
+{homeRecipientPhone}`,
+    `This is a different Murph thread from yours. Move over to:
+{homeRecipientPhone}`,
+    `Your current Murph chat is tied to this number. Continue there:
+{homeRecipientPhone}`,
+    `Shift this conversation to your active Murph line:
+{homeRecipientPhone}`,
+    `I need your message on the line connected to your Murph account:
+{homeRecipientPhone}`,
+    `This message came through a different Murph thread. Resend it to:
+{homeRecipientPhone}`,
+    `We're one thread off. Send your message to my number for you:
+{homeRecipientPhone}`,
+    `Use your active Murph line so I can keep the conversation together:
+{homeRecipientPhone}`,
+    `I can pick this up once you resend it to your main line:
+{homeRecipientPhone}`,
+    `Move back to the Murph thread where I answer you:
+{homeRecipientPhone}`,
+    `Use my live line for your Murph conversation:
+{homeRecipientPhone}`,
+    `This thread won't carry the conversation forward. Text me at:
+{homeRecipientPhone}`,
+    `I'm waiting on your active Murph line. Send the message there:
+{homeRecipientPhone}`,
+    `Take this message over to your main Murph number:
+{homeRecipientPhone}`,
+    `Your Murph replies are connected to another thread. Use:
+{homeRecipientPhone}`,
+    `I'm connected to you on this number instead. Resend there:
+{homeRecipientPhone}`,
+    `We landed in a different thread. Move the conversation to:
+{homeRecipientPhone}`,
+    `Use the number that keeps your Murph conversation active:
+{homeRecipientPhone}`,
+    `I can help after you send this to your current Murph line:
+{homeRecipientPhone}`,
+    `This one is not your live Murph chat. Continue at:
+{homeRecipientPhone}`,
+    `Bring this message to the Murph line set up for you:
+{homeRecipientPhone}`,
+    `We're almost there. Resend your message on your active line:
+{homeRecipientPhone}`,
+    `I reply to you on a different line. Text:
+{homeRecipientPhone}`,
+    `This chat can only point you to the one where I reply. Continue at:
+{homeRecipientPhone}`,
+    `Keep the conversation going on your main Murph number:
+{homeRecipientPhone}`,
+    `Your direct line to Murph is below. Send your message again:
+{homeRecipientPhone}`,
+    `This thread isn't connected to your current Murph chat. Use:
+{homeRecipientPhone}`,
+    `I need you on the active line before we continue. Text:
+{homeRecipientPhone}`,
+    `Use the line below for your next Murph message:
+{homeRecipientPhone}`,
+    `I'm set up to answer you from this number. Resend there:
+{homeRecipientPhone}`,
+    `We'll keep everything together if you move to your home line:
+{homeRecipientPhone}`,
+    `Send your question to your active Murph number so I can answer:
+{homeRecipientPhone}`,
+    `This isn't the Murph thread connected to you. Switch to:
+{homeRecipientPhone}`,
+    `Route this message to your current Murph chat:
+{homeRecipientPhone}`,
+    `Continue with me on the number assigned to your conversation:
+{homeRecipientPhone}`,
+    `I only continue your Murph chat on your active line:
+{homeRecipientPhone}`,
+    `Your current conversation is waiting on this Murph number. Continue at:
+{homeRecipientPhone}`,
+    `Message me on your main line and resend what you just sent:
+{homeRecipientPhone}`,
+    `Please move this conversation to the Murph number below:
+{homeRecipientPhone}`,
+    `I can take your message on the line connected to your account:
+{homeRecipientPhone}`,
+    `This chat is not your active route to Murph. Text:
+{homeRecipientPhone}`,
+    `Your Murph home thread is on this number. Continue there:
+{homeRecipientPhone}`,
+    `Let's use the line where your Murph conversation lives:
+{homeRecipientPhone}`,
+    `I'm answering you from another Murph number. Resend to:
+{homeRecipientPhone}`,
+    `Resend that message to the line I use for your replies:
+{homeRecipientPhone}`,
+    `We'll pick this up in your main Murph thread. Text me at:
+{homeRecipientPhone}`,
+    `Switch this message to your current Murph line:
+{homeRecipientPhone}`,
+    `You reached a different Murph thread. Continue on your active one:
+{homeRecipientPhone}`,
+    `I've got a separate home line for your replies. Use:
+{homeRecipientPhone}`,
+    `The active Murph number for you is below. Send your message there:
+{homeRecipientPhone}`,
+    `Move your question to the thread where I can answer it:
+{homeRecipientPhone}`,
+    `This message belongs in your main Murph conversation. Resend to:
+{homeRecipientPhone}`,
+    `Let's keep this on your connected Murph line:
+{homeRecipientPhone}`,
+    `I can't carry this message into your active thread. Resend it here:
+{homeRecipientPhone}`,
+    `This isn't the number connected to your Murph conversation. Use:
+{homeRecipientPhone}`,
+    `Head to your main Murph line and send that message again:
+{homeRecipientPhone}`,
+    `Send that through your active Murph number:
+{homeRecipientPhone}`,
+    `I'm on a different line for your replies. Continue at:
+{homeRecipientPhone}`,
+    `Use this number to keep talking with Murph:
+{homeRecipientPhone}`,
+    `This thread reached me, but it can't carry your message to your main line:
+{homeRecipientPhone}`,
+    `Put your next message on the Murph line connected to you:
+{homeRecipientPhone}`,
+    `Your live Murph thread is on a different number:
+{homeRecipientPhone}`,
+    `I'll continue once you resend your message to your home line:
+{homeRecipientPhone}`,
+    `We need the active Murph thread for this. Message:
+{homeRecipientPhone}`,
+    `Move your conversation with me to your assigned line:
+{homeRecipientPhone}`,
+    `This chat isn't where your Murph replies run. Move to:
+{homeRecipientPhone}`,
+    `I'm set to reply on your main Murph number. Send it there:
+{homeRecipientPhone}`,
+    `Move us back to your active Murph conversation:
+{homeRecipientPhone}`,
+    `Resend your last message on the number where I answer you:
 {homeRecipientPhone}`,
   ],
   "linq.ai_usage.billing_inactive": [
@@ -491,6 +672,28 @@ Sound good?`,
     `Your own monthly allowance is used. Other Family members have separate usage limits. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
     `You've used the allowance included with your Family seat for this month. Other members keep their own separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
   ],
+  "linq.ai_usage.group_upgrade_pulse": [
+    `You've used this month's included Core AI usage. New Murph replies are paused, but your wearable keeps syncing and your group activity stays current. Pulse includes more private usage: {homeUrl}`,
+    `Your Core AI allowance is used for this month. Wearable syncing and group activity keep running. Pulse has more replies, or you can wait for the reset: {homeUrl}`,
+    `Core's included AI usage is at its monthly limit. I pause new replies until reset, while your wearable and group data keep updating. Pulse has more included usage: {homeUrl}`,
+    `You've reached the Core plan's monthly AI allowance. Syncing stays on and your group activity remains current. Pulse is available, or wait for next period: {homeUrl}`,
+    `This month's Core AI usage is used. New AI work pauses, not your wearable connection or group updates. Pulse includes more usage: {homeUrl}`,
+    `Your included Core replies are used for this period. Health data keeps syncing and group activity keeps updating. Pulse is available, or wait for the reset: {homeUrl}`,
+    `You've hit the Core plan's AI limit for the month. New replies pause, while wearable syncing continues and your group stays current. Pulse fits more regular private Murph usage: {homeUrl}`,
+    `Core AI usage is at its included monthly amount. I pause new replies until reset, but syncing and group data continue. Pulse details: {homeUrl}`,
+    `The Core allowance for new AI work is used. Your wearable remains connected and group activity stays current. Choose Pulse for more usage or wait: {homeUrl}`,
+    `You've used the AI included with Core this month. Only new Murph work pauses; wearable and group updates continue. Pulse offers more included usage: {homeUrl}`,
+    `Your Core plan has reached this month's AI allowance. Syncing keeps running in the background and your group data stays current. Pulse is available, or wait: {homeUrl}`,
+    `That's the included Core AI usage for this period. I pause replies until reset, while your wearable and group activity continue updating. Pulse details: {homeUrl}`,
+    `You've reached Core's monthly AI amount. New replies pause, while your health data still syncs and your group participation remains current. Pulse has more private replies: {homeUrl}`,
+    `The Core plan's included AI is used for now. Wearable syncing does not stop, and group activity keeps updating. Pulse or the next reset will reopen replies: {homeUrl}`,
+    `Your monthly Core AI allowance is spent. New replies pause, but your wearable connection and group updates stay active. Pulse details: {homeUrl}`,
+    `You've used this period's Core AI allowance. New replies pause, while syncing and group activity continue normally. Pulse includes more private Murph usage: {homeUrl}`,
+    `Core's monthly AI capacity is used. I pause new AI work until reset, not wearable syncing or group updates. Pulse is available if you want to keep chatting: {homeUrl}`,
+    `You've reached the included usage on Core. Your wearable keeps syncing and your group data keeps moving. More Murph replies come with Pulse or the next reset: {homeUrl}`,
+    `This month's Core AI allowance is complete. New replies pause, while background health syncing and group activity continue. Pulse has more included replies: {homeUrl}`,
+    `Your included Core AI usage has run out for this period. New Murph replies pause, while wearables and group data stay current. Pulse is available here: {homeUrl}`,
+  ],
   "linq.ai_usage.pulse_upgrade_edge": [
     `You've used this month's included Pulse allowance. Murph is paused for this usage period. The allowance resets next period.`,
     `Your included Pulse usage is at its monthly amount. Murph is paused right now. The allowance resets next period.`,
@@ -615,11 +818,15 @@ function renderUserFacingMessageAtIndex<K extends UserFacingMessageTemplateKey>(
   }
 
   const rendered = renderUserFacingMessageTemplate(template, input.context)
+  const completeRendered = input.key === "linq.home_redirect"
+    && !HOME_REDIRECT_EXPLICIT_RESEND_PATTERN.test(rendered)
+    ? `${rendered}\n${HOME_REDIRECT_RESEND_FALLBACK}`
+    : rendered
 
   return {
     text: USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS.has(input.key)
-      ? addUsageLimitPercentage(rendered)
-      : rendered,
+      ? addUsageLimitPercentage(completeRendered)
+      : completeRendered,
   }
 }
 
@@ -650,10 +857,13 @@ function selectUserFacingMessageVariantIndex(input: {
 
 function assertUserFacingMessageTemplateCoverage(): void {
   for (const key of USER_FACING_MESSAGE_TEMPLATE_KEYS) {
+    const minimumVariantCount = key === "linq.home_redirect"
+      ? HOME_REDIRECT_MESSAGE_MIN_VARIANT_COUNT
+      : USER_FACING_MESSAGE_MIN_VARIANT_COUNT
     const variantCount = USER_FACING_MESSAGE_TEMPLATES[key].length
-    if (variantCount < USER_FACING_MESSAGE_MIN_VARIANT_COUNT) {
+    if (variantCount < minimumVariantCount) {
       throw new TypeError(
-        `User-facing message template ${key} requires at least ${USER_FACING_MESSAGE_MIN_VARIANT_COUNT} variants.`,
+        `User-facing message template ${key} requires at least ${minimumVariantCount} variants.`,
       )
     }
   }

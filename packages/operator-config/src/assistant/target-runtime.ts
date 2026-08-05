@@ -47,24 +47,45 @@ interface AssistantCodexModelProviderRegistration {
 export const VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID = 'vercel-ai-gateway'
 export const OPENAI_CODEX_MODEL_PROVIDER_ID = 'openai'
 export const HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID = 'hosted-openai'
+export const HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID =
+  'hosted-custom-inference'
+export const HOSTED_CUSTOM_INFERENCE_API_KEY_ENV =
+  'MURPH_CUSTOM_INFERENCE_API_KEY'
 // The hosted runtime writes this internal provider into its generated Codex
 // config when local development uses ChatGPT subscription auth.
 export const HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID =
   'hosted-chatgpt-openai'
+// Hosted-local sends multiple providers through one recorder origin. Keep
+// their reserved ids distinct so thread resume preserves production's provider
+// handoff boundary without registered-provider CLI overrides replacing it.
 export const HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID = 'openai-local-test'
+export const HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID =
+  'venice-local-test'
 export const VENICE_CODEX_MODEL_PROVIDER_ID = 'venice'
 
 export const CODEX_RESERVED_MODEL_PROVIDER_IDS = [
   OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
   'ollama',
   'lmstudio',
 ] as const
 const CODEX_RESERVED_MODEL_PROVIDER_ID_SET = new Set<string>(
   CODEX_RESERVED_MODEL_PROVIDER_IDS,
 )
+
+export const HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG = {
+  id: HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+  name: 'Murph Custom Inference',
+  baseUrl: 'http://murph-custom-inference.worker/v1',
+  envKey: HOSTED_CUSTOM_INFERENCE_API_KEY_ENV,
+  failureHint:
+    'The selected custom inference endpoint is unavailable or incompatible. Murph did not fall back to managed inference.',
+  wireApi: 'responses',
+} as const satisfies AssistantCodexModelProviderConfig
 
 export const OPENAI_CODEX_MODEL_PROVIDER_CONFIG = {
   id: OPENAI_CODEX_MODEL_PROVIDER_ID,
@@ -96,6 +117,9 @@ export const VENICE_CODEX_MODEL_PROVIDER_CONFIG = {
 const ASSISTANT_CODEX_MODEL_PROVIDER_REGISTRATIONS = [
   {
     config: OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
+  },
+  {
+    config: HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG,
   },
   {
     config: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
@@ -271,7 +295,8 @@ export function resolveAssistantRuntimeTarget(
       modelProvider,
       resumeKind: 'codex-thread',
       supportsNativeResume: true,
-      supportsReasoningEffort: true,
+      supportsReasoningEffort:
+        modelProvider !== HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
       target: { kind: 'codex-cli' },
     }
   }
@@ -358,6 +383,13 @@ function createLocalOnboardingProviderConfig(
   }
 }
 
+export function assistantCodexModelProviderRequiresModelThreadCompatibility(
+  value: string | null | undefined,
+): boolean {
+  return normalizeAssistantCodexModelProvider(value) ===
+    HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
+}
+
 export function isCodexReservedModelProviderId(
   value: string | null | undefined,
 ): boolean {
@@ -374,6 +406,11 @@ function buildAssistantContinuityFingerprint(
     provider: input.provider,
     executionDriver: 'codex-app-server',
     modelProvider: normalizeAssistantCodexModelProvider(input.modelProvider),
+    model: assistantCodexModelProviderRequiresModelThreadCompatibility(
+        input.modelProvider,
+      )
+      ? normalizeNullableString(input.model)
+      : null,
     sandbox: normalizeNullableString(input.sandbox),
     approvalPolicy: normalizeNullableString(input.approvalPolicy),
     profile: normalizeNullableString(input.profile),

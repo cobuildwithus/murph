@@ -339,6 +339,7 @@ describe('murph.generate_image dynamic tool schema', () => {
 
     releaseProvider()
     await expect(generation).resolves.toMatchObject({
+      failureDiagnostic: null,
       media: {
         contentType: 'image/webp',
         kind: 'vault_image',
@@ -354,6 +355,167 @@ describe('murph.generate_image dynamic tool schema', () => {
       }),
     }))
     releaseUsage()
+  })
+
+  it('binds an irreversible continuation to its exact accepted group input', async () => {
+    const exactInputId = `ain_${'a'.repeat(32)}`
+    const batchTailInputId = `ain_${'b'.repeat(32)}`
+    const launch = vi.fn<
+      NonNullable<AssistantHostedToolContext['imageGenerationLauncher']>['launch']
+    >(() => 'started')
+    const hostedToolContext = {
+      computerToolsAvailable: false,
+      currentAssistantInputId: () => batchTailInputId,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => ({
+        acceptedInputIds: [exactInputId, batchTailInputId],
+        conversationId: 'conversation_1',
+        conversationScope: 'group' as const,
+        inboundMailboxItemIds: ['mailbox_1', 'mailbox_2'],
+        originSessionId: 'session_1',
+        recipientKey: 'recipient_1',
+      }),
+      imageGenerationLauncher: { launch },
+      sendVaultFile: async () => ({
+        filename: 'unused',
+        status: 'denied' as const,
+      }),
+      vaultFileSendAvailable: false,
+    } satisfies AssistantHostedToolContext
+    const authorizeAcceptedMessageTarget = vi.fn(async () => ({
+      participant: {
+        assistantInputId: exactInputId,
+        senderHandle: 'participant_1',
+        source: 'linq' as const,
+      },
+      targetInputId: exactInputId,
+    }))
+    const request = {
+      args: {
+        alt: null,
+        outputFormat: 'jpeg' as const,
+        prompt: 'Create a physical note page.',
+        quality: 'high' as const,
+        referenceImageRefs: [],
+        size: '1024x1536' as const,
+      },
+      kind: 'generate-image' as const,
+      messageRef: exactInputId,
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(result.rpcResult).toMatchObject({ success: true })
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledWith({
+      action: 'participant-effect',
+      deliveryContextOrdinal: 0,
+      messageRef: exactInputId,
+    })
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+      originAssistantInputId: exactInputId,
+      originAssistantInputIdExact: true,
+    }))
+
+    const denied = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: async () => null,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery: null,
+      request,
+    })
+    expect(denied.rpcResult).toMatchObject({ success: false })
+    expect(launch).toHaveBeenCalledOnce()
+  })
+
+  it('keeps provider diagnostics in the hosted image result', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-image-failure-'))
+    tempRoots.push(vaultRoot)
+    await initializeVault({ vaultRoot })
+    let generation: Promise<unknown> | null = null
+    const hostedToolContext = {
+      computerToolsAvailable: false,
+      currentAssistantInputId: () => 'input_image_failure_origin',
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => ({
+        acceptedInputIds: ['input_image_failure_origin'],
+        conversationId: 'conversation_failure',
+        conversationScope: 'direct',
+        inboundMailboxItemIds: ['mailbox_failure'],
+        originSessionId: 'session_failure',
+        recipientKey: 'recipient_failure',
+      }),
+      imageGenerationLauncher: {
+        launch(input) {
+          generation = input.run(
+            new AbortController().signal,
+            async (write) => await write(),
+          )
+          return 'started' as const
+        },
+      },
+      recordDetachedUsage: vi.fn(),
+      sendVaultFile: async () => ({
+        filename: 'unused',
+        status: 'denied' as const,
+      }),
+      vaultFileSendAvailable: false,
+    } satisfies AssistantHostedToolContext
+
+    const result = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: 'test-key' },
+      fetchImpl: async () => new Response(JSON.stringify({
+        error: {
+          code: 'invalid_prompt',
+          message: 'The image prompt was rejected.',
+          type: 'invalid_request_error',
+        },
+      }), {
+        headers: {
+          'content-type': 'application/json',
+          'x-request-id': 'req_image_failed',
+        },
+        status: 400,
+      }),
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        args: {
+          alt: null,
+          outputFormat: 'webp',
+          prompt: 'Draw an invalid image.',
+          quality: 'medium',
+          referenceImageRefs: [],
+          size: '1024x1024',
+        },
+        kind: 'generate-image',
+      },
+      requireHostedPrivateImageDelivery: true,
+      vaultRoot,
+    })
+
+    expect(result.rpcResult.success).toBe(true)
+    await expect(generation).resolves.toEqual({
+      failureDiagnostic:
+        'image generation failed: ASSISTANT_IMAGE_GENERATION_FAILED (http 400, invalid_prompt, request req_image_failed): The image prompt was rejected.',
+      media: null,
+      runtimeIssue: null,
+      savedImageRef: null,
+    })
   })
 
   it('keeps the minimal legacy prompt-only call valid', () => {
@@ -378,6 +540,27 @@ describe('murph.generate_image dynamic tool schema', () => {
         size: '1024x1024',
       },
       kind: 'generate-image',
+    })
+  })
+
+  it('parses an exact effect-authorizing message outside provider arguments', () => {
+    const messageRef = `ain_${'c'.repeat(32)}`
+    expect(readMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          message_ref: messageRef,
+          prompt: 'Create a note page.',
+        },
+        namespace: 'murph',
+        tool: 'generate_image',
+      },
+    })).toMatchObject({
+      args: {
+        prompt: 'Create a note page.',
+      },
+      kind: 'generate-image',
+      messageRef,
     })
   })
 

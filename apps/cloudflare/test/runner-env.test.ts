@@ -1225,12 +1225,18 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
         "HOSTED_ASSISTANT_PROVIDER",
-        "HOSTED_VENICE_LUNA_MODEL",
-        "HOSTED_VENICE_SOL_MODEL",
-        "HOSTED_VENICE_TERRA_MODEL",
         "WHOOP_SCOPES",
       ]),
     );
+    for (const retiredVeniceModelVar of [
+      "HOSTED_VENICE_LUNA_MODEL",
+      "HOSTED_VENICE_SOL_MODEL",
+      "HOSTED_VENICE_TERRA_MODEL",
+    ]) {
+      expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
+        retiredVeniceModelVar,
+      );
+    }
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toContain("VENICE_API_KEY");
     for (const retiredWhatsAppVar of [
       "WHATSAPP_API_BASE_URL",
@@ -1283,8 +1289,10 @@ describe("hosted private-media platform env", () => {
   it("keeps the deployment Worker origin in the trusted container platform env", () => {
     expect(buildHostedRunnerContainerPlatformEnv({
       CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
+      HOSTED_PHYSICAL_NOTES_ENABLED: "true",
     })).toEqual({
       CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
+      HOSTED_PHYSICAL_NOTES_ENABLED: "true",
     });
   });
 });

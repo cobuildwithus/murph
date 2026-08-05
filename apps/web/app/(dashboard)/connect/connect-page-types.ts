@@ -13,6 +13,7 @@ export type ConnectSource = {
   description: string;
   disconnectConnectionId?: string;
   disconnectScope?: "junction_account";
+  disconnectSourceProviderSlug?: string;
   historicalResetIncomplete?: boolean;
   id: string;
   logo: LogoAsset;
@@ -47,7 +48,9 @@ export type ConnectIntentRecoveryRequest = {
 };
 
 export type ConnectCallbackNotice = {
+  errorCode?: string | null;
   kind: "error" | "success" | "warning";
   message: string;
+  sourceLabel?: string | null;
   title: string;
 } | null;

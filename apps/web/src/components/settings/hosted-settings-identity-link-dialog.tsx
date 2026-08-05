@@ -1,9 +1,11 @@
 "use client";
 
+import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
+import { useState, type ReactNode } from "react";
 
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
-import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
+import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +17,7 @@ import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/
 
 import { HostedEmailPrivyLinkHandOff } from "./hosted-email-privy-link-hand-off";
 import { HostedEmailSettings } from "./hosted-email-settings";
+import { useHostedPhoneLinkDiagnostics } from "./hosted-phone-link-diagnostics";
 import { HostedPhoneSettings } from "./hosted-phone-settings";
 import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 import { HostedTelegramCardSettings } from "./hosted-telegram-card-settings";
@@ -23,25 +26,21 @@ type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
 
 export function HostedSettingsIdentityLinkDialog({
   account,
+  expectedPrivyUserId,
   initialMode,
   onOpenChange,
+  privySessionMatchesAppSession,
 }: {
   account: HostedAccountSettingsSnapshot;
+  expectedPrivyUserId: string | null;
   initialMode: HostedSettingsIdentityLinkMode;
   onOpenChange: (open: boolean) => void;
+  privySessionMatchesAppSession: boolean;
 }) {
   const router = useRouter();
   const { openAuthDialog } = useAuth();
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
-  const clientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
 
-  const hasExisting = initialMode === "phone"
-    ? Boolean(account.phone.number)
-    : initialMode === "email"
-      ? Boolean(account.email.address)
-      : Boolean(account.telegram.telegramUserId);
-
-  const copy = getSettingsIdentityLinkCopy(initialMode, hasExisting, account);
   const closeAndRefresh = () => {
     onOpenChange(false);
     router.refresh();
@@ -51,20 +50,239 @@ export function HostedSettingsIdentityLinkDialog({
     openAuthDialog();
   };
 
+  if (!appId) {
+    return (
+      <HostedSettingsIdentityDialogFrame
+        account={account}
+        initialMode={initialMode}
+        onOpenChange={onOpenChange}
+      >
+        <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+          Linking isn&apos;t available yet. Please try again later.
+        </div>
+      </HostedSettingsIdentityDialogFrame>
+    );
+  }
+
+  return (
+    <HostedSettingsIdentityMutationContent
+      account={account}
+      expectedPrivyUserId={expectedPrivyUserId}
+      initialMode={initialMode}
+      onClientAuthRequired={promptClientAuth}
+      onOpenChange={onOpenChange}
+      onSynced={closeAndRefresh}
+      privySessionMatchesAppSession={privySessionMatchesAppSession}
+    />
+  );
+}
+
+function HostedSettingsIdentityMutationContent({
+  account,
+  expectedPrivyUserId,
+  initialMode,
+  onClientAuthRequired,
+  onOpenChange,
+  onSynced,
+  privySessionMatchesAppSession,
+}: {
+  account: HostedAccountSettingsSnapshot;
+  expectedPrivyUserId: string | null;
+  initialMode: HostedSettingsIdentityLinkMode;
+  onClientAuthRequired: () => void;
+  onOpenChange: (open: boolean) => void;
+  onSynced: () => void;
+  privySessionMatchesAppSession: boolean;
+}) {
+  const { authenticated, logout, ready } = usePrivy();
+  const { user } = useUser();
+  const [reauthError, setReauthError] = useState<string | null>(null);
+  const [reauthPending, setReauthPending] = useState(false);
+  const clientIdentityPending = !ready || (authenticated && user === null);
+  const clientSessionMatchesAppSession =
+    ready
+    && authenticated
+    && privySessionMatchesAppSession
+    && expectedPrivyUserId !== null
+    && user?.id === expectedPrivyUserId;
+  const createPhoneDiagnosticReporter = useHostedPhoneLinkDiagnostics({
+    appAuthenticated: true,
+    clientUserMatchesExpected: expectedPrivyUserId !== null && user?.id === expectedPrivyUserId,
+    clientUserPresent: Boolean(user?.id),
+    expectedUserPresent: expectedPrivyUserId !== null,
+    operation: user?.phone?.number ? "update" : "link",
+    privyAuthenticated: authenticated,
+    privyReady: ready,
+    serverSessionMatches: privySessionMatchesAppSession,
+    showLinkForm: initialMode === "phone",
+    surface: "settings",
+  });
+  const hasExisting = initialMode === "phone"
+    ? Boolean(account.phone.number)
+    : initialMode === "email"
+      ? Boolean(account.email.address)
+      : Boolean(account.telegram.telegramUserId);
+
+  async function handleClientAuthRequired() {
+    if (reauthPending) {
+      return;
+    }
+
+    setReauthError(null);
+    setReauthPending(true);
+
+    try {
+      if (authenticated) {
+        await logout();
+      }
+      onClientAuthRequired();
+    } catch {
+      setReauthError("Sign out did not finish. Try again.");
+    } finally {
+      setReauthPending(false);
+    }
+  }
+
+  if (!clientSessionMatchesAppSession) {
+    return (
+      <HostedSettingsIdentityDialogFrame
+        account={account}
+        initialMode={initialMode}
+        onOpenChange={onOpenChange}
+      >
+        {clientIdentityPending ? (
+          <HostedIdentitySessionLoading />
+        ) : (
+          <HostedIdentitySessionMismatch
+            disabled={reauthPending}
+            errorMessage={reauthError}
+            onSignInAgain={handleClientAuthRequired}
+            pending={reauthPending}
+          />
+        )}
+      </HostedSettingsIdentityDialogFrame>
+    );
+  }
+
   // The server told us the Privy user has no email linked, which means the
   // inline update form cannot work — Privy only supports linking an email
   // through its own modal. Skip our dialog entirely and hand off to Privy's,
   // so the member sees a single dialog instead of two stacked ones.
-  if (initialMode === "email" && account.email.privyEmailLinked === false && appId) {
+  if (initialMode === "email" && account.email.privyEmailLinked === false) {
     return (
-      <HostedPrivyProvider appId={appId} clientId={clientId}>
-        <HostedEmailPrivyLinkHandOff
-          onAborted={() => onOpenChange(false)}
-          onSynced={closeAndRefresh}
-        />
-      </HostedPrivyProvider>
+      <HostedEmailPrivyLinkHandOff
+        onAborted={() => onOpenChange(false)}
+        onSynced={onSynced}
+      />
     );
   }
+
+  if (initialMode === "phone") {
+    return (
+      <HostedPhoneSettings
+        autoOpen
+        diagnosticReporterFactory={createPhoneDiagnosticReporter}
+        initialPhoneNumber={account.phone.number}
+        onAborted={() => onOpenChange(false)}
+        onLinked={onSynced}
+      />
+    );
+  }
+
+  return (
+    <HostedSettingsIdentityDialogFrame
+      account={account}
+      initialMode={initialMode}
+      onOpenChange={onOpenChange}
+    >
+      {initialMode === "telegram" ? (
+        <HostedTelegramCardSettings
+          authenticated
+          autoLink={!hasExisting}
+          initialTelegramAccount={account.telegram.telegramUserId
+            ? {
+                telegramUserId: account.telegram.telegramUserId,
+                username: account.telegram.username ?? null,
+              }
+            : null}
+          onSynced={onSynced}
+          showHeading={false}
+        />
+      ) : null}
+      {initialMode === "email" ? (
+        <HostedEmailSettings
+          authenticated
+          changeFlow={hasExisting}
+          initialEmail={toInitialEmail(account.email)}
+          murphEmailAddress={account.email.murphEmailAddress}
+          onClientAuthRequired={onClientAuthRequired}
+          onSynced={onSynced}
+        />
+      ) : null}
+    </HostedSettingsIdentityDialogFrame>
+  );
+}
+
+export function HostedIdentitySessionLoading() {
+  return (
+    <p aria-live="polite" className="text-sm text-muted-foreground">
+      Preparing secure account linking…
+    </p>
+  );
+}
+
+export function HostedIdentitySessionMismatch({
+  disabled = false,
+  errorMessage = null,
+  onSignInAgain,
+  pending = false,
+}: {
+  disabled?: boolean;
+  errorMessage?: string | null;
+  onSignInAgain: () => Promise<void> | void;
+  pending?: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <p className="text-sm leading-6 text-muted-foreground">
+        Your sign-in changed. Sign in again using a login method already linked
+        to this Murph account before changing a linked account.
+      </p>
+      <Button
+        type="button"
+        size="xl"
+        className="w-full"
+        disabled={disabled}
+        onClick={() => void onSignInAgain()}
+      >
+        {pending ? "Signing out…" : "Sign in again"}
+      </Button>
+      {errorMessage ? (
+        <p role="alert" className="text-sm text-destructive">
+          {errorMessage}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function HostedSettingsIdentityDialogFrame({
+  account,
+  children,
+  initialMode,
+  onOpenChange,
+}: {
+  account: HostedAccountSettingsSnapshot;
+  children: ReactNode;
+  initialMode: HostedSettingsIdentityLinkMode;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const hasExisting = initialMode === "phone"
+    ? Boolean(account.phone.number)
+    : initialMode === "email"
+      ? Boolean(account.email.address)
+      : Boolean(account.telegram.telegramUserId);
+  const copy = getSettingsIdentityLinkCopy(initialMode, hasExisting, account);
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
@@ -77,46 +295,7 @@ export function HostedSettingsIdentityLinkDialog({
             {copy.description}
           </DialogDescription>
         </DialogHeader>
-        {!appId ? (
-          <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
-            Linking isn&apos;t available yet. Please try again later.
-          </div>
-        ) : (
-          <HostedPrivyProvider appId={appId} clientId={clientId}>
-            {initialMode === "phone" ? (
-              <HostedPhoneSettings
-                authenticated
-                autoOpen
-                initialPhoneNumber={account.phone.number}
-                onLinked={closeAndRefresh}
-              />
-            ) : null}
-            {initialMode === "telegram" ? (
-              <HostedTelegramCardSettings
-                authenticated
-                autoLink={!hasExisting}
-                initialTelegramAccount={account.telegram.telegramUserId
-                  ? {
-                      telegramUserId: account.telegram.telegramUserId,
-                      username: account.telegram.username ?? null,
-                    }
-                  : null}
-                onSynced={closeAndRefresh}
-                showHeading={false}
-              />
-            ) : null}
-            {initialMode === "email" ? (
-              <HostedEmailSettings
-                authenticated
-                changeFlow={hasExisting}
-                initialEmail={toInitialEmail(account.email)}
-                murphEmailAddress={account.email.murphEmailAddress}
-                onClientAuthRequired={promptClientAuth}
-                onSynced={closeAndRefresh}
-              />
-            ) : null}
-          </HostedPrivyProvider>
-        )}
+        {children}
       </DialogContent>
     </Dialog>
   );

@@ -315,14 +315,16 @@ export function sanitizeAssistantTurnReceiptForPersistence(
 
 export function sanitizeAssistantOutboxIntentForPersistence(
   intent: AssistantOutboxIntent,
-): Omit<AssistantOutboxIntent, 'operation'> & {
+): Omit<AssistantOutboxIntent, 'card' | 'operation'> & {
+  card?: NonNullable<AssistantOutboxIntent['card']>
   operation?: NonNullable<AssistantOutboxIntent['operation']>
 } {
-  const { operation, ...baseIntent } = intent
+  const { card, operation, ...baseIntent } = intent
   return {
     ...baseIntent,
     schema: 'murph.assistant-outbox-intent.v1',
     lastError: sanitizeAssistantDeliveryErrorForPersistence(intent.lastError),
+    ...(card ? { card } : {}),
     ...(operation ? { operation } : {}),
   }
 }

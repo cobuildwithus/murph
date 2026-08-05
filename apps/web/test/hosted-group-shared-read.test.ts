@@ -50,6 +50,7 @@ const WORKOUTS_KEY = buildHostedVaultShareProjectionScopeKey(
   WORKOUTS_SCOPE,
 );
 const DEVICE_KEY = buildHostedVaultShareProjectionScopeKey(DEVICE_SCOPE);
+const GRANTED_AT = new Date("2026-07-30T12:00:00.000Z");
 
 type TestProjectionScope =
   | typeof PROFILE_SCOPE
@@ -71,12 +72,14 @@ afterEach(() => {
 
 function shareRow(input: {
   ciphertext?: string | null;
+  grantedAt?: Date;
   id: string;
   memberId: string;
   projectionScope: TestProjectionScope;
 }) {
   return {
     destinationMemberId: RUNTIME_MEMBER_ID,
+    grantedAt: input.grantedAt ?? GRANTED_AT,
     grantorMemberId: input.memberId,
     id: input.id,
     projectionKind: input.projectionScope.projectionKind,
@@ -578,8 +581,16 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       memberId: "member_a",
       participantId: "participant_a",
       projections: [
-        { dataStatus: "available", grantStatus: "granted" },
-        { dataStatus: "available", grantStatus: "granted" },
+        {
+          dataStatus: "available",
+          grantedAt: GRANTED_AT.toISOString(),
+          grantStatus: "granted",
+        },
+        {
+          dataStatus: "available",
+          grantedAt: GRANTED_AT.toISOString(),
+          grantStatus: "granted",
+        },
       ],
     });
     expect(result.members[1]).toMatchObject({
@@ -587,8 +598,18 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       memberId: "member_b",
       participantId: "participant_b",
       projections: [
-        { dataStatus: "missing", grantStatus: "granted", records: [] },
-        { dataStatus: "missing", grantStatus: "not_granted", records: [] },
+        {
+          dataStatus: "missing",
+          grantedAt: GRANTED_AT.toISOString(),
+          grantStatus: "granted",
+          records: [],
+        },
+        {
+          dataStatus: "missing",
+          grantedAt: null,
+          grantStatus: "not_granted",
+          records: [],
+        },
       ],
     });
     expect(result.members.map(({ participantId }) => participantId)).toEqual([
@@ -601,9 +622,15 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       memberId: "member_c",
       participantId: "participant_c",
       projections: [
-        { dataStatus: "missing", grantStatus: "not_granted", records: [] },
+        {
+          dataStatus: "missing",
+          grantedAt: null,
+          grantStatus: "not_granted",
+          records: [],
+        },
         {
           dataStatus: "available",
+          grantedAt: GRANTED_AT.toISOString(),
           grantStatus: "granted",
           records: [{
             data: {
@@ -699,6 +726,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(result.requestedProjectionScopeKeys).toEqual([PROTEIN_KEY]);
     expect(result.members[0]?.projections).toEqual([{
       dataStatus: "available",
+      grantedAt: GRANTED_AT.toISOString(),
       grantStatus: "granted",
       projectionScope: PROTEIN_SCOPE,
       projectionScopeKey: PROTEIN_KEY,
@@ -715,6 +743,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     }]);
     expect(result.members[1]?.projections).toEqual([{
       dataStatus: "missing",
+      grantedAt: GRANTED_AT.toISOString(),
       grantStatus: "granted",
       projectionScope: PROTEIN_SCOPE,
       projectionScopeKey: PROTEIN_KEY,
@@ -722,6 +751,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     }]);
     expect(result.members[2]?.projections).toEqual([{
       dataStatus: "missing",
+      grantedAt: null,
       grantStatus: "not_granted",
       projectionScope: PROTEIN_SCOPE,
       projectionScopeKey: PROTEIN_KEY,
@@ -1014,6 +1044,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       participantId: "participant_protein_zero",
       projections: [{
         dataStatus: "available",
+        grantedAt: GRANTED_AT.toISOString(),
         grantStatus: "granted",
         projectionScope: PROTEIN_SCOPE,
         projectionScopeKey: PROTEIN_KEY,
@@ -1045,7 +1076,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(deviceConnectionFindMany).not.toHaveBeenCalled();
   });
 
-  it("filters inactive grantors while retaining every group member as missing", async () => {
+  it("filters inactive or explicitly revoked grantors while retaining every group member as missing", async () => {
     installCiphertexts({});
     const { hostedVaultShareFindMany, prisma } = createPrisma({ shares: [] });
 
@@ -1057,7 +1088,19 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
 
     expect(hostedVaultShareFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        grantor: expect.objectContaining({ suspendedAt: null }),
+        grantor: expect.objectContaining({
+          AND: expect.arrayContaining([
+            expect.objectContaining({ suspendedAt: null }),
+            {
+              consentGrants: {
+                none: {
+                  scope: "launch.health-data",
+                  status: "revoked",
+                },
+              },
+            },
+          ]),
+        }),
       }),
     }));
     expect(result.status).toBe("ok");

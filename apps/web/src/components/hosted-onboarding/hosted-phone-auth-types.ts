@@ -1,4 +1,3 @@
-export type HostedPhoneAuthIntent = "auth" | "link";
 export type HostedPhoneAuthPendingAction = "continue" | "logout" | "send-code" | "verify-code" | null;
 export type HostedAuthenticatedPhoneAuthView =
   | "loading"
@@ -27,3 +26,21 @@ export interface HostedPhoneLinkPayload {
   phoneNumber: string;
   phoneNumberHint: string;
 }
+
+export type HostedPhoneLinkSyncExpectation =
+  | {
+      kind: "changed-from";
+      phoneNumber: string | null;
+    }
+  | {
+      kind: "exact";
+      phoneNumber: string;
+    };
+
+export type HostedPhoneLinkSyncResult =
+  | {
+      status: "unchanged";
+    }
+  | (HostedPhoneLinkPayload & {
+      status: "synced";
+    });

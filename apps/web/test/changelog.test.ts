@@ -151,16 +151,78 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 21 through July 30 shipment set", () => {
+  it("keeps the July 31 Environment claims private and evidence-aware", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+
+    expect(items.get("private-environment-report")).toMatchObject({
+      sourcePullRequests: [573],
+      details: expect.stringContaining("optional equipment never counts against it"),
+      tryIt: {
+        href: "/environment",
+        label: "Open Environment",
+      },
+    });
+    expect(items.get("environment-voice-walkthrough")).toMatchObject({
+      sourcePullRequests: [573],
+      details: expect.stringContaining("Precise addresses are rejected"),
+    });
+  });
+
+  it("keeps the July 31 reliability and permission claims bounded", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+
+    expect(items.get("group-access-across-channels")).toMatchObject({
+      sourcePullRequests: [1184],
+      details: expect.stringContaining("trusted route"),
+    });
+    expect(items.get("fund-groups-at-any-capacity")).toMatchObject({
+      sourcePullRequests: [1207],
+      details: expect.stringContaining("explicit confirmation"),
+    });
+    expect(items.get("one-shot-reminders-survive-restart")).toMatchObject({
+      sourcePullRequests: [1209],
+      details: expect.stringContaining("best-effort wake signal"),
+    });
+    expect(items.get("delegated-work-before-blocker")).toMatchObject({
+      sourcePullRequests: [1214],
+      details: expect.stringContaining("cannot create new permission"),
+    });
+  });
+
+  it("publishes the complete July 20 through July 31 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 10).map((edition) => ({
+      listChangelogEditions().slice(0, 12).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
       {
+        id: "2026-07-31",
+        itemIds: [
+          "private-environment-report",
+          "environment-voice-walkthrough",
+          "native-link-previews",
+          "family-owner-usage-topups",
+          "group-access-across-channels",
+          "fund-groups-at-any-capacity",
+          "one-shot-reminders-survive-restart",
+          "venice-tool-compatible-replies",
+          "core-member-plan-name",
+          "usage-referrals-stay-current",
+          "safe-group-stakes",
+          "experiment-progress-cards-fail-soft",
+          "delegated-work-before-blocker",
+        ],
+      },
+      {
         id: "2026-07-30",
         itemIds: [
+          "capped-monthly-group-sponsorship",
+          "usage-credit-without-message-estimates",
           "usage-options-together",
           "open-ended-experiment-outcomes",
           "core-reply-provider-choice",
@@ -325,7 +387,50 @@ describe("changelog registry", () => {
           "experiment-results-match-the-dashboard",
         ],
       },
+      {
+        id: "2026-07-20",
+        itemIds: [
+          "challenge-standings-explain-missing-data",
+          "phone-link-settings-recovery",
+          "weekly-insights-skip-obvious-weekend",
+          "scheduled-messages-get-the-full-murph",
+          "pulse-finishes-after-payment-setup",
+          "contaminant-tests-on-product-pages",
+          "private-experiments-open-from-home",
+          "named-lab-marker-answers-faster",
+          "dense-voice-memo-keeps-onboarding-moving",
+          "welcome-continues-your-conversation",
+          "approval-page-sign-in-recovery",
+          "strava-connections-paused",
+        ],
+      },
     ]);
+  });
+
+  it("keeps historical one-time sponsorship copy and publishes monthly sponsorship only in the current edition", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+    const historical = items.get("group-sponsorship-moments");
+    const current = items.get("capped-monthly-group-sponsorship");
+    const estimateRemoval = items.get("usage-credit-without-message-estimates");
+
+    expect(historical).toMatchObject({
+      publishedOn: "2026-07-28",
+      sourcePullRequests: [1026, 1135],
+      summary: expect.stringContaining("one $5, $10, or $20 contribution"),
+    });
+    expect(`${historical?.summary} ${historical?.details}`).not.toMatch(
+      /monthly sponsorship|monthly maximum/iu,
+    );
+    expect(current).toMatchObject({
+      publishedOn: "2026-07-30",
+      summary: expect.stringContaining("up to $5, $10, or $20 per month"),
+    });
+    expect(estimateRemoval).toMatchObject({
+      publishedOn: "2026-07-30",
+      summary: expect.stringContaining("without converting it into an approximate number of messages"),
+    });
   });
 
   it("keeps internal provider branding out of published changelog copy", () => {
@@ -421,8 +526,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-30");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-24");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-31");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-25");
   });
 
   it("resolves only known canonical edition cursors", () => {

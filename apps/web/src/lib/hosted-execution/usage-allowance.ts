@@ -24,6 +24,10 @@ import {
   type HostedAiUsageAllowancePricedModel,
   type HostedAiUsageOpenAiFlexTokenPricingModel,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_ASSISTANT_VENICE_PROVIDER,
+  HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
+} from "@murphai/hosted-execution/assistant-model";
 
 import {
   HOSTED_PULSE_TRIAL_OFFER,
@@ -49,8 +53,20 @@ import {
   readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
+import {
+  admitHostedGroupSponsorshipRefillTx,
+} from "../hosted-groups/group-sponsorship-authorization";
+import {
+  classifyHostedGroupUsageCapacity,
+  type HostedGroupUsageCapacityState,
+} from "../hosted-groups/group-usage-capacity";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
+import {
+  HOSTED_LOB_USAGE_PRICING_SOURCE,
+  HOSTED_LOB_USAGE_PRICING_VERSION,
+  matchHostedLobPhysicalNoteUsageRecord,
+} from "./usage-lob";
 import {
   HOSTED_RETELL_USAGE_COST_KEY,
   HOSTED_RETELL_USAGE_PRICING_SOURCE,
@@ -72,6 +88,7 @@ type HostedAiUsageAccessDeniedReason = Exclude<
 export type HostedAiUsageGateNoticeCode =
   | "edge_usage_limit_reached"
   | "family_usage_limit_reached"
+  | "group_upgrade_pulse"
   | "pulse_upgrade_edge"
   | "thread_usage_limit_reached"
   | "trial_usage_limit_reached"
@@ -187,7 +204,7 @@ interface HostedAiUsageAllowanceTokenPricingBasisConfig {
   multiplierNumerator: bigint;
   pricingSource: string;
   pricingVersion: string;
-  requiredProviderKind: "openai" | null;
+  requiredProviderKind: "openai" | "venice" | null;
 }
 
 type HostedAiUsageAllowanceTokenPricingBasesByModel = Record<
@@ -407,13 +424,17 @@ async function hasHostedAiUsageThreadContainerAccess(input: {
 
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_VERSION =
-  "openai-api-pricing-2026-07-09-gpt-5.6-standard";
+  "openai-api-pricing-2026-07-30-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION =
-  "openai-api-pricing-2026-07-09-gpt-5.6-openai-flex";
+  "openai-api-pricing-2026-07-30-gpt-5.6-openai-flex";
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_VERSION =
+  "venice-api-pricing-2026-08-04-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE =
   "https://developers.openai.com/api/docs/pricing";
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_SOURCE =
+  "https://docs.venice.ai/overview/pricing";
 const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
@@ -506,20 +527,20 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE = {
-  cachedInputUsdMicrosPerMillionTokens: 250_000n,
-  cacheWriteUsdMicrosPerMillionTokens: 3_125_000n,
-  inputUsdMicrosPerMillionTokens: 2_500_000n,
-  outputUsdMicrosPerMillionTokens: 15_000_000n,
+  cachedInputUsdMicrosPerMillionTokens: 200_000n,
+  cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
+  inputUsdMicrosPerMillionTokens: 2_000_000n,
+  outputUsdMicrosPerMillionTokens: 12_000_000n,
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE = {
-  cachedInputUsdMicrosPerMillionTokens: 100_000n,
-  cacheWriteUsdMicrosPerMillionTokens: 1_250_000n,
-  inputUsdMicrosPerMillionTokens: 1_000_000n,
-  outputUsdMicrosPerMillionTokens: 6_000_000n,
+  cachedInputUsdMicrosPerMillionTokens: 20_000n,
+  cacheWriteUsdMicrosPerMillionTokens: 250_000n,
+  inputUsdMicrosPerMillionTokens: 200_000n,
+  outputUsdMicrosPerMillionTokens: 1_200_000n,
 } as const;
 
-const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES: Record<
+const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
 > = {
@@ -527,6 +548,38 @@ const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES: Record<
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE,
 };
+
+const HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES: Record<
+  HostedAiUsageAllowancePricedModel,
+  HostedAiUsageAllowanceModelPrice
+> = {
+  "gpt-5.6-sol": {
+    cachedInputUsdMicrosPerMillionTokens: 630_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 7_810_000n,
+    inputUsdMicrosPerMillionTokens: 6_250_000n,
+    outputUsdMicrosPerMillionTokens: 37_500_000n,
+  },
+  "gpt-5.6-terra": {
+    cachedInputUsdMicrosPerMillionTokens: 310_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 3_910_000n,
+    inputUsdMicrosPerMillionTokens: 3_130_000n,
+    outputUsdMicrosPerMillionTokens: 18_750_000n,
+  },
+  "gpt-5.6-luna": {
+    cachedInputUsdMicrosPerMillionTokens: 130_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 1_560_000n,
+    inputUsdMicrosPerMillionTokens: 1_250_000n,
+    outputUsdMicrosPerMillionTokens: 7_500_000n,
+  },
+};
+
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_TOKEN_PRICING_BASIS = {
+  multiplierDenominator: 1n,
+  multiplierNumerator: 1n,
+  pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_SOURCE,
+  pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_VERSION,
+  requiredProviderKind: "venice",
+} as const satisfies HostedAiUsageAllowanceTokenPricingBasisConfig;
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
   "openai-flex": {
@@ -571,6 +624,31 @@ function resolveHostedAiUsageAllowancePricingDecision(
   const counted = credentialSource !== "member";
   const tokenPricingBasis =
     normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
+
+  const lobPhysicalNote = matchHostedLobPhysicalNoteUsageRecord(record);
+  if (lobPhysicalNote !== null) {
+    assertHostedAiUsageLobPhysicalNoteTokenPricingBasis(tokenPricingBasis);
+    return {
+      kind: "priced",
+      priced: {
+        costUsdMicros: counted ? lobPhysicalNote.providerCostUsdMicros : 0n,
+        counted,
+        pricingSnapshot: {
+          credentialSource,
+          providerCost: {
+            providerCostUsdMicros:
+              lobPhysicalNote.providerCostUsdMicros.toString(),
+            providerPricingVersion:
+              lobPhysicalNote.providerPricingVersion,
+          },
+          pricingSource: HOSTED_LOB_USAGE_PRICING_SOURCE,
+          schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+          tokenPricingBasis,
+        },
+        pricingVersion: HOSTED_LOB_USAGE_PRICING_VERSION,
+      },
+    };
+  }
 
   const retellMatch = matchHostedAiUsageRetellPhoneCallRecord(record);
   if (retellMatch !== null) {
@@ -701,7 +779,7 @@ function resolveHostedAiUsageAllowancePricingDecision(
         counted: false,
         pricingSnapshot: {
           credentialSource,
-          ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
+          ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution, record),
           pricingSource: tokenPricing?.pricingSource ?? HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
           schema: "murph.hosted-ai-usage-allowance-pricing.v1",
           tokenPricingBasis,
@@ -718,7 +796,7 @@ function resolveHostedAiUsageAllowancePricingDecision(
     throw new TypeError("Hosted AI usage allowance pricing is missing for the model.");
   }
 
-  const prices = HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES[model];
+  const prices = resolveHostedAiUsageAllowanceModelPrices({ model, record });
   const resolvedTokenPricing = tokenPricing
     ?? resolveHostedAiUsageAllowanceTokenPricingBasis({ model, record });
   const cachedInputTokens = normalizeTokenCount(record.cachedInputTokens);
@@ -762,7 +840,7 @@ function resolveHostedAiUsageAllowancePricingDecision(
       counted: true,
       pricingSnapshot: {
         credentialSource,
-        ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
+        ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution, record),
         pricingSource: resolvedTokenPricing.pricingSource,
         ratesUsdMicrosPerMillionTokens: {
           cachedInput: prices.cachedInputUsdMicrosPerMillionTokens.toString(),
@@ -794,6 +872,11 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
 ): AssistantUsageTokenPricingBasis {
   const tokenPricingBasis =
     normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
+
+  if (matchHostedLobPhysicalNoteUsageRecord(record) !== null) {
+    assertHostedAiUsageLobPhysicalNoteTokenPricingBasis(tokenPricingBasis);
+    return tokenPricingBasis;
+  }
 
   if (matchHostedAiUsageRetellPhoneCallRecord(record) !== null) {
     assertHostedAiUsageRetellTokenPricingBasis(tokenPricingBasis);
@@ -1199,6 +1282,25 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
       return buildHostedAiUsageGateDecision({
         memberId: input.memberId,
         period,
+      });
+    }
+
+    // Settlement is not the only point at which authorization can change.
+    // A sponsor may raise the cap, resume, or cross a lazy calendar rollover
+    // while the group is already exhausted, so the mutating gate must give the
+    // same deterministic admission owner a chance before returning the denial.
+    // This transaction only creates the exact $5 purchase; the existing sweep
+    // remains the sole provider-work owner.
+    if (period.allowanceSource === "thread_container") {
+      await admitHostedGroupSponsorshipRefillTx({
+        beneficiaryMemberId: input.memberId,
+        capacityState: classifyHostedGroupUsageCapacity({
+          limitUsdMicros: period.limitUsdMicros,
+          remainingUsdMicros:
+            resolveHostedAiUsageAllowanceRemainingUsdMicros(period),
+        }),
+        now,
+        tx,
       });
     }
 
@@ -1935,6 +2037,25 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
     throw new TypeError("Hosted AI usage allowance period spend lost its locked row.");
   }
 
+  if (input.period.allowanceSource === "thread_container") {
+    const spentAfterUsdMicros =
+      input.period.spentUsdMicros + input.costUsdMicros;
+    const baseRemainingAfterUsdMicros =
+      input.period.limitUsdMicros > spentAfterUsdMicros
+        ? input.period.limitUsdMicros - spentAfterUsdMicros
+        : 0n;
+    await admitHostedGroupSponsorshipRefillTx({
+      beneficiaryMemberId: input.memberId,
+      capacityState: classifyHostedGroupUsageCapacity({
+        limitUsdMicros: input.period.limitUsdMicros,
+        remainingUsdMicros:
+          baseRemainingAfterUsdMicros + usageCreditBalanceUsdMicros,
+      }),
+      now: input.now,
+      tx: input.tx,
+    });
+  }
+
   if (!noticeEligible) {
     return null;
   }
@@ -2306,9 +2427,12 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
     throw new TypeError("Hosted AI usage allowance pricing is missing for the model.");
   }
 
-  const config = HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES[
-    input.model
-  ][basis];
+  const config = basis === "standard"
+      && isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
+    ? HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_TOKEN_PRICING_BASIS
+    : HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES[
+      input.model
+    ][basis];
 
   if (!config) {
     throw new TypeError(
@@ -2322,6 +2446,14 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
         "OpenAI flex token pricing requires OpenAI provider evidence.",
       );
     }
+  }
+  if (
+    config.requiredProviderKind === "venice"
+    && !isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
+  ) {
+    throw new TypeError(
+      "Venice token pricing requires Venice provider evidence.",
+    );
   }
 
   return {
@@ -2346,6 +2478,16 @@ function assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(
   if (basis !== "standard") {
     throw new TypeError(
       "OpenAI image hosted AI usage must use standard token pricing basis.",
+    );
+  }
+}
+
+function assertHostedAiUsageLobPhysicalNoteTokenPricingBasis(
+  basis: AssistantUsageTokenPricingBasis,
+): void {
+  if (basis !== "standard") {
+    throw new TypeError(
+      "Lob physical-note hosted usage must use standard token pricing basis.",
     );
   }
 }
@@ -3061,13 +3203,37 @@ function resolveHostedAiUsageAllowancePricingModel(
 
 function buildHostedAiUsageAllowanceModelSnapshot(
   resolution: HostedAiUsageAllowancePricingModelResolution,
+  record: AssistantUsageRecord,
 ): Prisma.InputJsonObject {
   return {
     model: resolution.model,
     modelSource: resolution.source,
+    ...(resolution.model
+        && isHostedAiUsageVeniceTokenPricingProviderName(record.providerName)
+      ? {
+        providerModel:
+          HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[resolution.model],
+      }
+      : {}),
     requestedModel: resolution.requestedModel,
     servedModel: resolution.servedModel,
   };
+}
+
+function resolveHostedAiUsageAllowanceModelPrices(input: {
+  model: HostedAiUsageAllowancePricedModel;
+  record: AssistantUsageRecord;
+}): HostedAiUsageAllowanceModelPrice {
+  return isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
+    ? HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES[input.model]
+    : HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[input.model];
+}
+
+function isHostedAiUsageVeniceTokenPricingProviderName(
+  value: unknown,
+): boolean {
+  return typeof value === "string"
+    && value.trim().toLowerCase() === HOSTED_ASSISTANT_VENICE_PROVIDER;
 }
 
 function buildHostedAiUsageGateLimitNotice(input: {
@@ -3119,6 +3285,18 @@ function buildHostedAiUsageGateLimitNotice(input: {
     };
   }
 
+  if (input.billingPlanCode === "launch_group_monthly") {
+    return {
+      code: "group_upgrade_pulse",
+      message: renderHostedAiUsageGateLimitNoticeMessage({
+        key: "linq.ai_usage.group_upgrade_pulse",
+        memberId: input.memberId,
+        noticeCode: "group_upgrade_pulse",
+        periodStart: input.periodStart,
+      }),
+    };
+  }
+
   if (input.billingPlanCode === "launch_edge_monthly") {
     return {
       code: "edge_usage_limit_reached",
@@ -3146,6 +3324,7 @@ function renderHostedAiUsageGateLimitNoticeMessage(input: {
   key:
     | "linq.ai_usage.edge_limit_reached"
     | "linq.ai_usage.family_limit_reached"
+    | "linq.ai_usage.group_upgrade_pulse"
     | "linq.ai_usage.pulse_upgrade_edge"
     | "linq.ai_usage.trial_limit_reached";
   memberId: string;

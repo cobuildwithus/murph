@@ -2,20 +2,16 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
-  type HostedRuntimeWorkflowState,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
-  createHostedRuntimeTemporalClientFromEnv,
-} from "@murphai/hosted-orchestrator-temporal/client/temporal-client";
-
-import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
+  queryHostedRuntimeWorkflowForTest,
   signalHostedMailboxAppendRuntimeForTest,
   signalHostedManualRunRuntimeForTest,
 } from "#hosted-web-testing";
@@ -124,30 +120,28 @@ describe("hosted local Temporal orchestration e2e", () => {
 async function waitForWorkflowExecutionState(input: {
   env: NodeJS.ProcessEnv;
   workflowId: string;
-}): Promise<HostedRuntimeWorkflowState> {
-  const client = await createHostedRuntimeTemporalClientFromEnv(input.env);
-  const handle = client.workflow.getHandle(input.workflowId);
+}): Promise<ObservedHostedRuntimeWorkflowState> {
   const deadline = Date.now() + 180_000;
-  let latestState: HostedRuntimeWorkflowState | null = null;
+  let latestState: ObservedHostedRuntimeWorkflowState | null = null;
   let latestError: string | null = null;
 
-  try {
-    while (Date.now() < deadline) {
-      try {
-        latestState = await handle.query<HostedRuntimeWorkflowState>(
-          HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
-        );
-        if (latestState.lastExecutionKind !== null) {
-          return latestState;
-        }
-      } catch (error) {
-        latestError = error instanceof Error ? error.message : String(error);
+  while (Date.now() < deadline) {
+    try {
+      latestState = readObservedHostedRuntimeWorkflowState(
+        await queryHostedRuntimeWorkflowForTest({
+          environment: input.env,
+          queryName: HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+          workflowId: input.workflowId,
+        }),
+      );
+      if (latestState.lastExecutionKind !== null) {
+        return latestState;
       }
-
-      await sleep(1_000);
+    } catch (error) {
+      latestError = error instanceof Error ? error.message : String(error);
     }
-  } finally {
-    await client.connection.close();
+
+    await sleep(1_000);
   }
 
   throw new Error(
@@ -159,6 +153,47 @@ async function waitForWorkflowExecutionState(input: {
       .filter((line): line is string => Boolean(line))
       .join("\n"),
   );
+}
+
+interface ObservedHostedRuntimeWorkflowState {
+  lastExecutionAt: string | null;
+  lastExecutionErrorCode: string | null;
+  lastExecutionKind: string | null;
+  userId: string;
+}
+
+function readObservedHostedRuntimeWorkflowState(
+  value: unknown,
+): ObservedHostedRuntimeWorkflowState {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("Hosted runtime Workflow query returned a non-object.");
+  }
+  const record = value as Record<string, unknown>;
+  const lastExecutionAt = readNullableString(record.lastExecutionAt);
+  const lastExecutionErrorCode = readNullableString(
+    record.lastExecutionErrorCode,
+  );
+  const lastExecutionKind = readNullableString(record.lastExecutionKind);
+  if (typeof record.userId !== "string" || record.userId.length === 0) {
+    throw new TypeError("Hosted runtime Workflow query returned an invalid userId.");
+  }
+
+  return {
+    lastExecutionAt,
+    lastExecutionErrorCode,
+    lastExecutionKind,
+    userId: record.userId,
+  };
+}
+
+function readNullableString(value: unknown): string | null {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new TypeError("Hosted runtime Workflow query returned an invalid field.");
+  }
+  return value;
 }
 
 function sleep(durationMs: number): Promise<void> {

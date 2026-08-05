@@ -8,6 +8,7 @@ vi.mock('../src/outbound-channel.ts', () => ({
 }))
 
 import type {
+  AssistantCronJob,
   AssistantChannelDelivery,
   AssistantDeliveryError,
   AssistantOutboxIntent,
@@ -25,6 +26,10 @@ import {
 } from '@murphai/core'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import {
+  renderAssistantResponseCardText,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
   hasAssistantSeenFirstContact,
@@ -55,6 +60,9 @@ import {
 } from '../src/assistant/outbox.ts'
 import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
 import {
+  buildAssistantCronNotificationDedupeToken,
+} from '../src/assistant/cron/notification-delivery.ts'
+import {
   createAssistantCronCanonicalRuntimeRecord,
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
@@ -83,6 +91,7 @@ import type {
   AssistantChannelDependencies,
 } from '../src/assistant/channels/types.ts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { LinqFetch } from '@murphai/operator-config/linq-runtime'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -90,6 +99,7 @@ import type {
 import {
   deliverAssistantMessageOverBinding,
 } from '../src/outbound-channel.ts'
+import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const mockedDeliverAssistantMessageOverBinding = vi.mocked(
@@ -101,6 +111,18 @@ const TEST_LINQ_DELIVERY_SOURCE: NonNullable<
 > = {
   kind: 'linq',
   fromPhoneNumber: '+15550000',
+}
+
+const NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'daily_nutrition',
+  localDate: '2026-07-28',
+  mealCount: 3,
+  totals: {
+    calories: { total: 1_490.25, mealCount: 3 },
+    proteinGrams: { total: 94.5, mealCount: 3 },
+    carbsGrams: { total: 193.125, mealCount: 3 },
+    fatGrams: { total: 34.75, mealCount: 3 },
+  },
 }
 
 const tempRoots: string[] = []
@@ -965,6 +987,312 @@ describe('assistant outbox runtime', () => {
     expect(
       receipt?.timeline.filter((event) => event.kind === 'delivery.queued'),
     ).toHaveLength(1)
+  })
+
+  it('persists and dispatches response cards through the existing outbox owner', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-card-')
+    const rendered = renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD)
+    const intent = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: 'stable-response-card-token',
+      message: 'model-authored text must not become the durable card message',
+      sessionId: 'session-response-card',
+      threadId: 'thread-response-card',
+      threadIsDirect: true,
+      turnId: 'turn-response-card',
+      vault: vaultRoot,
+    })
+
+    expect(intent.card).toEqual(NUTRITION_RESPONSE_CARD)
+    expect(intent.media).toEqual([])
+    expect(intent.message).toBe(rendered)
+    await expect(readRawOutboxIntent(vaultRoot, intent.intentId)).resolves
+      .toMatchObject({
+        card: NUTRITION_RESPONSE_CARD,
+        media: [],
+        message: rendered,
+      })
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageId: 'linq-response-card-delivered',
+        target: 'thread-response-card',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        card: NUTRITION_RESPONSE_CARD,
+        media: [],
+        message: rendered,
+      }),
+      expect.objectContaining({
+        persistLinqAppCardTextFallback: expect.any(Function),
+      }),
+    )
+
+    await expect(createAssistantOutboxIntent({
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      media: [{
+        alt: null,
+        kind: 'image',
+        source: null,
+        url: 'https://cdn.example.test/nutrition.png',
+      }],
+      message: rendered,
+      sessionId: 'session-response-card-conflict',
+      threadId: 'thread-response-card',
+      threadIsDirect: true,
+      turnId: 'turn-response-card-conflict',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+    })
+
+    await expect(createAssistantOutboxIntent({
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      message: rendered,
+      sessionId: 'session-response-card-group-conflict',
+      threadId: 'thread-response-card-group',
+      threadIsDirect: false,
+      turnId: 'turn-response-card-group-conflict',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
+    })
+  })
+
+  it('persists one text-only fallback identity before acceptance and reuses it after restart', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-card-fallback-restart-',
+    )
+    const intent = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: 'stable-card-fallback-restart',
+      deliverySource: TEST_LINQ_DELIVERY_SOURCE,
+      message: 'ignored model prose',
+      sessionId: 'session-card-fallback-restart',
+      threadId: 'thread-card-fallback-restart',
+      threadIsDirect: true,
+      turnId: 'turn-card-fallback-restart',
+      vault: vaultRoot,
+    })
+    const originalIdempotencyKey = `assistant-outbox:${intent.intentId}`
+    const fallbackIdempotencyKey = `${originalIdempotencyKey}:fallback`
+    const processTerminated = new Error('simulated process termination')
+    const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>()
+    const providerRequests: Array<Record<string, unknown>> = []
+    const fetchImplementation: LinqFetch = vi.fn(async (url, init) => {
+      const body = typeof init.body === 'string'
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : {}
+      providerRequests.push(body)
+      if (url.endsWith('/capability/check_imessage')) {
+        return new Response(JSON.stringify({ available: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      const message = body.message as {
+        parts?: Array<{ type?: string }>
+      } | undefined
+      if (message?.parts?.[0]?.type === 'imessage_app') {
+        return new Response(JSON.stringify({ error: 'unsupported app card' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 400,
+        })
+      }
+      return new Response(JSON.stringify({
+        message: { id: 'linq-card-fallback-text' },
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    await useActualOutboundDeliveryImplementation()
+    sendLinq.mockImplementationOnce(async (request) => {
+      expect(request).toMatchObject({
+        card: NUTRITION_RESPONSE_CARD,
+        idempotencyKey: originalIdempotencyKey,
+      })
+      const delivered = await sendLinqMessage(request, {
+        env: {
+          LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation,
+        ...(request.persistAppCardTextFallback
+          ? {
+              persistAppCardTextFallback:
+                request.persistAppCardTextFallback,
+            }
+          : {}),
+      })
+      await expect(readAssistantOutboxIntent(vaultRoot, intent.intentId)).resolves
+        .toMatchObject({
+          card: null,
+          deliveryIdempotencyKey: fallbackIdempotencyKey,
+          status: 'sending',
+        })
+      expect(delivered.idempotencyKey).toBe(fallbackIdempotencyKey)
+      throw processTerminated
+    })
+
+    await expect(dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      dispatchHooks: {
+        shouldRethrowDispatchError: ({ error }) => error === processTerminated,
+      },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-07-31T01:00:00.000Z'),
+      vault: vaultRoot,
+    })).rejects.toBe(processTerminated)
+
+    const interrupted = await readAssistantOutboxIntent(vaultRoot, intent.intentId)
+    expect(interrupted).toMatchObject({
+      card: null,
+      delivery: null,
+      deliveryIdempotencyKey: fallbackIdempotencyKey,
+      status: 'sending',
+    })
+
+    sendLinq.mockImplementationOnce(async (request) => {
+      return await sendLinqMessage(request, {
+        env: {
+          LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation,
+      })
+    })
+    const replayed = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-07-31T01:15:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(sendLinq).toHaveBeenCalledTimes(2)
+    expect(sendLinq.mock.calls[1]?.[0]).toMatchObject({
+      idempotencyKey: fallbackIdempotencyKey,
+      message: renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD),
+    })
+    expect(sendLinq.mock.calls[1]?.[0]).not.toHaveProperty('card')
+    expect(providerRequests).toHaveLength(4)
+    expect(providerRequests.slice(1).map((request) => (
+      request.message as { idempotency_key?: string }
+    ).idempotency_key)).toEqual([
+      originalIdempotencyKey,
+      fallbackIdempotencyKey,
+      fallbackIdempotencyKey,
+    ])
+    expect(replayed.intent).toMatchObject({
+      card: null,
+      deliveryIdempotencyKey: fallbackIdempotencyKey,
+      status: 'sent',
+      delivery: {
+        idempotencyKey: fallbackIdempotencyKey,
+        providerMessageId: 'linq-card-fallback-text',
+      },
+    })
+  })
+
+  it('reuses the first frozen card for one scheduled closeout occurrence', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-card-transport-identity-',
+    )
+    const scheduledCloseout: Pick<AssistantCronJob, 'jobId' | 'state' | 'target'> = {
+      jobId: 'cron_daily_meal_closeout',
+      state: {
+        nextRunAt: '2026-07-29T01:00:00.000Z',
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        consecutiveFailures: 0,
+        lastError: null,
+        runningAt: null,
+        runningPid: null,
+      },
+      target: {
+        alias: null,
+        channel: 'linq',
+        deliverySource: {
+          fromPhoneNumber: '+15550000',
+          kind: 'linq',
+        },
+        sessionId: null,
+        identityId: 'identity-closeout',
+        participantId: '+15550001',
+        threadId: 'thread-response-card',
+        deliveryTarget: null,
+      },
+    }
+    const transportIdentity = buildAssistantCronNotificationDedupeToken({
+      job: scheduledCloseout,
+      trigger: 'scheduled',
+    })
+    expect(transportIdentity).not.toBeNull()
+
+    const first = await createAssistantOutboxIntent({
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: transportIdentity,
+      deliveryIdempotencyKey: transportIdentity,
+      message: 'ignored model prose',
+      sessionId: 'session-response-card-transport',
+      threadId: 'thread-response-card-transport',
+      threadIsDirect: true,
+      turnId: 'turn-response-card-transport',
+      vault: vaultRoot,
+    })
+
+    const retry = await createAssistantOutboxIntent({
+      card: {
+        ...NUTRITION_RESPONSE_CARD,
+        totals: {
+          ...NUTRITION_RESPONSE_CARD.totals,
+          calories: {
+            ...NUTRITION_RESPONSE_CARD.totals.calories,
+            total: 1_491.25,
+          },
+        },
+      },
+      channel: 'linq',
+      dedupeToken: transportIdentity,
+      deliveryIdempotencyKey: transportIdentity,
+      message: 'different ignored model prose',
+      sessionId: 'session-response-card-transport',
+      threadId: 'thread-response-card-transport',
+      threadIsDirect: true,
+      turnId: 'turn-response-card-transport',
+      vault: vaultRoot,
+    })
+
+    expect(retry.intentId).toBe(first.intentId)
+    expect(retry.card).toEqual(NUTRITION_RESPONSE_CARD)
+    expect(retry.message).toBe(first.message)
+    expect(retry.deliveryIdempotencyKey).toBe(first.deliveryIdempotencyKey)
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toHaveLength(1)
   })
 
   it('stores response media while explicit dedupe tokens ignore media drift', async () => {
@@ -2915,6 +3243,61 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(2)
   })
 
+  it('blocks a queued one-shot at activeUntil before provider entry', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-16T14:20:00.000Z'))
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-active-until-',
+    )
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      activeUntil: '2026-07-16T14:30:00.000Z',
+      now: new Date('2026-07-16T14:20:00.000Z'),
+      schedule: {
+        at: '2026-07-16T14:29:00.000Z',
+        kind: 'at',
+      },
+      slug: 'outbox-active-until-authority',
+      title: 'Outbox active-until authority',
+      vaultRoot,
+    })
+    const queued = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'This one-shot must not send after its window.',
+      sessionId: 'session-outbox-active-until',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-outbox-active-until',
+      vault: vaultRoot,
+    })
+
+    vi.setSystemTime(new Date('2026-07-16T14:30:00.000Z'))
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+    })
+    await expect(showAutomation({
+      automationId: automation.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      status: 'archived',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
   it.each([
     { label: 'paused', status: 'paused' as const },
     { label: 'stopped', status: 'archived' as const },
@@ -4362,6 +4745,179 @@ describe('assistant outbox runtime', () => {
     })
   })
 
+  it('keeps Linq text-plus-link partial delivery retryable with its accepted text identity', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-link-partial-')
+
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'thread-linq-link',
+      message: 'Use this payment link https://pay.example.test/session',
+      sessionId: 'session-linq-link-partial',
+      turnId: 'turn-linq-link-partial',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('rich-link endpoint failed'), {
+        code: 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY',
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: 'linq-text-message',
+        providerMessageIds: ['linq-text-message'],
+        providerThreadId: 'thread-linq-link',
+        target: 'thread-linq-link',
+        targetKind: 'thread',
+      }),
+    )
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:23:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('retryable')
+    expect(dispatched.intent.deliveryConfirmationPending).toBe(false)
+    expect(dispatched.intent.nextAttemptAt).not.toBeNull()
+    expect(dispatched.intent.delivery).toMatchObject({
+      channel: 'linq',
+      messageLength: seeded.message.length,
+      providerMessageId: 'linq-text-message',
+      providerMessageIds: ['linq-text-message'],
+      providerThreadId: 'thread-linq-link',
+      target: 'thread-linq-link',
+      targetKind: 'thread',
+    })
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+
+    const deliveryIdempotencyKey = mockedDeliverAssistantMessageOverBinding
+      .mock.calls[0]?.[0].idempotencyKey
+    expect(deliveryIdempotencyKey).toBe(`assistant-outbox:${seeded.intentId}`)
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: deliveryIdempotencyKey,
+        providerMessageId: 'linq-link-message',
+        providerMessageIds: ['linq-text-message', 'linq-link-message'],
+        providerThreadId: 'thread-linq-link',
+        target: 'thread-linq-link',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const recovered = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:24:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(recovered.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(2)
+    expect(mockedDeliverAssistantMessageOverBinding.mock.calls[1]?.[0])
+      .toMatchObject({ idempotencyKey: deliveryIdempotencyKey })
+  })
+
+  it.each([
+    ['an ambiguous primary replay', 'primary replay acknowledgement was lost'],
+    ['an accepted-outcome callback failure', 'accepted outcome callback timed out'],
+  ])(
+    'keeps a Linq rich-link checkpoint non-confirmable through %s',
+    async (_label, ambiguousMessage) => {
+      const { vaultRoot } = await createAssistantVault(
+        'assistant-outbox-linq-link-sticky-checkpoint-',
+      )
+      const seeded = await createIntent(vaultRoot, {
+        channel: 'linq',
+        explicitTarget: 'thread-linq-link-sticky',
+        message: 'Use this payment link https://pay.example.test/session',
+        sessionId: 'session-linq-link-sticky',
+        turnId: 'turn-linq-link-sticky',
+      })
+      const partialFailure = Object.assign(
+        new Error('rich-link endpoint failed'),
+        {
+          code: 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY',
+          deliveryMayHaveSucceeded: true,
+          providerMessageId: 'linq-text-message',
+          providerMessageIds: ['linq-text-message'],
+          providerThreadId: 'thread-linq-link-sticky',
+          target: 'thread-linq-link-sticky',
+          targetKind: 'thread',
+        },
+      )
+      mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(partialFailure)
+
+      const partial = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: seeded.intentId,
+        now: new Date('2026-04-08T04:23:00.000Z'),
+        vault: vaultRoot,
+      })
+      const deliveryIdempotencyKey = mockedDeliverAssistantMessageOverBinding
+        .mock.calls[0]?.[0].idempotencyKey
+      expect(partial.intent).toMatchObject({
+        deliveryConfirmationPending: false,
+        status: 'retryable',
+      })
+
+      mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+        Object.assign(new Error(ambiguousMessage), {
+          deliveryMayHaveSucceeded: true,
+        }),
+      )
+      const ambiguous = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: seeded.intentId,
+        now: new Date('2026-04-08T04:24:00.000Z'),
+        vault: vaultRoot,
+      })
+
+      expect(ambiguous.intent).toMatchObject({
+        deliveryConfirmationPending: false,
+        status: 'retryable',
+      })
+      expect(ambiguous.intent.delivery).toMatchObject({
+        providerMessageIds: ['linq-text-message'],
+      })
+      expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(2)
+      expect(mockedDeliverAssistantMessageOverBinding.mock.calls[1]?.[0])
+        .toMatchObject({ idempotencyKey: deliveryIdempotencyKey })
+
+      mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+        delivery: createDelivery({
+          channel: 'linq',
+          idempotencyKey: deliveryIdempotencyKey,
+          providerMessageId: 'linq-link-message',
+          providerMessageIds: ['linq-text-message', 'linq-link-message'],
+          providerThreadId: 'thread-linq-link-sticky',
+          target: 'thread-linq-link-sticky',
+          targetKind: 'thread',
+        }),
+        deliveryDeduplicated: false,
+        deliveryTransportIdempotent: true,
+        outboxIntentId: null,
+        session: undefined,
+      })
+      const recovered = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: seeded.intentId,
+        now: new Date('2026-04-08T04:25:00.000Z'),
+        vault: vaultRoot,
+      })
+
+      expect(recovered.intent.status).toBe('sent')
+      expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(3)
+      expect(mockedDeliverAssistantMessageOverBinding.mock.calls[2]?.[0])
+        .toMatchObject({ idempotencyKey: deliveryIdempotencyKey })
+    },
+  )
+
   it('abandons Linq media-only voice memo ambiguity without retrying', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-voice-only-')
 
@@ -4857,6 +5413,7 @@ async function expectRawOutboxIntentMessage(
   expect(raw.media).toEqual(message.media)
   expect(raw.subject).toBe(message.subject)
   expect(raw.replyToMessageId).toBe(message.replyToMessageId)
+  expect(raw).not.toHaveProperty('card')
   expect(raw).not.toHaveProperty('operation')
   expect(raw).not.toHaveProperty('payload')
 }
@@ -4880,6 +5437,7 @@ async function createIntent(
     actorId: string | null
     answeredMailboxItemIds: string[]
     automationAuthority: AssistantOutboxIntent['automationAuthority']
+    card: AssistantResponseCard | null
     channel: string | null
     createdAt: string
     deliveryIdempotencyKey: string | null
@@ -4905,6 +5463,7 @@ async function createIntent(
     actorId: overrides.actorId ?? null,
     answeredMailboxItemIds: overrides.answeredMailboxItemIds,
     automationAuthority: overrides.automationAuthority,
+    card: overrides.card ?? null,
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
     deliveryIdempotencyKey: overrides.deliveryIdempotencyKey,

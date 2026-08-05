@@ -23,6 +23,10 @@ describe("chooseHostedLinqHomeLine", () => {
           ["+15550100002", 100],
         ]),
         preferredRecipientPhone: preferred.phoneNumber,
+        recentMessageEffectsByLineLookupKey: new Map([
+          [preferred.phoneNumberLookupKey, 10_000],
+          ["lookup:+15550100002", 0],
+        ]),
       }),
     ).toBe(preferred);
   });
@@ -40,6 +44,10 @@ describe("chooseHostedLinqHomeLine", () => {
           [belowTarget.phoneNumber, HOSTED_LINQ_PLANNING_LOAD_TARGET_MESSAGES - 1],
         ]),
         preferredRecipientPhone: preferred.phoneNumber,
+        recentMessageEffectsByLineLookupKey: new Map([
+          [preferred.phoneNumberLookupKey, 0],
+          [belowTarget.phoneNumberLookupKey, 10_000],
+        ]),
       }),
     ).toBe(belowTarget);
   });
@@ -60,6 +68,7 @@ describe("chooseHostedLinqHomeLine", () => {
           ["+15550100002", 2_000],
         ]),
         preferredRecipientPhone: "+15550100001",
+        recentMessageEffectsByLineLookupKey: new Map(),
       })?.phoneNumber,
     ).toBe("+15550100002");
   });
@@ -77,6 +86,10 @@ describe("chooseHostedLinqHomeLine", () => {
           [leastLoaded.phoneNumber, 5_100],
         ]),
         preferredRecipientPhone: preferred.phoneNumber,
+        recentMessageEffectsByLineLookupKey: new Map([
+          [preferred.phoneNumberLookupKey, 0],
+          [leastLoaded.phoneNumberLookupKey, 10_000],
+        ]),
       }),
     ).toBe(leastLoaded);
   });
@@ -95,8 +108,37 @@ describe("chooseHostedLinqHomeLine", () => {
           [line.phoneNumber, providerDailyMessageGuideline + 1_000],
         ]),
         preferredRecipientPhone: line.phoneNumber,
+        recentMessageEffectsByLineLookupKey: new Map(),
       }),
     ).toBe(line);
+  });
+
+  it("routes a new assignment away from a line with much higher recent message load", () => {
+    const busyLine = buildLine("+15550100001", {
+      assignmentWeight: 1_000,
+    });
+    const quietLine = buildLine("+15550100002", {
+      assignmentWeight: 1,
+    });
+
+    expect(
+      chooseHostedLinqHomeLine({
+        lines: [busyLine, quietLine],
+        newAssignmentsByRecipientPhone: new Map([
+          [busyLine.phoneNumber, 0],
+          [quietLine.phoneNumber, 4],
+        ]),
+        plannedMessagesByRecipientPhone: new Map([
+          [busyLine.phoneNumber, 0],
+          [quietLine.phoneNumber, 4_000],
+        ]),
+        preferredRecipientPhone: null,
+        recentMessageEffectsByLineLookupKey: new Map([
+          [busyLine.phoneNumberLookupKey, 10_000],
+          [quietLine.phoneNumberLookupKey, 100],
+        ]),
+      }),
+    ).toBe(quietLine);
   });
 });
 
@@ -114,6 +156,7 @@ describe("chooseHostedLinqSignupWelcomeLine", () => {
         ]),
         plannedMessagesByRecipientPhone: new Map(),
         preferredRecipientPhone: preferred.phoneNumber,
+        recentMessageEffectsByLineLookupKey: new Map(),
       }),
     ).toBe(fallback);
   });
@@ -131,6 +174,7 @@ describe("chooseHostedLinqSignupWelcomeLine", () => {
         ]),
         plannedMessagesByRecipientPhone: new Map(),
         preferredRecipientPhone: line.phoneNumber,
+        recentMessageEffectsByLineLookupKey: new Map(),
       }),
     ).toBeNull();
   });
@@ -146,6 +190,7 @@ describe("chooseHostedLinqSignupWelcomeLine", () => {
         newAssignmentsByRecipientPhone: new Map([[line.phoneNumber, 10]]),
         plannedMessagesByRecipientPhone: new Map(),
         preferredRecipientPhone: line.phoneNumber,
+        recentMessageEffectsByLineLookupKey: new Map(),
       }),
     ).toBeNull();
   });
@@ -162,6 +207,7 @@ describe("chooseHostedLinqSignupWelcomeLine", () => {
         newAssignmentsByRecipientPhone: new Map([[line.phoneNumber, 1]]),
         plannedMessagesByRecipientPhone: new Map(),
         preferredRecipientPhone: line.phoneNumber,
+        recentMessageEffectsByLineLookupKey: new Map(),
       }),
     ).toBe(line);
   });

@@ -57,7 +57,9 @@ import {
 import {
   bindHostedActiveLinqHomeChat,
   bindHostedActiveTelegramMember,
+  issueHostedAppSessionForTest,
   listHostedRuntimeLogsForTest,
+  readHostedDeviceSyncConnectionForTest,
   readHostedLinqWorkspaceIsolationStateForTest,
   readHostedThreadRouteForTest,
   readHostedJunctionDeviceSyncReplayDrainStatus,
@@ -65,6 +67,8 @@ import {
   seedHostedJunctionDeviceSyncReplay,
   seedHostedActiveLinqMember,
   seedHostedActiveMember,
+  type HostedAppSessionForTest,
+  type HostedDeviceSyncConnectionForTest,
   type HostedJunctionDeviceSyncConnectionSeedInput,
   type HostedJunctionDeviceSyncConnectionSeedResult,
   type HostedJunctionDeviceSyncReplayDrainStatus,
@@ -168,6 +172,18 @@ export interface HostedLocalFullStackScenario {
   /** Passively observes new hosted work; it never triggers runtime processing. */
   waitForLatestPendingWake(userId: string): Promise<HostedRunnerStatusResponse>;
   buildFailureMessage(userId: string, summaryLines: readonly string[]): Promise<string>;
+  /**
+   * Mints a real hosted app session cookie for a seeded member using the same
+   * HMAC key the hosted web process runs with.
+   */
+  issueHostedAppSession(input: {
+    memberId: string;
+    privyUserId: string;
+  }): Promise<HostedAppSessionForTest>;
+  readHostedDeviceSyncConnection(input: {
+    memberId: string;
+    provider?: string;
+  }): Promise<HostedDeviceSyncConnectionForTest>;
   seedActiveHostedLinqMember(input: HostedActiveLinqMemberSeedArgs): Promise<void>;
   seedActiveHostedMember(input: HostedActiveMemberSeedArgs): Promise<void>;
   readJunctionDeviceSyncReplayDrainStatus(input: {
@@ -207,6 +223,7 @@ export async function startHostedLocalFullStackScenario(input: {
   seedEnvironment?: NodeJS.ProcessEnv;
   streamLogs?: boolean;
   testControls?: boolean;
+  webProcessEnvOverrides?: NodeJS.ProcessEnv;
 }): Promise<HostedLocalFullStackScenario> {
   const assistantProviderRequests: HostedLocalAssistantProviderStubRequest[] = [];
   const providerRequestBodyFingerprintSecret = randomUUID();
@@ -332,7 +349,10 @@ export async function startHostedLocalFullStackScenario(input: {
       statusPath: (userId: string) => `/internal/users/${encodeURIComponent(userId)}/status`,
       streamLogs: input.streamLogs,
       testControls,
-      webProcessEnvOverrides: buildHostedLocalFullStackWebProcessEnvOverrides(runtimeEnv),
+      webProcessEnvOverrides: {
+        ...buildHostedLocalFullStackWebProcessEnvOverrides(runtimeEnv),
+        ...(input.webProcessEnvOverrides ?? {}),
+      },
     });
     preparedRunnerBundleCacheKeys.add(runnerBundleCacheKey);
     const scenarioHarness = harness;
@@ -441,6 +461,21 @@ export async function startHostedLocalFullStackScenario(input: {
           wake,
         }),
       harness: scenarioHarness,
+      issueHostedAppSession: async (sessionInput) =>
+        await issueHostedAppSessionForTest({
+          environment: buildScenarioSeedEnvironment({
+            HOSTED_APP_SESSION_HMAC_KEY: scenarioHarness.hostedAppSessionHmacKey,
+          }),
+          memberId: sessionInput.memberId,
+          privyUserId: sessionInput.privyUserId,
+          secureCookieMode: scenarioHarness.webUsesProductionArtifact,
+        }),
+      readHostedDeviceSyncConnection: async (connectionInput) =>
+        await readHostedDeviceSyncConnectionForTest({
+          environment: buildScenarioSeedEnvironment(),
+          memberId: connectionInput.memberId,
+          provider: connectionInput.provider,
+        }),
       seedActiveHostedLinqMember: async (seedInput) => {
         await seedHostedActiveLinqMember({
           billingPlanCode: seedInput.billingPlanCode,

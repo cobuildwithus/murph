@@ -8,7 +8,7 @@ import {
 } from "@/src/components/hosted-onboarding/hosted-auth-required-screen";
 
 const SETTINGS_AUTH_REQUIRED_PROPS = {
-  description: "Sign in to verify and finish your Pulse update.",
+  description: "Sign in to verify and finish your billing update.",
   eyebrow: "Subscription",
   eyebrowIcon: CreditCard,
   footer: "We will check this link against your account after you sign in.",

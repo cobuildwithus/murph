@@ -13,6 +13,11 @@ export const OPENAI_IMAGE_GENERATION_TIMEOUT_MS = 240_000
 export const OPENAI_IMAGE_GENERATION_USAGE_EXTRACTION_VERSION =
   'openai-images-v1'
 
+type OpenAiImageOperation = 'edit' | 'generation'
+
+const OPENAI_IMAGE_ERROR_MESSAGE_MAX_LENGTH = 300
+const OPENAI_IMAGE_ERROR_METADATA_MAX_LENGTH = 100
+
 export type OpenAiImageOutputFormat = 'jpeg' | 'png' | 'webp'
 export type OpenAiImageQuality = 'high' | 'low' | 'medium'
 export type OpenAiImageSize = '1024x1024' | '1024x1536' | '1536x1024'
@@ -74,17 +79,17 @@ async function generateOpenAiImageFromPrompt(input: {
   quality: OpenAiImageQuality
   size: OpenAiImageSize
 }): Promise<OpenAiImageGenerationResult> {
-  const response = await input.fetchImpl(`${OPENAI_IMAGES_BASE_URL}/images/generations`, {
+  return await requestOpenAiImage({
+    abortSignal: input.abortSignal ?? null,
+    apiKey: input.apiKey,
     body: JSON.stringify(buildOpenAiImageGenerationRequest(input)),
+    fetchImpl: input.fetchImpl,
     headers: {
-      authorization: `Bearer ${input.apiKey}`,
       'content-type': 'application/json',
     },
-    method: 'POST',
-    signal: buildOpenAiImageAbortSignal(input.abortSignal ?? null),
+    operation: 'generation',
+    path: '/images/generations',
   })
-
-  return await readOpenAiImageGenerationResult(response)
 }
 
 async function editOpenAiImageWithReferences(input: {
@@ -112,16 +117,66 @@ async function editOpenAiImageWithReferences(input: {
     )
   }
 
-  const response = await input.fetchImpl(`${OPENAI_IMAGES_BASE_URL}/images/edits`, {
+  return await requestOpenAiImage({
+    abortSignal: input.abortSignal ?? null,
+    apiKey: input.apiKey,
     body: form,
-    headers: {
-      authorization: `Bearer ${input.apiKey}`,
-    },
-    method: 'POST',
-    signal: buildOpenAiImageAbortSignal(input.abortSignal ?? null),
+    fetchImpl: input.fetchImpl,
+    operation: 'edit',
+    path: '/images/edits',
   })
+}
 
-  return await readOpenAiImageGenerationResult(response)
+async function requestOpenAiImage(input: {
+  abortSignal: AbortSignal | null
+  apiKey: string
+  body: BodyInit
+  fetchImpl: typeof fetch
+  headers?: Record<string, string>
+  operation: OpenAiImageOperation
+  path: '/images/edits' | '/images/generations'
+}): Promise<OpenAiImageGenerationResult> {
+  const startedAtMs = Date.now()
+  try {
+    const response = await input.fetchImpl(
+      `${OPENAI_IMAGES_BASE_URL}${input.path}`,
+      {
+        body: input.body,
+        headers: {
+          ...(input.headers ?? {}),
+          authorization: `Bearer ${input.apiKey}`,
+        },
+        method: 'POST',
+        signal: buildOpenAiImageAbortSignal(input.abortSignal),
+      },
+    )
+    return await readOpenAiImageGenerationResult(response, input.operation)
+  } catch (error) {
+    if (error instanceof VaultCliError) {
+      throw error
+    }
+    if (input.abortSignal?.aborted || isAbortError(error)) {
+      throw error
+    }
+
+    const timedOut = isTimeoutError(error)
+    throw new VaultCliError(
+      'ASSISTANT_IMAGE_GENERATION_FAILED',
+      timedOut
+        ? `OpenAI image ${input.operation} request timed out after ${OPENAI_IMAGE_GENERATION_TIMEOUT_MS}ms.`
+        : `OpenAI image ${input.operation} request failed before a response was returned.`,
+      {
+        elapsedMs: Date.now() - startedAtMs,
+        failureStage: 'transport',
+        operation: input.operation,
+        provider: 'openai-images',
+        retryable: true,
+        timedOut,
+        timeoutMs: OPENAI_IMAGE_GENERATION_TIMEOUT_MS,
+        transportErrorName: readSafeTransportErrorName(error),
+      },
+    )
+  }
 }
 
 function buildOpenAiImageAbortSignal(abortSignal: AbortSignal | null): AbortSignal {
@@ -135,26 +190,45 @@ function buildOpenAiImageAbortSignal(abortSignal: AbortSignal | null): AbortSign
 
 async function readOpenAiImageGenerationResult(
   response: Response,
+  operation: OpenAiImageOperation,
 ): Promise<OpenAiImageGenerationResult> {
-  const providerRequestId =
-    normalizeNullableString(response.headers.get('x-request-id')) ??
-    normalizeNullableString(response.headers.get('openai-request-id')) ??
-    null
-  const payload = await readOpenAiJsonResponse(response)
+  const headerProviderRequestId =
+    readBoundedErrorString(
+      response.headers.get('x-request-id'),
+      OPENAI_IMAGE_ERROR_METADATA_MAX_LENGTH,
+    ) ??
+    readBoundedErrorString(
+      response.headers.get('openai-request-id'),
+      OPENAI_IMAGE_ERROR_METADATA_MAX_LENGTH,
+    )
+  const payload = await readOpenAiJsonResponse(response, {
+    allowInvalidJson: !response.ok,
+    providerRequestId: headerProviderRequestId,
+  })
 
   if (!response.ok) {
+    const providerError = readOpenAiImageErrorBody(payload)
     throw new VaultCliError(
       'ASSISTANT_IMAGE_GENERATION_FAILED',
-      'OpenAI image generation failed.',
+      `OpenAI image ${operation} request failed with HTTP ${response.status}.`,
       {
-        providerRequestId,
-        retryable: response.status === 429 || response.status >= 500,
+        failureStage: 'http',
+        operation,
+        provider: 'openai-images',
+        providerErrorCode: providerError.code,
+        providerErrorMessage: providerError.message,
+        providerRequestId:
+          headerProviderRequestId ?? providerError.requestId,
+        retryable:
+          response.status === 408 ||
+          response.status === 429 ||
+          response.status >= 500,
         status: response.status,
       },
     )
   }
 
-  return parseOpenAiImageGenerationPayload(payload, providerRequestId)
+  return parseOpenAiImageGenerationPayload(payload, headerProviderRequestId)
 }
 
 function buildOpenAiImageGenerationRequest(input: {
@@ -172,14 +246,24 @@ function buildOpenAiImageGenerationRequest(input: {
   }
 }
 
-async function readOpenAiJsonResponse(response: Response): Promise<unknown> {
+async function readOpenAiJsonResponse(
+  response: Response,
+  input: {
+    allowInvalidJson: boolean
+    providerRequestId: string | null
+  },
+): Promise<unknown> {
   try {
     return await response.json()
   } catch {
+    if (input.allowInvalidJson) {
+      return null
+    }
     throw new VaultCliError(
       'ASSISTANT_IMAGE_GENERATION_INVALID_RESPONSE',
       'OpenAI image generation returned invalid JSON.',
       {
+        providerRequestId: input.providerRequestId,
         retryable: false,
         status: response.status,
       },
@@ -320,6 +404,68 @@ function normalizeTokenDetails(
   return Object.keys(normalized).length > 0 ? normalized : null
 }
 
+interface OpenAiImageErrorBody {
+  code: string | null
+  message: string | null
+  requestId: string | null
+}
+
+function readOpenAiImageErrorBody(payload: unknown): OpenAiImageErrorBody {
+  const record = asRecord(payload)
+  const error = asRecord(record?.error)
+  return {
+    code: readBoundedErrorString(
+      error?.code ?? error?.type,
+      OPENAI_IMAGE_ERROR_METADATA_MAX_LENGTH,
+    ),
+    message: readBoundedErrorString(
+      error?.message,
+      OPENAI_IMAGE_ERROR_MESSAGE_MAX_LENGTH,
+    ),
+    requestId: readBoundedErrorString(
+      error?.request_id ?? record?.request_id,
+      OPENAI_IMAGE_ERROR_METADATA_MAX_LENGTH,
+    ),
+  }
+}
+
+function readBoundedErrorString(
+  value: unknown,
+  maxLength: number,
+): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const normalized = value
+    .replace(/[\u0000-\u001f\u007f-\u009f]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+  if (!normalized) {
+    return null
+  }
+  const codePoints = Array.from(normalized)
+  return codePoints.length > maxLength
+    ? `${codePoints.slice(0, maxLength - 1).join('')}…`
+    : normalized
+}
+
+function readSafeTransportErrorName(error: unknown): string | null {
+  if (!(error instanceof Error)) {
+    return null
+  }
+  return /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(error.name)
+    ? error.name
+    : null
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'TimeoutError'
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -328,9 +474,4 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-}
-
-function normalizeNullableString(value: string | null | undefined): string | null {
-  const normalized = value?.trim()
-  return normalized ? normalized : null
 }

@@ -341,6 +341,7 @@ describe('channel helper seams', () => {
         kind: 'participant',
         target: 'participant-7',
       },
+      card: null,
       candidate: {
         kind: 'participant',
         target: 'participant-7',
@@ -472,7 +473,11 @@ describe('channel helper seams', () => {
       target: '  delivered-chat  ',
     })
     const sendLinq = vi.fn().mockResolvedValue({
-      providerMessageId: '  linq-message  ',
+      providerMessageId: '  linq-link-message  ',
+      providerMessageIds: [
+        '  linq-text-message  ',
+        '  linq-link-message  ',
+      ],
     })
     const sendEmail = vi.fn().mockResolvedValue({
       providerMessageId: '  email-message  ',
@@ -636,7 +641,8 @@ describe('channel helper seams', () => {
       channel: 'linq',
       idempotencyKey: 'idem-linq',
       messageLength: 10,
-      providerMessageId: 'linq-message',
+      providerMessageId: 'linq-link-message',
+      providerMessageIds: ['linq-text-message', 'linq-link-message'],
       providerThreadId: null,
       sentAt: FIXED_NOW.toISOString(),
       target: 'thread-linq-11',

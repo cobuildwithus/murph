@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -14,6 +14,8 @@ import {
   seedHostedWorkspaceCheckpointForTest,
   seedHostedWorkspaceInboxMediaRetentionWakeForTest,
   setLatestHostedLinqReplyLatencyForTest,
+  signalHostedMailboxAppendRuntimeForTest,
+  signalHostedRuntimeRecheckRuntimeForTest,
 } from "#hosted-web-testing";
 import {
   buildHostedExecutionAssistantAskCompletedWake,
@@ -21,6 +23,7 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
+  buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionGroupNewsletterEmailNeededWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActivatedWake,
@@ -45,12 +48,6 @@ import {
 import {
   createCloudflareHostedControlClient,
 } from "@murphai/cloudflare-hosted-control/client";
-import {
-  createHostedRuntimeTemporalClientFromEnv,
-} from "@murphai/hosted-orchestrator-temporal/client/temporal-client";
-import {
-  signalHostedUserRuntimeWorkflow,
-} from "@murphai/hosted-orchestrator-temporal/client";
 import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
@@ -166,9 +163,13 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
   it("replies promptly while every durable system wake kind owns the runner", async () => {
     await seedProbe(systemMailboxProbe);
     const stagedMealPhoto = await stageMealPhotoForProbe(systemMailboxProbe);
+    const stagedEnvironmentVoice = await stageEnvironmentVoiceForProbe(
+      systemMailboxProbe,
+    );
     const systemWakes = buildEverySystemWake(
       systemMailboxProbe,
       stagedMealPhoto,
+      stagedEnvironmentVoice,
     );
     expect(systemWakes.map((wake) => wake.kind).sort()).toEqual(
       HOSTED_EXECUTION_WAKE_KINDS
@@ -903,18 +904,19 @@ async function signalTemporalRuntime(
       }
     | { kind: "runtime_recheck_requested" },
 ): Promise<void> {
-  const client = await createHostedRuntimeTemporalClientFromEnv(
-    requireScenario().runtimeEnv,
-  );
-  try {
-    await signalHostedUserRuntimeWorkflow({
-      client,
-      signal,
-      userId,
+  if (signal.kind === "mailbox_appended") {
+    await signalHostedMailboxAppendRuntimeForTest({
+      environment: requireScenario().runtimeEnv,
+      expectedUserId: userId,
+      mailboxItemId: signal.mailboxItemId,
     });
-  } finally {
-    await client.connection.close();
+    return;
   }
+
+  await signalHostedRuntimeRecheckRuntimeForTest({
+    environment: requireScenario().runtimeEnv,
+    userId,
+  });
 }
 
 async function waitForAssistantProviderInput(
@@ -990,6 +992,12 @@ function buildEverySystemWake(
     byteLength: number;
     captureId: string;
     mealPhotoKey: string;
+    sha256: string;
+  },
+  environmentVoice: {
+    audioKey: string;
+    byteLength: number;
+    captureId: string;
     sha256: string;
   },
 ): HostedExecutionWake[] {
@@ -1104,6 +1112,18 @@ function buildEverySystemWake(
       reason: "webhook_hint",
       userId: identity.userId,
     }),
+    buildHostedExecutionEnvironmentVoiceCapturedWake({
+      audioKey: environmentVoice.audioKey,
+      byteLength: environmentVoice.byteLength,
+      captureId: environmentVoice.captureId,
+      capturedAt: requestedAt,
+      contentType: "audio/webm",
+      durationMs: 1_000,
+      eventId: `environment-voice.captured:priority:${runId}`,
+      memberId: identity.userId,
+      occurredAt: requestedAt,
+      sha256: environmentVoice.sha256,
+    }),
     buildHostedExecutionGroupNewsletterEmailNeededWake({
       eventId: `group-newsletter.email-needed:priority:${runId}`,
       groupDisplayName: "Priority gate",
@@ -1184,6 +1204,39 @@ function buildEverySystemWake(
       userId: identity.userId,
     }),
   ];
+}
+
+async function stageEnvironmentVoiceForProbe(identity: ProbeIdentity): Promise<{
+  audioKey: string;
+  byteLength: number;
+  captureId: string;
+  sha256: string;
+}> {
+  const bytes = new Uint8Array(await readFile(path.join(
+    process.cwd(),
+    "fixtures/demo-web-vault/raw/smoke/hosted-runner.wav",
+  )));
+  const captureId = createHash("sha256")
+    .update(`foreground-priority-environment-voice:${identity.userId}`)
+    .digest("hex");
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const staged = await createCloudflareHostedControlClient({
+    allowHttpLocalhost: true,
+    baseUrl: requireScenario().harness.workerBaseUrl,
+    getBearerToken: async () => requireScenario().harness.oidcToken,
+  }).stageEnvironmentVoice({
+    bytes,
+    captureId,
+    contentType: "audio/webm",
+    sha256,
+    userId: identity.userId,
+  });
+  return {
+    audioKey: staged.audioKey,
+    byteLength: staged.byteLength,
+    captureId,
+    sha256: staged.sha256,
+  };
 }
 
 async function stageMealPhotoForProbe(identity: ProbeIdentity): Promise<{

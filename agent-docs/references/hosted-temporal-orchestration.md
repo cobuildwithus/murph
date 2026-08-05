@@ -26,9 +26,9 @@ The final ownership split is:
 The public Murph repository owns the released orchestration contracts,
 hosted-local harness, and architecture guardrails. The private
 `cobuildwithus/murph-cloud` repository owns the production Temporal worker,
-Render Blueprint, deploy workflow, and operational runbook. The public
-implementation remains only as a temporary rollback reference during the
-source cutover and must not own a second production deployment path.
+Render Blueprint, deploy workflow, operational runbook, and rollback through
+previously deployed private versions. Public Murph contains no worker
+implementation or second production deployment path.
 
 Temporal decides when to ask Cloudflare to process based on web-owned
 reconciliation facts and pointer-only signals. Cloudflare starts or wakes the
@@ -124,8 +124,13 @@ Allowed Temporal state is tiny and pointer-only:
 - Latest opaque mailbox pointer fields: mailbox item pointer, lane, and lane
   sequence.
 - Source-less mailbox and recheck wake hints. Manual runs, browser-vault
-  refreshes, and device-sync requests are durable system-mailbox rows; Temporal
-  signals only wake the reconciliation loop.
+  refreshes, and device-sync requests are durable system-mailbox rows; their
+  Temporal signals only wake the reconciliation loop. A payload-free
+  `runtime_wake_requested` signal may additionally set one coalesced boolean
+  that calls the existing Cloudflare processing adapter when facts are idle. It
+  carries no provider value or credential, is discarded while facts are
+  blocked, and is cleared after accepted processing only when no newer wake
+  arrived.
 - Global device-sync scheduled-wake Schedule id, interval, Workflow start options, and
   count-only due-reconcile sweep results. The reconciler may remember that a
   sweep ran and how many due-reconcile rows/wakes it touched; it must not
@@ -176,8 +181,8 @@ compatibility paths in the completed hard cut. Operators stopped the old
 workers, terminated the incompatible `hosted-user-runtime:*` histories,
 deployed the matching web, Temporal, and Cloudflare contract set, and reseeded
 new histories with `runtime_recheck_requested` or mailbox signals. Do not repeat
-that history reset for the repository relocation: the current public and
-private workers retain the same Workflow code and identities.
+that history reset for the repository relocation: the private worker was
+relocated without changing Workflow code or identities.
 
 Workflow implementations must version-gate future command-order changes around
 awaited facts reads and execution calls unless the deployment is another
@@ -187,6 +192,12 @@ of clearing state derived from a stale read. Workflow timers that should be
 preempted by fresh signals, including owner-recheck waits after accepted
 processing, must use a signal-aware `condition()` timeout instead of a bare
 timer sleep.
+
+`runtime_wake_requested` adds a command path only after that new signal event;
+older histories cannot contain it, and carry-forward state defaults its
+coalesced bit to false. This preserves replay determinism without a history
+reset. Roll out Cloudflare runtime support first, then the Temporal worker, and
+deploy Web last so no producer can send the signal to an older workflow bundle.
 
 The workflow type constant must match the exported workflow function name
 exactly. Temporal TypeScript workflow type names are function names, so renaming
@@ -277,8 +288,9 @@ reconciles.
 
 ## Workflow Replay And Versioning
 
-`packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts`
-is a long-lived per-user Temporal Workflow. Any change that adds, removes, or
+Private `cobuildwithus/murph-cloud` owns the long-lived per-user Temporal
+Workflow under its `packages/hosted-orchestrator-temporal` package. Any change
+that adds, removes, or
 reorders awaited command-producing Temporal APIs requires an explicit replay
 compatibility plan before deployment. This includes Activity proxy calls,
 durable timers or `condition()` timeouts, `continueAsNew`, child Workflow
@@ -300,13 +312,13 @@ fixtures must be redacted or synthetic: do not commit raw mailbox payloads,
 prompts, transcripts, provider responses, secrets, local paths, or direct user
 identifiers just to prove replay.
 
-The reconciliation-before-mailbox patch is in the `deprecatePatch()` phase.
+The reconciliation-before-mailbox patch is in the `deprecatePatch()` phase in
+Murph Cloud.
 After production pre-patch histories drained, the old direct-mailbox branch and
 synthetic pre-patch replay fixture were removed. The workflow must keep the
 `deprecatePatch()` marker and patch id until a later removal phase confirms the
-deprecatePatch-window histories have drained. The root
-`hosted-temporal:guard` check requires that marker and the CI package-coverage
-entry to remain present.
+deprecatePatch-window histories have drained. Private replay and package
+coverage gates require that marker to remain present.
 
 ## Final Minimal Contract
 
@@ -366,6 +378,19 @@ replacement on the existing Task Queue and must not terminate or reset current
 histories.
 
 ## Cloudflare Execution Adapter Contract
+
+Health-data consent remains Web-owned and never enters Temporal history as a
+second state projection. Every Cloudflare `ensure-processing` operation first
+uses the signed Web callback to read the current `launch.health-data` grant and
+refuses a start or wake for explicit revocation. Web withdrawal separately
+calls Vercel OIDC-authenticated
+`POST /internal/users/:userId/runtime/health-data-consent`; the per-user Durable
+Object serializes that command with ensures, re-reads current consent, clears
+the write fence, and destroys the runner before returning a revoked result.
+Renewal waits on the same command before committing its new grant and then
+signals the existing per-user Temporal workflow. This is an execution barrier,
+not a Temporal workflow termination path, durable consent mirror, queue, lease,
+or reconciliation loop.
 
 Temporal calls a single Cloudflare processing adapter:
 
@@ -550,10 +575,10 @@ The hard-cut architecture is accepted when:
   or hard-disabled for production.
 - The root `hosted-temporal:guard` script remains wired into `pnpm typecheck`
   and `pnpm test:diff` so legacy Vercel nudge workflows, Cloudflare scheduler
-  methods, and business payload fields in Temporal workflow history surfaces
-  cannot re-enter production source silently; it also requires the hosted user
-  runtime `deprecatePatch()` marker and CI package-coverage entry to remain
-  present during the reconciliation-before-mailbox patch retirement window.
+  methods, business payload fields in shared orchestration contracts, and a
+  public Temporal worker implementation cannot re-enter production source
+  silently. Murph Cloud independently owns Workflow bundle and replay-policy
+  gates.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration

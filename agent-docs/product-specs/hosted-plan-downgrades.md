@@ -1,10 +1,11 @@
-# Hosted Plan Downgrades
+# Hosted Scheduled Plan Changes
 
 Last verified: 2026-07-30
 
 ## Goal
 
-Maintain a clean Edge-to-Pulse plan switch that relies on Stripe for billing state, timing, invoices, and future subscription changes.
+Maintain narrow direct-plan changes that rely on Stripe for billing state,
+timing, invoices, and future subscription changes.
 
 The product behavior is:
 
@@ -16,17 +17,19 @@ The product behavior is:
 
 ## Current State
 
-The app supports both the Pulse-to-Edge upgrade and the explicit Edge-to-Pulse
-scheduled switch:
+The app supports immediate upgrades and explicit renewal-bound changes:
 
-- `POST /api/settings/billing/upgrade-plan` accepts only `launch_edge_monthly`.
-- `upgradeHostedBillingPlan` is upgrade-shaped and only permits `launch_monthly -> launch_edge_monthly`.
-- `POST /api/settings/billing/switch-to-pulse` schedules `launch_edge_monthly -> launch_monthly` at the next renewal through `scheduleHostedBillingPlanSwitchToPulse`.
-- `/settings` computes and renders both upgrade and switch actions when the current billing state makes them eligible.
+- `POST /api/settings/billing/upgrade-plan` accepts Pulse or Edge targets.
+- `upgradeHostedBillingPlan` permits Group to Pulse or Edge and Pulse to Edge.
+- `POST /api/settings/billing/switch-plan` schedules an eligible Group or Pulse
+  target at the current paid period or active trial end.
+- the historical Edge-to-Pulse route and service remain compatibility delegates;
+- `/settings` computes and renders only transitions admitted by the shared
+  server policy.
 - `Manage subscription` opens Stripe Customer Portal for payment methods, invoices, and other Stripe-managed account work.
 
-The app-owned Edge-to-Pulse path is intentionally narrow; arbitrary plan
-transitions still stay out of scope.
+The transition graph is explicit. Arbitrary plan-code routing, reversal, and
+merging with foreign schedules stay out of scope.
 
 ## Hosted Assistant Configuration
 
@@ -38,6 +41,13 @@ turn:
   Venice rollout flag is enabled, an active personal member may choose Venice
   instead. The choice changes core assistant inference only; specialized tools
   can continue to use their own managed providers.
+- Settings may state that Murph disables OpenAI response storage because the
+  direct Responses path sends `store: false`, which [disables Responses API
+  storage](https://developers.openai.com/api/docs/guides/migrate-to-responses#4-decide-when-to-use-statefulness).
+  This does not promise zero data retention: OpenAI separately documents
+  [abuse-monitoring, prompt-cache, and endpoint retention
+  controls](https://developers.openai.com/api/docs/guides/your-data#v1responses),
+  and third-party tools remain subject to their own retention policies.
 - Settings may call Venice privacy-first and state that Venice stores no prompts
   or replies, consistent with [Venice's API privacy
   documentation](https://docs.venice.ai/welcome/privacy). This is a
@@ -78,10 +88,17 @@ turn:
   model, and reasoning effort or a synthetic thread-container's resolved room
   model to the runner at the next hosted invocation boundary. If Venice is
   disabled, a stored personal Venice preference resolves to OpenAI without
-  deleting member intent. This is also the activation boundary for changes made
-  through Settings. An already-active invocation can retain that snapshot
-  through its bounded 180-second idle window, so Settings states that an idle
-  run can take up to three minutes to close.
+  deleting member intent. This remains the activation boundary for changes made
+  through Settings. After an effective provider change commits, Settings sends
+  a bounded payloadless Temporal runtime-wake signal. Temporal coalesces
+  duplicate provider wakes and asks the existing Cloudflare adapter to process
+  one even when reconciliation facts are idle. A warm invocation compares its
+  provider snapshot with the live Web-owned preference, checkpoints immediately
+  when they differ, and returns the existing immediate-recheck edge so a fresh
+  invocation adopts the saved provider before the next message. Signal failure
+  does not undo the durable save: the next invocation and the provider-entry
+  revalidation remain correctness backstops. Model-only and reasoning-only
+  changes keep the existing warm-invocation behavior.
 - A confirmed `murph.assistant_configuration` update is different: its
   authoritative full web response becomes an ephemeral target for the next
   separately accepted provider turn, including a follow-up serviced by the
@@ -107,8 +124,10 @@ turn:
   ambiguous input authority fails closed.
   Murph may suggest Luna or an Edge upgrade, but it must not switch model or
   reasoning effort automatically because usage is low or exhausted.
-- Changing the preference does not create a mailbox item, wake, queue, or a
-  second runtime state machine.
+- Changing a preference does not create a mailbox item, queue, or second runtime
+  state machine. An effective provider change from authenticated Settings sends
+  only `runtime_wake_requested`; unchanged, model-only, and reasoning-only saves
+  do not. Existing `runtime_recheck_requested` callers remain facts-only.
 
 Conversation style remains independently available through
 `murph.personalization`, which atomically reads or updates the private member's
@@ -238,25 +257,25 @@ member, confirm a same-invocation follow-up reports it, update style through
 personalization, and verify usage retains both requested-model and served-model
 attribution.
 
-## First-Version Scope
+## Current Scope
 
-Keep the implemented first version intentionally narrow.
+Keep the implemented transition graph intentionally narrow.
 
-The supported transition is:
+Supported scheduled transitions:
 
-- Edge paid subscription to Pulse at renewal.
+- active Pulse trial to eligible Group at trial end;
+- paid Pulse to eligible Group at renewal;
+- paid Edge to Pulse or eligible Group at renewal.
 
 Do not build:
 
-- a generic plan-transition engine
-- arbitrary `targetPlanCode` routing
+- an open-ended plan-transition engine
+- unvalidated `targetPlanCode` routing
 - in-app schedule reversal
 - Customer Portal plan switching
 - local timers or cron-based entitlement changes
 - switch-request entitlement, current plan, usage allowance, usage period, or
   runner-state updates
-
-Future plan changes can generalize after this path is proven in Stripe test clocks and production.
 
 ## Stripe Constraints
 
@@ -264,7 +283,11 @@ Use Stripe as the source of truth, but do not use Customer Portal plan switching
 
 Stripe Customer Portal supports scheduled downgrades in general, but the app keeps this in-product switch explicit so pending state, schedule compatibility, and allowance reconciliation stay under Murph control.
 
-`subscription_update_confirm` is also not a fit because Stripe currently allows only one item in that flow and says subscriptions with multiple items cannot be updated through it.
+`subscription_update_confirm` owns immediate paid-plan upgrades after the
+retired hosted-AI metered items are removed and each eligible direct
+subscription has one licensed item. It does not own the scheduled transitions
+in this spec: Stripe Subscription Schedules remain the correct primitive for
+end-of-period downgrades and Group switches.
 
 Stripe Subscription Schedules are the correct Stripe-owned primitive for this behavior. They are designed for future subscription changes, including downgrades, and phase metadata updates the underlying subscription metadata when a phase starts.
 
@@ -277,15 +300,18 @@ Relevant Stripe docs:
 
 ## Product Policy
 
-Supported transition:
+Supported scheduled transitions:
 
-- `launch_edge_monthly -> launch_monthly`
+- `launch_monthly -> launch_group_monthly` while trialing or paid;
+- `launch_edge_monthly -> launch_monthly`;
+- `launch_edge_monthly -> launch_group_monthly`.
 
 Unsupported transitions:
 
-- Pulse to Pulse
-- Edge to Edge
-- trial-state switches
+- same-plan changes
+- Group to a lower plan
+- trial-state switches other than Pulse trial to Group at trial end
+- Group selection without confirmed current membership
 - switches without a Stripe customer and subscription
 - switches while a conflicting Stripe schedule is already attached
 
@@ -440,9 +466,8 @@ Important schedule rules:
   and Temporal runtime signals happen only after subscription reconciliation
   observes Stripe's applied Pulse prices.
 
-First version supports only canonical hosted subscriptions with exactly the known hosted plan items:
-
-- one configured Edge recurring price
+The service supports only canonical hosted subscriptions with exactly one
+configured recurring Price for the current direct plan.
 
 Reject subscriptions with unknown active licensed items, duplicate known recurring items, non-month recurring intervals, unsupported quantities, or unmarked metered add-ons. Marked legacy hosted AI usage metered items may be dropped by the schedule update; do not silently preserve unknown add-ons into the future phase.
 

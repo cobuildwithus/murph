@@ -56,6 +56,7 @@ export type HostedSystemMailboxRouteAction =
   | "continue-assistant-ask"
   | "run-clinical-records-sync"
   | "run-device-sync-wake"
+  | "run-environment-voice"
   | "apply-runtime-control-request";
 
 export interface HostedSystemMailboxPendingItem {
@@ -498,6 +499,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "continue-assistant-ask"
     || value === "run-clinical-records-sync"
     || value === "run-device-sync-wake"
+    || value === "run-environment-voice"
     || value === "apply-runtime-control-request"
   ) {
     return value;
@@ -597,6 +599,27 @@ function parseHostedSystemMailboxRecordRequest(
       ),
       kind: "codex-auth.updated",
       phase: record.phase,
+    };
+  }
+
+  if (record.kind === "environment-voice.audio-delete") {
+    assertHostedSystemMailboxRecordKeys(
+      record,
+      ["audioKey", "kind"],
+      "hosted system mailbox Environment voice postCheckpointRecord",
+    );
+    const audioKey = readRequiredString(
+      record.audioKey,
+      "hosted system mailbox Environment voice postCheckpointRecord audioKey",
+    );
+    if (!/^[a-f0-9]{40}$/u.test(audioKey)) {
+      throw new TypeError(
+        "hosted system mailbox Environment voice postCheckpointRecord audioKey is invalid.",
+      );
+    }
+    return {
+      audioKey,
+      kind: "environment-voice.audio-delete",
     };
   }
 

@@ -36,6 +36,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 import {
   HostedRuntimeArtifactReadError,
+  HostedRuntimeArtifactWriteError,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
@@ -429,6 +430,19 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(platform.subscriptionToolPort).toBeDefined();
     expect(platform.subscriptionToolPort?.request).toEqual(expect.any(Function));
+  });
+
+  it("attaches physical-note transport only when explicitly enabled", () => {
+    const disabled = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+    });
+    const enabled = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      physicalNotesEnabled: true,
+    });
+
+    expect(disabled.physicalNotes).toBeUndefined();
+    expect(enabled.physicalNotes?.send).toEqual(expect.any(Function));
   });
 
   it("attaches the hosted labs port when web-control transport is available", () => {
@@ -7094,6 +7108,58 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(serializedLogs).not.toContain("member_123");
     expect(serializedLogs).not.toContain("runtime_write_123");
     expect(serializedLogs).not.toContain("temporary failure");
+  });
+
+  it.each([
+    { retryable: true, status: 408 },
+    { retryable: true, status: 429 },
+    { retryable: true, status: 503 },
+    { retryable: false, status: 422 },
+  ])("classifies artifact upload HTTP $status failures", async ({
+    retryable,
+    status,
+  }) => {
+    const fetchMock = vi.fn(async () => new Response(null, { status }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    let rejectedError: unknown;
+    try {
+      await platform.artifactStore.put({
+        bytes: new Uint8Array([1, 2, 3]),
+        sha256: "a".repeat(64),
+      });
+    } catch (error) {
+      rejectedError = error;
+    }
+
+    expect(rejectedError).toBeInstanceOf(HostedRuntimeArtifactWriteError);
+    expect(rejectedError).toMatchObject({ retryable });
+  });
+
+  it("classifies artifact upload transport failures as retryable", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("fetch failed");
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    let rejectedError: unknown;
+    try {
+      await platform.artifactStore.put({
+        bytes: new Uint8Array([1, 2, 3]),
+        sha256: "a".repeat(64),
+      });
+    } catch (error) {
+      rejectedError = error;
+    }
+
+    expect(rejectedError).toBeInstanceOf(HostedRuntimeArtifactWriteError);
+    expect(rejectedError).toMatchObject({ retryable: true });
   });
 
   it("validates the workspace lease immediately before web checkpoint callbacks", async () => {

@@ -79,6 +79,7 @@ import {
   MURPH_GENERATE_SONG_TOOL,
 } from '../src/assistant-codex/dynamic-tools/generate-song.js'
 import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.js'
 import {
@@ -607,8 +608,9 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
       expect(plan.systemPrompt).toContain(
-        'Set `durationSeconds` to 5–15',
+        'Set `durationSeconds` to exactly 15',
       )
+      expect(plan.systemPrompt).not.toContain('durationSeconds` to 5–15')
       expect(plan.systemPrompt).toContain('at most four short lyric lines')
       expect(plan.systemPrompt).toContain(
         'Never infer the contributor or payer identity',
@@ -785,7 +787,7 @@ describe('assistant Codex turn planning', () => {
       resolveAssistantVoiceOptionElevenLabsVoiceId('drill-sergeant'),
     )
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
-      ordinaryToolNames,
+      ordinaryToolNames.filter((name) => name !== 'attach_response_card'),
     )
 
     const onboardingGoalCheckinPlan = await resolveAssistantRouteTurnPlan({
@@ -1965,11 +1967,80 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
           voiceMemoGenerationAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
     )
+  })
+
+  it('offers response cards to current private requests and managed closeout', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    const common = {
+      executionContext: null,
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-28',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+    } satisfies Omit<
+      Parameters<typeof resolveAssistantRouteTurnPlan>[0],
+      'input' | 'sharedPlan'
+    >
+    const toolNames = async (
+      input: AssistantMessageInput,
+      sharedPlan = createSharedPlan(),
+    ) => (await resolveAssistantRouteTurnPlan({
+      ...common,
+      input,
+      sharedPlan,
+    })).dynamicTools.map((tool) => tool.name)
+
+    await expect(toolNames({
+      ...createMessageInput(),
+      scheduledInvocationAuthority: {
+        automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+        occurrenceAt: '2026-07-28T21:00:00.000-04:00',
+      },
+      scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
+      turnTrigger: 'automation-cron',
+    })).resolves.toContain('attach_response_card')
+    await expect(toolNames(createMessageInput())).resolves.toContain(
+      'attach_response_card',
+    )
+    await expect(toolNames({
+      ...createMessageInput(),
+      scheduledInvocationAuthority: {
+        automationId: 'automation_other',
+        occurrenceAt: '2026-07-28T21:00:00.000-04:00',
+      },
+      scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
+      turnTrigger: 'automation-cron',
+    })).resolves.not.toContain('attach_response_card')
+    await expect(toolNames(
+      {
+        ...createMessageInput(),
+        scheduledInvocationAuthority: {
+          automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+          occurrenceAt: '2026-07-28T21:00:00.000-04:00',
+        },
+        threadIsDirect: false,
+      },
+      createSharedPlan({}, {
+        effectiveThreadIsDirect: false,
+        threadIsDirect: false,
+      }),
+    )).resolves.not.toContain('attach_response_card')
   })
 
   it('exposes private style settings to email turns only with exact-turn sender authority', async () => {
@@ -2126,8 +2197,13 @@ describe('assistant Codex turn planning', () => {
     expect(maintenance.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
     expect(maintenance.systemPrompt).not.toContain('Lab test discovery:')
     expect(scheduled.dynamicTools.map((tool) => tool.name)).toContain('labs')
+    expect(scheduled.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'attach_response_card',
+    )
     expect(scheduled.dynamicTools.map((tool) => tool.name)).toEqual(
-      direct.dynamicTools.map((tool) => tool.name),
+      direct.dynamicTools
+        .map((tool) => tool.name)
+        .filter((name) => name !== 'attach_response_card'),
     )
     expect(scheduled.systemPrompt).toContain('Lab test discovery:')
     expect(outputOnly.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
@@ -2211,6 +2287,7 @@ describe('assistant Codex turn planning', () => {
           assistantStyleSettingsAvailable: true,
           messageTargetingAvailable: true,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
           voiceMemoGenerationAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
@@ -2259,6 +2336,7 @@ describe('assistant Codex turn planning', () => {
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -2290,6 +2368,7 @@ describe('assistant Codex turn planning', () => {
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -2318,6 +2397,7 @@ describe('assistant Codex turn planning', () => {
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -2342,6 +2422,7 @@ describe('assistant Codex turn planning', () => {
           messageTargetingAvailable: false,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -2397,6 +2478,7 @@ describe('assistant Codex turn planning', () => {
           assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
@@ -2495,7 +2577,7 @@ describe('assistant Codex turn planning', () => {
     expect(groupTools[0]).toMatchObject({
       inputSchema: {
         properties: {
-          action: { enum: ['read_shared', 'post_join_offer'] },
+          action: { enum: ['read_shared', 'offer_access'] },
         },
       },
     })
@@ -2504,10 +2586,13 @@ describe('assistant Codex turn planning', () => {
       'current authorized scheduled group turn',
     )
     expect(groupTools[0]?.description).toContain(
-      'trusted host binds group, route, and offer copy',
+      'trusted host binds group and route and uses only the first-party link path',
     )
     expect(groupTools[0]?.description).toContain(
-      'A posted offer leaves existing membership and other grants unchanged.',
+      'unavailable proves no consent surface',
+    )
+    expect(groupTools[0]?.description).toContain(
+      'Existing membership and other grants stay unchanged.',
     )
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
@@ -2533,6 +2618,11 @@ describe('assistant Codex turn planning', () => {
       'use `murph.send_progress_update` much more sparingly than in a direct conversation',
     )
     expect(attendedPlan.systemPrompt).toContain(
+      '`murph.select_reply_target` annotates the one eventual group response',
+    )
+    expect(attendedPlan.systemPrompt).toContain('run shell `sleep 4`')
+    expect(attendedPlan.systemPrompt).toContain('one final `sleep 6`')
+    expect(attendedPlan.systemPrompt).not.toContain(
       'including every `---` bubble',
     )
 

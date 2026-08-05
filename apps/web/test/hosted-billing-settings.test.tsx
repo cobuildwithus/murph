@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import type { HostedPlanUsageAvailableStatus } from "@murphai/hosted-execution/plan-usage";
+import type {
+  HostedPlanUsageAvailableStatus,
+  HostedPlanUsageSubscriptionActionQuote,
+} from "@murphai/hosted-execution/plan-usage";
 import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, test, vi } from "vitest";
@@ -11,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   requestHostedOnboardingJson: vi.fn(),
   requestHostedPulseTrialContinuation: vi.fn(),
   requestHostedPulseTrialStartPaid: vi.fn(),
+  requestHostedTrialPlanStartPaid: vi.fn(),
   routerRefresh: vi.fn(),
   routerReplace: vi.fn(),
 }));
@@ -37,6 +41,27 @@ function buildUsageStatus(
   };
 }
 
+function buildSubscriptionActionQuote(input: {
+  label: string;
+  targetPlanCode: HostedPlanUsageSubscriptionActionQuote["targetPlanCode"];
+  timing: HostedPlanUsageSubscriptionActionQuote["timing"];
+}): HostedPlanUsageSubscriptionActionQuote {
+  const monthlyPriceUsdCents = input.targetPlanCode === "launch_group_monthly"
+    ? 350
+    : input.targetPlanCode === "launch_monthly"
+      ? 800
+      : 2_000;
+  return {
+    action: "change_plan",
+    expiresAt: "2026-07-10T12:10:00.000Z",
+    label: input.label,
+    monthlyPriceUsdCents,
+    quoteId: `quote_${input.targetPlanCode}_${input.timing}`,
+    targetPlanCode: input.targetPlanCode,
+    timing: input.timing,
+  };
+}
+
 vi.mock("@/src/components/hosted-onboarding/client-api", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/components/hosted-onboarding/client-api")
@@ -46,6 +71,7 @@ vi.mock("@/src/components/hosted-onboarding/client-api", async () => {
     requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
     requestHostedPulseTrialContinuation: mocks.requestHostedPulseTrialContinuation,
     requestHostedPulseTrialStartPaid: mocks.requestHostedPulseTrialStartPaid,
+    requestHostedTrialPlanStartPaid: mocks.requestHostedTrialPlanStartPaid,
   };
 });
 
@@ -129,10 +155,13 @@ describe("HostedBillingSettings", () => {
     vi.clearAllMocks();
     mocks.requestHostedOnboardingJson.mockResolvedValue({
       billingPlanCode: "launch_edge_monthly",
-      status: "upgraded",
+      status: "already_on_plan",
     });
     mocks.requestHostedPulseTrialStartPaid.mockResolvedValue({
       status: "started",
+    });
+    mocks.requestHostedTrialPlanStartPaid.mockResolvedValue({
+      status: "scheduled",
     });
     mocks.requestHostedPulseTrialContinuation.mockResolvedValue({
       status: "started",
@@ -159,6 +188,237 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Manage billing/);
   });
 
+  test("suppresses every plan-changing action while webhook projection is pending", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartFamily: true,
+      canSwitchToGroup: true,
+      canSwitchToPulse: true,
+      canUpgradeToEdge: true,
+      canUpgradeToPulse: true,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      currentPeriodEnd: new Date("2026-08-27T04:00:00.000Z"),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      planChangePending: true,
+      showGroupPlan: true,
+      usageStatus: buildUsageStatus({
+        recommendedAction: {
+          kind: "upgrade_edge",
+          label: "Upgrade from usage",
+          url: "https://example.test/settings#subscription",
+        },
+      }),
+    }));
+
+    assert.match(markup, /Current plan/);
+    assert.doesNotMatch(markup, /<button/);
+    assert.doesNotMatch(markup, /Upgrade from usage|Manage billing/);
+    assert.doesNotMatch(markup, /Everything in Pulse|2 to 6 people, one bill/);
+  });
+
+  test("shows the $3.50 Core plan only from the server-authorized catalog", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+
+    const hiddenMarkup = renderToStaticMarkup(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        currentBillingPlanCode: "launch_monthly",
+      },
+    ));
+    const visibleMarkup = renderToStaticMarkup(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canSwitchToGroup: true,
+        currentBillingPlanCode: "launch_monthly",
+        currentPeriodEnd: new Date("2026-08-01T00:00:00.000Z"),
+        showGroupPlan: true,
+      },
+    ));
+
+    assert.doesNotMatch(hiddenMarkup, />Core</);
+    assert.match(visibleMarkup, />Core</);
+    assert.match(visibleMarkup, /\$3\.50/);
+    assert.match(visibleMarkup, /Choose Core/);
+    assert.match(visibleMarkup, /Available to confirmed members/);
+  });
+
+  test("keeps Core members on the ordinary upgrade path", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+
+    const markup = renderToStaticMarkup(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canUpgradeToEdge: true,
+        canUpgradeToPulse: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_group_monthly",
+        showGroupPlan: true,
+      },
+    ));
+
+    assert.match(markup, />Core</);
+    assert.match(markup, /Current plan/);
+    assert.match(markup, /Choose Pulse/);
+    assert.match(markup, /Choose Edge/);
+  });
+
+  test("acknowledges a saved card and requires fresh exact-price Core confirmation", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartPaidPulse: true,
+        canSwitchToGroup: true,
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        groupPaymentMethodSaved: true,
+        showGroupPlan: true,
+      },
+    ));
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Payment method saved/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Core has not started/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Choose Core/,
+    );
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Review and start Core/,
+    );
+    assert.equal(mocks.requestHostedTrialPlanStartPaid.mock.calls.length, 0);
+    await rendered.cleanup();
+
+    const currentMarkup = renderToStaticMarkup(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_group_monthly",
+        showGroupPlan: true,
+      },
+    ));
+    assert.match(currentMarkup, /Current plan/);
+    assert.doesNotMatch(currentMarkup, /Core has not started/);
+  });
+
+  test("confirms the exact Core price and trial-end timing before scheduling", async () => {
+    const { StartPaidPulseButton } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(createElement(
+      StartPaidPulseButton,
+      {
+        targetPlanCode: "launch_group_monthly",
+        timing: "at_trial_end",
+      },
+      "Choose Core",
+    ));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Core begins at \$3\.50\/month when it ends/,
+    );
+
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Choose Core",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    assert.deepEqual(
+      mocks.requestHostedTrialPlanStartPaid.mock.calls[0]?.[0],
+      {
+        targetPlanCode: "launch_group_monthly",
+        timing: "at_trial_end",
+      },
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Core is set/,
+    );
+    await rendered.cleanup();
+  });
+
+  test("gives Pulse members a recovery path for a scheduled Core switch", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        scheduledBillingEffectiveAt:
+          new Date("2026-08-01T00:00:00.000Z"),
+        scheduledBillingPlanCode: "launch_group_monthly",
+        showGroupPlan: true,
+      },
+    ));
+
+    assert.match(markup, /Core starts Aug 1, 2026/);
+    assert.match(markup, /Pulse stays active until then/);
+    assert.match(markup, /Change scheduled plan/);
+    assert.match(markup, /mailto:support@withmurph\.ai/);
+  });
+
+  test("says syncing continues when Core AI usage is exhausted", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        usageStatus: buildUsageStatus({
+          planCode: "launch_group_monthly",
+          planName: "Group",
+          remainingPercent: 0,
+          status: "exhausted",
+          usedPercent: 100,
+        }),
+      },
+    ));
+
+    assert.match(markup, /wearable keeps syncing/);
+    assert.match(markup, /group activity stays current/);
+    assert.match(markup, /Core · Resets/);
+    assert.doesNotMatch(markup, /Group · Resets/);
+  });
+
   test("shows trial usage, timing, and a conservative forecast before the plan cards", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
@@ -182,8 +442,12 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /AI usage/);
     assert.match(markup, /aria-label="Pulse Trial AI usage"/);
-    assert.match(markup, /35% used/);
-    assert.match(markup, /65% remaining/);
+    assert.doesNotMatch(
+      markup,
+      /aria-label="Pulse Trial AI usage" class="[^"]*rounded-xl/u,
+    );
+    assert.match(markup, /aria-label="35% used, 65% remaining"/);
+    assert.match(markup, /<span[^>]*>65% remaining<\/span>/u);
     assert.match(markup, /Trial ends Jul 17, 2026/);
     assert.match(markup, /may run out in about 3 days/);
     assert.ok(markup.indexOf("AI usage") < markup.indexOf("Run experiments"));
@@ -216,6 +480,35 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, new RegExp(`aria-label="${planName} AI usage"`));
     assert.match(markup, /Resets Aug 1, 2026/);
+  });
+
+  test("shows the active Family owner their own Add usage action", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      familyState: "owner",
+      usageStatus: buildUsageStatus({
+        accessKind: "family_sponsored",
+        planName: "Family",
+        remainingPercent: 0,
+        status: "exhausted",
+        usedPercent: 100,
+      }),
+      usageTopUpCheckoutUrl:
+        "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
+      usageTopUpOffers: [{
+        amountLabel: "$5",
+        offerCode: "usage_5_usd",
+      }],
+      usageTopUpScope: "family",
+      usageTopUpTargetLabel: "you",
+    }));
+
+    assert.match(markup, />Add usage</);
+    assert.match(markup, /aria-label="Add usage for you"/);
+    assert.match(markup, /Add usage to continue/);
   });
 
   test("shows exhausted overall usage without inventing a forecast", async () => {
@@ -253,7 +546,6 @@ describe("HostedBillingSettings", () => {
       }),
       usageTopUpOffers: [{
         amountLabel: "$5",
-        estimatedMessages: 100,
         offerCode: "usage_5_usd",
       }],
     }));
@@ -345,6 +637,9 @@ describe("HostedBillingSettings", () => {
         hostedAiUsage: {
           findFirst: vi.fn(async () => null),
         },
+        hostedUsageCreditEntry: {
+          findFirst: vi.fn(async () => null),
+        },
       } as never,
       publicBaseUrl: null,
     });
@@ -362,7 +657,6 @@ describe("HostedBillingSettings", () => {
       usageStatus,
       usageTopUpOffers: [{
         amountLabel: "$5",
-        estimatedMessages: 100,
         offerCode: "usage_5_usd",
       }],
     }));
@@ -391,17 +685,14 @@ describe("HostedBillingSettings", () => {
       usageTopUpOffers: [
         {
           amountLabel: "$5",
-          estimatedMessages: 100,
           offerCode: "usage_5_usd",
         },
         {
           amountLabel: "$10",
-          estimatedMessages: 200,
           offerCode: "usage_10_usd",
         },
         {
           amountLabel: "$25",
-          estimatedMessages: 500,
           offerCode: "usage_25_usd",
         },
       ],
@@ -414,8 +705,9 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Add usage/);
     const addUsageButton = markup.match(/<button[^>]*>Add usage<\/button>/u)?.[0];
     assert.ok(addUsageButton);
-    assert.match(addUsageButton, /\bh-11\b/u);
+    assert.match(addUsageButton, /\bh-7\b/u);
     assert.match(addUsageButton, /\bborder-foreground\/20\b/u);
+    assert.match(addUsageButton, /\bshrink-0\b/u);
     assert.doesNotMatch(addUsageButton, /\bw-full\b/u);
   });
 
@@ -429,7 +721,6 @@ describe("HostedBillingSettings", () => {
       usageTopUpInitialOpen: true,
       usageTopUpOffers: [{
         amountLabel: "$10",
-        estimatedMessages: 200,
         offerCode: "usage_10_usd",
       }],
     }));
@@ -449,7 +740,6 @@ describe("HostedBillingSettings", () => {
       usageTopUpInitialOpen: true,
       usageTopUpOffers: [{
         amountLabel: "$10",
-        estimatedMessages: 200,
         offerCode: "usage_10_usd",
       }],
     }));
@@ -459,6 +749,40 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Choose an amount/);
     assert.doesNotMatch(markup, /Continue checkout/);
     assert.doesNotMatch(markup, /reconcil/iu);
+  });
+
+  test("mounts an exact return without offers or an active purchase", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(
+      createElement(HostedBillingSettings, {
+          authenticated: true,
+          payerMemberId: TEST_PAYER_MEMBER_ID,
+          usageStatus: buildUsageStatus(),
+          usageTopUpActivePurchase: null,
+          usageTopUpOffers: [],
+          usageTopUpPurchaseReturn: {
+            kind: "success",
+            purchaseId: "hucp_ownerreturn00000",
+          },
+          usageTopUpScope: "family",
+          usageTopUpTargetLabel: "you",
+        },
+      ),
+    );
+
+    assert.match(markup, /Confirming payment for you/);
+    assert.match(markup, /We’re confirming your payment/);
+    assert.doesNotMatch(
+      markup,
+      /Other checkout|unfinished checkout|another usage destination/i,
+    );
+    assert.equal(
+      mocks.requestHostedOnboardingJson.mock.calls.length,
+      0,
+      "server rendering must not perform purchase-status I/O",
+    );
   });
 
   test("offers Text Murph on a fulfilled top-up when a contact channel resolves", async () => {
@@ -525,7 +849,6 @@ describe("HostedBillingSettings", () => {
       }),
       usageTopUpOffers: [{
         amountLabel: "$5",
-        estimatedMessages: 100,
         offerCode: "usage_5_usd",
       }],
     }));
@@ -653,6 +976,133 @@ describe("HostedBillingSettings", () => {
     assert.match(ineligibleStartMarkup, /Start Pulse from usage/);
     assert.match(eligibleUpgradeMarkup, /Upgrade from usage/);
     assert.match(ineligibleUpgradeMarkup, /Upgrade from usage/);
+  });
+
+  test("keeps plan changes out of the usage band for an active trial", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartPaidPulse: true,
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        usageStatus: buildUsageStatus({
+          accessKind: "trial",
+          periodKind: "trial",
+          planName: "Pulse Trial",
+          recommendedAction: {
+            kind: "change_plan",
+            label: "Keep Pulse from usage",
+            targetPlanCode: "launch_monthly",
+            url: "https://example.test/settings#subscription",
+          },
+          subscriptionActionQuote: buildSubscriptionActionQuote({
+            label: "Keep Pulse from usage",
+            targetPlanCode: "launch_monthly",
+            timing: "at_trial_end",
+          }),
+        }),
+      },
+    ));
+
+    assert.doesNotMatch(markup, /Keep Pulse from usage/);
+    assert.match(markup, /Start Pulse plan/);
+  });
+
+  test("keeps immediate paid plan changes in the plan cards", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canUpgradeToPulse: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_group_monthly",
+        usageStatus: buildUsageStatus({
+          planCode: "launch_group_monthly",
+          planName: "Group",
+          recommendedAction: {
+            kind: "change_plan",
+            label: "Start Pulse now from usage",
+            targetPlanCode: "launch_monthly",
+            url: "https://example.test/settings#subscription",
+          },
+          subscriptionActionQuote: buildSubscriptionActionQuote({
+            label: "Start Pulse now from usage",
+            targetPlanCode: "launch_monthly",
+            timing: "immediate",
+          }),
+        }),
+      },
+    ));
+
+    assert.doesNotMatch(markup, /Start Pulse now from usage/);
+    assert.match(markup, /Choose Pulse/);
+  });
+
+  test("keeps period-end paid plan changes in the plan cards", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canSwitchToGroup: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        showGroupPlan: true,
+        usageStatus: buildUsageStatus({
+          recommendedAction: {
+            kind: "change_plan",
+            label: "Choose Group next month from usage",
+            targetPlanCode: "launch_group_monthly",
+            url: "https://example.test/settings#subscription",
+          },
+          subscriptionActionQuote: buildSubscriptionActionQuote({
+            label: "Choose Group next month from usage",
+            targetPlanCode: "launch_group_monthly",
+            timing: "period_end",
+          }),
+        }),
+      },
+    ));
+
+    assert.doesNotMatch(markup, /Choose Group next month from usage/);
+    assert.match(markup, /Choose Core/);
+  });
+
+  test("suppresses a plan change when the signed quote targets another plan", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        usageStatus: buildUsageStatus({
+          recommendedAction: {
+            kind: "change_plan",
+            label: "Choose Group next month from usage",
+            targetPlanCode: "launch_group_monthly",
+            url: "https://example.test/settings#subscription",
+          },
+          subscriptionActionQuote: buildSubscriptionActionQuote({
+            label: "Keep Pulse",
+            targetPlanCode: "launch_monthly",
+            timing: "period_end",
+          }),
+        }),
+      },
+    ));
+
+    assert.doesNotMatch(markup, /Choose Group next month from usage/);
   });
 
   test("shows the Pulse trial start action inline for Pulse trial members", async () => {
@@ -863,30 +1313,24 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /Edge/);
     assert.match(markup, /Scheduled to start May 6, 2026/);
-    assert.match(markup, /Switching to Pulse on May 6, 2026/);
-    assert.match(markup, /Want to keep Edge\? Contact support/);
+    assert.match(markup, /Pulse starts May 6, 2026/);
+    assert.match(markup, /Edge stays active until then/);
+    assert.match(markup, /Change scheduled plan/);
     assert.doesNotMatch(markup, /Switch to Pulse</);
   });
 
-  test("posts the Edge upgrade request and refreshes on success", async () => {
+  test("opens Stripe directly for an Edge upgrade without a duplicate confirmation", async () => {
     const { UpgradeToEdgeButton } = await import("@/src/components/settings/hosted-plan-upgrade-button");
     const rendered = await renderClientComponent(createElement(UpgradeToEdgeButton));
 
     await act(async () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
-    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
-    assert.match(rendered.window.document.body.textContent ?? "", /For when you want the full picture\./);
-    assert.match(rendered.window.document.body.textContent ?? "", /\$20\/ month/);
-
-    const confirmButton = findLastButtonByText(rendered.window.document, "Upgrade to Edge", rendered.window);
-    await act(async () => {
-      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
 
     assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
       method: "POST",
       payload: {
+        expectedCurrentPlanCode: "launch_monthly",
         targetPlanCode: "launch_edge_monthly",
       },
       url: "/api/settings/billing/upgrade-plan",
@@ -944,7 +1388,7 @@ describe("HostedBillingSettings", () => {
     });
     assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
     assert.match(rendered.window.document.body.textContent ?? "", /Start Pulse plan/);
-    assert.match(rendered.window.document.body.textContent ?? "", /Your trial ends and Pulse begins at \$8\/mo\./);
+    assert.match(rendered.window.document.body.textContent ?? "", /Your trial ends now and Pulse begins at \$8\/month/);
     assert.match(rendered.window.document.body.textContent ?? "", /\$8\/ month/);
 
     const confirmButton = findLastButtonByText(rendered.window.document, "Start Pulse", rendered.window);
@@ -1413,15 +1857,42 @@ describe("HostedBillingSettings", () => {
     await act(async () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
-    const confirmButton = findLastButtonByText(rendered.window.document, "Upgrade to Edge", rendered.window);
-    await act(async () => {
-      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
 
     assert.equal(mocks.routerRefresh.mock.calls.length, 0);
     assert.deepEqual(rendered.assign.mock.calls[0], [
       "https://stripe.example.test/portal/session_123",
     ]);
+
+    await rendered.cleanup();
+  });
+
+  test("restores the upgrade action with an accessible error when Stripe handoff fails", async () => {
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new Error("Could not open Stripe. Try again."),
+    );
+
+    const { UpgradeToEdgeButton } = await import(
+      "@/src/components/settings/hosted-plan-upgrade-button"
+    );
+    const rendered = await renderClientComponent(createElement(
+      UpgradeToEdgeButton,
+      { expectedCurrentPlanCode: "launch_monthly" },
+    ));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+      await Promise.resolve();
+    });
+
+    const alert = rendered.window.document.querySelector('[role="alert"]');
+    assert.ok(alert instanceof rendered.window.HTMLElement);
+    assert.match(alert.textContent ?? "", /Could not open Stripe\. Try again\./);
+    assert.equal(rendered.button.disabled, false);
+    assert.match(rendered.button.textContent ?? "", /Upgrade to Edge/);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+    assert.equal(rendered.assign.mock.calls.length, 0);
 
     await rendered.cleanup();
   });

@@ -1,7 +1,9 @@
 import "server-only";
 
 import {
+  HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
   isHostedEmailConversationMessageWake,
+  isHostedExecutionGroupReactionEventId,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   readHostedLinqConversationMessageContact,
@@ -36,8 +38,15 @@ import {
   createHostedLinqParticipantContactLookupKeyReadCandidates,
   type HostedLinqParticipantContactKind,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import {
+  buildHostedGrowthMessageSeries,
+  type HostedGrowthMessagePoint,
+} from "@/src/lib/hosted-ops/growth-message-series";
 import { HOSTED_MESSAGE_VOLUME_BASE } from "@/src/lib/message-volume";
 import { getPrisma } from "@/src/lib/prisma";
+
+export { buildHostedGrowthMessageSeries } from "@/src/lib/hosted-ops/growth-message-series";
+export type { HostedGrowthMessagePoint } from "@/src/lib/hosted-ops/growth-message-series";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAILY_SERIES_DAYS = 30;
@@ -227,6 +236,7 @@ export interface HostedGrowthDashboard {
   };
   current: HostedGrowthCurrentMetrics;
   dailySeries: HostedGrowthDailyPoint[];
+  messageSeries: HostedGrowthMessagePoint[];
   mrrWowPercent: number | null;
   newMembers: {
     today: number;
@@ -735,8 +745,12 @@ async function decodeHostedGrowthGroupMessages(
   prisma: HostedGrowthPrisma,
 ): Promise<HostedGrowthDecodedGroupMessages> {
   return runWithHostedDomainRootUnwrapCache(async () => {
+    // Retired reaction attestations were never sender evidence, so they must
+    // not mark an active-user window incomplete.
     const retiredMessageOccurredAt = rows.flatMap((row) =>
-      row.contentRetiredAt ? [row.occurredAt] : []
+      row.contentRetiredAt && !isHostedExecutionGroupReactionEventId(row.dedupeKey)
+        ? [row.occurredAt]
+        : []
     );
     const retainedRows = rows.filter((row) => !row.contentRetiredAt);
     const messages = await Promise.all(retainedRows.map(async (row) => {
@@ -803,6 +817,13 @@ function readHostedGrowthGroupSenderEvidence(
     if (wake.message.linqMessage.threadIsDirect !== false) {
       throw new Error("Hosted growth thread-container Linq message must be non-direct.");
     }
+    if (
+      isHostedExecutionGroupReactionEventId(wake.eventId)
+      && wake.message.linqMessage.from
+        === HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION
+    ) {
+      return null;
+    }
     const storedContact = readHostedLinqConversationMessageContact(wake.message);
     const currentContact = createHostedLinqParticipantContact({
       kind: storedContact.kind,
@@ -841,6 +862,13 @@ function readHostedGrowthGroupSenderEvidence(
   if (isHostedTelegramConversationMessageWake(wake)) {
     if (wake.message.telegramMessage.threadIsDirect !== false) {
       throw new Error("Hosted growth thread-container Telegram message must be non-direct.");
+    }
+    if (
+      isHostedExecutionGroupReactionEventId(wake.eventId)
+      && wake.message.telegramMessage.from
+        === HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION
+    ) {
+      return null;
     }
     if (wake.message.senderMemberId) {
       const identityKey = hostedGrowthMemberIdentity(wake.message.senderMemberId);
@@ -1032,6 +1060,7 @@ export async function readHostedGrowthDashboard(
     memberRows,
     rawTrialStartRows,
     snapshots,
+    messagesBeforeSeries,
     matureStarted,
     matureConverted,
     growthAggregate,
@@ -1086,6 +1115,21 @@ export async function readHostedGrowthDashboard(
         snapshotDate: {
           gte: dailyStart,
           lte: todayStart,
+        },
+      },
+    }),
+    prisma.hostedGrowthDailySnapshot.aggregate({
+      _count: {
+        inboundMessagesPriorDay: true,
+        outboundMessagesPriorDay: true,
+      },
+      _sum: {
+        inboundMessagesPriorDay: true,
+        outboundMessagesPriorDay: true,
+      },
+      where: {
+        snapshotDate: {
+          lt: dailyStart,
         },
       },
     }),
@@ -1279,6 +1323,16 @@ export async function readHostedGrowthDashboard(
     }),
     current,
     dailySeries,
+    messageSeries: buildHostedGrowthMessageSeries({
+      messagesBeforeSeries: HOSTED_MESSAGE_VOLUME_BASE +
+        (messagesBeforeSeries._sum.inboundMessagesPriorDay ?? 0) +
+        (messagesBeforeSeries._sum.outboundMessagesPriorDay ?? 0),
+      snapshots,
+      trackingEstablishedBeforeSeries:
+        messagesBeforeSeries._count.inboundMessagesPriorDay > 0
+        && messagesBeforeSeries._count.outboundMessagesPriorDay > 0,
+      windowEnd: now,
+    }),
     mrrWowPercent: comparableSnapshot === null
       ? null
       : calculatePercentChange(current.mrrUsdCents, comparableSnapshot.mrrUsdCents),

@@ -4,34 +4,37 @@ import {
   startHostedDirectRuntimeWakeBestEffort,
   type HostedDirectRuntimeWakeSource,
 } from "../hosted-execution/direct-runtime-wake";
+import {
+  createHostedPostCommitDeadline,
+  waitForHostedPostCommitOperation,
+} from "../hosted-onboarding/bounded-post-commit";
 import { signalHostedMailboxAppendRuntime } from "./signal-runtime";
 
-export function scheduleHostedMailboxWakeAfterResponse(input: {
+export async function handoffHostedMailboxWake(input: {
   directWakeSource: HostedDirectRuntimeWakeSource;
   expectedUserId: string;
   mailboxItemId: string;
-}): void {
-  const task = async () => {
-    try {
-      await signalHostedMailboxAppendRuntime({
-        expectedUserId: input.expectedUserId,
-        mailboxItemId: input.mailboxItemId,
-      });
-    } catch {
-      // The durable mailbox item remains reconciliation truth when signaling
-      // is unavailable. A direct wake must never bypass Temporal acceptance.
-      return;
-    }
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<void> {
+  const deadlineMs = createHostedPostCommitDeadline(input.timeoutMs);
+  await waitForHostedPostCommitOperation({
+    deadlineMs,
+    operation: (abortSignal) => signalHostedMailboxAppendRuntime({
+      abortSignal,
+      expectedUserId: input.expectedUserId,
+      mailboxItemId: input.mailboxItemId,
+    }),
+    signal: input.signal,
+  });
 
-    await startHostedDirectRuntimeWakeBestEffort({
-      source: input.directWakeSource,
-      userId: input.expectedUserId,
-    });
-  };
-
+  const directWake = startHostedDirectRuntimeWakeBestEffort({
+    source: input.directWakeSource,
+    userId: input.expectedUserId,
+  });
   try {
-    after(task);
+    after(() => directWake);
   } catch {
-    void task();
+    void directWake;
   }
 }

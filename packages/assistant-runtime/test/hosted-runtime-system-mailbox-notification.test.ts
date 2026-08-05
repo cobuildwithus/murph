@@ -81,6 +81,161 @@ beforeEach(() => {
 });
 
 describe("hosted system mailbox notification execution context", () => {
+  it("deletes staged environment audio only after the checkpoint boundary", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-",
+    );
+    const deleteEnvironmentVoice = vi.fn(async () => undefined);
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:environment-audio-cleanup",
+      memberId: "member_123",
+      notification: {
+        instructions: "Synthetic checkpoint record.",
+        route: {
+          actorId: "+15550001111",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq_thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "linq_thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: FIXED_NOW,
+    });
+    const item = {
+      attemptCount: 1,
+      itemId: "mailbox_environment_voice_1",
+      lastAttemptAt: FIXED_NOW,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      mailboxDedupeKey: wake.eventId,
+      mailboxLaneSeq: "1",
+      nextAttemptAt: null,
+      occurredAt: FIXED_NOW,
+      postCheckpointRecord: {
+        audioKey: "a".repeat(40),
+        kind: "environment-voice.audio-delete" as const,
+      },
+      requestId: null,
+      routeAction: "dispatch-assistant-notification" as const,
+      status: "recording" as const,
+      wake,
+    } satisfies HostedSystemMailboxPendingItem;
+
+    try {
+      expect(deleteEnvironmentVoice).not.toHaveBeenCalled();
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item,
+        runtime: createRuntime({
+          effectsPort: {
+            deleteEnvironmentVoice,
+            async readRawEmailMessage() {
+              return null;
+            },
+            async sendEmail() {},
+          },
+        }),
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        failed: 0,
+        recorded: 1,
+      });
+      expect(deleteEnvironmentVoice).toHaveBeenCalledWith("a".repeat(40));
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("retains the cleanup record for retry when environment audio deletion fails", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-",
+    );
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:environment-audio-retry",
+      memberId: "member_123",
+      notification: {
+        instructions: "Synthetic checkpoint retry record.",
+        route: {
+          actorId: "+15550001111",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq_thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "linq_thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: FIXED_NOW,
+    });
+    try {
+      mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "environment-voice",
+        nextWakeAt: null,
+        postCheckpointRecord: {
+          audioKey: "b".repeat(40),
+          kind: "environment-voice.audio-delete",
+        },
+        redactedLogEntries: [],
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          dedupeKey: wake.eventId,
+          id: "mailbox_environment_voice_retry",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const runtime = createRuntime({
+        effectsPort: {
+          async deleteEnvironmentVoice() {
+            throw new Error("temporary delete failure");
+          },
+          async readRawEmailMessage() {
+            return null;
+          },
+          async sendEmail() {},
+        },
+      });
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.ok(prepared);
+      assert.equal(prepared.status, "processed");
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: prepared.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        failed: 1,
+        recorded: 0,
+      });
+      const state = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(state.pending).toEqual([
+        expect.objectContaining({
+          itemId: "mailbox_environment_voice_retry",
+          postCheckpointRecord: {
+            audioKey: "b".repeat(40),
+            kind: "environment-voice.audio-delete",
+          },
+          status: "recording",
+        }),
+      ]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("bootstraps member activation before queued system maintenance", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const wake = buildHostedExecutionMemberActivatedWake({

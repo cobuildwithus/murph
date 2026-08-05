@@ -58,7 +58,12 @@ import type {
   HostedPhoneCallStartResponse,
 } from '@murphai/hosted-execution/phone-calls'
 import type {
+  HostedPhysicalNoteSendRequest,
+  HostedPhysicalNoteSendResponse,
+} from '@murphai/hosted-execution/physical-notes'
+import type {
   HostedPlanUsageStatus,
+  HostedPlanUsageToolRequest,
 } from '@murphai/hosted-execution/plan-usage'
 import type {
   HostedVaultShareSelectableProjectionScope,
@@ -237,6 +242,9 @@ export interface AssistantHostedProductFeedbackCandidateSink {
   acceptProductFeedbackCandidate(
     feedback: HostedRuntimeProductFeedbackRecord,
   ): void
+  deliverProductSupportEscalation?(
+    feedback: HostedRuntimeProductFeedbackRecord,
+  ): Promise<{ recorded: boolean }>
 }
 
 export interface AssistantHostedFamilyPlanTool {
@@ -246,7 +254,7 @@ export interface AssistantHostedFamilyPlanTool {
 }
 
 export interface AssistantHostedPlanUsageTool {
-  read(): Promise<HostedPlanUsageStatus>
+  read(request: HostedPlanUsageToolRequest): Promise<HostedPlanUsageStatus>
 }
 
 export interface AssistantHostedIMessageContactTool {
@@ -283,6 +291,7 @@ export interface AssistantHostedAssistantConfigurationTool {
 export interface AssistantHostedGroupTool {
   request(
     request: HostedRuntimeGroupToolRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeGroupToolResponse>
 }
 
@@ -293,7 +302,12 @@ export interface AssistantHostedGroupPermissionOfferRequest {
 export interface AssistantHostedGroupPermissionOfferTool {
   request(
     request: AssistantHostedGroupPermissionOfferRequest,
-  ): Promise<Extract<HostedRuntimeGroupToolResponse, { action: 'post_join_offer' }>>
+  ): Promise<
+    Extract<
+      HostedRuntimeGroupToolResponse,
+      { action: 'create_join_link' | 'post_join_offer' }
+    >
+  >
 }
 
 export type AssistantHostedGroupSharedReadRequest =
@@ -338,6 +352,15 @@ export interface AssistantPhoneCallPort {
   ): Promise<HostedPhoneCallStartResponse>
 }
 
+export interface AssistantPhysicalNotePort {
+  send(
+    request: HostedPhysicalNoteSendRequest,
+    context?: {
+      signal?: AbortSignal | null
+    },
+  ): Promise<HostedPhysicalNoteSendResponse>
+}
+
 export type AssistantPrivateImageContentType =
   | 'image/jpeg'
   | 'image/png'
@@ -358,6 +381,7 @@ export interface AssistantHostedPrivateImageUrlPublisher {
 }
 
 export interface AssistantHostedImageGenerationResult {
+  failureDiagnostic?: string | null
   media: AssistantVaultImageResponseMedia | null
   runtimeIssue: AssistantRuntimeIssueInput | null
   savedImageRef: string | null
@@ -367,6 +391,7 @@ export interface AssistantHostedImageGenerationLauncher {
   launch(input: {
     operationId: string
     originAssistantInputId: string
+    originAssistantInputIdExact: boolean
     scopeId?: string | null
     run(
       signal: AbortSignal,
@@ -420,6 +445,7 @@ export interface AssistantHostedExecutionContext {
   labsTool?: AssistantHostedLabsTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
+  physicalNotes?: AssistantPhysicalNotePort | null
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
   dynamicContextPrompts?: readonly string[] | null
@@ -530,6 +556,7 @@ export function normalizeAssistantExecutionContext(
     hosted?.subscriptionTool,
   )
   const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
+  const physicalNotes = normalizeAssistantPhysicalNotePort(hosted?.physicalNotes)
   const privateImageUrlPublisher = normalizeAssistantPrivateImageUrlPublisher(
     hosted?.privateImageUrlPublisher,
   )
@@ -573,6 +600,7 @@ export function normalizeAssistantExecutionContext(
       ...(labsTool ? { labsTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
+      ...(physicalNotes ? { physicalNotes } : {}),
       ...(privateImageUrlPublisher ? { privateImageUrlPublisher } : {}),
       ...(subscriptionTool ? { subscriptionTool } : {}),
       ...(typeof hosted?.materializeWorkspaceArtifacts === 'function'
@@ -718,6 +746,18 @@ function normalizeAssistantPhoneCallPort(
   }
 }
 
+function normalizeAssistantPhysicalNotePort(
+  input: AssistantHostedExecutionContext['physicalNotes'] | undefined,
+): AssistantPhysicalNotePort | undefined {
+  if (!input || typeof input.send !== 'function') {
+    return undefined
+  }
+
+  return {
+    send: input.send.bind(input),
+  }
+}
+
 function normalizeAssistantPrivateImageUrlPublisher(
   input: AssistantHostedExecutionContext['privateImageUrlPublisher'] | undefined,
 ): AssistantHostedPrivateImageUrlPublisher | undefined {
@@ -740,6 +780,12 @@ function normalizeAssistantProductFeedbackCandidateSink(
   return {
     acceptProductFeedbackCandidate:
       input.acceptProductFeedbackCandidate.bind(input),
+    ...(typeof input.deliverProductSupportEscalation === 'function'
+      ? {
+          deliverProductSupportEscalation:
+            input.deliverProductSupportEscalation.bind(input),
+        }
+      : {}),
   }
 }
 

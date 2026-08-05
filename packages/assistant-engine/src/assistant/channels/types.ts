@@ -2,6 +2,9 @@ import type {
   AgentmailFetch,
 } from '@murphai/operator-config/agentmail-runtime'
 import type { LinqFetch } from '@murphai/operator-config/linq-runtime'
+import type {
+  AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import type { TelegramFetchImplementation } from '@murphai/operator-config/telegram-runtime'
 import {
   assistantChannelDeliverySchema,
@@ -69,6 +72,9 @@ export interface LinqRuntimeDependencies {
     media: AssistantVaultFileResponseMedia,
   ) => Promise<Uint8Array>
   maxSessionMs?: number
+  persistAppCardTextFallback?: (input: {
+    idempotencyKey: string
+  }) => Promise<void>
   refreshMs?: number
   signal?: AbortSignal
 }
@@ -152,6 +158,7 @@ export interface AssistantChannelDependencies {
   sendLinq?: (input: {
     acceptedAssistantInputIds?: readonly string[] | null
     answeredMailboxItemIds?: readonly string[] | null
+    card?: AssistantResponseCard | null
     directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
     homeRouteFallbackAllowed?: boolean | null
@@ -163,8 +170,13 @@ export interface AssistantChannelDependencies {
     signal?: AbortSignal
     target: string
     targetKind?: AssistantDeliveryCandidate['kind']
+    threadIsDirect?: boolean | null
+    persistAppCardTextFallback?: (input: {
+      idempotencyKey: string
+    }) => Promise<void>
   }) => Promise<
     | {
+        idempotencyKey?: string | null
         providerMessageId?: string | null
         providerMessageIds?: string[] | null
         providerThreadId?: string | null
@@ -173,6 +185,9 @@ export interface AssistantChannelDependencies {
       }
     | void
   >
+  persistLinqAppCardTextFallback?: (input: {
+    idempotencyKey: string
+  }) => Promise<void>
   sendLinqVoiceMemo?: (input: {
     answeredMailboxItemIds?: readonly string[] | null
     attachmentId: string
@@ -248,6 +263,7 @@ export interface AssistantChannelAdapter {
       actorId: string | null
       answeredMailboxItemIds?: readonly string[] | null
       bindingDelivery: AssistantBindingDelivery | null
+      card?: AssistantResponseCard | null
       deliverySource?: AssistantDeliverySource | null
       explicitTarget: string | null
       idempotencyKey?: string | null
@@ -301,6 +317,7 @@ export interface AssistantChannelAdapterSpec {
     answeredMailboxItemIds?: readonly string[] | null
     bindingDelivery: AssistantBindingDelivery | null
     candidate: AssistantDeliveryCandidate
+    card: AssistantResponseCard | null
     deliverySource?: AssistantDeliverySource | null
     dependencies: AssistantChannelDependencies
     explicitTarget: string | null

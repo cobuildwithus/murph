@@ -11,10 +11,12 @@ import {
 import {
   claimHostedLinqProactiveConversationCapacityTx,
   listHostedLinqHealthyProactiveLines,
+  readHostedLinqRecentMessageEffectCountsTx,
   type HostedLinqAssignableHomeLine,
 } from "../hosted-onboarding/linq-line-store";
 import { createHostedLinqChat } from "../hosted-onboarding/linq-client";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   isHostedOnboardingError,
 } from "../hosted-onboarding/errors";
@@ -33,6 +35,9 @@ import {
 import {
   acquireHostedLinqParticipantPhoneLockTx,
 } from "../hosted-onboarding/linq-participant-contact";
+import {
+  lockHostedMemberSponsoredAccessRows,
+} from "../hosted-onboarding/shared";
 import {
   decideHostedGroupJoinOutreachSendWindow,
 } from "./group-join-outreach-window";
@@ -59,6 +64,7 @@ const HOSTED_GROUP_JOIN_OUTREACH_SWEEP_BUDGET_MS = 20_000;
 const HOSTED_GROUP_JOIN_OUTREACH_RESERVED_WELCOME_SLOTS = 10;
 const HOSTED_GROUP_JOIN_OUTREACH_NO_LINE_RETRY_MS = 15 * 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_RETRY_MS = 15 * 60_000;
+const HOSTED_GROUP_JOIN_OUTREACH_RECIPIENT_STATE_RETRY_MS = 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_MAX_PROVIDER_ATTEMPTS = 5;
 const MINUTES_PER_DAY = 24 * 60;
 
@@ -419,17 +425,96 @@ async function drainOneHostedGroupJoinOutreachTx(input: {
     });
   }
 
-  const member = await lookupHostedMemberIdentityByPhoneNumber({
+  const memberLookup = await lookupHostedMemberIdentityByPhoneNumber({
     phoneNumber: participantPhoneNumber,
     prisma: input.tx,
   });
-  if (member) {
-    return skipHostedGroupJoinOutreachTx({
-      now: input.now,
-      outreachId: outreach.id,
-      reason: "recipient_now_member",
+  if (memberLookup) {
+    // Member creation is fenced by the participant-phone lock above. Existing
+    // member access and membership transitions use the stronger member row lock.
+    // Account deletion takes that row before this global drain, so never wait on
+    // it while owning the drain: a concurrent authority transition gets one
+    // minute to settle, and the next sweep makes the terminal decision.
+    if (!await tryLockHostedGroupJoinOutreachRecipientTx({
+      memberId: memberLookup.core.id,
       tx: input.tx,
+    })) {
+      const memberStillExists = await input.tx.hostedMember.findUnique({
+        select: { id: true },
+        where: { id: memberLookup.core.id },
+      });
+      if (!memberStillExists) {
+        return skipHostedGroupJoinOutreachTx({
+          now: input.now,
+          outreachId: outreach.id,
+          reason: "recipient_identity_changed",
+          tx: input.tx,
+        });
+      }
+      return deferHostedGroupJoinOutreachTx({
+        nextAttemptAt: new Date(
+          input.now.getTime()
+            + HOSTED_GROUP_JOIN_OUTREACH_RECIPIENT_STATE_RETRY_MS,
+        ),
+        now: input.now,
+        outreachId: outreach.id,
+        reason: "recipient_state_in_flight",
+        tx: input.tx,
+      });
+    }
+    await lockHostedMemberSponsoredAccessRows(
+      input.tx,
+      memberLookup.core.id,
+    );
+    const member = await input.tx.hostedMember.findUnique({
+      select: { suspendedAt: true },
+      where: { id: memberLookup.core.id },
     });
+    if (!member) {
+      return skipHostedGroupJoinOutreachTx({
+        now: input.now,
+        outreachId: outreach.id,
+        reason: "recipient_identity_changed",
+        tx: input.tx,
+      });
+    }
+    if (member.suspendedAt) {
+      return skipHostedGroupJoinOutreachTx({
+        now: input.now,
+        outreachId: outreach.id,
+        reason: "recipient_suspended",
+        tx: input.tx,
+      });
+    }
+    if (await readActiveHostedMemberAccess({
+      memberId: memberLookup.core.id,
+      now: input.now,
+      prisma: input.tx,
+    })) {
+      return skipHostedGroupJoinOutreachTx({
+        now: input.now,
+        outreachId: outreach.id,
+        reason: "recipient_now_active",
+        tx: input.tx,
+      });
+    }
+    const membership = await input.tx.hostedGroupMember.findUnique({
+      select: { id: true },
+      where: {
+        groupId_memberId: {
+          groupId: offer.group.id,
+          memberId: memberLookup.core.id,
+        },
+      },
+    });
+    if (membership) {
+      return skipHostedGroupJoinOutreachTx({
+        now: input.now,
+        outreachId: outreach.id,
+        reason: "recipient_now_group_member",
+        tx: input.tx,
+      });
+    }
   }
 
   // A reaction to a distinct offer is fresh intent, so nothing here suppresses
@@ -671,15 +756,28 @@ async function drainOneHostedGroupJoinOutreachTx(input: {
   }
 }
 
+async function tryLockHostedGroupJoinOutreachRecipientTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const rows = await input.tx.$queryRaw<{ id: string }[]>`
+    SELECT "id"
+    FROM "hosted_member"
+    WHERE "id" = ${input.memberId}
+    FOR UPDATE SKIP LOCKED
+  `;
+  return rows.length === 1;
+}
+
 async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
   lines: readonly HostedLinqAssignableHomeLine[];
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<HostedLinqAssignableHomeLine | null> {
   // Reuse the shared proactive line policy instead of re-deriving one here. It
-  // balances on weighted durable line load and today's new-conversation count,
-  // and applies the per-line warmup limit itself, so pre-member outreach spreads
-  // across the pool the same way signup welcomes do.
+  // balances on weighted planning load, recent message effects, and today's
+  // new-conversation count, and applies the per-line warmup limit itself, so
+  // reply-gated outreach spreads across the pool the same way signup welcomes do.
   const dayUtc = startOfUtcDay(input.now);
   const planningLoad = await readHostedLinqLinePlanningLoadSnapshot({
     lines: input.lines,
@@ -696,6 +794,13 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
         : 0,
     ]),
   );
+  const recentMessageEffectsByLineLookupKey = input.lines.length > 1
+    ? await readHostedLinqRecentMessageEffectCountsTx({
+        lineLookupKeys: input.lines.map((line) => line.phoneNumberLookupKey),
+        now: input.now,
+        prisma: input.tx,
+      })
+    : new Map<string, number>();
 
   // Drop a losing line from the candidate set rather than marking it full in the
   // count map. The shared chooser filters against the full signup-welcome limit, so
@@ -708,6 +813,7 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
       newAssignmentsByRecipientPhone,
       plannedMessagesByRecipientPhone,
       preferredRecipientPhone: null,
+      recentMessageEffectsByLineLookupKey,
     });
     if (!line) {
       return null;

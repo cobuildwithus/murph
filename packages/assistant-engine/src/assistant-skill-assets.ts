@@ -239,7 +239,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'physical-therapy',
     name: 'physical-therapy',
     triggerHint:
-      'Use when a user reports musculoskeletal pain, stiffness, weakness, loss of function, injury, rehabilitation, return-to-activity needs, or asks for PT-style assessment or exercises—including workout modification because of pain. Before asking questions, reuse relevant current-conversation and vault context and ask only decision-changing gaps. Read before suggesting exercises for a new or materially changed pain complaint. Do not use for ordinary workout programming without pain, injury, or rehabilitation needs.',
+      'Use when a user reports musculoskeletal pain, stiffness, weakness, loss of function, injury, rehabilitation, return-to-activity needs, or asks for PT-style assessment or exercises—including workout modification because of pain. Before asking questions, reuse relevant current-conversation and vault context and ask only decision-changing gaps. Read before recommending exercises, rest, activity restriction, or load changes for a new or materially changed pain complaint. Do not use for ordinary workout programming without pain, injury, or rehabilitation needs.',
   },
   {
     slug: 'running-cardio',
@@ -263,7 +263,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'groupchat-comedy',
     name: 'groupchat-comedy',
     triggerHint:
-      'Read alongside group-chat before composing humor in a challenge or banter context: kickoffs, daily dispatches, score updates, spontaneous open-room cameos, replies to trash talk, rulings, verdicts, comics, songs, or voice memos. Shapes a turn whose floor group-chat permits; it never overrides a human-owned exchange. Governs the referee comedy engine, roast hierarchy, register flips between group humor and private care, canon and callback management, dispatch format rotation, and the hard safety limits that outrank every joke.',
+      'Read alongside group-chat before composing humor in a challenge or banter context: kickoffs, daily dispatches, score updates, spontaneous open-room cameos, replies to trash talk, rulings, verdicts, comics, songs, or voice memos. Shapes a turn whose floor group-chat permits; it never overrides a human-owned exchange. Governs the referee comedy engine, roast hierarchy, protected-register handling inside the group, canon and callback management, dispatch format rotation, and the hard safety limits that outrank every joke.',
   },
   {
     slug: 'group-challenge',

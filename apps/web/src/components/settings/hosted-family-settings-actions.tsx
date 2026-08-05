@@ -28,7 +28,7 @@ import {
   normalizeHostedEmailAddress,
   normalizeHostedTelegramUsernameForLookup,
 } from "@/src/lib/hosted-onboarding/contact-normalization";
-import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/shared";
+import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";

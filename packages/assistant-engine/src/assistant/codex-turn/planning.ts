@@ -26,6 +26,7 @@ import {
   readAssistantGroupRoomModelPrompt,
 } from '../group-room-model.js'
 import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
 } from '../managed-automations.js'
 import {
@@ -483,6 +484,21 @@ export async function resolveAssistantRouteTurnPlan(input: {
     privateInteractiveAudience &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
+  const ordinaryInboundTurn =
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn' &&
+    input.input.scheduledOccurrenceAt == null &&
+    (
+      input.input.turnTrigger == null ||
+      input.input.turnTrigger === 'manual-ask' ||
+      input.input.turnTrigger === 'automation-auto-reply'
+    )
+  const responseCardsAvailable =
+    privateInteractiveProviderTurn &&
+    ((ordinaryInboundTurn &&
+      input.input.scheduledInvocationAuthority == null) ||
+      input.input.scheduledInvocationAuthority?.automationId ===
+        MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
@@ -737,6 +753,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       ),
       onboardingGuidance: options.injectOnboardingGuidance,
       modelBehaviorProfile,
+      ordinaryInboundTurn,
       scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
       turnTrigger: input.input.turnTrigger ?? null,
     }, {
@@ -791,15 +808,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
-  // Maintenance turns run without a delivery target and must not expose any
-  // external-capable or delivery-facing tool surface, so the gate is the
-  // resolved tool set itself rather than prompt text.
+  // Maintenance turns run without a delivery target. The room-model profile
+  // receives only its host-owned tool for the exact managed automation.
   const availableDynamicTools = outputOnlyTurn || onboardingGoalCheckinTurn
       ? []
       : maintenanceTurn
       ? input.input.maintenanceProfile === 'group-room-model' &&
-        input.input.scheduledInvocationAuthority?.automationId ===
-          MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
+      input.input.scheduledInvocationAuthority?.automationId ===
+        MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
         ? [MURPH_GROUP_ROOM_MODEL_TOOL]
         : []
       : resolveMurphDynamicTools({
@@ -866,6 +882,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
+        responseCardsAvailable,
+        physicalNotesAvailable:
+          (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
+          input.hostedToolContext?.physicalNotes != null &&
+          input.hostedToolContext?.privateImageUrlPublisher != null,
         phoneCallsAvailable:
           (
             privateInteractiveAudience

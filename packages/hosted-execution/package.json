@@ -22,6 +22,10 @@
       "types": "./dist/auth.d.ts",
       "default": "./dist/auth.js"
     },
+    "./assistant-inference": {
+      "types": "./dist/assistant-inference.d.ts",
+      "default": "./dist/assistant-inference.js"
+    },
     "./assistant-usage": {
       "types": "./dist/assistant-usage.d.ts",
       "default": "./dist/assistant-usage.js"
@@ -73,6 +77,10 @@
     "./phone-calls": {
       "types": "./dist/phone-calls.d.ts",
       "default": "./dist/phone-calls.js"
+    },
+    "./physical-notes": {
+      "types": "./dist/physical-notes.d.ts",
+      "default": "./dist/physical-notes.js"
     },
     "./plan-usage": {
       "types": "./dist/plan-usage.d.ts",

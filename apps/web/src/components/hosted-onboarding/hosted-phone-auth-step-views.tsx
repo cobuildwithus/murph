@@ -4,13 +4,15 @@ import { useId, type FormEvent } from "react";
 
 import { Button } from "@/src/components/ui/button";
 import { Label } from "@/src/components/ui/label";
-import { PhoneNumberInput } from "@/src/components/ui/phone-number-input";
+import {
+  PhoneNumberInput,
+  type PhoneNumberInputChangeMetadata,
+} from "@/src/components/ui/phone-number-input";
 import { Spinner } from "@/src/components/ui/spinner";
 
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
 import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 import type {
-  HostedPhoneAuthIntent,
   HostedPhoneAuthPendingAction,
   HostedPhoneCountryOption,
 } from "./hosted-phone-auth-types";
@@ -78,7 +80,6 @@ function HostedInviteMaskedPhoneSummary({
 }
 
 export function HostedPhoneEntryStep({
-  intent,
   phoneFieldLabel,
   phoneFieldDescription,
   phoneInputAutoFocus = false,
@@ -92,7 +93,6 @@ export function HostedPhoneEntryStep({
   onPhoneNumberChange,
   onSubmitPhoneEntry,
 }: {
-  intent: HostedPhoneAuthIntent;
   phoneFieldLabel?: string | null;
   phoneFieldDescription?: string | null;
   phoneInputAutoFocus?: boolean;
@@ -103,7 +103,10 @@ export function HostedPhoneEntryStep({
   sendCodeDisabled: boolean;
   selectedPhoneCountry: HostedPhoneCountryOption;
   onPhoneCountryChange: (code: string) => void;
-  onPhoneNumberChange: (value: string) => void;
+  onPhoneNumberChange: (
+    value: string,
+    metadata?: PhoneNumberInputChangeMetadata,
+  ) => void;
   onSubmitPhoneEntry: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const phoneInputId = useId();
@@ -112,8 +115,7 @@ export function HostedPhoneEntryStep({
     <form className="space-y-3" onSubmit={onSubmitPhoneEntry}>
       <div className="space-y-3">
         <Label htmlFor={phoneInputId}>
-          {phoneFieldLabel ??
-            (intent === "link" ? "Phone number" : "Your phone")}
+          {phoneFieldLabel ?? "Your phone"}
         </Label>
         <PhoneNumberInput
           id={phoneInputId}
@@ -155,7 +157,6 @@ export function HostedCodeEntryStep({
   code,
   disableSignup = false,
   disabled,
-  intent,
   pendingAction,
   secondaryActionSize,
   size,
@@ -169,7 +170,6 @@ export function HostedCodeEntryStep({
   code: string;
   disableSignup?: boolean;
   disabled: boolean;
-  intent: HostedPhoneAuthIntent;
   pendingAction: HostedPhoneAuthPendingAction;
   secondaryActionSize: "sm" | "lg";
   size?: "default" | "compact";
@@ -185,7 +185,6 @@ export function HostedCodeEntryStep({
       size={size}
       description={resolveHostedPhoneCodeEntryDescription({
         disableSignup,
-        intent,
         verificationPhoneNumberHint,
       })}
       disabled={disabled}
@@ -194,16 +193,8 @@ export function HostedCodeEntryStep({
           ? pendingAction
           : null
       }
-      primaryActionLabel={
-        intent === "link"
-          ? "Link phone"
-          : "Verify phone"
-      }
-      primaryActionPendingLabel={
-        intent === "link"
-          ? "Saving phone..."
-          : "Finishing..."
-      }
+      primaryActionLabel="Verify phone"
+      primaryActionPendingLabel="Finishing..."
       secondaryAction={
         <HostedUseDifferentNumberButton
           disabled={disabled}
@@ -221,17 +212,11 @@ export function HostedCodeEntryStep({
 
 function resolveHostedPhoneCodeEntryDescription({
   disableSignup,
-  intent,
   verificationPhoneNumberHint,
 }: {
   disableSignup: boolean;
-  intent: HostedPhoneAuthIntent;
   verificationPhoneNumberHint: string;
 }) {
-  if (intent === "link") {
-    return `We texted the latest verification code to ${verificationPhoneNumberHint}.`;
-  }
-
   if (disableSignup) {
     return `If an account exists for ${verificationPhoneNumberHint}, we texted the latest code there.`;
   }

@@ -148,7 +148,7 @@ async function signHostedProviderEgressCredential(input: {
   return bytesToBase64Url(signature);
 }
 
-function readHostedProviderEgressCredentialSigningSecret(
+export function readHostedProviderEgressCredentialSigningSecret(
   source: Readonly<Record<string, unknown>>,
 ): string {
   const value = source[HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET_ENV];

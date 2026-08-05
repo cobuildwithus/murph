@@ -8,6 +8,9 @@ import {
 } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
+  HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES,
+  HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES,
+  type HostedExecutionEnvironmentVoiceContentType,
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
@@ -23,19 +26,33 @@ import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import type {
+  HostedHealthDataConsentState,
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 
 import {
+  parseCloudflareHostedInferenceVerificationRequest,
+  parseCloudflareHostedInferenceVerificationResult,
+  type CloudflareHostedInferenceVerificationRequest,
+  type CloudflareHostedInferenceVerificationResult,
+} from "./inference-verification.ts";
+import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+  CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER,
+  CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER,
+  CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_SHA256_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlEnvironmentVoiceDeletePath,
+  buildCloudflareHostedControlEnvironmentVoiceStagePath,
+  buildCloudflareHostedControlInferenceVerificationPath,
   buildCloudflareHostedControlMealPhotoDeletePath,
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
+  buildCloudflareHostedControlRuntimeHealthDataConsentPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -79,6 +96,15 @@ export interface CloudflareHostedControlUserDataDeletionResult {
   userId: string;
 }
 
+export interface CloudflareHostedControlRuntimeHealthDataConsentResult {
+  activeInvocationPreempted: boolean;
+  consentState: HostedHealthDataConsentState;
+  processingAllowed: boolean;
+  runnerContainerDestroyAttempted: boolean;
+  runnerContainerDestroyOk: boolean;
+  userId: string;
+}
+
 export interface CloudflareHostedControlTelegramUsageLimitNoticeRequest {
   message: string;
   replyToMessageId: string;
@@ -88,6 +114,12 @@ export interface CloudflareHostedControlTelegramUsageLimitNoticeRequest {
 export interface CloudflareHostedControlMealPhotoStageResult {
   byteLength: number;
   mealPhotoKey: string;
+  sha256: string;
+}
+
+export interface CloudflareHostedControlEnvironmentVoiceStageResult {
+  audioKey: string;
+  byteLength: number;
   sha256: string;
 }
 
@@ -116,12 +148,23 @@ export interface CloudflareHostedControlClient {
     mealPhotoKey: string;
     userId: string;
   }): Promise<void>;
+  deleteEnvironmentVoice(input: {
+    audioKey: string;
+    userId: string;
+  }): Promise<void>;
   ensureRuntimeProcessing(input: {
     onTiming?: (timing: CloudflareHostedControlRuntimeEnsureProcessingTiming) => void;
     orchestrationAttemptId: string;
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
+  reconcileRuntimeHealthDataConsent(
+    userId: string,
+  ): Promise<CloudflareHostedControlRuntimeHealthDataConsentResult>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+  verifyInferenceConnection(input: {
+    request: CloudflareHostedInferenceVerificationRequest;
+    userId: string;
+  }): Promise<CloudflareHostedInferenceVerificationResult>;
   sendTelegramUsageLimitNotice(input: {
     onRequestAttempted?: () => Promise<void> | void;
     request: CloudflareHostedControlTelegramUsageLimitNoticeRequest;
@@ -133,6 +176,13 @@ export interface CloudflareHostedControlClient {
     sha256: string;
     userId: string;
   }): Promise<CloudflareHostedControlMealPhotoStageResult>;
+  stageEnvironmentVoice(input: {
+    bytes: Uint8Array;
+    captureId: string;
+    contentType: HostedExecutionEnvironmentVoiceContentType;
+    sha256: string;
+    userId: string;
+  }): Promise<CloudflareHostedControlEnvironmentVoiceStageResult>;
 }
 
 export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
@@ -162,6 +212,7 @@ export interface CloudflareHostedControlClientOptions {
 const BROWSER_VAULT_REPLICA_NOT_FOUND_ERROR_MESSAGE = "Hosted execution browser vault replica was not found.";
 const HOSTED_MEAL_PHOTO_CAPTURE_ID_PATTERN = /^[a-f0-9]{64}$/u;
 const HOSTED_MEAL_PHOTO_KEY_PATTERN = /^[a-f0-9]{40}$/u;
+const HOSTED_ENVIRONMENT_VOICE_KEY_PATTERN = /^[a-f0-9]{40}$/u;
 const HOSTED_SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 
 export function parseCloudflareHostedControlTelegramUsageLimitNoticeRequest(
@@ -283,6 +334,27 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+    async deleteEnvironmentVoice(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const audioKey = requireEnvironmentVoiceKey(input.audioKey);
+
+      await requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "environment voice deletion",
+        parse: parseCloudflareHostedControlEnvironmentVoiceDeleteResult,
+        path: buildCloudflareHostedControlEnvironmentVoiceDeletePath(userId),
+        request: {
+          headers: {
+            [CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER]: audioKey,
+          },
+          method: "DELETE",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
     ensureRuntimeProcessing(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
 
@@ -307,6 +379,33 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+    reconcileRuntimeHealthDataConsent(userId) {
+      const expectedUserId = requireCloudflareHostedControlUserId(userId);
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: expectedUserId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "runtime health-data consent reconciliation",
+        parse: (value) =>
+          parseCloudflareHostedControlRuntimeHealthDataConsentResult(
+            value,
+            expectedUserId,
+          ),
+        path: buildCloudflareHostedControlRuntimeHealthDataConsentPath(
+          expectedUserId,
+        ),
+        request: {
+          body: "{}",
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
     getRunnerStatus(userId) {
       const expectedUserId = requireCloudflareHostedControlUserId(userId);
 
@@ -319,6 +418,30 @@ export function createCloudflareHostedControlClient(
         parse: (value) => parseHostedRunnerStatusForExpectedUser(value, expectedUserId),
         path: buildCloudflareHostedControlUserStatusPath(expectedUserId),
         request: { method: "GET" },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    verifyInferenceConnection(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const request = parseCloudflareHostedInferenceVerificationRequest(
+        input.request,
+      );
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "custom inference verification",
+        parse: parseCloudflareHostedInferenceVerificationResult,
+        path: buildCloudflareHostedControlInferenceVerificationPath(userId),
+        request: {
+          body: JSON.stringify(request),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
         timeoutMs: options.timeoutMs,
       });
     },
@@ -388,7 +511,111 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+    async stageEnvironmentVoice(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const captureId = requireMealPhotoCaptureId(input.captureId);
+      const bytes = copyUint8Array(
+        input.bytes,
+        "Cloudflare environment voice bytes",
+      );
+      if (
+        bytes.byteLength === 0
+        || bytes.byteLength > HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES
+      ) {
+        throw new RangeError(
+          `Cloudflare environment voice bytes must contain between 1 and ${HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES} bytes.`,
+        );
+      }
+      const contentType = HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES.find(
+        (candidate) => candidate === input.contentType,
+      );
+      if (!contentType) {
+        throw new TypeError("Cloudflare environment voice content type is invalid.");
+      }
+      const sha256 = requireSha256(
+        input.sha256,
+        "Cloudflare environment voice sha256",
+      );
+      if (await sha256Hex(bytes) !== sha256) {
+        throw new TypeError(
+          "Cloudflare environment voice sha256 must match bytes.",
+        );
+      }
+
+      return await requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "environment voice staging",
+        parse: (value) =>
+          parseCloudflareHostedControlEnvironmentVoiceStageResult(value, {
+            byteLength: bytes.byteLength,
+            sha256,
+          }),
+        path: buildCloudflareHostedControlEnvironmentVoiceStagePath(userId),
+        request: {
+          body: copyBytesToArrayBuffer(bytes),
+          headers: {
+            [CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER]:
+              captureId,
+            [CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_SHA256_HEADER]: sha256,
+            "content-type": contentType,
+          },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
   };
+}
+
+function parseCloudflareHostedControlEnvironmentVoiceStageResult(
+  value: unknown,
+  expected: { byteLength: number; sha256: string },
+): CloudflareHostedControlEnvironmentVoiceStageResult {
+  const record = requireRecord(value, "Cloudflare environment voice stage result");
+  const audioKey = requireString(
+    record.audioKey,
+    "Cloudflare environment voice stage result audioKey",
+  );
+  const byteLength = requireNonNegativeInteger(
+    record.byteLength,
+    "Cloudflare environment voice stage result byteLength",
+  );
+  const sha256 = requireSha256(
+    record.sha256,
+    "Cloudflare environment voice stage result sha256",
+  );
+  if (!HOSTED_ENVIRONMENT_VOICE_KEY_PATTERN.test(audioKey)) {
+    throw new TypeError(
+      "Cloudflare environment voice stage result audioKey is invalid.",
+    );
+  }
+  assertMatchingNumber(
+    byteLength,
+    expected.byteLength,
+    "Cloudflare environment voice stage result byteLength",
+    "the uploaded byte length",
+  );
+  assertMatchingString(
+    sha256,
+    expected.sha256,
+    "Cloudflare environment voice stage result sha256",
+    "the uploaded sha256",
+  );
+  return { audioKey, byteLength, sha256 };
+}
+
+function parseCloudflareHostedControlEnvironmentVoiceDeleteResult(
+  value: unknown,
+): void {
+  const record = requireRecord(value, "Cloudflare environment voice delete result");
+  if (record.deleted !== true) {
+    throw new TypeError(
+      "Cloudflare environment voice delete result deleted must be true.",
+    );
+  }
 }
 
 function parseCloudflareHostedControlMealPhotoStageResult(
@@ -697,6 +924,66 @@ function parseCloudflareHostedControlUserDataDeletionResult(
         ? userScopedSkipReason
         : null,
     },
+    userId,
+  };
+}
+
+function parseCloudflareHostedControlRuntimeHealthDataConsentResult(
+  value: unknown,
+  expectedUserId: string,
+): CloudflareHostedControlRuntimeHealthDataConsentResult {
+  const record = requireRecord(
+    value,
+    "Cloudflare runtime health-data consent result",
+  );
+  const userId = requireString(
+    record.userId,
+    "Cloudflare runtime health-data consent result userId",
+  );
+  assertMatchingString(
+    userId,
+    expectedUserId,
+    "Cloudflare runtime health-data consent result userId",
+    "the requested userId",
+  );
+  const rawConsentState = requireString(
+    record.consentState,
+    "Cloudflare runtime health-data consent result consentState",
+  );
+  if (
+    rawConsentState !== "granted"
+    && rawConsentState !== "revoked"
+    && rawConsentState !== "missing"
+  ) {
+    throw new TypeError(
+      "Cloudflare runtime health-data consent result consentState is invalid.",
+    );
+  }
+  const processingAllowed = requireBoolean(
+    record.processingAllowed,
+    "Cloudflare runtime health-data consent result processingAllowed",
+  );
+  if (processingAllowed !== (rawConsentState !== "revoked")) {
+    throw new TypeError(
+      "Cloudflare runtime health-data consent result processingAllowed did not match consentState.",
+    );
+  }
+
+  return {
+    activeInvocationPreempted: requireBoolean(
+      record.activeInvocationPreempted,
+      "Cloudflare runtime health-data consent result activeInvocationPreempted",
+    ),
+    consentState: rawConsentState,
+    processingAllowed,
+    runnerContainerDestroyAttempted: requireBoolean(
+      record.runnerContainerDestroyAttempted,
+      "Cloudflare runtime health-data consent result runnerContainerDestroyAttempted",
+    ),
+    runnerContainerDestroyOk: requireBoolean(
+      record.runnerContainerDestroyOk,
+      "Cloudflare runtime health-data consent result runnerContainerDestroyOk",
+    ),
     userId,
   };
 }
@@ -1175,6 +1462,16 @@ function requireMealPhotoKey(value: unknown): string {
     );
   }
   return mealPhotoKey;
+}
+
+function requireEnvironmentVoiceKey(value: unknown): string {
+  const audioKey = requireString(value, "Cloudflare environment voice key");
+  if (!HOSTED_ENVIRONMENT_VOICE_KEY_PATTERN.test(audioKey)) {
+    throw new TypeError(
+      "Cloudflare environment voice key must be a 40-character lowercase hexadecimal string.",
+    );
+  }
+  return audioKey;
 }
 
 function requireSha256(value: unknown, label: string): string {

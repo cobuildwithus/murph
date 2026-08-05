@@ -1,4 +1,5 @@
 import {
+  hostedPrivateMediaExtensionForContentType,
   matchHostedPrivateMediaCapabilityPath,
   readHostedPrivateMedia,
   readHostedPrivateMediaCapabilitySecret,
@@ -36,24 +37,44 @@ export const privateMediaRoutes: readonly DeclarativeRoute<{
       if (!media) {
         return privateMediaNotFound();
       }
+      const extension = hostedPrivateMediaExtensionForContentType(
+        media.contentType,
+      );
+      if (params.extension && params.extension !== extension) {
+        return privateMediaNotFound();
+      }
 
-      return new Response(copyBytesToArrayBuffer(media.bytes), {
-        headers: {
-          "cache-control": "private, no-store",
-          "content-disposition":
-            `inline; filename="group-avatar.${extensionForContentType(media.contentType)}"`,
-          "content-length": String(media.bytes.byteLength),
-          "content-type": media.contentType,
-          "x-content-type-options": "nosniff",
+      return new Response(
+        context.request.method === "HEAD"
+          ? null
+          : copyBytesToArrayBuffer(media.bytes),
+        {
+          headers: {
+            "cache-control": "private, no-store",
+            "content-disposition":
+              `inline; filename="group-avatar.${extension}"`,
+            "content-length": String(media.bytes.byteLength),
+            "content-type": media.contentType,
+            "x-content-type-options": "nosniff",
+          },
+          status: 200,
         },
-        status: 200,
-      });
+      );
     },
     match(pathname) {
-      const capability = matchHostedPrivateMediaCapabilityPath(pathname);
-      return capability ? { capability } : null;
+      const matched = matchHostedPrivateMediaCapabilityPath(pathname);
+      if (!matched) {
+        return null;
+      }
+      const params: Record<string, string> = {
+        capability: matched.capability,
+      };
+      if (matched.extension) {
+        params.extension = matched.extension;
+      }
+      return params;
     },
-    methods: ["GET"],
+    methods: ["GET", "HEAD"],
     name: "private-media-delivery",
     wrongMethodResponse: "not-found",
   },
@@ -72,19 +93,6 @@ function readCapabilityExpiry(url: URL): number | null {
   return Number.isSafeInteger(expiresAtUnixSeconds)
     ? expiresAtUnixSeconds
     : null;
-}
-
-function extensionForContentType(
-  contentType: "image/jpeg" | "image/png" | "image/webp",
-): "jpg" | "png" | "webp" {
-  switch (contentType) {
-    case "image/jpeg":
-      return "jpg";
-    case "image/png":
-      return "png";
-    case "image/webp":
-      return "webp";
-  }
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

@@ -9,19 +9,23 @@ import { describe, expect, it } from "vitest";
 import { resolveMetricDefinition } from "@murphai/health-metrics";
 
 import {
+  buildHealthCommonsBiomarkerDesiredDirectionsArtifact,
   buildHealthCommonsCatalog,
   createHealthCommonsCatalogReader,
   createHealthCommonsRouteBundleReader,
+  getGeneratedHealthCommonsBiomarkerDesiredDirections,
   getGeneratedHealthCommonsProtocolFamilyGraphReader,
   getGeneratedHealthCommonsProtocolIndexReader,
   getGeneratedHealthCommonsProtocolRunSpecReader,
   getGeneratedHealthCommonsWebBiomarkerIndex,
   getGeneratedHealthCommonsWebExperimentIndex,
   getGeneratedHealthCommonsWebRouteIndex,
+  HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION,
   isRunnableProtocolStatus,
+  loadGeneratedHealthCommonsBiomarkerDesiredDirections,
   loadGeneratedHealthCommonsProtocolFamilyGraph,
   loadGeneratedHealthCommonsProtocolIndex,
   loadGeneratedHealthCommonsProtocolRunSpecs,
@@ -248,7 +252,47 @@ function createMeasurementMethodCatalogReader() {
 }
 
 describe("@murphai/health-commons runtime catalog reader", () => {
+  it("builds a sorted compact biomarker desired-direction projection", () => {
+    expect(
+      buildHealthCommonsBiomarkerDesiredDirectionsArtifact({
+        biomarkers: [
+          {
+            desiredDirection: "lower_or_stable",
+            key: "biomarker:zeta",
+          },
+          {
+            desiredDirection: null,
+            key: "biomarker:without-direction",
+          },
+          {
+            desiredDirection: "higher",
+            key: "biomarker:alpha",
+          },
+        ],
+        catalogHash: TEST_CATALOG_HASH,
+      }),
+    ).toEqual({
+      biomarkers: [
+        {
+          desiredDirection: "higher",
+          key: "biomarker:alpha",
+        },
+        {
+          desiredDirection: "lower_or_stable",
+          key: "biomarker:zeta",
+        },
+      ],
+      catalogHash: TEST_CATALOG_HASH,
+      schemaVersion:
+        HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION,
+    });
+  });
+
   it("resolves desired directions through canonical biomarker aliases", () => {
+    expect(getGeneratedHealthCommonsBiomarkerDesiredDirections()).toMatchObject({
+      schemaVersion:
+        HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION,
+    });
     expect(
       resolveGeneratedHealthCommonsBiomarkerDesiredDirection("biomarker:hrv"),
     ).toBe("higher_or_stable");
@@ -376,6 +420,19 @@ describe("@murphai/health-commons runtime catalog reader", () => {
 
     const catalogHash = `sha256:${"2".repeat(64)}`;
     await writeFile(
+      path.join(generatedRoot, "biomarker-desired-directions.json"),
+      `${JSON.stringify({
+        biomarkers: [{
+          desiredDirection: "lower_or_stable",
+          key: "biomarker:resting-heart-rate",
+        }],
+        catalogHash,
+        schemaVersion:
+          HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION,
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
       path.join(generatedRoot, "protocol-index.json"),
       `${JSON.stringify({
         catalogHash,
@@ -418,6 +475,20 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
     process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV] = packageRoot;
     try {
+      expect(
+        loadGeneratedHealthCommonsBiomarkerDesiredDirections().catalogHash,
+      ).toBe(catalogHash);
+      expect(
+        resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
+          "biomarker:resting_hr",
+          {
+            biomarkerDesiredDirectionsPath: path.join(
+              generatedRoot,
+              "biomarker-desired-directions.json",
+            ),
+          },
+        ),
+      ).toBe("lower_or_stable");
       expect(loadGeneratedHealthCommonsProtocolIndex().catalogHash).toBe(catalogHash);
       expect(loadGeneratedHealthCommonsProtocolRunSpecs().catalogHash).toBe(catalogHash);
       expect(loadGeneratedHealthCommonsProtocolFamilyGraph().catalogHash).toBe(catalogHash);
@@ -431,7 +502,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     }
   });
 
-  it("fails web artifact loads under the env-pinned package root instead of probing cwd fallbacks", async () => {
+  it("fails missing generated artifact loads under the env-pinned package root instead of probing cwd fallbacks", async () => {
     const packageRoot = await mkdtemp(
       path.join(os.tmpdir(), "murph-health-commons-empty-package-root-"),
     );
@@ -439,8 +510,16 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV];
     process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV] = packageRoot;
     try {
+      const expectedGeneratedRootPath = path.join(packageRoot, "generated");
       const expectedWebRootPath = path.join(packageRoot, "generated", "web");
 
+      expect(() => loadGeneratedHealthCommonsBiomarkerDesiredDirections())
+        .toThrow(
+          path.join(
+            expectedGeneratedRootPath,
+            "biomarker-desired-directions.json",
+          ),
+        );
       expect(() => loadGeneratedHealthCommonsWebRouteIndex())
         .toThrow(path.join(expectedWebRootPath, "routes", "index.json"));
       expect(() => loadGeneratedHealthCommonsWebExperimentIndex())
@@ -454,6 +533,37 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV] = previousPackageRoot;
       }
     }
+  });
+
+  it("rejects malformed generated biomarker desired directions", async () => {
+    const generatedRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-health-commons-directions-"),
+    );
+    const artifactPath = path.join(
+      generatedRoot,
+      "biomarker-desired-directions.json",
+    );
+    await writeFile(
+      artifactPath,
+      `${JSON.stringify({
+        biomarkers: [{
+          desiredDirection: "sideways",
+          key: "biomarker:resting-heart-rate",
+        }],
+        catalogHash: TEST_CATALOG_HASH,
+        schemaVersion:
+          HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION,
+      })}\n`,
+      "utf8",
+    );
+
+    expect(() =>
+      loadGeneratedHealthCommonsBiomarkerDesiredDirections({
+        biomarkerDesiredDirectionsPath: artifactPath,
+      })
+    ).toThrow(
+      "Health Commons generated biomarker desired directions are invalid.",
+    );
   });
 
   it("loads route-scoped web bundles and preserves the route-bundle reader contract", () => {

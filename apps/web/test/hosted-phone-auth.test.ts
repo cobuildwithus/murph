@@ -157,7 +157,7 @@ describe("HostedPhoneAuth", () => {
     );
   });
 
-  it("projects an autofilled international number through the real phone input callbacks", async () => {
+  it("projects a pasted international number and its auto-send metadata through the real phone input callbacks", async () => {
     vi.resetModules();
     vi.doMock("@/src/hooks/use-mobile", () => ({
       useIsMobile: () => false,
@@ -214,12 +214,55 @@ describe("HostedPhoneAuth", () => {
       );
 
       await act(async () => {
+        setInputSelectionForTest(input, 0, 0);
+        input.dispatchEvent(
+          new rendered.window.Event("paste", {
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
         valueDescriptor?.set?.call(input, "+44 7400 123456");
-        input.dispatchEvent(new rendered.window.Event("input", { bubbles: true }));
+        input.dispatchEvent(
+          new rendered.window.InputEvent("input", {
+            bubbles: true,
+            inputType: "insertFromPaste",
+          }),
+        );
       });
 
       expect(onCountryChange).toHaveBeenCalledWith("GB");
-      expect(onPhoneNumberChange).toHaveBeenCalledWith("7400 123456");
+      expect(onPhoneNumberChange).toHaveBeenCalledWith("7400 123456", {
+        autoSendCandidate: true,
+        countryCode: "GB",
+      });
+      onCountryChange.mockClear();
+      onPhoneNumberChange.mockClear();
+
+      await act(async () => {
+        valueDescriptor?.set?.call(input, "4155552671");
+        input.dispatchEvent(
+          new rendered.window.InputEvent("input", {
+            bubbles: true,
+            inputType: "insertText",
+          }),
+        );
+      });
+
+      expect(onCountryChange).not.toHaveBeenCalled();
+      expect(onPhoneNumberChange).toHaveBeenCalledWith("4155552671", undefined);
+      onPhoneNumberChange.mockClear();
+
+      await act(async () => {
+        valueDescriptor?.set?.call(input, "4155552672");
+        input.dispatchEvent(
+          new rendered.window.InputEvent("input", {
+            bubbles: true,
+            inputType: "insertReplacementText",
+          }),
+        );
+      });
+
+      expect(onPhoneNumberChange).toHaveBeenCalledWith("4155552672", undefined);
     } finally {
       await rendered.cleanup();
       vi.doUnmock("@/src/components/ui/combobox");
@@ -227,6 +270,173 @@ describe("HostedPhoneAuth", () => {
       vi.doUnmock("@/src/hooks/use-mobile");
       vi.resetModules();
       vi.unstubAllGlobals();
+    }
+  });
+
+  it("auto-sends only a whole-field paste from the public phone form", async () => {
+    vi.resetModules();
+    vi.doMock("@/src/hooks/use-mobile", () => ({
+      useIsMobile: () => false,
+    }));
+    vi.doMock("@/src/components/ui/combobox", () => ({
+      Combobox: ({ children }: { children?: React.ReactNode }) =>
+        React.createElement("div", null, children),
+      ComboboxContent: ({ children }: { children?: React.ReactNode }) =>
+        React.createElement("div", null, children),
+      ComboboxInput: (props: React.InputHTMLAttributes<HTMLInputElement>) =>
+        React.createElement("input", props),
+      ComboboxItem: ({ children }: { children?: React.ReactNode }) =>
+        React.createElement("div", null, children),
+      ComboboxList: () => null,
+      ComboboxTrigger: (props: React.ButtonHTMLAttributes<HTMLButtonElement>) =>
+        React.createElement("button", props),
+    }));
+    vi.doMock("@/src/components/ui/input", () => ({
+      Input: ({
+        inputSize,
+        onChange,
+        ...props
+      }: React.InputHTMLAttributes<HTMLInputElement> & { inputSize?: string }) => {
+        void inputSize;
+        return React.createElement("input", { ...props, onChange, onInput: onChange });
+      },
+    }));
+    vi.doMock(
+      "@/src/components/hosted-onboarding/hosted-verification-code-step",
+      () => ({
+        HostedVerificationCodeStep({ description }: { description: string }) {
+          return React.createElement(
+            "div",
+            { "data-verification-code-step": "mounted" },
+            React.createElement("p", null, "Verification code"),
+            React.createElement("p", null, description),
+          );
+        },
+      }),
+    );
+    const { HostedPhoneAuth } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth"
+    );
+    mocks.sendCode.mockResolvedValue(undefined);
+    const rendered = await renderClientComponent(
+      React.createElement(HostedPhoneAuth, {
+        autoSendPastedPhoneNumber: true,
+      }),
+    );
+
+    try {
+      const input = rendered.container.querySelector(
+        "input[name='phone-number']",
+      ) as HTMLInputElement | null;
+      assert.ok(input);
+      const valueDescriptor = Object.getOwnPropertyDescriptor(
+        rendered.window.HTMLInputElement.prototype,
+        "value",
+      );
+
+      await act(async () => {
+        setInputSelectionForTest(input, 0, 0);
+        input.dispatchEvent(
+          new rendered.window.Event("paste", {
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        valueDescriptor?.set?.call(input, "123");
+        input.dispatchEvent(
+          new rendered.window.InputEvent("input", {
+            bubbles: true,
+            inputType: "insertFromPaste",
+          }),
+        );
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+
+      await act(async () => {
+        valueDescriptor?.set?.call(input, "415");
+        input.dispatchEvent(
+          new rendered.window.InputEvent("input", {
+            bubbles: true,
+            inputType: "insertText",
+          }),
+        );
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      findSendVerificationCodeButton(rendered.container);
+
+      await act(async () => {
+        setInputSelectionForTest(input, input.value.length, input.value.length);
+        input.dispatchEvent(
+          new rendered.window.Event("paste", {
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        valueDescriptor?.set?.call(input, "4155552671");
+        input.dispatchEvent(
+          new rendered.window.InputEvent("input", {
+            bubbles: true,
+            inputType: "insertFromPaste",
+          }),
+        );
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      findSendVerificationCodeButton(rendered.container);
+
+      await act(async () => {
+        setInputSelectionForTest(input, 9, 10);
+        valueDescriptor?.set?.call(input, "4155552672");
+        input.dispatchEvent(
+          new rendered.window.InputEvent("input", {
+            bubbles: true,
+            inputType: "insertReplacementText",
+          }),
+        );
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      findSendVerificationCodeButton(rendered.container);
+
+      await act(async () => {
+        setInputSelectionForTest(input, 0, input.value.length);
+        input.dispatchEvent(
+          new rendered.window.Event("paste", {
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        valueDescriptor?.set?.call(input, "+44 7400 123456");
+        input.dispatchEvent(
+          new rendered.window.InputEvent("input", {
+            bubbles: true,
+            inputType: "insertFromPaste",
+          }),
+        );
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).toHaveBeenCalledTimes(1);
+      expect(mocks.sendCode).toHaveBeenCalledWith({
+        phoneNumber: "+447400123456",
+      });
+      assert.match(rendered.container.textContent ?? "", /Verification code/);
+      assert.match(rendered.container.textContent ?? "", /\*\*\* 3456/);
+    } finally {
+      await rendered.cleanup();
+      vi.doUnmock(
+        "@/src/components/hosted-onboarding/hosted-verification-code-step",
+      );
+      vi.doUnmock("@/src/components/ui/combobox");
+      vi.doUnmock("@/src/components/ui/input");
+      vi.doUnmock("@/src/hooks/use-mobile");
+      vi.resetModules();
     }
   });
 
@@ -353,11 +563,8 @@ describe("HostedPhoneAuth", () => {
 
     const markup = renderToStaticMarkup(
       React.createElement(React.Fragment, null,
-        React.createElement(HostedPhoneAuth, {
-        }),
-        React.createElement(HostedPhoneAuth, {
-          intent: "auth",
-        }),
+        React.createElement(HostedPhoneAuth),
+        React.createElement(HostedPhoneAuth),
       ),
     );
 
@@ -529,6 +736,156 @@ describe("HostedPhoneAuth", () => {
         container.textContent ?? "",
         /No account for this phone/,
       );
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-privy-captcha");
+      vi.resetModules();
+    }
+  });
+
+  it("queues one pasted-phone send until Privy becomes ready", async () => {
+    vi.resetModules();
+    interface FlowProps {
+      activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null;
+      onPhoneNumberChange: (
+        value: string,
+        metadata?: { autoSendCandidate: true; countryCode: string },
+      ) => void;
+      pendingAction: string | null;
+    }
+    const flowState: { current: FlowProps | null } = { current: null };
+
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
+      HostedPhoneAuthFlow(props: FlowProps) {
+        flowState.current = props;
+        return React.createElement("div", { "data-phone-flow": "mounted" });
+      },
+      HostedPhoneAuthScaffold({ children }: { children: React.ReactNode }) {
+        return React.createElement(React.Fragment, null, children);
+      },
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/hosted-privy-captcha", () => ({
+      HostedPrivyCaptcha() {
+        return null;
+      },
+    }));
+    mocks.sendCode.mockResolvedValue(undefined);
+
+    const { HostedPhoneAuth } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth"
+    );
+    const harnessState: {
+      setReady: React.Dispatch<React.SetStateAction<boolean>> | null;
+    } = { setReady: null };
+
+    function ReadyHarness() {
+      const [ready, setReady] = React.useState(false);
+      harnessState.setReady = setReady;
+      mocks.usePrivy.mockReturnValue({
+        authenticated: false,
+        logout: mocks.logout,
+        ready,
+      });
+      return React.createElement(HostedPhoneAuth, {
+        autoSendPastedPhoneNumber: true,
+      });
+    }
+
+    const { cleanup } = await renderClientComponent(
+      React.createElement(ReadyHarness),
+      { requireButton: false },
+    );
+
+    try {
+      await act(async () => {
+        flowState.current?.onPhoneNumberChange("4155552671", {
+          autoSendCandidate: true,
+          countryCode: "US",
+        });
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      assert.equal(flowState.current?.pendingAction, "send-code");
+
+      const setReady = harnessState.setReady;
+      assert.ok(setReady);
+      await act(async () => {
+        setReady(true);
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).toHaveBeenCalledTimes(1);
+      expect(mocks.sendCode).toHaveBeenCalledWith({
+        phoneNumber: "+14155552671",
+      });
+      assert.equal(flowState.current?.activeAttempt?.maskedPhoneNumber, "*** 2671");
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-privy-captcha");
+      vi.resetModules();
+    }
+  });
+
+  it("keeps pasted-phone metadata manual without an explicit surface opt-in", async () => {
+    vi.resetModules();
+    interface FlowProps {
+      activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null;
+      onPhoneNumberChange: (
+        value: string,
+        metadata?: { autoSendCandidate: true; countryCode: string },
+      ) => void;
+      onSubmitPhoneEntry: () => Promise<void>;
+    }
+    const flowState: { current: FlowProps | null } = { current: null };
+
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
+      HostedPhoneAuthFlow(props: FlowProps) {
+        flowState.current = props;
+        return React.createElement("div", { "data-phone-flow": "mounted" });
+      },
+      HostedPhoneAuthScaffold({ children }: { children: React.ReactNode }) {
+        return React.createElement(React.Fragment, null, children);
+      },
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/hosted-privy-captcha", () => ({
+      HostedPrivyCaptcha() {
+        return null;
+      },
+    }));
+    mocks.sendCode.mockResolvedValue(undefined);
+
+    const { HostedPhoneAuth } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth"
+    );
+    const { cleanup } = await renderClientComponent(
+      React.createElement(HostedPhoneAuth),
+      { requireButton: false },
+    );
+
+    try {
+      await act(async () => {
+        flowState.current?.onPhoneNumberChange("4155552671", {
+          autoSendCandidate: true,
+          countryCode: "US",
+        });
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await flowState.current?.onSubmitPhoneEntry();
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).toHaveBeenCalledTimes(1);
+      expect(mocks.sendCode).toHaveBeenCalledWith({
+        phoneNumber: "+14155552671",
+      });
+      assert.equal(flowState.current?.activeAttempt?.maskedPhoneNumber, "*** 2671");
     } finally {
       await cleanup();
       vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
@@ -855,137 +1212,6 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
-  it("drains queued manual link-phone sends when Privy initializes while authenticated", async () => {
-    vi.resetModules();
-    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
-      HostedPhoneAuthFlow(props: {
-        activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null;
-        onPhoneNumberChange: (value: string) => void;
-        sendCodeDisabled: boolean;
-        onSubmitPhoneEntry: (event?: React.FormEvent<HTMLFormElement>) => void;
-      }) {
-        return React.createElement(
-          "div",
-          {
-            "data-active-attempt": props.activeAttempt?.maskedPhoneNumber ?? "",
-            "data-send-disabled": props.sendCodeDisabled ? "yes" : "no",
-          },
-          React.createElement(
-            "button",
-            {
-              type: "button",
-              "data-set-phone": "true",
-              onClick: () => props.onPhoneNumberChange("4155552671"),
-            },
-            "Set phone",
-          ),
-          React.createElement(
-            "button",
-            {
-              type: "button",
-              "data-send-code": "true",
-              disabled: props.sendCodeDisabled,
-              onClick: () => props.onSubmitPhoneEntry(),
-            },
-            "Send verification code",
-          ),
-        );
-      },
-      HostedPhoneAuthScaffold({
-        children,
-        view,
-      }: {
-        children: React.ReactNode;
-        view: string | null;
-      }) {
-        if (view) {
-          return React.createElement("div", { "data-auth-view": view });
-        }
-
-        return React.createElement(React.Fragment, null, children);
-      },
-    }));
-    vi.doMock("@/src/components/hosted-onboarding/hosted-privy-captcha", () => ({
-      HostedPrivyCaptcha() {
-        return React.createElement("div", { "data-privy-captcha": "mounted" });
-      },
-    }));
-    mocks.sendCode.mockResolvedValue(undefined);
-
-    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
-    const readyHarnessState: {
-      setPrivyReady: React.Dispatch<React.SetStateAction<boolean>> | null;
-    } = {
-      setPrivyReady: null,
-    };
-    function ReadyHarness() {
-      const [privyReady, setReady] = React.useState(false);
-      readyHarnessState.setPrivyReady = setReady;
-      mocks.usePrivy.mockReturnValue({
-        authenticated: true,
-        logout: mocks.logout,
-        ready: privyReady,
-      });
-      return React.createElement(HostedPhoneAuth, {
-        intent: "link",
-      });
-    }
-
-    const { cleanup, container } = await renderClientComponent(
-      React.createElement(ReadyHarness),
-    );
-
-    try {
-      const setPhoneButton = container.querySelector(
-        "[data-set-phone]",
-      ) as HTMLButtonElement | null;
-      const sendCodeButton = container.querySelector(
-        "[data-send-code]",
-      ) as HTMLButtonElement | null;
-      assert.ok(setPhoneButton);
-      assert.ok(sendCodeButton);
-      assert.equal(container.querySelector("[data-auth-view]"), null);
-
-      await act(async () => {
-        setPhoneButton.dispatchEvent(new Event("click", { bubbles: true }));
-      });
-
-      assert.equal(
-        container.querySelector("[data-send-disabled]")?.getAttribute("data-send-disabled"),
-        "no",
-      );
-
-      await act(async () => {
-        sendCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
-        await flushHostedPhoneAuthEffects(2);
-      });
-
-      expect(mocks.sendCode).not.toHaveBeenCalled();
-
-      const updatePrivyReady = readyHarnessState.setPrivyReady;
-      assert.ok(updatePrivyReady);
-      await act(async () => {
-        updatePrivyReady(true);
-        await flushHostedPhoneAuthEffects();
-      });
-
-      expect(mocks.sendCode).toHaveBeenCalledTimes(1);
-      expect(mocks.sendCode).toHaveBeenCalledWith({
-        phoneNumber: "+14155552671",
-      });
-      assert.equal(
-        container.querySelector("[data-active-attempt]")?.getAttribute("data-active-attempt"),
-        "*** 2671",
-      );
-      assert.equal(container.querySelector("[data-auth-view]"), null);
-    } finally {
-      await cleanup();
-      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
-      vi.doUnmock("@/src/components/hosted-onboarding/hosted-privy-captcha");
-      vi.resetModules();
-    }
-  });
-
   it("renders the explicit manual-resume banner for authenticated invite sessions", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
@@ -1068,7 +1294,6 @@ describe("HostedPhoneAuth", () => {
         },
         code: "",
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
@@ -1168,7 +1393,6 @@ describe("HostedPhoneAuth", () => {
         code: "",
         disableSignup: true,
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
@@ -1203,7 +1427,6 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: null,
         code: "",
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
@@ -1237,7 +1460,6 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: null,
         code: "",
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
@@ -2149,9 +2371,7 @@ describe("HostedPhoneAuth", () => {
 
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
     const { cleanup, container } = await renderClientComponent(
-      React.createElement(HostedPhoneAuth, {
-        intent: "auth",
-      }),
+      React.createElement(HostedPhoneAuth),
     );
 
     try {
@@ -2233,9 +2453,7 @@ describe("HostedPhoneAuth", () => {
 
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
     const { cleanup, container } = await renderClientComponent(
-      React.createElement(HostedPhoneAuth, {
-        intent: "auth",
-      }),
+      React.createElement(HostedPhoneAuth),
     );
 
     try {
@@ -2366,9 +2584,7 @@ describe("HostedPhoneAuth", () => {
 
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
     const { cleanup, container } = await renderClientComponent(
-      React.createElement(HostedPhoneAuth, {
-        intent: "auth",
-      }),
+      React.createElement(HostedPhoneAuth),
     );
 
     try {
@@ -2508,9 +2724,7 @@ describe("HostedPhoneAuth", () => {
 
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
     const { cleanup, container } = await renderClientComponent(
-      React.createElement(HostedPhoneAuth, {
-        intent: "auth",
-      }),
+      React.createElement(HostedPhoneAuth),
     );
 
     try {
@@ -2683,9 +2897,7 @@ describe("HostedPhoneAuth", () => {
     function PhoneAuthHarness() {
       const [, setRenderVersion] = React.useState(0);
       rerenderHarness = () => setRenderVersion((version) => version + 1);
-      return React.createElement(HostedPhoneAuth, {
-        intent: "auth",
-      });
+      return React.createElement(HostedPhoneAuth);
     }
 
     const { cleanup, container } = await renderClientComponent(
@@ -3111,7 +3323,6 @@ describe("HostedPhoneAuth", () => {
         },
         code: "",
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
@@ -3145,7 +3356,6 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: null,
         code: "",
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
@@ -3173,7 +3383,6 @@ describe("HostedPhoneAuth", () => {
         },
         code: "",
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
@@ -3207,7 +3416,6 @@ describe("HostedPhoneAuth", () => {
     );
     const markup = renderToStaticMarkup(
       React.createElement(HostedPhoneEntryStep, {
-        intent: "auth",
         pendingAction: "send-code",
         phoneCountryOptions: [US_PHONE_COUNTRY],
         phoneNumber: "4155552671",
@@ -3812,6 +4020,23 @@ function findSendVerificationCodeButton(container: HTMLElement): HTMLButtonEleme
   return button;
 }
 
+function setInputSelectionForTest(
+  input: HTMLInputElement,
+  selectionStart: number,
+  selectionEnd: number,
+) {
+  Object.defineProperties(input, {
+    selectionEnd: {
+      configurable: true,
+      value: selectionEnd,
+    },
+    selectionStart: {
+      configurable: true,
+      value: selectionStart,
+    },
+  });
+}
+
 async function loadHostedInvitePhoneAuthHarness(input?: {
   activeAttempt?: { maskedPhoneNumber: string; phoneNumber: string } | null;
   ReactMock?: () => Promise<Record<string, unknown>>;
@@ -3878,7 +4103,6 @@ function createHostedInvitePhoneAuthControllerHarness(
       activeAttempt,
       code: "",
       disabled: false,
-      intent: "auth" as const,
       onCodeChange: vi.fn(),
       onPhoneCountryChange: vi.fn(),
       onPhoneNumberChange: vi.fn(),

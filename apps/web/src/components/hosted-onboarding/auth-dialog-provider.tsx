@@ -16,10 +16,16 @@ import {
   HOSTED_APP_INITIAL_VISIT_HOME_PATH,
 } from "@/src/lib/hosted-onboarding/app-routes";
 import {
+  HOSTED_START_PAID_GROUP_RETURN_PARAM,
+  HOSTED_START_PAID_GROUP_RETURN_VALUE,
   HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM,
   HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM,
   HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
+import {
+  HOSTED_BILLING_PLAN_CHANGE_RETURN_PARAM,
+  parseHostedBillingPlanChangeReturnValue,
+} from "@/src/lib/hosted-onboarding/billing-plan-change-contract";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { subscribeBrowserVaultSessionInvalidation } from "@/src/lib/browser-vault/session-invalidation";
@@ -37,6 +43,7 @@ const INTEGRATIONS_CONNECT_PATH_PATTERN =
   /^\/integrations\/connect\/cai_[A-Za-z0-9_-]{32}$/u;
 const SETTINGS_DATA_PRIVACY_PATH = "/settings/data-privacy";
 const SETTINGS_PATH = "/settings";
+const ENVIRONMENT_PATH = "/environment";
 
 interface AuthContextValue {
   authenticated: boolean;
@@ -126,19 +133,67 @@ export function AuthProvider({
 function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): boolean {
   return (
     shouldResumeCurrentActionApprovalUrl(payload)
+    || shouldResumeCurrentEnvironmentUrl(payload)
     || shouldResumeCurrentDeviceConnectIntentUrl(payload)
     || shouldResumeCurrentClinicalRecordsIndexUrl(payload)
     || shouldResumeCurrentClinicalRecordsConnectUrl(payload)
     || shouldResumeCurrentComputerHandoffUrl(payload)
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
     || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
+    || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
+    || shouldResumeCurrentSettingsPlanChangeUrl(payload)
     || shouldResumeCurrentSettingsPulseTrialPaymentUrl(payload)
   );
 }
 
+function shouldResumeCurrentSettingsPlanChangeUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined" || window.location.pathname !== SETTINGS_PATH) {
+    return false;
+  }
+
+  const returnValues = new URLSearchParams(window.location.search).getAll(
+    HOSTED_BILLING_PLAN_CHANGE_RETURN_PARAM,
+  );
+  return returnValues.length === 1
+    && parseHostedBillingPlanChangeReturnValue(returnValues[0]) !== null;
+}
+
+function shouldResumeCurrentEnvironmentUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  return (
+    isHostedOnboardingAccessibleStage(payload.stage)
+    && typeof window !== "undefined"
+    && window.location.pathname === ENVIRONMENT_PATH
+  );
+}
+
 // Someone returning from Stripe's payment-method page lands on /settings with
-// the signed continuation params. Sending them to /home instead would strand
-// the plan switch they just paid to complete.
+// the payment-return params. Sending them to /home instead would strand the
+// plan choice they just added a card to complete.
+function shouldResumeCurrentSettingsGroupPaymentUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined" || window.location.pathname !== SETTINGS_PATH) {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const returnValues = params.getAll(HOSTED_START_PAID_GROUP_RETURN_PARAM);
+  return returnValues.length === 1
+    && returnValues[0] === HOSTED_START_PAID_GROUP_RETURN_VALUE;
+}
+
 function shouldResumeCurrentSettingsPulseTrialPaymentUrl(
   payload: HostedPrivyCompletionPayload,
 ): boolean {

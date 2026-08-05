@@ -118,10 +118,13 @@ default destination for every goal or the definition of activation.
   the workflow. When safe, conversation still handles discovery, setup, the
   smallest authorized handoff, and status or confirmation afterward.
 - Wearable-provider authorization uses that exception narrowly. A provider
-  callback may show a first-party confirmation but must not attach an account
-  on navigation alone; the initiating browser must explicitly finish the
-  connection. A callback that cannot prove that browser context fails safely
-  and sends the member back to start again.
+  callback completes automatically only for the browser that can prove it
+  started the connection for the signed-in member; that proof-bound return is
+  the member's completion act, and Murph does not add its own confirmation
+  tap on top of the provider's authorization screen. The owner accepts that
+  provider-side account selection is trusted as-is. A callback that cannot
+  prove the initiating-browser context fails safely without attaching an
+  account and lands on the Connect callback-error notice to start again.
 - Apple Health follows that exception narrowly: Murph can explain and hand off
   setup in a direct conversation with the canonical App Store listing, while
   the iOS app owns sign-in and the operating-system HealthKit permission flow.
@@ -194,6 +197,10 @@ Assistant runtime state is never the source of truth for these objects.
 - On secondary web control surfaces, show the actionable state first and keep
   explanatory history or requirements on demand. Do not repeat the same truth
   in a heading, introduction, and row labels.
+- When a member choice materially changes cost-weighted included-capacity
+  drawdown, disclose that difference in the choice and keep it visible in the
+  saved-state summary. Do not imply that equal model names have equal provider
+  cost.
 - Rank learning, confidence, and life fit before engagement or protocol volume.
 - Any experiment result that can be shared or aggregated must stay tied to the
   exact protocol revision, test plan, and confidence language that produced it.

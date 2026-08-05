@@ -8,6 +8,7 @@ import {
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
+  buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
@@ -31,6 +32,9 @@ import {
 import {
   type AssistantCodexModelProviderConfig,
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG,
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   VENICE_CODEX_MODEL_PROVIDER_ID,
   resolveAssistantCodexModelProviderConfig,
@@ -142,6 +146,7 @@ const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
 ] as const;
 const HOSTED_CODEX_SUPPORTED_PROVIDER_IDS = new Set<string>([
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id,
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   VENICE_CODEX_MODEL_PROVIDER_ID,
 ]);
 const HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL =
@@ -185,6 +190,13 @@ export async function prepareHostedCodexRuntimeEnvironment(
     provider: normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER),
     runtimeEnv: input.runtimeEnv,
   });
+  const customInferenceProvider =
+    providerConfig.id === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID;
+  const contextWindowTokens = customInferenceProvider
+    ? requireHostedCustomInferenceContextWindowTokens(
+        input.runtimeEnv.HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS,
+      )
+    : null;
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
@@ -259,8 +271,11 @@ export async function prepareHostedCodexRuntimeEnvironment(
     buildHostedCodexConfigToml({
       chatGptAuth,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
+      contextWindowTokens,
       provider: providerConfig,
-      reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
+      reasoningEffort: customInferenceProvider
+        ? null
+        : runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
     }),
     {
       encoding: "utf8",
@@ -423,7 +438,9 @@ function resolveHostedCodexModelProviderConfig(input: {
 }): AssistantCodexModelProviderConfig {
   const resolvedProviderConfig = input.provider
     && HOSTED_CODEX_SUPPORTED_PROVIDER_IDS.has(input.provider)
-    ? resolveAssistantCodexModelProviderConfig(input.provider)
+    ? input.provider === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
+      ? HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG
+      : resolveAssistantCodexModelProviderConfig(input.provider)
     : null;
   if (!resolvedProviderConfig) {
     throw new HostedAssistantConfigurationError(
@@ -480,6 +497,9 @@ function resolveHostedCodexModelProviderConfig(input: {
   return {
     ...providerConfig,
     baseUrl: url.toString(),
+    id: providerConfig.id === VENICE_CODEX_MODEL_PROVIDER_ID
+      ? HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
+      : providerConfig.id,
     supportsWebSockets: false,
   };
 }
@@ -533,15 +553,43 @@ function normalizeHostedCodexUrlHostname(hostname: string): string {
   return hostname.replace(/^\[/u, "").replace(/\]$/u, "");
 }
 
+function requireHostedCustomInferenceContextWindowTokens(value: unknown): number {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!/^[0-9]+$/u.test(normalized)) {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      "Custom inference requires HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS.",
+    );
+  }
+  const parsed = Number(normalized);
+  if (!Number.isSafeInteger(parsed) || parsed < 8_192 || parsed > 2_000_000) {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      "HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS is outside the supported range.",
+    );
+  }
+  return parsed;
+}
+
 export function buildHostedCodexConfigToml(input: {
   chatGptAuth?: boolean;
+  contextWindowTokens?: number | null;
   model: string | null;
   provider: AssistantCodexModelProviderConfig;
-  reasoningEffort: string;
+  reasoningEffort: string | null;
 }): string {
   const modelProviderId = input.chatGptAuth
     ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
     : input.provider.id;
+  const customInferenceProvider =
+    input.provider.id === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID;
+  const autoCompactTokenLimit = input.contextWindowTokens === null
+      || input.contextWindowTokens === undefined
+    ? DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT
+    : Math.min(
+        DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT,
+        Math.max(4_096, Math.floor(input.contextWindowTokens * 0.75)),
+      );
   const providerConfigLines = [
     `[model_providers.${tomlQuotedKey(modelProviderId)}]`,
     `name = ${tomlString(input.provider.name)}`,
@@ -557,7 +605,9 @@ export function buildHostedCodexConfigToml(input: {
       : []),
     `stream_idle_timeout_ms = ${HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS}`,
     `requires_openai_auth = ${input.chatGptAuth ? "true" : "false"}`,
-    `request_max_retries = ${HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES}`,
+    `request_max_retries = ${
+      customInferenceProvider ? 1 : HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES
+    }`,
     `stream_max_retries = ${HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES}`,
     "",
   ];
@@ -566,8 +616,13 @@ export function buildHostedCodexConfigToml(input: {
     ...(input.model ? [`model = ${tomlString(input.model)}`] : []),
     ...(input.chatGptAuth ? ['cli_auth_credentials_store = "file"'] : []),
     `model_provider = ${tomlString(modelProviderId)}`,
-    `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
-    `model_auto_compact_token_limit = ${DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT}`,
+    ...(input.reasoningEffort
+      ? [`model_reasoning_effort = ${tomlString(input.reasoningEffort)}`]
+      : []),
+    ...(input.contextWindowTokens
+      ? [`model_context_window = ${input.contextWindowTokens}`]
+      : []),
+    `model_auto_compact_token_limit = ${autoCompactTokenLimit}`,
     `log_dir = ${tomlString(DEFAULT_HOSTED_CODEX_LOG_DIR)}`,
     `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
     `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,
@@ -581,6 +636,7 @@ export function buildHostedCodexConfigToml(input: {
     ...providerConfigLines,
     ...buildMurphGroupReadPermissionProfileTomlLines(),
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
+    ...buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
     ...buildMurphMemberReadPermissionProfileTomlLines(),
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",

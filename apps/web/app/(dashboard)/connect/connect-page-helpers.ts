@@ -78,14 +78,18 @@ export function markCallbackConnectedSource(
 export function markLocallyDisconnectedSources(
   sources: readonly ConnectSource[],
   disconnectedConnectionIds: ReadonlySet<string>,
+  disconnectedSourceIds: ReadonlySet<string> = new Set(),
 ): readonly ConnectSource[] {
-  if (disconnectedConnectionIds.size === 0) {
+  if (disconnectedConnectionIds.size === 0 && disconnectedSourceIds.size === 0) {
     return sources;
   }
 
   return sources.map((source) => {
     const connectionId = source.disconnectConnectionId;
-    if (!connectionId || !disconnectedConnectionIds.has(connectionId)) {
+    if (
+      !disconnectedSourceIds.has(source.id)
+      && (!connectionId || !disconnectedConnectionIds.has(connectionId))
+    ) {
       return source;
     }
 
@@ -94,6 +98,7 @@ export function markLocallyDisconnectedSources(
       connectProvider,
       disconnectConnectionId,
       disconnectScope,
+      disconnectSourceProviderSlug,
       recoveryKind,
       requiresReconnect,
       ...locallyDisconnectedSource
@@ -102,6 +107,7 @@ export function markLocallyDisconnectedSources(
     void connectProvider;
     void disconnectConnectionId;
     void disconnectScope;
+    void disconnectSourceProviderSlug;
     void recoveryKind;
     void requiresReconnect;
 
@@ -134,11 +140,31 @@ export function createConnectCallbackNotice(
     };
   }
 
+  // Error callbacks are taken straight from query params, so only a catalog
+  // source and a recognizable code shape may reach the prefilled support mail.
+  // Anything else is unverified text and is dropped rather than quoted back.
+  const catalogSource = findCallbackSource({
+    connectSource: input.connectSource,
+    connectTarget: input.connectTarget,
+    provider: input.provider,
+    sources,
+  });
+
   return {
+    errorCode: normalizeConnectCallbackErrorReference(input.errorCode),
     kind: "error",
+    sourceLabel: catalogSource?.name ?? null,
     title: "Unable to finish connection",
     message: describeDeviceSyncCallbackError(sourceLabel, input.errorCode),
   };
+}
+
+const CONNECT_CALLBACK_ERROR_REFERENCE_PATTERN = /^[A-Z][A-Z0-9_]{2,63}$/u;
+
+function normalizeConnectCallbackErrorReference(errorCode: string | null): string | null {
+  return errorCode && CONNECT_CALLBACK_ERROR_REFERENCE_PATTERN.test(errorCode)
+    ? errorCode
+    : null;
 }
 
 export function stripConnectCallbackParams() {
@@ -287,6 +313,10 @@ function describeDeviceSyncCallbackError(providerLabel: string, errorCode: strin
       return `${providerLabel} was not connected this time. You can try again whenever you're ready.`;
     case "OAUTH_STATE_INVALID":
       return `${providerLabel} gave us an expired or invalid return from the last attempt. Start a fresh connection and try again.`;
+    case "CALLBACK_PROOF_INVALID":
+      return `That return link did not match the browser you started in, so nothing was connected. Start ${providerLabel} again from this page.`;
+    case "CALLBACK_SESSION_REQUIRED":
+      return `You were signed out before ${providerLabel} finished connecting. Log in, then start the connection again.`;
     default:
       return `We could not finish connecting ${providerLabel}. Try again when you're ready.`;
   }

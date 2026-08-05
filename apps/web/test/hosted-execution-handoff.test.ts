@@ -464,12 +464,16 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     });
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
+      deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
+      reconcileRuntimeHealthDataConsent: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
+      stageEnvironmentVoice: vi.fn(),
       stageMealPhoto: vi.fn(),
+      verifyInferenceConnection: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(deleteHostedRunnerUserDataBestEffort({
@@ -493,6 +497,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
   it("keeps a legacy Worker response pending without deleteAll completion evidence", async () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
+      deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
       deleteUserData: vi.fn().mockResolvedValue({
         deletedAt: "2026-04-29T00:00:00.000Z",
@@ -511,8 +516,11 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       }),
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
+      reconcileRuntimeHealthDataConsent: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
+      stageEnvironmentVoice: vi.fn(),
       stageMealPhoto: vi.fn(),
+      verifyInferenceConnection: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(deleteHostedRunnerUserDataBestEffort({
@@ -531,12 +539,16 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     ));
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
+      deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
       deleteUserData,
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
+      reconcileRuntimeHealthDataConsent: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
+      stageEnvironmentVoice: vi.fn(),
       stageMealPhoto: vi.fn(),
+      verifyInferenceConnection: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(deleteHostedRunnerUserDataBestEffort({

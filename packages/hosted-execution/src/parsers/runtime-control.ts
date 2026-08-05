@@ -10,6 +10,9 @@ import {
   parseAssistantUsageRecord,
 } from "../assistant-usage.ts";
 import {
+  parseHostedAssistantCustomInferenceOverride,
+} from "../assistant-inference.ts";
+import {
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   isHostedAssistantProductModel,
   isHostedAssistantProvider,
@@ -109,6 +112,8 @@ import {
   type HostedRuntimeLogPhase,
   type HostedRuntimeLogRequest,
   type HostedRuntimeLogResponse,
+  HOSTED_HEALTH_DATA_CONSENT_STATES,
+  type HostedRuntimeHealthDataAdmissionResponse,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
   type HostedRuntimeRedactedScalar,
@@ -131,6 +136,7 @@ import {
   type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedRuntimeAssistantConfigurationUpdateStatus,
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
+  hostedRuntimeLinqProviderErrorMessageForCode,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -1242,6 +1248,7 @@ export function parseHostedRuntimeGroupToolRequest(
       new Set([
         "action",
         "linqSenderHandles",
+        "participant",
         "sourceConversation",
         "telegramSenderHandles",
       ]),
@@ -1249,6 +1256,14 @@ export function parseHostedRuntimeGroupToolRequest(
     );
     return {
       action,
+      ...(record.participant !== undefined && record.participant !== null
+        ? {
+          participant: parseHostedRuntimeGroupToolParticipant(
+            record.participant,
+            "Hosted runtime group tool read_usage_referral request participant",
+          ),
+        }
+        : {}),
       ...parseHostedRuntimeGroupSenderHandlesRequest(record),
       ...parseHostedRuntimeUsageReferralSourceContext(record),
     };
@@ -2271,6 +2286,7 @@ function parseHostedRuntimeGroupSharedProjection(
     projection,
     new Set([
       "dataStatus",
+      "grantedAt",
       "grantStatus",
       "projectionScope",
       "projectionScopeKey",
@@ -2303,6 +2319,24 @@ function parseHostedRuntimeGroupSharedProjection(
   const dataStatus = requireString(projection.dataStatus, `${label}.dataStatus`);
   if (dataStatus !== "available" && dataStatus !== "missing") {
     throw new TypeError(`${label}.dataStatus is invalid.`);
+  }
+  const grantedAt = projection.grantedAt === undefined
+    ? undefined
+    : projection.grantedAt === null
+      ? null
+      : parseHostedRuntimeGroupCanonicalTimestamp(
+          projection.grantedAt,
+          `${label}.grantedAt`,
+        );
+  if (
+    grantStatus === "not_granted"
+    && grantedAt !== undefined
+    && grantedAt !== null
+  ) {
+    throw new TypeError(`${label} not_granted projections cannot have grantedAt.`);
+  }
+  if (grantStatus === "granted" && grantedAt === null) {
+    throw new TypeError(`${label} granted projections cannot have null grantedAt.`);
   }
 
   const rawRecords = requireArray(projection.records, `${label}.records`);
@@ -2353,11 +2387,24 @@ function parseHostedRuntimeGroupSharedProjection(
 
   return {
     dataStatus,
+    ...(grantedAt === undefined ? {} : { grantedAt }),
     grantStatus,
     projectionScope,
     projectionScopeKey,
     records,
   };
+}
+
+function parseHostedRuntimeGroupCanonicalTimestamp(
+  value: unknown,
+  label: string,
+): string {
+  const timestamp = requireString(value, label);
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== timestamp) {
+    throw new TypeError(`${label} must be a canonical UTC timestamp.`);
+  }
+  return timestamp;
 }
 
 function parseHostedRuntimeGroupMemberAskResult(
@@ -2750,51 +2797,102 @@ export function parseHostedRuntimeGroupToolResponse(
         result.usage,
         "Hosted runtime group tool read_usage usage",
       );
+      // Temporary rolling-deploy seam. Remove only after no deployed or
+      // rollback-eligible Web build emits the immediately preceding shape and
+      // every pre-reader warm runner has drained; see apps/cloudflare/DEPLOY.md.
+      const isLegacyUsageProjection = [
+        "capacityState",
+        "periodEnd",
+        "remainingPercent",
+      ].some((key) => Object.prototype.hasOwnProperty.call(usage, key));
+      if (isLegacyUsageProjection) {
+        assertAllowedObjectKeys(
+          usage,
+          new Set([
+            "capacityState",
+            "fundingUrl",
+            "periodEnd",
+            "remainingPercent",
+          ]),
+          "Hosted runtime group tool read_usage legacy usage",
+        );
+        const capacityState = requireString(
+          usage.capacityState,
+          "Hosted runtime group tool read_usage legacy capacityState",
+        );
+        if (
+          capacityState !== "healthy"
+          && capacityState !== "low"
+          && capacityState !== "exhausted"
+        ) {
+          throw new TypeError(
+            "Hosted runtime group tool read_usage legacy capacityState is invalid.",
+          );
+        }
+        const periodEnd = requireString(
+          usage.periodEnd,
+          "Hosted runtime group tool read_usage legacy periodEnd",
+        );
+        const periodEndDate = new Date(periodEnd);
+        if (
+          !Number.isFinite(periodEndDate.getTime())
+          || periodEndDate.toISOString() !== periodEnd
+        ) {
+          throw new TypeError(
+            "Hosted runtime group tool read_usage legacy periodEnd must be canonical.",
+          );
+        }
+        const remainingPercent = usage.remainingPercent === undefined
+          ? undefined
+          : requireNonNegativeInteger(
+              usage.remainingPercent,
+              "Hosted runtime group tool read_usage legacy remainingPercent",
+            );
+        if (remainingPercent !== undefined && remainingPercent > 100) {
+          throw new TypeError(
+            "Hosted runtime group tool read_usage legacy remainingPercent must be at most 100.",
+          );
+        }
+        const fundingUrl = readNullableString(
+          usage.fundingUrl,
+          "Hosted runtime group tool read_usage legacy fundingUrl",
+        );
+        return {
+          action,
+          result: {
+            status,
+            usage: {
+              fundingNeeded: capacityState !== "healthy",
+              fundingUrl,
+              sponsorshipStatus: "not_sponsored",
+            },
+          },
+        };
+      }
       assertAllowedObjectKeys(
         usage,
         new Set([
-          "capacityState",
+          "fundingNeeded",
           "fundingUrl",
-          "periodEnd",
-          "remainingPercent",
+          "sponsorshipStatus",
         ]),
         "Hosted runtime group tool read_usage usage",
       );
-      const capacityState = requireString(
-        usage.capacityState,
-        "Hosted runtime group tool read_usage capacityState",
+      const sponsorshipStatus = requireString(
+        usage.sponsorshipStatus,
+        "Hosted runtime group tool read_usage sponsorshipStatus",
       );
       if (
-        capacityState !== "healthy"
-        && capacityState !== "low"
-        && capacityState !== "exhausted"
+        sponsorshipStatus !== "not_sponsored"
+        && sponsorshipStatus !== "sponsored"
       ) {
         throw new TypeError(
-          "Hosted runtime group tool read_usage capacityState is invalid.",
+          "Hosted runtime group tool read_usage sponsorshipStatus is invalid.",
         );
       }
-      const periodEnd = requireString(
-        usage.periodEnd,
-        "Hosted runtime group tool read_usage periodEnd",
-      );
-      const periodEndDate = new Date(periodEnd);
-      if (
-        !Number.isFinite(periodEndDate.getTime())
-        || periodEndDate.toISOString() !== periodEnd
-      ) {
+      if (typeof usage.fundingNeeded !== "boolean") {
         throw new TypeError(
-          "Hosted runtime group tool read_usage periodEnd must be a canonical timestamp.",
-        );
-      }
-      const remainingPercent = usage.remainingPercent === undefined
-        ? undefined
-        : requireNonNegativeInteger(
-            usage.remainingPercent,
-            "Hosted runtime group tool read_usage remainingPercent",
-          );
-      if (remainingPercent !== undefined && remainingPercent > 100) {
-        throw new TypeError(
-          "Hosted runtime group tool read_usage remainingPercent must be at most 100.",
+          "Hosted runtime group tool read_usage fundingNeeded must be boolean.",
         );
       }
       return {
@@ -2802,13 +2900,12 @@ export function parseHostedRuntimeGroupToolResponse(
         result: {
           status,
           usage: {
-            capacityState,
+            fundingNeeded: usage.fundingNeeded,
             fundingUrl: readNullableString(
               usage.fundingUrl,
               "Hosted runtime group tool read_usage fundingUrl",
             ),
-            periodEnd,
-            ...(remainingPercent === undefined ? {} : { remainingPercent }),
+            sponsorshipStatus,
           },
         },
       };
@@ -3015,13 +3112,20 @@ export function parseHostedRuntimeGroupToolResponse(
     const result = requireObject(record.result, "Hosted runtime group tool create_join_link response result");
     const status = requireString(result.status, "Hosted runtime group tool create_join_link response status");
     if (status === "ok") {
-      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), "Hosted runtime group tool create_join_link ok response result");
+      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl", "offeredAt"]), "Hosted runtime group tool create_join_link ok response result");
+      const offeredAt = result.offeredAt === undefined
+        ? undefined
+        : parseHostedRuntimeGroupCanonicalTimestamp(
+            result.offeredAt,
+            "Hosted runtime group tool create_join_link offeredAt",
+          );
       return {
         action,
         result: {
           status,
           group: parseHostedRuntimeGroupSummary(result.group),
           joinUrl: requireString(result.joinUrl, "Hosted runtime group tool create_join_link joinUrl"),
+          ...(offeredAt === undefined ? {} : { offeredAt }),
         },
       };
     }
@@ -3070,13 +3174,43 @@ export function parseHostedRuntimeGroupToolResponse(
     const result = requireObject(record.result, "Hosted runtime group tool post_join_offer response result");
     const status = requireString(result.status, "Hosted runtime group tool post_join_offer response status");
     if (status === "sent") {
-      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), "Hosted runtime group tool post_join_offer sent response result");
+      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl", "offeredAt", "offerState"]), "Hosted runtime group tool post_join_offer sent response result");
+      const offeredAt = result.offeredAt === undefined
+        ? undefined
+        : parseHostedRuntimeGroupCanonicalTimestamp(
+            result.offeredAt,
+            "Hosted runtime group tool post_join_offer offeredAt",
+          );
+      const offerState = result.offerState === undefined
+        ? undefined
+        : requireString(
+            result.offerState,
+            "Hosted runtime group tool post_join_offer offerState",
+          );
+      if (
+        offerState !== undefined
+        && offerState !== "existing"
+        && offerState !== "posted"
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool post_join_offer offerState is invalid.",
+        );
+      }
+      if (offeredAt !== undefined && offerState === undefined) {
+        throw new TypeError(
+          "Hosted runtime group tool post_join_offer offeredAt requires offerState.",
+        );
+      }
       return {
         action,
         result: {
           status,
           group: parseHostedRuntimeGroupSummary(result.group),
           joinUrl: requireString(result.joinUrl, "Hosted runtime group tool post_join_offer joinUrl"),
+          ...(offerState === undefined ? {} : {
+            offerState,
+            ...(offeredAt === undefined ? {} : { offeredAt }),
+          }),
         },
       };
     }
@@ -3127,12 +3261,64 @@ export function parseHostedRuntimeGroupToolResponse(
       return { action, result: { status } };
     }
     if (status === "unavailable") {
-      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool set_chat_avatar unavailable response result");
+      assertAllowedObjectKeys(
+        result,
+        new Set([
+          "status",
+          "unavailableReason",
+          "providerErrorCode",
+        ]),
+        "Hosted runtime group tool set_chat_avatar unavailable response result",
+      );
+      const providerErrorCode = result.providerErrorCode === undefined
+        ? undefined
+        : requireNumber(
+            result.providerErrorCode,
+            "Hosted runtime group tool set_chat_avatar providerErrorCode",
+          );
+      if (
+        providerErrorCode !== undefined
+        && (
+          !Number.isSafeInteger(providerErrorCode)
+          || providerErrorCode < 1_000
+          || providerErrorCode > 9_999
+        )
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool set_chat_avatar providerErrorCode must be a four-digit integer.",
+        );
+      }
+      const expectedProviderErrorMessage =
+        hostedRuntimeLinqProviderErrorMessageForCode(providerErrorCode);
+      if (
+        providerErrorCode !== undefined
+        && expectedProviderErrorMessage === null
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool set_chat_avatar providerErrorCode must be allowlisted.",
+        );
+      }
+      const unavailableReason = requireString(
+        result.unavailableReason,
+        "Hosted runtime group unavailableReason",
+      );
+      if (
+        unavailableReason !== "provider_unavailable"
+        && providerErrorCode !== undefined
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool set_chat_avatar provider diagnostics require provider_unavailable.",
+        );
+      }
       return {
         action,
         result: {
           status,
-          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          unavailableReason,
+          ...(providerErrorCode === undefined ? {} : { providerErrorCode }),
+          ...(expectedProviderErrorMessage === null
+            ? {}
+            : { providerErrorMessage: expectedProviderErrorMessage }),
         },
       };
     }
@@ -5845,6 +6031,13 @@ export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState 
 
 export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspaceReadResponse {
   const record = requireObject(value, "Hosted workspace read response");
+  const hostedAssistantCustomInferenceOverride =
+    record.hostedAssistantCustomInferenceOverride === undefined
+      || record.hostedAssistantCustomInferenceOverride === null
+      ? null
+      : parseHostedAssistantCustomInferenceOverride(
+          record.hostedAssistantCustomInferenceOverride,
+        );
   const hostedAssistantModelOverride = parseHostedAssistantModelOverride(
     record.hostedAssistantModelOverride,
   );
@@ -5855,9 +6048,18 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
     parseHostedAssistantReasoningEffortOverride(
       record.hostedAssistantReasoningEffortOverride,
     );
+  const platformAiUsageAllowed = record.platformAiUsageAllowed === undefined
+    ? null
+    : requireBoolean(
+        record.platformAiUsageAllowed,
+        "Hosted workspace read response platformAiUsageAllowed",
+      );
 
   return {
     fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
+    ...(hostedAssistantCustomInferenceOverride
+      ? { hostedAssistantCustomInferenceOverride }
+      : {}),
     ...(hostedAssistantModelOverride
       ? { hostedAssistantModelOverride }
       : {}),
@@ -5867,6 +6069,7 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
     ...(hostedAssistantReasoningEffortOverride
       ? { hostedAssistantReasoningEffortOverride }
       : {}),
+    ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };
 }
@@ -6360,12 +6563,38 @@ function parseHostedRunnerR2CutoverStatus(
       record.coexisting,
       "Hosted runner status response r2Cutover.coexisting",
     ),
+    ...(record.pausedCanaryConfigured === undefined
+      ? {}
+      : {
+          pausedCanaryConfigured: requireBoolean(
+            record.pausedCanaryConfigured,
+            "Hosted runner status response r2Cutover.pausedCanaryConfigured",
+          ),
+        }),
     phase,
     protocolVersion: requireString(
       record.protocolVersion,
       "Hosted runner status response r2Cutover.protocolVersion",
     ),
+    ...(record.writeAdmission === undefined
+      ? {}
+      : {
+          writeAdmission: parseHostedR2WriteAdmission(record.writeAdmission),
+        }),
   };
+}
+
+function parseHostedR2WriteAdmission(value: unknown): "open" | "paused" {
+  const writeAdmission = requireString(
+    value,
+    "Hosted runner status response r2Cutover.writeAdmission",
+  );
+  if (writeAdmission !== "open" && writeAdmission !== "paused") {
+    throw new TypeError(
+      "Hosted runner status response r2Cutover.writeAdmission must be open or paused.",
+    );
+  }
+  return writeAdmission;
 }
 
 export function parseHostedRuntimeWebStatusResponse(value: unknown): HostedRuntimeWebStatusResponse {
@@ -6396,6 +6625,38 @@ export function parseHostedRuntimeWebStatusResponse(value: unknown): HostedRunti
         }),
     userId: requireString(record.userId, "Hosted runtime web status response userId"),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
+  };
+}
+
+export function parseHostedRuntimeHealthDataAdmissionResponse(
+  value: unknown,
+): HostedRuntimeHealthDataAdmissionResponse {
+  const record = requireObject(
+    value,
+    "Hosted runtime health-data admission response",
+  );
+  const consentState = parseAllowedString(
+    record.consentState,
+    "Hosted runtime health-data admission response consentState",
+    HOSTED_HEALTH_DATA_CONSENT_STATES,
+  );
+  const processingAllowed = requireBoolean(
+    record.processingAllowed,
+    "Hosted runtime health-data admission response processingAllowed",
+  );
+  if (processingAllowed !== (consentState !== "revoked")) {
+    throw new TypeError(
+      "Hosted runtime health-data admission response processingAllowed did not match consentState.",
+    );
+  }
+
+  return {
+    consentState,
+    processingAllowed,
+    userId: requireString(
+      record.userId,
+      "Hosted runtime health-data admission response userId",
+    ),
   };
 }
 

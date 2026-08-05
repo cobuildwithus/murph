@@ -353,6 +353,55 @@ test("AuthProvider returns an unauthenticated medical-records viewer to that pag
   await rendered.cleanup();
 });
 
+test("AuthProvider returns an Environment voice user to that page", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+    {
+      location: {
+        hash: "",
+        href: "https://join.example.test/environment",
+        origin: "https://join.example.test",
+        pathname: "/environment",
+        search: "",
+      },
+    },
+  );
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  await act(async () => {
+    await mocks.authDialogProps?.onCompleted?.({
+      activationPending: false,
+      initialVisitEligible: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    });
+  });
+
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
 test("AuthProvider resumes a private computer handoff after sign-in completion", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
@@ -519,6 +568,148 @@ test("AuthProvider resumes a signed Pulse payment return on settings after sign-
   // and the signed continuation params were thrown away.
   expect(reload).toHaveBeenCalledTimes(1);
   expect(assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
+test("AuthProvider preserves a Group payment return through sign-in", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const assign = vi.fn();
+  const reload = vi.fn();
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, {
+      authenticated: false,
+    }, createElement(OpenAuthButton)),
+  );
+  const search = "?startGroup=payment_method_saved";
+  const href =
+    `https://join.example.test/settings${search}#subscription`;
+  Object.defineProperty(rendered.window, "location", {
+    configurable: true,
+    value: {
+      assign,
+      hash: "#subscription",
+      href,
+      origin: "https://join.example.test",
+      pathname: "/settings",
+      reload,
+      search,
+    },
+  });
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Complete auth",
+  );
+  await act(async () => {
+    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  expect(rendered.window.location.href).toBe(href);
+  expect(reload).toHaveBeenCalledTimes(1);
+  expect(assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
+test.each([
+  {
+    label: "Edge completion",
+    resumes: true,
+    search: "?planUpdate=launch_edge_monthly",
+  },
+  {
+    label: "Pulse completion",
+    resumes: true,
+    search: "?planUpdate=launch_monthly",
+  },
+  {
+    label: "cancellation",
+    resumes: true,
+    search: "?planUpdate=canceled",
+  },
+  {
+    label: "unsupported Group target",
+    resumes: false,
+    search: "?planUpdate=launch_group_monthly",
+  },
+  {
+    label: "malformed target",
+    resumes: false,
+    search: "?planUpdate=edge",
+  },
+  {
+    label: "repeated return",
+    resumes: false,
+    search: "?planUpdate=launch_edge_monthly&planUpdate=canceled",
+  },
+])("AuthProvider scopes plan-change return resume: $label", async ({ resumes, search }) => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const assign = vi.fn();
+  const reload = vi.fn();
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, {
+      authenticated: false,
+    }, createElement(OpenAuthButton)),
+  );
+  const href = `https://join.example.test/settings${search}#subscription`;
+  Object.defineProperty(rendered.window, "location", {
+    configurable: true,
+    value: {
+      assign,
+      hash: "#subscription",
+      href,
+      origin: "https://join.example.test",
+      pathname: "/settings",
+      reload,
+      search,
+    },
+  });
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Complete auth",
+  );
+  await act(async () => {
+    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  if (resumes) {
+    expect(rendered.window.location.href).toBe(href);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
+  } else {
+    expect(assign).toHaveBeenCalledWith("/home");
+    expect(reload).not.toHaveBeenCalled();
+  }
 
   await rendered.cleanup();
 });

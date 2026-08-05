@@ -12,7 +12,9 @@ const mocks = vi.hoisted(() => ({
   markDeliveryAccepted: vi.fn(),
   markDeliveryFailed: vi.fn(),
   markSkippedDelivery: vi.fn(),
+  readActiveAccess: vi.fn(),
   readParticipantPhone: vi.fn(),
+  readRecentMessageEffectCounts: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
@@ -32,8 +34,9 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   markHostedLinqDeliverySendFailedTx: mocks.markDeliveryFailed,
 }));
 
-// Mock only the canonical load read; chooseHostedLinqSignupWelcomeLine itself
-// runs for real so these tests exercise the shared selection policy.
+// Mock only the canonical planning and recent-traffic reads;
+// chooseHostedLinqSignupWelcomeLine itself runs for real so these tests
+// exercise the shared selection policy.
 vi.mock("@/src/lib/hosted-onboarding/linq-line-planning-load", () => ({
   buildHostedLinqAssignmentPlanningMessages: (snapshot: {
     byRecipientPhone: ReadonlyMap<string, { plannedMessages: number }>;
@@ -71,6 +74,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-planning-load", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
   claimHostedLinqProactiveConversationCapacityTx: mocks.claimLineCapacity,
   listHostedLinqHealthyProactiveLines: mocks.listHealthyLines,
+  readHostedLinqRecentMessageEffectCountsTx: mocks.readRecentMessageEffectCounts,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
@@ -79,6 +83,10 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
   lookupHostedMemberIdentityByPhoneNumber: mocks.lookupMember,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readActiveHostedMemberAccess: mocks.readActiveAccess,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-join-outreach-store", () => ({
@@ -140,7 +148,9 @@ describe("hosted group join outreach drain", () => {
     });
     mocks.markDeliveryFailed.mockResolvedValue(undefined);
     mocks.markSkippedDelivery.mockResolvedValue(undefined);
+    mocks.readActiveAccess.mockResolvedValue(false);
     mocks.readParticipantPhone.mockReturnValue("+15551234567");
+    mocks.readRecentMessageEffectCounts.mockResolvedValue(new Map());
   });
 
   it("sends one paced, link-free, group-specific first outreach", async () => {
@@ -162,6 +172,7 @@ describe("hosted group join outreach drain", () => {
       phoneNumberLookupKey: "line_lookup_1",
       prisma: expect.anything(),
     });
+    expect(mocks.readRecentMessageEffectCounts).not.toHaveBeenCalled();
     expect(mocks.createChat).toHaveBeenCalledTimes(1);
     const send = mocks.createChat.mock.calls[0]?.[0] as {
       message: string;
@@ -171,6 +182,28 @@ describe("hosted group join outreach drain", () => {
     // first-contact rules by the dedicated copy tests below.
     expect(send?.message).toMatch(/repl(y|ies)|say hi|send me a message/iu);
     expect(send?.message).not.toMatch(/https?:|www\./iu);
+  });
+
+  it("sends the unchanged opener to an inactive unsuspended existing member", async () => {
+    mocks.lookupMember.mockResolvedValue({
+      core: { id: "hbm_inactive", suspendedAt: null },
+    });
+    const { prisma } = createPrismaStub();
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({
+      kind: "sent",
+      outreachId: "hgrpjoa_opaque",
+    });
+
+    expect(mocks.readActiveAccess).toHaveBeenCalledWith({
+      memberId: "hbm_inactive",
+      now: NOW,
+      prisma: expect.anything(),
+    });
+    expect(mocks.createChat).toHaveBeenCalledTimes(1);
   });
 
   it("defers durably without a provider call when every line is at cap", async () => {
@@ -208,11 +241,47 @@ describe("hosted group join outreach drain", () => {
     {
       arrange: () => {
         mocks.lookupMember.mockResolvedValue({
-          core: { id: "hbm_existing", suspendedAt: null },
+          core: {
+            id: "hbm_suspended",
+            suspendedAt: new Date("2026-07-23T00:00:00.000Z"),
+          },
         });
       },
-      expected: { kind: "skipped", reason: "recipient_now_member" },
-      name: "the recipient already has an account",
+      expected: { kind: "skipped", reason: "recipient_suspended" },
+      name: "the recipient is suspended",
+      stub: {
+        memberSuspendedAt: new Date("2026-07-23T00:00:00.000Z"),
+      },
+    },
+    {
+      arrange: () => {
+        mocks.lookupMember.mockResolvedValue({
+          core: { id: "hbm_active", suspendedAt: null },
+        });
+        mocks.readActiveAccess.mockResolvedValue(true);
+      },
+      expected: { kind: "skipped", reason: "recipient_now_active" },
+      name: "the recipient now has active hosted access",
+    },
+    {
+      arrange: () => {
+        mocks.lookupMember.mockResolvedValue({
+          core: { id: "hbm_transitioning", suspendedAt: null },
+        });
+      },
+      expected: { kind: "deferred", reason: "recipient_state_in_flight" },
+      name: "a recipient authority transition owns the member row",
+      stub: { recipientLocked: false },
+    },
+    {
+      arrange: () => {
+        mocks.lookupMember.mockResolvedValue({
+          core: { id: "hbm_group_member", suspendedAt: null },
+        });
+      },
+      expected: { kind: "skipped", reason: "recipient_now_group_member" },
+      name: "the recipient already belongs to the target group",
+      stub: { targetMembership: true },
     },
     {
       arrange: () => {
@@ -575,6 +644,41 @@ describe("hosted group join outreach drain", () => {
     expect(attemptedKeys.filter((key) => key === "line_lookup_a")).toHaveLength(1);
   });
 
+  it("routes outreach through the line with lower recent message load", async () => {
+    const busyLine = {
+      ...LINE,
+      phoneNumber: "+15550000001",
+      phoneNumberLookupKey: "line_lookup_busy",
+    };
+    const quietLine = {
+      ...LINE,
+      phoneNumber: "+15550000002",
+      phoneNumberLookupKey: "line_lookup_quiet",
+    };
+    mocks.listHealthyLines.mockResolvedValue([busyLine, quietLine]);
+    mocks.readRecentMessageEffectCounts.mockResolvedValue(new Map([
+      [busyLine.phoneNumberLookupKey, 9_000],
+      [quietLine.phoneNumberLookupKey, 100],
+    ]));
+    const { prisma } = createPrismaStub();
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({ kind: "sent", outreachId: "hgrpjoa_opaque" });
+
+    expect(mocks.readRecentMessageEffectCounts).toHaveBeenCalledWith({
+      lineLookupKeys: [
+        busyLine.phoneNumberLookupKey,
+        quietLine.phoneNumberLookupKey,
+      ],
+      now: NOW,
+      prisma: expect.any(Object),
+    });
+    const send = mocks.createChat.mock.calls[0]?.[0] as { from: string } | undefined;
+    expect(send?.from).toBe(quietLine.phoneNumber);
+  });
+
   it("retries soon, not next day, when a pinned line leaves the pool and no replacement is free", async () => {
     // The pinned line can return within minutes, so a transient health event must
     // not push the only private join path past the UTC-day boundary.
@@ -723,9 +827,12 @@ describe("hosted group join outreach drain", () => {
 function createPrismaStub(options?: {
   attemptCount?: number;
   due?: null;
+  memberSuspendedAt?: Date | null;
   offerRevokedAt?: Date;
   pinnedLineKey?: string;
   recentLineKeys?: readonly string[];
+  recipientLocked?: boolean;
+  targetMembership?: boolean;
 }): {
   prisma: Parameters<typeof drainOneHostedGroupJoinOutreach>[0]["prisma"];
   updateMany: ReturnType<typeof vi.fn>;
@@ -741,6 +848,8 @@ function createPrismaStub(options?: {
   };
   const tx = {
     $executeRaw: vi.fn(async () => 0),
+    $queryRaw: vi.fn(async () =>
+      options?.recipientLocked === false ? [] : [{ id: "hbm_locked" }]),
     hostedGroupJoinOffer: {
       findUnique: vi.fn(async () => ({
         group: {
@@ -752,6 +861,16 @@ function createPrismaStub(options?: {
         },
         groupId: "hgrp_opaque",
         revokedAt: options?.offerRevokedAt ?? null,
+      })),
+    },
+    hostedGroupMember: {
+      findUnique: vi.fn(async () =>
+        options?.targetMembership ? { id: "hgrpm_existing" } : null),
+    },
+    hostedMember: {
+      findUnique: vi.fn(async () => ({
+        id: "hbm_locked",
+        suspendedAt: options?.memberSuspendedAt ?? null,
       })),
     },
     hostedGroupJoinOutreach: {

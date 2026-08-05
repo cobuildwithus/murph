@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   hasHostedMemberEstablishedLinqThreadRoute: vi.fn(),
   hasHostedMemberEstablishedLinqHomeRoute: vi.fn(),
   hostedThreadContainerParticipantFindFirst: vi.fn(),
+  hostedConsentGrantFindUnique: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
   projectHostedAiUsageLimitNoticeForDelivery: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
@@ -23,12 +24,14 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxPayload: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  readSelectedHostedInferenceConnectionOverride: vi.fn(),
   readHostedWorkspace: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
   sendClaimedHostedAiUsageLimitNoticeToLinqChat: vi.fn(),
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread: vi.fn(),
   sendHostedTrialConversionNoticeToLinqChat: vi.fn(),
+  tryMarkHostedMailboxConversationAiUsageDenied: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -45,6 +48,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload: mocks.readHostedMailboxPayload,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
+  tryMarkHostedMailboxConversationAiUsageDenied:
+    mocks.tryMarkHostedMailboxConversationAiUsageDenied,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
@@ -111,6 +116,11 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
   resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
 }));
 
+vi.mock("@/src/lib/hosted-inference/connection-store", () => ({
+  readSelectedHostedInferenceConnectionOverride:
+    mocks.readSelectedHostedInferenceConnectionOverride,
+}));
+
 type ReconciliationRoute = typeof import(
   "../app/api/internal/hosted-orchestration/users/[userId]/reconciliation-facts/route"
 );
@@ -134,6 +144,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(MEMBER_ID);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord());
+    mocks.hostedConsentGrantFindUnique.mockResolvedValue(null);
     mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
     mocks.hasHostedMemberEstablishedLinqThreadRoute.mockResolvedValue(false);
     mocks.hasHostedMailboxMealPhotoCaptureSince.mockResolvedValue(false);
@@ -157,6 +168,8 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue(null);
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
+    mocks.readSelectedHostedInferenceConnectionOverride.mockResolvedValue(null);
+    mocks.tryMarkHostedMailboxConversationAiUsageDenied.mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -394,7 +407,7 @@ describe("hosted orchestration reconciliation facts", () => {
       },
     ]);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: buildHostedAccessInactiveUsageGateDecision(),
+      decision: buildUsageLimitExceededGateDecision(),
       status: "denied",
     });
 
@@ -407,6 +420,31 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
+  });
+
+  it("blocks non-model runtime work after explicit health-data withdrawal", async () => {
+    mocks.hostedConsentGrantFindUnique.mockResolvedValue({
+      scope: "launch.health-data",
+      status: "revoked",
+    });
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "device-sync.reconcile",
+    }));
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "health_data_consent_withdrawn",
+      retryAt: null,
+    });
+    expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readSelectedHostedInferenceConnectionOverride).not.toHaveBeenCalled();
   });
 
   it("does not AI-gate a due inbox media retention wake", async () => {
@@ -633,6 +671,41 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
+  it("admits member-funded custom core inference when managed usage is denied", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "assistant_due",
+    }));
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: buildUsageLimitExceededGateDecision(),
+      status: "denied",
+    });
+    mocks.readSelectedHostedInferenceConnectionOverride.mockResolvedValue({
+      contextWindowTokens: 131_072,
+      modelAlias: "murph-custom-r3",
+      protocol: "responses",
+      revision: 3,
+      supportsImages: false,
+      verificationProfile:
+        "murph-codex-0.145.0-portable-responses-v1",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toBeNull();
+    expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread)
+      .not.toHaveBeenCalled();
+  });
+
   it("sends the current-chat Linq trial conversion notice when pending conversation work is runtime-denied", async () => {
     const deniedDecision = buildTrialConversionPendingUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
@@ -688,6 +761,14 @@ describe("hosted orchestration reconciliation facts", () => {
       routeAuthority,
       sourceEventId: "linq_event_runtime_denied",
     });
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).toHaveBeenCalledWith({
+      afterConversationLaneSeq: 2n,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      throughConversationLaneSeq: 3n,
+      userId: MEMBER_ID,
+    });
   });
 
   it("retries the current capacity-epoch Linq usage-limit notice from the denied gate", async () => {
@@ -738,6 +819,16 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(firstResponse.status).toBe(500);
     expect(retryResponse.status).toBe(200);
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mock
+        .invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledTimes(2);
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenLastCalledWith({
       chatId: "chat_runtime_denied",
@@ -1168,6 +1259,9 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
     expect(mocks.sendHostedTrialConversionNoticeToLinqChat).not.toHaveBeenCalled();
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).not.toHaveBeenCalled();
   });
 
   it("does not retry usage-limit delivery for read-only status checks", async () => {
@@ -1793,6 +1887,9 @@ function createPrismaClientStub() {
     },
     hostedMember: {
       findUnique: mocks.hostedMemberFindUnique,
+    },
+    hostedConsentGrant: {
+      findUnique: mocks.hostedConsentGrantFindUnique,
     },
     hostedThreadContainerParticipant: {
       findFirst: mocks.hostedThreadContainerParticipantFindFirst,

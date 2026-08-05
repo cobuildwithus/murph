@@ -101,28 +101,8 @@ const temporalWorkflowHistoryPayloadPatterns = [
   },
 ] as const;
 
-const temporalWorkflowBundlePatterns = [
-  {
-    label: "Node-only hosted-execution parser import in Temporal workflow bundle",
-    pattern: /\bfrom\s+["']@murphai\/hosted-execution\/parsers(?:\/[^"']*)?["']/u,
-  },
-] as const;
-
-const hostedTemporalPatchRetirementChecks = [
-  {
-    filePath:
-      "packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts",
-    label: "retired reconciliation-before-mailbox patch must keep its deprecatePatch marker",
-    pattern: /\bdeprecatePatch\s*\(\s*HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID\s*\)/u,
-    token: "deprecatePatch(HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID)",
-  },
-  {
-    filePath: ".github/workflows/host-support.yml",
-    label: "CI package coverage must include hosted Temporal package tests",
-    pattern: /\bpackages\/hosted-orchestrator-temporal\b/u,
-    token: "packages/hosted-orchestrator-temporal",
-  },
-] as const;
+const publicTemporalWorkerPackagePath =
+  "packages/hosted-orchestrator-temporal";
 
 type GuardPattern = Readonly<{
   label: string;
@@ -142,7 +122,7 @@ export async function collectHostedTemporalGuardFindings(): Promise<HostedTempor
   for (const root of scanRoots) {
     await scanDirectory(root, findings);
   }
-  findings.push(...await collectHostedTemporalPatchRetirementFindings());
+  findings.push(...await collectPublicTemporalWorkerOwnershipFindings());
 
   return findings;
 }
@@ -234,10 +214,6 @@ function selectGuardPatterns(relativePath: string): readonly GuardPattern[] {
     patterns.push(...temporalWorkflowHistoryPayloadPatterns);
   }
 
-  if (isTemporalWorkflowSourcePath(relativePath)) {
-    patterns.push(...temporalWorkflowBundlePatterns);
-  }
-
   if (
     relativePath.startsWith("apps/web/app/")
     || relativePath.startsWith("apps/web/src/")
@@ -258,44 +234,26 @@ function selectGuardPatterns(relativePath: string): readonly GuardPattern[] {
   return patterns;
 }
 
-async function collectHostedTemporalPatchRetirementFindings():
+async function collectPublicTemporalWorkerOwnershipFindings():
   Promise<HostedTemporalGuardFinding[]> {
-  const findings: HostedTemporalGuardFinding[] = [];
-
-  for (const check of hostedTemporalPatchRetirementChecks) {
-    const contents = await readOptionalRepoTextFile(check.filePath);
-    if (contents === null) {
-      findings.push({
-        filePath: check.filePath,
-        label: `${check.label}: required file is missing`,
-        line: 1,
-        token: "missing",
-      });
-      continue;
-    }
-
-    const match = findFirstPatternMatch(contents, check.pattern);
-    if (match === null) {
-      findings.push({
-        filePath: check.filePath,
-        label: check.label,
-        line: 1,
-        token: check.token,
-      });
-    }
-  }
-
-  return findings;
-}
-
-async function readOptionalRepoTextFile(
-  relativePath: string,
-): Promise<string | null> {
   try {
-    return await readFile(path.join(repoRoot, relativePath), "utf8");
-  } catch {
-    return null;
+    await readFile(
+      path.join(repoRoot, publicTemporalWorkerPackagePath, "package.json"),
+      "utf8",
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
   }
+
+  return [{
+    filePath: publicTemporalWorkerPackagePath,
+    label: "private Temporal worker implementation must not exist in public Murph",
+    line: 1,
+    token: publicTemporalWorkerPackagePath,
+  }];
 }
 
 function shouldScanTextFile(relativePath: string): boolean {
@@ -309,13 +267,7 @@ function isPackageSourcePath(relativePath: string): boolean {
 }
 
 function isTemporalWorkflowHistorySurface(relativePath: string): boolean {
-  return isTemporalWorkflowSourcePath(relativePath)
-    || relativePath === "packages/hosted-orchestrator-temporal/src/workflow-types.ts"
-    || relativePath === "packages/hosted-execution/src/orchestration-control.ts";
-}
-
-function isTemporalWorkflowSourcePath(relativePath: string): boolean {
-  return relativePath.startsWith("packages/hosted-orchestrator-temporal/src/workflows/");
+  return relativePath === "packages/hosted-execution/src/orchestration-control.ts";
 }
 
 function findFirstPatternMatch(

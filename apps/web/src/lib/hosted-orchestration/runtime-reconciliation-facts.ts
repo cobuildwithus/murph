@@ -26,12 +26,17 @@ import {
   readHostedMailboxRedactedStatusRecord,
 } from "../hosted-mailbox/lag";
 import {
+  readHostedMailboxConversationAiUsageHighWater,
+  readHostedMailboxConversationAiUsageReplayFloor,
+} from "../hosted-mailbox/ai-usage-gate";
+import {
   decodeHostedMailboxStoredPayload,
   hasHostedMailboxMealPhotoCaptureSince,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload,
+  tryMarkHostedMailboxConversationAiUsageDenied,
 } from "../hosted-mailbox/store";
 import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
@@ -63,10 +68,14 @@ import {
 import {
   getPrisma,
 } from "../prisma";
+import { readHostedHealthDataConsentState } from "../legal/consent";
 import {
   resolveHostedRuntimeAiUsageGate,
   type HostedRuntimeUsageGateCheck,
 } from "./runtime-usage-decision";
+import {
+  readSelectedHostedInferenceConnectionOverride,
+} from "../hosted-inference/connection-store";
 
 type HostedRuntimeReconciliationUsageGateStatus =
   | HostedRuntimeUsageGateCheck["status"]
@@ -158,6 +167,25 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
+  if (await readHostedHealthDataConsentState({
+    memberId: input.userId,
+    prisma,
+  }) === "revoked") {
+    const facts = buildHostedRuntimeBlockedFacts({
+      mailboxLag: [],
+      reason: "health_data_consent_withdrawn",
+      retryAt: null,
+      workspace: projectedWorkspace,
+    });
+    emitHostedRuntimeReconciliationFacts({
+      facts,
+      request: input,
+      usageGateRequired: false,
+      usageGateStatus: "health_data_consent_withdrawn",
+    });
+    return facts;
+  }
+
   const [maxSeqByLane, consumedSeqByLane] = await Promise.all([
     readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
     readHostedMailboxConsumedSeqByLane({
@@ -245,15 +273,51 @@ export async function readHostedRuntimeReconciliationFacts(
   });
 
   if (usageGateRequired) {
-    const gate = await resolveHostedRuntimeAiUsageGate({
-      mode: input.usageGateMode ?? "mutating",
-      now,
-      userId: input.userId,
-    });
+    const [gate, selectedCustomInference] = await Promise.all([
+      resolveHostedRuntimeAiUsageGate({
+        mode: input.usageGateMode ?? "mutating",
+        now,
+        userId: input.userId,
+      }),
+      readSelectedHostedInferenceConnectionOverride({
+        memberId: input.userId,
+        prisma,
+      }),
+    ]);
 
-    if (gate.status === "denied") {
+    if (gate.status === "health_data_consent_withdrawn") {
+      const facts = buildHostedRuntimeBlockedFacts({
+        mailboxLag,
+        reason: "health_data_consent_withdrawn",
+        retryAt: null,
+        workspace: projectedWorkspace,
+      });
+      emitHostedRuntimeReconciliationFacts({
+        facts,
+        request: input,
+        usageGateRequired: true,
+        usageGateStatus: gate.status,
+      });
+      return facts;
+    }
+
+    if (gate.status === "denied" && !selectedCustomInference) {
       let noticeRetryAt: Date | null = null;
       if ((input.usageGateMode ?? "mutating") === "mutating") {
+        if (freshConversationMailboxLag) {
+          await tryMarkHostedMailboxConversationAiUsageDenied({
+            afterConversationLaneSeq: readHostedConversationFreshWorkFloor({
+              consumedSeqByLane,
+              mailboxLag,
+            }),
+            prisma,
+            throughConversationLaneSeq:
+              readHostedMailboxConversationAiUsageHighWater({
+                lanes: mailboxLag,
+              }),
+            userId: input.userId,
+          });
+        }
         noticeRetryAt = await sendHostedRuntimeUsageDeniedNoticeForPendingConversation({
           consumedSeqByLane,
           decision: gate.decision,
@@ -586,14 +650,10 @@ function readHostedConversationFreshWorkFloor(input: {
   consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
   mailboxLag: readonly HostedMailboxLaneLag[];
 }): bigint {
-  const importedSeq = parseHostedMailboxReconciliationSeq(
-    readHostedMailboxLaneImportedSeq(input.mailboxLag, "conversation"),
-  ) ?? 0n;
-  const consumedSeq = parseHostedMailboxReconciliationSeq(
-    input.consumedSeqByLane.find((entry) => entry.lane === "conversation")?.consumedSeq,
-  ) ?? 0n;
-
-  return consumedSeq > importedSeq ? consumedSeq : importedSeq;
+  return readHostedMailboxConversationAiUsageReplayFloor({
+    consumedSeqByLane: input.consumedSeqByLane,
+    lanes: input.mailboxLag,
+  });
 }
 
 function parseHostedMailboxReconciliationSeq(
@@ -602,13 +662,6 @@ function parseHostedMailboxReconciliationSeq(
   return typeof value === "string" && /^(?:0|[1-9][0-9]*)$/u.test(value)
     ? BigInt(value)
     : null;
-}
-
-function readHostedMailboxLaneImportedSeq(
-  mailboxLag: readonly HostedMailboxLaneLag[],
-  lane: HostedMailboxLaneLag["lane"],
-): string {
-  return mailboxLag.find((laneLag) => laneLag.lane === lane)?.importedSeq ?? "0";
 }
 
 function emitHostedRuntimeReconciliationFacts(event: {

@@ -939,13 +939,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.117')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.122')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.117'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.122'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1007,7 +1007,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain('`CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain('`Nested CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain(
-      'const MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS = 7.5 * 60 * 1000;',
+      'const MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS = 5 * 60 * 1000;',
     )
     const solTarget: ReviewGptModelPickerTarget = {
       desiredVersion: '5-6',
@@ -1098,9 +1098,9 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(reviewGptReadme).toContain('the exact turn committed by this run')
     expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
-    expect(reviewGptReadme).toContain('after at least 7.5 minutes of observed generation')
+    expect(reviewGptReadme).toContain('after at least 5 minutes of observed generation')
     expect(reviewGptReadme).toContain(
-      'A marked concrete-model response that completes in under 7.5 minutes fails closed as untrusted',
+      'A marked concrete-model response that completes in under 5 minutes fails closed as untrusted',
     )
     expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
     expect(reviewGptDriver).not.toContain("value.includes('MODEL_CONFIRMATION:')")
@@ -1162,6 +1162,7 @@ describe('monorepo release flow coverage audit', () => {
         '  let ownedTargetId = pageTargetId;',
         '  let operationError = null;',
         '  let completedResponseCapture = null;',
+        '  let waitedAttachmentCleanupPending = false;',
         '  let releasePageFocusEmulation = async () => {};',
         '  try {',
       ].join('\n'),
@@ -1463,7 +1464,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('ReviewGPT first-reviewed head: <full-sha>')
     expect(prReviewGptLoop).toContain('`ROUND_OUTCOME: INVALID`')
     expect(prReviewGptLoop).toContain(
-      'its minimum trustworthy duration is 4 minutes',
+      'its minimum trustworthy duration is 5 minutes',
     )
     expect(prReviewGptLoop).toContain(
       'Treat 7.5 minutes as the default final-gate trust floor',
@@ -1497,7 +1498,7 @@ describe('monorepo release flow coverage audit', () => {
       'For prompt-primary changes, apply the prompt lens inside the preliminary specialist ReviewGPT pass',
     )
     expect(agentsGuide).toContain('isolated regression test or explanatory doc')
-    expect(agentsGuide).toContain('later rounds verify only remediation deltas')
+    expect(agentsGuide).toContain('later rounds verify remediation deltas')
     expect(agentWorkflowRouting).toContain('final-ReviewGPT-eligible PR-lane work')
     expect(agentWorkflowRouting).toContain('scope-anomaly signal')
     expect(prReviewGptLoop).toContain('final cross-cutting gate for eligible work')
@@ -1552,9 +1553,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain(
       'pass replaces the four former local `product-experience-review`,',
     )
-    expect(completionWorkflow).toContain(
-      'never combine this final gate with local `deep-review`',
-    )
+    expect(completionWorkflow).toMatch(/do not also run local\s+`deep-review`/u)
     expect(completionWorkflow).not.toContain(
       'Run local `deep-review` too only when the user explicitly asks',
     )
@@ -1969,7 +1968,7 @@ describe('monorepo release flow coverage audit', () => {
         'gpt-5.6-sol',
         extractedConfirmation,
         '',
-        7.5 * 60 * 1000 - 1,
+        5 * 60 * 1000 - 1,
       ),
     ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
     expect(
@@ -1977,7 +1976,7 @@ describe('monorepo release flow coverage audit', () => {
         'gpt-5.6-sol',
         extractedConfirmation,
         '',
-        7.5 * 60 * 1000,
+        5 * 60 * 1000,
       ),
     ).toBe('')
     expect(
@@ -1985,7 +1984,7 @@ describe('monorepo release flow coverage audit', () => {
         'gpt-5.6-sol',
         extractedConfirmation,
         'gpt-5-5-pro',
-        7.5 * 60 * 1000,
+        5 * 60 * 1000,
       ),
     ).toContain('DOM reported model gpt-5-5-pro, expected gpt-5.6-sol')
 
@@ -2198,7 +2197,7 @@ describe('monorepo release flow coverage audit', () => {
         elapsedFallbackSnapshot,
         true,
         committedUserTurnSignature,
-        7.5 * 60 * 1000 - 1,
+        5 * 60 * 1000 - 1,
       ),
     ).toMatchObject({ evidence: null, failure: expect.stringContaining('confirmed model UNKNOWN') })
     expect(
@@ -2207,7 +2206,7 @@ describe('monorepo release flow coverage audit', () => {
         elapsedFallbackSnapshot,
         true,
         committedUserTurnSignature,
-        7.5 * 60 * 1000,
+        5 * 60 * 1000,
       ),
     ).toEqual({ evidence: null, failure: '' })
 
@@ -2241,24 +2240,24 @@ describe('monorepo release flow coverage audit', () => {
     ).toMatchObject({ evidence: null })
   })
 
-  it('fails closed marked concrete-model responses below seven and a half minutes', () => {
+  it('fails closed marked concrete-model responses below five minutes', () => {
     const harness = loadReviewGptOpenTargetHarness(1)
 
     expect(
       harness.markedResponseDurationFailure('gpt-5.6-sol', 'ROUND_OUTCOME:', 37_000),
-    ).toContain('after 37s, below the 7.5m minimum')
+    ).toContain('after 37s, below the 5m minimum')
     expect(
       harness.markedResponseDurationFailure(
         'gpt-5.6-sol',
         'ROUND_OUTCOME:',
-        7.5 * 60 * 1000 - 1,
+        5 * 60 * 1000 - 1,
       ),
     ).toContain('The response is untrusted and was not attested.')
     expect(
       harness.markedResponseDurationFailure(
         'gpt-5.6-sol',
         'ROUND_OUTCOME:',
-        7.5 * 60 * 1000,
+        5 * 60 * 1000,
       ),
     ).toBe('')
     expect(

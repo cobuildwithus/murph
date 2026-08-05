@@ -5,6 +5,9 @@ import {
   deploySmokeRoutes,
 } from "./route-handlers/deploy-smoke.ts";
 import {
+  inferenceVerificationRoutes,
+} from "./route-handlers/inference-verification.ts";
+import {
   runtimeProcessingRoutes,
   userStatusRoutes,
 } from "./route-handlers/runtime-control.ts";
@@ -15,12 +18,17 @@ import {
   telegramUsageLimitNoticeRoutes,
 } from "./route-handlers/telegram-send.ts";
 import { mealPhotoRoutes } from "./route-handlers/meal-photo-stage.ts";
+import {
+  environmentVoiceRoutes,
+} from "./route-handlers/environment-voice-stage.ts";
 
 export const workerInternalRoutes = [
   ...deploySmokeRoutes,
   ...runtimeProcessingRoutes,
+  ...inferenceVerificationRoutes,
   ...userDataDeleteRoutes,
   ...telegramUsageLimitNoticeRoutes,
+  ...environmentVoiceRoutes,
   ...mealPhotoRoutes,
   ...browserVaultRoutes,
   ...userStatusRoutes,

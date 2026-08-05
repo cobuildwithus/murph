@@ -45,44 +45,6 @@ const mocks = vi.hoisted(() => {
         },
         demotedMailboxConsumedAt: null,
       })),
-    nudgeHostedRunnerUserBestEffort: vi.fn(async () => ({
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    })),
-    nudgeHostedRunnerUserBestEffortResult: vi.fn(async (
-      input?: { context?: string; timeoutMs?: number; userId: string },
-    ) => {
-      void input;
-      return {
-        accepted: true,
-        alarmScheduled: false,
-        configured: true,
-        errorCode: null,
-        immediateDriveStarted: false,
-        inFlight: false,
-        nextAlarmAtPresent: false,
-      };
-    }),
-    nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
-      input: { context?: string; timeoutMs?: number; userId: string },
-    ) => {
-      void input;
-      return {
-        accepted: true,
-        alarmScheduled: false,
-        configured: true,
-        errorCode: null,
-        immediateDriveStarted: false,
-        inFlight: false,
-        nextAlarmAtPresent: false,
-        usageGateDenied: false,
-      };
-    }),
     signalHostedMailboxAppendRuntime: vi.fn(async () => ({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
@@ -234,16 +196,6 @@ vi.mock("@/src/lib/prisma", () => ({
   }),
 }));
 
-vi.mock("@/src/lib/hosted-runner/control", () => ({
-  nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
-  nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
-  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
-}));
-
-vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
-  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
-}));
-
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
@@ -317,28 +269,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
-    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    });
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    });
-    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockImplementation(async (input) => ({
-      ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
-      usageGateDenied: false,
-    }));
     mocks.readHostedMailboxItemOwnerById.mockImplementation(async (input: {
       mailboxItemId: string;
     }) => ({
@@ -447,8 +377,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       }),
     );
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
@@ -1959,7 +1887,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         },
       });
       expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-      expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     } finally {
       restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousContactPrivacyKeys);
       restoreEnvValue(
@@ -2101,8 +2028,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
@@ -2112,15 +2037,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
   it("signals Temporal for active-member Telegram messages", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
-      accepted: false,
-      alarmScheduled: false,
-      configured: false,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    });
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -2172,8 +2088,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
@@ -2469,6 +2383,65 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       telegramThreadId: "123:business:biz-setup",
       telegramUserId: "456",
     });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("does not mutate direct routing after explicit health-data withdrawal", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
+    const prisma = withPrismaTransaction({
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          consentGrants: [{ scope: "launch.health-data", status: "revoked" }],
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_123",
+            suspendedAt: null,
+          },
+          memberId: "member_telegram_123",
+          telegramUserIdEncrypted: null,
+        }),
+        upsert: hostedMemberRoutingUpsert,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          business_connection_id: "biz-setup",
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 1,
+          text: "/start",
+        },
+        update_id: 658,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "inactive-member",
+    });
+
+    expect(hostedMemberRoutingUpsert).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });

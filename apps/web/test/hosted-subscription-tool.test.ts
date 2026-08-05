@@ -4,8 +4,13 @@ const mocks = vi.hoisted(() => ({
   claimSubscriptionAction: vi.fn(),
   continuePulse: vi.fn(),
   getPrisma: vi.fn(),
+  readBillingEligibilityState: vi.fn(),
+  readMemberCoreState: vi.fn(),
+  schedulePlanSwitch: vi.fn(),
   startPulse: vi.fn(),
+  startTrialPaidPlan: vi.fn(),
   upgradePlan: vi.fn(),
+  verifyBillingPlanQuote: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -22,10 +27,29 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/billing-start-paid-pulse-service", () => ({
   continueHostedPulseTrialPaidPlan: mocks.continuePulse,
   startHostedPulseTrialPaidPlan: mocks.startPulse,
+  startHostedTrialPaidPlan: mocks.startTrialPaidPlan,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/billing-plan-change-service", () => ({
   upgradeHostedBillingPlan: mocks.upgradePlan,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service", () => ({
+  scheduleHostedBillingPlanSwitch: mocks.schedulePlanSwitch,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/billing-plan-quote", () => ({
+  buildHostedBillingPlanQuoteState: vi.fn((input) => input),
+  verifyHostedBillingPlanQuote: mocks.verifyBillingPlanQuote,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberBillingEligibilityState:
+    mocks.readBillingEligibilityState,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberCoreState: mocks.readMemberCoreState,
 }));
 
 import {
@@ -39,6 +63,12 @@ const PULSE_PLAN = {
   interval: "month",
   recurringAmountUsdCents: 800,
 } as const;
+const GROUP_PLAN = {
+  code: "launch_group_monthly",
+  displayName: "Group",
+  interval: "month",
+  recurringAmountUsdCents: 350,
+} as const;
 const EDGE_PLAN = {
   code: "launch_edge_monthly",
   displayName: "Edge",
@@ -51,6 +81,22 @@ describe("hosted subscription tool", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({ label: "prisma" });
     mocks.claimSubscriptionAction.mockResolvedValue("claimed");
+    mocks.readMemberCoreState.mockResolvedValue({
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    });
+    mocks.readBillingEligibilityState.mockResolvedValue({
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentPeriodEnd: new Date("2026-08-12T00:00:00.000Z"),
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+    });
+    mocks.verifyBillingPlanQuote.mockReturnValue("at_trial_end");
   });
 
   it("rejects an action without live member-bound conversation authority before billing", async () => {
@@ -180,6 +226,76 @@ describe("hosted subscription tool", () => {
     });
   });
 
+  it("returns the authoritative effective time for a scheduled Group plan", async () => {
+    mocks.startTrialPaidPlan.mockResolvedValue({
+      effectiveAt: "2026-08-12T00:00:00.000Z",
+      scheduledBillingPlanCode: "launch_group_monthly",
+      status: "scheduled",
+    });
+
+    await expect(handleHostedSubscriptionTool({
+      memberId: "member_123",
+      request: {
+        action: "change_plan",
+        assistantInputId: ASSISTANT_INPUT_ID,
+        quoteId: "quote_group_123",
+        targetPlanCode: "launch_group_monthly",
+      },
+    })).resolves.toEqual({
+      action: "change_plan",
+      effectiveAt: "2026-08-12T00:00:00.000Z",
+      plan: GROUP_PLAN,
+      status: "scheduled",
+    });
+
+    expect(mocks.verifyBillingPlanQuote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_123",
+        quoteId: "quote_group_123",
+        targetPlanCode: "launch_group_monthly",
+      }),
+    );
+    expect(mocks.claimSubscriptionAction).toHaveBeenCalledWith({
+      action: "change_plan",
+      actionClaim: expect.stringMatching(
+        /^change_plan:launch_group_monthly:[0-9a-f]{64}$/u,
+      ),
+      assistantInputId: ASSISTANT_INPUT_ID,
+      memberId: "member_123",
+      prisma: { label: "prisma" },
+    });
+    expect(mocks.startTrialPaidPlan).toHaveBeenCalledWith({
+      memberId: "member_123",
+      paymentMethodContinuation: "conversation",
+      prisma: { label: "prisma" },
+      targetPlanCode: "launch_group_monthly",
+      timing: "at_trial_end",
+    });
+  });
+
+  it("fails a stale Group quote before consuming conversation authority", async () => {
+    mocks.verifyBillingPlanQuote.mockImplementationOnce(() => {
+      throw Object.assign(new Error("Quote stale."), {
+        code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
+      });
+    });
+
+    await expect(handleHostedSubscriptionTool({
+      memberId: "member_123",
+      request: {
+        action: "change_plan",
+        assistantInputId: ASSISTANT_INPUT_ID,
+        quoteId: "quote_group_stale",
+        targetPlanCode: "launch_group_monthly",
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
+    });
+
+    expect(mocks.claimSubscriptionAction).not.toHaveBeenCalled();
+    expect(mocks.startTrialPaidPlan).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["started", "completed"],
     ["billing_pending", "pending"],
@@ -202,32 +318,7 @@ describe("hosted subscription tool", () => {
     });
   });
 
-  it("upgrades to Edge through the canonical plan-change owner", async () => {
-    mocks.upgradePlan.mockResolvedValue({
-      billingPlanCode: "launch_edge_monthly",
-      status: "upgraded",
-    });
-
-    await expect(handleHostedSubscriptionTool({
-      memberId: "member_123",
-      request: {
-        action: "upgrade_edge",
-        assistantInputId: ASSISTANT_INPUT_ID,
-      },
-    })).resolves.toEqual({
-      action: "upgrade_edge",
-      plan: EDGE_PLAN,
-      status: "completed",
-    });
-
-    expect(mocks.upgradePlan).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: { label: "prisma" },
-      targetPlanCode: "launch_edge_monthly",
-    });
-  });
-
-  it("returns the Edge Billing Portal URL while payment is pending", async () => {
+  it("returns Stripe's Edge confirmation URL from the canonical plan-change owner", async () => {
     mocks.upgradePlan.mockResolvedValue({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.com/p/session_123",
@@ -245,6 +336,12 @@ describe("hosted subscription tool", () => {
       paymentUrl: "https://billing.stripe.com/p/session_123",
       plan: EDGE_PLAN,
       status: "payment_required",
+    });
+    expect(mocks.upgradePlan).toHaveBeenCalledWith({
+      expectedCurrentPlanCode: "launch_monthly",
+      memberId: "member_123",
+      prisma: { label: "prisma" },
+      targetPlanCode: "launch_edge_monthly",
     });
   });
 

@@ -111,7 +111,13 @@ it has been explicitly elevated to a cross-cutting invariant.
   terminal. It never inherits the root turn's
   invocation-scoped automation or device capability. Root completion or a
   later ordinary turn does not terminate valid detached work merely to rotate
-  request authority.
+  request authority. If the root replies while its child is still generating,
+  every later ordinary inbound root turn checks again for completion. A newly
+  completed relevant result is incorporated at most once. Use, failure,
+  cancellation, or loss of relevance ends that child's rechecks; an unfinished
+  child never blocks the current reply and is checked again on the next
+  ordinary inbound turn. Scheduled automation, maintenance,
+  system-notification, and output-only turns never perform this recheck.
 - Before a hosted workspace snapshot, Murph waits for every exact resident child
   and checks every touched root and resident child for background terminals. A
   root's lifecycle set retains every admitted child until that boundary clears;
@@ -242,14 +248,18 @@ it has been explicitly elevated to a cross-cutting invariant.
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate
   fails.
-- A pre-member group-join reaction accepted for proactive outreach is Web-owned
-  durable work. Its stable offer-and-participant identity collapses webhook
-  retry, duplicate reaction, and unlike/re-like delivery. Every refusal is typed
-  and durable: line health and capacity defer with a bounded next attempt, and a
-  condition whose inputs cannot change terminates instead of deferring, so no row
-  retries forever and none is dropped unrecorded. Pre-member contact data that a
-  reaction creates participates in the existing account-deletion and
-  group-deletion owners rather than outliving them.
+- A canonical group-join reaction accepted for reply-gated proactive outreach
+  is Web-owned durable work. The eligible phone participant either has no member
+  identity or is a verified, unsuspended member without active hosted access who
+  is not already in the target group. Active members stay on direct join;
+  suspended and existing target-group members are consumed without outreach. The
+  stable offer-and-participant identity collapses webhook retry, duplicate
+  reaction, and unlike/re-like delivery. Every refusal is typed and durable:
+  line health and capacity defer with a bounded next attempt, and a condition
+  whose inputs cannot change terminates instead of deferring, so no row retries
+  forever and none is dropped unrecorded. Contact data that a reaction creates
+  participates in the existing account-deletion and group-deletion owners rather
+  than outliving them.
 
 ## Authority, Ownership, And State
 
@@ -449,6 +459,15 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Safety, reliability, privacy, authentication, and review fixes preserve the
   authorized success path for existing critical flows. Disabling, silently
   dropping, or degrading the flow is a product decision, not a technical fix.
+- A live monthly group sponsorship is a payer authorization, not a Stripe
+  subscription and not a message bundle. It stores only payer, beneficiary,
+  status, $5/$10/$20 cap, and anchored period. Current-period committed spend is
+  derived from exact-$5 `HostedUsageCreditPurchase` rows in fulfilled or pending
+  states; `HostedUsageCreditEntry` is the only balance and unused credit carries
+  forward. One live authorization per group is database-enforced. Refill
+  admission occurs only inside the existing beneficiary serialization boundary,
+  provider work is post-commit, Stripe reconciliation alone grants credit, and
+  group-visible projections reveal only sponsored versus unsponsored.
 - Purchased hosted usage credit belongs to its beneficiary, not its payer. A
   payer deletion must first resolve nonterminal payment state and must not
   delete fulfilled credit owned by a surviving beneficiary. Terminal
@@ -480,6 +499,25 @@ it has been explicitly elevated to a cross-cutting invariant.
   authority fail closed. An advisory dependency may degrade only into an
   already-authorized narrower path and never silently suppress an accepted
   reply.
+- Explicit hosted health-data withdrawal revokes processing authority before
+  cleanup. AI and message admission, queued runtime usage, source connections,
+  webhooks, scheduled sync, and companion processing independently reject that
+  state. The withdrawal response waits for the per-user Cloudflare execution
+  barrier to serialize behind earlier ensures, re-read the Web-owned grant,
+  clear the write fence, and stop the runner; every later ensure re-reads that
+  grant before work. Renewal waits behind the earlier stop before committing a
+  new grant. Cleanup failure cannot restore authority, while an absent legacy
+  grant is not reinterpreted as withdrawal. Settings, latest-available export,
+  and account deletion remain available; renewed consent is the only processing
+  restore path.
+- The Cloudflare Worker that can retain an exact user-control stop target after
+  clearing write authority is a hard rollback floor after the first such row is
+  written. Withdrawal and account deletion must consume that same persisted
+  target; an older Worker that derives its own versioned target is not a valid
+  rollback candidate. The consent-aware Web artifact is also a hard rollback
+  floor after it can record an explicit revoke because Web-only ingress and
+  shared-data readers must enforce that row. Recovery uses a coordinated
+  forward fix on the compatible Web and Worker pair.
 
 ## Deployment Compatibility
 

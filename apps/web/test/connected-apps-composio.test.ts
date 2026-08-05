@@ -56,13 +56,15 @@ describe("Composio connected-app client", () => {
               "INSTACART_CREATE_SHOPPING_LIST_PAGE",
               "INSTACART_GET_NEARBY_RETAILERS",
             ],
-          },
-          openweather_api: {
-            enable: [
-              "OPENWEATHER_API_GET_CURRENT_WEATHER",
-              "OPENWEATHER_API_GET5_DAY_FORECAST",
-            ],
-          },
+            },
+            openweather_api: {
+              enable: [
+                "OPENWEATHER_API_GET_AIR_POLLUTION_CURRENT",
+                "OPENWEATHER_API_GET_CURRENT_WEATHER",
+                "OPENWEATHER_API_GET5_DAY_FORECAST",
+                "OPENWEATHER_API_GET_GEOCODING_DIRECT",
+              ],
+            },
         },
         toolkits: {
           enable: [
@@ -356,7 +358,7 @@ describe("Composio connected-app client", () => {
       const encoder = new TextEncoder();
       return new Response(new ReadableStream<Uint8Array>({
         start(controller) {
-          controller.enqueue(encoder.encode(`{"data":"${"x".repeat(600 * 1024)}"}`));
+          controller.enqueue(encoder.encode(`{"data":"${"x".repeat(5 * 1024 * 1024)}"}`));
           controller.close();
         },
       }), {

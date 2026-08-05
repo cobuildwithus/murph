@@ -75,6 +75,9 @@
       "@murphai/hosted-execution/assistant-identifiers": [
         "../../packages/hosted-execution/src/assistant-identifiers.ts"
       ],
+      "@murphai/hosted-execution/assistant-inference": [
+        "../../packages/hosted-execution/src/assistant-inference.ts"
+      ],
       "@murphai/hosted-execution/assistant-model": [
         "../../packages/hosted-execution/src/assistant-model.ts"
       ],
@@ -125,6 +128,9 @@
       ],
       "@murphai/hosted-execution/pending-group-setup": [
         "../../packages/hosted-execution/src/pending-group-setup.ts"
+      ],
+      "@murphai/hosted-execution/physical-notes": [
+        "../../packages/hosted-execution/src/physical-notes.ts"
       ],
       "@murphai/hosted-execution/plan-usage": [
         "../../packages/hosted-execution/src/plan-usage.ts"

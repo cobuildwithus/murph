@@ -111,12 +111,14 @@ describe("hosted app session", () => {
       throw new Error("Expected issued hosted web session to be stored.");
     }
 
+    expect(result.firstMemberSession).toBe(true);
     expect(result.sessionId).toMatch(/^hws_[A-Za-z0-9_-]+$/u);
     expect(result.cookie).toContain(`murph-session=murph_session_v2.${result.sessionId}.`);
     expect(result.cookie).toContain("Path=/");
     expect(result.cookie).toContain("HttpOnly");
     expect(result.cookie).toContain("SameSite=Lax");
     expect(result.cookie).toContain("Max-Age=2592000");
+    expect(result.cookie).not.toContain("Secure");
     expect(storedSession).toEqual(expect.objectContaining({
       createdAt: now,
       expiresAt: new Date("2026-06-01T00:00:00.000Z"),
@@ -183,6 +185,7 @@ describe("hosted app session", () => {
     const targetSessionIds = harness.records
       .filter((record) => record.memberId === "member_123" && record.privyUserId === "did:privy:user_123")
       .map((record) => record.id);
+    expect(result.firstMemberSession).toBe(false);
     expect(targetSessionIds).toHaveLength(20);
     expect(targetSessionIds).toContain(result.sessionId);
     expect(targetSessionIds).toContain("hws_target_19");
@@ -583,6 +586,9 @@ function createPrismaHarness(records: StoredHostedWebSession[] = []) {
 }
 
 function createHostedWebSessionDelegate(records: StoredHostedWebSession[]) {
+  const count = vi.fn(async (input: { where: { memberId: string } }): Promise<number> =>
+    records.filter((record) => record.memberId === input.where.memberId).length,
+  );
   const create = vi.fn(async (input: HostedWebSessionCreateInput): Promise<StoredHostedWebSession> => {
     const record = {
       ...input.data,
@@ -632,6 +638,7 @@ function createHostedWebSessionDelegate(records: StoredHostedWebSession[]) {
   });
 
   return {
+    count,
     create,
     deleteMany,
     findMany,

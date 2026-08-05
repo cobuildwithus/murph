@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  hostedRuntimeLinqProviderErrorMessageForCode,
   isHostedRuntimePrivateImageDeliveryUrl,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupParticipantDisplayName,
@@ -36,6 +37,7 @@ import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   assertHostedMemberNotSuspended,
 } from "../hosted-onboarding/entitlement";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
@@ -203,7 +205,7 @@ export async function handleHostedRuntimeGroupTool(input: {
   scheduleMailboxWake?: (input: {
     expectedUserId: string;
     mailboxItemId: string;
-  }) => void;
+  }) => Promise<void>;
 }): Promise<HostedRuntimeGroupToolResponse> {
   if (input.request.action === "ask") {
     const admission = await requestHostedGroupAssistantAsk({
@@ -214,7 +216,7 @@ export async function handleHostedRuntimeGroupTool(input: {
       question: input.request.question,
     });
     if (admission.mailboxWake) {
-      input.scheduleMailboxWake?.(admission.mailboxWake);
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask", result: admission.result };
   }
@@ -225,7 +227,7 @@ export async function handleHostedRuntimeGroupTool(input: {
       origin: input.request.origin,
     });
     if (admission.mailboxWake) {
-      input.scheduleMailboxWake?.(admission.mailboxWake);
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask_current_sender", result: admission.result };
   }
@@ -238,7 +240,7 @@ export async function handleHostedRuntimeGroupTool(input: {
       question: input.request.question,
     });
     if (admission.mailboxWake) {
-      input.scheduleMailboxWake?.(admission.mailboxWake);
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask_member", result: admission.result };
   }
@@ -1159,16 +1161,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       requestedVaultShareProjectionScopes: projectionScopes,
       tx,
     });
-    const offerPost = hasEveryHostedGroupMemberGrantedProjectionScopes(
-      result.group,
+    const offerPost = await prepareHostedGroupJoinOfferPostTx({
+      groupId: result.group.id,
       projectionScopes,
-    )
-      ? { kind: "not_needed" as const }
-      : await prepareHostedGroupJoinOfferPostTx({
-          groupId: result.group.id,
-          projectionScopes,
-          tx,
-        });
+      tx,
+    });
     if (offerPost.kind === "unavailable") {
       return { kind: "active_offer_state_unavailable" as const };
     }
@@ -1190,15 +1187,13 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   if (!joinUrl) {
     return unavailable("join_links_unavailable");
   }
-  if (
-    created.offerPost.kind === "active_offer"
-    || created.offerPost.kind === "not_needed"
-  ) {
+  if (created.offerPost.kind === "active_offer") {
     return {
       action: "post_join_offer",
       result: {
         group: created.group,
         joinUrl,
+        offerState: "existing",
         status: "sent",
       },
     };
@@ -1208,6 +1203,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     joinUrl,
     projectionScopes,
   });
+  const providerSendStartedAt = new Date();
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
     sent = await sendHostedLinqChatMessage({
@@ -1222,16 +1218,37 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   } catch {
     return unavailable("send_failed");
   }
+  const providerSendCompletedAt = new Date();
   if (!sent.messageId) {
     return unavailable("provider_message_unavailable");
   }
+  const providerCreatedAtMs = sent.messageCreatedAt
+    ? Date.parse(sent.messageCreatedAt)
+    : Number.NaN;
+  const providerCreatedAt = Number.isFinite(providerCreatedAtMs)
+    ? new Date(providerCreatedAtMs)
+    : null;
+  const providerSendStartedAtSecond = Math.floor(
+    providerSendStartedAt.getTime() / 1_000,
+  );
+  const providerSendCompletedAtSecond = Math.floor(
+    providerSendCompletedAt.getTime() / 1_000,
+  );
+  const providerCreatedAtSecond = providerCreatedAt === null
+    ? null
+    : Math.floor(providerCreatedAt.getTime() / 1_000);
+  const providerCreatedDuringAttempt = providerCreatedAt !== null
+    && providerCreatedAtSecond !== null
+    && providerCreatedAtSecond >= providerSendStartedAtSecond
+    && providerCreatedAtSecond <= providerSendCompletedAtSecond;
+  const postedAt = providerCreatedAt ?? providerSendCompletedAt;
 
   try {
     await prisma.$transaction(async (tx) => {
       await recordHostedGroupJoinOfferTx({
         groupId: created.group.id,
         message: { channel: "linq", messageId: sent.messageId },
-        postedAt: now,
+        postedAt,
         projectionScopes,
         tx,
       });
@@ -1257,34 +1274,13 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     result: {
       group: created.group,
       joinUrl,
+      offerState: "posted",
+      ...(providerCreatedDuringAttempt
+        ? { offeredAt: providerCreatedAt.toISOString() }
+        : {}),
       status: "sent",
     },
   };
-}
-
-function hasEveryHostedGroupMemberGrantedProjectionScopes(
-  group: {
-    memberCount: number;
-    members: readonly {
-      grantedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
-    }[];
-  },
-  projectionScopes: readonly HostedVaultShareProjectionScope[],
-): boolean {
-  if (group.members.length !== group.memberCount) {
-    return false;
-  }
-  const requestedScopeKeys = projectionScopes.map(
-    buildHostedVaultShareProjectionScopeKey,
-  );
-  return group.members.every((member) => {
-    const grantedScopeKeys = new Set(
-      member.grantedVaultShareProjectionScopes.map(
-        buildHostedVaultShareProjectionScopeKey,
-      ),
-    );
-    return requestedScopeKeys.every((scopeKey) => grantedScopeKeys.has(scopeKey));
-  });
 }
 
 async function handleHostedRuntimeGroupSetChatAvatar(input: {
@@ -1292,9 +1288,18 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
-  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+  const unavailable = (
+    unavailableReason: string,
+    providerDiagnostics?: {
+      providerErrorCode?: number;
+    },
+  ): HostedRuntimeGroupToolResponse => ({
     action: "set_chat_avatar",
-    result: { status: "unavailable", unavailableReason },
+    result: {
+      status: "unavailable",
+      unavailableReason,
+      ...providerDiagnostics,
+    },
   });
 
   const access = await checkHostedRuntimeGroupLinqChatMutationAccess({
@@ -1315,14 +1320,45 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
       chatId: access.chatId,
       groupChatIconUrl,
     });
-  } catch {
-    return unavailable("provider_unavailable");
+  } catch (error) {
+    return unavailable(
+      "provider_unavailable",
+      readHostedLinqAvatarProviderDiagnostics(error),
+    );
   }
 
   return {
     action: "set_chat_avatar",
     result: { status: "requested" },
   };
+}
+
+function readHostedLinqAvatarProviderDiagnostics(error: unknown): {
+  providerErrorCode?: number;
+} | undefined {
+  if (
+    !isHostedOnboardingError(error)
+    || error.code !== "LINQ_SEND_FAILED"
+    || error.details?.failureStage !== "http"
+  ) {
+    return undefined;
+  }
+  const code = error.details.providerErrorCode;
+  const providerErrorCode = typeof code === "number"
+    && Number.isSafeInteger(code)
+    && code >= 1_000
+    && code <= 9_999
+      ? code
+      : null;
+  if (providerErrorCode === null) {
+    return undefined;
+  }
+  if (
+    hostedRuntimeLinqProviderErrorMessageForCode(providerErrorCode) === null
+  ) {
+    return undefined;
+  }
+  return { providerErrorCode };
 }
 
 async function handleHostedRuntimeGroupSetChatAvatarPreflight(input: {
@@ -1378,7 +1414,7 @@ function buildHostedGroupJoinOfferMessage(input: {
   // for everyone.
   return `Like or heart this message if these default sharing choices look right: ${
     renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
-  }. To choose different permissions, use ${input.joinUrl}.`;
+  }. Use ${input.joinUrl} to choose different permissions.`;
 }
 
 async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {

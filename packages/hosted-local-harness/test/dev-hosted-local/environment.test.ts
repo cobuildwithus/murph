@@ -371,6 +371,7 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
     expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
+    expect(merged.HOSTED_R2_WRITE_ADMISSION).toBe("open");
     expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
   });
@@ -428,6 +429,7 @@ describe("mergeCloudflareLocalEnv", () => {
         HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:9000",
         HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:9000",
         HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
+        HOSTED_R2_WRITE_ADMISSION: "paused",
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
       },
     });
@@ -437,6 +439,7 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT).toBe("1");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
     expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
+    expect(merged.HOSTED_R2_WRITE_ADMISSION).toBe("paused");
     expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT).toBe("http://127.0.0.1:9000");
     expect(merged.HOSTED_R2_PRESIGN_ENDPOINT).toBe("http://host.docker.internal:9000");
@@ -1457,8 +1460,14 @@ describe("buildWranglerEnvFileText", () => {
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
         MURPH_DATA_API_KEY: "local-data-api-key",
         OPENAI_API_KEY: "local-openai-key",
+        VENICE_API_KEY: "local-venice-key",
       }),
     ).toContain('OPENAI_API_KEY="local-openai-key"');
+    expect(
+      buildWranglerEnvFileText({
+        VENICE_API_KEY: "local-venice-key",
+      }),
+    ).toContain('VENICE_API_KEY="local-venice-key"');
     expect(
       buildWranglerEnvFileText({
         MURPH_DATA_API_KEY: "local-data-api-key",
@@ -1691,6 +1700,10 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(config.ai).toEqual({ binding: "AI" });
     expect(config.send_email).toEqual([{ name: "HOSTED_EMAIL" }]);
     expect(config.version_metadata).toEqual({ binding: "CF_VERSION_METADATA" });
+    expect((config.vars as Record<string, string>).HOSTED_R2_WRITE_ADMISSION).toBe("open");
+    expect((buildWranglerLocalDevConfig({
+      HOSTED_R2_WRITE_ADMISSION: "paused",
+    }).vars as Record<string, string>).HOSTED_R2_WRITE_ADMISSION).toBe("paused");
   });
 
   it("omits the Workers AI binding for hosted-local test routes so the fake binding composes", () => {
@@ -1830,17 +1843,19 @@ describe("buildWranglerLocalDevConfig", () => {
     });
   });
 
-  it("declares Worker-owned data API and OpenAI credentials as local worker secrets", () => {
+  it("declares Worker-owned data API and provider credentials as local worker secrets", () => {
     const config = buildWranglerLocalDevConfig({
       HOSTED_ASSISTANT_PROVIDER: "openai",
       MURPH_DATA_API_KEY: "local-data-api-key",
       OPENAI_API_KEY: "local-openai-key",
+      VENICE_API_KEY: "local-venice-key",
     });
 
     expect(config.secrets).toEqual({
       required: expect.arrayContaining([
         "MURPH_DATA_API_KEY",
         "OPENAI_API_KEY",
+        "VENICE_API_KEY",
       ]),
     });
     expect(config.vars).toMatchObject({
@@ -1848,6 +1863,7 @@ describe("buildWranglerLocalDevConfig", () => {
     });
     expect(config.vars).not.toHaveProperty("MURPH_DATA_API_KEY");
     expect(config.vars).not.toHaveProperty("OPENAI_API_KEY");
+    expect(config.vars).not.toHaveProperty("VENICE_API_KEY");
   });
 
   it("declares the dev Codex subscription auth JSON as a local worker secret, never a config var", () => {

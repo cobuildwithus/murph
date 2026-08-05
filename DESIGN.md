@@ -220,6 +220,20 @@ an affected WAU or MAU with `At least`, explain the private evidence retirement
 in the supporting copy, and withhold a week-over-week rate when either compared
 window is incomplete.
 
+Follow the scorecard with the existing two-column chart grid. Lead that grid
+with **Total messages sent**, a thin sage cumulative line seeded from the
+established historical base, and **Messages sent per day**, restrained sage
+bars for completed UTC days. Both derive from the existing daily growth
+snapshots. Shift each snapshot's prior-day counts onto the date when the
+messages occurred and always preserve the exact 30 completed-day UTC spine.
+Leave absent snapshots and legacy unknown counts as chart gaps rather than
+zeros. Once tracking has begun, an unavailable day also ends the exact
+cumulative line until the missing evidence is reconciled; later known daily
+bars may still render. State that the daily total combines inbound messages
+across supported channels with tracked Linq replies. Give each keyboard-enabled
+chart one visible focus surface named by its heading. Keep acquisition and
+revenue snapshots as the second chart row.
+
 ### Measured Biomarker Index
 On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
 band bracketed by warm one-pixel rules. Do not wrap that band in a rounded card
@@ -367,38 +381,46 @@ check. Keep the semantic radio visually hidden and place the visible check at
 the right edge of the card; do not add a leading radio dot.
 Unavailable choices stay visible but disabled, with the plan or access
 requirement named directly.
+When a choice materially changes cost-weighted included-capacity drawdown,
+state that difference in the choice copy and keep it visible beside the saved
+selection. Do not hide it in a tooltip or only mention it after save.
 Keyboard focus rings the whole card. Keep actions outside the card label so the
 full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
 navigation or as a substitute for ordinary buttons.
 
-### Device Connection Callback
-
-Provider return is a quiet, full-height confirmation page built from the shared
-Card primitives. Use one mono kicker, one serif decision heading, one short
-safety instruction, and explicit primary/secondary actions. The callback GET
-never mutates: the primary button is the member's visible completion act. The
-failure state removes that action, says that nothing was connected, and offers
-one route back to Connect. Keep both states readable at narrow mobile widths,
-with 44px-or-larger controls and no provider-supplied copy.
-
 ### Group Usage Funding
-Use `GroupUsageFundingCard` as the public entry surface for one-time group usage
-credit. Lead with the group name, one concise sentence explaining that the
-credit belongs to the group, and one primary action. Do not add a decorative
-status badge; retain `Open Murph` as the quiet secondary action.
+An authenticated group funding link opens its relevant funding control
+immediately: monthly sponsorship for an unsponsored chat, one-time contribution
+for an already sponsored chat, or payment recovery when a purchase is in
+progress. Use `GroupUsageFundingShell` only as the quiet reopen surface beneath
+that control. Do not add a second sales card, decorative status badge, duplicate
+headline, or explanatory paragraph. Retain `Back to Murph` as the quiet
+secondary action.
 
-Use `GroupSponsorshipDialog` for amount selection. Present the fixed offers as
-large choice cards, then one primary **Sponsor ~200 messages · $10** action and
-a plain cancel action. Keep the description to the one-time group contribution;
-do not repeat saved-card or verification mechanics there. Do not imply that
-selecting an amount charges the card; only the explicit primary action
-authorizes the contribution. Keep the alias, note, and eligible temporary
-running bit behind one optional disclosure, and state the server-owned bit
-duration beside that field. Optional text fields use the sage focus border
-without an outer glow. Stack amount cards and actions on narrow screens,
-preserve visible focus and selection states, and render the production
-components on both the Components and Sections tabs of `/design` for review.
+Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
+and $20 as visually prominent monthly maximums. On desktop, use the shared
+choice cards. On phones, use a near-full-height bottom drawer with one large
+circular cap slider. The handle follows a pointer anywhere around the arc and
+snaps to the nearest available maximum on release; Arrow keys and Home/End
+provide the same three-stop selection. Keep the opening explanation to
+`Choose your monthly sponsorship limit.` The explicit sponsor action authorizes
+the initial $5 activation purchase, whose amount is shown before payment;
+selecting a maximum alone does not charge the card. Keep both funding actions
+available at every current group-capacity state; capacity changes urgency and
+automatic refill timing, not the ability to fund. Keep an explicit one-time
+contribution as the secondary action. Dollar amounts are cost-weighted usage
+credit, never an owned or promised number of messages. Every cap increase
+requires fresh payer confirmation. Keep the alias, note, and eligible temporary
+running bit in one collapsible `Add a note` section, open by default, and attach
+them only to the activation or one-time purchase, never to automatic refills.
+Optional text fields use the sage focus border without an outer glow. The
+drawer body owns overflow while the sponsor action stays available at the safe
+area edge, so expanded note fields never become unreachable. Preserve visible
+focus and selection states. Render the production activation,
+active-management, near-cap/recovery, paused, and one-time states at desktop and
+mobile sizes on `/design` with controls inert, including content rendered
+through a dialog or drawer portal.
 
 When group funding is fulfilled, switch from the payment-status composition to
 one confident success hierarchy: a compact sage confirmation mark and mono

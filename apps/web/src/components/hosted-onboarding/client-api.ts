@@ -48,9 +48,17 @@ export interface HostedAutoPulseTrialEnrollmentResponse {
 }
 
 export interface HostedPulseTrialStartPaidResponse {
-  billingPlanCode: "launch_monthly";
+  billingPlanCode?: "launch_group_monthly" | "launch_monthly";
+  effectiveAt?: string;
   paymentUrl?: string;
-  status: "billing_pending" | "payment_required" | "started";
+  scheduledBillingPlanCode?: HostedBillingPlanCode;
+  status:
+    | "already_scheduled"
+    | "billing_pending"
+    | "continuing"
+    | "payment_required"
+    | "scheduled"
+    | "started";
 }
 
 export type HostedPulseTrialStartPaidClientResult =
@@ -73,11 +81,23 @@ export type HostedPulseTrialContinuationClientResult =
     status: "continuing";
   };
 
+export type HostedTrialPaidPlanCode = Extract<
+  HostedBillingPlanCode,
+  "launch_group_monthly" | "launch_monthly"
+>;
+
+export type HostedTrialPaidPlanStartClientResult =
+  | HostedPulseTrialStartPaidClientResult
+  | {
+    effectiveAt?: string;
+    status: "already_scheduled" | "continuing" | "scheduled";
+  };
+
 export async function requestHostedOnboardingJson<T>(input: {
   credentials?: RequestCredentials;
   headers?: Record<string, string>;
   keepalive?: boolean;
-  method?: "DELETE" | "GET" | "PATCH" | "POST";
+  method?: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
   onSuccessfulResponseError?: () => void;
   onSuccessfulResponseHeaders?: () => void;
   payload?: Record<string, unknown>;
@@ -164,8 +184,38 @@ export async function requestHostedAutoPulseTrialEnrollment(input: {
 }
 
 export async function requestHostedPulseTrialStartPaid(): Promise<HostedPulseTrialStartPaidClientResult> {
+  return requestHostedTrialPlanStartPaid({
+    targetPlanCode: "launch_monthly",
+    timing: "now",
+    useLegacyEmptyBody: true,
+  });
+}
+
+export function requestHostedTrialPlanStartPaid(input: {
+  targetPlanCode: "launch_monthly";
+  timing: "now";
+  useLegacyEmptyBody: true;
+}): Promise<HostedPulseTrialStartPaidClientResult>;
+export function requestHostedTrialPlanStartPaid(input: {
+  targetPlanCode: HostedTrialPaidPlanCode;
+  timing: "at_trial_end" | "now";
+  useLegacyEmptyBody?: boolean;
+}): Promise<HostedTrialPaidPlanStartClientResult>;
+export async function requestHostedTrialPlanStartPaid(input: {
+  targetPlanCode: HostedTrialPaidPlanCode;
+  timing: "at_trial_end" | "now";
+  useLegacyEmptyBody?: boolean;
+}): Promise<HostedTrialPaidPlanStartClientResult> {
   const response = await requestHostedOnboardingJson<HostedPulseTrialStartPaidResponse>({
     method: "POST",
+    ...(input.useLegacyEmptyBody
+      ? {}
+      : {
+          payload: {
+            targetPlanCode: input.targetPlanCode,
+            timing: input.timing,
+          },
+        }),
     url: "/api/settings/billing/start-paid-pulse",
   });
 
@@ -185,6 +235,18 @@ export async function requestHostedPulseTrialStartPaid(): Promise<HostedPulseTri
 
   if (response.status === "billing_pending" || response.status === "started") {
     return {
+      status: response.status,
+    };
+  }
+  if (
+    response.status === "already_scheduled"
+    || response.status === "continuing"
+    || response.status === "scheduled"
+  ) {
+    return {
+      ...(typeof response.effectiveAt === "string"
+        ? { effectiveAt: response.effectiveAt }
+        : {}),
       status: response.status,
     };
   }

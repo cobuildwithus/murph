@@ -5,8 +5,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   type HostedMailboxItem,
+  type HostedRuntimeGroupSummary,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
@@ -38,6 +38,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   applyMurphManagedAutomations: vi.fn(),
+  refreshReminderAvailability: vi.fn(),
   buildHostedLinqChannelEnv: vi.fn((input: {
     forwardedEnv: Readonly<Record<string, string>>;
     userEnv: Readonly<Record<string, string>>;
@@ -129,6 +130,7 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
     getAssistantCronStatus: mocks.getAssistantCronStatus,
     readAssistantInputEvent: mocks.readAssistantInputEvent,
     readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
+    refreshReminderAvailability: mocks.refreshReminderAvailability,
     recordHostedMailboxAssistantInputItem:
       automation.recordHostedMailboxAssistantInputItem,
     scheduleDeviceActivityTriggeredAutomations:
@@ -220,6 +222,7 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
 import {
   initializeVault,
   showAutomation,
+  splitAutomationAvailabilityConflictBlock,
   upsertAutomation,
 } from "@murphai/core";
 import {
@@ -547,6 +550,12 @@ beforeEach(() => {
     created: 0,
     skipped: 1,
     updated: 0,
+  });
+  mocks.refreshReminderAvailability.mockResolvedValue({
+    attempted: 0,
+    failed: 0,
+    nextRefreshAt: null,
+    refreshed: 0,
   });
   mocks.prepareHostedAssistantAutomationForWake.mockResolvedValue(
     PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE,
@@ -885,7 +894,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       if (!telegramGroupTools) {
         throw new Error("Expected scheduled Telegram group capabilities.");
       }
-      expect(telegramGroupTools.groupPermissionOfferTool).toBeUndefined();
+      expect(telegramGroupTools.groupPermissionOfferTool).toEqual({
+        request: expect.any(Function),
+      });
       await expect(telegramGroupTools.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       })).resolves.toMatchObject({ status: "ok" });
@@ -909,7 +920,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("allows one scheduled offer only for exact not-granted evidence from the same model operation", async () => {
+  it("allows one scheduled access link only for exact not-granted evidence from the same model operation", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-scheduled-group-offer-"));
     const groupToolRequests: HostedRuntimeGroupToolRequest[] = [];
     let readGrantStatus: "granted" | "not_granted" = "not_granted";
@@ -939,9 +950,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           },
         };
       }
-      if (groupToolRequest.action === "post_join_offer") {
+      if (groupToolRequest.action === "create_join_link") {
         return {
-          action: "post_join_offer" as const,
+          action: "create_join_link" as const,
           result: {
             group: null,
             status: "unavailable" as const,
@@ -963,9 +974,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         threadIsDirect: false,
       })).toBeNull();
 
-      const createTools = () => {
+      const createTools = (channel: "linq" | "telegram" = "linq") => {
         const tools = factory({
-          channel: "linq",
+          channel,
           target: "chat_current_group",
           threadIsDirect: false,
         });
@@ -1036,6 +1047,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           },
         });
 
+      const telegramAllowed = createTools("telegram");
+      await telegramAllowed.groupSharedReader.request({
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      });
+      await expect(requirePermissionOffer(telegramAllowed).request(stepsOffer))
+        .resolves.toMatchObject({
+          result: { unavailableReason: "synthetic_web_unavailable" },
+        });
+
       return {
         assistantAutomationProgressed: false,
         assistantAutomationCurrentTurnDeliveryIntentIds: [],
@@ -1050,24 +1070,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot,
       }));
       expect(groupToolRequests.filter((item) => item.action === "read_shared"))
-        .toHaveLength(4);
-      expect(groupToolRequests.filter((item) => item.action === "post_join_offer"))
-        .toEqual([{
-          action: "post_join_offer",
-          joinOffer: {
-            messageTemplate:
-              HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
-            projectionScopes: [{ projectionKind: "steps-days.v0" }],
-          },
-          linqThread: {
-            authority: {
-              channel: "linq",
-              containerMemberId: "member_synthetic_phase",
-              threadId: "chat_current_group",
+        .toHaveLength(5);
+      expect(groupToolRequests.filter((item) => item.action === "create_join_link"))
+        .toEqual([
+          {
+            action: "create_join_link",
+            joinLink: {
+              requestedVaultShareProjectionScopes: [
+                { projectionKind: "steps-days.v0" },
+              ],
             },
-            chatId: "chat_current_group",
           },
-        }]);
+          {
+            action: "create_join_link",
+            joinLink: {
+              requestedVaultShareProjectionScopes: [
+                { projectionKind: "steps-days.v0" },
+              ],
+            },
+          },
+        ]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -2887,6 +2909,230 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("runs deterministic reminder availability in the hosted background pass", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-reminder-availability-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const actualAssistantEngine = await vi.importActual<
+      typeof import("@murphai/assistant-engine")
+    >("@murphai/assistant-engine");
+    const connectedApps = {
+      request: vi.fn(async () => ({
+        result: {
+          data: {
+            items: [{
+              description: "Private provider content",
+              end: { dateTime: "2026-07-30T15:00:00.000Z" },
+              start: { dateTime: "2026-07-30T14:00:00.000Z" },
+              summary: "Private event title",
+            }],
+          },
+        },
+      })),
+    };
+    try {
+      await initializeVault({
+        createdAt: "2026-07-29T00:00:00.000Z",
+        vaultRoot,
+      });
+      await upsertAutomation({
+        continuityPolicy: "fresh",
+        instructions: [
+          "Send one flexible reminder.",
+          "Availability conflict policy: skip-when-busy",
+          "Availability source policy: calendar-only",
+          "Availability calendar account: googlecalendar / calendar-account",
+        ].join("\n"),
+        now: new Date("2026-07-29T00:00:00.000Z"),
+        route: {
+          channel: "linq",
+          deliveryTarget: "direct-thread",
+          identityId: null,
+          participantId: null,
+          threadId: null,
+          threadIsDirect: true,
+        },
+        schedule: { kind: "dailyLocal", localTime: "16:00" },
+        slug: "hosted-reminder-availability",
+        status: "active",
+        title: "Hosted reminder availability",
+        vaultRoot,
+      });
+      mocks.refreshReminderAvailability.mockImplementationOnce(
+        actualAssistantEngine.refreshReminderAvailability,
+      );
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => "2026-07-30T00:00:00.000Z",
+        runtimeConnectedApps: connectedApps,
+        vaultRoot,
+      }));
+
+      expect(mocks.refreshReminderAvailability).toHaveBeenCalledWith({
+        connectedApps,
+        now: new Date("2026-07-30T00:00:00.000Z"),
+        shouldYield: null,
+        signal: null,
+        vaultRoot,
+      });
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: "2026-07-30T23:00:00.000Z",
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          reminderAvailabilityMaintenanceAttempted: 1,
+          reminderAvailabilityMaintenanceFailed: 0,
+          reminderAvailabilityMaintenanceRefreshed: 1,
+        }),
+      }));
+      const reminder = await showAutomation({
+        slug: "hosted-reminder-availability",
+        vaultRoot,
+      });
+      expect(reminder).not.toBeNull();
+      expect(reminder?.instructions).not.toContain("Private event title");
+      expect(splitAutomationAvailabilityConflictBlock(
+        reminder?.instructions ?? "",
+      ).block).toContain(
+        "- 2026-07-30T14:00:00.000Z / 2026-07-30T15:00:00.000Z",
+      );
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("preempts an in-flight reminder availability read without logging a provider failure", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-reminder-availability-abort-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const backgroundController = new AbortController();
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    let foregroundWaiting = false;
+    let markRequestStarted: () => void = () => undefined;
+    const requestStarted = new Promise<void>((resolve) => {
+      markRequestStarted = resolve;
+    });
+    const connectedApps: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["connectedApps"]
+    > = {
+      request: vi.fn(async (_request, context) => {
+        const signal = context?.signal ?? null;
+        expect(signal).toBe(backgroundController.signal);
+        markRequestStarted();
+        return await new Promise<never>((_resolve, reject) => {
+          const rejectFromAbort = () => reject(signal?.reason);
+          if (!signal) {
+            reject(new Error("Expected a background maintenance signal."));
+          } else if (signal.aborted) {
+            rejectFromAbort();
+          } else {
+            signal.addEventListener("abort", rejectFromAbort, { once: true });
+          }
+        });
+      }),
+    };
+    const actualAssistantEngine = await vi.importActual<
+      typeof import("@murphai/assistant-engine")
+    >("@murphai/assistant-engine");
+    try {
+      await initializeVault({
+        createdAt: "2026-07-29T00:00:00.000Z",
+        vaultRoot,
+      });
+      await upsertAutomation({
+        continuityPolicy: "fresh",
+        instructions: [
+          "Send one flexible reminder.",
+          "Availability conflict policy: skip-when-busy",
+          "Availability source policy: calendar-only",
+          "Availability calendar account: googlecalendar / calendar-account",
+        ].join("\n"),
+        now: new Date("2026-07-29T00:00:00.000Z"),
+        route: {
+          channel: "linq",
+          deliveryTarget: "direct-thread",
+          identityId: null,
+          participantId: null,
+          threadId: null,
+          threadIsDirect: true,
+        },
+        schedule: { kind: "dailyLocal", localTime: "16:00" },
+        slug: "hosted-reminder-availability-abort",
+        status: "active",
+        title: "Hosted reminder availability abort",
+        vaultRoot,
+      });
+      mocks.refreshReminderAvailability.mockImplementationOnce(
+        actualAssistantEngine.refreshReminderAvailability,
+      );
+
+      const phasePromise = runHostedWorkspaceAssistantPhase(createPhaseInput({
+        backgroundMaintenanceSignal: backgroundController.signal,
+        logRequests,
+        now: () => "2026-07-30T00:00:00.000Z",
+        runtimeConnectedApps: connectedApps,
+        shouldYieldBackgroundMaintenance: () => foregroundWaiting,
+        vaultRoot,
+      }));
+      await requestStarted;
+      foregroundWaiting = true;
+      backgroundController.abort(
+        new DOMException(
+          "Foreground conversation input preempted background maintenance.",
+          "AbortError",
+        ),
+      );
+
+      await expect(phasePromise).resolves.toEqual(expect.objectContaining({
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: "2026-07-30T00:00:00.000Z",
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          reminderAvailabilityMaintenanceYielded: true,
+        }),
+      }));
+      expect(
+        logRequests.flatMap((request) => request.entries).some((entry) =>
+          entry.redactedJson?.reminderAvailabilityMaintenanceFailed === true
+        ),
+      ).toBe(false);
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("falls back to the runtime shutdown signal for reminder availability", async () => {
+    const shutdownController = new AbortController();
+    const shutdownReason = new DOMException(
+      "Synthetic hosted runtime shutdown.",
+      "AbortError",
+    );
+    let markRefreshStarted: () => void = () => undefined;
+    const refreshStarted = new Promise<void>((resolve) => {
+      markRefreshStarted = resolve;
+    });
+    mocks.refreshReminderAvailability.mockImplementationOnce(async (input) => {
+      expect(input.signal).toBe(shutdownController.signal);
+      markRefreshStarted();
+      return await new Promise<never>((_resolve, reject) => {
+        const rejectFromAbort = () => reject(input.signal?.reason);
+        if (!input.signal) {
+          reject(new Error("Expected the runtime shutdown signal."));
+        } else if (input.signal.aborted) {
+          rejectFromAbort();
+        } else {
+          input.signal.addEventListener("abort", rejectFromAbort, { once: true });
+        }
+      });
+    });
+
+    const phasePromise = runHostedWorkspaceAssistantPhase(createPhaseInput({
+      signal: shutdownController.signal,
+    }));
+    await refreshStarted;
+    shutdownController.abort(shutdownReason);
+
+    await expect(phasePromise).rejects.toBe(shutdownReason);
+  });
+
   it("checkpoints a retry wake after logging partial managed setup failures", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const stableKeyFailure = new VaultCliError(
@@ -3979,6 +4225,195 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
   });
 
+  it("routes accepted group inputs through the production operation scope to the supported access surface", async () => {
+    const inputIds = {
+      imessage: "ain_10101010101010101010101010101010",
+      mixedRcs: "ain_20202020202020202020202020202020",
+      mixedSms: "ain_30303030303030303030303030303030",
+      sms: "ain_40404040404040404040404040404040",
+      telegram: "ain_50505050505050505050505050505050",
+    } as const;
+    const syntheticGroup: HostedRuntimeGroupSummary = {
+      displayName: null,
+      id: "synthetic_group",
+      kind: "friends",
+      memberCount: 0,
+      members: [],
+      requestedVaultShareProjectionKinds: ["steps-days.v0"],
+      requestedVaultShareProjectionScopes: [
+        { projectionKind: "steps-days.v0" },
+      ],
+      status: "active",
+    };
+    const groupToolRequests: HostedRuntimeGroupToolRequest[] = [];
+    const groupToolPort: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    > = {
+      async request(request) {
+        groupToolRequests.push(request);
+        if (request.action === "post_join_offer") {
+          return "linqThread" in request
+            ? {
+                action: "post_join_offer" as const,
+                result: {
+                  group: syntheticGroup,
+                  joinUrl: "https://example.test/private-native-url",
+                  status: "sent" as const,
+                },
+              }
+            : {
+                action: "post_join_offer" as const,
+                result: {
+                  group: null,
+                  status: "unavailable" as const,
+                  unavailableReason: "linq_thread_unavailable",
+                },
+              };
+        }
+        if (request.action === "create_join_link") {
+          return {
+            action: "create_join_link" as const,
+            result: {
+              group: syntheticGroup,
+              joinUrl: "https://example.test/groups/join/exact",
+              status: "ok" as const,
+            },
+          };
+        }
+        throw new Error(`Unexpected group tool request: ${request.action}`);
+      },
+    };
+    const buildGroupEvent = (input: {
+      channel: "linq" | "telegram";
+      service?: string;
+      threadId: string;
+    }) => ({
+      conversation: {
+        accountId: `${input.channel}_identity`,
+        actorId: `${input.channel}_participant`,
+        actorIsSelf: false,
+        source: input.channel,
+        threadId: input.threadId,
+        threadIsDirect: false,
+      },
+      replyTarget: {
+        channel: input.channel,
+        messageId: `${input.threadId}_message`,
+        threadId: input.threadId,
+      },
+      sourceMetadata: input.channel === "linq"
+        ? {
+            externalThreadRouteAuthorityPresent: true,
+            kind: "linq" as const,
+            partCount: 0,
+            reactionEligible: false,
+            replyToMessageId: null,
+            senderHandle: "+15555550123",
+            service: input.service ?? null,
+          }
+        : {
+            externalThreadRouteAuthorityPresent: true,
+            kind: "telegram" as const,
+            mediaGroupId: null,
+            replyContext: null,
+            senderHandle: "1234567890",
+            senderUsername: "example_user",
+          },
+    });
+    mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) => {
+      if (inputId === inputIds.imessage) {
+        return buildGroupEvent({
+          channel: "linq",
+          service: "iMessage",
+          threadId: "imessage_group_chat",
+        });
+      }
+      if (inputId === inputIds.sms) {
+        return buildGroupEvent({
+          channel: "linq",
+          service: "SMS",
+          threadId: "sms_group_chat",
+        });
+      }
+      if (inputId === inputIds.telegram) {
+        return buildGroupEvent({
+          channel: "telegram",
+          threadId: "telegram_group_chat",
+        });
+      }
+      return buildGroupEvent({
+        channel: "linq",
+        service: inputId === inputIds.mixedSms ? "SMS" : "RCS",
+        threadId: "mixed_group_chat",
+      });
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: Object.values(inputIds),
+      importedCount: Object.values(inputIds).length,
+      runtimeGroupToolPort: groupToolPort,
+    }));
+    const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const operationScope = laneInput?.operationScope as
+      | AssistantAutomationOperationScope
+      | undefined;
+    if (!laneInput?.executionContext || !operationScope) {
+      throw new Error("Expected hosted automation operation scope.");
+    }
+    const offer = {
+      action: "post_join_offer" as const,
+      joinOffer: { projectionKinds: ["steps-days.v0" as const] },
+    };
+    const runOffer = async (ids: readonly string[]) =>
+      await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: ids,
+        operation: async (executionContext) =>
+          await executionContext.hosted?.groupTool?.request(offer),
+        turnEnvironment: null,
+      });
+
+    await expect(runOffer([inputIds.imessage])).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+    await expect(runOffer([inputIds.sms])).resolves.toMatchObject({
+      action: "create_join_link",
+      result: {
+        joinUrl: "https://example.test/groups/join/exact",
+        status: "ok",
+      },
+    });
+    await expect(runOffer([inputIds.telegram])).resolves.toMatchObject({
+      action: "create_join_link",
+      result: {
+        joinUrl: "https://example.test/groups/join/exact",
+        status: "ok",
+      },
+    });
+    await expect(runOffer([inputIds.mixedSms, inputIds.mixedRcs]))
+      .resolves.toMatchObject({
+        action: "post_join_offer",
+        result: { status: "unavailable" },
+      });
+
+    expect(groupToolRequests).toEqual([
+      expect.objectContaining({
+        action: "post_join_offer",
+        linqThread: expect.objectContaining({ chatId: "imessage_group_chat" }),
+      }),
+      {
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionKinds: ["steps-days.v0"] },
+      },
+      {
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionKinds: ["steps-days.v0"] },
+      },
+      offer,
+    ]);
+  });
+
   it("carries persisted direct Linq service through the real operation scope to referral tools", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-referral-service-"));
     const vaultRoot = path.join(parentRoot, "vault");
@@ -4158,6 +4593,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await rm(parentRoot, { force: true, recursive: true });
     }
   });
+
 
   it("scopes automation and group mutation authority to each durable accepted input", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-tool-"));
@@ -4685,6 +5121,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-retarget-"));
     const vaultRoot = path.join(parentRoot, "vault");
     const inputId = "ain_11111111111111111111111111111111";
+    const availabilityBase = [
+      "Send the existing reminder.",
+      "Availability conflict policy: skip-when-busy",
+      "Availability source policy: calendar-only",
+      "Availability calendar account: googlecalendar / calendar-account",
+    ].join("\n");
+    const availabilityBlock = [
+      "<!-- murph:availability-conflicts:start -->",
+      "Availability conflict snapshot:",
+      "- generatedAt: 2026-07-30T03:15:00.000Z",
+      "- expiresAt: 2026-08-06T03:15:00.000Z",
+      "- 2026-07-30T14:00:00.000Z / 2026-07-30T15:00:00.000Z",
+      "<!-- murph:availability-conflicts:end -->",
+    ].join("\n");
     try {
       await initializeVault({
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -4696,7 +5146,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           reasoningEffort: "medium",
         },
         continuityPolicy: "preserve",
-        instructions: "Send the existing reminder.",
+        instructions: `${availabilityBase}\n\n${availabilityBlock}`,
         route: {
           channel: "telegram",
           deliveryTarget: "telegram_existing_chat",
@@ -4843,6 +5293,63 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           threadIsDirect: true,
         }),
       }));
+
+      await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "patch",
+            lookup: "existing-reminder",
+            schedule: { at: "2026-08-01T13:00:00.000Z", kind: "at" },
+          });
+        },
+        turnEnvironment: null,
+      });
+      const exactReminder = await showAutomation({
+        slug: "existing-reminder",
+        vaultRoot,
+      });
+      expect(exactReminder).toEqual(expect.objectContaining({
+        schedule: { at: "2026-08-01T13:00:00.000Z", kind: "at" },
+      }));
+      expect(exactReminder?.instructions).toBe([
+        "Send the existing reminder.",
+        "Availability conflict policy: fixed",
+      ].join("\n"));
+
+      await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "patch",
+            instructions: `${availabilityBase.replace(
+              "Availability conflict policy: skip-when-busy",
+              "Availability conflict policy: fixed",
+            )}\n\n${availabilityBlock}`,
+            lookup: "existing-reminder",
+          });
+        },
+        turnEnvironment: null,
+      });
+      await expect(showAutomation({
+        slug: "existing-reminder",
+        vaultRoot,
+      })).resolves.toMatchObject({
+        instructions: [
+          "Send the existing reminder.",
+          "Availability conflict policy: fixed",
+        ].join("\n"),
+      });
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
@@ -7674,6 +8181,51 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       recorded: true,
     });
     await postCheckpointPromise;
+  });
+
+  it("records support escalations through the port inside the turn instead of the post-delivery flush", async () => {
+    const supportFeedback = {
+      idempotencyKey: "support-escalation-in-turn",
+      kind: "frustration" as const,
+      relatedChangelogItemIds: [],
+      summary: "Support escalation: a connected source does not finish connecting.",
+    };
+    const recordProductFeedback = vi.fn(async () => ({
+      feedbackId: "feedback_support_synthetic",
+      recorded: true,
+    }));
+    let deliveredDuringLane: { recorded: boolean } | null = null;
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async (laneInput) => {
+        const sink =
+          laneInput.executionContext.hosted?.productFeedbackCandidateSink;
+        if (!sink?.deliverProductSupportEscalation) {
+          throw new Error(
+            "Expected a durable support-escalation sink for the hosted lane.",
+          );
+        }
+        deliveredDuringLane =
+          await sink.deliverProductSupportEscalation(supportFeedback);
+        return {
+          assistantAutomationProgressed: true,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      runtimeProductFeedbackPort: { recordProductFeedback },
+    }));
+
+    expect(deliveredDuringLane).toEqual({ recorded: true });
+    expect(recordProductFeedback).toHaveBeenCalledExactlyOnceWith(
+      supportFeedback,
+    );
+
+    await result.afterCheckpoint?.();
+    expect(recordProductFeedback).toHaveBeenCalledOnce();
   });
 
   it("does not re-emit a stale pre-delivery outbox wake after deferred foreground delivery drains", async () => {
@@ -16035,6 +16587,7 @@ function createPhaseWorkspace(input: {
 function createPhaseInput(input: {
   acceptedAssistantInputCausalSeq?: string;
   assistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["assistantAutomationScheduleChanged"];
+  backgroundMaintenanceSignal?: HostedWorkspaceRuntimeAssistantPhaseInput["backgroundMaintenanceSignal"];
   foregroundCausalOnly?: boolean;
   clearAssistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["clearAssistantAutomationScheduleChanged"];
   assistantInputIds?: string[];
@@ -16065,6 +16618,9 @@ function createPhaseInput(input: {
   recordDeferredUsage?: HostedWorkspaceRuntimeAssistantPhaseInput["recordDeferredUsage"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeClinicalRecordsPort?: RuntimeClinicalRecordsPort;
+  runtimeConnectedApps?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["connectedApps"]
+  >;
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeGroupToolPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
@@ -16080,6 +16636,7 @@ function createPhaseInput(input: {
   runtimeEnv?: Record<string, string>;
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
+  signal?: HostedWorkspaceRuntimeAssistantPhaseInput["signal"];
   runtimeActionApprovalPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"]
   >;
@@ -16103,6 +16660,7 @@ function createPhaseInput(input: {
         : {}
     ),
     assistantAutomationScheduleChanged: input.assistantAutomationScheduleChanged,
+    backgroundMaintenanceSignal: input.backgroundMaintenanceSignal,
     foregroundCausalOnly: input.foregroundCausalOnly,
     clearAssistantAutomationScheduleChanged:
       input.clearAssistantAutomationScheduleChanged,
@@ -16221,6 +16779,9 @@ function createPhaseInput(input: {
         ...(input.runtimeClinicalRecordsPort
           ? { clinicalRecordsPort: input.runtimeClinicalRecordsPort }
           : {}),
+        ...(input.runtimeConnectedApps
+          ? { connectedApps: input.runtimeConnectedApps }
+          : {}),
         ...(input.runtimeActionApprovalPort
           ? { actionApprovalPort: input.runtimeActionApprovalPort }
           : {}),
@@ -16274,6 +16835,7 @@ function createPhaseInput(input: {
     },
     runtimeEnv: input.runtimeEnv ?? {},
     shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
+    signal: input.signal,
     workspace: input.workspace ?? null,
   };
 }

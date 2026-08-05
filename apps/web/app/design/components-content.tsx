@@ -2,7 +2,6 @@
 
 import {
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
-  type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
 import { CheckCircle2, ContactRound, Monitor } from "lucide-react";
@@ -13,10 +12,13 @@ import {
   DeviceSyncSetupGuideDialog,
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
-import { HostedDeviceSyncCallbackConfirmation } from "@/src/components/device-sync/hosted-device-sync-callback-confirmation";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
-import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import {
+  GroupUsageFundingActions,
+  GroupUsageFundingShell,
+} from "@/src/components/hosted-groups/group-usage-funding-shell";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
+import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -28,18 +30,33 @@ import {
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
 import {
+  HostedPhonePrivyHandOffStatus,
+  HostedPhoneLinkAction,
+  HostedPhoneLinkCardPresentation,
+} from "@/src/components/settings/hosted-phone-settings";
+import {
+  HostedIdentitySessionLoading,
+  HostedIdentitySessionMismatch,
+} from "@/src/components/settings/hosted-settings-identity-link-dialog";
+import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
 } from "@/src/components/settings/assistant-model-artwork";
 import {
   AssistantProviderDialog,
   AssistantProviderSummary,
+  type AssistantRoutingChoice,
 } from "@/src/components/settings/hosted-assistant-model-settings";
+import { HostedInferenceConnectionPane } from "@/src/components/settings/hosted-inference-connection-settings";
+import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
-import { HostedResumableAuthState } from "@/src/components/hosted-onboarding/hosted-auth-panel";
+import {
+  HostedAuthPanelAlternateMethods,
+  HostedResumableAuthState,
+} from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 import {
@@ -48,6 +65,7 @@ import {
 import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
 import { HostedCodeEntryStep } from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
 import { HostedAuthenticatedPhoneAuthState } from "@/src/components/hosted-onboarding/hosted-phone-auth-views";
+import { HostedContactChannelChoice } from "@/src/components/hosted-onboarding/hosted-contact-channel-choice";
 import { HostedTelegramAuthButtonPresentation } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
 import {
   HostedLegalConsentCard,
@@ -114,6 +132,9 @@ import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-app
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
+import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/hosted-plan-change-button";
+import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
+import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
 import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
@@ -121,14 +142,50 @@ import {
   DESIGN_AI_USAGE_DISABLED_HISTORY,
   DESIGN_AI_USAGE_EMPTY_ACTIVITY,
   DESIGN_AI_USAGE_WAITING_ACTIVITY,
+  DESIGN_GROUP_MONTHLY_CAPS,
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
+import {
+  EnvironmentCaptureCard,
+  EnvironmentEmptyState,
+  EnvironmentVoiceRefreshNotice,
+} from "../(dashboard)/environment/environment-page-client";
+import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { DataExportControlStudy } from "./data-export-study";
+import { HealthDataConsentControlStudy } from "./health-data-consent-study";
+
+const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
+  dialogTitle: "Fill the gaps in your report",
+  flow: "fill-gaps",
+  idleDescription:
+    "Two short topics, based on what Murph does not know yet.",
+  idleTitle: "Only the missing details",
+  topics: [
+    {
+      eyebrow: "Sleep",
+      focus: ["Bedroom CO₂"],
+      id: "sleep",
+      prompt:
+        "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
+      title: "Your sleep setup",
+    },
+    {
+      eyebrow: "Workspace",
+      focus: ["Breaks"],
+      id: "workspace",
+      prompt:
+        "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
+      title: "Your remaining workspace details",
+    },
+  ],
+};
 
 function Section({
   children,
@@ -507,7 +564,7 @@ export function ComponentsContent() {
     useState<SegmentedControlDemoValue>("email");
   const [choiceCardValue, setChoiceCardValue] = useState("terra");
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
-  const [providerValue, setProviderValue] = useState<HostedAssistantProvider>(
+  const [providerValue, setProviderValue] = useState<AssistantRoutingChoice>(
     HOSTED_ASSISTANT_OPENAI_PROVIDER,
   );
   const [addedContactAvatar, setAddedContactAvatar] =
@@ -515,6 +572,8 @@ export function ComponentsContent() {
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
   const [phoneInputCountryCode, setPhoneInputCountryCode] = useState("US");
   const [phoneInputValue, setPhoneInputValue] = useState("");
+  const [phoneTransferSupportDialogOpen, setPhoneTransferSupportDialogOpen] =
+    useState(false);
   const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
   const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
   const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
@@ -563,12 +622,15 @@ export function ComponentsContent() {
           <div
             className="flex flex-col gap-6"
             data-design-homepage-auth-transitions
+            id="homepage-auth-transitions"
           >
             <p className="text-sm text-muted-foreground">
               Secure sign in keeps the ordinary methods visible while the
               provider initializes. A selected method owns the pending state
-              immediately, then account completion stays on that production
-              action through the next view.
+              immediately. If hydration discovers an existing session before
+              submission, method actions pause until its linked account is
+              known, then recovery takes priority. Otherwise account completion
+              stays on that production action through the next view.
             </p>
             <div
               className="grid items-start gap-5 lg:grid-cols-2"
@@ -606,6 +668,63 @@ export function ComponentsContent() {
                 />
               </DialogPreviewFrame>
             </div>
+            <div
+              className="grid items-start gap-5 lg:grid-cols-2"
+              id="homepage-auth-hydrated-session-recovery"
+              inert
+            >
+              <DialogPreviewFrame label="Session identity hydration">
+                <HostedPrivyReadinessState
+                  message="Secure sign in is checking your existing session."
+                  onRestart={() => {}}
+                  restartAvailable={false}
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Hydrated email session recovery">
+                <div className="space-y-4">
+                  <HostedResumableAuthState
+                    auth={{ identityLabel: "member@example.com", method: "email" }}
+                    disabled={false}
+                    onContinue={() => {}}
+                    onSignOut={() => {}}
+                    pending={false}
+                  />
+                  <HostedAuthPanelAlternateMethods>
+                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
+                    <HostedInlineAuthButton
+                      icon={<EmailIcon className="size-5" />}
+                      onClick={() => {}}
+                    >
+                      Email
+                    </HostedInlineAuthButton>
+                  </HostedAuthPanelAlternateMethods>
+                </div>
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Hydrated phone session recovery">
+                <div className="space-y-4">
+                  <HostedAuthenticatedPhoneAuthState
+                    body=""
+                    description=""
+                    disabled={false}
+                    onContinue={() => {}}
+                    onUseDifferentNumber={() => {}}
+                    pendingAction={null}
+                    secondaryActionSize="lg"
+                    title=""
+                    view="manual-resume"
+                  />
+                  <HostedAuthPanelAlternateMethods>
+                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
+                    <HostedInlineAuthButton
+                      icon={<EmailIcon className="size-5" />}
+                      onClick={() => {}}
+                    >
+                      Email
+                    </HostedInlineAuthButton>
+                  </HostedAuthPanelAlternateMethods>
+                </div>
+              </DialogPreviewFrame>
+            </div>
             <div className="grid items-start gap-5 lg:grid-cols-2" inert>
               <DialogPreviewFrame label="Telegram completion">
                 <div className="grid grid-cols-2 gap-3">
@@ -630,7 +749,6 @@ export function ComponentsContent() {
                   code="123456"
                   disableSignup={false}
                   disabled
-                  intent="auth"
                   onCodeChange={() => {}}
                   onResendCode={() => {}}
                   onUseDifferentNumber={() => {}}
@@ -753,6 +871,94 @@ export function ComponentsContent() {
             </div>
           </div>
         </Section>
+
+        <Separator />
+
+        <div
+          data-design-component="environment-empty-state"
+          id="environment-empty-state-component"
+        >
+          <Section title="Environment empty state">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production zero-data state. One voice-first action leads to the
+              walkthrough, while the real report categories preview what Murph
+              will build without showing empty scores or missing facts.
+            </p>
+            <EnvironmentEmptyState
+              contactOptions={[
+                {
+                  href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
+                  kind: "text",
+                  label: "Messages",
+                },
+                {
+                  href: "https://t.me/withmurph_bot",
+                  kind: "telegram",
+                  label: "Telegram",
+                },
+              ]}
+            />
+          </Section>
+        </div>
+
+        <Separator />
+
+        <div
+          data-design-component="environment-capture-card"
+          id="environment-capture-card-component"
+          inert
+        >
+          <Section title="Environment progressive capture">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production partial-data state. The action opens a voice script
+              built only from facts Murph still does not know.
+            </p>
+            <EnvironmentCaptureCard
+              contactOptions={[]}
+              coverage={70}
+              known={21}
+              script={DESIGN_ENVIRONMENT_GAP_SCRIPT}
+            />
+          </Section>
+        </div>
+
+        <Separator />
+
+        <div
+          data-design-component="environment-voice-refresh-notice"
+          id="environment-voice-refresh-notice-component"
+          inert
+        >
+          <Section title="Environment voice processing feedback">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              The open report keeps ownership after upload: processing,
+              updated, no-clear-facts, and delayed recovery remain visible
+              without requiring a reload. Processing stays animated, and the
+              delayed action rechecks the existing accepted job.
+            </p>
+            <div className="grid gap-4">
+              <EnvironmentVoiceRefreshNotice
+                state={{
+                  baselineValues: "{}",
+                  status: "processing",
+                }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ factsChanged: true, status: "updated" }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ factsChanged: false, status: "updated" }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ status: "delayed" }}
+                onCheckAgain={() => {}}
+              />
+            </div>
+          </Section>
+        </div>
 
         <Separator />
 
@@ -930,10 +1136,13 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Radio Group, Choice Cards & Provider Picker">
+        <Section
+          id="assistant-provider-picker"
+          title="Radio Group, Choice Cards & Provider Picker"
+        >
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Compare model choice cards and the compact, save-gated provider
-            picker used by assistant settings.
+            Compare model choice cards and review the provider privacy and
+            included-capacity disclosures used by assistant settings.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"
@@ -971,16 +1180,35 @@ export function ComponentsContent() {
             />
           </RadioGroup>
           <AssistantProviderSummary
-            currentProvider={HOSTED_ASSISTANT_OPENAI_PROVIDER}
-            draftProvider={providerValue}
+            connection={DESIGN_INFERENCE_CONNECTION}
+            currentRouting={HOSTED_ASSISTANT_OPENAI_PROVIDER}
+            draftRouting={providerValue}
             onChangeClick={() => setProviderDialogOpen(true)}
           />
           <AssistantProviderDialog
+            chatCompletionsAvailable
+            connection={DESIGN_INFERENCE_CONNECTION}
+            customInferenceAvailable
             onOpenChange={setProviderDialogOpen}
-            onProviderChange={setProviderValue}
+            onRoutingChange={setProviderValue}
             open={providerDialogOpen}
-            provider={providerValue}
+            routing={providerValue}
+            veniceAvailable
           />
+        </Section>
+
+        <Separator />
+
+        <Section title="Custom inference endpoint pane">
+          <div inert>
+            <HostedInferenceConnectionPane
+              chatCompletionsAvailable
+              configurationAvailable={false}
+              connection={null}
+              onConnectionChange={() => {}}
+              selected={false}
+            />
+          </div>
         </Section>
 
         <Separator />
@@ -1066,11 +1294,20 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Device Sync Callback Confirmation">
-          <div className="overflow-hidden rounded-2xl border border-border" inert>
-            <HostedDeviceSyncCallbackConfirmation
-              action="/"
-              state="confirmation"
+        <Section title="Connect Callback Error Notice">
+          <div className="flex flex-col gap-4" inert>
+            <ConnectCallbackErrorNotice
+              errorCode="CALLBACK_PROOF_INVALID"
+              message="That return link did not match the browser you started in, so nothing was connected. Start Oura again from this page."
+              sourceLabel="Oura"
+              title="Unable to finish connection"
+            />
+            <ConnectCallbackErrorNotice
+              errorCode="CALLBACK_SESSION_REQUIRED"
+              message="You were signed out before Oura finished connecting. Log in, then start the connection again."
+              onSignIn={() => {}}
+              sourceLabel="Oura"
+              title="Unable to finish connection"
             />
           </div>
         </Section>
@@ -1140,6 +1377,74 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section title="Hosted plan change">
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+            Immediate upgrades open Stripe&apos;s exact proration confirmation.
+            Period-end switches keep their in-product scheduling confirmation.
+          </p>
+          <div className="grid items-start gap-6 lg:grid-cols-2">
+            <div className="space-y-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Period-end switch
+              </p>
+              <Dialog>
+                <div
+                  className="space-y-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7"
+                  inert
+                >
+                  <HostedPlanChangeConfirmationContent
+                    currentPeriodEnd="2026-08-27T04:00:00.000Z"
+                    errorMessage={null}
+                    onClose={() => undefined}
+                    onConfirm={() => undefined}
+                    pending={false}
+                    targetPlanCode="launch_group_monthly"
+                  />
+                </div>
+              </Dialog>
+            </div>
+            <div className="space-y-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Immediate upgrade entry
+              </p>
+              <div
+                className="rounded-2xl bg-muted/45 p-6"
+                inert
+              >
+                <UpgradeToEdgeButton expectedCurrentPlanCode="launch_monthly" />
+              </div>
+            </div>
+          </div>
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <div className="space-y-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Return · syncing
+              </p>
+              <div inert>
+                <HostedPlanUpdateReturn
+                  active={false}
+                  pollingEnabled={false}
+                  targetPlanCode="launch_edge_monthly"
+                />
+              </div>
+            </div>
+            <div className="space-y-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Return · active
+              </p>
+              <div inert>
+                <HostedPlanUpdateReturn
+                  active
+                  pollingEnabled={false}
+                  targetPlanCode="launch_edge_monthly"
+                />
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        <Separator />
+
         <div id="whoop-completion-dialog" className="scroll-mt-24">
           <Section title="WHOOP Completion Dialog">
             <p className="max-w-2xl text-sm text-muted-foreground">
@@ -1191,7 +1496,7 @@ export function ComponentsContent() {
             label and status-only recovery when another target owns the active
             checkout. Credit is added only after Stripe confirms payment.
           </p>
-          <div className="grid gap-6 xl:grid-cols-3">
+          <div className="grid gap-6 xl:grid-cols-2 2xl:grid-cols-4">
             <div
               className="rounded-3xl border border-border bg-card p-6"
               data-design-component="personal-usage-top-up"
@@ -1210,6 +1515,7 @@ export function ComponentsContent() {
               <div className="mt-6">
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
+                  inert
                   offers={DESIGN_USAGE_OFFERS}
                   payerMemberId="design_usage_top_up_payer"
                   scope="personal"
@@ -1220,16 +1526,55 @@ export function ComponentsContent() {
               data-design-component="group-usage-funding"
               id="group-usage-funding-component"
             >
-              <GroupUsageFundingCard
-                action={
-                  <GroupSponsorshipDialog
-                    checkoutUrl="/api/design/usage-credit-preview"
-                    customizationAllowed
-                    offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
-                    payerMemberId="design_usage_top_up_payer"
+              <GroupUsageFundingShell
+                action={(
+                  <GroupUsageFundingActions
+                    monthlyAction={(
+                      <GroupSponsorshipDialog
+                        checkoutUrl="/api/design/usage-credit-preview"
+                        customizationAllowed
+                        inert
+                        mode="monthly"
+                        monthlyCapMinor={1_000}
+                        monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
+                        offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
+                        payerMemberId="design_usage_top_up_payer"
+                      />
+                    )}
+                    oneTimeAction={(
+                      <GroupSponsorshipDialog
+                        checkoutUrl="/api/design/usage-credit-preview"
+                        customizationAllowed
+                        inert
+                        mode="one_time"
+                        offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+                        payerMemberId="design_usage_top_up_payer"
+                        triggerSize="default"
+                        triggerVariant="link"
+                      />
+                    )}
                   />
-                }
+                )}
                 groupName="Sunday sleep crew"
+              />
+            </div>
+            <div
+              data-design-component="group-sponsorship-management"
+              id="group-sponsorship-management-component"
+              inert
+            >
+              <GroupSponsorshipManagementCard
+                endpoint="/api/design/group-sponsorship-management"
+                inert
+                management={{
+                  authorizationId: "hgsa_design_component",
+                  chargedThisPeriodMinor: 500,
+                  monthlyCapMinor: 1_000,
+                  pendingMonthlyCapMinor: null,
+                  pendingThisPeriodMinor: 500,
+                  periodEnd: "2026-08-30T16:00:00.000Z",
+                  status: "active",
+                }}
               />
             </div>
             <div
@@ -1250,6 +1595,7 @@ export function ComponentsContent() {
               <div className="mt-6 flex flex-wrap gap-3">
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
+                  inert
                   offers={DESIGN_USAGE_OFFERS}
                   payerMemberId="design_usage_top_up_payer"
                   scope="family"
@@ -1264,6 +1610,7 @@ export function ComponentsContent() {
                     targetConflict: true,
                   }}
                   checkoutUrl="/api/design/usage-credit-preview"
+                  inert
                   offers={[]}
                   payerMemberId="design_usage_top_up_payer"
                   scope="family"
@@ -1378,10 +1725,181 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Hosted AI usage credits and missions">
+        <Section id="phone-account-linking" title="Phone Account Linking">
+          <p className="text-sm leading-6 text-muted-foreground">
+            Settings opens the authenticated identity provider directly, with
+            no second Murph confirmation. After verification or an approved
+            account transfer, Murph saves the exact provider-owned result. If
+            Privy already has a verified phone that Murph has not recorded,
+            Settings repairs that projection directly. A declined transfer
+            closes quietly, and a failed save retries without reopening Privy.
+            Existing phone accounts use the same surface for replacement.
+            Support-required conflicts stop retrying and leave one direct email
+            action without putting account identifiers in the message.
+            Privacy-safe lifecycle diagnostics observe these states without
+            changing any rendered state or action.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2" inert>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Add phone
+              </p>
+              <HostedPhoneLinkAction
+                isChangeFlow={false}
+                isLinking={false}
+                isSyncing={false}
+                onClick={() => {}}
+              />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Replace phone
+              </p>
+              <HostedPhoneLinkAction
+                isChangeFlow
+                isLinking={false}
+                isSyncing={false}
+                onClick={() => {}}
+              />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Provider opening
+              </p>
+              <HostedPhoneLinkAction
+                disabled
+                isChangeFlow={false}
+                isLinking
+                isSyncing={false}
+                onClick={() => {}}
+              />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Session mismatch
+              </p>
+              <HostedIdentitySessionMismatch onSignInAgain={() => {}} />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Provider loading
+              </p>
+              <HostedIdentitySessionLoading />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Recovery failed
+              </p>
+              <HostedIdentitySessionMismatch
+                errorMessage="Sign out did not finish. Try again."
+                onSignInAgain={() => {}}
+              />
+            </div>
+          </div>
+          <p className="text-sm leading-6 text-muted-foreground">
+            The join card composes that action with its reserved status line
+            and the Telegram alternative. The status line holds its height
+            while empty so the button never moves when a message arrives, so
+            these previews show the real resting spacing between the two
+            contact channels.
+          </p>
+          <div
+            aria-label="Composed contact channel card previews"
+            className="grid max-w-3xl gap-4 sm:grid-cols-2"
+            data-design-component="hosted-contact-channel-choice"
+            inert
+          >
+            {[
+              {
+                disabled: false,
+                errorMessage: null,
+                label: "Resting",
+                showPhoneAction: true,
+                state: "resting",
+                statusMessage: null,
+                statusTone: "neutral" as const,
+              },
+              {
+                disabled: false,
+                errorMessage: null,
+                label: "Saved status",
+                showPhoneAction: true,
+                state: "status",
+                statusMessage: "Phone saved.",
+                statusTone: "success" as const,
+              },
+              {
+                disabled: true,
+                errorMessage:
+                  "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
+                label: "Support required",
+                showPhoneAction: false,
+                state: "support-required",
+                statusMessage:
+                  "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
+                statusTone: "destructive" as const,
+              },
+            ].map((preview) => (
+              <div
+                className="space-y-3 rounded-xl border border-border bg-card p-5"
+                data-design-state={preview.state}
+                key={preview.label}
+              >
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  {preview.label}
+                </p>
+                <HostedContactChannelChoice
+                  phone={
+                    <HostedPhoneLinkCardPresentation
+                      disabled={preview.disabled}
+                      errorMessage={preview.errorMessage}
+                      isChangeFlow={false}
+                      isLinking={false}
+                      isSyncing={false}
+                      showPhoneAction={preview.showPhoneAction}
+                      statusMessage={preview.statusMessage}
+                      statusTone={preview.statusTone}
+                      onClick={() => {}}
+                    />
+                  }
+                  telegram={
+                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
+                  }
+                />
+              </div>
+            ))}
+          </div>
+          <div className="space-y-3">
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Settings support-required dialog
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => setPhoneTransferSupportDialogOpen(true)}
+            >
+              Preview terminal dialog
+            </Button>
+            {phoneTransferSupportDialogOpen
+              ? (
+                  <HostedPhonePrivyHandOffStatus
+                    errorMessage="That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely."
+                    isLinking={false}
+                    isRetryAllowed={false}
+                    isSyncing={false}
+                    onAborted={() => setPhoneTransferSupportDialogOpen(false)}
+                    onRetry={() => {}}
+                  />
+                )
+              : null}
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Hosted AI usage credits and referrals">
           <p className="text-sm text-muted-foreground">
-            Read-only Settings detail with missions first, optional mission
-            details on demand, and a compact purchased-credit ledger.
+            Read-only Settings detail keeps current referrals visible and
+            moves completed referrals and purchased credits into quiet history.
           </p>
           <div
             aria-label="Read-only hosted AI usage activity previews"
@@ -1393,31 +1911,36 @@ export function ComponentsContent() {
               {
                 activity: DESIGN_AI_USAGE_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
-                label: "Active and completed missions",
+                label: "Active referrals with completed history",
                 state: "active-and-completed",
               },
               {
                 activity: DESIGN_AI_USAGE_WAITING_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
-                label: "Mission selected, waiting for a new group",
+                label: "Referral selected, waiting for a new group",
                 state: "waiting-for-group",
               },
               {
                 activity: DESIGN_AI_USAGE_EMPTY_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
-                label: "Missions available, none selected",
+                label: "Referrals available, none selected",
                 state: "empty",
               },
               {
                 activity: DESIGN_AI_USAGE_DISABLED_HISTORY,
                 contactOption: null,
-                label: "New missions disabled, existing history retained",
+                label: "New referrals disabled, existing history retained",
                 state: "disabled-history",
               },
             ].map((preview) => (
               <div
                 className="flex flex-col gap-3"
                 data-design-state={preview.state}
+                id={
+                  preview.state === "empty"
+                    ? "hosted-ai-usage-empty"
+                    : undefined
+                }
                 key={preview.label}
               >
                 <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -1784,6 +2307,18 @@ export function ComponentsContent() {
             <ConclusionCard title="Key insights" variant="insight" items={[{ icon: "•", text: "Evening sessions drove sleep gains. Morning sessions showed no benefit." }, { icon: "•", text: "2–3x/week appears sufficient. Skipping one session had no negative impact." }]} />
             <ConclusionCard title="Recommendations" variant="recommendation" items={[{ icon: "→", text: "Continue sauna 2x/week as maintenance." }, { icon: "→", text: "Add cold exposure post-sauna for contrast protocol." }]} />
           </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Health data consent settings">
+          <HealthDataConsentControlStudy />
+        </Section>
+
+        <Separator />
+
+        <Section title="Data export">
+          <DataExportControlStudy />
         </Section>
 
         <Separator />

@@ -31,13 +31,120 @@ describe("createCloudflareHostedControlClient", () => {
 
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultSession",
+      "deleteEnvironmentVoice",
       "deleteMealPhoto",
       "deleteUserData",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
+      "reconcileRuntimeHealthDataConsent",
       "sendTelegramUsageLimitNotice",
+      "stageEnvironmentVoice",
       "stageMealPhoto",
+      "verifyInferenceConnection",
     ]);
+  });
+
+  it("verifies a bounded inference candidate through the user-bound route", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({
+      verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+      verified: true,
+    })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.verifyInferenceConnection({
+      request: {
+        auth: { kind: "bearer", secret: "synthetic-secret" },
+        contextWindowTokens: 131_072,
+        endpointUrl: "https://inference.example.test/v1/responses",
+        model: "example-model",
+        protocol: "responses",
+        supportsImages: false,
+      },
+      userId: "user_123",
+    })).resolves.toEqual({
+      verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+      verified: true,
+    });
+
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe(
+      "https://runner.example.test/internal/users/user_123/inference/verify",
+    );
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("authorization")).toBe(
+      "Bearer token-123",
+    );
+    expect(new Headers(init.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(
+      "user_123",
+    );
+  });
+
+  it("stages and deletes environment voice bytes through the bound user routes", async () => {
+    const bytes = Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]);
+    const sha256 = await sha256Hex(bytes);
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(createJsonResponse({
+        audioKey: "a".repeat(40),
+        byteLength: bytes.byteLength,
+        sha256,
+      }))
+      .mockResolvedValueOnce(createJsonResponse({ deleted: true })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.stageEnvironmentVoice({
+      bytes,
+      captureId: sha256,
+      contentType: "audio/webm",
+      sha256,
+      userId: "user_123",
+    })).resolves.toEqual({
+      audioKey: "a".repeat(40),
+      byteLength: bytes.byteLength,
+      sha256,
+    });
+    await expect(client.deleteEnvironmentVoice({
+      audioKey: "a".repeat(40),
+      userId: "user_123",
+    })).resolves.toBeUndefined();
+
+    const [stageUrl, stageInit] = vi.mocked(fetchImpl).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(stageUrl).toBe(
+      "https://runner.example.test/internal/users/user_123/environment-voice/stage",
+    );
+    expect(stageInit.method).toBe("POST");
+    expect(new Uint8Array(stageInit.body as ArrayBuffer)).toEqual(bytes);
+    const stageHeaders = new Headers(stageInit.headers);
+    expect(stageHeaders.get("content-type")).toBe("audio/webm");
+    expect(stageHeaders.get("x-murph-environment-voice-capture-id")).toBe(
+      sha256,
+    );
+    expect(stageHeaders.get("x-murph-environment-voice-sha256")).toBe(sha256);
+
+    const [deleteUrl, deleteInit] = vi.mocked(fetchImpl).mock.calls[1] as [
+      string,
+      RequestInit,
+    ];
+    expect(deleteUrl).toBe(
+      "https://runner.example.test/internal/users/user_123/environment-voice/delete",
+    );
+    expect(deleteInit.method).toBe("DELETE");
+    expect(
+      new Headers(deleteInit.headers).get("x-murph-environment-voice-key"),
+    ).toBe("a".repeat(40));
   });
 
   it("deletes one staged meal photo through the bound user route", async () => {
@@ -192,6 +299,62 @@ describe("createCloudflareHostedControlClient", () => {
       tokenAcquiredAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       tokenAcquireStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.000Z"),
     });
+  });
+
+  it("posts runtime health-data consent reconciliation and validates the bound result", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({
+      activeInvocationPreempted: true,
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyAttempted: true,
+      runnerContainerDestroyOk: true,
+      userId: "user_123",
+    })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(
+      client.reconcileRuntimeHealthDataConsent("user_123"),
+    ).resolves.toEqual({
+      activeInvocationPreempted: true,
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyAttempted: true,
+      runnerContainerDestroyOk: true,
+      userId: "user_123",
+    });
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "https://runner.example.test/internal/users/user_123/runtime/health-data-consent",
+    );
+    expect(init).toMatchObject({
+      body: "{}",
+      method: "POST",
+    });
+    expect(new Headers(init.headers).get("x-hosted-execution-user-id")).toBe("user_123");
+  });
+
+  it("rejects inconsistent runtime health-data consent reconciliation results", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({
+      activeInvocationPreempted: false,
+      consentState: "revoked",
+      processingAllowed: true,
+      runnerContainerDestroyAttempted: false,
+      runnerContainerDestroyOk: true,
+      userId: "user_123",
+    })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(
+      client.reconcileRuntimeHealthDataConsent("user_123"),
+    ).rejects.toThrow("processingAllowed did not match consentState");
   });
 
   it("accepts an early runtime ensure-processing ack and still reports timing", async () => {

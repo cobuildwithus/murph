@@ -9,9 +9,12 @@ import {
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
 import {
+  checkLinqIMessageCapability,
   createLinqChat,
+  isDefinitiveLinqIMessageAppCardRejection,
   resolveLinqApiToken,
   sendLinqChatMessage,
+  sendLinqIMessageAppCard,
   setLinqMessageReaction as setLinqApiMessageReaction,
   sendLinqVoiceMemo,
   startLinqChatTypingIndicator,
@@ -58,6 +61,9 @@ import type {
   AssistantResponseMedia,
   AssistantVoiceMemoGeneration,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { normalizeOptionalText } from './helpers.js'
 
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
@@ -230,12 +236,13 @@ export async function sendTelegramImageMessage(
   const providerMessageIds: string[] = []
   let lastProviderMessageId: string | null = null
 
-  const caption = buildTelegramPhotoCaption(input.message)
-  if (!caption && input.message.trim().length > 0) {
+  const accessibleMessage = appendImageAlternativeText(input.message, media)
+  const caption = buildTelegramPhotoCaption(accessibleMessage)
+  if (!caption && accessibleMessage.trim().length > 0) {
     const deliveredText = await sendTelegramMessageDetailed(
       {
         idempotencyKey: input.idempotencyKey ?? null,
-        message: input.message,
+        message: accessibleMessage,
         replyToMessageId,
         target: targetLabel,
       },
@@ -494,6 +501,8 @@ export async function sendPreparedTelegramVoiceMemoMessage(
 
 export async function sendLinqMessage(
   input: {
+    card?: AssistantResponseCard | null
+    directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
     idempotencyKey?: string | null
     media?: readonly AssistantResponseMedia[] | null
@@ -502,10 +511,13 @@ export async function sendLinqMessage(
     replyToMessageId?: string | null
     target: string
     targetKind?: AssistantDeliveryCandidate['kind']
+    threadIsDirect?: boolean | null
   },
   dependencies: LinqRuntimeDependencies = {},
 ): Promise<{
+  idempotencyKey?: string | null
   providerMessageId: string | null
+  providerMessageIds?: string[]
   providerThreadId: string | null
   target: string | null
 }> {
@@ -526,6 +538,14 @@ export async function sendLinqMessage(
     throw new VaultCliError(
       'ASSISTANT_CHANNEL_TARGET_REQUIRED',
       'iMessage delivery requires an explicit chat id or a stored thread binding.',
+    )
+  }
+  const card = input.card ?? null
+  const responseMedia = input.media ?? []
+  if (card !== null && responseMedia.length > 0) {
+    throw new VaultCliError(
+      'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+      'A response card cannot be combined with response media.',
     )
   }
   if (input.nativeReplyRequested === true) {
@@ -552,13 +572,96 @@ export async function sendLinqMessage(
     )
   }
 
+  const directRecipientPhoneNumber = normalizeOptionalText(
+    input.directRecipientPhoneNumber,
+  )
+  const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
+  const shouldAttemptNativeCard =
+    card !== null &&
+    input.targetKind === 'thread' &&
+    input.threadIsDirect === true &&
+    input.nativeReplyRequested !== true &&
+    directRecipientPhoneNumber !== null &&
+    idempotencyKey !== null
+  let appCardFallbackIdempotencyKey: string | null = null
+  if (shouldAttemptNativeCard) {
+    let capabilityAvailable = false
+    try {
+      capabilityAvailable = await checkLinqIMessageCapability(
+        {
+          address: directRecipientPhoneNumber,
+          from: normalizeOptionalText(input.fromPhoneNumber),
+        },
+        {
+          env,
+          fetchImplementation: dependencies.fetchImplementation,
+          ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+        },
+      )
+    } catch (error) {
+      if (dependencies.signal?.aborted) {
+        throw error
+      }
+    }
+    if (capabilityAvailable) {
+      try {
+        const delivered = await sendLinqIMessageAppCard(
+          {
+            card,
+            chatId: target,
+            idempotencyKey,
+          },
+          {
+            env,
+            fetchImplementation: dependencies.fetchImplementation,
+            ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+          },
+        )
+        return {
+          providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+          providerThreadId: null,
+          target,
+        }
+      } catch (error) {
+        if (
+          dependencies.signal?.aborted ||
+          !isDefinitiveLinqIMessageAppCardRejection(error)
+        ) {
+          throw error
+        }
+        appCardFallbackIdempotencyKey = `${idempotencyKey}:fallback`
+      }
+    }
+  }
+
+  if (card !== null) {
+    const textFallbackIdempotencyKey =
+      appCardFallbackIdempotencyKey ?? idempotencyKey
+    if (!textFallbackIdempotencyKey) {
+      throw new VaultCliError(
+        'ASSISTANT_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_REQUIRED',
+        'An iMessage app-card text fallback requires a stable delivery identity.',
+      )
+    }
+    if (!dependencies.persistAppCardTextFallback) {
+      throw new VaultCliError(
+        'ASSISTANT_LINQ_APP_CARD_FALLBACK_PERSISTENCE_REQUIRED',
+        'An iMessage app-card text fallback must be persisted before provider delivery.',
+        { retryable: true },
+      )
+    }
+    await dependencies.persistAppCardTextFallback({
+      idempotencyKey: textFallbackIdempotencyKey,
+    })
+  }
+
   const media = await prepareLinqMessageMedia(
-    input.media ?? [],
+    responseMedia,
     dependencies,
   )
-  const message = (input.media ?? []).some((item) => item.kind === 'vault_file')
+  const message = responseMedia.some((item) => item.kind === 'vault_file')
     ? ''
-    : input.message
+    : appendImageAlternativeText(input.message, input.media ?? [])
 
   if (participantFromPhoneNumber) {
     const created = await createLinqChat(
@@ -578,6 +681,9 @@ export async function sendLinqMessage(
 
     return {
       providerMessageId: normalizeOptionalText(created.messageId),
+      ...(created.providerMessageIds && created.providerMessageIds.length > 0
+        ? { providerMessageIds: [...created.providerMessageIds] }
+        : {}),
       providerThreadId: normalizeOptionalText(created.chatId),
       target: normalizeOptionalText(created.chatId),
     }
@@ -586,7 +692,8 @@ export async function sendLinqMessage(
   const delivered = await sendLinqChatMessage(
     {
       chatId: target,
-      idempotencyKey: input.idempotencyKey ?? null,
+      idempotencyKey:
+        appCardFallbackIdempotencyKey ?? input.idempotencyKey ?? null,
       message,
       ...(media.length > 0 ? { media } : {}),
       ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
@@ -599,7 +706,13 @@ export async function sendLinqMessage(
     },
   )
   return {
+    ...(appCardFallbackIdempotencyKey
+      ? { idempotencyKey: appCardFallbackIdempotencyKey }
+      : {}),
     providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+    ...(delivered.providerMessageIds && delivered.providerMessageIds.length > 0
+      ? { providerMessageIds: [...delivered.providerMessageIds] }
+      : {}),
     providerThreadId: null,
     target,
   }
@@ -672,6 +785,34 @@ async function prepareLinqMessageMedia(
   }
 
   return prepared
+}
+
+function appendImageAlternativeText(
+  message: string,
+  media: readonly AssistantResponseMedia[],
+): string {
+  const alternatives: string[] = []
+  for (const item of media) {
+    if (item.kind !== 'image' && item.kind !== 'vault_image') {
+      continue
+    }
+    const alternative = normalizeOptionalText(item.alt)
+    if (
+      !alternative ||
+      message.includes(alternative) ||
+      alternatives.includes(alternative)
+    ) {
+      continue
+    }
+    alternatives.push(alternative)
+  }
+  if (alternatives.length === 0) {
+    return message
+  }
+  const normalizedMessage = message.trim()
+  return normalizedMessage.length > 0
+    ? `${normalizedMessage}\n\n${alternatives.join('\n\n')}`
+    : alternatives.join('\n\n')
 }
 
 export async function sendLinqVoiceMemoMessage(

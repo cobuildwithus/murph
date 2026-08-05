@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
+import { DEVICE_CONNECT_SOURCES } from "../src/config/connect-routes.ts";
 import { buildJunctionProviderSourceInstanceKey } from "../src/config/junction-connect-sources.ts";
+import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { mergeGuardedJunctionHistoricalBackfillMetadata } from "../src/junction-historical-backfill-progress.ts";
 import { createDeviceSyncPublicIngress } from "../src/public-ingress.ts";
 import { createDeviceSyncRegistry } from "../src/registry.ts";
@@ -57,6 +59,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   claimWebhookTraceCalls = 0;
   completedWebhookTraceCalls = 0;
   markConnectionSetupFailedError: Error | null = null;
+  lastCreatedOAuthState: OAuthStateRecord | null = null;
   upsertConnectionCalls = 0;
   private accountCounter = 0;
 
@@ -75,6 +78,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   }
 
   createOAuthState(input: OAuthStateRecord): OAuthStateRecord {
+    this.lastCreatedOAuthState = input;
     this.oauthStates.set(input.state, input);
     return input;
   }
@@ -414,6 +418,14 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       status,
     });
   }
+}
+
+function createVoidDeferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = () => {};
+  const promise = new Promise<void>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
 }
 
 function readOAuthCredentialTokens(input: UpsertPublicDeviceSyncConnectionInput): ProviderAuthTokens | null {
@@ -993,6 +1005,17 @@ test("starting another Junction source preserves an established shared account",
   let acceptedWebhookCount = 0;
   let connectionHookFailureSource: string | null = null;
   let connectionHookNoopSource: string | null = null;
+  const rejectedSourceAttempts: Array<{
+    connectionStartedAt: string;
+    sourceProviderSlug: string;
+  }> = [];
+  const observedSourceAttempts: Array<{
+    eventType: string;
+    sourceProviderSlug: string;
+    traceClaimed: boolean;
+  }> = [];
+  const delayedSourceStartEntered = createVoidDeferred();
+  const releaseDelayedSourceStart = createVoidDeferred();
   const provider = createFakeProvider({
     provider: "junction",
     credentialPolicy: {
@@ -1024,6 +1047,10 @@ test("starting another Junction source preserves an established shared account",
       },
     },
     async beginConnection(input) {
+      if (input.sourceProviderSlug === "polar") {
+        delayedSourceStartEntered.resolve();
+        await releaseDelayedSourceStart.promise;
+      }
       return {
         authorizationUrl: `https://junction.example/link?murph_state=${input.state}`,
         connectionSeed: {
@@ -1055,12 +1082,19 @@ test("starting another Junction source preserves an established shared account",
       };
     },
     async verifyAndParseWebhook(input) {
-      const sourceProviderSlug = input.rawBody.toString("utf8");
+      const [sourceProviderSlug, timestampMode] = input.rawBody.toString("utf8").split(":");
+      assert.ok(sourceProviderSlug);
+      const eventType = timestampMode === "lifecycle"
+        ? "provider.connection.created"
+        : `${sourceProviderSlug}.data`;
       return {
         acceptanceMode: "durable_webhook_work",
         externalAccountId: "shared-junction-account",
-        eventType: `${sourceProviderSlug}.data`,
-        traceId: `trace-${sourceProviderSlug}`,
+        eventType,
+        occurredAt: timestampMode === "no_timestamp"
+          ? input.now
+          : "2026-03-26T12:01:00.000Z",
+        traceId: `trace-${sourceProviderSlug}-${timestampMode ?? "timestamped"}`,
         sourceProviderSlug,
         dataSourceProviderSlug: sourceProviderSlug,
         jobs: [{
@@ -1104,6 +1138,36 @@ test("starting another Junction source preserves an established shared account",
           sourceAdmissionCommitted: true as const,
         };
       },
+      onConnectionSourceAdmissionRejected({ connectionStartedAt, sourceProviderSlug }) {
+        rejectedSourceAttempts.push({ connectionStartedAt, sourceProviderSlug });
+      },
+      onConnectionSourceObserved({ account, eventType, sourceProviderSlug }) {
+        observedSourceAttempts.push({
+          eventType,
+          sourceProviderSlug,
+          traceClaimed: store.claimWebhookTraceCalls > 0,
+        });
+        if (
+          sourceProviderSlug !== "apple_health_kit"
+          || eventType !== "provider.connection.created"
+        ) {
+          return;
+        }
+        const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+          connectionId: account.id,
+          sourceProviderSlug,
+        });
+        assert.ok(sourceInstanceKey);
+        store.upsertConnectionSource({
+          connectionId: account.id,
+          sourceInstanceKey,
+          sourceProviderSlug,
+          status: "connected",
+          firstSeenAt: "2026-03-26T12:01:00.000Z",
+          lastSeenAt: "2026-03-26T12:01:00.000Z",
+        });
+        return { sourceAdmissionCommitted: true as const };
+      },
       onWebhookAccepted({ account, claimToken, traceId }) {
         acceptedWebhookCount += 1;
         return completeWebhookAcceptDurably(store, account, traceId, claimToken);
@@ -1126,11 +1190,83 @@ test("starting another Junction source preserves an established shared account",
   });
   const establishedConnectedAt = established.account.connectedAt;
 
-  const fitbit = await ingress.startConnection({
+  const polarSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: established.account.id,
+    sourceProviderSlug: "polar",
+  });
+  assert.ok(polarSourceInstanceKey);
+  const polarPreparedAt = "2026-03-26T12:00:20.000Z";
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: polarSourceInstanceKey,
+    sourceProviderSlug: "polar",
+    status: "disconnected",
+    firstSeenAt: polarPreparedAt,
+    lastSeenAt: polarPreparedAt,
+  });
+  const polarStart = ingress.startConnection({
     ownerId: "<REDACTED_OWNER_ID>",
     provider: "junction",
+    sourceProviderSlug: "polar",
+    sourceLifecycleProof: {
+      connectionId: established.account.id,
+      lastSeenAt: polarPreparedAt,
+      sourceInstanceKey: polarSourceInstanceKey,
+      sourceProviderSlug: "polar",
+    },
+  });
+  await delayedSourceStartEntered.promise;
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: polarSourceInstanceKey,
+    sourceProviderSlug: "polar",
+    status: "disconnected",
+    firstSeenAt: polarPreparedAt,
+    lastSeenAt: "2026-03-26T12:00:21.000Z",
+    lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
+  });
+  releaseDelayedSourceStart.resolve();
+  await assert.rejects(
+    polarStart,
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_SOURCE_START_STALE",
+  );
+
+  const fitbitSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: established.account.id,
     sourceProviderSlug: "fitbit",
   });
+  assert.ok(fitbitSourceInstanceKey);
+  const concurrentCleanupAt = "2026-03-26T12:00:30.000Z";
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: fitbitSourceInstanceKey,
+    sourceProviderSlug: "fitbit",
+    status: "disconnected",
+    firstSeenAt: concurrentCleanupAt,
+    lastSeenAt: concurrentCleanupAt,
+    lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
+    lastErrorMessage: "Source cleanup is in progress.",
+  });
+
+  const fitbitSourceLifecycleProof = {
+    connectionId: established.account.id,
+    lastSeenAt: concurrentCleanupAt,
+    sourceInstanceKey: fitbitSourceInstanceKey,
+    sourceProviderSlug: "fitbit",
+  };
+  await assert.rejects(
+    ingress.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "fitbit",
+      sourceLifecycleProof: fitbitSourceLifecycleProof,
+    }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_SOURCE_START_STALE",
+  );
 
   const afterFitbitStart = store.getConnectionByExternalAccount(
     "junction",
@@ -1150,9 +1286,25 @@ test("starting another Junction source preserves an established shared account",
     store.listConnectionSources({
       connectionId: established.account.id,
       sourceProviderSlug: "fitbit",
-    })[0]?.status,
-    "disconnected",
+    })[0]?.lastErrorCode,
+    "SOURCE_DISCONNECT_IN_PROGRESS",
   );
+
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: fitbitSourceInstanceKey,
+    sourceProviderSlug: "fitbit",
+    status: "disconnected",
+    firstSeenAt: concurrentCleanupAt,
+    lastSeenAt: concurrentCleanupAt,
+  });
+
+  const fitbit = await ingress.startConnection({
+    ownerId: "<REDACTED_OWNER_ID>",
+    provider: "junction",
+    sourceProviderSlug: "fitbit",
+    sourceLifecycleProof: fitbitSourceLifecycleProof,
+  });
 
   await assert.doesNotReject(
     ingress.handleWebhook("junction", new Headers(), Buffer.from("garmin")),
@@ -1189,6 +1341,83 @@ test("starting another Junction source preserves an established shared account",
     "connected",
   );
   assert.equal(acceptedWebhookCount, 2);
+
+  const appleHealthSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: established.account.id,
+    sourceProviderSlug: "apple_health_kit",
+  });
+  assert.ok(appleHealthSourceInstanceKey);
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: appleHealthSourceInstanceKey,
+    sourceProviderSlug: "apple_health_kit",
+    status: "disconnected",
+    firstSeenAt: "2026-03-26T12:00:00.000Z",
+    lastSeenAt: "2026-03-26T12:00:00.000Z",
+  });
+  await assert.doesNotReject(
+    ingress.handleWebhook("junction", new Headers(), Buffer.from("apple_health_kit:lifecycle")),
+  );
+  assert.deepEqual(observedSourceAttempts, [
+    {
+      eventType: "fitbit.data",
+      sourceProviderSlug: "fitbit",
+      traceClaimed: true,
+    },
+    {
+      eventType: "provider.connection.created",
+      sourceProviderSlug: "apple_health_kit",
+      traceClaimed: true,
+    },
+  ]);
+  assert.equal(
+    store.listConnectionSources({
+      connectionId: established.account.id,
+      sourceProviderSlug: "apple_health_kit",
+    })[0]?.status,
+    "connected",
+  );
+  assert.equal(acceptedWebhookCount, 3);
+
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: appleHealthSourceInstanceKey,
+    sourceProviderSlug: "apple_health_kit",
+    status: "disconnected",
+    firstSeenAt: "2026-03-26T12:02:00.000Z",
+    lastSeenAt: "2026-03-26T12:02:00.000Z",
+  });
+  for (const timestampMode of ["timestamped", "no_timestamp"]) {
+    await assert.rejects(
+      ingress.handleWebhook(
+        "junction",
+        new Headers(),
+        Buffer.from(`apple_health_kit:${timestampMode}`),
+      ),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "WEBHOOK_SOURCE_NOT_READY",
+    );
+  }
+  assert.deepEqual(observedSourceAttempts.slice(-2), [
+    {
+      eventType: "apple_health_kit.data",
+      sourceProviderSlug: "apple_health_kit",
+      traceClaimed: true,
+    },
+    {
+      eventType: "apple_health_kit.data",
+      sourceProviderSlug: "apple_health_kit",
+      traceClaimed: true,
+    },
+  ]);
+  assert.equal(
+    store.listConnectionSources({
+      connectionId: established.account.id,
+      sourceProviderSlug: "apple_health_kit",
+    })[0]?.status,
+    "disconnected",
+  );
 
   const withings = await ingress.startConnection({
     ownerId: "<REDACTED_OWNER_ID>",
@@ -1230,6 +1459,8 @@ test("starting another Junction source preserves an established shared account",
     sourceProviderSlug: "oura",
   });
   connectionHookFailureSource = "oura";
+  const ouraStartedAt = store.peekOAuthState(oura.state)?.createdAt;
+  assert.ok(ouraStartedAt);
   await assert.rejects(
     ingress.handleConnectionCallback({
       expectedOwnerId: "<REDACTED_OWNER_ID>",
@@ -1252,6 +1483,10 @@ test("starting another Junction source preserves an established shared account",
     store.getConnectionByExternalAccount("junction", "shared-junction-account")?.setupPhase,
     "source_confirmed",
   );
+  assert.deepEqual(rejectedSourceAttempts, [{
+    connectionStartedAt: ouraStartedAt,
+    sourceProviderSlug: "oura",
+  }]);
 
   const polar = await ingress.startConnection({
     ownerId: "<REDACTED_OWNER_ID>",
@@ -1281,6 +1516,10 @@ test("starting another Junction source preserves an established shared account",
     })[0]?.status,
     "disconnected",
   );
+  assert.deepEqual(rejectedSourceAttempts.map((attempt) => attempt.sourceProviderSlug), [
+    "oura",
+    "polar",
+  ]);
 });
 
 test("public ingress completes seeded external-link callbacks after mutable webhook observations", async () => {
@@ -3090,10 +3329,11 @@ test("public ingress scopes durable webhook traces by external account while pre
   ]);
 });
 
-test("public ingress accepts already-satisfied dirty hints before claiming exact trace ids", async () => {
+test("public ingress claims and completes already-satisfied dirty hints", async () => {
   const store = new InMemoryPublicIngressStore();
   let alreadySatisfiedCalls = 0;
   let acceptedCalls = 0;
+  let observedCalls = 0;
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
@@ -3103,6 +3343,7 @@ test("public ingress accepts already-satisfied dirty hints before claiming exact
             acceptanceMode: "level_dirty_hint",
             externalAccountId: "demo-abc",
             eventType: "demo.updated",
+            sourceProviderSlug: "apple_health_kit",
             traceId: "trace-already-dirty",
             jobs: [
               {
@@ -3119,6 +3360,12 @@ test("public ingress accepts already-satisfied dirty hints before claiming exact
     ]),
     store,
     hooks: {
+      onConnectionSourceObserved({ eventType }) {
+        observedCalls += 1;
+        assert.equal(eventType, "demo.updated");
+        assert.equal(store.claimWebhookTraceCalls, 1);
+        return { sourceAdmissionCommitted: true };
+      },
       onLevelDirtyWebhookAlreadySatisfied({ webhook }) {
         alreadySatisfiedCalls += 1;
         assert.equal(webhook.acceptanceMode, "level_dirty_hint");
@@ -3137,6 +3384,16 @@ test("public ingress accepts already-satisfied dirty hints before claiming exact
     state: begin.state,
     code: "abc",
   });
+  const account = store.getConnectionByExternalAccount("demo", "demo-abc");
+  assert.ok(account);
+  store.upsertConnectionSource({
+    connectionId: account.id,
+    sourceInstanceKey: `${account.id}:apple_health_kit`,
+    sourceProviderSlug: "apple_health_kit",
+    status: "disconnected",
+    firstSeenAt: "2026-04-10T00:00:00.000Z",
+    lastSeenAt: "2026-04-10T00:00:00.000Z",
+  });
 
   const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
 
@@ -3144,10 +3401,165 @@ test("public ingress accepts already-satisfied dirty hints before claiming exact
   assert.equal(result.duplicate, false);
   assert.equal(result.traceId, scopeWebhookTraceId("demo", "demo-abc", "trace-already-dirty"));
   assert.equal(alreadySatisfiedCalls, 1);
+  assert.equal(observedCalls, 1);
   assert.equal(acceptedCalls, 0);
-  assert.equal(store.claimWebhookTraceCalls, 0);
-  assert.equal(store.completedWebhookTraceCalls, 0);
+  assert.equal(store.claimWebhookTraceCalls, 1);
+  assert.equal(store.completedWebhookTraceCalls, 1);
   assert.equal(store.getConnectionByExternalAccount("demo", "demo-abc")?.lastWebhookAt, null);
+});
+
+test("public ingress finishes source lifecycle before concurrent dirty coalescing completes its trace", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const order: string[] = [];
+  let dirtySatisfied = false;
+  let releaseSourceLifecycle!: () => void;
+  let signalSourceLifecycleStarted!: () => void;
+  const sourceLifecycleReleased = new Promise<void>((resolve) => {
+    releaseSourceLifecycle = resolve;
+  });
+  const sourceLifecycleStarted = new Promise<void>((resolve) => {
+    signalSourceLifecycleStarted = resolve;
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook({ rawBody }) {
+          const registration = rawBody.toString("utf8") === "registration";
+          return {
+            acceptanceMode: "level_dirty_hint",
+            externalAccountId: "demo-abc",
+            eventType: registration ? "provider.connection.created" : "daily.data.updated",
+            ...(registration ? { sourceProviderSlug: "apple_health_kit" } : {}),
+            traceId: registration ? "trace-registration" : "trace-dirty",
+            jobs: [{ kind: "reconcile" }],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      async onConnectionSourceObserved({ eventType }) {
+        assert.equal(eventType, "provider.connection.created");
+        order.push("source:start");
+        signalSourceLifecycleStarted();
+        await sourceLifecycleReleased;
+        order.push("source:complete");
+        return { sourceAdmissionCommitted: true };
+      },
+      onLevelDirtyWebhookAlreadySatisfied({ webhook }) {
+        if (webhook.eventType === "provider.connection.created") {
+          assert.equal(dirtySatisfied, true);
+          order.push("registration:dirty-coalesced");
+          return { accepted: true };
+        }
+        return null;
+      },
+      onWebhookAccepted({ account, claimToken, traceId, webhook }) {
+        assert.equal(webhook.eventType, "daily.data.updated");
+        dirtySatisfied = true;
+        order.push("dirty:accepted");
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({ provider: "demo", state: begin.state, code: "abc" });
+  const account = store.getConnectionByExternalAccount("demo", "demo-abc");
+  assert.ok(account);
+  store.upsertConnectionSource({
+    connectionId: account.id,
+    sourceInstanceKey: `${account.id}:apple_health_kit`,
+    sourceProviderSlug: "apple_health_kit",
+    status: "disconnected",
+    firstSeenAt: "2026-04-10T00:00:00.000Z",
+    lastSeenAt: "2026-04-10T00:00:00.000Z",
+  });
+
+  const registration = ingress.handleWebhook(
+    "demo",
+    new Headers(),
+    Buffer.from("registration"),
+  );
+  await sourceLifecycleStarted;
+
+  await ingress.handleWebhook("demo", new Headers(), Buffer.from("dirty"));
+  releaseSourceLifecycle();
+  const registered = await registration;
+  const replay = await ingress.handleWebhook(
+    "demo",
+    new Headers(),
+    Buffer.from("registration"),
+  );
+
+  assert.equal(registered.accepted, true);
+  assert.equal(registered.duplicate, false);
+  assert.equal(replay.duplicate, true);
+  assert.deepEqual(order, [
+    "source:start",
+    "dirty:accepted",
+    "source:complete",
+    "registration:dirty-coalesced",
+  ]);
+  assert.equal(store.completedWebhookTraceCalls, 2);
+});
+
+test("public ingress completes a source-registration trace after target cleanup", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let acceptedCalls = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            acceptanceMode: "level_dirty_hint",
+            externalAccountId: "demo-abc",
+            eventType: "provider.connection.created",
+            sourceProviderSlug: "apple_health_kit",
+            traceId: "trace-cleaned-registration",
+            jobs: [{ kind: "reconcile" }],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionSourceObserved() {
+        return { sourceRegistrationRemoved: true };
+      },
+      onLevelDirtyWebhookAlreadySatisfied() {
+        throw new Error("cleaned source registration must not reach dirty coalescing");
+      },
+      onWebhookAccepted() {
+        acceptedCalls += 1;
+        throw new Error("cleaned source registration must not reach durable acceptance");
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({ provider: "demo", state: begin.state, code: "abc" });
+  const account = store.getConnectionByExternalAccount("demo", "demo-abc");
+  assert.ok(account);
+  store.upsertConnectionSource({
+    connectionId: account.id,
+    sourceInstanceKey: `${account.id}:apple_health_kit`,
+    sourceProviderSlug: "apple_health_kit",
+    status: "disconnected",
+    firstSeenAt: "2026-04-10T00:00:00.000Z",
+    lastSeenAt: "2026-04-10T00:00:00.000Z",
+    lastErrorCode: "SOURCE_USER_DISCONNECTED",
+  });
+
+  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.duplicate, false);
+  assert.equal(acceptedCalls, 0);
+  assert.equal(store.claimWebhookTraceCalls, 1);
+  assert.equal(store.completedWebhookTraceCalls, 1);
 });
 
 test("public ingress records no source arrival when durable acceptance fails", async () => {
@@ -3883,6 +4295,10 @@ test("public ingress passes connect source context to connection-established hoo
   assert.equal(connectionEvents[0]?.account.id, connected.account.id);
   assert.equal(connectionEvents[0]?.connectSourceId, "garmin");
   assert.equal(connectionEvents[0]?.connectTarget, "garmin");
+  assert.equal(
+    connectionEvents[0]?.connectionStartedAt,
+    store.lastCreatedOAuthState?.createdAt,
+  );
   assert.equal(connectionEvents[0]?.sourceProviderSlug, "garmin");
   assert.equal(connected.sourceProviderSlug, "garmin");
 });
@@ -5091,10 +5507,10 @@ test("public ingress SDK sign-in session skips established side effects when ups
   ]);
 });
 
-test("public ingress SDK sign-in session treats connection-established hook failure as non-fatal", async () => {
+test("public ingress SDK sign-in session clears persisted authority and returns no token when admission fails", async () => {
   const store = new InMemoryPublicIngressStore();
-  const warnings: Array<{ message: string; context: Record<string, unknown> | undefined }> = [];
   let hookCalls = 0;
+  let mintedTokens = 0;
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
@@ -5120,6 +5536,7 @@ test("public ingress SDK sign-in session treats connection-established hook fail
             };
           },
           async createSignInToken() {
+            mintedTokens += 1;
             return {
               signInToken: "sdk-sign-in-token",
               environment: "sandbox",
@@ -5135,32 +5552,22 @@ test("public ingress SDK sign-in session treats connection-established hook fail
         throw new Error("wake enqueue failed with authorization=<REDACTED_AUTHORIZATION>");
       },
     },
-    log: {
-      warn(message, context) {
-        warnings.push({ message, context });
-      },
-    },
   });
 
-  const session = await ingress.createSdkSignInSession({
-    provider: "demo",
-    ownerId: "member-1",
-  });
+  await assert.rejects(
+    () => ingress.createSdkSignInSession({
+      provider: "demo",
+      ownerId: "member-1",
+    }),
+    /wake enqueue failed/u,
+  );
 
-  assert.equal(session.signInToken, "sdk-sign-in-token");
-  assert.equal(session.account.status, "active");
-  assert.equal(session.account.setupPhase, "source_confirmed");
+  const account = store.getConnectionByExternalAccount("demo", "demo-sdk-user-1");
+  assert.equal(account?.status, "reauthorization_required");
+  assert.equal(account?.setupPhase, "failed");
+  assert.equal(account?.accessTokenExpiresAt, null);
   assert.equal(hookCalls, 1);
-  assert.equal(warnings.length, 1);
-  assert.equal(warnings[0]?.message, "Device sync SDK sign-in established hook failed; continuing token mint.");
-  assert.equal(warnings[0]?.context?.failureCode, "DEVICE_SYNC_SDK_SIGN_IN_ESTABLISHED_HOOK_FAILED");
-  assert.deepEqual(warnings[0]?.context?.error, {
-    category: "unexpected_error",
-    message: "wake enqueue failed with authorization=[redacted]",
-    name: "Error",
-  });
-  assert.doesNotMatch(JSON.stringify(warnings), /sdk-sign-in-token/u);
-  assert.doesNotMatch(JSON.stringify(warnings), /REDACTED_AUTHORIZATION/u);
+  assert.equal(mintedTokens, 0);
 });
 
 test("public ingress SDK sign-in session rejects unsupported providers and missing owners", async () => {
@@ -5203,4 +5610,112 @@ test("public ingress SDK sign-in session rejects unsupported providers and missi
   );
 
   assert.equal(store.getConnectionByExternalAccount("demo-sdk", "demo-sdk-user-1"), null);
+});
+
+test("every default-enabled Junction Link connect source completes the real-provider callback with normalized initial jobs", async () => {
+  // Regression for the production outage where source-scoped Junction Link
+  // completions enqueued initial jobs whose payload carried a field the
+  // junction manifest did not declare: the callback handler threw
+  // DEVICE_SYNC_JOB_PAYLOAD_INVALID before persisting the connection, hard-
+  // walling every web Link connect. The fake-provider ingress tests above and
+  // the manifest-free provider unit tests each passed while the real
+  // provider/manifest seam was broken, so this test wires the REAL junction
+  // provider (Junction HTTP mocked at the fetch boundary) into the REAL
+  // ingress service and walks every default-enabled Link source end to end.
+  const junctionLinkRoutes = DEVICE_CONNECT_SOURCES.flatMap((source) =>
+    source.routes.flatMap((route) =>
+      route.kind === "junction_link" && route.defaultEnabled
+        ? [{ connectSourceId: source.connectSourceId, route }]
+        : []
+    )
+  );
+  assert.ok(
+    junctionLinkRoutes.length >= 10,
+    "expected the connect-source registry to enumerate default-enabled Junction Link routes",
+  );
+
+  for (const { connectSourceId, route } of junctionLinkRoutes) {
+    const junctionUserId = `junction-user-${route.sourceProviderSlug}`;
+    const provider = createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      pushSourceRecoveryEnabled: false,
+      summaryResources: ["activity"],
+      summaryBackfillDays: 2,
+      timeseriesResources: [],
+      fetchImpl: async (input) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.startsWith("https://api.sandbox.us.junction.com/v2/user/resolve/")) {
+          return new Response(JSON.stringify({ id: junctionUserId }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url === "https://api.sandbox.us.junction.com/v2/link/token") {
+          return new Response(JSON.stringify({ link_web_url: "https://link.junction.com/session/link-token-1" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        throw new Error(`Unexpected Junction request for ${route.sourceProviderSlug}: ${url}`);
+      },
+    });
+
+    const store = new InMemoryPublicIngressStore();
+    const establishedJobs: Array<{ kind: string; payload?: Record<string, unknown> }> = [];
+    const ingress = createDeviceSyncPublicIngress({
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      allowedReturnOrigins: ["https://app.example.test"],
+      registry: createDeviceSyncRegistry([provider]),
+      store,
+      hooks: {
+        onConnectionEstablished(input) {
+          establishedJobs.push(...(input.connection.initialJobs ?? []));
+          return { sourceAdmissionCommitted: true };
+        },
+      },
+    });
+
+    const begin = await ingress.startConnection({
+      provider: "junction",
+      returnTo: "https://app.example.test/device-sync/connect/complete",
+      ownerId: "hosted-member-1",
+      sourceProviderSlug: route.sourceProviderSlug,
+      connectSourceId,
+      connectTarget: route.connectTarget,
+    });
+    assert.equal(
+      begin.authorizationUrl,
+      "https://link.junction.com/session/link-token-1",
+      `Junction Link start should succeed for ${route.sourceProviderSlug}`,
+    );
+
+    const connected = await ingress.handleConnectionCallback({
+      provider: "junction",
+      state: begin.state,
+      expectedOwnerId: "hosted-member-1",
+      query: new URLSearchParams({
+        murph_state: begin.state,
+        state: "success",
+      }),
+    });
+
+    assert.equal(connected.sourceProviderSlug, route.sourceProviderSlug);
+    assert.equal(connected.account.provider, "junction");
+    assert.equal(
+      connected.account.setupPhase,
+      "source_confirmed",
+      `Junction Link completion should confirm the source for ${route.sourceProviderSlug}`,
+    );
+    assert.deepEqual(establishedJobs.map((job) => job.kind), ["backfill", "reconcile"]);
+    for (const job of establishedJobs) {
+      assert.equal(
+        job.payload?.sourceProviderSlug,
+        route.sourceProviderSlug,
+        `initial ${job.kind} job should stay scoped to ${route.sourceProviderSlug} through the manifest boundary`,
+      );
+    }
+  }
 });

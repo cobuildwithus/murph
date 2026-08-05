@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
+import type { PhoneNumberInputChangeMetadata } from "@/src/components/ui/phone-number-input";
 import { Spinner } from "@/src/components/ui/spinner";
 
 import {
@@ -13,7 +14,6 @@ import {
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
 import type {
   HostedAuthenticatedPhoneAuthView,
-  HostedPhoneAuthIntent,
   HostedPhoneAuthPendingAction,
   HostedPhoneCountryOption,
   HostedPhoneVerificationAttempt,
@@ -24,7 +24,6 @@ interface SharedFlowProps {
   code: string;
   disableSignup?: boolean;
   disabled: boolean;
-  intent: HostedPhoneAuthIntent;
   pendingAction: HostedPhoneAuthPendingAction;
   phoneFieldDescription?: string | null;
   phoneFieldLabel?: string | null;
@@ -38,7 +37,10 @@ interface SharedFlowProps {
   size?: "default" | "compact";
   onCodeChange: (value: string) => void;
   onPhoneCountryChange: (code: string) => void;
-  onPhoneNumberChange: (value: string) => void;
+  onPhoneNumberChange: (
+    value: string,
+    metadata?: PhoneNumberInputChangeMetadata,
+  ) => void;
   onResendCode: () => void;
   onSubmitPhoneEntry: (event: FormEvent<HTMLFormElement>) => void;
   onUseDifferentNumber: () => void;
@@ -111,7 +113,6 @@ export function HostedPhoneAuthFlow(props: SharedFlowProps) {
         code={props.code}
         disableSignup={props.disableSignup}
         disabled={props.disabled}
-        intent={props.intent}
         pendingAction={props.pendingAction}
         secondaryActionSize={props.secondaryActionSize}
         size={props.size}
@@ -125,7 +126,6 @@ export function HostedPhoneAuthFlow(props: SharedFlowProps) {
 
   return (
     <HostedPhoneEntryStep
-      intent={props.intent}
       phoneFieldDescription={props.phoneFieldDescription}
       phoneFieldLabel={props.phoneFieldLabel}
       phoneInputAutoFocus={props.phoneInputAutoFocus}

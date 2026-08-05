@@ -7,6 +7,7 @@ import {
 } from "@/src/components/hosted-onboarding/client-api";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { Input } from "@/src/components/ui/input";
 import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import type { DeviceSyncCompletionContactAction } from "@/src/lib/device-sync/connect-completion-types";
@@ -103,6 +104,9 @@ export function ConnectSourcesGrid({
   const [disconnectedConnectionIds, setDisconnectedConnectionIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [disconnectedSourceIds, setDisconnectedSourceIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [locationConnectIntent] = useState<InitialDeviceConnectIntent>(() => (
     initialConnectIntent ? null : readDeviceConnectIntentFromCurrentLocation()
   ));
@@ -118,6 +122,7 @@ export function ConnectSourcesGrid({
       markLocallyDisconnectedSources(
         markCallbackConnectedSource(sources, callbackConnectedSourceId),
         disconnectedConnectionIds,
+        disconnectedSourceIds,
       ).filter((source) =>
         source.connectionAvailable !== false
         || source.connected === true
@@ -126,7 +131,7 @@ export function ConnectSourcesGrid({
         || source.historicalResetIncomplete === true
       ),
     ),
-    [callbackConnectedSourceId, disconnectedConnectionIds, sources],
+    [callbackConnectedSourceId, disconnectedConnectionIds, disconnectedSourceIds, sources],
   );
   const filteredSources = useMemo(
     () => filterConnectSourcesForSearch(displaySources, search),
@@ -329,12 +334,20 @@ export function ConnectSourcesGrid({
     setNotice(null);
 
     try {
+      const sourceProviderSlug = source.disconnectSourceProviderSlug?.trim();
+      const disconnectUrl = sourceProviderSlug
+        ? `/api/settings/device-sync/connections/${encodeURIComponent(connectionId)}/sources/${encodeURIComponent(sourceProviderSlug)}/disconnect`
+        : `/api/settings/device-sync/connections/${encodeURIComponent(connectionId)}/disconnect`;
       const result = await requestHostedOnboardingJson<HostedDeviceSyncDisconnectResponse>({
         method: "POST",
-        url: `/api/settings/device-sync/connections/${encodeURIComponent(connectionId)}/disconnect`,
+        url: disconnectUrl,
       });
       setDisconnectSource(null);
-      setDisconnectedConnectionIds((current) => new Set([...current, connectionId]));
+      if (sourceProviderSlug) {
+        setDisconnectedSourceIds((current) => new Set([...current, source.id]));
+      } else {
+        setDisconnectedConnectionIds((current) => new Set([...current, connectionId]));
+      }
       setNotice({
         kind: result.warning?.message ? "warning" : "success",
         title: "Source disconnected",
@@ -376,10 +389,17 @@ export function ConnectSourcesGrid({
             <AlertDescription>{visibleNotice.message}</AlertDescription>
           </Alert>
         ) : (
-          <Alert variant="destructive">
-            <AlertTitle>Unable to finish connection</AlertTitle>
-            <AlertDescription>{visibleNotice.message}</AlertDescription>
-          </Alert>
+          <ConnectCallbackErrorNotice
+            errorCode={visibleNotice.errorCode}
+            message={visibleNotice.message}
+            onSignIn={
+              !authenticated && visibleNotice.errorCode === "CALLBACK_SESSION_REQUIRED"
+                ? openAuthDialog
+                : null
+            }
+            sourceLabel={visibleNotice.sourceLabel}
+            title={visibleNotice.title}
+          />
         )
       ) : null}
 

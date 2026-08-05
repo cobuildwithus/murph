@@ -19,10 +19,10 @@ import {
 } from "@/src/lib/hosted-onboarding/privy-client";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { PhoneNumberInputChangeMetadata } from "@/src/components/ui/phone-number-input";
 
 import {
   createHostedPhoneVerificationAttempt,
-  finalizeHostedPhoneLink,
   finalizeHostedPrivyVerification,
   isHostedPhoneVerificationCodeComplete,
   normalizeHostedPhoneVerificationCode,
@@ -42,15 +42,13 @@ import {
 } from "./phone-country-code-client-provider";
 import type {
   HostedAuthenticatedPhoneAuthView,
-  HostedPhoneAuthIntent,
-  HostedPhoneLinkPayload,
   HostedPhoneVerificationAttempt,
 } from "./hosted-phone-auth-types";
 
 interface HostedPhoneAuthControllerInput {
+  autoSendPastedPhoneNumber?: boolean;
   disableSignup?: boolean;
   inviteCode?: string | null;
-  intent?: HostedPhoneAuthIntent;
   interactionGated?: boolean;
   onAuthCancel?: () => void;
   onAuthQueue?: () => boolean;
@@ -59,7 +57,6 @@ interface HostedPhoneAuthControllerInput {
   onAuthenticated?: (input: { authMethod: "phone" }) => Promise<void> | void;
   onCodeSent?: () => void;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
-  onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
   suppressAuthenticatedSessionIssue?: boolean;
 }
@@ -67,9 +64,9 @@ interface HostedPhoneAuthControllerInput {
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
 
 export function useHostedPhoneAuthController({
+  autoSendPastedPhoneNumber = false,
   disableSignup = false,
   inviteCode,
-  intent = "auth",
   interactionGated = false,
   onAuthCancel,
   onAuthQueue,
@@ -78,7 +75,6 @@ export function useHostedPhoneAuthController({
   onAuthenticated,
   onCodeSent,
   onCompleted,
-  onLinked,
   onSignOut,
   suppressAuthenticatedSessionIssue = false,
 }: HostedPhoneAuthControllerInput) {
@@ -150,8 +146,7 @@ export function useHostedPhoneAuthController({
     ? null
     : pendingAction;
 
-  const activeQueuedPhoneCodeSend =
-    intent !== "link" && authenticated ? null : queuedPhoneCodeSend;
+  const activeQueuedPhoneCodeSend = authenticated ? null : queuedPhoneCodeSend;
   const presentedPendingAction =
     activeQueuedPhoneCodeSend !== null
       ? "send-code"
@@ -180,14 +175,12 @@ export function useHostedPhoneAuthController({
   const showAuthenticatedManualResumeState =
     allowAuthenticatedSessionStateUi
     && !effectiveRequiresAuthenticatedSessionRestart
-    && intent !== "link"
     && authenticated
     && !showAuthenticatedLoadingState
     && !keepDelegatedVerificationMounted
     && !authenticatedSessionMissingPhone;
   const showAuthenticatedRestartState =
     allowAuthenticatedSessionStateUi
-    && intent !== "link"
     && (effectiveRequiresAuthenticatedSessionRestart
       || (authenticated && !showAuthenticatedLoadingState && authenticatedSessionMissingPhone));
   const authenticatedView = resolveHostedAuthenticatedPhoneAuthView({
@@ -195,18 +188,14 @@ export function useHostedPhoneAuthController({
     showAuthenticatedManualResumeState,
     showAuthenticatedRestartState,
   });
-  const authenticatedLoadingTitle =
-    intent === "link" ? "Saving your phone..." : "Finishing setup...";
+  const authenticatedLoadingTitle = "Finishing setup...";
   const authenticatedLoadingBody =
-    intent === "link"
-      ? "Keep this tab open. We are verifying your number and linking it to your account."
-      : "Keep this tab open. We are verifying your number and preparing your account.";
+    "Keep this tab open. We are verifying your number and preparing your account.";
   const sharedFlowProps = {
     activeAttempt: phoneVerificationAttempt,
     code,
     disableSignup,
     disabled: flowDisabled,
-    intent,
     phoneFieldDescription: null,
     phoneFieldLabel: null,
     phoneInputDisabled: interactionGated,
@@ -225,10 +214,36 @@ export function useHostedPhoneAuthController({
       cancelQueuedPhoneCodeSend();
       setPhoneCountryCode(code);
     },
-    onPhoneNumberChange: (value: string) => {
+    onPhoneNumberChange: (
+      value: string,
+      metadata?: PhoneNumberInputChangeMetadata,
+    ) => {
       if (interactionGatedRef.current || phoneCodeSendInFlightRef.current) return;
       cancelQueuedPhoneCodeSend();
       setPhoneNumber(value);
+
+      if (
+        !autoSendPastedPhoneNumber
+        || !metadata?.autoSendCandidate
+        || authenticated
+        || phoneVerificationAttempt !== null
+        || effectivePendingAction !== null
+      ) {
+        return;
+      }
+
+      const candidateCountry = resolveHostedPhoneCountryOption(
+        metadata.countryCode,
+      );
+      const candidatePhoneNumber = candidateCountry
+        ? normalizePhoneNumberForCountry(value, candidateCountry.dialCode)
+        : null;
+
+      if (candidatePhoneNumber) {
+        void requestPhoneCodeSend(candidatePhoneNumber, {
+          resetAuthenticatedSessionRestart: true,
+        });
+      }
     },
     onResendCode: handleResendCode,
     onSubmitPhoneEntry: handleSendCode,
@@ -343,13 +358,26 @@ export function useHostedPhoneAuthController({
       return;
     }
 
+    await requestPhoneCodeSend(nextPhoneNumber, {
+      resetAuthenticatedSessionRestart: true,
+    });
+  }
+
+  async function requestPhoneCodeSend(
+    nextPhoneNumber: string,
+    {
+      resetAuthenticatedSessionRestart = false,
+    }: {
+      resetAuthenticatedSessionRestart?: boolean;
+    } = {},
+  ) {
     if (!ready) {
       queuePhoneCodeSend(nextPhoneNumber);
       return;
     }
 
     await runPhoneCodeSend(nextPhoneNumber, {
-      resetAuthenticatedSessionRestart: true,
+      resetAuthenticatedSessionRestart,
     });
   }
 
@@ -433,12 +461,7 @@ export function useHostedPhoneAuthController({
     });
 
     if (resendTarget.kind === "active-attempt") {
-      if (!ready) {
-        queuePhoneCodeSend(resendTarget.phoneNumber);
-        return;
-      }
-
-      await runPhoneCodeSend(resendTarget.phoneNumber);
+      await requestPhoneCodeSend(resendTarget.phoneNumber);
       return;
     }
 
@@ -471,10 +494,8 @@ export function useHostedPhoneAuthController({
 
     try {
       await loginWithCode({ code: submittedCode });
-      await runHostedPrivyFinalization(
-        intent === "link" ? "continue" : "verify-code",
-      );
-      preservePendingAction = intent !== "link" && onAuthenticated !== undefined;
+      await runHostedPrivyFinalization("verify-code");
+      preservePendingAction = onAuthenticated !== undefined;
     } catch (error) {
       onAuthCancel?.();
       if (disableSignup) {
@@ -571,7 +592,7 @@ export function useHostedPhoneAuthController({
   async function runHostedPrivyFinalization(
     action: "continue" | "verify-code",
   ) {
-    if (intent !== "link" && onAuthenticated) {
+    if (onAuthenticated) {
       setPendingAction(action);
       try {
         await onAuthenticated({ authMethod: "phone" });
@@ -585,13 +606,6 @@ export function useHostedPhoneAuthController({
     await runHostedPrivyFinalizationAttempt({
       action,
       finalize: async () => {
-        if (intent === "link") {
-          await finalizeHostedPhoneLink({
-            onLinked,
-          });
-          return;
-        }
-
         await finalizeHostedPrivyVerification({
           inviteCode,
           onCompleted,

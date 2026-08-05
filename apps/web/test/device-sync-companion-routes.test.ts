@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@privy-io/node", () => ({
+  NotFoundError: class NotFoundError extends Error {},
   PrivyClient: vi.fn(),
   verifyIdentityToken: mocks.verifyIdentityToken,
 }));
@@ -56,6 +57,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
+  HOSTED_HEALTH_DATA_CONSENT_SCOPE: "launch.health-data",
   assertHostedHistoricalLaunchConsentGranted:
     mocks.assertHostedHistoricalLaunchConsentGranted,
 }));
@@ -1563,7 +1565,34 @@ describe("device sync companion routes", () => {
         resource: "companion_health_metadata",
         sourceProviderSlug: "apple-health-kit",
       });
-      expect(mocks.listConnectionSources).not.toHaveBeenCalled();
+      expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_1");
+    });
+
+    it("rejects metadata from a source-specific Apple Health disconnect", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([
+        { id: "dsc_1", provider: "junction", status: "active" },
+      ]);
+      mocks.listConnectionSources.mockResolvedValue([{
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        sourceProviderSlug: "apple_health_kit",
+        status: "disconnected",
+      }]);
+
+      const response = await healthMetadataRoute.POST(healthMetadataRequest({
+        records: [healthMetadataRecord()],
+        schemaVersion: 1,
+      }));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
+          message: "Connect Apple Health in the companion before syncing supplemental metadata.",
+          retryable: false,
+        },
+      });
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
     });
 
     it("keeps durable batch identity stable across receipt-time retries", async () => {

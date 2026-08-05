@@ -15,6 +15,7 @@ type LinqApiRequestInput = {
   path: string;
   signal?: AbortSignal;
   timeoutMs?: number;
+  maxResponseBytes?: number;
 };
 
 export async function fetchLinqApi(input: LinqApiRequestInput): Promise<Response> {
@@ -27,9 +28,11 @@ export async function fetchLinqApiJson(input: LinqApiRequestInput): Promise<{
   status: number;
 }> {
   return runLinqApiRequest(input, async (response) => {
-    const text = await response.text();
+    const text = input.maxResponseBytes === undefined
+      ? await response.text()
+      : await readBoundedLinqApiResponseText(response, input.maxResponseBytes);
     let payload: unknown | null = null;
-    if (text.trim()) {
+    if (text?.trim()) {
       try {
         payload = JSON.parse(text);
       } catch {
@@ -43,6 +46,45 @@ export async function fetchLinqApiJson(input: LinqApiRequestInput): Promise<{
       status: response.status,
     };
   });
+}
+
+async function readBoundedLinqApiResponseText(
+  response: Response,
+  maxResponseBytes: number,
+): Promise<string | null> {
+  if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes <= 0) {
+    throw new TypeError("Linq API response byte limit must be a positive integer.");
+  }
+  const declaredLength = response.headers.get("content-length");
+  if (
+    declaredLength
+    && /^[0-9]+$/u.test(declaredLength)
+    && Number(declaredLength) > maxResponseBytes
+  ) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+  if (!response.body) {
+    return "";
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let byteLength = 0;
+  let text = "";
+  while (true) {
+    const next = await reader.read();
+    if (next.done) {
+      text += decoder.decode();
+      return text;
+    }
+    byteLength += next.value.byteLength;
+    if (byteLength > maxResponseBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    text += decoder.decode(next.value, { stream: true });
+  }
 }
 
 async function runLinqApiRequest<T>(

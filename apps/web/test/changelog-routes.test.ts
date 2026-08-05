@@ -24,7 +24,7 @@ describe("changelog routes", () => {
   it("publishes every item from the two newest editions with canonical links", async () => {
     const response = await getChangelogFeed(
       new Request(
-        "https://join.example.test/api/changelog?from=2026-07-29&to=2026-07-31&featureLimit=100&improvementLimit=25",
+        "https://join.example.test/api/changelog?from=2026-07-30&to=2026-08-01&featureLimit=100&improvementLimit=25",
       ),
     );
     const body = await response.json();
@@ -35,25 +35,34 @@ describe("changelog routes", () => {
     }>;
 
     expect(response.status).toBe(200);
-    expect(items).toHaveLength(28);
+    expect(items).toHaveLength(31);
     expect(items.map((item) => item.publishedOn)).toEqual([
-      ...Array.from({ length: 16 }, () => "2026-07-30"),
-      ...Array.from({ length: 12 }, () => "2026-07-29"),
+      ...Array.from({ length: 13 }, () => "2026-07-31"),
+      ...Array.from({ length: 18 }, () => "2026-07-30"),
     ]);
     expect(items.map((item) => item.id)).toEqual(
       expect.arrayContaining([
+        "private-environment-report",
+        "environment-voice-walkthrough",
+        "native-link-previews",
+        "family-owner-usage-topups",
+        "group-access-across-channels",
+        "fund-groups-at-any-capacity",
+        "one-shot-reminders-survive-restart",
+        "venice-tool-compatible-replies",
+        "core-member-plan-name",
+        "usage-referrals-stay-current",
+        "safe-group-stakes",
+        "experiment-progress-cards-fail-soft",
+        "delegated-work-before-blocker",
+        "capped-monthly-group-sponsorship",
+        "usage-credit-without-message-estimates",
         "usage-options-together",
         "open-ended-experiment-outcomes",
         "group-voice-only-punchlines",
         "animated-gif-filmstrips",
         "ios-app-link-in-chat",
         "homepage-auth-stays-usable",
-        "post-onboarding-choice-point",
-        "additive-group-challenge-scorecards",
-        "dense-reminders-become-conversation",
-        "telegram-imessage-contact-handoff",
-        "imessage-edits-become-corrections",
-        "clubs-challenge-pilot-page",
       ]),
     );
     for (const item of items) {

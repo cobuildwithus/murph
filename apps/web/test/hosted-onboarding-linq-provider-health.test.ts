@@ -40,6 +40,7 @@ const inventoryMocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/linq/api", () => ({
   fetchLinqApi: inventoryMocks.fetchLinqApi,
+  LINQ_API_DEFAULT_TIMEOUT_MS: 10_000,
   LinqApiTimeoutError: class LinqApiTimeoutError extends Error {},
 }));
 
@@ -51,6 +52,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
+  acquireHostedLinqInventoryApplyLockTx: async (
+    input: { prisma: { $executeRaw: (...args: unknown[]) => Promise<unknown> } },
+  ) => {
+    await input.prisma.$executeRaw();
+  },
   upsertHostedLinqLineForPhoneTx:
     inventoryMocks.upsertHostedLinqLineForPhoneTx,
 }));
@@ -222,7 +228,11 @@ describe("Linq provider health inventory synchronization", () => {
     const observedAt = new Date("2026-07-29T16:08:00.000Z");
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
-      hostedLinqLine: { updateMany },
+      $executeRaw: vi.fn(),
+      hostedLinqLine: {
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany,
+      },
     } as never;
     inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
       phone_numbers: [{
@@ -271,7 +281,11 @@ describe("Linq provider health inventory synchronization", () => {
   it("does not clear stored provider state from unknown inventory values", async () => {
     const updateMany = vi.fn();
     const prisma = {
-      hostedLinqLine: { updateMany },
+      $executeRaw: vi.fn(),
+      hostedLinqLine: {
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany,
+      },
     } as never;
     inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
       phone_numbers: [{
@@ -290,7 +304,13 @@ describe("Linq provider health inventory synchronization", () => {
       prisma,
     })).resolves.toEqual({ syncedCount: 1 });
 
-    expect(updateMany).not.toHaveBeenCalled();
+    // The only write is the freshness watermark for the confirmed line;
+    // unknown status values never clear stored provider state.
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    expect(updateMany).toHaveBeenCalledWith({
+      data: { providerInventoryConfirmedAt: expect.any(Date) },
+      where: { phoneNumberLookupKey: "line-key" },
+    });
   });
 
   it("associates inventoried chat health with its resolved sending line", async () => {

@@ -13,6 +13,7 @@ import {
   hostedArtifactUserPrefix,
   hostedBrowserVaultReplicaUserPrefix,
   hostedBundleUserPrefix,
+  hostedEnvironmentVoiceUserPrefix,
   hostedMealPhotoUserPrefix,
   hostedPrivateMediaUserPrefix,
   hostedRunnerSecretsObjectKey,
@@ -26,6 +27,7 @@ import {
   deleteR2ObjectsWithPrefix,
   requireR2DeletionCapabilities,
 } from "./r2-delete.js";
+import { readActiveRuntimeRunnerContainerName } from "./runtime-container-wake.js";
 import type { RunnerStateStore } from "./runner-state-store.js";
 import type { DurableObjectStateLike } from "./types.js";
 import {
@@ -34,7 +36,7 @@ import {
 
 type HostedRunnerUserDataDeletionStateStore = Pick<
   RunnerStateStore,
-  "assertStateForUser" | "clearWriteFenceForUserDeletion" | "deleteStateForUser"
+  "assertStateForUser" | "clearWriteFenceForUserControl" | "deleteStateForUser"
 >;
 
 export interface HostedRunnerUserDataDeletionCompletedResult {
@@ -165,12 +167,26 @@ async function stopRunnerBeforeUserDataDeletion(input: {
   runnerContainerDestroyAttempted: boolean;
   runnerContainerDestroyOk: boolean;
 }> {
-  const preemption = await input.stateStore.clearWriteFenceForUserDeletion(input.userId);
-  const destroyed = await destroyHostedExecutionContainer({
-    runnerContainerName: resolveHostedExecutionRunnerContainerName({
+  const preemption = await input.stateStore.clearWriteFenceForUserControl(input.userId);
+  const runnerContainerName = preemption.runnerContainerName
+    ? readActiveRuntimeRunnerContainerName({
+      activeRuntime: {
+        attemptId: preemption.attemptId ?? "user-data-deletion-stop",
+        leaseGeneration: "0",
+        userId: input.userId,
+      },
+      runnerContainerName: preemption.runnerContainerName,
+      runnerRuntimeEnvSource: input.runnerRuntimeEnvSource,
+    })
+    : resolveHostedExecutionRunnerContainerName({
       source: input.runnerRuntimeEnvSource,
       userId: input.userId,
-    }),
+    });
+  if (!runnerContainerName) {
+    throw new HostedRunnerUserDataDeletionRunnerStillActiveError();
+  }
+  const destroyed = await destroyHostedExecutionContainer({
+    runnerContainerName,
     runnerContainerNamespace: input.runnerContainerNamespace,
     userId: input.userId,
   });
@@ -244,6 +260,7 @@ async function deleteHostedUserR2Data(input: {
     await hostedBundleUserPrefix({ userId: input.userId }),
     await hostedArtifactUserPrefix({ userId: input.userId }),
     await hostedBrowserVaultReplicaUserPrefix({ userId: input.userId }),
+    await hostedEnvironmentVoiceUserPrefix({ userId: input.userId }),
     await hostedMealPhotoUserPrefix({ userId: input.userId }),
     await hostedPrivateMediaUserPrefix({ userId: input.userId }),
     await hostedWorkspaceSnapshotUserPrefix({ userId: input.userId }),

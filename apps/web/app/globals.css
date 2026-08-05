@@ -138,6 +138,43 @@
   }
 }
 
+@keyframes habitat-pop {
+  from {
+    opacity: 0;
+    transform: translateY(7px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes habitat-ghost-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.habitat-pop {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: habitat-pop 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.habitat-ghost {
+  animation: habitat-ghost-in 0.9s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .habitat-pop,
+  .habitat-ghost {
+    animation: none;
+  }
+}
+
 @keyframes dot-pulse {
   0%, 100% {
     transform: scale(1);

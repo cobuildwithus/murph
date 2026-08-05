@@ -44,6 +44,9 @@ import {
 import {
   resolveHostedRuntimeAiUsageGate,
 } from "./runtime-usage-decision";
+import {
+  buildHostedBrowserVaultRefreshRuntimeControlEvent,
+} from "./browser-vault-refresh-control";
 
 export interface HostedRuntimeSignalResult {
   signalAccepted: true;
@@ -103,7 +106,7 @@ export interface SignalHostedManualRunInput {
   userId: string;
 }
 
-export interface SignalHostedRuntimeRecheckInput {
+export interface SignalHostedRuntimeControlInput {
   abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
@@ -228,7 +231,7 @@ export async function signalHostedManualRunRuntime(
 }
 
 export async function signalHostedRuntimeRecheckRuntime(
-  input: SignalHostedRuntimeRecheckInput,
+  input: SignalHostedRuntimeControlInput,
 ): Promise<HostedRuntimeSignalResult> {
   const prisma = input.prisma ?? getPrisma();
   await requireHostedRuntimeActiveAccess(input.userId, {
@@ -250,8 +253,31 @@ export async function signalHostedRuntimeRecheckRuntime(
   });
 }
 
+export async function signalHostedRuntimeWakeRuntime(
+  input: SignalHostedRuntimeControlInput,
+): Promise<HostedRuntimeSignalResult> {
+  const prisma = input.prisma ?? getPrisma();
+  await requireHostedRuntimeActiveAccess(input.userId, {
+    code: "HOSTED_RUNTIME_USER_INACTIVE",
+    message: "Hosted runtime user is not active.",
+    prisma,
+  });
+
+  return signalHostedUserRuntimeWorkflow({
+    abortSignal: input.abortSignal,
+    client: input.client,
+    environment: input.environment,
+    ensureWorkspace: false,
+    prisma,
+    signal: parseHostedRuntimeSignal({
+      kind: "runtime_wake_requested",
+    }),
+    userId: input.userId,
+  });
+}
+
 export async function signalHostedRetentionRuntimeRecheck(
-  input: SignalHostedRuntimeRecheckInput,
+  input: SignalHostedRuntimeControlInput,
 ): Promise<HostedRuntimeSignalResult> {
   return signalHostedUserRuntimeWorkflow({
     abortSignal: input.abortSignal,
@@ -360,33 +386,7 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
 
 const HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT = "1970-01-01T00:00:00.000Z";
 
-const BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS = 60_000;
 const RUNTIME_MAINTENANCE_CONTROL_DEDUPE_WINDOW_MS = 60_000;
-
-function buildHostedBrowserVaultRefreshRuntimeControlEvent(input: {
-  userId: string;
-  workspaceVersion: string;
-}): {
-  eventId: string;
-  occurredAt: string;
-} {
-  const bucketMs = Math.floor(Date.now() / BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS) *
-    BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS;
-  const fingerprint = createHash("sha256")
-    .update(JSON.stringify({
-      bucketMs,
-      userId: input.userId,
-      version: 1,
-      workspaceVersion: input.workspaceVersion,
-    }))
-    .digest("hex")
-    .slice(0, 32);
-
-  return {
-    eventId: `runtime-control:browser-vault-refresh:${fingerprint}`,
-    occurredAt: new Date(bucketMs).toISOString(),
-  };
-}
 
 function buildHostedRuntimeMaintenanceControlEvent(input: {
   userId: string;

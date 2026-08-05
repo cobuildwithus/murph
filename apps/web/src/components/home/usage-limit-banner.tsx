@@ -14,6 +14,7 @@ interface UsageLimitBannerProps {
 const resettableMonthlyNoticeCodes = new Set<HostedAiUsageGateNoticeCode>([
   "edge_usage_limit_reached",
   "family_usage_limit_reached",
+  "group_upgrade_pulse",
   "pulse_upgrade_edge",
 ]);
 
@@ -33,6 +34,10 @@ const usageLimitBannerCopy: Record<
   family_usage_limit_reached: {
     body: "New replies and other AI work are blocked until your included usage resets. Other Family members have separate allowances.",
     title: "You've used 100% of your included usage this month",
+  },
+  group_upgrade_pulse: {
+    body: "New replies and other AI work are blocked until your included usage resets. Your wearable keeps syncing and your group activity stays current.",
+    title: "You've used 100% of this month's included Core usage",
   },
   pulse_upgrade_edge: {
     body: "New replies and other AI work are blocked until your included usage resets.",
@@ -69,6 +74,12 @@ export function UsageLimitBanner({
       ? " Edge offers more included usage."
       : recommendedAction?.kind === "add_usage"
         ? " You can add more usage now."
+        : recommendedAction?.kind === "change_plan"
+          ? recommendedAction.targetPlanCode === "launch_group_monthly"
+            ? " Core keeps you connected with lighter private Murph usage."
+            : recommendedAction.targetPlanCode === "launch_monthly"
+              ? " Pulse includes more private Murph usage."
+              : " Edge offers more included usage."
         : "";
 
   return (

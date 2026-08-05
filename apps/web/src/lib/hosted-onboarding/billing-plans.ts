@@ -2,15 +2,27 @@ import {
   HOSTED_PLAN_CODES,
   type HostedPlanCode,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
+} from "@murphai/hosted-execution/plan-usage";
 
 export { HOSTED_PLAN_CODES, type HostedPlanCode };
 
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",
   "launch_edge_monthly",
+  "launch_group_monthly",
 ] as const;
 
 export type HostedBillingPlanCode = (typeof HOSTED_BILLING_PLAN_CODES)[number];
+
+export const HOSTED_PUBLIC_BILLING_PLAN_CODES = [
+  "launch_monthly",
+  "launch_edge_monthly",
+] as const satisfies readonly HostedBillingPlanCode[];
+
+export type HostedPublicBillingPlanCode =
+  (typeof HOSTED_PUBLIC_BILLING_PLAN_CODES)[number];
 export type HostedBillingPlanInterval = "month";
 
 export const HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS = [
@@ -96,6 +108,16 @@ export interface HostedBillingPlanPresentation {
 }
 
 const HOSTED_BILLING_PLAN_DEFINITIONS = {
+  launch_group_monthly: {
+    badge: null,
+    code: "launch_group_monthly",
+    displayName: HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
+    interval: "month",
+    planCode: "pulse",
+    priceIdEnvKey:
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_GROUP_MONTHLY",
+    recurringAmountUsdCents: 350,
+  },
   launch_monthly: {
     badge: null,
     code: "launch_monthly",
@@ -115,6 +137,17 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     recurringAmountUsdCents: 2_000,
   },
 } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
+
+const HOSTED_DEFAULT_BILLING_PLAN_CODE_BY_PLAN = {
+  edge: "launch_edge_monthly",
+  pulse: "launch_monthly",
+} as const satisfies Record<HostedPlanCode, HostedBillingPlanCode>;
+
+const HOSTED_DIRECT_BILLING_PLAN_RANK = {
+  launch_group_monthly: 0,
+  launch_monthly: 1,
+  launch_edge_monthly: 2,
+} as const satisfies Record<HostedBillingPlanCode, number>;
 
 export interface HostedPlanDefinition {
   readonly code: HostedPlanCode;
@@ -195,13 +228,13 @@ export function getHostedPlanCodeForBillingPlan(
 export function getHostedBillingPlanCodeForPlan(
   planCode: HostedPlanCode,
 ): HostedBillingPlanCode {
-  const billingPlanCode = HOSTED_BILLING_PLAN_CODES.find(
-    (code) => HOSTED_BILLING_PLAN_DEFINITIONS[code].planCode === planCode,
-  );
-  if (!billingPlanCode) {
-    throw new TypeError(`No direct billing plan is configured for ${planCode}.`);
-  }
-  return billingPlanCode;
+  return HOSTED_DEFAULT_BILLING_PLAN_CODE_BY_PLAN[planCode];
+}
+
+export function getHostedDirectBillingPlanRank(
+  code: HostedBillingPlanCode,
+): number {
+  return HOSTED_DIRECT_BILLING_PLAN_RANK[code];
 }
 
 export function parseHostedPlanCode(value: unknown): HostedPlanCode | null {
@@ -251,6 +284,43 @@ function calculateHostedPaidAiUsageAllowanceUsdMicros(
   ) / HOSTED_PAID_AI_USAGE_ALLOWANCE_DENOMINATOR;
 }
 
+export function isHostedBillingPlanImmediateUpgrade(input: {
+  currentPlanCode: HostedBillingPlanCode;
+  targetPlanCode: HostedBillingPlanCode;
+}): boolean {
+  return getHostedDirectBillingPlanRank(input.targetPlanCode) >
+    getHostedDirectBillingPlanRank(input.currentPlanCode);
+}
+
+export function isHostedBillingPlanScheduledDowngrade(input: {
+  currentPlanCode: HostedBillingPlanCode;
+  targetPlanCode: HostedBillingPlanCode;
+}): boolean {
+  return getHostedDirectBillingPlanRank(input.targetPlanCode) <
+    getHostedDirectBillingPlanRank(input.currentPlanCode);
+}
+
+export function canUpgradeHostedBillingPlan(input: {
+  currentBillingPhase?: unknown;
+  currentBillingPlanCode?: unknown;
+  currentCheckoutOffer?: unknown;
+  targetPlanCode?: unknown;
+}): boolean {
+  const currentPlanCode = parseHostedBillingPlanCode(
+    input.currentBillingPlanCode,
+  );
+  const targetPlanCode = parseHostedBillingPlanCode(input.targetPlanCode);
+
+  return currentPlanCode !== null &&
+    targetPlanCode !== null &&
+    parseHostedBillingPhase(input.currentBillingPhase) === "paid" &&
+    !isHostedPulseTrialBillingState(input) &&
+    isHostedBillingPlanImmediateUpgrade({
+      currentPlanCode,
+      targetPlanCode,
+    });
+}
+
 export function isHostedPulseTrialCheckoutEnabled(
   source: Record<string, string | undefined> = process.env,
 ): boolean {
@@ -270,6 +340,17 @@ export function parseHostedBillingPlanCode(
 ): HostedBillingPlanCode | null {
   return typeof value === "string" && hasHostedBillingPlanCode(value)
     ? value
+    : null;
+}
+
+export function parseHostedPublicBillingPlanCode(
+  value: unknown,
+): HostedPublicBillingPlanCode | null {
+  return typeof value === "string" &&
+      HOSTED_PUBLIC_BILLING_PLAN_CODES.includes(
+        value as HostedPublicBillingPlanCode,
+      )
+    ? value as HostedPublicBillingPlanCode
     : null;
 }
 
@@ -314,11 +395,52 @@ export function canUpgradeHostedBillingPlanToEdge(input: {
   currentBillingPlanCode?: unknown;
   currentCheckoutOffer?: unknown;
 }): boolean {
-  const phase = parseHostedBillingPhase(input.currentBillingPhase);
+  return canUpgradeHostedBillingPlan({
+    ...input,
+    targetPlanCode: "launch_edge_monthly",
+  });
+}
 
-  return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_monthly" &&
-    phase === "paid" &&
-    !isHostedPulseTrialBillingState(input);
+export function canScheduleHostedBillingPlanChange(input: {
+  billingStatus?: unknown;
+  currentBillingPhase?: unknown;
+  currentBillingPlanCode?: unknown;
+  currentCheckoutOffer?: unknown;
+  stripeCustomerId?: unknown;
+  stripeSubscriptionId?: unknown;
+  suspendedAt?: unknown;
+  targetPlanCode?: unknown;
+}): boolean {
+  const currentPlanCode = parseHostedBillingPlanCode(
+    input.currentBillingPlanCode,
+  );
+  const targetPlanCode = parseHostedBillingPlanCode(input.targetPlanCode);
+  if (
+    !currentPlanCode ||
+    !targetPlanCode ||
+    input.billingStatus !== "active" ||
+    input.suspendedAt instanceof Date ||
+    typeof input.stripeCustomerId !== "string" ||
+    input.stripeCustomerId.length === 0 ||
+    typeof input.stripeSubscriptionId !== "string" ||
+    input.stripeSubscriptionId.length === 0
+  ) {
+    return false;
+  }
+
+  if (
+    parseHostedBillingPhase(input.currentBillingPhase) === "paid" &&
+    isHostedBillingPlanScheduledDowngrade({
+      currentPlanCode,
+      targetPlanCode,
+    })
+  ) {
+    return true;
+  }
+
+  return currentPlanCode === "launch_monthly" &&
+    targetPlanCode === "launch_group_monthly" &&
+    isHostedPulseTrialBillingState(input);
 }
 
 export function canSwitchHostedBillingPlanToPulse(input: {
@@ -329,14 +451,10 @@ export function canSwitchHostedBillingPlanToPulse(input: {
   stripeSubscriptionId?: unknown;
   suspendedAt?: unknown;
 }): boolean {
-  return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_edge_monthly" &&
-    parseHostedBillingPhase(input.currentBillingPhase) === "paid" &&
-    input.billingStatus === "active" &&
-    !(input.suspendedAt instanceof Date) &&
-    typeof input.stripeCustomerId === "string" &&
-    input.stripeCustomerId.length > 0 &&
-    typeof input.stripeSubscriptionId === "string" &&
-    input.stripeSubscriptionId.length > 0;
+  return canScheduleHostedBillingPlanChange({
+    ...input,
+    targetPlanCode: "launch_monthly",
+  });
 }
 
 export function canStartHostedPulseTrialPaidPlan(input: {
@@ -390,29 +508,33 @@ export function listHostedBillingPlanPresentations(input?: {
   configuredPlanCodes?: readonly HostedBillingPlanCode[] | null;
 }): readonly HostedBillingPlanPresentation[] {
   const configuredPlanCodes = new Set(
-    input?.configuredPlanCodes ?? HOSTED_BILLING_PLAN_CODES
+    input?.configuredPlanCodes ?? HOSTED_PUBLIC_BILLING_PLAN_CODES
   );
 
-  return HOSTED_BILLING_PLAN_CODES.filter((code) =>
+  return HOSTED_PUBLIC_BILLING_PLAN_CODES.filter((code) =>
     configuredPlanCodes.has(code)
   ).map((code) => buildHostedBillingPlanPresentation(code));
 }
 
 export function resolveHostedBillingReady(input: {
-  stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
+  stripePriceIdsByPlan: Readonly<
+    Partial<Record<HostedBillingPlanCode, string | null>>
+  >;
   stripeSecretKey: string | null;
 }): boolean {
   if (!input.stripeSecretKey) {
     return false;
   }
 
-  return HOSTED_BILLING_PLAN_CODES.some((code) =>
+  return HOSTED_PUBLIC_BILLING_PLAN_CODES.some((code) =>
     hasHostedBillingPlanStripePrice(input, code)
   );
 }
 
 export function resolveConfiguredHostedBillingPlanCodes(input: {
-  stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
+  stripePriceIdsByPlan: Readonly<
+    Partial<Record<HostedBillingPlanCode, string | null>>
+  >;
 }): HostedBillingPlanCode[] {
   return HOSTED_BILLING_PLAN_CODES.filter((code) =>
     hasHostedBillingPlanStripePrice(input, code)
@@ -463,7 +585,9 @@ function buildHostedBillingPlanPresentation(
 
 function hasHostedBillingPlanStripePrice(
   input: {
-    stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
+    stripePriceIdsByPlan: Readonly<
+      Partial<Record<HostedBillingPlanCode, string | null>>
+    >;
   },
   code: HostedBillingPlanCode,
 ): boolean {
@@ -476,10 +600,19 @@ function hasHostedBillingPlanCode(
   return HOSTED_BILLING_PLAN_CODES.includes(value as HostedBillingPlanCode);
 }
 
+export function formatHostedBillingPrice(amountUsdCents: number): string {
+  const wholeDollars = Math.floor(amountUsdCents / 100);
+  const cents = amountUsdCents % 100;
+
+  return cents === 0
+    ? `$${wholeDollars}`
+    : `$${wholeDollars}.${String(cents).padStart(2, "0")}`;
+}
+
 function formatUsdCompact(amountUsdCents: number): string {
-  return `$${(amountUsdCents / 100).toFixed(0)}`;
+  return formatHostedBillingPrice(amountUsdCents);
 }
 
 function formatUsdLong(amountUsdCents: number): string {
-  return `$${(amountUsdCents / 100).toFixed(0)}`;
+  return formatHostedBillingPrice(amountUsdCents);
 }

@@ -5,7 +5,11 @@ import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
+import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
@@ -74,6 +78,7 @@ import {
 } from './turn-progress.js'
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
 } from './managed-automations.js'
 import type {
   AssistantHostedToolContext,
@@ -315,6 +320,11 @@ function createAssistantProviderUsageAttribution(input: {
 
   const credentialSource = resolveAssistantUsageCredentialSource({
     apiKeyEnv: null,
+    credentialSourceHint:
+      input.attemptPlan.route.providerOptions.modelProvider
+        === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
+        ? 'member'
+        : null,
     effectiveEnv: input.env,
     headers: null,
     provider: input.attemptPlan.route.provider,
@@ -486,8 +496,15 @@ async function executeAssistantCodexAttempt(input: {
       executionPlan.input.maintenanceProfile === 'group-room-model' &&
       executionPlan.input.scheduledInvocationAuthority?.automationId ===
         MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
+    const memberMemoryMaintenanceTurn =
+      executionPlan.profile.toolProfile === 'maintenance-turn' &&
+      executionPlan.input.maintenanceProfile === 'member-memory' &&
+      executionPlan.input.scheduledInvocationAuthority?.automationId ===
+        MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
     const restrictedOneShotTurn =
-      groupRoomModelMaintenanceTurn || readOnlyAutomationTurn
+      groupRoomModelMaintenanceTurn ||
+      memberMemoryMaintenanceTurn ||
+      readOnlyAutomationTurn
     const audience = executionPlan.sharedPlan.conversationPolicy.audience
     const groupConversation =
       resolveAssistantConversationScope(audience) === 'group'
@@ -595,7 +612,9 @@ async function executeAssistantCodexAttempt(input: {
         permissions:
           groupRoomModelMaintenanceTurn
             ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
-            : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
+            : memberMemoryMaintenanceTurn
+              ? MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE
+              : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
               : null,
         ...(restrictedOneShotTurn
@@ -679,6 +698,7 @@ async function executeAssistantCodexAttempt(input: {
         providerOptions: attemptPlan.route.providerOptions,
         route: attemptPlan.route,
         responseMedia: result.responseMedia ?? [],
+        responseCard: result.responseCard ?? null,
         session: attemptPlan.session,
         usageAttribution,
         workingDirectory: attemptPlan.routePlan.workingDirectory,

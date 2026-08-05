@@ -185,6 +185,7 @@ describe("hosted-local MinIO sidecar", () => {
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
       HOSTED_R2_CUTOVER_PHASE: "source_active",
+      HOSTED_R2_WRITE_ADMISSION: "open",
       HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-local-r2-bundles-enam",
       HOSTED_R2_PRESIGN_CONTROL_ENDPOINT:
         expect.stringMatching(new RegExp(`^http://${expectedControlHost.replace(/\./gu, "\\.")}:\\d+$`, "u")),

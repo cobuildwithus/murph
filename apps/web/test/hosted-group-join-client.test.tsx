@@ -8,6 +8,7 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as {
+    autoSendPastedPhoneNumber?: boolean;
     description: string;
     inviteCode?: string | null;
     methods?: readonly ("phone" | "telegram" | "email")[];
@@ -34,6 +35,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
+    autoSendPastedPhoneNumber?: boolean;
     description: string;
     inviteCode?: string | null;
     methods?: readonly ("phone" | "telegram" | "email")[];
@@ -106,11 +108,30 @@ test("renders a not-now escape link with the group join legal consent gate", asy
   );
 
   const markup = renderToStaticMarkup(
-    createElement(GroupJoinLegalConsentGate, { initialStatus: null }),
+    createElement(GroupJoinLegalConsentGate, {
+      initialStatus: null,
+      notNowHref: "/home",
+    }),
   );
 
   expect(markup).toContain('data-consent-card="true"');
   expect(markup).toContain('href="/home"');
+  expect(markup).toContain("Not now");
+});
+
+test("keeps the initial-visit destination on the consent gate not-now link", async () => {
+  const { GroupJoinLegalConsentGate } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+
+  const markup = renderToStaticMarkup(
+    createElement(GroupJoinLegalConsentGate, {
+      initialStatus: null,
+      notNowHref: "/home?initialVisit=true",
+    }),
+  );
+
+  expect(markup).toContain('href="/home?initialVisit=true"');
   expect(markup).toContain("Not now");
 });
 
@@ -396,6 +417,7 @@ test("automatically opens the intent-first auth prompt on a valid group join pag
   expect(container.textContent).toContain("Continue to join");
   expect(mocks.authDialogProps?.inviteCode).toBe("invite_opaque");
   expect(mocks.authDialogProps?.methods).toEqual(["phone"]);
+  expect(mocks.authDialogProps?.autoSendPastedPhoneNumber).toBeUndefined();
   expect(container.querySelector(
     '[data-auth-title="Continue to join this Murph group"]',
   )).toBeTruthy();
@@ -591,6 +613,44 @@ test("hands a messaging member back to the channel Murph reaches them on", async
     "Back to Murph in Telegram (opens in a new tab)",
   );
   expect(container.querySelector('a[href="/home"]')).toBeNull();
+});
+
+test("prefers the one-shot initial-visit handoff over the messaging-channel return", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: false,
+      expectedMembershipId: null,
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      permissions: [],
+      postJoinContactOption: {
+        href: "sms:+15555550100",
+        kind: "text",
+        label: "Messages",
+      },
+      postJoinDestination: "/home?initialVisit=true",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  // A member created by texting binds their Privy user during this very
+  // authentication, so a skipped initial visit can never be recreated: the
+  // web destination must outrank the usual return-to-messages handoff.
+  const returnLink = Array.from(container.querySelectorAll("a")).find(
+    (candidate) => candidate.textContent?.includes("Back to Murph"),
+  );
+  expect(returnLink?.getAttribute("href")).toBe("/home?initialVisit=true");
+  expect(container.querySelector('a[href^="sms:"]')).toBeNull();
 });
 
 test("binds an existing-member sharing update to the rendered membership id", async () => {

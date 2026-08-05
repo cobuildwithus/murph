@@ -13,6 +13,8 @@ import {
 } from "./linq";
 import {
   getHostedLinqChatSummary,
+  startHostedLinqChatTypingIndicator,
+  stopHostedLinqChatTypingIndicator,
   type HostedLinqChatHandleSummary,
 } from "./linq-client";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
@@ -89,6 +91,9 @@ import {
 import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "./webhook-service-wake";
+import {
+  startHostedDirectRuntimeWakeBestEffort,
+} from "../hosted-execution/direct-runtime-wake";
 import {
   assertHostedThreadRouteEgressAuthority,
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
@@ -173,6 +178,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   let eventId: string | null = null;
   let eventType: string | null = null;
   let responseReason: string | null = null;
+  let instantStartTypingHint: HostedLinqInstantStartTypingHint | null = null;
 
   try {
     const verifyTiming = startHostedOnboardingTiming(
@@ -247,12 +253,13 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         prisma,
         signal: input.signal,
       });
-      // A refused region is a decided outcome for a reaction that provably
-      // targeted the canonical join offer, so it must be consumed here. Falling
-      // through would stage group-runtime work and wake the mailbox only to skip
-      // it, and could produce the group-visible behaviour this path avoids.
+      // Every terminal outcome for a proven canonical join offer is consumed
+      // here. Falling through would turn a decided reaction into ordinary group
+      // runtime work.
       if (
         reactionResult.status === "accepted"
+        || reactionResult.reason === "already_group_member"
+        || reactionResult.reason === "member_suspended"
         || reactionResult.reason === "recipient_region_unsupported"
       ) {
         const response: HostedOnboardingLinqWebhookResponse = {
@@ -261,7 +268,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           ok: true,
           reason: reactionResult.status === "accepted"
             ? "accepted-linq-group-join-offer-reaction"
-            : "ignored-linq-group-join-offer-region-unsupported",
+            : reactionResult.reason === "member_suspended"
+              ? "ignored-linq-group-join-offer-member-suspended"
+              : reactionResult.reason === "already_group_member"
+                ? "ignored-linq-group-join-offer-already-member"
+                : "ignored-linq-group-join-offer-region-unsupported",
         };
         responseReason = response.reason ?? null;
         finishHostedOnboardingTiming(timing, "completed", {
@@ -525,7 +536,16 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 tx: transaction,
               }),
           );
-          if (admissionBudget.kind === "exhausted") {
+          if (admissionBudget.kind === "already_allowed") {
+            // This contact cleared admission on an earlier event, so this one
+            // is planned on that allow: no attempt is spent and the classifier
+            // is not asked to re-decide a sender already admitted. The allow
+            // stays owned by the event that earned it and is never written
+            // under this event id, and instant start is off here: only a
+            // classification of this exact inbound may mint that entitlement.
+            firstContactAdmissionDecision = admissionBudget.decision;
+            plan = await runPlan(false);
+          } else if (admissionBudget.kind === "exhausted") {
             plan = await planAfterBlockedAdmission(
               "first-contact-admission-budget-exhausted",
             );
@@ -565,6 +585,19 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
       if (plan.instantStartEnrollment) {
         const instantStartEnrollment = plan.instantStartEnrollment;
+        // The member row is committed, but enrollment plus the replan below
+        // take seconds before the ordinary post-Temporal ensure fires. Start
+        // the container boot now so it overlaps that work, and show a typing
+        // indicator so the sender's first-ever message is not met with a
+        // silent chat while the runtime spins up. Both are best-effort
+        // latency/feedback hints with no authority and no reply path impact.
+        void startHostedDirectRuntimeWakeBestEffort({
+          source: "linq-instant-start",
+          userId: instantStartEnrollment.memberId,
+        });
+        instantStartTypingHint = startHostedLinqInstantStartTypingHintBestEffort({
+          event: planningEvent,
+        });
         let enrollmentFailed = false;
         try {
           await ensureHostedLinqInstantStartPulseTrialEnrollment({
@@ -781,6 +814,13 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     return plan.response;
   } catch (error) {
+    // A failing webhook is retried later with no visible continuation until
+    // then, so clear any started typing hint instead of letting its promise
+    // decay into silence.
+    stopHostedLinqInstantStartTypingHintBestEffort({
+      hint: instantStartTypingHint,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
     finishHostedOnboardingTiming(timing, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
@@ -1061,6 +1101,100 @@ function logHostedLinqChatClassification(
   logHostedOnboardingDiagnostic("hosted-onboarding.webhook.linq.chat-classification", {
     outcome,
   });
+}
+
+const HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS = 2_500;
+
+type HostedLinqInstantStartTypingHint = {
+  chatId: string;
+  started: Promise<void>;
+};
+
+// Instant start is the sender's first-ever message and the reply waits on a
+// cold runtime boot, so surface typing feedback immediately instead of leaving
+// the chat silent until the runtime's own typing session starts. Losing the
+// hint costs nothing; it must never affect webhook handling. The returned
+// handle lets a failing webhook clear the indicator so the hint cannot promise
+// a reply that no surviving continuation owns.
+function startHostedLinqInstantStartTypingHintBestEffort(input: {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+}): HostedLinqInstantStartTypingHint | null {
+  try {
+    const chatId =
+      requireHostedLinqMessageReceivedEvent(input.event).data.chat_id?.trim() ?? "";
+    if (chatId.length === 0) {
+      return null;
+    }
+    const started = startHostedLinqChatTypingIndicator({
+      chatId,
+      timeoutMs: HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS,
+    })
+      .then((result) => {
+        if (!result.ok) {
+          logHostedOnboardingDiagnostic(
+            "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+            { httpStatus: result.status },
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        logHostedOnboardingDiagnostic(
+          "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+          { errorName: deriveHostedOnboardingTimingErrorName(error) },
+        );
+      });
+    return { chatId, started };
+  } catch (error) {
+    logHostedOnboardingDiagnostic(
+      "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+      { errorName: deriveHostedOnboardingTimingErrorName(error) },
+    );
+    return null;
+  }
+}
+
+// Chains after the in-flight start settles so cancellation cannot race ahead
+// of it, and never affects the webhook's own failure handling. The cleanup is
+// registered with the request's post-response scheduler because the failing
+// webhook's invocation may freeze right after the error response; a detached
+// promise would not be guaranteed to run, leaving the typing promise dangling.
+function stopHostedLinqInstantStartTypingHintBestEffort(input: {
+  hint: HostedLinqInstantStartTypingHint | null;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): void {
+  const hint = input.hint;
+  if (!hint) {
+    return;
+  }
+  const task = () => hint.started
+    .then(() => stopHostedLinqChatTypingIndicator({
+      chatId: hint.chatId,
+      timeoutMs: HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS,
+    }))
+    .then((result) => {
+      if (!result.ok) {
+        logHostedOnboardingDiagnostic(
+          "hosted-onboarding.webhook.linq.instant-start-typing-hint-stop-failed",
+          { httpStatus: result.status },
+        );
+      }
+    })
+    .catch((error: unknown) => {
+      logHostedOnboardingDiagnostic(
+        "hosted-onboarding.webhook.linq.instant-start-typing-hint-stop-failed",
+        { errorName: deriveHostedOnboardingTimingErrorName(error) },
+      );
+    });
+
+  try {
+    if (input.scheduleAfterResponse) {
+      input.scheduleAfterResponse(task);
+      return;
+    }
+  } catch {
+    // Fall through to the immediate best-effort path.
+  }
+  void task();
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {

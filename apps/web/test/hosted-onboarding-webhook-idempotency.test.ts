@@ -36,23 +36,6 @@ const mocks = vi.hoisted(() => ({
   sendHostedLinqReadReceipt: vi.fn(),
   stageHostedLinqGroupParticipantContext: vi.fn(),
   stageHostedLinqGroupReactionContext: vi.fn(),
-  nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
-    input: { context?: string; timeoutMs?: number; userId: string },
-  ) => {
-    void input;
-    return {
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-      usageGateDenied: false,
-    };
-  }),
-  nudgeHostedRunnerUserBestEffort: vi.fn(),
-  nudgeHostedRunnerUserBestEffortResult: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
@@ -80,15 +63,6 @@ vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
-}));
-
-vi.mock("@/src/lib/hosted-runner/control", () => ({
-  nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
-  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
-}));
-
-vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
-  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -271,28 +245,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       ok: true,
       status: 204,
     });
-    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    });
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    });
-    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockImplementation(async (input) => ({
-      ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
-      usageGateDenied: false,
-    }));
     mocks.checkHostedAiUsageGate.mockResolvedValue({
       allowed: true,
       billingPlanCode: "launch_monthly",
@@ -361,7 +313,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
@@ -401,7 +352,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
@@ -642,7 +592,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
   it("routes an affirmative private-chat reaction through the ordinary message planner", async () => {
@@ -835,10 +784,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult)
-      .not.toHaveBeenCalled();
   });
 
   it("does not restage duplicate non-join reaction context", async () => {
@@ -1026,7 +971,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
   it("records Linq line status updates as alerts without product sends or wake handoff", async () => {
@@ -1083,8 +1027,57 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      "suspended member",
+      "member_suspended",
+      "ignored-linq-group-join-offer-member-suspended",
+    ],
+    [
+      "target-group member",
+      "already_group_member",
+      "ignored-linq-group-join-offer-already-member",
+    ],
+  ] as const)(
+    "consumes a %s join reaction without ordinary fallthrough",
+    async (_label, reactionReason, responseReason) => {
+      mocks.handleHostedGroupJoinOfferReaction.mockResolvedValueOnce({
+        reason: reactionReason,
+        status: "ignored",
+      });
+      const prisma = createPrismaStub();
+      mocks.getPrisma.mockReturnValue(prisma);
+
+      await expect(
+        handleHostedOnboardingLinqWebhook({
+          rawBody: buildLinqProviderWebhookBody({
+            data: {
+              chat_id: "chat_group_1",
+              from_handle: { handle: "+15551234567", service: "iMessage" },
+              line: { phone_number: "+15550000000" },
+              message_id: "msg_offer_123",
+              reaction_type: "like",
+            },
+            eventId: `evt_reaction_${reactionReason}`,
+            eventType: "reaction.added",
+          }),
+          signature: null,
+          timestamp: null,
+        }),
+      ).resolves.toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: responseReason,
+      });
+
+      expect(mocks.buildHostedLinqAffirmativeReactionMessageEvent)
+        .not.toHaveBeenCalled();
+      expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    },
+  );
 
   it("consumes an unsupported-region join reaction without staging group work", async () => {
     // The refusal is a decided outcome for a reaction that targeted the canonical
@@ -1239,7 +1232,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       mocks.markHostedLinqOnboardingLinkNoticeSent.mock.invocationCallOrder[0],
     );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
   it("honors an earlier group outreach after the phone becomes an active member", async () => {
@@ -1625,8 +1617,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         }),
       }),
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
@@ -1677,14 +1667,17 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(3);
     const initialAccessReadOrder =
       prisma.hostedMember.findUnique.mock.invocationCallOrder[0]!;
-    const refreshedAccessReadOrder =
+    const exactAccessReadOrder =
       prisma.hostedMember.findUnique.mock.invocationCallOrder[1]!;
+    const refreshedAccessReadOrder =
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[2]!;
     const reclassificationLockOrder =
       mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]!;
-    expect(initialAccessReadOrder).toBeLessThan(reclassificationLockOrder);
+    expect(initialAccessReadOrder).toBeLessThan(exactAccessReadOrder);
+    expect(exactAccessReadOrder).toBeLessThan(reclassificationLockOrder);
     expect(reclassificationLockOrder).toBeLessThan(refreshedAccessReadOrder);
     expect(
       refreshedAccessReadOrder,
@@ -1912,7 +1905,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",

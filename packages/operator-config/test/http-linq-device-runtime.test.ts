@@ -17,18 +17,43 @@ import {
 import { resolveExternalUrlBrowserCommands } from '../src/device-sync-browser-opener.ts'
 import { createDeviceSyncClient } from '../src/device-sync-client.ts'
 import {
+  checkLinqIMessageCapability,
   createLinqChat,
   createLinqWebhookSubscription,
   deleteLinqMessage,
+  isDefinitiveLinqIMessageAppCardRejection,
   markLinqChatRead,
   probeLinqApi,
   sendLinqChatMessage,
+  sendLinqIMessageAppCard,
   sendLinqVoiceMemo,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
+  type LinqFetch,
   uploadLinqAttachment,
 } from '../src/linq-runtime.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
+
+const NUTRITION_CARD = {
+  kind: 'daily_nutrition',
+  version: 2,
+  localDate: '2026-07-28',
+  mealCount: 4,
+  totals: {
+    calories: { total: 1_490.25, mealCount: 3 },
+    proteinGrams: { total: 94.5, mealCount: 3 },
+    carbsGrams: { total: 193.125, mealCount: 3 },
+    fatGrams: { total: 34.75, mealCount: 3 },
+    fiberGrams: { total: 26.5, mealCount: 3 },
+  },
+  goals: {
+    calories: null,
+    proteinGrams: null,
+    carbsGrams: null,
+    fatGrams: null,
+    fiberGrams: null,
+  },
+} as const
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -58,14 +83,14 @@ function createJsonResponse(body: unknown, init?: ResponseInit): Response {
   })
 }
 
-function requireStringRequestBody(body: string | Blob | undefined): string {
+function requireStringRequestBody(body: BodyInit | null | undefined): string {
   if (typeof body !== 'string') {
     assert.fail('Expected a JSON string request body.')
   }
   return body
 }
 
-function parseJsonRequestBody(body: string | Blob | undefined): Record<string, unknown> {
+function parseJsonRequestBody(body: BodyInit | null | undefined): Record<string, unknown> {
   return JSON.parse(requireStringRequestBody(body)) as Record<string, unknown>
 }
 
@@ -352,6 +377,158 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
   })
 })
 
+
+test('linq runtime checks iMessage capability and sends the exact one-part app card body', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const requests: Array<{
+    body: Record<string, unknown>
+    method: string
+    url: string
+  }> = []
+  const fetchImplementation: LinqFetch = vi.fn(async (url, init) => {
+    requests.push({
+      body: parseJsonRequestBody(init.body),
+      method: init.method ?? 'GET',
+      url,
+    })
+    if (url.endsWith('/capability/check_imessage')) {
+      return createJsonResponse({ available: true })
+    }
+    return createJsonResponse({
+      message: { id: 'native-card-message-1' },
+    })
+  })
+
+  await expect(checkLinqIMessageCapability({
+    address: ' +15550001 ',
+    from: ' +15550000 ',
+  }, { env, fetchImplementation })).resolves.toBe(true)
+  await sendLinqIMessageAppCard({
+    card: NUTRITION_CARD,
+    chatId: ' chat-123 ',
+    idempotencyKey: ' card-delivery-1 ',
+  }, { env, fetchImplementation })
+
+  expect(requests).toHaveLength(2)
+  expect(requests[0]).toEqual({
+    body: {
+      address: '+15550001',
+      from: '+15550000',
+    },
+    method: 'POST',
+    url: 'https://linq.example.test/api/partner/v3/capability/check_imessage',
+  })
+  expect(requests[1]).toEqual({
+    body: {
+      message: {
+        idempotency_key: 'card-delivery-1',
+        parts: [{
+          app: {
+            app_store_id: 6786145859,
+            bundle_id: 'ai.withmurph.app.messages',
+            name: 'Murph',
+            team_id: 'G9DJH2XUMK',
+          },
+          fallback_text: 'Open your Murph nutrition summary',
+          interactive: false,
+          layout: {
+            caption: 'Murph',
+            subcaption: 'Nutrition summary',
+            trailing_caption: 'OPEN',
+            trailing_subcaption: 'PARTIAL TOTALS',
+          },
+          type: 'imessage_app',
+          url: expect.stringMatching(/^data:application\/json;base64,/u),
+        }],
+        preferred_service: 'iMessage',
+      },
+    },
+    method: 'POST',
+    url: 'https://linq.example.test/api/partner/v3/chats/chat-123/messages',
+  })
+})
+
+test('linq iMessage capability requires a literal available true response', async () => {
+  const env = { LINQ_API_TOKEN: 'linq-token' } satisfies NodeJS.ProcessEnv
+  for (const payload of [
+    { available: false },
+    { available: 'true' },
+    { supported: true },
+    null,
+  ]) {
+    await expect(checkLinqIMessageCapability({
+      address: '+15550001',
+    }, {
+      env,
+      fetchImplementation: async () => createJsonResponse(payload),
+    })).resolves.toBe(false)
+  }
+})
+
+test('linq app-card failure diagnostics do not expose nutrition values', async () => {
+  await assert.rejects(
+    () => sendLinqIMessageAppCard({
+      card: NUTRITION_CARD,
+      chatId: 'private-chat-route',
+      idempotencyKey: 'card-delivery-1',
+    }, {
+      env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+      fetchImplementation: async () => createJsonResponse({
+        message: 'rejected 1490.25 calories for 2026-07-28',
+      }, { status: 400 }),
+    }),
+    (error) => {
+      if (!(error instanceof VaultCliError)) {
+        return false
+      }
+      const serialized = JSON.stringify({
+        context: error.context,
+        message: error.message,
+      })
+      return isDefinitiveLinqIMessageAppCardRejection(error) &&
+        error.code === 'LINQ_API_REQUEST_FAILED' &&
+        error.context?.operation === 'send_imessage_app_card' &&
+        error.context?.requestMessagePartCount === 1 &&
+        !serialized.includes('1490.25') &&
+        !serialized.includes('2026-07-28') &&
+        !serialized.includes('private-chat-route')
+    },
+  )
+})
+
+test('linq app-card rejection classification permits only definitive pre-acceptance statuses', () => {
+  const createError = (
+    status: number,
+    retryable: boolean,
+  ): VaultCliError => new VaultCliError(
+    'LINQ_API_REQUEST_FAILED',
+    'Linq rejected the iMessage app card.',
+    {
+      failureStage: 'http',
+      method: 'POST',
+      operation: 'send_imessage_app_card',
+      path: '/chats/[chat]/messages',
+      provider: 'linq',
+      retryable,
+      status,
+    },
+  )
+
+  for (const status of [400, 415, 422]) {
+    expect(isDefinitiveLinqIMessageAppCardRejection(
+      createError(status, false),
+    )).toBe(true)
+  }
+  for (const status of [404, 408, 429, 500]) {
+    expect(isDefinitiveLinqIMessageAppCardRejection(
+      createError(status, status !== 404),
+    )).toBe(false)
+  }
+})
+
 test('linq runtime serializes reply targets only for marked native replies', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test',
@@ -414,6 +591,632 @@ test('linq runtime serializes reply targets only for marked native replies', asy
     (error) => error instanceof VaultCliError && error.code === 'LINQ_INVALID_INPUT',
   )
   expect(fetchImplementation).toHaveBeenCalledTimes(2)
+})
+
+const incompleteTwoPartMessageIdentityCases = [
+  {
+    expectedMessageId: 'message-text',
+    expectedMessageIds: ['message-text'],
+    label: 'only the primary message id',
+    linkMessageId: null,
+    primaryMessageId: 'message-text',
+  },
+  {
+    expectedMessageId: 'message-duplicate',
+    expectedMessageIds: ['message-duplicate'],
+    label: 'the same id for both messages',
+    linkMessageId: 'message-duplicate',
+    primaryMessageId: 'message-duplicate',
+  },
+] as const
+
+const missingPrimaryMessageIdentityCases = [
+  {
+    label: 'a later link identity',
+    linkMessageId: 'message-link',
+  },
+  {
+    label: 'no later identity',
+    linkMessageId: null,
+  },
+] as const
+
+test('linq runtime sends a terminal payment URL as a separate rich-link message', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const bodies: Record<string, unknown>[] = []
+  let requestCount = 0
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    bodies.push(parseJsonRequestBody(requireStringRequestBody(init.body)))
+    requestCount += 1
+    return createJsonResponse({
+      chat_id: 'chat-123',
+      message: {
+        id: requestCount === 1 ? 'message-text' : 'message-link',
+      },
+    })
+  })
+
+  const result = await sendLinqChatMessage(
+    {
+      chatId: 'chat-123',
+      idempotencyKey: 'payment-message-123',
+      message: 'Complete payment here:\n[secure checkout](https://pay.example.test/checkout/session_123).',
+      nativeReplyRequested: true,
+      replyToMessageId: 'incoming-123',
+    },
+    { env, fetchImplementation },
+  )
+
+  assert.equal(result.message.id, 'message-link')
+  assert.deepEqual(result.providerMessageIds, ['message-text', 'message-link'])
+  assert.deepEqual(bodies, [
+    {
+      message: {
+        idempotency_key: 'payment-message-123',
+        parts: [{
+          type: 'text',
+          value: 'Complete payment here:',
+        }],
+        reply_to: {
+          message_id: 'incoming-123',
+        },
+      },
+    },
+    {
+      message: {
+        idempotency_key: 'payment-message-123:link',
+        parts: [{
+          type: 'link',
+          value: 'https://pay.example.test/checkout/session_123',
+        }],
+      },
+    },
+  ])
+})
+
+test.each(incompleteTwoPartMessageIdentityCases)(
+  'linq runtime keeps an existing-chat rich-link delivery terminal with $label',
+  async ({
+    expectedMessageId,
+    expectedMessageIds,
+    linkMessageId,
+    primaryMessageId,
+  }) => {
+    const env = {
+      LINQ_API_BASE_URL: 'https://linq.example.test',
+      LINQ_API_TOKEN: 'linq-token',
+    } satisfies NodeJS.ProcessEnv
+    const bodies: Record<string, unknown>[] = []
+    let requestCount = 0
+    const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(parseJsonRequestBody(requireStringRequestBody(init.body)))
+      requestCount += 1
+      return createJsonResponse({
+        chat_id: 'chat-123',
+        message: requestCount === 1
+          ? primaryMessageId
+            ? { id: primaryMessageId }
+            : {}
+          : linkMessageId
+            ? { id: linkMessageId }
+            : {},
+      })
+    })
+
+    await assert.rejects(
+      () => sendLinqChatMessage(
+        {
+          chatId: 'chat-123',
+          idempotencyKey: 'payment-message-123',
+          message:
+            'Complete payment here:\nhttps://pay.example.test/checkout/session_123',
+        },
+        { env, fetchImplementation },
+      ),
+      (error) => {
+        const partial = error as {
+          code?: unknown
+          deliveryMayHaveSucceeded?: unknown
+          providerMessageId?: unknown
+          providerMessageIds?: unknown
+          providerThreadId?: unknown
+        }
+        return partial.code === 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+          && partial.deliveryMayHaveSucceeded === true
+          && partial.providerMessageId === expectedMessageId
+          && partial.providerThreadId === 'chat-123'
+          && JSON.stringify(partial.providerMessageIds)
+            === JSON.stringify(expectedMessageIds)
+      },
+    )
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    assert.deepEqual(bodies[1], {
+      message: {
+        idempotency_key: 'payment-message-123:link',
+        parts: [{
+          type: 'link',
+          value: 'https://pay.example.test/checkout/session_123',
+        }],
+      },
+    })
+  },
+)
+
+test.each(missingPrimaryMessageIdentityCases)(
+  'linq runtime does not issue an existing-chat rich-link request when the primary response has no identity, even with $label',
+  async ({ linkMessageId }) => {
+    const env = {
+      LINQ_API_BASE_URL: 'https://linq.example.test',
+      LINQ_API_TOKEN: 'linq-token',
+    } satisfies NodeJS.ProcessEnv
+    let requestCount = 0
+    const fetchImplementation = vi.fn(async () => {
+      requestCount += 1
+      return createJsonResponse({
+        chat_id: 'chat-123',
+        message: requestCount === 1
+          ? {}
+          : linkMessageId
+            ? { id: linkMessageId }
+            : {},
+      })
+    })
+
+    await assert.rejects(
+      () => sendLinqChatMessage(
+        {
+          chatId: 'chat-123',
+          idempotencyKey: 'payment-message-123',
+          message:
+            'Complete payment here:\nhttps://pay.example.test/checkout/session_123',
+        },
+        { env, fetchImplementation },
+      ),
+      (error) => error instanceof VaultCliError
+        && error.code === 'LINQ_API_REQUEST_FAILED'
+        && 'deliveryMayHaveSucceeded' in error
+        && error.deliveryMayHaveSucceeded === true,
+    )
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  },
+)
+
+test('linq runtime retries an identity-less primary with the same key before issuing the link', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const bodies: Record<string, unknown>[] = []
+  let primaryAttemptCount = 0
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    const body = parseJsonRequestBody(requireStringRequestBody(init.body))
+    bodies.push(body)
+    const parts = (body.message as { parts?: Array<{ type?: string }> })?.parts
+    if (parts?.[0]?.type === 'link') {
+      return createJsonResponse({
+        chat_id: 'chat-123',
+        message: { id: 'message-link' },
+      })
+    }
+    primaryAttemptCount += 1
+    return createJsonResponse({
+      chat_id: 'chat-123',
+      message: primaryAttemptCount === 1 ? {} : { id: 'message-text' },
+    })
+  })
+  const input = {
+    chatId: 'chat-123',
+    idempotencyKey: 'payment-message-123',
+    message:
+      'Complete payment here:\nhttps://pay.example.test/checkout/session_123',
+  }
+
+  await assert.rejects(
+    () => sendLinqChatMessage(input, { env, fetchImplementation }),
+    (error) => error instanceof VaultCliError
+      && error.code === 'LINQ_API_REQUEST_FAILED',
+  )
+  await expect(sendLinqChatMessage(
+    input,
+    { env, fetchImplementation },
+  )).resolves.toMatchObject({
+    providerMessageIds: ['message-text', 'message-link'],
+  })
+
+  assert.deepEqual(bodies.map((body) => (
+    body.message as { idempotency_key?: string }
+  )?.idempotency_key), [
+    'payment-message-123',
+    'payment-message-123',
+    'payment-message-123:link',
+  ])
+})
+
+test('linq runtime keeps a selected link-only payment URL on the text reply anchor', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let body: Record<string, unknown> | null = null
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    body = parseJsonRequestBody(requireStringRequestBody(init.body))
+    return createJsonResponse({
+      chat_id: 'chat-123',
+      message: {
+        id: 'message-link',
+      },
+    })
+  })
+
+  const result = await sendLinqChatMessage(
+    {
+      chatId: 'chat-123',
+      idempotencyKey: 'payment-message-123',
+      message: 'https://pay.example.test/checkout/session_123',
+      nativeReplyRequested: true,
+      replyToMessageId: 'incoming-123',
+    },
+    { env, fetchImplementation },
+  )
+
+  assert.equal(result.message.id, 'message-link')
+  assert.deepEqual(body, {
+    message: {
+      idempotency_key: 'payment-message-123',
+      parts: [{
+        type: 'text',
+        value: 'https://pay.example.test/checkout/session_123',
+      }],
+      reply_to: {
+        message_id: 'incoming-123',
+      },
+    },
+  })
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
+test('linq runtime sanitizes but still promotes an uppercase terminal HTTPS URL', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let body: Record<string, unknown> | null = null
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    body = parseJsonRequestBody(requireStringRequestBody(init.body))
+    return createJsonResponse({
+      chat_id: 'chat-123',
+      message: { id: 'message-link' },
+    })
+  })
+
+  await sendLinqChatMessage(
+    {
+      chatId: 'chat-123',
+      message: 'HTTPS://PAY.EXAMPLE.TEST/checkout/session_123',
+    },
+    { env, fetchImplementation },
+  )
+
+  assert.deepEqual(body, {
+    message: {
+      parts: [{
+        type: 'link',
+        value: 'https://pay.example.test/checkout/session_123',
+      }],
+    },
+  })
+})
+
+test('linq runtime creates a chat with caller text before the rich-link follow-up', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const requests: Array<{ body: Record<string, unknown>; url: string }> = []
+  const fetchImplementation = vi.fn(async (url: string, init: RequestInit) => {
+    requests.push({
+      body: parseJsonRequestBody(requireStringRequestBody(init.body)),
+      url,
+    })
+    if (url.endsWith('/chats')) {
+      return createJsonResponse({
+        chat: {
+          id: 'chat-created',
+          message: { id: 'message-text' },
+        },
+      })
+    }
+    return createJsonResponse({
+      chat_id: 'chat-created',
+      message: { id: 'message-link' },
+    })
+  })
+
+  const result = await createLinqChat(
+    {
+      from: '+15550000000',
+      idempotencyKey: 'create-123',
+      message: 'Your secure payment link:\nhttps://pay.example.test/checkout/session_123',
+      to: ['+15550000001'],
+    },
+    { env, fetchImplementation },
+  )
+
+  assert.equal(result.messageId, 'message-link')
+  assert.deepEqual(result.providerMessageIds, ['message-text', 'message-link'])
+  assert.deepEqual(requests, [
+    {
+      body: {
+        from: '+15550000000',
+        message: {
+          idempotency_key: 'create-123',
+          parts: [{
+            type: 'text',
+            value: 'Your secure payment link:',
+          }],
+        },
+        to: ['+15550000001'],
+      },
+      url: 'https://linq.example.test/chats',
+    },
+    {
+      body: {
+        message: {
+          idempotency_key: 'create-123:link',
+          parts: [{
+            type: 'link',
+            value: 'https://pay.example.test/checkout/session_123',
+          }],
+        },
+      },
+      url: 'https://linq.example.test/chats/chat-created/messages',
+    },
+  ])
+})
+
+test.each(incompleteTwoPartMessageIdentityCases)(
+  'linq runtime keeps a new-chat rich-link delivery terminal with $label',
+  async ({
+    expectedMessageId,
+    expectedMessageIds,
+    linkMessageId,
+    primaryMessageId,
+  }) => {
+    const env = {
+      LINQ_API_BASE_URL: 'https://linq.example.test',
+      LINQ_API_TOKEN: 'linq-token',
+    } satisfies NodeJS.ProcessEnv
+    const requests: Array<{ body: Record<string, unknown>; url: string }> = []
+    const fetchImplementation = vi.fn(async (url: string, init: RequestInit) => {
+      requests.push({
+        body: parseJsonRequestBody(requireStringRequestBody(init.body)),
+        url,
+      })
+      if (url.endsWith('/chats')) {
+        return createJsonResponse({
+          chat: {
+            id: 'chat-created',
+            message: primaryMessageId ? { id: primaryMessageId } : {},
+          },
+        })
+      }
+      return createJsonResponse({
+        chat_id: 'chat-created',
+        message: linkMessageId ? { id: linkMessageId } : {},
+      })
+    })
+
+    await assert.rejects(
+      () => createLinqChat(
+        {
+          from: '+15550000000',
+          idempotencyKey: 'create-123',
+          message:
+            'Your secure payment link:\nhttps://pay.example.test/checkout/session_123',
+          to: ['+15550000001'],
+        },
+        { env, fetchImplementation },
+      ),
+      (error) => {
+        const partial = error as {
+          code?: unknown
+          deliveryMayHaveSucceeded?: unknown
+          providerMessageId?: unknown
+          providerMessageIds?: unknown
+          providerThreadId?: unknown
+        }
+        return partial.code === 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+          && partial.deliveryMayHaveSucceeded === true
+          && partial.providerMessageId === expectedMessageId
+          && partial.providerThreadId === 'chat-created'
+          && JSON.stringify(partial.providerMessageIds)
+            === JSON.stringify(expectedMessageIds)
+      },
+    )
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    assert.deepEqual(requests[1], {
+      body: {
+        message: {
+          idempotency_key: 'create-123:link',
+          parts: [{
+            type: 'link',
+            value: 'https://pay.example.test/checkout/session_123',
+          }],
+        },
+      },
+      url: 'https://linq.example.test/chats/chat-created/messages',
+    })
+  },
+)
+
+test.each(missingPrimaryMessageIdentityCases)(
+  'linq runtime does not issue a new-chat rich-link request when the primary response has no identity, even with $label',
+  async ({ linkMessageId }) => {
+    const env = {
+      LINQ_API_BASE_URL: 'https://linq.example.test',
+      LINQ_API_TOKEN: 'linq-token',
+    } satisfies NodeJS.ProcessEnv
+    let requestCount = 0
+    const fetchImplementation = vi.fn(async (url: string) => {
+      requestCount += 1
+      if (url.endsWith('/chats')) {
+        return createJsonResponse({
+          chat: {
+            id: 'chat-created',
+            message: {},
+          },
+        })
+      }
+      return createJsonResponse({
+        chat_id: 'chat-created',
+        message: linkMessageId ? { id: linkMessageId } : {},
+      })
+    })
+
+    await assert.rejects(
+      () => createLinqChat(
+        {
+          from: '+15550000000',
+          idempotencyKey: 'create-123',
+          message:
+            'Your secure payment link:\nhttps://pay.example.test/checkout/session_123',
+          to: ['+15550000001'],
+        },
+        { env, fetchImplementation },
+      ),
+      (error) => error instanceof VaultCliError
+        && error.code === 'LINQ_API_REQUEST_FAILED'
+        && 'deliveryMayHaveSucceeded' in error
+        && error.deliveryMayHaveSucceeded === true,
+    )
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  },
+)
+
+test('linq runtime falls back to URL text after a definitive rich-link rejection', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestCount = 0
+  const bodies: Record<string, unknown>[] = []
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    bodies.push(parseJsonRequestBody(requireStringRequestBody(init.body)))
+    requestCount += 1
+    return requestCount === 1
+      ? createJsonResponse({
+          chat_id: 'chat-123',
+          message: { id: 'message-text' },
+        })
+      : requestCount === 2
+        ? createJsonResponse(
+          { error: { code: 'LINK_REJECTED' } },
+          { status: 400 },
+        )
+        : createJsonResponse({
+          chat_id: 'chat-123',
+          message: { id: 'message-fallback' },
+        })
+  })
+
+  const result = await sendLinqChatMessage(
+    {
+      chatId: 'chat-123',
+      idempotencyKey: 'payment-message-123',
+      message:
+        'Complete payment here:\nhttps://pay.example.test/checkout/session_123',
+    },
+    { env, fetchImplementation },
+  )
+  assert.deepEqual(result.providerMessageIds, [
+    'message-text',
+    'message-fallback',
+  ])
+  assert.deepEqual(bodies[2], {
+    message: {
+      idempotency_key: 'payment-message-123:link:fallback',
+      parts: [{
+        type: 'text',
+        value: 'https://pay.example.test/checkout/session_123',
+      }],
+    },
+  })
+  expect(fetchImplementation).toHaveBeenCalledTimes(3)
+})
+
+test('linq runtime never fabricates text for a link-only new chat', async () => {
+  const fetchImplementation = vi.fn()
+
+  await assert.rejects(
+    () => createLinqChat(
+      {
+        from: '+15550000000',
+        message: 'https://pay.example.test/checkout/session_123',
+        to: ['+15550000001'],
+      },
+      { fetchImplementation },
+    ),
+    (error) =>
+      error instanceof VaultCliError
+      && error.code === 'LINQ_INVALID_INPUT'
+      && error.message.includes('caller-supplied text or media'),
+  )
+  expect(fetchImplementation).not.toHaveBeenCalled()
+})
+
+test('linq runtime refuses multiple new-chat URLs before provider entry', async () => {
+  const fetchImplementation = vi.fn()
+
+  await assert.rejects(
+    () => createLinqChat(
+      {
+        from: '+15550000000',
+        message:
+          'Use https://first.example.test or https://pay.example.test/checkout/session_123',
+        to: ['+15550000001'],
+      },
+      { fetchImplementation },
+    ),
+    (error) =>
+      error instanceof VaultCliError
+      && error.code === 'LINQ_INVALID_INPUT'
+      && error.message.includes('cannot include URL text'),
+  )
+  expect(fetchImplementation).not.toHaveBeenCalled()
+})
+
+test('linq runtime makes a missing created-chat id retryable without a link send', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const fetchImplementation = vi.fn(async () =>
+    createJsonResponse({
+      chat: {
+        message: { id: 'message-text' },
+      },
+    }),
+  )
+
+  await assert.rejects(
+    () => createLinqChat(
+      {
+        from: '+15550000000',
+        message: 'Your secure payment link:\nhttps://pay.example.test/checkout/session_123',
+        to: ['+15550000001'],
+      },
+      { env, fetchImplementation },
+    ),
+    (error) =>
+      error instanceof VaultCliError
+      && error.code === 'LINQ_API_REQUEST_FAILED'
+      && error.context?.retryable === true
+      && error.message.includes('missing a chat id'),
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
 })
 
 test('linq runtime omits the text part for media-only messages and rejects empty text-only sends', async () => {

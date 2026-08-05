@@ -73,23 +73,6 @@ describe("check-hosted-temporal-orchestration-guards", () => {
     ]);
   });
 
-  it("flags broad hosted-execution parser imports inside Temporal workflow code", () => {
-    expect(
-      findHostedTemporalGuardFindings(
-        "packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts",
-        'import { parseHostedRuntimeSignal } from "@murphai/hosted-execution/parsers";',
-      ),
-    ).toEqual([
-      {
-        filePath:
-          "packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts",
-        label: "Node-only hosted-execution parser import in Temporal workflow bundle",
-        line: 1,
-        token: 'from "@murphai/hosted-execution/parsers"',
-      },
-    ]);
-  });
-
   it("flags legacy hosted runtime demand decision helpers", () => {
     expect(
       findHostedTemporalGuardFindings(

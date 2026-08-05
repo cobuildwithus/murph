@@ -8,11 +8,29 @@ export const CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER =
   "x-murph-meal-photo-key";
 export const CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER =
   "x-murph-meal-photo-sha256";
+export const CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER =
+  "x-murph-environment-voice-capture-id";
+export const CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER =
+  "x-murph-environment-voice-key";
+export const CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_SHA256_HEADER =
+  "x-murph-environment-voice-sha256";
 
 export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
   browserVaultSession: {
     method: "POST",
     suffix: "browser-vault/session",
+  },
+  environmentVoiceStage: {
+    method: "POST",
+    suffix: "environment-voice/stage",
+  },
+  environmentVoiceDelete: {
+    method: "DELETE",
+    suffix: "environment-voice/delete",
+  },
+  inferenceVerification: {
+    method: "POST",
+    suffix: "inference/verify",
   },
   mealPhotoStage: {
     method: "POST",
@@ -25,6 +43,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
   runtimeEnsureProcessing: {
     method: "POST",
     suffix: "runtime/ensure-processing",
+  },
+  runtimeHealthDataConsentReconcile: {
+    method: "POST",
+    suffix: "runtime/health-data-consent",
   },
   telegramUsageLimitNotice: {
     method: "POST",
@@ -49,8 +71,26 @@ export function buildCloudflareHostedControlUserStatusPath(userId: string): stri
   return buildCloudflareHostedControlUserRoutePath("status", userId);
 }
 
+export function buildCloudflareHostedControlInferenceVerificationPath(
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath(
+    "inferenceVerification",
+    userId,
+  );
+}
+
 export function buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("runtimeEnsureProcessing", userId);
+}
+
+export function buildCloudflareHostedControlRuntimeHealthDataConsentPath(
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath(
+    "runtimeHealthDataConsentReconcile",
+    userId,
+  );
 }
 
 export function buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId: string): string {
@@ -71,6 +111,24 @@ export function buildCloudflareHostedControlMealPhotoStagePath(userId: string): 
 
 export function buildCloudflareHostedControlMealPhotoDeletePath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("mealPhotoDelete", userId);
+}
+
+export function buildCloudflareHostedControlEnvironmentVoiceStagePath(
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath(
+    "environmentVoiceStage",
+    userId,
+  );
+}
+
+export function buildCloudflareHostedControlEnvironmentVoiceDeletePath(
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath(
+    "environmentVoiceDelete",
+    userId,
+  );
 }
 
 export function matchCloudflareHostedControlUserRoutePath(

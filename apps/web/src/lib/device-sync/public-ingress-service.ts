@@ -3,7 +3,7 @@ import {
   resolveDeviceSyncWebhookPreflightResponse,
 } from "@murphai/device-syncd/public-ingress";
 import {
-  buildJunctionProviderSourceInstanceKey,
+  normalizeJunctionProviderSlug,
   type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
@@ -21,14 +21,18 @@ import {
   type PublicDeviceSyncAccount,
   type PublicProviderDescriptor,
   type SdkSignInSessionResult,
+  type StartConnectionSourceLifecycleProof,
   type DeviceSyncRegistry,
 } from "@murphai/device-syncd/types";
 import type { CompanionHrvRmssdObservation } from "@murphai/contracts";
 
+import { formatHostedExecutionSafeLogErrorDetails } from "../hosted-execution/logging";
+import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import { createHostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import {
   assertCompanionHrvRmssdObservationFresh,
+  COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
   resolveCompanionHrvRmssdConnection,
   type CompanionConnectionIntent,
 } from "./companion";
@@ -39,11 +43,17 @@ import {
 } from "./public-connection";
 import {
   acceptHostedCompanionHrvRmssdObservation,
+  beginHostedDeviceSyncConnectionSourceReconnect,
   buildHostedCompanionHrvRmssdDirtyResource,
+  captureHostedDeviceSyncConnectionSourceReconnect,
+  cleanupRejectedHostedDeviceSyncConnectionSource,
   disconnectHostedDeviceSyncConnection,
+  disconnectHostedDeviceSyncConnectionSource,
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncUnknownWebhook,
   handleHostedDeviceSyncWebhookAccepted,
+  prepareHostedDeviceSyncConnectionSourceStart,
+  reconcileHostedDeviceSyncConnectionSourceRegistration,
 } from "./wake-service";
 import { readRawBodyBuffer } from "./http";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
@@ -51,6 +61,10 @@ import { createHostedDeviceSyncRegistry } from "./providers";
 
 export class HostedDeviceSyncPublicIngressService {
   private readonly ingress;
+  private readonly preparedSourceLifecycles = new Map<
+    string,
+    StartConnectionSourceLifecycleProof
+  >();
 
   constructor(
     private readonly context: HostedDeviceSyncControlPlaneContext,
@@ -66,13 +80,24 @@ export class HostedDeviceSyncPublicIngressService {
         onConnectionEstablished: async ({
           account,
           connection,
+          connectionStartedAt,
           now,
           provider,
           sourceProviderSlug,
         }) => {
+          if (await this.hasWithdrawnHealthDataConsent(account.id)) {
+            throw deviceSyncError({
+              code: "HEALTH_DATA_CONSENT_REQUIRED",
+              httpStatus: 403,
+              message: "Use Murph again before connecting a health source.",
+              retryable: false,
+            });
+          }
+
           await handleHostedDeviceSyncConnectionEstablished({
             account,
             connection,
+            connectionStartedAt: connectionStartedAt ?? null,
             now,
             sourceProviderSlug: sourceProviderSlug ?? null,
             store: this.context.store,
@@ -83,11 +108,78 @@ export class HostedDeviceSyncPublicIngressService {
             sourceAdmissionCommitted: true,
           };
         },
+        onConnectionSourceAdmissionRejected: async ({
+          account,
+          connectionStartedAt,
+          sourceProviderSlug,
+        }) => {
+          await cleanupRejectedHostedDeviceSyncConnectionSource({
+            account,
+            connectionStartedAt,
+            registry: this.registry,
+            sourceProviderSlug,
+            store: this.context.store,
+          });
+        },
+        onConnectionSourceObserved: async ({
+          account,
+          eventType,
+          sourceProviderSlug,
+        }) => {
+          if (
+            normalizeJunctionProviderSlug(sourceProviderSlug)
+              !== COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
+          ) {
+            return;
+          }
+          if (
+            eventType === "provider.connection.created"
+            || eventType === "provider.connection.updated"
+          ) {
+            const reconciliation = await reconcileHostedDeviceSyncConnectionSourceRegistration({
+              account,
+              registry: this.registry,
+              sourceProviderSlug,
+              store: this.context.store,
+            });
+            if (reconciliation === "admitted") {
+              return { sourceAdmissionCommitted: true };
+            }
+            return reconciliation === "removed"
+              ? { sourceRegistrationRemoved: true }
+              : undefined;
+          }
+          return;
+        },
         onLevelDirtyWebhookAlreadySatisfied: async ({ account }) => {
           const pending = await this.context.store.hasPendingDirtyConnection(account.id);
           return pending ? { accepted: true } : null;
         },
-        onWebhookAccepted: async ({ account, claimToken, traceId, webhook, now }) => {
+        onWebhookAccepted: async ({
+          account,
+          claimToken,
+          traceId,
+          webhook,
+          provider,
+          now,
+        }) => {
+          if (await this.hasWithdrawnHealthDataConsent(account.id)) {
+            const completed = await this.context.store.completeWebhookTrace(
+              provider.provider,
+              traceId,
+              claimToken,
+            );
+            if (!completed) {
+              throw deviceSyncError({
+                code: "WEBHOOK_TRACE_CLAIM_LOST",
+                message: "Webhook trace claim was lost before durable acceptance completed.",
+                retryable: true,
+                httpStatus: 503,
+              });
+            }
+            return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;
+          }
+
           await handleHostedDeviceSyncWebhookAccepted({
             account,
             claimToken,
@@ -128,11 +220,23 @@ export class HostedDeviceSyncPublicIngressService {
       connectTarget?: string | null;
     } = {},
   ): Promise<BeginConnectionResult> {
+    const sourceLifecycleKey = buildPreparedSourceLifecycleKey(
+      userId,
+      provider,
+      options.sourceProviderSlug ?? null,
+    );
+    const sourceLifecycleProof = sourceLifecycleKey
+      ? this.preparedSourceLifecycles.get(sourceLifecycleKey) ?? null
+      : null;
+    if (sourceLifecycleKey) {
+      this.preparedSourceLifecycles.delete(sourceLifecycleKey);
+    }
     return this.ingress.startConnection({
       provider,
       returnTo,
       ownerId: userId,
       sourceProviderSlug: options.sourceProviderSlug ?? null,
+      sourceLifecycleProof,
       connectSourceId: options.connectSourceId ?? null,
       connectTarget: options.connectTarget ?? null,
     });
@@ -152,48 +256,23 @@ export class HostedDeviceSyncPublicIngressService {
         && connection.status !== "disconnected"
       );
 
+    let sourceLifecycleProof: StartConnectionSourceLifecycleProof | null = null;
     for (const connection of connections) {
-      const storedAccount = await this.context.store.getStoredConnectionAccountForUser(
-        userId,
-        connection.id,
-      );
-      const revokeSourceAccess =
-        this.registry.get(target.provider)?.connectionHandler?.revokeSourceAccess;
-
-      try {
-        if (!storedAccount || !revokeSourceAccess) {
-          throw new TypeError("Junction source cleanup authority is unavailable.");
-        }
-        await revokeSourceAccess(storedAccount, target.sourceProviderSlug);
-      } catch {
-        throw deviceSyncError({
-          cause: {
-            errorObservabilityClass: "provider_cleanup",
-            errorPhase: "browser_oauth_start",
-          },
-          code: "JUNCTION_PENDING_LINK_CLEANUP_FAILED",
-          message:
-            "Murph could not clear the earlier device connection attempt. Retry before opening another connection link.",
-          retryable: true,
-          httpStatus: 503,
-        });
-      }
-
-      const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      sourceLifecycleProof = await prepareHostedDeviceSyncConnectionSourceStart({
         connectionId: connection.id,
+        registry: this.registry,
         sourceProviderSlug: target.sourceProviderSlug,
+        store: this.context.store,
+        userId,
       });
-      if (sourceInstanceKey) {
-        const now = new Date().toISOString();
-        await this.context.store.upsertConnectionSource({
-          connectionId: connection.id,
-          sourceInstanceKey,
-          sourceProviderSlug: target.sourceProviderSlug,
-          status: "disconnected",
-          firstSeenAt: now,
-          lastSeenAt: now,
-        });
-      }
+    }
+    const sourceLifecycleKey = buildPreparedSourceLifecycleKey(
+      userId,
+      target.provider,
+      target.sourceProviderSlug,
+    );
+    if (sourceLifecycleKey && sourceLifecycleProof) {
+      this.preparedSourceLifecycles.set(sourceLifecycleKey, sourceLifecycleProof);
     }
   }
 
@@ -211,10 +290,56 @@ export class HostedDeviceSyncPublicIngressService {
     connectionIntent: CompanionConnectionIntent | null,
   ): Promise<SdkSignInSessionResult> {
     if (connectionIntent === "connect") {
-      return this.ingress.createSdkSignInSession({
+      const providerConnections = (await this.context.store.listConnectionsForUser(userId))
+        .filter((connection) =>
+          connection.provider === provider
+          && isEstablishedDeviceSyncConnection(connection)
+        );
+      if (providerConnections.length > 1) {
+        throw deviceSyncError({
+          code: "SDK_SIGN_IN_CONNECTION_AMBIGUOUS",
+          message: "The companion could not identify one active device-sync connection.",
+          retryable: false,
+          httpStatus: 409,
+        });
+      }
+      const establishedConnection = providerConnections[0] ?? null;
+      const capturedReconnectProof = establishedConnection
+        ? await captureHostedDeviceSyncConnectionSourceReconnect({
+            connectionId: establishedConnection.id,
+            sourceProviderSlug: COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
+            store: this.context.store,
+            userId,
+          })
+        : null;
+      const session = await this.ingress.createSdkSignInSession({
         provider,
         ownerId: userId,
       });
+      if (
+        capturedReconnectProof
+        && session.account.id !== capturedReconnectProof.connection.id
+      ) {
+        throw deviceSyncError({
+          code: "SDK_SIGN_IN_CONNECTION_CHANGED",
+          message: "The companion connection changed while sign-in was starting. Retry.",
+          retryable: true,
+          httpStatus: 409,
+        });
+      }
+      const reconnectProof = capturedReconnectProof
+        ?? await captureHostedDeviceSyncConnectionSourceReconnect({
+          connectionId: session.account.id,
+          sourceProviderSlug: COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
+          store: this.context.store,
+          userId,
+        });
+      await beginHostedDeviceSyncConnectionSourceReconnect({
+        proof: reconnectProof,
+        store: this.context.store,
+        userId,
+      });
+      return session;
     }
 
     const providerConnections = (await this.context.store.listConnectionsForUser(userId))
@@ -411,12 +536,85 @@ export class HostedDeviceSyncPublicIngressService {
     };
   }
 
+  async disconnectConnectionSource(
+    userId: string,
+    connectionId: string,
+    sourceProviderSlug: string,
+  ): Promise<{ sourceProviderSlug: string; status: "disconnected" }> {
+    const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
+
+    return disconnectHostedDeviceSyncConnectionSource({
+      connectionId: connection.id,
+      registry: this.registry,
+      sourceProviderSlug,
+      store: this.context.store,
+      userId,
+    });
+  }
+
+  async disconnectAllConnections(userId: string): Promise<{
+    attemptedCount: number;
+    disconnectedCount: number;
+    failedCount: number;
+  }> {
+    const connections = (await this.context.store.listConnectionsForUser(userId))
+      .filter((connection) => connection.status !== "disconnected");
+    let attemptedCount = 0;
+    let disconnectedCount = 0;
+    let failedCount = 0;
+
+    for (const connection of connections) {
+      if (await readHostedHealthDataConsentState({
+        memberId: userId,
+        prisma: this.context.store.prisma,
+      }) !== "revoked") {
+        break;
+      }
+      attemptedCount += 1;
+      try {
+        await disconnectHostedDeviceSyncConnection({
+          connectionId: connection.id,
+          registry: this.registry,
+          store: this.context.store,
+          userId,
+        });
+        disconnectedCount += 1;
+      } catch (error) {
+        failedCount += 1;
+        console.error("Health-data consent withdrawal could not disconnect a source.", {
+          ...formatHostedExecutionSafeLogErrorDetails(error, {
+            code: "HEALTH_DATA_CONSENT_SOURCE_DISCONNECT_FAILED",
+          }),
+          provider: connection.provider,
+        });
+      }
+    }
+
+    return {
+      attemptedCount,
+      disconnectedCount,
+      failedCount,
+    };
+  }
+
   toBrowserConnection(account: PublicDeviceSyncAccount): HostedBrowserDeviceSyncConnection {
     return toHostedBrowserDeviceSyncConnection(account, this.context.env.routingIndexKey);
   }
 
   createBrowserConnectionId(connectionId: string): string {
     return createHostedBrowserConnectionId(this.context.env.routingIndexKey, connectionId);
+  }
+
+  private async hasWithdrawnHealthDataConsent(connectionId: string): Promise<boolean> {
+    const memberId = await this.context.store.getConnectionOwnerId(connectionId);
+    if (!memberId) {
+      return false;
+    }
+
+    return await readHostedHealthDataConsentState({
+      memberId,
+      prisma: this.context.store.prisma,
+    }) === "revoked";
   }
 
   private async requireOwnedBrowserConnection(
@@ -442,6 +640,17 @@ export class HostedDeviceSyncPublicIngressService {
 
 }
 
+function buildPreparedSourceLifecycleKey(
+  userId: string,
+  provider: string,
+  sourceProviderSlug: string | null,
+): string | null {
+  const normalizedSourceProviderSlug = normalizeJunctionProviderSlug(sourceProviderSlug);
+  return provider === "junction" && normalizedSourceProviderSlug
+    ? `${userId}\u0000${normalizedSourceProviderSlug}`
+    : null;
+}
+
 export function createHostedDeviceSyncPublicIngressService(
   request: Request,
 ): HostedDeviceSyncPublicIngressService {
@@ -450,4 +659,12 @@ export function createHostedDeviceSyncPublicIngressService(
   const registry = createHostedDeviceSyncRegistry(process.env);
 
   return new HostedDeviceSyncPublicIngressService(context, webhookAdmin, registry);
+}
+
+export async function disconnectAllHostedDeviceSyncConnectionsForUser(input: {
+  request: Request;
+  userId: string;
+}) {
+  return createHostedDeviceSyncPublicIngressService(input.request)
+    .disconnectAllConnections(input.userId);
 }

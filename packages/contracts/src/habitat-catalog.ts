@@ -53,9 +53,35 @@ function enumType(...values: string[]): HabitatIndicatorValueType {
 
 const TEXT: HabitatIndicatorValueType = { kind: "text", maxLength: 400 };
 const BOOL: HabitatIndicatorValueType = { kind: "boolean" };
+const CITY_OR_REGION_MAX_LENGTH = 120;
+const CITY_OR_REGION_CHARACTERS = /^[\p{L}\p{M}][\p{L}\p{M} .,'’()/-]*$/u;
+const PRECISE_ADDRESS_WORDS =
+  /\b(?:apartment|apt|avenue|boulevard|building|calle|drive|flat|floor|house|lane|lokal|mieszkanie|osiedle|postal|postcode|road|rue|street|suite|ulica|unit|zip)\b/iu;
+
+/**
+ * Returns provider-safe member-stated location context. This deliberately
+ * refuses to infer a city from address-shaped input: callers should ask the
+ * member for a city or approximate region instead.
+ */
+export function normalizeHabitatCityOrRegion(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().replace(/\s+/gu, " ");
+  if (
+    normalized.length === 0
+    || normalized.length > CITY_OR_REGION_MAX_LENGTH
+    || !CITY_OR_REGION_CHARACTERS.test(normalized)
+    || /\d/u.test(normalized)
+    || PRECISE_ADDRESS_WORDS.test(normalized)
+  ) {
+    return null;
+  }
+  return normalized;
+}
 
 export const HABITAT_CATALOG: HabitatCatalog = {
-  version: "2026-07-08",
+  version: "2026-07-23",
   aspects: [
     {
       id: "home-location",
@@ -68,6 +94,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "location",
           label: "City / region",
           priority: "high",
+          informational: true,
           valueType: TEXT,
           question: "Where do you live these days? A city is enough.",
         },
@@ -75,6 +102,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "area_type",
           label: "Area type",
           priority: "medium",
+          informational: true,
           valueType: enumType("urban_center", "suburbs", "rural"),
           question: "Are you in the city center, suburbs, or outside town?",
         },
@@ -107,6 +135,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "temp_control",
           label: "Temperature control",
           priority: "high",
+          informational: true,
           valueType: enumType("ac", "adjustable_heating", "none"),
           question: "Can you control it — AC, heating?",
         },
@@ -114,6 +143,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "window_at_night",
           label: "Window at night",
           priority: "high",
+          informational: true,
           valueType: enumType("open", "closed", "seasonal"),
           question: "Do you sleep with the window open or closed?",
         },
@@ -121,6 +151,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "co2_meter",
           label: "CO2 meter",
           priority: "high",
+          informational: true,
           valueType: enumType("aranet", "other", "none"),
           question: "Ever measured CO2 in your bedroom?",
         },
@@ -151,12 +182,14 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "noise_countermeasures",
           label: "Noise countermeasures",
           priority: "medium",
+          informational: true,
           valueType: enumType("earplugs", "white_noise", "none"),
         },
         {
           id: "humidity_known",
           label: "Humidity",
           priority: "medium",
+          informational: true,
           valueType: enumType("measured", "humidifier", "dehumidifier", "unmanaged"),
           question: "Does the air get dry in winter? Do you run a humidifier?",
           target: "40-60% RH",
@@ -172,6 +205,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "mattress_age_years",
           label: "Mattress age",
           priority: "low",
+          informational: true,
           valueType: { kind: "number", min: 0, max: 60, unit: "years" },
         },
         {
@@ -215,6 +249,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "ventilation",
           label: "Ventilation",
           priority: "high",
+          informational: true,
           valueType: enumType("mechanical_recuperation", "mechanical", "windows_only"),
           question: "Does your place have mechanical ventilation, or do you air it out with windows?",
         },
@@ -229,6 +264,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "air_purifier",
           label: "Air purifier",
           priority: "medium",
+          informational: true,
           valueType: enumType("hepa", "other", "none"),
           question: "Do you run an air purifier?",
         },
@@ -236,6 +272,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "air_quality_meter",
           label: "Air quality meter",
           priority: "medium",
+          informational: true,
           valueType: enumType("pm25", "co2", "combined", "none"),
           question: "Do you measure air quality at home with anything?",
         },
@@ -243,6 +280,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "stove",
           label: "Stove",
           priority: "medium",
+          informational: true,
           valueType: enumType("gas", "induction", "electric"),
           question: "Do you cook on gas or induction?",
           target: "gas → NO2; ventilate while cooking",
@@ -257,6 +295,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "radon_tested",
           label: "Radon",
           priority: "low",
+          informational: true,
           valueType: enumType("tested_ok", "tested_high", "not_tested"),
           target: "only relevant in risk regions on ground floor/basement",
         },
@@ -335,6 +374,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "sauna_access",
           label: "Sauna",
           priority: "high",
+          informational: true,
           valueType: enumType("home", "gym", "nearby", "none"),
           question: "Do you have access to a sauna anywhere — at home, at the gym?",
         },
@@ -444,12 +484,14 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "work_mode",
           label: "Work mode",
           priority: "high",
+          informational: true,
           valueType: enumType("remote", "office", "hybrid"),
         },
         {
           id: "desk_hours",
           label: "Hours at a desk",
           priority: "high",
+          informational: true,
           valueType: { kind: "number", min: 0, max: 18, unit: "h/day" },
           question: "How many hours a day do you actually spend at a desk?",
         },
@@ -457,6 +499,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "standing_desk",
           label: "Standing desk",
           priority: "high",
+          informational: true,
           valueType: enumType("adjustable_used", "adjustable_unused", "fixed"),
           question: "Do you have a height-adjustable desk? Do you use it standing?",
           target: "20-8-2 pattern",
@@ -465,6 +508,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "screen_setup",
           label: "Screen setup",
           priority: "high",
+          informational: true,
           valueType: enumType("external_monitor", "laptop_only", "mixed"),
           question: "Do you work on just the laptop, or an external monitor?",
         },
@@ -479,6 +523,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "chair",
           label: "Chair",
           priority: "medium",
+          informational: true,
           valueType: enumType("ergonomic", "ordinary", "varies"),
           question: "What do you sit on — a proper chair, or whatever's around?",
         },
@@ -486,6 +531,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "external_keyboard",
           label: "External keyboard with laptop",
           priority: "medium",
+          informational: true,
           valueType: BOOL,
         },
         {
@@ -515,6 +561,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "gym_access",
           label: "Gym access",
           priority: "high",
+          informational: true,
           valueType: enumType("membership", "home_gym", "both", "none"),
           question: "Do you have gym access — a membership, or gear at home?",
         },

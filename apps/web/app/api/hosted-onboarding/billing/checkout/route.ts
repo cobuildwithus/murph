@@ -1,6 +1,6 @@
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
 import {
-  parseHostedBillingPlanCode,
+  parseHostedPublicBillingPlanCode,
   parseHostedPublicBillingCheckoutOffer,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -24,7 +24,9 @@ export const POST = withJsonError(async (request: Request) => {
     const prisma = getPrisma();
     const auth = await requireHostedAppSessionFromRequest(request);
     const { body, inviteCode } = await requireHostedInviteCodeFromRequest(request);
-    const billingPlanCode = parseHostedBillingPlanCode(body.billingPlanCode);
+    const billingPlanCode = parseHostedPublicBillingPlanCode(
+      body.billingPlanCode,
+    );
     const checkoutOffer = parseHostedPublicBillingCheckoutOffer(body.checkoutOffer);
 
     if (body.billingPlanCode !== undefined && !billingPlanCode) {

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -49,6 +50,12 @@ const RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS = [
   'gut-digestion',
   'general-eye-health',
 ] as const
+
+const managedGroupSkillsArePublicFallbacks = readFileSync(
+  path.join(resolveAssistantSkillsRoot(), 'group-chat', 'SKILL.md'),
+  'utf8',
+).includes('This public fallback intentionally contains no managed')
+const managedGroupSkillIt = managedGroupSkillsArePublicFallbacks ? it.skip : it
 
 type AssistantSkillMetadata = {
   readonly description: string
@@ -226,22 +233,27 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('keeps private and shared activity interpretation in their owners', async () => {
-    const load = async (slug: string) => {
-      const skill = ASSISTANT_SKILLS.find((candidate) => candidate.slug === slug)
-      if (!skill) throw new Error(`Missing registered skill: ${slug}`)
-      return (await readSkillFile(skill)).replace(/\s+/gu, ' ')
-    }
-    const [daily, shared] = await Promise.all([
-      load('daily-activity'),
-      load('group-chat'),
-    ])
+  it('keeps private activity interpretation in its owner', async () => {
+    const dailySkill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'daily-activity',
+    )
+    if (!dailySkill) throw new Error('Missing registered skill: daily-activity')
+    const daily = (await readSkillFile(dailySkill)).replace(/\s+/gu, ' ')
 
     expect(daily).toMatch(
       /wearables day <date>.+wearables activity list.+canonical workout-day rollup/u,
     )
     expect(daily).toContain('current-local-day totals as provisional and say "so far."')
     expect(daily).toContain('not proof of failed provider sync or import')
+  })
+
+  managedGroupSkillIt('keeps shared activity interpretation in its owner', async () => {
+    const groupChatSkill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'group-chat',
+    )
+    if (!groupChatSkill) throw new Error('Missing registered skill: group-chat')
+    const shared = (await readSkillFile(groupChatSkill)).replace(/\s+/gu, ' ')
+
     expect(shared).toContain('its cause is unverified')
     expect(shared).toContain('current-local-day value as provisional: say "so far"')
   })
@@ -691,7 +703,7 @@ describe('assistant skill assets', () => {
     expect(nutritionText).not.toContain('### GI comfort and performance')
   })
 
-  it('keeps group newsletter setup and opt-out behavior in the group-chat skill', async () => {
+  managedGroupSkillIt('keeps group newsletter setup and opt-out behavior in the group-chat skill', async () => {
     const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
     expect(groupChatSkill).toBeTruthy()
     if (!groupChatSkill) return
@@ -700,7 +712,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/group-newsletter/SKILL.md')
     expect(raw).toContain('do not create it immediately with invented')
     expect(raw).toContain('group wants to call it')
-    expect(raw).toContain('newsletter reaction-share scope')
+    expect(raw).toContain('newsletter permission scope')
     expect(raw).toMatch(/sleep\s+duration/u)
     expect(raw).toContain('workout summaries, resting heart rate, and HRV')
     expect(raw).toMatch(/Let\s+the group widen/u)
@@ -708,11 +720,12 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('before inventing a')
     expect(raw).toContain('generic default')
     expect(raw).toMatch(/[Pp]ass that same chosen name\s+as `displayName`/)
-    expect(raw).toContain('`murph.group action="post_join_offer"`')
-    expect(raw).toContain('`murph.group action="create_join_link"`')
+    expect(raw).toContain('`murph.group action="offer_access"`')
+    expect(raw).not.toContain('`murph.group action="create_join_link"`')
+    expect(raw).not.toContain('`murph.group action="post_join_offer"`')
     expect(raw).toContain('## Creating a hosted group')
     expect(raw).toContain('In interactive group setup and additive-permission flows, call `read_current`')
-    expect(raw).toContain('scheduled surface uses `read_shared` and may post one evidence-gated offer')
+    expect(raw).toMatch(/scheduled surface uses\s+`read_shared` and may make one evidence-gated offer/u)
     expect(raw).toContain('Only when an interactive `read_current` returns')
     expect(raw).toMatch(/one reusable core\s+set/u)
     const coreSet = raw.match(
@@ -726,17 +739,20 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/pass the unique union of the core\s+set/u)
     expect(raw).toContain('Never list a scope twice')
     expect(raw).toMatch(/That\s+device scope does not grant Apple Health access/u)
-    expect(raw).toContain('`requestedVaultShareProjectionScopes` on `create_join_link`')
-    expect(raw).toContain('`projectionScopes` when creation uses `post_join_offer`')
+    expect(raw).toContain('Pass the set as `projectionScopes` on `offer_access`')
+    expect(raw).toContain('A returned `presentation="native"`')
+    expect(raw).toContain('does not\nprove UI was newly posted or is currently visible')
+    expect(raw).toMatch(/A returned\s+`presentation="link"` includes the exact first-party `joinUrl`/u)
+    expect(raw).toContain('A returned `status="unavailable"` proves no consent surface')
     expect(raw).toContain('This is a permission\nrequest, not automatic sharing')
-    expect(raw).toContain('every item stays individually\nselectable')
+    expect(raw).toContain('every item stays individually selectable')
     expect(raw).toContain('an explicit request from the group creator for narrower')
     expect(raw).toContain("`group-email.v0` remains the server's standard new-group request")
     expect(raw).toMatch(/Do not request every available projection by\s+default/u)
     expect(raw).toContain('When `read_current` returns an existing group, do not add the core set')
     expect(raw).toContain('Use only the exact workflow or additive scopes needed')
     expect(raw).toMatch(
-      /`read_current` can return `status="none"`[\s\S]*not that\s+someone must link an external workspace[\s\S]*those\s+actions create the hosted group record/u,
+      /`read_current` can return `status="none"`[\s\S]*not that\s+someone must link an external workspace[\s\S]*call `offer_access`[\s\S]*trusted host creates the\s+hosted group record/u,
     )
     expect(raw).toContain('`murph.automation action="save_newsletter"`')
     expect(raw).toMatch(
@@ -769,6 +785,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('complete read-compose-send and notification')
     expect(raw).toContain('Do not duplicate or')
     expect(raw).toContain('action="revoke_own_email_share"')
+    expect(raw).toContain('authenticated Linq\n(iMessage or SMS) or Telegram group chat')
     expect(raw).toContain('## Leaving a hosted group')
     expect(raw).toContain('private one-to-one conversation')
     expect(raw).toContain('`murph.group action="list_memberships"` first')
@@ -777,7 +794,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Never guess an id')
     expect(raw).toContain('do not create, reconstruct, or reveal a reusable join URL')
     expect(raw).not.toContain('temporarily unavailable')
-    expect(raw).toContain('does not remove them from the iMessage chat')
+    expect(raw).toContain('does not remove them from the underlying provider chat')
     expect(raw).toContain('owner_cannot_leave')
     expect(raw).toContain('## Room style settings')
     expect(raw).toContain('shared room settings, not the visible sender\'s personal')
@@ -790,9 +807,9 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('https://www.withmurph.ai/settings?addEmail=true')
     expect(raw).not.toContain('`/settings?addEmail=true`')
     expect(raw).not.toContain('nudge them in the group')
-    expect(raw).toContain("use the channel's permission\npath above scoped to")
+    expect(raw).toContain('asks how someone can opt into the newsletter, use `offer_access` scoped to')
     expect(raw).toContain('the Creating a hosted group core set\ntakes precedence when `read_current` returns `status="none"`')
-    expect(raw).toContain('For an existing\ngroup, propose only the newsletter reaction-share scope')
+    expect(raw).toContain('For an existing\ngroup, propose only the newsletter permission scope')
     expect(raw).toContain('`group-email.v0`, `sleep-duration-days.v0`')
     expect(raw).not.toMatch(
       /path above scoped to[\s\S]{0,400}`sleep-times\.v0`/u,
@@ -807,36 +824,32 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('call\n`murph.group action="read_chat_name"` exactly once')
     expect(raw).toContain('immediately before the\ncreation action')
     expect(raw).toContain('also pass the group\'s chosen name as')
-    expect(raw).toContain('`displayName` on the iMessage/Linq `post_join_offer` call or Telegram')
-    expect(raw).toContain('Web owns the complete canonical')
-    expect(raw).toContain('Like-to-consent sentence')
-    expect(raw).toContain('exact scope disclosure')
-    expect(raw).toContain('first-party')
-    expect(raw).toContain('customize link')
-    expect(raw).toContain('Never author or pass offer text')
+    expect(raw).toContain('`displayName`. The trusted host owns the complete canonical consent copy')
+    expect(raw).toContain('exact\nscope disclosure')
+    expect(raw).toContain('first-party customize link')
+    expect(raw).toContain('Never author or pass offer')
     expect(raw).not.toContain('{{join_url}}')
     expect(raw).not.toContain('{{share_scope}}')
-    expect(raw).toContain('newsletter like-to-consent path')
-    expect(raw).not.toContain('newsletter react-to-join path')
-    expect(raw).toContain('In iMessage, liking the message adds the')
-    expect(raw).toContain('disclosed snapshot')
-    expect(raw).toMatch(/For\s+existing participants, call this permission opt-in/)
-    expect(raw).toContain('Never silently')
-    expect(raw).toContain('share health data that the message did not disclose')
+    expect(raw).toContain('Native consent adds the disclosed snapshot')
+    expect(raw).toContain('link consent uses the exact returned Web URL')
+    expect(raw).toMatch(/For existing participants, call\s+this permission opt-in/)
+    expect(raw).toContain('Never silently share health')
+    expect(raw).toContain('data that the message did not disclose')
     expect(raw).not.toContain('link-free offer')
     expect(raw).toContain('never repeatedly re-offer')
-    expect(raw).toContain('## Additive permissions')
-    expect(raw).toMatch(/default\s+to `murph\.group action="post_join_offer"`/)
-    expect(raw).toMatch(/Do not tell existing members\s+to join/u)
-    expect(raw).toContain('Pass only the exact')
-    expect(raw).toMatch(/Web owns the full canonical offer\s+copy/u)
-    expect(raw).toContain('Telegram has no provider-side `post_join_offer` path')
-    expect(raw).toMatch(/In a Telegram group,\s+call `create_join_link`/u)
-    expect(raw).toContain('include the\nreturned server-owned `joinUrl`')
-    expect(raw).toContain('Never\nclaim that a reaction offer was posted in Telegram')
+    expect(raw).toContain('## Offering group access and additive permissions')
+    expect(raw).toContain('Use `murph.group action="offer_access"`')
+    expect(raw).toContain('Omit `standaloneLink`')
+    expect(raw).toContain('`presentation="native"`')
+    expect(raw).toContain('`presentation="link"`')
+    expect(raw).toContain('SMS, Telegram, explicit standalone-link requests')
+    expect(raw).toContain('sms_reactions_unsupported')
+    expect(raw).toContain('sms_attachments_unsupported')
+    expect(raw).toContain('sms_chat_customization_unsupported')
+    expect(raw).toContain('Never call an SMS room\niMessage')
   })
 
-  it('keeps the new-group contact handoff natural and reactive', async () => {
+  managedGroupSkillIt('keeps the new-group contact handoff natural and reactive', async () => {
     const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
     expect(groupChatSkill).toBeTruthy()
     if (!groupChatSkill) return
@@ -849,11 +862,13 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/Use your own words,\s+not a fixed script/u)
     expect(raw).toContain('Do not repeat the invitation unprompted')
     expect(raw).toContain('when someone new joins later')
-    expect(raw).toMatch(/if\s+someone asks you to resend or re-share the card, share it again/u)
+    expect(raw).toMatch(/if someone asks you to resend or re-share\s+the card, share it again/u)
     expect(raw).not.toContain('Never try to re-send it')
     expect(raw).toContain('`already_shared`')
-    expect(raw).toContain('that proves the attempt, not delivery')
-    expect(raw).toContain('Never claim the chat blocks duplicates')
+    expect(raw).toMatch(/that proves the attempt,\s+not delivery/u)
+    expect(raw).toMatch(/Never\s+claim the chat blocks duplicates/u)
+    expect(raw).toContain('`sms_attachments_unsupported`')
+    expect(raw).toContain('without claiming a card was sent')
     expect(raw).toContain('If\n  someone asks why they have not been added')
     expect(raw).toContain('activated a Murph account at some point')
     expect(raw).toMatch(/does\s+not say whether they can use it right now/u)
@@ -863,21 +878,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('the shape of "')
   })
 
-  it('keeps next-group ownership preparation explicit and private', async () => {
-    const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
-    expect(groupChatSkill).toBeTruthy()
-    if (!groupChatSkill) return
-
-    const raw = await readSkillFile(groupChatSkill)
-    expect(raw).toContain('action="prepare_next_group"')
-    expect(raw).toContain('one new group')
-    expect(raw).toContain('for 30 minutes')
-    expect(raw).toContain("Do not claim that Murph detected")
-    expect(raw).toContain("Never call any\nof these actions from a group, email, scheduled turn")
-    expect(raw).toContain("do not tell the member to race to\nsend the first message")
-  })
-
-  it('polls scheduled member asks to a terminal result in the current turn', async () => {
+  managedGroupSkillIt('polls scheduled member asks to a terminal result in the current turn', async () => {
     const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
     expect(groupChatSkill).toBeTruthy()
     if (!groupChatSkill) return
@@ -896,7 +897,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('resumes that same current\nautomation')
   })
 
-  it('registers a dedicated group newsletter editorial skill', async () => {
+  managedGroupSkillIt('registers a dedicated group newsletter editorial skill', async () => {
     const newsletterSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'group-newsletter',
     )
@@ -955,7 +956,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('best total this month')
   })
 
-  it('keeps group challenge guidance aligned with selectable scoring projections', async () => {
+  managedGroupSkillIt('keeps group challenge guidance aligned with selectable scoring projections', async () => {
     const groupChallengeSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'group-challenge',
     )
@@ -978,7 +979,7 @@ describe('assistant skill assets', () => {
     // The scoring and diagnostic scopes must never be requested in one read:
     // the combined result is refused whole above the model ceiling.
     expect(raw).not.toContain('the exact scoring scope and `device-sync-status.v0`')
-    expect(raw).toContain('post that offer immediately from')
+    expect(raw).toContain('call `offer_access` immediately from')
     expect(raw).toContain('an explicit `status`')
     expect(raw).toMatch(/by exact\s+`participantId`, never by display name/u)
     expect(raw).toMatch(/Duplicate or changed names do not\s+change that join\./u)
@@ -1001,21 +1002,21 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('`episodePublicGapDate`')
     expect(raw).toContain('state the exact missing group share\n   in ordinary language')
     expect(raw).toMatch(/Never infer a missing\s+permission from granted-but-missing or stale data\./u)
-    expect(raw).toMatch(/call `murph\.group action="post_join_offer"` exactly once after the read with\s+only those `projectionScopes`/u)
+    expect(raw).toMatch(/call `murph\.group action="offer_access"` exactly once after the read with only\s+those `projectionScopes`/u)
     expect(raw).toMatch(/adds no scheduler-side message and no pre-model work/u)
-    expect(raw).toContain('Never author generic permission copy or tell someone to Like the standings.')
+    expect(raw).toMatch(/Never author generic\s+permission copy or tell someone to Like the standings\./u)
     expect(raw).toMatch(/explicitly says they do not want to share a scope, record that\s+choice and do\s+not offer, repeat, or nag/u)
     expect(raw).toMatch(/grant\s+Apple Health or\s+operating-system Steps access/u)
-    expect(raw).toContain('Treat a `sent` result as an opaque handled result')
-    expect(raw).toMatch(/Do not infer, announce,\s+or append a separate assistant message claiming that a card is visible or\s+newly posted\./u)
-    expect(raw).toMatch(/record that the offer action was handled for that exact participant and\s+scope/u)
-    expect(raw.replace(/\s+/gu, ' ')).toContain(
-      'When the card is the only user-facing outcome, call `murph.finish_without_reply`',
-    )
+    expect(raw).toMatch(/Its recency evidence is unavailable because final-reply delivery\s+owns presentation timing/u)
+    expect(raw).toMatch(/Never use a scheduled link or a diagnostic-scope\s+offer as challenge buy-in/u)
+    expect(raw).toMatch(/This scheduled surface\s+returns `presentation="link"`; include the exact\s+returned `joinUrl` once/u)
+    expect(raw).toMatch(/Do not\s+infer, announce, or append a companion message claiming native consent UI is\s+visible/u)
+    expect(raw).toMatch(/record that the\s+offer action was handled for that exact participant and scope/u)
+    expect(raw).not.toContain('When native consent is the only user-facing outcome')
     expect(raw).not.toContain('If the returned group proves')
     expect(raw).not.toContain("Web's card is\n   the visible confirmation.")
     expect(raw).toMatch(/Never offer the scoring scope merely because its grant exists but current\s+data is missing/u)
-    expect(raw).toMatch(/literal disconnected, `needs-reconnect`, and other device statuses may get\s+status-appropriate guidance and no permission card\./u)
+    expect(raw).toMatch(/literal disconnected, `needs-reconnect`, and other device statuses may get\s+status-appropriate guidance and no access offer\./u)
     expect(raw).not.toContain('belong in the affected participant\'s private thread')
     expect(raw).toContain(
       'The runtime does not preload a roster, grant snapshot, or shared\n   records into the prompt.',
@@ -1023,11 +1024,10 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('vault-cli group shared --kind')
     expect(raw).not.toContain('vault-cli group shared --scope')
     expect(raw).not.toContain('vault-cli group weekly --')
-    expect(raw).toMatch(/Whether `read_current` returns\s+`status="none"` or an existing group/u)
-    expect(raw).toMatch(/do not\s+create a hosted group or post a permission offer as part of challenge setup/u)
-    expect(raw).toMatch(/Explain any missing group setup or share naturally in the normal\s+group reply/u)
-    expect(raw).toMatch(/bounded proactive\s+standings behavior below begins only once the challenge is running/u)
-    expect(raw).toMatch(/Do not\s+tell the room to join again/u)
+    expect(raw).toMatch(/If `read_current` returns `status="none"`, do not create a hosted group as a\s+side effect of challenge kickoff/u)
+    expect(raw).toMatch(/Call `murph\.group\s+action="offer_access"` exactly once from that scoring read\s+with only the exact scoring scope it proved `not_granted`/u)
+    expect(raw).toMatch(/record the offer as\s+handled only when the tool reports `status="ok"`/u)
+    expect(raw).toMatch(/grant without `grantedAt`, a grant before `offeredAt`, a grant more\s+than 24 hours later, silence, an unresolved identity, unavailable recency\s+evidence, or an offer followed by materially changed challenge terms does not\s+establish buy-in/u)
     expect(raw).not.toContain('Mint the join link with `murph.group`')
     expect(raw).toContain(
       "under the developer prompt's shared\nautomation action rules",
@@ -1771,6 +1771,35 @@ describe('assistant skill assets', () => {
     expect(referenceText).not.toContain('exercise-image skill')
   })
 
+  it('keeps pain-driven restrictions evidence-gated and durable-rehab answers durable', async () => {
+    const physicalTherapy = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'physical-therapy',
+    )
+    expect(physicalTherapy).toBeTruthy()
+    if (!physicalTherapy) {
+      return
+    }
+
+    expect(physicalTherapy.triggerHint).toContain(
+      'Read before recommending exercises, rest, activity restriction, or load changes',
+    )
+
+    const raw = await readSkillFile(physicalTherapy)
+
+    expect(raw).toContain(
+      "Do not anchor on the user's label or let it choose an acute-injury branch.",
+    )
+    expect(raw).toContain(
+      'do not answer mainly with short-term flare management or a bare referral',
+    )
+    expect(raw).toContain(
+      'Rest, activity restriction, and fixed recovery windows are interventions, not neutral defaults while clarifying.',
+    )
+    expect(raw).toContain(
+      'ask that question before restricting activity; preserve tolerated movement in the meantime.',
+    )
+  })
+
   it('keeps exercise lookup and presentation in one shared domain reference', async () => {
     const skillBySlug = new Map(
       ASSISTANT_SKILLS.map((skill) => [skill.slug, skill] as const),
@@ -2467,7 +2496,7 @@ How old are you and what's your gender?
       },
       {
         contract:
-          'If they ask to pause, leave onboarding open and let the existing managed onboarding follow-up automation own continuation.',
+          'If they ask to pause, leave onboarding open and let the finite managed next-day recovery occurrence decide whether continuation is timely.',
         section: parkSection,
         userMessage: 'Pause for now',
       },
@@ -2591,6 +2620,23 @@ How old are you and what's your gender?
     expect(compact).toContain(
       'If the last onboarding question is still unanswered, do not send a different setup question.',
     )
+    expect(raw).toContain('### Finite next-day recovery')
+    expect(compact).toContain(
+      'The occurrence may instead ask one natural, low-pressure question that lets the user choose whether to continue.',
+    )
+    expect(compact).toContain(
+      'Send or skip ends this scheduled recovery.',
+    )
+    expect(compact).toContain(
+      'do not run the completion command or otherwise mutate onboarding state',
+    )
+    expect(compact).toContain(
+      'Only a later foreground user reply may advance or complete onboarding through the canonical state owner.',
+    )
+    expect(compact).toContain(
+      'uses the ordinary scheduled notification skip and leaves onboarding state unchanged',
+    )
+    expect(compact).not.toContain('managed daily onboarding follow-up')
 
     expect(raw).not.toContain('roughly 9-10 short assistant messages')
     expect(raw).not.toContain('### 4. Establish the first ongoing support loop')

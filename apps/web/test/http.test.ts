@@ -546,6 +546,50 @@ describe("json route helper factory", () => {
     });
   });
 
+  it("redacts national-format phone numbers and schemeless URLs while keeping the surrounding wording", () => {
+    // These are the shapes external text actually uses. Matching only `+`
+    // phones and `https://` URLs left them readable in persisted diagnostics
+    // and operational alert emails.
+    expect(httpModule.sanitizeJsonLogString("carrier filtered 415-555-2671 for spam"))
+      .toBe("carrier filtered <redacted-phone> for spam");
+    expect(httpModule.sanitizeJsonLogString("blocked (415) 555-2671 at gateway"))
+      .toBe("blocked <redacted-phone> at gateway");
+    expect(httpModule.sanitizeJsonLogString("415.555.2671 unreachable"))
+      .toBe("<redacted-phone> unreachable");
+    expect(httpModule.sanitizeJsonLogString("415 555 2671 unreachable"))
+      .toBe("<redacted-phone> unreachable");
+    expect(httpModule.sanitizeJsonLogString("see www.example.test/help for details"))
+      .toBe("see <redacted-url> for details");
+  });
+
+  it("redacts a whole email address whose domain is www-prefixed", () => {
+    // Ordering regression: if the schemeless-URL rule runs first it consumes the
+    // domain and strands the local part, which is usually the identifying half.
+    for (const address of [
+      "alice@www.example.test",
+      "alice+tag@www.example.test",
+      "alice@mail.www.example.test",
+    ]) {
+      const sanitized = httpModule.sanitizeJsonLogString(`provider rejected ${address}`);
+      expect(sanitized).toBe("provider rejected <redacted-email>");
+      expect(sanitized).not.toContain("alice");
+      expect(sanitized).not.toContain("example.test");
+    }
+  });
+
+  it("keeps non-contact numerics readable so diagnostics stay useful", () => {
+    // Over-redaction would defeat the purpose of keeping provider reasons.
+    for (const value of [
+      "failed at 2026-08-04 with code 30007",
+      "retry after 1.2.3 seconds",
+      "carrier filtered the message",
+      "spam score 0.87 exceeded threshold",
+      "error code 4001 from gateway",
+    ]) {
+      expect(httpModule.sanitizeJsonLogString(value)).toBe(value);
+    }
+  });
+
   it("redacts complete authorization and cookie header values from log strings", () => {
     expect(httpModule.sanitizeJsonLogString("Authorization: Bearer auth-fixture-token, status=401"))
       .toBe("Authorization: <redacted-secret>");

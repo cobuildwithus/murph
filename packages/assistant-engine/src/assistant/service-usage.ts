@@ -11,6 +11,9 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
+import {
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
 } from './codex-thread-route.js'
@@ -46,6 +49,9 @@ export async function recordAssistantUsageEvent(input: {
   const usageRecorder = input.executionContext.hosted?.usageRecorder ?? null
   const apiKeyEnv = normalizeNullableString(usage?.apiKeyEnv)
   const usageAttribution = input.providerResult.usageAttribution ?? null
+  const isMemberFundedCustomInference =
+    input.providerResult.providerOptions.modelProvider
+      === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
 
   if (!usage || !hostedMemberId || !usageRecorder) {
     return
@@ -68,13 +74,18 @@ export async function recordAssistantUsageEvent(input: {
       provider: input.providerResult.provider,
       routeId: readCodexThreadRouteFingerprint(input.providerResult.route),
       requestedModel: usage.requestedModel ?? input.providerResult.providerOptions.model,
-      servedModel: usage.servedModel ?? null,
-      providerName: normalizeNullableString(usage.providerName),
+      servedModel: isMemberFundedCustomInference ? null : usage.servedModel ?? null,
+      providerName: isMemberFundedCustomInference
+        ? HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
+        : normalizeNullableString(usage.providerName),
       providerRequestOutcome: input.providerRequestOutcome ?? 'succeeded',
-      baseUrl: normalizeNullableString(usage.baseUrl),
+      baseUrl: isMemberFundedCustomInference
+        ? null
+        : normalizeNullableString(usage.baseUrl),
       apiKeyEnv,
       credentialSource: usageAttribution?.credentialSource ?? resolveAssistantUsageCredentialSource({
         apiKeyEnv,
+        credentialSourceHint: isMemberFundedCustomInference ? 'member' : null,
         effectiveEnv: input.effectiveEnv,
         headers: input.providerResult.providerOptions.headers ?? null,
         provider: input.providerResult.provider,

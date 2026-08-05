@@ -44,6 +44,18 @@ describe('assistant hosted low-usage skill', () => {
       'how to get more usage, what options exist, how to earn usage, or about a mission',
     )
     expect(normalizedSkill).toContain(
+      'A direct funding intent explicitly asks to fund, sponsor, contribute, pay to add usage, receive the funding link, or otherwise selects the paid path over earned options',
+    )
+    expect(normalizedSkill).toContain(
+      'A broad-options intent asks generically how to get or add more usage, get more Murph time, or keep the room going',
+    )
+    expect(normalizedSkill).toContain(
+      'Call `read_usage` only',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not call `read_usage_referral` or add earned missions',
+    )
+    expect(normalizedSkill).toContain(
       'Do this even when current usage is `healthy`',
     )
     expect(normalizedSkill).toContain(
@@ -54,6 +66,9 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(normalizedSkill).toContain(
       'Do not answer with only the paid or funding path or make the sender ask again',
+    )
+    expect(normalizedSkill).toContain(
+      'A direct group funding intent explicitly selects the paid or funding path rather than asking generically for more usage',
     )
     expect(normalizedSkill).toContain(
       "use this turn's `read_usage_referral` result",
@@ -68,9 +83,31 @@ describe('assistant hosted low-usage skill', () => {
 
   it('keeps the first heads-up to one short final segment', async () => {
     const skill = await readLowUsageSkill()
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
+    const firstHeadsUpSection = skill.slice(
+      skill.indexOf('## Choose the first-heads-up question'),
+      skill.indexOf('## Referral comedy shape'),
+    )
 
     expect(skill).toContain('append exactly one final usage segment')
-    expect(skill).toContain('using `---` only on a bubble-supporting channel')
+    expect(skill).toContain(
+      'using `---` only when the active direct reply style expressly authorizes that',
+    )
+    expect(skill).toContain(
+      'In an interactive group, append the first assistant-initiated low-usage mention',
+    )
+    expect(skill).toContain('Never use `---` there')
+    expect(skill).toContain(
+      'even when the underlying transport supports reply bubbles',
+    )
+    expect(skill).toContain(
+      'The second is a one-bubble\n' +
+      'group example with no delimiter',
+    )
+    expect(skill).toContain(
+      "Maya won yesterday's step challenge with 14,320 steps. 🏆\n\n" +
+      "Tiny operational drama: we're getting low on Murph time",
+    )
     expect(skill).toContain('begins after one final `---` line')
     expect(skill).toContain('may still use earlier natural')
     expect(skill).toContain('current message already asks about usage')
@@ -81,11 +118,32 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('defer the entire usage heads-up')
     expect(skill).toContain('one or two short sentences')
     expect(skill).toContain('Never spread it across multiple usage')
-    expect(skill).toContain('without `---` bubble support')
+    expect(skill).toContain(
+      'active direct reply style does not expressly authorize `---`',
+    )
     expect(skill).toContain('final paragraph with no delimiter')
-    expect(skill).toContain('Never expose the internal delimiter')
+    expect(skill).toContain('internal delimiter as visible copy')
     expect(skill).toContain('ignore `usedPercent`, `remainingPercent`, `forecast`')
     expect(skill).toContain('Do not render a link or Markdown link')
+    expect(normalizedSkill).toContain(
+      'In a group, also keep the first heads-up link-free',
+    )
+    expect(normalizedSkill).toContain(
+      'A yes to "want the options?" asks only for an explanation',
+    )
+    expect(firstHeadsUpSection).not.toContain(
+      'https://www.withmurph.ai/groups/fund/',
+    )
+    expect(firstHeadsUpSection).toContain(
+      "we're getting low on Murph time in here",
+    )
+    expect(firstHeadsUpSection).toContain('Want me to check the options?')
+    expect(firstHeadsUpSection).not.toContain(
+      "we're getting low on messages in here",
+    )
+    expect(normalizedSkill).toContain(
+      'Do not frame each text as a unit being spent',
+    )
     expect(skill).toContain('Do not repeat the heads-up')
   })
 
@@ -97,7 +155,8 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('**Direct paid Pulse or Edge:**')
     expect(skill).toContain('**Family sponsored:**')
     expect(skill).toContain('**Hosted group:**')
-    expect(skill).toContain('Do not promise a link')
+    expect(normalizedSkill).toContain('Do not promise a link')
+    expect(skill).toContain('never invent one')
     expect(skill).toContain('Personal top-ups are unavailable')
     expect(skill).toContain('Family plan owner may')
     expect(skill).toContain('add one-time usage for this active member')
@@ -133,18 +192,55 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('group ID into a model-composed link')
     expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
     expect(skill).toContain('`murph.group action="read_usage_referral"` once')
-    expect(skill).toContain('This only offers')
-    expect(skill).toContain('does not arm one')
-    expect(skill).toContain('include it in the same segment as a plain first-party link')
+    expect(normalizedSkill).toContain(
+      'In a hosted group, after someone accepts the link-free first heads-up',
+    )
+    expect(normalizedSkill).toContain(
+      "pass that response's exact opaque accepted `message_ref`",
+    )
+    expect(normalizedSkill).toContain(
+      "Never infer the responder from the whole grouped turn",
+    )
+    expect(normalizedSkill).toContain(
+      'Keep this first mention link-free and route-neutral',
+    )
+    expect(normalizedSkill).toContain(
+      'do not name or count earned, sponsored, paid, funding, or referral paths',
+    )
+    expect(normalizedSkill).toContain(
+      'A returned funding URL is authority for a later requested follow-up, not copy for the first heads-up',
+    )
+    expect(normalizedSkill).toContain(
+      'present all of them before any link',
+    )
+    expect(normalizedSkill).toContain(
+      'place any funding URL after the sponsored path rather than opening with it',
+    )
+    expect(normalizedSkill).toContain(
+      'Never send it in the first assistant-initiated heads-up',
+    )
+    expect(normalizedSkill).toContain(
+      'sponsoring more Murph time for the room, not buying messages',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not volunteer message counts',
+    )
+    expect(normalizedSkill).not.toContain(
+      'include it in the same segment as a plain first-party link',
+    )
+    expect(normalizedSkill).not.toContain(
+      'sponsor action in approximate messages',
+    )
     expect(skill).toContain("Match the room's energy")
-    expect(skill).toContain('without naming or singling out a nonpayer')
-    expect(skill).toContain('guilt-trip, call out nonpayers')
+    expect(normalizedSkill).toContain('without naming or singling out a nonpayer')
+    expect(normalizedSkill).toContain('guilt-trip, call out nonpayers')
     expect(skill).toContain('skip the heads-up entirely')
     expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')
-    expect(skill).toContain('If no funding URL is returned')
-    expect(skill).toContain('period end when relevant')
-    expect(skill).toContain('remaining percentage when the result includes remainingPercent')
+    expect(normalizedSkill).toContain('If no funding URL is returned')
+    expect(normalizedSkill).toContain(
+      'share only the binary sponsored status unless the current request matches the direct or broad intent split above',
+    )
     expect(skill).toContain(
       'returned percentages and forecast as overall available AI usage',
     )
@@ -159,6 +255,48 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(skill).not.toContain('included-versus-purchased')
     expect(skill).not.toContain('Share only its')
+  })
+
+  it('separates explicit group funding from low-capacity urgency', async () => {
+    const skill = await readLowUsageSkill()
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
+
+    expect(normalizedSkill).toContain(
+      '`fundingNeeded` controls urgency, not whether a returned funding URL may be shared after an explicit request',
+    )
+    expect(normalizedSkill).toContain(
+      'a returned first-party funding URL is the private path for an additional one-time contribution',
+    )
+    expect(normalizedSkill).toContain(
+      'does not make explicit funding unavailable',
+    )
+    expect(normalizedSkill).not.toContain(
+      'Share a returned first-party funding URL only when `fundingNeeded` is true',
+    )
+  })
+
+  it('maps the member-facing Core plan without renaming hosted groups', async () => {
+    const skill = await readLowUsageSkill()
+    const hostedGroupHeading =
+      '- **Group:** Call `read_usage` again when the state may have changed.'
+    const hostedGroupIndex = skill.indexOf(hostedGroupHeading)
+
+    expect(hostedGroupIndex).toBeGreaterThan(0)
+    const directPlanGuidance = skill.slice(0, hostedGroupIndex)
+    const hostedGroupGuidance = skill.slice(hostedGroupIndex)
+
+    expect(directPlanGuidance).toContain(
+      'Core is the member-facing name\n' +
+      '  for `targetPlanCode: "launch_group_monthly"`.',
+    )
+    expect(directPlanGuidance).toContain(
+      'Core maps\n' +
+      '  to `launch_group_monthly`.',
+    )
+    expect(directPlanGuidance).toContain('**Direct paid Core:**')
+    expect(directPlanGuidance).not.toMatch(/\bGroup\b/u)
+    expect(hostedGroupGuidance).toContain(hostedGroupHeading)
+    expect(hostedGroupGuidance).toContain('sponsorshipStatus')
   })
 
   it('preserves explicit billing confirmation and payment truth', async () => {
@@ -191,7 +329,12 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain(
       'Canceling one policy never cancels or replaces another',
     )
-    expect(normalizedSkill).toContain('Treat returned message counts as approximate')
+    expect(normalizedSkill).toContain(
+      'Treat returned reward labels as exact cost-weighted usage-credit labels',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not calculate or translate them into messages or days',
+    )
     expect(normalizedSkill).toContain('Never reveal qualification counters')
     expect(normalizedSkill).toContain(
       'state the returned `expiresAt` as the mission\'s public occurrence deadline',
@@ -234,7 +377,7 @@ describe('assistant hosted low-usage skill', () => {
       'After arming that mission, explain the reciprocal setup path',
     )
     expect(normalizedSkill).toContain(
-      'introduce me to your mom and I can bring this group roughly another 50 messages',
+      'introduce me to your mom and I can secure this group some additional Murph time',
     )
     expect(normalizedSkill).toContain('Murph is the butt of the joke')
     expect(normalizedSkill).toContain('Do not reuse the mom line as a template')
@@ -245,9 +388,9 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('Never choose an amount, start')
     expect(skill).toContain('Checkout, or claim usage was added')
     expect(skill).toContain(
-      'never reveal who paid, amounts, or',
+      'never reveal who paid, amounts, caps, purchase status, or refill',
     )
-    expect(skill).toContain('never claim messages were sponsored when they were not')
+    expect(skill).toContain('never claim the room is sponsored when the read says it is not')
     expect(skill).toContain('standing objective')
     expect(skill).toContain('deferral rules below still outrank this objective')
   })
@@ -264,7 +407,7 @@ describe('assistant hosted low-usage skill', () => {
             expiresAt: '2026-08-03T18:00:00.000Z',
             policyCode: 'active_group_v1',
             rewardLabel:
-              'about 140 more messages on the model your Murph is using now',
+              '$3.50 of cost-weighted usage credit for your Murph',
             state: 'armed',
           }],
         },
@@ -280,7 +423,7 @@ describe('assistant hosted low-usage skill', () => {
 
     expect(assembledContext).toContain('2026-08-03T18:00:00.000Z')
     expect(assembledContext).toContain(
-      'about 140 more messages on the model your Murph is using now',
+      '$3.50 of cost-weighted usage credit for your Murph',
     )
     expect(JSON.stringify(armedToolResult)).not.toContain('humanMessageCount')
     expect(JSON.stringify(armedToolResult)).not.toContain(
@@ -341,7 +484,7 @@ describe('assistant hosted low-usage skill', () => {
                   expiresAt: '2026-08-03T18:00:00.000Z',
                   policyCode: 'new_person_activation_v1',
                   rewardLabel:
-                    'about 100 more messages on the model your Murph is using now',
+                    '$2.00 of cost-weighted usage credit for your Murph',
                   state: 'armed',
                 },
                 {
@@ -349,7 +492,7 @@ describe('assistant hosted low-usage skill', () => {
                   expiresAt: '2026-08-04T18:00:00.000Z',
                   policyCode: 'active_group_v1',
                   rewardLabel:
-                    'about 140 more messages on the model your Murph is using now',
+                    '$3.50 of cost-weighted usage credit for your Murph',
                   state: 'armed',
                 },
               ],
@@ -383,7 +526,7 @@ describe('assistant hosted low-usage skill', () => {
                 expiresAt: '2026-08-05T18:00:00.000Z',
                 policyCode: 'new_person_activation_v1',
                 rewardLabel:
-                  'about 100 more messages on the model your Murph is using now',
+                  '$2.00 of cost-weighted usage credit for your Murph',
                 state: 'armed',
               }],
               availablePolicies: [],

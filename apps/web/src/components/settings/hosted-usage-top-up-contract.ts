@@ -19,7 +19,6 @@ type HostedUsageTopUpSelectionConflict = "offer" | "sponsorship";
 interface HostedUsageTopUpOffer {
   offerCode: string;
   amountLabel: string;
-  estimatedMessages: number;
 }
 
 interface HostedUsageTopUpActivePurchase {
@@ -47,13 +46,16 @@ interface HostedUsageTopUpDialogProps {
   checkoutUrl?: string;
   contactOptions?: readonly MurphContactOption[];
   deferTerminalRefreshUntilClose?: boolean;
+  groupPaymentMode?: "monthly" | "one_time";
   initialOpen?: boolean;
+  inert?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
   payerMemberId: string;
   purchaseReturn?: HostedUsageTopUpReturn | null;
   renderPurchaseDetails?: ReactNode;
   renderSelectionDetails?: (input: {
     disabled: boolean;
+    mobileStickyActionVisible: boolean;
     selectedOffer: HostedUsageTopUpOffer | null;
   }) => ReactNode;
   scope?: "family" | "group" | "personal";

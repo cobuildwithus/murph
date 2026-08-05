@@ -95,6 +95,83 @@ describe("RunnerStateStore write-fence state", () => {
     await expect(store.readWriteFenceToken()).resolves.toBeNull();
   });
 
+  it("binds the effective invocation mode to the active write fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { db, store } = createHarness();
+    await store.bindUser("member_123");
+    const token = await store.beginWriteFence({
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+
+    const pinned = await store.bindWriteFenceInvocationFacts({
+      customInferenceEnvelope: null,
+      platformAiUsageAllowed: false,
+      processingMode: "system_mailbox",
+      token,
+      workspaceVersion: "9",
+    });
+
+    expect(pinned.processingMode).toBe("system_mailbox");
+    expect(readActiveReason(db)).toBe("system_mailbox");
+    const restartedStore = new RunnerStateStore(createDurableObjectState(db));
+    await expect(restartedStore.readWriteFenceToken()).resolves.toMatchObject({
+      attemptId: token.attemptId,
+      processingMode: "system_mailbox",
+      userId: "member_123",
+      workspaceVersion: "9",
+    } satisfies Partial<RunnerWriteFenceToken>);
+  });
+
+  it("pins one custom target envelope to the active fence and clears it with that fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { db, store } = createHarness();
+    await store.bindUser("member_123");
+    const token = await store.beginWriteFence({
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+    const pinned = await store.bindWriteFenceInvocationFacts({
+      customInferenceEnvelope: "synthetic-sealed-target-envelope",
+      platformAiUsageAllowed: false,
+      token,
+      workspaceVersion: "9",
+    });
+    if (!token.providerEgressToken) {
+      throw new Error("Expected a provider egress token on the active fence.");
+    }
+
+    await expect(store.validateProviderEgressToken({
+      providerEgressToken: token.providerEgressToken,
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      customInferenceEnvelope: "synthetic-sealed-target-envelope",
+      owns: true,
+      platformAiUsageAllowed: false,
+      workspaceVersion: "9",
+    });
+    expect(readActiveCustomInferenceEnvelope(db))
+      .toBe("synthetic-sealed-target-envelope");
+    expect(readActivePlatformAiAllowed(db)).toBe(0);
+
+    await store.clearWriteFenceAfterCompletion({
+      finishedAt: NOW,
+      token: pinned,
+    });
+
+    expect(readActiveCustomInferenceEnvelope(db)).toBeNull();
+    expect(readActivePlatformAiAllowed(db)).toBeNull();
+    await expect(store.validateProviderEgressToken({
+      providerEgressToken: token.providerEgressToken,
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      owns: false,
+      reason: "missing_write_fence",
+    });
+  });
+
   it("clears replacement fences by identity and records the failure", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
@@ -165,6 +242,20 @@ function readActiveReason(db: DatabaseSync): string | null {
   const row = db.prepare("SELECT active_reason FROM runner_meta WHERE singleton = 1")
     .get() as { active_reason: string | null };
   return row.active_reason;
+}
+
+function readActiveCustomInferenceEnvelope(db: DatabaseSync): string | null {
+  const row = db.prepare(
+    "SELECT active_custom_inference_envelope FROM runner_meta WHERE singleton = 1",
+  ).get() as { active_custom_inference_envelope: string | null };
+  return row.active_custom_inference_envelope;
+}
+
+function readActivePlatformAiAllowed(db: DatabaseSync): number | null {
+  const row = db.prepare(
+    "SELECT active_platform_ai_allowed FROM runner_meta WHERE singleton = 1",
+  ).get() as { active_platform_ai_allowed: number | null };
+  return row.active_platform_ai_allowed;
 }
 
 function createDurableObjectState(db: DatabaseSync): DurableObjectStateLike {

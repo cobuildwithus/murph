@@ -66,6 +66,37 @@ export async function readHostedPrivyUserById(
     timeout?: number;
   },
 ): Promise<HostedPrivyUser> {
+  const user = await readHostedPrivyUserByIdInternal(privyUserId, options);
+  if (!user) {
+    throw hostedOnboardingError({
+      code: "PRIVY_USER_LOOKUP_FAILED",
+      httpStatus: 503,
+      message: "Secure approval is temporarily unavailable.",
+      retryable: true,
+    });
+  }
+  return user;
+}
+
+export async function readHostedPrivyUserByIdIfExists(
+  privyUserId: string,
+  options?: {
+    maxRetries?: number;
+    signal?: AbortSignal;
+    timeout?: number;
+  },
+): Promise<HostedPrivyUser | null> {
+  return readHostedPrivyUserByIdInternal(privyUserId, options);
+}
+
+async function readHostedPrivyUserByIdInternal(
+  privyUserId: string,
+  options?: {
+    maxRetries?: number;
+    signal?: AbortSignal;
+    timeout?: number;
+  },
+): Promise<HostedPrivyUser | null> {
   const client = getHostedPrivyManagementClient();
 
   if (!client) {
@@ -84,6 +115,9 @@ export async function readHostedPrivyUserById(
     }
     return user as HostedPrivyUser;
   } catch (error) {
+    if (isHostedPrivyUserMissing(error)) {
+      return null;
+    }
     if (isHostedOnboardingError(error)) {
       throw error;
     }
@@ -92,8 +126,67 @@ export async function readHostedPrivyUserById(
       httpStatus: 503,
       message: "Secure approval is temporarily unavailable.",
       retryable: true,
+      details: describeHostedPrivyManagementError(error),
     });
   }
+}
+
+function isHostedPrivyUserMissing(error: unknown): boolean {
+  if (!error || typeof error !== "object" || Reflect.get(error, "status") !== 404) {
+    return false;
+  }
+
+  const retryHeader = readHostedPrivyErrorHeader(error, "x-should-retry");
+  return retryHeader !== undefined
+    && retryHeader?.toLowerCase() !== "true";
+}
+
+function describeHostedPrivyManagementError(
+  error: unknown,
+): Record<string, unknown> | undefined {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+
+  const status = Reflect.get(error, "status");
+  const constructor = Reflect.get(error, "constructor");
+  const providerErrorType = typeof constructor === "function"
+    ? constructor.name
+    : null;
+
+  return {
+    ...(providerErrorType ? { providerErrorType } : {}),
+    ...(typeof status === "number" && Number.isInteger(status)
+      ? { statusCode: status }
+      : {}),
+    providerRequestIdPresent: Boolean(
+      readHostedPrivyErrorHeader(error, "request-id")
+      ?? readHostedPrivyErrorHeader(error, "x-request-id"),
+    ),
+    type: readHostedPrivyErrorHeader(error, "x-should-retry")?.toLowerCase() === "true"
+      ? "provider_marked_retryable"
+      : "provider_response",
+  };
+}
+
+function readHostedPrivyErrorHeader(
+  error: object,
+  name: string,
+): string | null | undefined {
+  const headers = Reflect.get(error, "headers");
+  if (!headers || typeof headers !== "object") {
+    return undefined;
+  }
+
+  const get = Reflect.get(headers, "get");
+  if (typeof get !== "function") {
+    return undefined;
+  }
+
+  const value = Reflect.apply(get, headers, [name]);
+  return typeof value === "string" || value === null
+    ? value
+    : undefined;
 }
 
 // Deletes the Privy user record itself (account deletion). Returns false when

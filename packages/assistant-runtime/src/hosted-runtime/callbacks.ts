@@ -811,6 +811,7 @@ async function persistHostedAssistantAskFallbackSupersession(input: {
     expectedUpdatedAt: current.updatedAt,
     intent: {
       ...current,
+      card: null,
       media: [],
       message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
       updatedAt,
@@ -997,6 +998,8 @@ function hostedAssistantReplyTargetsSignupWelcomeRecipient(
 }
 
 const HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX = "signup-welcome:";
+const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
+  "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
 
 function isHostedSignupWelcomeDeliveryPayload(
   payload: HostedAssistantDeliveryPayload,
@@ -2434,8 +2437,14 @@ async function resolveHostedDirectEmailRecipientAtProviderEntry(input: {
     normalizeHostedAssistantDeliveryChannel(payload.channel)?.toLowerCase()
       !== "email"
     || payload.threadIsDirect !== true
-    || input.targetKind !== "explicit"
   ) {
+    return input.target;
+  }
+
+  const hostedEmailThreadTarget = input.targetKind === "thread"
+    ? parseHostedEmailThreadTarget(input.target)
+    : null;
+  if (hostedEmailThreadTarget?.targetKind === "group") {
     return input.target;
   }
 
@@ -2448,15 +2457,27 @@ async function resolveHostedDirectEmailRecipientAtProviderEntry(input: {
       { retryable: true },
     ));
   }
-  const target = (await resolveRecipient({ signal: input.signal }))?.trim() ?? "";
-  if (!target) {
+  const recipient =
+    (await resolveRecipient({ signal: input.signal }))?.trim() ?? "";
+  if (!recipient) {
     throw markHostedDeliveryPreProviderRetryable(new VaultCliError(
       "ASSISTANT_EMAIL_AUDIENCE_AUTHORITY_UNAVAILABLE",
       "Hosted direct email delivery requires current verified-email authority before provider work.",
       { retryable: true },
     ));
   }
-  return target;
+  if (input.targetKind === "explicit") {
+    return recipient;
+  }
+  if (!hostedEmailThreadTarget) {
+    return input.target;
+  }
+
+  return serializeHostedEmailThreadTarget({
+    ...hostedEmailThreadTarget,
+    cc: [],
+    to: [recipient],
+  });
 }
 
 function isHostedAssistantReactionOnlyEffect(
@@ -3504,6 +3525,8 @@ function createHostedAssistantLinqSendDependency(input: {
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     const idempotencyKey = request.idempotencyKey?.trim() || null;
+    let effectiveIdempotencyKey = idempotencyKey;
+    const persistAppCardTextFallback = request.persistAppCardTextFallback;
     const reviewedAssistantAskCompletion = idempotencyKey?.startsWith(
       HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
     ) === true;
@@ -3594,7 +3617,7 @@ function createHostedAssistantLinqSendDependency(input: {
               effectsPort: input.effectsPort ?? null,
               fromPhoneNumber,
               homeRouteFallbackAllowed: currentHomeRouteOnly,
-              idempotencyKey,
+              idempotencyKey: effectiveIdempotencyKey,
               intentId: input.intentId ?? null,
               replyToMessageId: request.replyToMessageId ?? null,
               providerDispatchRetrySafe: true,
@@ -3642,6 +3665,16 @@ function createHostedAssistantLinqSendDependency(input: {
         replyToMessageId: request.replyToMessageId ?? null,
         target: providerTarget,
         targetKind: providerTargetKind,
+        ...(request.card == null
+          ? {}
+          : {
+              card: request.card,
+              threadIsDirect:
+                request.threadIsDirect
+                ?? input.threadIsDirect
+                ?? deliveryContext?.threadIsDirect
+                ?? null,
+            }),
       }, {
         ...dependencies,
         ...(input.publicInternetFetch
@@ -3679,10 +3712,45 @@ function createHostedAssistantLinqSendDependency(input: {
               },
             }
           : {}),
+        ...(persistAppCardTextFallback
+          ? {
+              persistAppCardTextFallback: async (fallback) => {
+                await persistAppCardTextFallback(fallback);
+                effectiveIdempotencyKey = fallback.idempotencyKey;
+              },
+            }
+          : {}),
       });
     } catch (error) {
       if (!attemptedAt) {
         throw error;
+      }
+      const partialRichLinkResult =
+        readHostedAssistantLinqRichLinkPartialDeliveryResult(error);
+      if (partialRichLinkResult) {
+        await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
+          effectsPort: input.effectsPort ?? null,
+          outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+            attemptedAt,
+            answeredMailboxItemIds: [],
+            deliveryContext,
+            directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
+            failedAt: new Date(),
+            failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
+            failureReason: null,
+            fromPhoneNumber,
+            idempotencyKey: effectiveIdempotencyKey,
+            intentId: input.intentId ?? null,
+            providerTarget,
+            providerThreadId: partialRichLinkResult.providerThreadId ?? null,
+            result: partialRichLinkResult,
+            target: providerTarget,
+            targetKind: providerTargetKind,
+            threadIsDirect:
+              input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
+          }),
+        });
+        throw markHostedDeliveryMayHaveSucceeded(error);
       }
       if (isHostedLinqProviderOutcomeAmbiguous(error)) {
         throw markHostedDeliveryMayHaveSucceeded(error);
@@ -3698,7 +3766,7 @@ function createHostedAssistantLinqSendDependency(input: {
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
           failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
           fromPhoneNumber,
-          idempotencyKey,
+          idempotencyKey: effectiveIdempotencyKey,
           intentId: input.intentId ?? null,
           providerTarget,
           providerThreadId: null,
@@ -3711,6 +3779,8 @@ function createHostedAssistantLinqSendDependency(input: {
       throw error;
     }
     const acceptedAt = new Date();
+    effectiveIdempotencyKey =
+      result.idempotencyKey ?? effectiveIdempotencyKey;
     input.onProviderAccepted?.({
       acceptedAssistantInputIds: request.acceptedAssistantInputIds ?? [],
       acceptedAt,
@@ -3724,7 +3794,7 @@ function createHostedAssistantLinqSendDependency(input: {
         deliveryContext,
         directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
         fromPhoneNumber,
-        idempotencyKey,
+        idempotencyKey: effectiveIdempotencyKey,
         intentId: input.intentId ?? null,
         providerTarget,
         providerThreadId: result.providerThreadId ?? null,
@@ -4153,6 +4223,9 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
     intentId: input.intentId,
     lineLookupKey: input.deliveryContext?.routeAuthority?.accountLookupKey ?? null,
     providerMessageId: input.result?.providerMessageId ?? null,
+    ...(input.result?.providerMessageIds?.length
+      ? { providerMessageIds: [...input.result.providerMessageIds] }
+      : {}),
     providerTarget: input.targetKind === "participant" ? null : input.providerTarget,
     providerThreadId: input.result?.providerThreadId ?? input.providerThreadId,
     target: input.targetKind === "participant" ? null : input.target,
@@ -4182,7 +4255,15 @@ async function recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort(input: 
 function shouldRequireHostedAssistantLinqDeliveryOutcomeWrite(
   outcome: HostedRuntimeLinqDeliveryOutcomeRequest,
 ): boolean {
-  if (!outcome.acceptedAt) {
+  const richLinkPartial = Boolean(outcome.failedAt)
+    && outcome.failureCode
+      === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE;
+  if (richLinkPartial) {
+    return true;
+  }
+
+  const providerAccepted = Boolean(outcome.acceptedAt);
+  if (!providerAccepted) {
     return false;
   }
   if (outcome.answeredMailboxItemIds?.length) {
@@ -4357,6 +4438,75 @@ function readHostedAssistantLinqDeliveryFailureCode(error: unknown): string {
   return error instanceof Error && error.name !== "Error"
     ? error.name
     : "HOSTED_LINQ_PROVIDER_SEND_FAILED";
+}
+
+function readHostedAssistantLinqRichLinkPartialDeliveryResult(
+  error: unknown,
+): HostedRuntimeLinqSendResponse | null {
+  if (
+    typeof error !== "object"
+    || error === null
+    || !("code" in error)
+    || error.code !== HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
+  ) {
+    return null;
+  }
+  const providerMessageIds: string[] = [];
+  if ("providerMessageIds" in error && Array.isArray(error.providerMessageIds)) {
+    for (const value of error.providerMessageIds) {
+      const messageId = typeof value === "string" ? value.trim() : "";
+      if (messageId && !providerMessageIds.includes(messageId)) {
+        providerMessageIds.push(messageId);
+      }
+    }
+  }
+  const providerMessageId = readHostedAssistantLinqPartialDeliveryString(
+    error,
+    "providerMessageId",
+  ) ?? providerMessageIds.at(-1) ?? null;
+  if (
+    providerMessageId
+    && !providerMessageIds.includes(providerMessageId)
+  ) {
+    providerMessageIds.push(providerMessageId);
+  }
+  return {
+    providerMessageId,
+    ...(providerMessageIds.length > 0 ? { providerMessageIds } : {}),
+    providerThreadId: readHostedAssistantLinqPartialDeliveryString(
+      error,
+      "providerThreadId",
+    ),
+    target: readHostedAssistantLinqPartialDeliveryString(error, "target"),
+    targetKind: readHostedAssistantLinqPartialDeliveryTargetKind(error),
+  };
+}
+
+function readHostedAssistantLinqPartialDeliveryString(
+  error: object,
+  key: "providerMessageId" | "providerThreadId" | "target",
+): string | null {
+  const value =
+    key === "providerMessageId" && "providerMessageId" in error
+      ? error.providerMessageId
+      : key === "providerThreadId" && "providerThreadId" in error
+        ? error.providerThreadId
+        : key === "target" && "target" in error
+          ? error.target
+          : null;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readHostedAssistantLinqPartialDeliveryTargetKind(
+  error: object,
+): HostedRuntimeProviderTargetKind | null {
+  if (!("targetKind" in error)) {
+    return null;
+  }
+  const value = error.targetKind;
+  return value === "explicit" || value === "participant" || value === "thread"
+    ? value
+    : null;
 }
 
 function requireHostedLinqProviderAttemptedAt(value: Date | null): Date {
@@ -5108,6 +5258,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "actorId"
     | "answeredMailboxItemIds"
     | "bindingDelivery"
+    | "card"
     | "channel"
     | "deliveryIdempotencyKey"
     | "deliverySource"
@@ -5133,6 +5284,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     answeredMailboxItemIds: intent.answeredMailboxItemIds ?? [],
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
     bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
+    ...(intent.card == null ? {} : { card: intent.card }),
     channel: intent.channel ?? null,
     deliverySourceKey: readHostedAssistantDeliverySourceKey(intent.deliverySource),
     ...(intent.emailHtml == null ? {} : { emailHtml: intent.emailHtml }),
@@ -5474,9 +5626,16 @@ function normalizeHostedAssistantDeliveryMirrorFailure(input: {
 function assertSupportedHostedAssistantDeliveryPayload(
   payload: Pick<
     HostedAssistantDeliveryPayload,
-    "bindingDeliveryKind" | "channel" | "explicitTarget"
+    "bindingDeliveryKind" | "card" | "channel" | "explicitTarget" | "media"
   >,
 ): void {
+  if (payload.card != null && payload.media.length > 0) {
+    throw new VaultCliError(
+      "ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT",
+      "Assistant delivery cannot combine a response card with media.",
+    );
+  }
+
   if (payload.channel !== "email") {
     return;
   }

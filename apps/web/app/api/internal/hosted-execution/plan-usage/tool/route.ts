@@ -19,9 +19,16 @@ export const POST = withJsonError(async (request: Request) => {
   const toolRequest = parseHostedPlanUsageToolRequest(payload);
 
   return jsonOk(await readHostedPersonalAiUsageStatus({
+    includeScheduledPlan: true,
     ...(toolRequest.includeSubscriptionActionQuote
       ? { includeSubscriptionActionQuote: true }
       : {}),
     memberId,
+    ...(toolRequest.subscriptionActionTargetPlanCode
+      ? {
+          subscriptionActionTargetPlanCode:
+            toolRequest.subscriptionActionTargetPlanCode,
+        }
+      : {}),
   }));
 });

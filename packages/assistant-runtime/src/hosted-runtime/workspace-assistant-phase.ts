@@ -11,7 +11,6 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
@@ -41,6 +40,7 @@ import {
   recordHostedMailboxAssistantInputItem,
   readAssistantInputEvent,
   readAssistantOutboxIntent,
+  refreshReminderAvailability,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
@@ -65,10 +65,12 @@ import {
   type AutomationRoute,
 } from "@murphai/contracts";
 import {
+  AutomationAvailabilityConflictBlockError,
   patchAutomation,
   reconcileAutomationSupportSeries,
   resolveAutomationUpsertSlug,
   showAutomation,
+  stripAutomationAvailabilityConflictBlock,
   upsertAutomation,
 } from "@murphai/core";
 import {
@@ -348,7 +350,11 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
   const emailIngressPresent = input.groupEmailIngress === true
     || (input.emailDeliveryContexts?.length ?? 0) > 0;
   return {
-    async request(request) {
+    async request(request, context) {
+      const forwardRequest = (forwardedRequest: HostedRuntimeGroupToolRequest) =>
+        context
+          ? input.groupToolPort.request(forwardedRequest, context)
+          : input.groupToolPort.request(forwardedRequest);
       if (
         emailIngressPresent
         && request.action !== "read_current"
@@ -370,7 +376,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
               linqDeliveryContexts: input.linqDeliveryContexts,
               telegramSenderHandles: input.telegramSenderHandles ?? [],
             });
-        return await input.groupToolPort.request({
+        return await forwardRequest({
           ...sharedReadRequest,
           ...senderHandles,
         });
@@ -380,8 +386,15 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         || request.action === "arm_usage_referral"
         || request.action === "cancel_usage_referral"
       ) {
+        const participant = request.action === "read_usage_referral"
+          ? request.participant
+          : null;
         const senderHandles = emailIngressPresent
           ? {}
+          : participant?.source === "linq"
+          ? { linqSenderHandles: [participant.senderHandle] }
+          : participant?.source === "telegram"
+          ? { telegramSenderHandles: [participant.senderHandle] }
           : resolveHostedGroupToolSenderHandles({
               linqDeliveryContexts: input.linqDeliveryContexts,
               telegramSenderHandles: input.telegramSenderHandles ?? [],
@@ -401,7 +414,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
               action: request.action,
               policyCode: request.policyCode,
             };
-        return await input.groupToolPort.request({
+        return await forwardRequest({
           ...referralRequest,
           ...senderHandles,
           ...(request.action !== "cancel_usage_referral"
@@ -410,27 +423,151 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         });
       }
       if (
-        request.action !== "read_chat_participants"
-        && request.action !== "update_display_name"
+        request.action === "read_chat_participants"
+      ) {
+        const linqRoute = resolveHostedGroupToolLinqRouteContext(
+          input.linqDeliveryContexts,
+        );
+        return await forwardRequest(
+          linqRoute
+            ? { ...request, linqThread: linqRoute.thread }
+            : request,
+        );
+      }
+      if (request.action === "post_join_offer") {
+        const linqRoute = resolveHostedGroupToolLinqRouteContext(
+          input.linqDeliveryContexts,
+        );
+        if (linqRoute?.service === "imessage") {
+          return await forwardRequest({
+            ...request,
+            linqThread: linqRoute.thread,
+          });
+        }
+        if (
+          linqRoute?.service === "sms"
+          || isHostedGroupToolTelegramGroupRoute(input.currentDeliveryRoute)
+        ) {
+          return await forwardRequest(
+            buildHostedGroupJoinLinkFallbackRequest(request),
+          );
+        }
+        return await forwardRequest(request);
+      }
+      if (
+        request.action !== "update_display_name"
         && request.action !== "post_disclosure_request"
-        && request.action !== "post_join_offer"
         && request.action !== "preflight_set_chat_avatar"
         && request.action !== "set_chat_avatar"
         && request.action !== "share_contact_card"
       ) {
-        return await input.groupToolPort.request(request);
+        return await forwardRequest(request);
       }
-      const linqThread = resolveHostedGroupToolLinqThreadContext(
+      const linqRoute = resolveHostedGroupToolLinqRouteContext(
         input.linqDeliveryContexts,
-        request.action === "read_chat_participants"
-          ? "imessage_or_sms"
-          : "imessage_only",
       );
-      return await input.groupToolPort.request(
-        linqThread ? { ...request, linqThread } : request,
-      );
+      if (linqRoute?.service === "imessage") {
+        return await forwardRequest({
+          ...request,
+          linqThread: linqRoute.thread,
+        });
+      }
+      return linqRoute?.service === "sms"
+        ? buildHostedGroupSmsUnsupportedResponse(request)
+        : await forwardRequest(request);
     },
   };
+}
+
+function isHostedGroupToolTelegramGroupRoute(
+  route: AssistantCurrentDeliveryRoute | null | undefined,
+): boolean {
+  return normalizeAssistantRouteString(route?.channel)?.toLowerCase()
+      === "telegram"
+    && route?.threadIsDirect === false;
+}
+
+function buildHostedGroupJoinLinkFallbackRequest(
+  request: Extract<HostedRuntimeGroupToolRequest, { action: "post_join_offer" }>,
+): Extract<HostedRuntimeGroupToolRequest, { action: "create_join_link" }> {
+  const joinOffer = request.joinOffer;
+  if (!joinOffer) {
+    return { action: "create_join_link" };
+  }
+  const joinLink = {
+    ...(joinOffer.displayName
+      ? { displayName: joinOffer.displayName }
+      : {}),
+    ...(joinOffer.projectionScopes?.length
+      ? {
+        requestedVaultShareProjectionScopes: [
+          ...joinOffer.projectionScopes,
+        ],
+      }
+      : joinOffer.projectionKinds?.length
+        ? {
+          requestedVaultShareProjectionKinds: [
+            ...joinOffer.projectionKinds,
+          ],
+        }
+        : {}),
+  };
+  return Object.keys(joinLink).length > 0
+    ? { action: "create_join_link", joinLink }
+    : { action: "create_join_link" };
+}
+
+type HostedRuntimeGroupSmsUnsupportedRequest = Extract<
+  HostedRuntimeGroupToolRequest,
+  {
+    action:
+      | "post_disclosure_request"
+      | "preflight_set_chat_avatar"
+      | "set_chat_avatar"
+      | "share_contact_card"
+      | "update_display_name";
+  }
+>;
+
+function buildHostedGroupSmsUnsupportedResponse(
+  request: HostedRuntimeGroupSmsUnsupportedRequest,
+): HostedRuntimeGroupToolResponse {
+  switch (request.action) {
+    case "update_display_name":
+      return {
+        action: request.action,
+        result: {
+          group: null,
+          status: "unavailable",
+          unavailableReason: "sms_chat_customization_unsupported",
+        },
+      };
+    case "preflight_set_chat_avatar":
+    case "set_chat_avatar":
+      return {
+        action: request.action,
+        result: {
+          status: "unavailable",
+          unavailableReason: "sms_chat_customization_unsupported",
+        },
+      };
+    case "share_contact_card":
+      return {
+        action: request.action,
+        result: {
+          status: "unavailable",
+          unavailableReason: "sms_attachments_unsupported",
+        },
+      };
+    case "post_disclosure_request":
+      return {
+        action: request.action,
+        result: {
+          status: "unavailable",
+          unavailableReason: "sms_reactions_unsupported",
+        },
+      };
+  }
 }
 
 function resolveHostedUsageReferralSourceContext(
@@ -566,19 +703,20 @@ function resolveHostedGroupToolLinqSenderHandles(
 ): string[] {
   // Use only route-authorized Linq group inputs. Hosted email reply aliases
   // authenticate a route, not the human From header, and never enter here.
-  const linqThread = resolveHostedGroupToolLinqThreadContext(contexts);
-  if (!linqThread) {
+  const linqRoute = resolveHostedGroupToolLinqRouteContext(contexts);
+  if (!linqRoute) {
     return [];
   }
   const eligible = new Set<string>();
   for (const context of contexts) {
     const authority = context.routeAuthority;
+    const service = normalizeHostedGroupToolLinqService(context.service);
     if (
       !authority
-      || authority.channel !== linqThread.authority.channel
-      || authority.containerMemberId !== linqThread.authority.containerMemberId
-      || authority.threadId !== linqThread.authority.threadId
-      || context.service?.trim().toLowerCase() !== "imessage"
+      || authority.channel !== linqRoute.thread.authority.channel
+      || authority.containerMemberId !== linqRoute.thread.authority.containerMemberId
+      || authority.threadId !== linqRoute.thread.authority.threadId
+      || service !== linqRoute.service
       || context.threadIsDirect !== false
     ) {
       continue;
@@ -596,52 +734,77 @@ function resolveHostedGroupToolLinqSenderHandles(
   return [...eligible].slice(0, HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX);
 }
 
-function resolveHostedGroupToolLinqThreadContext(
+type HostedGroupToolLinqService = "imessage" | "sms";
+
+type HostedGroupToolLinqRouteContext = {
+  service: HostedGroupToolLinqService;
+  thread: HostedRuntimeGroupToolLinqThreadContext;
+};
+
+function resolveHostedGroupToolLinqRouteContext(
   contexts: readonly HostedAssistantLinqDeliveryContext[],
-  serviceScope: "imessage_only" | "imessage_or_sms" = "imessage_only",
-): HostedRuntimeGroupToolLinqThreadContext | null {
-  const eligible = new Map<string, HostedRuntimeGroupToolLinqThreadContext>();
+): HostedGroupToolLinqRouteContext | null {
+  const eligible = new Map<string, HostedGroupToolLinqRouteContext>();
+  let hasInvalidAuthoritativeCandidate = false;
   for (const context of contexts) {
     const authority = context.routeAuthority;
-    const service = context.service?.trim().toLowerCase();
+    if (!authority || context.threadIsDirect === true) {
+      continue;
+    }
+    if (context.threadIsDirect !== false) {
+      hasInvalidAuthoritativeCandidate = true;
+      continue;
+    }
+    const service = normalizeHostedGroupToolLinqService(context.service);
     if (
-      !authority
+      !service
+      || authority.channel !== "linq"
+      || authority.containerMemberId.trim().length === 0
       || authority.threadId.trim().length === 0
-      || (
-        service !== "imessage"
-        && (serviceScope !== "imessage_or_sms" || service !== "sms")
-      )
-      || context.threadIsDirect !== false
     ) {
+      hasInvalidAuthoritativeCandidate = true;
       continue;
     }
     const routeKey = JSON.stringify([
       authority.channel,
       authority.containerMemberId,
       authority.threadId,
+      service,
     ]);
     if (!eligible.has(routeKey)) {
       eligible.set(routeKey, {
-        authority: {
-          ...(authority.accountLookupKey === undefined
-            ? {}
-            : { accountLookupKey: authority.accountLookupKey }),
-          channel: authority.channel,
-          containerMemberId: authority.containerMemberId,
-          threadId: authority.threadId,
+        service,
+        thread: {
+          authority: {
+            ...(authority.accountLookupKey === undefined
+              ? {}
+              : { accountLookupKey: authority.accountLookupKey }),
+            channel: authority.channel,
+            containerMemberId: authority.containerMemberId,
+            threadId: authority.threadId,
+          },
+          chatId: authority.threadId,
         },
-        chatId: authority.threadId,
       });
     }
   }
 
-  // Two distinct route-authorized threads in one turn (for example around a
-  // provider chat re-key) make the target ambiguous; fail closed and let the
-  // web handler answer linq_thread_unavailable.
-  if (eligible.size !== 1) {
+  // An incomplete candidate, service mismatch, or second authorized route
+  // makes the provider target ambiguous. Fail closed rather than choosing
+  // iMessage or SMS by iteration order during a provider re-key or mixed batch.
+  if (hasInvalidAuthoritativeCandidate || eligible.size !== 1) {
     return null;
   }
   return [...eligible.values()][0] ?? null;
+}
+
+function normalizeHostedGroupToolLinqService(
+  service: string | null | undefined,
+): HostedGroupToolLinqService | null {
+  const normalized = service?.trim().toLowerCase();
+  return normalized === "imessage" || normalized === "sms"
+    ? normalized
+    : null;
 }
 
 function resolveHostedInitialLinqDeliveryContexts(
@@ -998,18 +1161,10 @@ function createHostedScheduledGroupTools(input: {
     return null;
   }
 
-  // Linq can post a provider-side join offer. Telegram instead uses the normal
-  // create_join_link result in the assistant's ordinary chat reply.
-  if (channel === "telegram") {
-    return {
-      groupSharedReader: createHostedGroupSharedReader({
-        groupToolPort: input.groupToolPort,
-      }),
-      groupTool: input.groupToolPort,
-    };
-  }
-
-  // This state belongs to one scheduled Linq model operation. It proves a
+  // Scheduled routes deliberately use the first-party link on both Linq and
+  // Telegram. The durable automation route does not preserve whether a Linq
+  // thread is iMessage or SMS, and the link is the common consent surface.
+  // This state belongs to one scheduled group model operation. It proves a
   // missing grant from the model-triggered read and prevents repeated offers.
   const observedNotGrantedScopeKeys = new Set<string>();
   let permissionOfferAttempted = false;
@@ -1059,22 +1214,12 @@ function createHostedScheduledGroupTools(input: {
 
       try {
         const response = await input.groupToolPort.request({
-          action: "post_join_offer",
-          joinOffer: {
-            messageTemplate:
-              HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
-            projectionScopes,
-          },
-          linqThread: {
-            authority: {
-              channel: "linq",
-              containerMemberId,
-              threadId: target,
-            },
-            chatId: target,
+          action: "create_join_link",
+          joinLink: {
+            requestedVaultShareProjectionScopes: projectionScopes,
           },
         });
-        return response.action === "post_join_offer"
+        return response.action === "create_join_link"
           ? response
           : buildHostedScheduledGroupPermissionOfferUnavailable();
       } catch {
@@ -1092,10 +1237,10 @@ function createHostedScheduledGroupTools(input: {
 
 function buildHostedScheduledGroupPermissionOfferUnavailable(): Extract<
   HostedRuntimeGroupToolResponse,
-  { action: "post_join_offer" }
+  { action: "create_join_link" }
 > {
   return {
-    action: "post_join_offer",
+    action: "create_join_link",
     result: {
       group: null,
       status: "unavailable",
@@ -1147,7 +1292,6 @@ function createHostedAssistantAutomationTool(input: {
   const currentRoute = automationRouteSchema.parse(
     resolveAssistantDeliveryRouteWithCurrentRoute({}, input.route),
   );
-
   return {
     async request(request, context) {
       context?.signal?.throwIfAborted();
@@ -1212,7 +1356,9 @@ function createHostedAssistantAutomationTool(input: {
             : { assistantTargetOverride: request.assistantTargetOverride }),
           ...(request.automationId ? { automationId: request.automationId } : {}),
           continuityPolicy: request.continuityPolicy ?? "preserve",
-          instructions: request.instructions,
+          instructions: stripHostedAssistantAvailabilityConflictBlock(
+            request.instructions,
+          ),
           route: currentRoute,
           schedule: request.schedule,
           ...(request.slug ? { slug: request.slug } : {}),
@@ -1273,7 +1419,11 @@ function createHostedAssistantAutomationTool(input: {
           : { continuityPolicy: request.continuityPolicy }),
         ...(request.instructions === undefined
           ? {}
-          : { instructions: request.instructions }),
+          : {
+              instructions: stripHostedAssistantAvailabilityConflictBlock(
+                request.instructions,
+              ),
+            }),
         lookup: request.lookup,
         ...(request.retargetToCurrentConversation === true
           ? { route: currentRoute }
@@ -1308,6 +1458,19 @@ function createHostedAssistantAutomationTool(input: {
       });
     },
   };
+}
+
+function stripHostedAssistantAvailabilityConflictBlock(
+  instructions: string,
+): string {
+  try {
+    return stripAutomationAvailabilityConflictBlock(instructions);
+  } catch (error) {
+    if (error instanceof AutomationAvailabilityConflictBlockError) {
+      throw new VaultCliError("invalid_option", error.message);
+    }
+    throw error;
+  }
 }
 
 function assertHostedAutomationSaveRequest(input: {
@@ -1559,6 +1722,7 @@ export async function runHostedWorkspaceAssistantPhase(
           input.runtime.platform.assistantConfigurationToolPort ?? null,
         connectedApps: input.runtime.platform.connectedApps ?? null,
         ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
+        physicalNotes: input.runtime.platform.physicalNotes ?? null,
         phoneCalls: input.runtime.platform.phoneCalls ?? null,
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
           effectsPort: input.runtime.platform.effectsPort,
@@ -1635,6 +1799,22 @@ export async function runHostedWorkspaceAssistantPhase(
                     feedback.idempotencyKey,
                     feedback,
                   );
+                },
+                // Support escalations are recorded through the Web callback
+                // inside the turn so the member-facing "queued" confirmation is
+                // backed by a durable record; they never join the best-effort
+                // post-delivery candidate flush.
+                async deliverProductSupportEscalation(
+                  feedback: HostedRuntimeProductFeedbackRecord,
+                ) {
+                  const port = input.runtime.platform.productFeedbackPort;
+                  if (!port) {
+                    throw new Error(
+                      "Hosted product feedback port unavailable for support escalation.",
+                    );
+                  }
+                  const response = await port.recordProductFeedback(feedback);
+                  return { recorded: response.recorded };
                 },
               },
             }
@@ -1765,10 +1945,13 @@ export async function runHostedWorkspaceAssistantPhase(
     const managedAutomationsResult = hasFreshConversationInput
       || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
       ? null
-      : await applyHostedManagedAutomationsBestEffort({
-        input,
-        retryStableKeyFailure: false,
-      });
+      : mergeHostedAssistantPhaseResults(
+          await applyHostedManagedAutomationsBestEffort({
+            input,
+            retryStableKeyFailure: false,
+          }),
+          await refreshHostedReminderAvailabilityBestEffort({ input }),
+        );
     const shouldContinueAssistantLane = systemMailboxMaintenance.continueAssistantLane
       || managedAutomationsResult !== null;
     if (
@@ -2493,6 +2676,115 @@ function hasFreshHostedMailboxInput(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
   return input.initialMailboxImport.importResult.fetchedCount > 0;
+}
+
+async function refreshHostedReminderAvailabilityBestEffort(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
+  if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
+    return null;
+  }
+
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
+  const maintenanceSignal = input.input.backgroundMaintenanceSignal
+    ?? input.input.signal
+    ?? null;
+  let result: Awaited<ReturnType<typeof refreshReminderAvailability>>;
+  try {
+    result = await refreshReminderAvailability({
+      connectedApps: input.input.runtime.platform.connectedApps ?? null,
+      now: new Date(nowMs),
+      shouldYield: input.input.shouldYieldBackgroundMaintenance ?? null,
+      signal: maintenanceSignal,
+      vaultRoot: input.input.restored.vaultRoot,
+    });
+  } catch (error) {
+    input.input.signal?.throwIfAborted();
+    if (
+      maintenanceSignal?.aborted
+      && input.input.shouldYieldBackgroundMaintenance?.() === true
+    ) {
+      return {
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: new Date(
+          nowMs + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
+        ).toISOString(),
+        nextWakeReason: "assistant",
+        progressed: true,
+        redactedStatus: {
+          reminderAvailabilityMaintenanceYielded: true,
+        },
+      };
+    }
+    maintenanceSignal?.throwIfAborted();
+    const failure = buildHostedRuntimeFailureDiagnostics(
+      error,
+      "Hosted reminder availability maintenance failed.",
+      { includeSafeIdentity: true },
+    );
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        errorCode: failure.errorCode,
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
+          ...failure.redactedJson,
+          reminderAvailabilityMaintenanceFailed: true,
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+    return null;
+  }
+
+  if (result.failed > 0) {
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
+          reminderAvailabilityMaintenanceAttempted: result.attempted,
+          reminderAvailabilityMaintenanceFailed: result.failed,
+          reminderAvailabilityMaintenanceRefreshed: result.refreshed,
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+  }
+  const nextWakeAt = result.yielded === true
+    ? new Date(
+      nowMs + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
+    ).toISOString()
+    : result.nextRefreshAt;
+  if (result.refreshed === 0 && nextWakeAt === null) {
+    return null;
+  }
+
+  return {
+    checkpointReason: "assistant_runtime_commit",
+    ...(nextWakeAt ? { nextWakeAt, nextWakeReason: "assistant" } : {}),
+    progressed: true,
+    redactedStatus: {
+      reminderAvailabilityMaintenanceAttempted: result.attempted,
+      reminderAvailabilityMaintenanceFailed: result.failed,
+      reminderAvailabilityMaintenanceRefreshed: result.refreshed,
+      reminderAvailabilityMaintenanceYielded: result.yielded === true,
+    },
+  };
 }
 
 async function applyHostedManagedAutomationsBestEffort(input: {

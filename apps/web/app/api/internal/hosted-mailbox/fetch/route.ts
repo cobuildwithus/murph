@@ -2,6 +2,7 @@ import {
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
 } from "@murphai/hosted-execution/parsers";
+import type { PrismaClient } from "@prisma/client";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -17,9 +18,12 @@ import {
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
   hostedMailboxItemsRequireAiUsageAccess,
+  readHostedMailboxConversationAiUsageHighWater,
+  readHostedMailboxConversationAiUsageReplayFloor,
 } from "@/src/lib/hosted-mailbox/ai-usage-gate";
 import {
   fetchHostedRuntimeMailboxProjection,
+  tryMarkHostedMailboxConversationAiUsageDenied,
 } from "@/src/lib/hosted-mailbox/store";
 import {
   resolveHostedRuntimeAiUsageGate,
@@ -60,6 +64,8 @@ export const POST = withJsonError(async (request: Request) => {
     consumedSeqByLane: projection.consumedSeqByLane,
     items: projection.items,
     lanes: body.lanes,
+    maxSeqByLane: projection.maxSeqByLane,
+    prisma,
     userId,
   });
   // Sponsorship color is optional; it must never block ordinary mailbox work.
@@ -84,6 +90,10 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   consumedSeqByLane: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["consumedSeqByLane"];
   items: readonly HostedRuntimeMailboxAiUsageItem[];
   lanes: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["lanes"];
+  maxSeqByLane: Parameters<
+    typeof readHostedMailboxConversationAiUsageHighWater
+  >[0]["lanes"];
+  prisma: PrismaClient;
   userId: string;
 }): Promise<boolean> {
   // Gate the whole fetch batch: runtime imports lanes together, and all-or-nothing
@@ -110,6 +120,17 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   if (gate.status === "allowed") {
     return gate.usageRunningLow === true;
   }
+
+  await tryMarkHostedMailboxConversationAiUsageDenied({
+    afterConversationLaneSeq:
+      readHostedMailboxConversationAiUsageReplayFloor(input),
+    prisma: input.prisma,
+    throughConversationLaneSeq:
+      readHostedMailboxConversationAiUsageHighWater({
+        lanes: input.maxSeqByLane,
+      }),
+    userId: input.userId,
+  });
 
   throw hostedOnboardingError({
     code: "HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED",

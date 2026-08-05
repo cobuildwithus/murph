@@ -9,8 +9,10 @@ changes user-facing frontend UI must render the real production component on
 `/design?tab=components`, or the complete composed section or flow on
 `/design?tab=sections`. Include hosted desktop and mobile screenshots captured
 from that catalog surface in the PR so reviewers can judge the UI without
-reconstructing the state locally. The `Frontend design proof` workflow enforces
-the catalog update and PR evidence contract.
+reconstructing the state locally. Capture lossless PNGs at 2x device scale or
+higher, crop to the changed component or section, and verify both local and
+hosted images at native resolution. The `Frontend design proof` workflow
+enforces the catalog update and PR evidence contract.
 
 `apps/web` is the canonical hosted control plane. Hosted product meaning lives
 in Postgres here, not in Cloudflare worker control storage. In particular,
@@ -51,6 +53,31 @@ authenticated execution intents, restores encrypted runtime state, runs a
 workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It may hold
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
+
+## Health-data withdrawal rollback floor
+
+Deploy the consent-aware Cloudflare Worker before the Web deployment that can
+record explicit `launch.health-data = revoked` events, then promote Web
+immediately. The short Worker-first window is intentionally fail closed for
+runtime admission if old Web does not expose the signed consent callback. Old
+Web cannot create the new withdrawal event through the product flow.
+
+Once the consent-aware Web deployment can record a revocation, both that Web
+artifact and the compatible Worker are hard rollback floors. An older Web build
+does not enforce the persisted revoke at Web-only provider webhooks, scheduled
+sync, messaging, or cross-member shared-data reads; retaining the signed
+callback route protects only Worker runtime admission and cannot make that
+legacy Web consumer safe. Do not independently roll either plane below the
+floor after cutover. Recover with a coordinated forward fix on the compatible
+pair. A separately proposed rollback artifact would need complete proof for
+every Web- and Worker-owned authority reader, not a callback-only compatibility
+shim.
+
+The supported post-cutover matrix is therefore the consent-aware Web with the
+consent-aware Worker. Focused proof covers a revoked Worker runtime admission,
+a revoked Web webhook/sync admission, and a revoked grantor shared-data read.
+Missing legacy grants remain compatible within those current artifacts; they
+are not a reason to restore pre-consent readers.
 
 ## Browser-vault member-proof rollback floor
 
@@ -300,8 +327,9 @@ The hosted Prisma schema keeps ownership sharp and nested:
   adapters normalize Linq and Telegram evidence into this Web-owned state; the
   assistant and browser never own attribution or grant authority.
 - `HostedProductFeedback` owns assistant-captured structured product feedback
-  with only a bounded product-only summary, kind, and optional changelog ids,
-  without storing raw conversation text, health details, tags, topics, or provider payloads
+  with only a bounded product-only summary, kind, and optional changelog ids;
+  the summary-content policy (de-identification contract and best-effort
+  deterministic redaction) is owned by `agent-docs/SECURITY.md`
 - `HostedPhoneCall` owns one member-bound Retell phone-call row per real call
   with a bounded call brief, provider call id, status, and final analysis
   result. Briefs and results use member/table/row/field/scope-bound hosted
@@ -664,6 +692,7 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD`
+- `HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MONTHLY` and `HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY` select the dedicated Customer Portal configurations used for exact immediate plan confirmations. Each configuration enables price updates, invoices prorations immediately, and allows only its exact destination Price because Stripe rejects multiple monthly Prices from the same Product in one configuration.
 - `HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID` optionally selects a dedicated Family Billing Portal configuration.
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
@@ -679,11 +708,22 @@ Hosted onboarding extras:
   update or the final reply. Completed grouped traces count once by their
   shared Linq delivery, and traces for one in-flight provider request count
   once while unresolved. Progress accepted before 30 seconds suppresses that
-  turn; progress at or after the boundary remains alertable. The monitor sends
+  turn; progress at or after the boundary remains alertable. Fresh conversation
+  mailbox rows explicitly stamped by the existing AI usage gate are excluded
+  before the bounded scan and grouping only while execution remains blocked;
+  missing or impossible denial chronology remains alertable. The database-timed
+  stamp covers only the conversation sequence window observed by the denying
+  fetch or reconciliation. The query derives one latency origin from ingress,
+  staging, provider, delivery, and consumption before its 24-hour window and
+  row cap; execution that starts after denial is measured from its earliest
+  milestone even when ingress is older than that window. The monitor sends
   no alert for scheduled automation turns, including Flex-tier turns, because
   they do not own a user-ingress reply trace. The monitor sends one email per
   continuous incident, suppresses sends from 11 PM through 7 AM
   operator-local time, and adds up to ten minutes of stable wake/retry jitter.
+  The existing seven-day trace cleanup retires a trace only when both ingress
+  and latest activity are stale, so recent resumed work remains observable
+  after quiet-hour deferral without extending inactive-trace retention.
   Provider attempts therefore stay at least ten minutes
   apart and spread across more than one five-minute cron tick. A fresh health
   and operator-time recheck before provider admission makes no attempt-state
@@ -742,12 +782,13 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
+- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows by canonical model and recorded provider into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. OpenAI and Venice GPT-5.6 usage therefore use their respective documented input, cache-read, cache-write, and output rates. Settings discloses Venice's higher provider-rate capacity use both while it is selected as a pending choice and after it is saved. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
 - Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.
-- Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
-- Settings keeps the aggregate usage meter as the only current-capacity view. Its read-only activity detail leads with compact mission status and reward ownership, keeps requirements and selection dates in a native details disclosure, then shows flat purchase-grant history with added amount, source, and date.
+- Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog, including the active Family owner's authorized own-seat target. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
+- Settings keeps the aggregate usage meter as the only current-capacity view. A fulfilled purchase starts a fresh 0%-used display window, and later counted usage advances it without changing admission or ledger accounting. Its read-only activity detail leads with compact mission status and reward ownership, keeps requirements and selection dates in a native details disclosure, then shows flat purchase-grant history with added amount, source, and date.
 - Usage-credit payment accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and keeps the browser from choosing an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
+- Hosted-group funding offers monthly sponsorship first and one-time contribution second at every current capacity. Monthly activation freezes one exact $5 purchase plus a payer/group authorization with a $5, $10, or $20 maximum. The durable settlement seam may admit one deterministic exact-$5 refill under the group beneficiary lock when capacity is low; the existing Stripe minute sweep charges it after commit. Pending and fulfilled purchases derive period commitment, unused ledger credit carries forward, and the authorization never stores a balance. Periods roll lazily from the successful activation anchor, including month-end. Payment failure blocks further automatic charges until the authenticated payer follows the private recovery path. Automatic refills create no sponsorship moment and no room notification; public group usage exposes only sponsored versus unsponsored.
 - Personal, Family, and group funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy personal and Family purchases resolve the exact Murph billing Subscription whose Customer matches the frozen purchase, then use its attached explicit default card or inherited attached Customer default. Missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only exact-subscription state stays in Checkout, and unrelated Subscriptions never participate. Group funding has no required billing Subscription and may use the attached Customer default or sole attached card only when no legacy Customer default Source exists. Stripe's redisplay setting controls Checkout presentation rather than whether the existing subscription card can fund the payer's explicit top-up. The service creates an unconfirmed PaymentIntent, then rechecks active payer, still-created purchase state, and the current exact personal or Family billing Customer, Subscription, canonical status, suspension state, and last accepted Stripe-event time while durably binding that intent under the payer lock before off-session confirmation. A billing-reference change, deletion, or terminal-state race cancels the unbound intent and never confirms it; after bind, recovery remains tied to that exact intent rather than retargeting. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Current-policy Checkout asks the payer whether to save the selected method so Stripe may present it in later Checkout flows. Murph stores no raw card data and never charges from amount selection alone.
 - A browser return or synchronous PaymentIntent response never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout and line-item facts when present plus the exact PaymentIntent and Charge, then commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
 - The purchase schema freezes payer and beneficiary separately. Personal, Family-member, and hosted-group purchases converge on the same append-only beneficiary ledger, Stripe verification, refund/dispute adjustments, status/expire routes, and webhook-only grant path. Family top-ups reuse the active group billing customer; they do not create a personal customer, Family wallet, second ledger, or second credit projection. One payer-wide nonterminal purchase is the ambiguity fence: a conflicting Family target receives no payable URL or retry action, and former-member recovery remains payable only when Settings can show an owner-recognizable frozen beneficiary.
@@ -756,9 +797,9 @@ Hosted AI usage metering:
   referrer's next new group, and freeze pre-expiry qualification in the
   provider-ingress transaction. Bound commitments remain reserved for a
   25-hour late-evidence grace before referrer-serialized expiry becomes final.
-  The assistant-facing reward label is an approximate current-model message
-  estimate recomputed at each read and again at celebration; Luna uses a generic
-  fallback. Exact qualification counters remain server-only.
+  The assistant-facing reward label is an exact server-owned cost-weighted
+  usage-credit label; it is never translated into an approximate number of
+  messages or days. Exact qualification counters remain server-only.
   Immediate post-commit reconciliation and the bounded minute recovery cron
   converge on one final referral grant and one atomic source-mailbox
   celebration fence. Recovery also re-signals bounded oldest unconsumed
@@ -897,12 +938,12 @@ Callback auth contract:
 
 - hosted browser start sets one 15-minute host-only callback proof bound to the
   provider, OAuth state, member, and app-session generation
-- callback GET requires that proof and active session but only renders the
-  confirmation or safe failure surface; it never exchanges provider credentials
-- the explicit same-origin confirmation POST passes the exact member as
-  `expectedOwnerId` before shared ingress can consume state or exchange a code
-- a callback without its initiating-browser proof consumes only the OAuth state,
-  preventing later relay into the member's signed-in browser
+- callback GET requires that proof and active session, passes the exact member
+  as `expectedOwnerId` before shared ingress can consume state or exchange a
+  code, and redirects back into the app without an interstitial
+- a callback without its initiating-browser proof consumes only the OAuth state
+  and redirects to Connect, preventing later relay into the member's signed-in
+  browser
 - the provider callback hostname must match the hostname that served the
   authenticated browser start; the `__Host-` app-session and callback-proof
   cookies remain host-only, and Murph does not add a Domain cookie or
@@ -1355,6 +1396,67 @@ machine: 4 vCPUs, 8 GB RAM, and 32 GB disk. The CI guard currently observes the
 production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
+The production build launches the parent Next process explicitly through Node
+with `--max-old-space-size=1024` while appending
+`--max-old-space-size=3072` to `NODE_OPTIONS`. Node gives the direct CLI flag
+precedence in the parent. Next 16.2.6 reconstructs its non-isolated TypeScript
+worker options from the parent arguments followed by `NODE_OPTIONS`, so the
+mandatory generated-contract validation receives the 3 GiB limit. Next removes
+that option from its isolated static workers. The existing caller options are
+preserved. The shared script is used by the Vercel package build and the CI
+memory-observation lane. This bounds the compile parent without starving the
+later validation worker or changing the compiled application. Repeated
+forced-cold Standard previews remain the direct acceptance evidence, and a Next
+upgrade must revalidate this worker boundary.
+
+Production builds explicitly use Next's supported `--webpack` fallback with
+`experimental.webpackBuildWorker=true` and
+`experimental.webpackMemoryOptimizations=true`. The Workflow integration
+contributes custom Webpack configuration, so the worker is opted in explicitly
+instead of relying on Next's automatic selection. The worker isolates Webpack
+compilation to reduce build-memory pressure, while the memory-optimization mode
+trades some compile speed for a lower peak. Local development remains on
+Turbopack by default.
+
+Next 16.2.6 accepts `experimental.turbopackMemoryLimit` at the JavaScript/native
+boundary but discards the `_memory_limit` argument when creating its native
+backend. The option is therefore omitted rather than documented or tested as a
+4 GiB governor that does not exist. A Next upgrade must re-audit that behavior
+before reintroducing the option.
+
+A 2 GiB parent-old-space candidate passed one forced-cold Standard preview but
+the next identical build was still killed by the 8 GB container OOM boundary.
+Single global limits of 1 GiB and 1.5 GiB completed compilation but
+deterministically exhausted V8 old space in Next's generated-contract
+TypeScript validation. A split with 1 GiB for the parent and 2 GiB for that
+worker failed at the same boundary; the 1 GiB / 3 GiB split completed the full
+local build. Either a V8 heap failure or a container OOM invalidates it rather
+than justifying weaker checks.
+
+The first forced-cold Standard preview with that split still exhausted the
+container during Turbopack compilation. Compile-graph profiling found the
+underlying multiplier: the top-level `/design` catalog was a Client Component
+only to manage its `tab` query parameter, so every catalog study and its
+transitive server imports entered one browser compilation graph. The route now
+parses the query on the server and uses URL-backed tab links. Client components
+reachable from catalog studies also use narrow client-safe public imports
+instead of server-heavy barrels, while the three synthetic studies that pass
+callback props declare their own local client boundaries. With the same heap
+split, a cold local Turbopack build then compiled in 57 seconds instead of
+roughly 4.4 minutes and completed all 229 static pages. Exact-head forced-cold
+Standard previews remain the external acceptance proof. The next exact-head
+preview nevertheless OOM-killed Turbopack, so the catalog correction is kept
+for its proven boundary and graph improvement but is not claimed as sufficient
+capacity relief.
+
+The memory-optimized Webpack worker compiled the complete application within
+the local heap policy and enforced stricter route contracts. It exposed a
+browser-vault parser re-export through a server-heavy cursor, an extra helper
+export from a page module, optional page props, and one synchronous route-param
+compatibility union. Those boundaries now use their narrow owners and Next 16
+route signatures; validation remains enabled. A complete local Webpack build
+then passed TypeScript and generated all 229 pages.
+
 The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
 machine model minus a 0.8 GB reserve for OS/container overhead outside the build
 cgroup at the ceiling. The legacy-named
@@ -1376,20 +1478,25 @@ across all build workers plus page cache. A fully working Linux CI run on
 2026-07-06 proved the mismatch: a 6,000,000,000-byte cgroup cap OOM-killed a
 build that the real 8 GB Vercel Standard machine accepts.
 
-Linux CI defaults to wrapping the `apps/web verify` production `next build` step
-with `apps/web/scripts/build-memory-guard.sh`. Privileged operations are limited
+Linux CI defaults to wrapping the shared production Next-build script with
+`apps/web/scripts/build-memory-guard.sh`. Privileged operations are limited
 to creating/removing that measured cgroup and moving the build process into it;
 the build itself still runs as the invoking user with its normal environment,
 working directory, and stdio.
 
-Enforcement is deferred because live CI on 2026-07-07 showed the cold-build
-multi-process anonymous-memory ramp is not governed by the Turbopack heap limit:
+Enforcement remains deferred because live CI on 2026-07-07 showed the cold-build
+multi-process anonymous-memory ramp was unchanged by the ignored Turbopack option:
 with `turbopackMemoryLimit=3GiB`, anon climbed about 2.9 GB at 12 seconds, 5.5
 GB at 27 seconds, and 6.9 GB at 42 seconds before an OOM-group kill, matching
-the prior 4 GiB run. Any hard cgroup limit that leaves a meaningful reserve on
-the 8 GB machine would currently false-fail the cold build. Cold-build memory
-optimization is the follow-up work; production config should not carry
-unproven heap-limit churn from the 3 GiB trial.
+the prior 4 GiB-configured run. Any hard cgroup limit that leaves a meaningful reserve on
+the 8 GB machine would false-fail that historical cold build. The later
+compile-graph correction addresses the active Standard-build candidate, but
+the guard must remain observe-only until exact-head CI accounting supports a
+safe enforced budget.
+
+That failed 3 GiB trial changed only a discarded configuration input, not a
+native Turbopack target. Keep it distinct from the enforced Node old-space
+policy when profiling or changing the build.
 
 The guard samples cgroup `memory.current` and selected `memory.stat` fields
 about every 3 seconds during the build, prints trajectory lines about every 15

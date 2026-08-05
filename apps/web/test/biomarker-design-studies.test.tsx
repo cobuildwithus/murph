@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   act,
   createElement,
@@ -12,7 +13,6 @@ import { renderClientComponent } from "./render-client-component";
 
 const navigationMocks = vi.hoisted(() => ({
   replace: vi.fn(),
-  tab: "sections",
 }));
 
 vi.mock("next/navigation", async (importOriginal) => {
@@ -21,7 +21,7 @@ vi.mock("next/navigation", async (importOriginal) => {
   return {
     ...actual,
     useRouter: () => ({ replace: navigationMocks.replace }),
-    useSearchParams: () => new URLSearchParams(`tab=${navigationMocks.tab}`),
+    useSearchParams: () => new URLSearchParams(),
   };
 });
 
@@ -31,9 +31,17 @@ vi.mock("next/link", async () => {
   return {
     default({
       prefetch,
+      replace,
+      scroll,
       ...props
-    }: ComponentPropsWithoutRef<"a"> & { prefetch?: boolean }) {
+    }: ComponentPropsWithoutRef<"a"> & {
+      prefetch?: boolean;
+      replace?: boolean;
+      scroll?: boolean;
+    }) {
       void prefetch;
+      void replace;
+      void scroll;
       return React.createElement("a", props);
     },
   };
@@ -89,13 +97,15 @@ import { DesignPage } from "@/app/design/design-page";
 
 beforeEach(() => {
   navigationMocks.replace.mockReset();
-  navigationMocks.tab = "sections";
 });
 
 test("design page routes the biomarker studies through the dedicated sections tab", () => {
-  const sectionsMarkup = renderToStaticMarkup(createElement(DesignPage));
+  const sectionsMarkup = renderToStaticMarkup(
+    createElement(DesignPage, { activeTab: "sections" }),
+  );
 
   expect(sectionsMarkup).toContain(">Sections<");
+  expect(sectionsMarkup).toContain('data-design-section="catalog-navigation"');
   expect(sectionsMarkup).toContain("Homepage security and privacy");
   expect(sectionsMarkup).toContain("Consumer Health Data Privacy Notice");
   expect(sectionsMarkup).toContain(
@@ -110,9 +120,11 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain(
-    "Sponsor more messages: group funding, recovery, and fulfilled receipt",
+    "Always-available group sponsorship and contribution",
   );
-  expect(sectionsMarkup).toContain("Overall AI usage, credits, and missions");
+  expect(sectionsMarkup).toContain(
+    "Overall AI usage, purchase reset, Family owner action, credits, and referrals",
+  );
   expect(sectionsMarkup).toContain("Biomarker result detail");
   expect(sectionsMarkup).toContain("Biomarker reference context");
   expect(sectionsMarkup).toContain("Boundary result detail");
@@ -122,20 +134,30 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain('data-design-study="biomarker-boundary-result"');
   expect(sectionsMarkup).toContain('data-design-study="group-usage-funding"');
   expect(sectionsMarkup).toContain("Sunday sleep crew");
-  expect(sectionsMarkup).toContain("Keep Murph going");
+  expect(sectionsMarkup).toContain("Support Murph in Sunday sleep crew");
+  expect(sectionsMarkup).not.toContain("Keep Murph going");
   expect(sectionsMarkup).toContain("Sponsor this chat");
-  expect(sectionsMarkup).toContain('data-design-state="usage-added-follow-up"');
-  expect(sectionsMarkup).toContain("Preview group usage added");
-  expect(sectionsMarkup).toContain("Preview usage added with Text Murph");
-  expect(sectionsMarkup).toContain("Preview usage added with channel choices");
+  expect(sectionsMarkup).toContain('data-design-state="monthly-activation"');
+  expect(sectionsMarkup).toContain('data-design-state="ordinary-sponsored-one-time"');
+  expect(sectionsMarkup).toContain('data-design-state="monthly-active"');
+  expect(sectionsMarkup).toContain('data-design-state="monthly-paused"');
+  expect(sectionsMarkup).toContain('data-design-state="monthly-recovery"');
+  expect(sectionsMarkup).toContain('data-design-state="sponsored-one-time-recovery"');
+  expect(sectionsMarkup).toContain("Monthly sponsorship is the primary flow");
+  expect(sectionsMarkup).toContain("One-time contribution");
   expect(sectionsMarkup).toContain("personal-usage-credit-owner");
   expect(sectionsMarkup).toContain("Pulse AI usage");
   expect(sectionsMarkup).toContain("Static owner-layout preview");
   expect(sectionsMarkup).toContain("Overall usage active");
   expect(sectionsMarkup).toContain("Plan usage exhausted, credit remains");
+  expect(sectionsMarkup).toContain("Fresh purchase starts at zero used");
   expect(sectionsMarkup).toContain("All available usage exhausted");
+  expect(sectionsMarkup).toContain(
+    "Family owner can add usage for their own seat",
+  );
   expect(sectionsMarkup).toContain("76% used");
   expect(sectionsMarkup).toContain("24% remaining");
+  expect(sectionsMarkup).toContain("0% used");
   expect(sectionsMarkup).toContain("Fulfilled top-up with refreshed usage");
   expect(sectionsMarkup).toContain("Preview fulfilled top-up");
   expect(sectionsMarkup).toContain("Add usage to continue");
@@ -145,8 +167,9 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("inert=\"\"");
   expect(sectionsMarkup).toContain("max-w-7xl");
 
-  navigationMocks.tab = "components";
-  const componentsMarkup = renderToStaticMarkup(createElement(DesignPage));
+  const componentsMarkup = renderToStaticMarkup(
+    createElement(DesignPage, { activeTab: "components" }),
+  );
 
   expect(componentsMarkup).toContain(">Components<");
   expect(componentsMarkup).toContain("WHOOP Completion Dialog");
@@ -158,8 +181,14 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-detail"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-boundary-result"');
   expect(componentsMarkup).toContain('data-design-component="group-usage-funding"');
+  expect(componentsMarkup).toContain(
+    'data-design-component="group-sponsorship-management"',
+  );
+  expect(componentsMarkup).toContain("This month");
+  expect(componentsMarkup).toContain("Monthly limit");
   expect(componentsMarkup).toContain("Sunday sleep crew");
-  expect(componentsMarkup).toContain("Keep Murph going");
+  expect(componentsMarkup).toContain("Support Murph in Sunday sleep crew");
+  expect(componentsMarkup).not.toContain("Keep Murph going");
   expect(componentsMarkup).toContain("Sponsor this chat");
   expect(componentsMarkup).toMatch(
     /data-slot="radio-group-item"[^>]*class="[^"]*sr-only/u,
@@ -169,6 +198,39 @@ test("design page routes the biomarker studies through the dedicated sections ta
   );
   expect(componentsMarkup).toContain("max-w-5xl");
   expect(componentsMarkup).not.toContain("max-w-7xl");
+
+  const designPageSource = readFileSync(
+    new URL("../app/design/design-page.tsx", import.meta.url),
+    "utf8",
+  );
+  expect(designPageSource).not.toContain('"use client"');
+  expect(designPageSource).not.toContain("useSearchParams");
+  expect(designPageSource).toContain('import Link from "next/link"');
+
+  for (const clientStudy of [
+    "environment-progress-study.tsx",
+    "experiment-results-share-study.tsx",
+    "homepage-auth-warm-runtime-study.tsx",
+    "settings-custom-inference-study.tsx",
+  ]) {
+    const clientStudySource = readFileSync(
+      new URL(`../app/design/${clientStudy}`, import.meta.url),
+      "utf8",
+    );
+    expect(clientStudySource).toMatch(/^"use client";/u);
+  }
+
+  const groupFundingStudySource = readFileSync(
+    new URL("../app/design/group-usage-funding-study.tsx", import.meta.url),
+    "utf8",
+  );
+  expect(groupFundingStudySource.match(/\binitialOpen\b/gu)).toHaveLength(1);
+  expect(groupFundingStudySource).toContain(
+    "<GroupSponsorshipManagementCard",
+  );
+  expect(groupFundingStudySource).toContain(
+    'mode="one_time"',
+  );
 });
 
 test("biomarker preparing study reassures members and previews the index structure", () => {

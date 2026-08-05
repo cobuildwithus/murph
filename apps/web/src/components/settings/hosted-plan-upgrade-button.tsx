@@ -6,42 +6,27 @@ import { useState, type ReactNode } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { Button } from "@/src/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/src/components/ui/dialog";
-import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
+import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedBillingPlanUpgradeResult } from "@/src/lib/hosted-onboarding/billing-plan-change-service";
 import { cn } from "@/src/lib/utils";
 
-import { PlanFeatureCard } from "./plan-feature-card";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
-
-const edgePlan = getHostedBillingPlanDefinition("launch_edge_monthly");
-const edgePriceLabel = formatHostedBillingPlanMonthlyPrice(edgePlan.recurringAmountUsdCents);
-
-const EDGE_FEATURES = [
-  "Everything in Pulse",
-  "More usage on latest AI models",
-  "Murph remembers more of your history",
-  "Deeper research and analysis",
-];
 
 export function UpgradeToEdgeButton(props: {
   block?: boolean;
   children?: ReactNode;
   disabled?: boolean;
+  expectedCurrentPlanCode:
+    | Extract<HostedBillingPlanCode, "launch_group_monthly" | "launch_monthly">;
   onPendingChange?: (pending: boolean) => void;
   presentation?: "banner" | "settings";
 }) {
   const presentation = props.presentation ?? "settings";
+  const expectedCurrentPlanCode =
+    props.expectedCurrentPlanCode ?? "launch_monthly";
   const router = useRouter();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isUpgrading, setIsUpgrading] = useState(false);
-  const [confirmationOpen, setConfirmationOpen] = useState(false);
 
   async function handleUpgrade() {
     setErrorMessage(null);
@@ -52,6 +37,7 @@ export function UpgradeToEdgeButton(props: {
       const response = await requestHostedOnboardingJson<HostedBillingPlanUpgradeResult>({
         method: "POST",
         payload: {
+          expectedCurrentPlanCode,
           targetPlanCode: "launch_edge_monthly",
         },
         url: "/api/settings/billing/upgrade-plan",
@@ -63,15 +49,16 @@ export function UpgradeToEdgeButton(props: {
       }
 
       router.refresh();
+      setIsUpgrading(false);
+      props.onPendingChange?.(false);
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "Could not upgrade your plan right now."));
-    } finally {
       setIsUpgrading(false);
       props.onPendingChange?.(false);
     }
   }
 
-  const label = isUpgrading ? "Upgrading..." : props.children ?? "Upgrade to Edge";
+  const label = isUpgrading ? "Opening Stripe..." : props.children ?? "Upgrade to Edge";
   const disabled = props.disabled === true || isUpgrading;
 
   if (presentation === "banner") {
@@ -81,20 +68,14 @@ export function UpgradeToEdgeButton(props: {
           type="button"
           variant="unstyled"
           size="unstyled"
-          onClick={() => setConfirmationOpen(true)}
+          onClick={() => void handleUpgrade()}
           disabled={disabled}
           className="inline-flex items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
         >
           {label}
           <ArrowRight className="size-4" aria-hidden="true" />
         </Button>
-        <EdgeUpgradeConfirmationDialog
-          errorMessage={errorMessage}
-          isUpgrading={isUpgrading}
-          onConfirm={() => void handleUpgrade()}
-          onOpenChange={setConfirmationOpen}
-          open={confirmationOpen}
-        />
+        <UpgradeErrorMessage message={errorMessage} />
       </div>
     );
   }
@@ -104,79 +85,25 @@ export function UpgradeToEdgeButton(props: {
       <Button
         type="button"
         variant={props.block ? "secondary" : "default"}
-        onClick={() => setConfirmationOpen(true)}
+        onClick={() => void handleUpgrade()}
         disabled={disabled}
         className={props.block ? "w-full" : undefined}
       >
         {label}
       </Button>
-      <EdgeUpgradeConfirmationDialog
-        errorMessage={errorMessage}
-        isUpgrading={isUpgrading}
-        onConfirm={() => void handleUpgrade()}
-        onOpenChange={setConfirmationOpen}
-        open={confirmationOpen}
-      />
+      <UpgradeErrorMessage message={errorMessage} />
     </div>
   );
 }
 
-function EdgeUpgradeConfirmationDialog(props: {
-  errorMessage: string | null;
-  isUpgrading: boolean;
-  onConfirm: () => void;
-  onOpenChange: (open: boolean) => void;
-  open: boolean;
-}) {
-  return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
-        <DialogHeader className="pr-10">
-          <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-            Upgrade to Edge
-          </DialogTitle>
-          <DialogDescription className="text-sm leading-6 text-[#736a58]">
-            For when you want the full picture.
-          </DialogDescription>
-        </DialogHeader>
-
-        <PlanFeatureCard price={edgePriceLabel} features={EDGE_FEATURES} />
-
-        {props.errorMessage ? (
-          <p
-            role="alert"
-            className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
-          >
-            {props.errorMessage}
-          </p>
-        ) : null}
-
-        <div className="flex flex-col gap-2">
-          <Button
-            type="button"
-            size="xl"
-            onClick={props.onConfirm}
-            disabled={props.isUpgrading}
-            className="w-full"
-          >
-            {props.isUpgrading ? "Upgrading..." : "Upgrade to Edge"}
-          </Button>
-          <Button
-            type="button"
-            size="xl"
-            variant="ghost"
-            onClick={() => props.onOpenChange(false)}
-            disabled={props.isUpgrading}
-            className="w-full"
-          >
-            Cancel
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function formatHostedBillingPlanMonthlyPrice(amountUsdCents: number): string {
-  return `$${amountUsdCents / 100}`;
+function UpgradeErrorMessage(props: { message: string | null }) {
+  return props.message ? (
+    <p
+      role="alert"
+      aria-live="polite"
+      className="text-xs leading-tight text-destructive sm:max-w-xs sm:text-right"
+    >
+      {props.message}
+    </p>
+  ) : null;
 }

@@ -18,13 +18,18 @@ vi.mock("../src/web-control-plane.ts", async () => {
   };
 });
 
+import { createHostedWebConnectedAppsPort } from "../src/runtime-platform/connected-apps-port.ts";
+import { HostedWebControlPlaneResponseError } from "../src/runtime-platform/web-control-transport.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import type { RunnerOutboundEnvironmentSource } from "../src/runner-outbound/shared.ts";
 import {
   readHostedRunnerWebControlPolicy,
 } from "../src/runner-outbound/shared-web-control-policy.ts";
 import { handleRunnerWebControlRequest } from "../src/runner-outbound/web-control.ts";
-import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
+import {
+  createHostedExecutionTestEnv,
+  TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+} from "./hosted-execution-fixtures.ts";
 
 beforeEach(() => {
   mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
@@ -84,5 +89,51 @@ describe("connected-app web-control policy", () => {
 
     expect(response.status).toBe(401);
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+  });
+  it("keeps the control-plane error code, status, and message readable by the caller", async () => {
+    // The assistant decides whether a connected-app failure is worth retrying
+    // and what to tell the user, so a rejected request must arrive as more than
+    // a transport error.
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "CONNECTED_APPS_RESULT_TOO_LARGE",
+            message: "That request returned more than Murph can read at once.",
+            retryable: false,
+          },
+        }),
+        { headers: { "content-type": "application/json" }, status: 413 },
+      ),
+    );
+    const port = createHostedWebConnectedAppsPort({
+      boundUserId: "member_123",
+      fetchImpl: (async () => {
+        throw new Error("Direct transport should route through the control plane.");
+      }) as unknown as typeof fetch,
+      timeoutMs: 5_000,
+      transport: {
+        callbackSigning: {
+          keyId: "v1",
+          privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+        mode: "direct",
+        webControlBaseUrl: "https://web.example.test",
+        workspaceCheckpointBridge: null,
+      },
+    });
+
+    const error = await port.request(
+      { input: { query: "travel credit" }, operation: "search" },
+      { signal: null },
+    ).catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(HostedWebControlPlaneResponseError);
+    expect(error).toMatchObject({
+      code: "CONNECTED_APPS_RESULT_TOO_LARGE",
+      detail: "That request returned more than Murph can read at once.",
+      retryable: false,
+      status: 413,
+    });
   });
 });

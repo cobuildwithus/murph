@@ -13,8 +13,10 @@ import {
   HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
   listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
+  readHostedLinqRecentMessageEffectCountsTx,
   readHostedLinqIncomingLineState,
   readHostedLinqReceiptCorrelatedRecoveryLineTx,
+  syncHostedLinqConfiguredLinesTx,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
@@ -38,6 +40,7 @@ describe("listHostedLinqContactCardLines", () => {
     const findMany = vi.fn()
       .mockResolvedValueOnce([
         buildLineRow("+15550100001", {
+          configuredAt: new Date("2026-06-30T11:00:00.000Z"),
           providerLastSeenAt: new Date("2026-06-30T12:00:00.000Z"),
           providerReputationStatus: "HEALTHY",
           providerServiceStatus: "ACTIVE",
@@ -63,12 +66,14 @@ describe("listHostedLinqContactCardLines", () => {
       }),
     ).resolves.toMatchObject([
       {
+        isConfigured: true,
         phoneNumber: "+15550100001",
         phoneNumberHint: "*** 0001",
         providerReputationStatus: "HEALTHY",
         providerServiceStatus: "ACTIVE",
       },
       {
+        isConfigured: false,
         phoneNumber: "+15550100002",
         phoneNumberHint: "*** 0002",
         providerReputationStatus: "AT_RISK",
@@ -81,6 +86,8 @@ describe("listHostedLinqContactCardLines", () => {
       where: {
         configuredAt: { not: null },
         phoneNumberEncrypted: { not: null },
+        providerInventoryConfirmedAt: { gte: expect.any(Date) },
+        providerPhoneNumberId: { not: null },
       },
     }));
     expect(findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
@@ -88,8 +95,34 @@ describe("listHostedLinqContactCardLines", () => {
       where: {
         configuredAt: null,
         phoneNumberEncrypted: { not: null },
+        providerInventoryConfirmedAt: { gte: expect.any(Date) },
+        providerPhoneNumberId: { not: null },
         providerSeenAt: { not: null },
       },
+    }));
+  });
+
+  it("excludes provider-only rows that the phone-number inventory has not vouched for", async () => {
+    // Chat-health sync stamps providerSeenAt on lines derived from chat
+    // handles, which can reference numbers the account no longer owns. Only
+    // inventory-backed rows (providerPhoneNumberId set) may join the batch.
+    const findMany = vi.fn().mockResolvedValue([]);
+    const prisma = {
+      hostedLinqLine: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      listHostedLinqContactCardLines({
+        prisma,
+      }),
+    ).resolves.toEqual([]);
+
+    expect(findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.objectContaining({
+        providerPhoneNumberId: { not: null },
+      }),
     }));
   });
 });
@@ -448,6 +481,90 @@ describe("assertHostedLinqAssignableHomeLinePoolReady", () => {
   });
 });
 
+describe("readHostedLinqRecentMessageEffectCountsTx", () => {
+  it("reads one bounded trailing-window aggregate from canonical message owners", async () => {
+    const now = new Date("2026-07-29T15:00:00.000Z");
+    const queryRaw = vi.fn().mockResolvedValue([
+      {
+        messageEffectCount: 101n,
+        phoneNumberLookupKey: "lookup:line-1",
+      },
+      {
+        messageEffectCount: 7n,
+        phoneNumberLookupKey: "lookup:line-2",
+      },
+    ]);
+
+    await expect(
+      readHostedLinqRecentMessageEffectCountsTx({
+        lineLookupKeys: [
+          "lookup:line-1",
+          "lookup:line-2",
+          "lookup:line-1",
+        ],
+        now,
+        prisma: { $queryRaw: queryRaw } as never,
+      }),
+    ).resolves.toEqual(new Map([
+      ["lookup:line-1", 101],
+      ["lookup:line-2", 7],
+    ]));
+
+    const query = queryRaw.mock.calls[0]?.[0] as {
+      sql: string;
+      values: unknown[];
+    };
+    expect(query.sql).toContain('FROM "hosted_linq_delivery"');
+    expect(query.sql).toContain('"accepted_at" >=');
+    expect(query.sql).toContain('FROM "hosted_linq_provider_event"');
+    expect(query.sql).toContain('"event_type" = \'message.received\'');
+    expect(query.sql).toContain('"direction" = \'inbound\'');
+    expect(query.sql).toContain('"received_at" >=');
+    expect(query.sql).toContain('SUM("message_effect_count")');
+    expect(query.values).toEqual([
+      "lookup:line-1",
+      "lookup:line-2",
+      new Date("2026-07-22T15:00:00.000Z"),
+      now,
+      "lookup:line-1",
+      "lookup:line-2",
+      new Date("2026-07-22T15:00:00.000Z"),
+      now,
+    ]);
+  });
+
+  it("does not query when there are no candidate lines", async () => {
+    const queryRaw = vi.fn();
+
+    await expect(
+      readHostedLinqRecentMessageEffectCountsTx({
+        lineLookupKeys: [],
+        now: new Date("2026-07-29T15:00:00.000Z"),
+        prisma: { $queryRaw: queryRaw } as never,
+      }),
+    ).resolves.toEqual(new Map());
+
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("fails before querying beyond the reviewed candidate bound", async () => {
+    const queryRaw = vi.fn();
+
+    await expect(
+      readHostedLinqRecentMessageEffectCountsTx({
+        lineLookupKeys: Array.from(
+          { length: HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT + 1 },
+          (_, index) => `lookup:line-${index}`,
+        ),
+        now: new Date("2026-07-29T15:00:00.000Z"),
+        prisma: { $queryRaw: queryRaw } as never,
+      }),
+    ).rejects.toThrow(/at most 250 candidate line/u);
+
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+});
+
 describe("hosted Linq proactive-conversation capacity", () => {
   const dayUtc = new Date("2026-07-16T00:00:00.000Z");
 
@@ -549,6 +666,57 @@ describe("hosted Linq proactive-conversation capacity", () => {
         phoneNumberLookupKey: "lookup:line-1",
       });
     }
+  });
+});
+
+describe("syncHostedLinqConfiguredLinesTx", () => {
+  it("takes the inventory-wide lock before any per-phone lock, read, or write", async () => {
+    const events: string[] = [];
+    const transactionClient = {
+      $executeRaw: vi.fn().mockImplementation((strings: TemplateStringsArray) => {
+        events.push(
+          strings.join("?").includes("hosted_linq_phone_number_inventory")
+            ? "inventory-lock"
+            : "phone-lock",
+        );
+        return Promise.resolve([]);
+      }),
+      hostedLinqLine: {
+        findMany: vi.fn().mockImplementation(() => {
+          events.push("candidate-read");
+          return Promise.resolve([]);
+        }),
+        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) => {
+          events.push("write");
+          return Promise.resolve({
+            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+          });
+        }),
+      },
+    };
+
+    await syncHostedLinqConfiguredLinesTx({
+      activeMemberLimit: null,
+      observedAt: new Date("2026-06-30T12:00:00.000Z"),
+      phoneNumbers: ["+15550100001", "+15550100002"],
+      prisma: transactionClient as never,
+    });
+
+    // Every multi-phone writer must serialize on the shared inventory lock
+    // before touching any per-phone lock, so lock acquisition can never
+    // invert against the provider-inventory writer.
+    expect(events[0]).toBe("inventory-lock");
+    expect(events.filter((event) => event === "inventory-lock")).toHaveLength(1);
+    expect(events.filter((event) => event === "phone-lock")).toHaveLength(2);
+    expect(events).toEqual([
+      "inventory-lock",
+      "phone-lock",
+      "candidate-read",
+      "write",
+      "phone-lock",
+      "candidate-read",
+      "write",
+    ]);
   });
 });
 
@@ -694,12 +862,14 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
 function buildLineRow(
   phoneNumber: string,
   input: {
+    configuredAt?: Date | null;
     providerLastSeenAt: Date;
     providerReputationStatus: string;
     providerServiceStatus: string;
   },
 ) {
   return {
+    configuredAt: input.configuredAt ?? null,
     phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
     phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
     phoneNumberLookupKey: `lookup:${phoneNumber}`,

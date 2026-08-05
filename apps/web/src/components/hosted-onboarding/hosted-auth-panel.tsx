@@ -1,7 +1,7 @@
 "use client";
 
 import { usePrivy, useUser } from "@privy-io/react-auth";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { PhoneIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -12,12 +12,16 @@ import { readHostedPrivyClientSessionState } from "@/src/lib/hosted-onboarding/p
 import {
   extractHostedPrivyTelegramAccount,
   extractHostedPrivyVerifiedEmailAccount,
+  type HostedPrivyLinkedAccountState,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { cn } from "@/src/lib/utils";
 import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
-import { logoutHostedAppSession } from "./hosted-app-session-client";
+import {
+  declineHostedLaunchConsent,
+  logoutHostedAppSession,
+} from "./hosted-app-session-client";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 
 import {
@@ -41,8 +45,10 @@ export type HostedResumableAuth = {
 };
 
 export type HostedAuthPanelView = "auth" | "auth-active" | "consent";
+export type HostedPrivyWaitReason = "action" | "session" | null;
 
 export function HostedAuthPanel({
+  autoSendPastedPhoneNumber = false,
   inviteCode,
   methods,
   onCompleted,
@@ -53,10 +59,11 @@ export function HostedAuthPanel({
   showPassiveLegalNotice,
   size,
 }: {
+  autoSendPastedPhoneNumber?: boolean;
   inviteCode?: string | null;
   methods: readonly HostedAuthMethod[];
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
-  onPrivyWaitChange?: (waiting: boolean) => void;
+  onPrivyWaitChange?: (reason: HostedPrivyWaitReason) => void;
   onSignOut?: () => Promise<void> | void;
   onViewChange?: (view: HostedAuthPanelView) => void;
   requireLaunchConsentOnCompletion?: boolean;
@@ -77,8 +84,15 @@ export function HostedAuthPanel({
   // Decline is terminal. A status read or acceptance that resolves after it must
   // not advance the journey the member just refused.
   const consentDeclinedRef = useRef(false);
-  const { authenticated, logout } = usePrivy();
+  const { authenticated, logout, ready } = usePrivy();
   const { user } = useUser();
+  const privySessionState = readHostedPrivyClientSessionState({ user });
+  // A cold panel can accept a presentation choice before Privy reveals an
+  // existing session. Consume that hydration boundary once so later choices
+  // remain deliberate.
+  const [privyHydrationPending, setPrivyHydrationPending] = useState(
+    () => !ready || (authenticated && privySessionState === null),
+  );
   const completion = useHostedAuthCompletion({
     inviteCode,
     onCompleted: handleAuthCompleted,
@@ -90,7 +104,7 @@ export function HostedAuthPanel({
     authenticated,
     includesEmail,
     includesTelegram,
-    user,
+    sessionState: privySessionState,
   });
   const canSwap = includesPhone && includesEmail;
   const showAlternateMethods = !codeSent && (includesTelegram || canSwap);
@@ -104,6 +118,42 @@ export function HostedAuthPanel({
   const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
   const authJourneyActive = completion.activeMethod !== null;
   const selectedAuthMethod = completion.activeMethod ?? queuedAuthMethod;
+  // Privy keeps authenticated/user in a module-level store while a keyed
+  // provider restart resets ready locally. Do not trust that carried session
+  // snapshot until the replacement provider becomes ready.
+  const privySessionHydrationPending =
+    authenticated
+    && (!ready || privySessionState === null)
+    && !codeSent
+    && completion.activeMethod === null
+    && completion.completingMethod === null
+    && pendingAuthCompletion === null;
+
+  if (privySessionHydrationPending && !privyHydrationPending) {
+    setPrivyHydrationPending(true);
+  }
+
+  if (privySessionHydrationPending && queuedAuthMethod !== null) {
+    setQueuedAuthMethod(null);
+  }
+
+  if (privyHydrationPending && ready && !privySessionHydrationPending) {
+    setPrivyHydrationPending(false);
+    if (
+      authenticated
+      && !codeSent
+      && queuedAuthMethod === null
+      && completion.activeMethod === null
+      && completion.completingMethod === null
+      && pendingAuthCompletion === null
+    ) {
+      if (includesPhone || resumableAuth !== null) {
+        setPrimaryMethod("phone");
+      }
+      setTelegramActive(false);
+      setTelegramNotice(null);
+    }
+  }
 
   const view: HostedAuthPanelView = pendingAuthCompletion
     ? "consent"
@@ -114,8 +164,27 @@ export function HostedAuthPanel({
     onViewChange?.(view);
   }, [onViewChange, view]);
   useLayoutEffect(() => {
-    onPrivyWaitChange?.(queuedAuthMethod !== null);
-  }, [onPrivyWaitChange, queuedAuthMethod]);
+    if (privySessionHydrationPending) {
+      queuedAuthMethodRef.current = null;
+    }
+  }, [privySessionHydrationPending]);
+  useLayoutEffect(() => {
+    onPrivyWaitChange?.(
+      privySessionHydrationPending
+        ? "session"
+        : queuedAuthMethod !== null
+          ? "action"
+          : null,
+    );
+  }, [
+    onPrivyWaitChange,
+    privySessionHydrationPending,
+    queuedAuthMethod,
+  ]);
+
+  if (privySessionHydrationPending) {
+    return null;
+  }
 
   function queueAuthMethod(method: HostedAuthMethod): boolean {
     const activeMethod = completion.activeMethod;
@@ -194,7 +263,6 @@ export function HostedAuthPanel({
     if (onCompleted) {
       await onCompleted(result.payload);
       pendingAuthCompletionRef.current = null;
-      setPendingAuthCompletion(null);
       return;
     }
 
@@ -208,9 +276,9 @@ export function HostedAuthPanel({
     consentDeclinedRef.current = true;
     setConsentDeclinePending(true);
     try {
-      await logoutHostedAppSession({ logoutPrivy: logout });
+      await declineHostedLaunchConsent({ logoutPrivy: logout });
     } catch {
-      // logoutHostedAppSession owns recovery: it revalidates authority by
+      // The session-ending client owns recovery: it revalidates authority by
       // reloading the document, and the fail-closed gate reappears if the
       // session survived. Nothing rendered here would outlive that reload.
       // The decline did not take effect, so it does not keep terminal priority.
@@ -288,6 +356,7 @@ export function HostedAuthPanel({
         />
       ) : primaryMethod === "phone" && includesPhone ? (
         <HostedPhoneAuth
+          autoSendPastedPhoneNumber={autoSendPastedPhoneNumber}
           inviteCode={inviteCode}
           interactionGated={
             selectedAuthMethod !== null
@@ -327,83 +396,65 @@ export function HostedAuthPanel({
       ) : null}
 
       {showAlternateMethods ? (
-        <>
-          <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />
-            OR
-            <span className="h-px flex-1 bg-border" />
-          </div>
-          <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
-            {includesTelegram ? (
-              <HostedTelegramAuthButton
-                active={telegramActive}
-                completionPending={completion.completingMethod === "telegram"}
+        <HostedAuthPanelAlternateMethods
+          telegramNotice={telegramActive ? telegramNotice : null}
+        >
+          {includesTelegram ? (
+            <HostedTelegramAuthButton
+              active={telegramActive}
+              completionPending={completion.completingMethod === "telegram"}
+              disabled={
+                selectedAuthMethod !== null
+                && selectedAuthMethod !== "telegram"
+              }
+              onAuthCancel={() => cancelAuthMethod("telegram")}
+              onAuthQueue={() => queueAuthMethod("telegram")}
+              onAuthQueueCancel={() => clearQueuedAuthMethod("telegram")}
+              onAuthStart={() => beginAuthMethod("telegram")}
+              onAuthenticated={completion.completeAuth}
+              onActivate={() => {
+                setPrimaryMethod("phone");
+                setTelegramActive(true);
+              }}
+              onNoticeChange={setTelegramNotice}
+            />
+          ) : null}
+          {canSwap ? (
+            primaryMethod === "phone" ? (
+              <HostedEmailAuthButton
+                active={false}
                 disabled={
                   selectedAuthMethod !== null
-                  && selectedAuthMethod !== "telegram"
+                  && selectedAuthMethod !== "email"
                 }
-                onAuthCancel={() => cancelAuthMethod("telegram")}
-                onAuthQueue={() => queueAuthMethod("telegram")}
-                onAuthQueueCancel={() => clearQueuedAuthMethod("telegram")}
-                onAuthStart={() => beginAuthMethod("telegram")}
+                onAuthCancel={() => cancelAuthMethod("email")}
+                onAuthQueue={() => queueAuthMethod("email")}
+                onAuthQueueCancel={() => clearQueuedAuthMethod("email")}
+                onAuthStart={() => beginAuthMethod("email")}
                 onAuthenticated={completion.completeAuth}
                 onActivate={() => {
-                  setPrimaryMethod("phone");
-                  setTelegramActive(true);
+                  setPrimaryMethod("email");
+                  setTelegramActive(false);
+                  setTelegramNotice(null);
                 }}
-                onNoticeChange={setTelegramNotice}
+                onCodeEntryChange={setCodeSent}
               />
-            ) : null}
-            {canSwap ? (
-              primaryMethod === "phone" ? (
-                <HostedEmailAuthButton
-                  active={false}
-                  disabled={
-                    selectedAuthMethod !== null
-                    && selectedAuthMethod !== "email"
-                  }
-                  onAuthCancel={() => cancelAuthMethod("email")}
-                  onAuthQueue={() => queueAuthMethod("email")}
-                  onAuthQueueCancel={() => clearQueuedAuthMethod("email")}
-                  onAuthStart={() => beginAuthMethod("email")}
-                  onAuthenticated={completion.completeAuth}
-                  onActivate={() => {
-                    setPrimaryMethod("email");
-                    setTelegramActive(false);
-                    setTelegramNotice(null);
-                  }}
-                  onCodeEntryChange={setCodeSent}
-                />
-              ) : (
-                <HostedInlineAuthButton
-                  active={false}
-                  disabled={selectedAuthMethod !== null}
-                  icon={<PhoneIcon className="h-5 w-5" />}
-                  onClick={() => {
-                    setPrimaryMethod("phone");
-                    setTelegramActive(false);
-                    setTelegramNotice(null);
-                  }}
-                >
-                  Phone
-                </HostedInlineAuthButton>
-              )
-            ) : null}
-          </div>
-          {telegramActive && telegramNotice ? (
-            <p
-              role="status"
-              className={cn(
-                "px-1 text-xs leading-relaxed",
-                telegramNotice.tone === "cancel"
-                  ? "text-muted-foreground"
-                  : "text-destructive/90",
-              )}
-            >
-              {telegramNotice.message}
-            </p>
+            ) : (
+              <HostedInlineAuthButton
+                active={false}
+                disabled={selectedAuthMethod !== null}
+                icon={<PhoneIcon className="h-5 w-5" />}
+                onClick={() => {
+                  setPrimaryMethod("phone");
+                  setTelegramActive(false);
+                  setTelegramNotice(null);
+                }}
+              >
+                Phone
+              </HostedInlineAuthButton>
+            )
           ) : null}
-        </>
+        </HostedAuthPanelAlternateMethods>
       ) : null}
 
       {completion.errorMessage ? (
@@ -415,6 +466,40 @@ export function HostedAuthPanel({
 
       {shouldShowPassiveLegalNotice ? <HostedAuthLegalNotice /> : null}
     </div>
+  );
+}
+
+export function HostedAuthPanelAlternateMethods({
+  children,
+  telegramNotice = null,
+}: {
+  children: ReactNode;
+  telegramNotice?: TelegramAuthNotice | null;
+}) {
+  return (
+    <>
+      <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        OR
+        <span className="h-px flex-1 bg-border" />
+      </div>
+      <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
+        {children}
+      </div>
+      {telegramNotice ? (
+        <p
+          role="status"
+          className={cn(
+            "px-1 text-xs leading-relaxed",
+            telegramNotice.tone === "cancel"
+              ? "text-muted-foreground"
+              : "text-destructive/90",
+          )}
+        >
+          {telegramNotice.message}
+        </p>
+      ) : null}
+    </>
   );
 }
 
@@ -475,21 +560,19 @@ function resolveHostedResumableAuth(input: {
   authenticated?: boolean;
   includesEmail: boolean;
   includesTelegram: boolean;
-  user: { linkedAccounts?: unknown; linked_accounts?: unknown; telegram?: unknown } | null;
+  sessionState: HostedPrivyLinkedAccountState | null;
 }): HostedResumableAuth | null {
   if (!input.authenticated) {
     return null;
   }
 
-  const sessionState = readHostedPrivyClientSessionState({ user: input.user });
-
-  if (!sessionState || sessionState.phone) {
+  if (!input.sessionState || input.sessionState.phone) {
     return null;
   }
 
   if (input.includesTelegram) {
     const telegramAccount = extractHostedPrivyTelegramAccount({
-      linkedAccounts: sessionState.linkedAccounts,
+      linkedAccounts: input.sessionState.linkedAccounts,
     });
 
     if (telegramAccount) {
@@ -502,7 +585,7 @@ function resolveHostedResumableAuth(input: {
 
   if (input.includesEmail) {
     const emailAccount = extractHostedPrivyVerifiedEmailAccount(
-      sessionState.linkedAccounts,
+      input.sessionState.linkedAccounts,
     );
 
     if (emailAccount) {

@@ -26,6 +26,7 @@ import {
   type HostedCanonicalWritePort,
 } from '@murphai/core'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -132,6 +133,17 @@ const MURPH_DYNAMIC_TOOLS_WITH_STYLE = resolveMurphDynamicTools({
   assistantStyleSettingsAvailable: true,
   progressUpdatesAvailable: false,
 })
+const DAILY_NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'daily_nutrition',
+  localDate: '2026-07-28',
+  mealCount: 3,
+  totals: {
+    calories: { total: 1_490.25, mealCount: 3 },
+    proteinGrams: { total: 94.5, mealCount: 3 },
+    carbsGrams: { total: 193.125, mealCount: 3 },
+    fatGrams: { total: 34.75, mealCount: 3 },
+  },
+}
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-transport-diagnostics.v1'
 
@@ -3881,7 +3893,7 @@ describe('assistant codex runtime', () => {
     })
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Still generating the image.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
   })
 
@@ -10378,6 +10390,7 @@ describe('assistant codex runtime', () => {
         actionKind: 'mcp.tool.call',
         durationMsBucket: 'unknown',
         outputBytesBucket: 'lt_1kb',
+        tool: 'search_query',
       },
     })
 
@@ -10387,6 +10400,8 @@ describe('assistant codex runtime', () => {
         item: {
           id: 'dynamic-1',
           type: 'dynamicToolCall',
+          namespace: 'murph',
+          tool: 'connected_apps_execute',
           success: false,
           arguments: {
             prompt: 'private prompt',
@@ -10411,6 +10426,8 @@ describe('assistant codex runtime', () => {
         actionKind: 'dynamic.tool.call',
         durationMsBucket: 'unknown',
         outputBytesBucket: 'lt_1kb',
+        // Names the failing surface without the arguments or output around it.
+        tool: 'connected_apps_execute',
       },
     })
 
@@ -14035,7 +14052,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('handles the Murph progress dynamic tool without changing the final response', async () => {
+  it('handles the Murph progress dynamic tool after live steering without changing the final response', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-tool-')
     const progressDelivery = createProgressDeliveryMock()
     const progressText =
@@ -14074,6 +14091,27 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-progress-initial',
+                message: 'Process this blood test.',
+                type: 'user_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-progress-steered',
+                message: 'Include the late result too.',
+                type: 'user_message',
+              },
+            },
+          }))
+          await new Promise((resolve) => setTimeout(resolve, 0))
           child.stderr.write('Provider-side status text\n')
           child.stdout.write(
             jsonLine({
@@ -14149,7 +14187,7 @@ describe('assistant codex runtime', () => {
 
     expect(progressDelivery.send).toHaveBeenCalledWith(
       progressText,
-      { source: 'model' },
+      { deliveryContextOrdinal: 1, source: 'model' },
     )
     expect(progressDelivery.send).not.toHaveBeenCalledWith('Provider-side status text')
   })
@@ -14252,7 +14290,7 @@ describe('assistant codex runtime', () => {
     })
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the file now.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
   })
 
@@ -14353,7 +14391,7 @@ describe('assistant codex runtime', () => {
     })
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the file now.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
   })
 
@@ -14476,11 +14514,11 @@ describe('assistant codex runtime', () => {
     expect(progressDelivery.send).toHaveBeenCalledTimes(1)
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the saved context now.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
     expect(progressDelivery.send).not.toHaveBeenCalledWith(
       'Reading the report now.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
     expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'message',
@@ -14581,7 +14619,7 @@ describe('assistant codex runtime', () => {
     }
     expect(progressDelivery.send).toHaveBeenCalledWith(
       expect.any(String),
-      { required: true, source: 'system' },
+      { deliveryContextOrdinal: 0, required: true, source: 'system' },
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -14679,7 +14717,7 @@ describe('assistant codex runtime', () => {
     }
     expect(progressDelivery.send).toHaveBeenCalledWith(
       expect.any(String),
-      { required: true, source: 'system' },
+      { deliveryContextOrdinal: 0, required: true, source: 'system' },
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -14795,7 +14833,7 @@ describe('assistant codex runtime', () => {
     }
     expect(progressDelivery.send).toHaveBeenCalledWith(
       expect.any(String),
-      { required: true, source: 'system' },
+      { deliveryContextOrdinal: 0, required: true, source: 'system' },
     )
 
     await new Promise((resolve) => setTimeout(resolve, 2_100))
@@ -14899,7 +14937,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('sends one current-channel progress update when Codex compacts context', async () => {
+  it('sends one current-channel progress update at the live-steered context when Codex compacts context', async () => {
     const workingDirectory = await createTempDir('assistant-codex-context-compact-')
     const onProgress = vi.fn()
     const onTraceEvent = vi.fn()
@@ -14933,6 +14971,16 @@ describe('assistant codex runtime', () => {
           itemId: 'context-compact-1',
           threadId: 'thread-context-compact',
           turnId: 'turn-context-compact',
+          userMessages: [
+            {
+              id: 'user-context-compact-initial',
+              message: 'Answer after compacting context.',
+            },
+            {
+              id: 'user-context-compact-steered',
+              message: 'Include the late follow up.',
+            },
+          ],
         })
       })
       return child
@@ -14955,7 +15003,7 @@ describe('assistant codex runtime', () => {
     expect(progressDelivery.send).toHaveBeenCalledTimes(1)
     expect(progressDelivery.send).toHaveBeenCalledWith(
       selectedProgressText,
-      { required: true, source: 'system' },
+      { deliveryContextOrdinal: 1, required: true, source: 'system' },
     )
     expect(
       onProgress.mock.calls.some(([event]) => event?.id === 'context-compact-1'),
@@ -15015,11 +15063,11 @@ describe('assistant codex runtime', () => {
     expect(progressDelivery.send).toHaveBeenCalledTimes(1)
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the group thread now.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
     expect(progressDelivery.send).not.toHaveBeenCalledWith(
       expect.any(String),
-      { required: true, source: 'system' },
+      { deliveryContextOrdinal: 0, required: true, source: 'system' },
     )
   })
 
@@ -15796,7 +15844,7 @@ describe('assistant codex runtime', () => {
     })
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the file now.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
   })
 
@@ -17409,7 +17457,7 @@ describe('assistant codex event shaping', () => {
   })
 
   describe('codex subagent thread events', () => {
-    it('tolerates subagent thread events and records their usage as additional drafts', async () => {
+    it('uses protocol-carried V2 child models without a lookup and keeps V1 parent fallback', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-usage-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-usage-home-')
       const spawnedChildren: MockChildProcess[] = []
@@ -17430,19 +17478,17 @@ describe('assistant codex event shaping', () => {
               threadId: 'thread-subagent-parent',
               turnId: 'turn-subagent-parent',
             })
-            // Parent-thread spawn item announces the child's effective model.
+            // Newer V2 activity can carry the effective child model directly.
             child.stdout.write(jsonLine({
               method: 'item/completed',
               params: {
                 item: {
-                  id: 'collab-spawn-1',
-                  type: 'collabAgentToolCall',
-                  tool: 'spawnAgent',
-                  status: 'completed',
-                  senderThreadId: 'thread-subagent-parent',
-                  receiverThreadIds: ['thread-subagent-child-a'],
-                  prompt: 'crunch the export',
-                  model: 'gpt-5.6-terra-mini',
+                  id: 'spawn-v2-terra',
+                  type: 'subAgentActivity',
+                  kind: 'started',
+                  agentThreadId: 'thread-subagent-child-a',
+                  agentPath: 'root/terra_check',
+                  model: 'gpt-5.6-terra',
                 },
                 threadId: 'thread-subagent-parent',
                 turnId: 'turn-subagent-parent',
@@ -17517,8 +17563,8 @@ describe('assistant codex event shaping', () => {
                 },
               },
             }))
-            // A second spawned child whose spawn item carries no model stays
-            // model-unattributed but still bills.
+            // A V1 child whose spawn item carries no model inherits the
+            // parent's model and still bills without a lookup.
             child.stdout.write(jsonLine({
               method: 'item/completed',
               params: {
@@ -17576,6 +17622,7 @@ describe('assistant codex event shaping', () => {
           PATH: '/custom/bin',
         },
         modelProvider: 'local-test-provider',
+        model: 'gpt-5.6-sol',
         prompt: 'spawn a subagent and finish',
         sandbox: 'workspace-write',
         workingDirectory,
@@ -17593,8 +17640,8 @@ describe('assistant codex event shaping', () => {
           outputTokens: 1_000,
           providerName: 'local-test-provider',
           reasoningTokens: 120,
-          requestedModel: 'gpt-5.6-terra-mini',
-          servedModel: 'gpt-5.6-terra-mini',
+          requestedModel: 'gpt-5.6-terra',
+          servedModel: 'gpt-5.6-terra',
           totalTokens: 5_000,
         },
       })
@@ -17610,11 +17657,16 @@ describe('assistant codex event shaping', () => {
         usage: {
           inputTokens: 600,
           outputTokens: 100,
-          requestedModel: null,
-          servedModel: null,
+          requestedModel: 'gpt-5.6-sol',
+          servedModel: 'gpt-5.6-sol',
           totalTokens: 700,
         },
       })
+      expect(
+        readWrittenRpcMessages(
+          requireMockChildProcess(spawnedChildren[0] ?? null),
+        ).filter((message) => message.method === 'thread/resume'),
+      ).toHaveLength(0)
     })
 
     it('answers subagent thread server requests with an error without failing the turn', async () => {
@@ -19417,6 +19469,13 @@ describe('steered final segments', () => {
         media: readonly unknown[]
       }
     | {
+        card: AssistantResponseCard
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
+        kind: 'attach-response-card'
+      }
+    | {
         expectedSuccess?: boolean
         expectedText: string
         id: number
@@ -19454,6 +19513,12 @@ describe('steered final segments', () => {
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'attach-response-media' }> {
     return 'kind' in step && step.kind === 'attach-response-media'
+  }
+
+  function isAttachResponseCardStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'attach-response-card' }> {
+    return 'kind' in step && step.kind === 'attach-response-card'
   }
 
   function isFinishWithoutReplyStep(
@@ -19505,6 +19570,7 @@ describe('steered final segments', () => {
   async function runScriptedSteeredFinalSegmentsTurn(
     steps: Array<Record<string, unknown> | ScriptedSteeredFinalStep>,
     input: {
+      abortSignal?: CodexAppServerTurnInput['abortSignal']
       authorizeAcceptedMessageTarget?:
         CodexAppServerTurnInput['authorizeAcceptedMessageTarget']
       hostedToolContext?: CodexAppServerTurnInput['hostedToolContext']
@@ -19513,6 +19579,7 @@ describe('steered final segments', () => {
       onProgress?: CodexAppServerTurnInput['onProgress']
       onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
+      responseCardsAvailable?: boolean
       turnStatus?: 'completed' | 'failed'
     } = {},
   ) {
@@ -19556,6 +19623,34 @@ describe('steered final segments', () => {
           }))
 
           for (const step of steps) {
+            if (isAttachResponseCardStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  namespace: 'murph',
+                  tool: 'attach_response_card',
+                  arguments: {
+                    card: step.card,
+                  },
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  success: step.expectedSuccess ?? true,
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: step.expectedText,
+                    },
+                  ],
+                },
+              })
+              continue
+            }
+
             if (isAttachResponseMediaStep(step)) {
               child.stdout.write(jsonLine({
                 id: step.id,
@@ -19738,10 +19833,19 @@ describe('steered final segments', () => {
 
     return await executeCodexAppServerTurn({
       approvalPolicy: 'never',
+      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       authorizeAcceptedMessageTarget:
         input.authorizeAcceptedMessageTarget ?? null,
       codexCommand: 'codex',
       codexHome,
+      ...(input.responseCardsAvailable === true
+        ? {
+            dynamicTools: resolveMurphDynamicTools({
+              responseCardsAvailable: true,
+            }),
+            groupConversation: false,
+          }
+        : {}),
       hostedToolContext: input.hostedToolContext,
       onFirstAssistantResponseCompleted:
         input.onFirstAssistantResponseCompleted,
@@ -19788,8 +19892,12 @@ describe('steered final segments', () => {
       },
     }
     const groupTool = {
-      request: vi.fn(async () => response),
+      request: vi.fn(async (
+        _request: unknown,
+        _context?: { signal?: AbortSignal | null },
+      ) => response),
     }
+    const abortController = new AbortController()
 
     const result = await runScriptedSteeredFinalSegmentsTurn([
       {
@@ -19803,11 +19911,121 @@ describe('steered final segments', () => {
         message: 'You belong to Sunday runners.',
       }),
     ], {
+      abortSignal: abortController.signal,
       hostedToolContext: createHostedToolContext({ groupTool }),
     })
 
-    expect(groupTool.request).toHaveBeenCalledWith({ action: 'list_memberships' })
+    expect(groupTool.request).toHaveBeenCalledWith(
+      { action: 'list_memberships' },
+      { signal: expect.any(AbortSignal) },
+    )
+    const forwardedSignal = groupTool.request.mock.calls[0]?.[1]?.signal
+    if (!forwardedSignal) {
+      throw new Error('Expected current-turn abort signal at group-tool boundary.')
+    }
+    expect(forwardedSignal.aborted).toBe(false)
+    abortController.abort(new DOMException('turn cancelled', 'AbortError'))
+    expect(forwardedSignal.aborted).toBe(true)
     expect(result.finalMessage).toBe('You belong to Sunday runners.')
+  })
+
+  it('keeps a steered follow-up text-only after an earlier response card', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-card-1',
+        type: 'user_message',
+        message: 'First nutrition question',
+      }),
+      {
+        card: DAILY_NUTRITION_RESPONSE_CARD,
+        expectedText: 'response card attached',
+        id: 84,
+        kind: 'attach-response-card',
+      },
+      completedItemEvent({
+        id: 'assistant-card-1',
+        type: 'assistant_message',
+        message: 'Model prose replaced by card text.',
+      }),
+      completedItemEvent({
+        id: 'user-card-2',
+        type: 'user_message',
+        message: 'One more thought',
+      }),
+      {
+        card: DAILY_NUTRITION_RESPONSE_CARD,
+        expectedSuccess: false,
+        expectedText: 'response card unavailable for this final response',
+        id: 85,
+        kind: 'attach-response-card',
+      },
+      completedItemEvent({
+        id: 'assistant-card-2',
+        type: 'assistant_message',
+        message: 'Final follow-up answer.',
+      }),
+    ], { responseCardsAvailable: true })
+
+    expect(result.responseCard).toBeNull()
+    expect(result.responseMedia).toEqual([])
+    expect(result.finalMessage).toBe('Final follow-up answer.')
+    expect(result.providerAuthoredFinalMessage).toBe('Final follow-up answer.')
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [],
+      response:
+        'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals.',
+    }])
+  })
+
+  it('keeps a response card when the model finishes without authored text', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        card: DAILY_NUTRITION_RESPONSE_CARD,
+        expectedText: 'response card attached',
+        id: 87,
+        kind: 'attach-response-card',
+      },
+    ], { responseCardsAvailable: true })
+
+    expect(result.responseCard).toEqual(DAILY_NUTRITION_RESPONSE_CARD)
+    expect(result.providerAuthoredFinalMessage).toBe('')
+    expect(result.finalMessage).toBe(
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals.',
+    )
+  })
+
+  it('invalidates a card-only response when a live steer adds accepted work', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-card-only-request',
+        type: 'user_message',
+        message: 'Send today\'s nutrition card',
+      }),
+      {
+        card: DAILY_NUTRITION_RESPONSE_CARD,
+        expectedText: 'response card attached',
+        id: 86,
+        kind: 'attach-response-card',
+      },
+      completedItemEvent({
+        id: 'user-card-follow-up',
+        type: 'user_message',
+        message: 'Also explain how to reach my protein goal',
+      }),
+      completedItemEvent({
+        id: 'assistant-card-follow-up',
+        type: 'assistant_message',
+        message: 'Complete combined nutrition answer.',
+      }),
+    ], { responseCardsAvailable: true })
+
+    expect(result.responseCard).toBeNull()
+    expect(result.responseMedia).toEqual([])
+    expect(result.finalMessage).toBe('Complete combined nutrition answer.')
+    expect(result.providerAuthoredFinalMessage).toBe(
+      'Complete combined nutrition answer.',
+    )
   })
 
   it('keeps independent last-successful reply and reaction targets per steered segment', async () => {
@@ -21012,6 +21230,7 @@ it('rejects finish_without_reply after context compaction progress was sent', as
   })
 
   expect(progressDelivery.send).toHaveBeenCalledWith(expect.any(String), {
+    deliveryContextOrdinal: 0,
     required: true,
     source: 'system',
   })
@@ -21115,6 +21334,10 @@ async function writeSuccessfulContextCompactionTurn(input: {
   progressText?: string
   threadId: string
   turnId: string
+  userMessages?: readonly {
+    id: string
+    message: string
+  }[]
 }): Promise<void> {
   const initialize = await waitForRpcMethod(input.child, 'initialize')
   input.child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
@@ -21136,6 +21359,21 @@ async function writeSuccessfulContextCompactionTurn(input: {
       },
     },
   }))
+  for (const userMessage of input.userMessages ?? []) {
+    input.child.stdout.write(jsonLine({
+      method: 'item/completed',
+      params: {
+        item: {
+          id: userMessage.id,
+          message: userMessage.message,
+          type: 'user_message',
+        },
+      },
+    }))
+  }
+  if (input.userMessages?.length) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
   input.child.stdout.write(jsonLine({
     method: 'item/started',
     params: {

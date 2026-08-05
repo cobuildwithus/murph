@@ -55,6 +55,7 @@ export const HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES = [
   ...HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES,
   "CF_PUBLIC_BASE_URL",
   "HOSTED_LOG_FINGERPRINT_SECRET",
+  "HOSTED_PHYSICAL_NOTES_ENABLED",
 ] as const;
 
 // These vars may come from trusted forwarded runtime profiles for legacy/local
@@ -66,6 +67,7 @@ export const HOSTED_SHARED_TRUSTED_PLATFORM_ENV_NAMES = [
 
 export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
   assistantConfigured: [
+    "MURPH_CUSTOM_INFERENCE_API_KEY",
     "OPENAI_API_KEY",
     "VENICE_API_KEY",
   ],
@@ -79,6 +81,7 @@ export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
 } as const satisfies Record<string, readonly string[]>;
 
 export const HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES = [
+  "MURPH_CUSTOM_INFERENCE_API_KEY",
   "OPENAI_API_KEY",
   "VENICE_API_KEY",
 ] as const;

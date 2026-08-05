@@ -9,9 +9,18 @@ import {
 import type {
   HostedRuntimeNewsletterToolResponse,
 } from '@murphai/hosted-execution/runtime-control'
+import type { AutomationScheduleKind } from '@murphai/contracts'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
+import {
+  renderAssistantResponseCardText,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  shouldSkipAutomationOccurrenceForAvailability,
+  stripAutomationAvailabilityConflictEvidenceForProvider,
+} from '@murphai/core'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
@@ -158,11 +167,12 @@ export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
 
-export type AssistantNotificationTurnPolicy = {
-  kind: 'maintenance-exact-skip'
-  maintenanceProfile: AssistantMaintenanceProfile
-  privateSummary: string
-}
+export type AssistantNotificationTurnPolicy =
+  | {
+      kind: 'maintenance-exact-skip'
+      maintenanceProfile: AssistantMaintenanceProfile
+      privateSummary: string
+    }
 
 export type AssistantNotificationPromptProfile = 'creative-response'
 
@@ -242,6 +252,7 @@ export interface AssistantNotificationInput
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
+  scheduledAutomationScheduleKind?: AutomationScheduleKind | null
 }
 
 export interface AssistantNotificationResult {
@@ -351,6 +362,23 @@ export async function sendAssistantNotificationLocal(
           decision: {
             kind: 'skip',
             privateSummary: 'First-contact notification already accepted for this route.',
+          },
+          response: null,
+          session: resolved.session,
+        })
+      }
+
+      if (
+        shouldSkipAutomationOccurrenceForAvailability({
+          instructions: input.instructions,
+          occurrenceAt: input.scheduledOccurrenceAt,
+          scheduleKind: input.scheduledAutomationScheduleKind,
+        })
+      ) {
+        return withPostTurnDeliveryExpectations({
+          decision: {
+            kind: 'skip',
+            privateSummary: 'Scheduled occurrence overlaps an authorized calendar conflict.',
           },
           response: null,
           session: resolved.session,
@@ -556,14 +584,21 @@ export async function sendAssistantNotificationLocal(
         }
         let decision: AssistantNotificationDecision
         try {
-          decision = parseAssistantNotificationDecision(providerResult.response)
+          decision = parseAssistantNotificationDecision(
+            providerResult.providerAuthoredResponse ?? providerResult.response,
+          )
+          if (providerResult.responseCard && decision.kind !== 'send_message') {
+            throw new VaultCliError(
+              'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+              'A notification response card requires a send_message decision.',
+            )
+          }
         } catch (error) {
           throw annotateAssistantNotificationError(
             error,
             providerValidationErrorDetails,
           )
         }
-
         if (isAssistantNotificationMaintenanceExactSkip(input)) {
           try {
             assertAssistantMaintenanceNotificationDecision({
@@ -608,7 +643,9 @@ export async function sendAssistantNotificationLocal(
           })
         }
 
-        const responseText = normalizeRequiredText(decision.text, 'notification response')
+        const responseText = providerResult.responseCard
+          ? renderAssistantResponseCardText(providerResult.responseCard)
+          : normalizeRequiredText(decision.text, 'notification response')
         throwIfAssistantNotificationAborted(messageInput.abortSignal)
         await runAssistantNotificationBeforeDelivery(input, {
           decision: {
@@ -651,6 +688,7 @@ export async function sendAssistantNotificationLocal(
             dedupeToken: input.deliveryDedupeToken ?? null,
             decisionSubject: decision.subject ?? null,
             input: messageInput,
+            card: providerResult.responseCard ?? null,
             media: providerResult.responseMedia ?? [],
             message: responseText,
             session: savedSession,
@@ -715,6 +753,7 @@ export async function sendAssistantNotificationLocal(
           dedupeToken: input.deliveryDedupeToken ?? null,
           decisionSubject: decision.subject ?? null,
           input: messageInput,
+          card: providerResult.responseCard ?? null,
           media: providerResult.responseMedia ?? [],
           message: responseText,
           session: providerResult.session,
@@ -1245,7 +1284,10 @@ function buildAssistantNotificationMessageInput(
   input: AssistantNotificationInput,
   maintenanceEvidence: string | null,
 ): AssistantMessageInput {
-  const instructions = normalizeRequiredText(input.instructions, 'instructions')
+  const instructions = normalizeRequiredText(
+    stripAutomationAvailabilityConflictEvidenceForProvider(input.instructions),
+    'instructions',
+  )
   const maintenanceTurn = isAssistantNotificationMaintenanceExactSkip(input)
   const scheduledOccurrence = isAssistantNotificationScheduledOccurrence(input)
   const firstContactExactText =
@@ -1340,6 +1382,7 @@ function buildAssistantNotificationMessageInput(
 }
 
 async function deliverAssistantNotificationMessage(input: {
+  card?: AssistantResponseCard | null
   dedupeToken: string | null
   decisionSubject: string | null
   input: AssistantMessageInput
@@ -1393,6 +1436,7 @@ async function deliverAssistantNotificationMessage(input: {
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     signal: input.input.abortSignal,
     ...deliveryFields,
+    card: input.card ?? null,
     media,
     dispatchMode: input.input.deliveryDispatchMode,
   })
@@ -1588,8 +1632,11 @@ function isAssistantMaintenanceMutationCommand(
   if (normalized === null) {
     return false
   }
-  return profile === 'group-room-model'
-    ? false
+  if (profile === 'group-room-model') {
+    return false
+  }
+  return profile === 'habitat-voice'
+    ? /\bvault-cli\b[\s\S]*\bhabitat\s+save\b/u.test(normalized)
     : /\bvault-cli\b[\s\S]*\bmemory\s+(?:upsert|update)\b/u.test(normalized)
 }
 

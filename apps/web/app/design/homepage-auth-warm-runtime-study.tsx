@@ -1,7 +1,12 @@
+"use client";
+
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
 import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
-import { HostedPhoneEntryStep } from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
+import {
+  HostedCodeEntryStep,
+  HostedPhoneEntryStep,
+} from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { HostedTelegramAuthButtonPresentation } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
 
@@ -38,6 +43,27 @@ export function HomepageAuthWarmRuntimeStudy() {
           Phone selected before ready
         </p>
         <HomepageAuthFormStudy phoneQueued />
+      </div>
+      <div
+        className="scroll-mt-20 rounded-2xl border border-border bg-card p-6"
+        id="homepage-auth-pasted-phone-code-sent"
+        inert
+      >
+        <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Valid phone pasted · code sent
+        </p>
+        <HostedCodeEntryStep
+          autoFocus={false}
+          code=""
+          disabled={false}
+          pendingAction={null}
+          secondaryActionSize="lg"
+          verificationPhoneNumberHint="*** 2671"
+          onCodeChange={() => {}}
+          onResendCode={() => {}}
+          onUseDifferentNumber={() => {}}
+          onVerifyCode={() => {}}
+        />
       </div>
       <div className="rounded-2xl border border-border bg-card p-6" inert>
         <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -82,7 +108,6 @@ function HomepageAuthFormStudy({
   return (
     <div className="space-y-4">
       <HostedPhoneEntryStep
-        intent="auth"
         pendingAction={phoneQueued ? "send-code" : null}
         phoneInputDisabled={telegramQueued}
         phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}

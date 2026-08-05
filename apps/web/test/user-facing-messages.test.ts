@@ -7,6 +7,9 @@ import {
 } from "@/src/lib/hosted-messages/user-facing-messages";
 
 const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20;
+const HOME_REDIRECT_MIN_VARIANT_COUNT = 100;
+const HOME_REDIRECT_EXPLICIT_RESEND_PATTERN =
+  /\b(?:resend (?:(?:the|this|your)(?: last)? message|what you just wrote)|send (?:(?:the|this|your)(?: last)? message|that)(?: again)?|that message can't move between threads\. resend it to the number above)\b/iu;
 
 /**
  * The thread notice has room for personality, but every variant still has to
@@ -29,6 +32,7 @@ const TEST_TEMPLATE_KEYS = [
   "linq.ai_usage.trial_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
+  "linq.ai_usage.group_upgrade_pulse",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
   "linq.ai_usage.thread_limit_funding",
@@ -58,6 +62,9 @@ const TEST_CONTEXT_BY_KEY = {
   "linq.ai_usage.family_limit_reached": {
     homeUrl: "https://withmurph.ai/home",
   },
+  "linq.ai_usage.group_upgrade_pulse": {
+    homeUrl: "https://withmurph.ai/home",
+  },
   "linq.ai_usage.billing_inactive": {
     homeUrl: "https://withmurph.ai/home",
   },
@@ -79,6 +86,12 @@ describe("user-facing message variants", () => {
         USER_FACING_MESSAGE_MIN_VARIANT_COUNT,
       );
     }
+  });
+
+  it("keeps at least 100 distinct wrong-line redirect variants", () => {
+    expect(collectRenderedTexts("linq.home_redirect").size).toBeGreaterThanOrEqual(
+      HOME_REDIRECT_MIN_VARIANT_COUNT,
+    );
   });
 
   it("selects variants deterministically from the caller seed", () => {
@@ -126,6 +139,13 @@ describe("user-facing message variants", () => {
       "linq.ai_usage.thread_limit_funding",
       "https://www.withmurph.ai/groups/fund/test-code",
     );
+  });
+
+  it("tells the member to resend every unprocessed wrong-line message", () => {
+    for (const text of collectRenderedTexts("linq.home_redirect")) {
+      expect(text).toMatch(HOME_REDIRECT_EXPLICIT_RESEND_PATTERN);
+      expect(text).not.toMatch(/https?:\/\//iu);
+    }
   });
 
   it("identifies Murph in every phone signup invite", () => {
@@ -184,6 +204,17 @@ describe("user-facing message variants", () => {
     }
   });
 
+  it("keeps Core sync continuity explicit when personal AI usage pauses", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.group_upgrade_pulse")) {
+      expect(text).toMatch(/Core/u);
+      expect(text).not.toMatch(/\bGroup\b/u);
+      expect(text).toMatch(/sync|syncing|wearable|health data/iu);
+      expect(text).toMatch(/group/iu);
+      expect(text).toMatch(/pause|paused|wait|reset/iu);
+      expect(text).not.toMatch(/top[ -]?up|checkout|\$|paid/iu);
+    }
+  });
+
   it("explains how each blocked non-top-up allowance can resume", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.trial_limit_reached")) {
       expect(text).toMatch(/Murph is paused until .+ plan/iu);
@@ -208,6 +239,7 @@ describe("user-facing message variants", () => {
       "linq.ai_usage.trial_limit_reached",
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
+      "linq.ai_usage.group_upgrade_pulse",
       "linq.ai_usage.pulse_upgrade_edge",
       "linq.ai_usage.thread_limit_reached",
     ] as const) {
@@ -235,6 +267,7 @@ describe("user-facing message variants", () => {
       "linq.ai_usage.trial_limit_reached",
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
+      "linq.ai_usage.group_upgrade_pulse",
       "linq.ai_usage.pulse_upgrade_edge",
     ] as const) {
       for (const text of collectRenderedTexts(key)) {

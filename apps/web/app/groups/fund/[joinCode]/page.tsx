@@ -2,11 +2,18 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { GroupFundingSignInButton } from "@/src/components/hosted-groups/group-funding-sign-in-button";
-import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import {
+  GroupUsageFundingActions,
+  GroupUsageFundingShell,
+} from "@/src/components/hosted-groups/group-usage-funding-shell";
 import {
   GroupSponsorshipDialog,
+  type GroupSponsorshipMonthlyCapOption,
   type GroupSponsorshipOffer,
 } from "@/src/components/hosted-groups/group-sponsorship-dialog";
+import {
+  GroupSponsorshipManagementCard,
+} from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import {
   type HostedUsageTopUpReturn,
 } from "@/src/components/settings/hosted-usage-top-up-dialog";
@@ -22,6 +29,9 @@ import {
   readHostedGroupUsageStatus,
 } from "@/src/lib/hosted-groups/group-usage-funding";
 import {
+  readHostedGroupSponsorshipManagementProjection,
+} from "@/src/lib/hosted-groups/group-sponsorship-authorization";
+import {
   hasHostedGroupSponsorshipCustomizationAuthority,
   readHostedGroupSponsorshipDraftForCreator,
 } from "@/src/lib/hosted-groups/group-sponsorship-store";
@@ -32,7 +42,6 @@ import {
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { readHostedConfiguredUsageCreditOfferCodes } from "@/src/lib/hosted-onboarding/personal-usage-credit-eligibility";
 import {
-  estimateHostedUsageCreditMessages,
   getHostedUsageCreditOfferDefinition,
   type HostedGroupSponsorshipOfferCode,
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
@@ -94,6 +103,7 @@ export default async function GroupFundingPage({
     activePurchase,
     purchaseReturnMatchesTarget,
     customizationAllowed,
+    sponsorshipManagement,
   ] =
     await Promise.all([
       readHostedGroupUsageStatus({
@@ -127,6 +137,13 @@ export default async function GroupFundingPage({
             prisma,
           })
         : Promise.resolve(false),
+      member && !member.suspendedAt
+        ? readHostedGroupSponsorshipManagementProjection({
+            beneficiaryMemberId: target.runtimeMemberId,
+            payerMemberId: member.id,
+            prisma,
+          })
+        : Promise.resolve(null),
     ]);
   if (!usageStatus) {
     return <GroupFundingUnavailable />;
@@ -153,31 +170,102 @@ export default async function GroupFundingPage({
           url: undefined,
         }
     : null;
-  const offers = member && !member.suspendedAt && !activePurchase
+  const oneTimeOffers = member && !member.suspendedAt && !activePurchase
     ? projectHostedUsageTopUpOffers(
         readHostedConfiguredGroupSponsorshipOfferCodes({
           configuredOfferCodes: readHostedConfiguredUsageCreditOfferCodes(),
         }),
       )
     : [];
+  const monthlyOffer = projectHostedUsageTopUpOffers(["usage_5_usd"]);
+  const monthlyCapOptions = projectHostedMonthlyCapOptions();
   const purchaseReturn = purchaseReturnMatchesTarget
     ? requestedPurchaseReturn
     : null;
+  const openOneTimeContribution =
+    sponsorshipManagement === null &&
+    usageStatus.sponsorshipStatus === "sponsored";
+  const oneTimeContributionDialog = member && oneTimeOffers.length > 0 ? (
+    <GroupSponsorshipDialog
+      checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+      customizationAllowed={customizationAllowed}
+      initialOpen={openOneTimeContribution}
+      mode="one_time"
+      offers={oneTimeOffers}
+      payerMemberId={member.id}
+      purchaseReturn={purchaseReturn}
+      triggerSize="default"
+      triggerVariant="link"
+    />
+  ) : null;
+  const oneTimeContributionAction = member && visibleActivePurchase ? (
+    <GroupSponsorshipDialog
+      activePurchase={visibleActivePurchase}
+      checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+      customizationAllowed={customizationAllowed}
+      frozenSponsorship={frozenSponsorship}
+      initialOpen
+      mode="one_time"
+      offers={oneTimeOffers}
+      payerMemberId={member.id}
+      purchaseReturn={purchaseReturn}
+    />
+  ) : oneTimeContributionDialog ? (
+    <GroupUsageFundingActions oneTimeAction={oneTimeContributionDialog} />
+  ) : null;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center px-5 py-12 sm:px-6 sm:py-16">
-      <GroupUsageFundingCard
+    <main className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center px-4 py-8 sm:px-6 sm:py-12">
+      <GroupUsageFundingShell
         action={
           member ? (
-            offers.length > 0 || visibleActivePurchase ? (
+            sponsorshipManagement?.status === "pending_activation" &&
+            visibleActivePurchase ? (
               <GroupSponsorshipDialog
                 activePurchase={visibleActivePurchase}
                 checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
                 customizationAllowed={customizationAllowed}
                 frozenSponsorship={frozenSponsorship}
-                offers={offers}
+                initialOpen
+                mode="monthly"
+                monthlyCapMinor={sponsorshipManagement.monthlyCapMinor}
+                monthlyCapOptions={monthlyCapOptions}
+                offers={monthlyOffer}
                 payerMemberId={member.id}
                 purchaseReturn={purchaseReturn}
+              />
+            ) : sponsorshipManagement ? (
+              <div className="space-y-4">
+                <GroupSponsorshipManagementCard
+                  endpoint={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/sponsorship`}
+                  management={sponsorshipManagement}
+                />
+                {oneTimeContributionAction}
+              </div>
+            ) : usageStatus.sponsorshipStatus === "sponsored" ? (
+              <div className="space-y-4">
+                <p className="py-2 text-center text-sm text-muted-foreground">
+                  Murph is sponsored in this chat.
+                </p>
+                {oneTimeContributionAction}
+              </div>
+            ) : visibleActivePurchase ? (
+              oneTimeContributionAction
+            ) : oneTimeOffers.length > 0 ? (
+              <GroupUsageFundingActions
+                monthlyAction={(
+                  <GroupSponsorshipDialog
+                    checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+                    customizationAllowed={customizationAllowed}
+                    initialOpen
+                    mode="monthly"
+                    monthlyCapOptions={monthlyCapOptions}
+                    offers={monthlyOffer}
+                    payerMemberId={member.id}
+                    purchaseReturn={purchaseReturn}
+                  />
+                )}
+                oneTimeAction={oneTimeContributionDialog}
               />
             ) : (
               <p className="py-2 text-center text-sm text-muted-foreground">
@@ -192,6 +280,13 @@ export default async function GroupFundingPage({
       />
     </main>
   );
+}
+
+function projectHostedMonthlyCapOptions(): GroupSponsorshipMonthlyCapOption[] {
+  return ([500, 1_000, 2_000] as const).map((monthlyCapMinor) => ({
+    amountLabel: formatUsageTopUpAmount(monthlyCapMinor),
+    monthlyCapMinor,
+  }));
 }
 
 function GroupFundingUnavailable() {
@@ -249,7 +344,6 @@ function projectHostedUsageTopUpOffers(
       getHostedGroupSponsorshipExperiencePolicy(offerCode);
     return {
       amountLabel: formatUsageTopUpAmount(offer.cashAmountMinor),
-      estimatedMessages: estimateHostedUsageCreditMessages(offer.cashAmountMinor),
       offerCode: offer.code,
       runningBitDurationLabel: experience.runningBitDurationLabel,
     };

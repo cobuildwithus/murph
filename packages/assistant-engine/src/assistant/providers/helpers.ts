@@ -1231,11 +1231,11 @@ export interface CodexSubagentTokenUsageSample {
 // sendInput, wait, resume — covering freshly spawned and reused children) or
 // by a subAgentActivity item's agentThreadId (multi-agent V2, which emits
 // activity items instead of collab tool calls) become drafts. The model is
-// attributed from V1 spawn items, the only ones that carry it; V2 children
-// inherit the parent model by default, so evidence without a model falls
-// back to parentModel. Warm processes are reused across threads, so a
-// foreign thread id alone is not proof of a subagent — a stale flush from a
-// previous thread must never mint a usage row.
+// attributed directly from V1 spawn items or optional V2 activity evidence;
+// same-model children without explicit evidence inherit parentModel. Warm
+// processes are reused across threads, so a foreign thread id alone is not
+// proof of a subagent — a stale flush from a previous thread must never mint a
+// usage row.
 export function extractCodexSubagentUsageDrafts(input: {
   modelProvider: string | null
   ordinalStart: number
@@ -1270,8 +1270,7 @@ export function extractCodexSubagentUsageDrafts(input: {
       continue
     }
 
-    const model =
-      spawnModelByThreadId.get(threadId) ?? input.parentModel ?? null
+    const model = spawnModelByThreadId.get(threadId) ?? input.parentModel ?? null
     const inputTokens = readAssistantProviderInteger(
       delta,
       'inputTokens',
@@ -1351,8 +1350,9 @@ export function resolveCodexAssistantProviderTokenPricingBasis(input: {
 // call item (V1: spawnAgent, sendInput, wait, resumeAgent, ...) or
 // subAgentActivity item (V2) is a key — that membership is what authorizes
 // billing a foreign thread's usage, covering both freshly spawned children
-// and reused existing children. The effective model is only known from V1
-// spawn items and may be null otherwise.
+// and reused existing children. V1 spawn items carry the effective model
+// directly. V2 activity may carry the effective model in newer protocol
+// versions; when absent, the child inherits the parent model.
 function readCodexCollabSpawnModelsByThread(
   rawEvents: readonly unknown[],
 ): Map<string, string | null> {
@@ -1407,14 +1407,18 @@ function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
   // Multi-agent V2 emits subAgentActivity items (started/interacted/
   // interrupted) instead of collab tool calls; any of them names the child
   // thread this parent turn engaged, which is exactly the spawn evidence the
-  // billing gate needs. V2 activity items carry no model.
+  // billing gate needs. Newer protocol versions may also carry the effective
+  // child model on that activity.
   if (itemType === 'subAgentActivity' || itemType === 'sub_agent_activity') {
     const agentThreadId = readAssistantProviderString(
       item.agentThreadId,
       item.agent_thread_id,
     )
     return agentThreadId
-      ? { receiverThreadIds: [agentThreadId], spawnModel: null }
+      ? {
+          receiverThreadIds: [agentThreadId],
+          spawnModel: readAssistantProviderString(item.model) ?? null,
+        }
       : null
   }
   if (itemType !== 'collabAgentToolCall') {

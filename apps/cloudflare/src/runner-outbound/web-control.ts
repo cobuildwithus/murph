@@ -23,6 +23,9 @@ import {
   createAssistantUsageReportingUserId,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS,
+} from "@murphai/hosted-execution/physical-notes";
+import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
@@ -216,7 +219,12 @@ export async function handleRunnerWebControlRequest(input: {
       writeAuthority,
       checkpointRequest?.expectedWorkspaceVersion ?? writeAuthority.workspaceVersion,
     ),
-    timeoutMs: input.environment.webControlTimeoutMs,
+    timeoutMs: policy.operation === "physical_note_send"
+      ? Math.max(
+        input.environment.webControlTimeoutMs,
+        HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS,
+      )
+      : input.environment.webControlTimeoutMs,
   });
   const responseBodyMetadata = response.ok || isClinicalRecordsRequest
     ? {}

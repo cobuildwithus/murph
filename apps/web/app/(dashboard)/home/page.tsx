@@ -56,9 +56,9 @@ type HomeSearchParams =
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams?: Promise<HomeSearchParams>;
-} = {}) {
-  const resolvedSearchParams = searchParams ? await searchParams : {};
+  searchParams: Promise<HomeSearchParams>;
+}) {
+  const resolvedSearchParams = await searchParams;
   const showInitialVisitPersonaPicker =
     readFirstSearchParamValue(resolvedSearchParams.initialVisit) === "true";
   const auth = await getHostedDashboardPageAuthSnapshot();

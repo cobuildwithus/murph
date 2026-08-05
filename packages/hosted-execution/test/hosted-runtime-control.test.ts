@@ -80,6 +80,7 @@ import {
   parseHostedRuntimeIMessageContactToolResponse,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
+  parseHostedRuntimeHealthDataAdmissionResponse,
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
   parseHostedRuntimeLogEntry,
@@ -98,6 +99,37 @@ import {
 } from "../src/parsers.ts";
 
 describe("hosted runtime control contracts", () => {
+  it("parses health-data runtime admission and rejects inconsistent decisions", () => {
+    expect(parseHostedRuntimeHealthDataAdmissionResponse({
+      consentState: "missing",
+      processingAllowed: true,
+      userId: "member_123",
+    })).toEqual({
+      consentState: "missing",
+      processingAllowed: true,
+      userId: "member_123",
+    });
+    expect(parseHostedRuntimeHealthDataAdmissionResponse({
+      consentState: "revoked",
+      processingAllowed: false,
+      userId: "member_123",
+    })).toEqual({
+      consentState: "revoked",
+      processingAllowed: false,
+      userId: "member_123",
+    });
+    expect(() => parseHostedRuntimeHealthDataAdmissionResponse({
+      consentState: "revoked",
+      processingAllowed: true,
+      userId: "member_123",
+    })).toThrow(/processingAllowed did not match consentState/u);
+    expect(() => parseHostedRuntimeHealthDataAdmissionResponse({
+      consentState: "unknown",
+      processingAllowed: true,
+      userId: "member_123",
+    })).toThrow(/consentState is not supported/u);
+  });
+
   it("classifies typed and retryable mailbox continuations", () => {
     expect(isHostedRuntimeMailboxContinuation({
       nextWakeAt: "2026-04-27T00:00:15.000Z",
@@ -196,6 +228,7 @@ describe("hosted runtime control contracts", () => {
       "assistant.ask.completed",
       "clinical-records.sync-requested",
       "device-sync.wake",
+      "environment-voice.captured",
       "group-newsletter.email-needed",
       "meal-photo.captured",
       "vault-share.delivery",

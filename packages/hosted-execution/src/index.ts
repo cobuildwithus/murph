@@ -1,4 +1,5 @@
 export * from "./auth.ts";
+export * from "./assistant-inference.ts";
 export * from "./assistant-usage.ts";
 export * from "./assistant-personalization.ts";
 export * from "./pending-group-setup.ts";
@@ -48,8 +49,10 @@ export * from "./browser-vault.ts";
 export * from "./connected-apps.ts";
 export * from "./computer-use.ts";
 export * from "./phone-calls.ts";
+export * from "./physical-notes.ts";
 export * from "./email-ingress.ts";
 export * from "./env.ts";
+export * from "./group-reactions.ts";
 export * from "./hosted-email.ts";
 export * from "./hosted-codex-subscription-auth.ts";
 export * from "./observability.ts";
