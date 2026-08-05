@@ -385,19 +385,37 @@ describe('assistant response cards', () => {
     }).endsWith('Some calorie and macro estimates were partial.')).toBe(true)
   })
 
-  it('keeps the Linq fallback and layout static and value-free', () => {
-    const layout = buildLinqIMessageAppLayout(COMPLETE_CARD)
+  it('keeps the Linq static layout value-free and labels partial totals', () => {
+    const completeLayout = buildLinqIMessageAppLayout(COMPLETE_CARD)
+    const partialLayout = buildLinqIMessageAppLayout({
+      ...COMPLETE_CARD_V2,
+      mealCount: 4,
+      goals: {
+        calories: null,
+        proteinGrams: null,
+        carbsGrams: null,
+        fatGrams: null,
+        fiberGrams: null,
+      },
+    })
     expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
       'Open your Murph nutrition summary',
     )
-    expect(layout).toEqual({
+    expect(completeLayout).toEqual({
       caption: 'Murph',
       subcaption: 'Nutrition summary',
       trailing_caption: 'OPEN',
     })
+    expect(partialLayout).toEqual({
+      caption: 'Murph',
+      subcaption: 'Nutrition summary',
+      trailing_caption: 'OPEN',
+      trailing_subcaption: 'PARTIAL TOTALS',
+    })
     const staticPresentation = JSON.stringify({
       fallbackText: LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
-      layout,
+      completeLayout,
+      partialLayout,
     })
     expect(staticPresentation).not.toMatch(/1490|94|193|34|2026-07-28|today|day|time/iu)
   })
