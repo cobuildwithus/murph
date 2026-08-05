@@ -482,6 +482,7 @@ export interface CompanionDeviceSyncResourceStatus {
 
 export interface CompanionDeviceSyncStatusResponse {
   lastDataReceivedAt: string | null;
+  observedAt: string;
   resources: Record<string, CompanionDeviceSyncResourceStatus>;
 }
 
@@ -496,6 +497,9 @@ export interface CompanionDeviceSyncStatusResponse {
  *   such as `provider.connection.created` carry no resource and are excluded.
  * - `lastDataReceivedAt` is the max of those per-resource receipt times, so it
  *   only reflects actual data webhooks, never connection lifecycle events.
+ * - `observedAt` is the server time for this status snapshot. Native clients
+ *   use it for setup age and receipt freshness so device clock changes cannot
+ *   create or suppress a synced state.
  * - Resource keys additionally include resources Junction reports available
  *   for connected sources (`device_connection_source.resourceAvailabilitySummary`,
  *   projected by the reconcile floor), with `lastReceivedAt: null` until the
@@ -510,6 +514,7 @@ export interface CompanionDeviceSyncStatusResponse {
  */
 export async function readCompanionDeviceSyncStatus(input: {
   memberId: string;
+  now?: () => Date;
   sourceProviderSlug?: string | null;
   store: PrismaDeviceSyncControlPlaneStore;
 }): Promise<CompanionDeviceSyncStatusResponse> {
@@ -629,6 +634,7 @@ export async function readCompanionDeviceSyncStatus(input: {
 
   return {
     lastDataReceivedAt,
+    observedAt: (input.now?.() ?? new Date()).toISOString(),
     resources,
   };
 }
