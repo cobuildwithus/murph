@@ -34,6 +34,11 @@ const footerLinks = {
   murph: [
     { label: "Clubs", href: "/clubs", external: false },
     { label: "Changelog", href: "/changelog", external: false },
+    {
+      label: "Status",
+      href: "https://status.withmurph.ai",
+      external: true,
+    },
     { label: "Design", href: "/design", external: false },
     { label: "Security", href: "/security", external: false },
     {
@@ -55,9 +60,9 @@ const footerLinks = {
   ],
 };
 
-export function SiteFooter() {
+export function SiteFooter({ id = "site-footer" }: { id?: string }) {
   return (
-    <footer id="site-footer" className="border-t border-[rgba(196,168,130,0.25)] bg-[#f5f0e8] px-6 sm:px-10 lg:px-16">
+    <footer id={id} className="border-t border-[rgba(196,168,130,0.25)] bg-[#f5f0e8] px-6 sm:px-10 lg:px-16">
       <div className="mx-auto max-w-[1080px]">
         {/* Logo + link columns */}
         <div className="flex flex-col gap-10 py-10 sm:flex-row sm:justify-between">

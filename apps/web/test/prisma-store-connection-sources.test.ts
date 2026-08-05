@@ -670,10 +670,12 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     });
     await expect(readCompanionDeviceSyncStatus({
       memberId: "member_1",
+      now: () => new Date("2026-07-25T20:00:00.000Z"),
       sourceProviderSlug: "health_connect",
       store,
     })).resolves.toEqual({
       lastDataReceivedAt: acceptedAt,
+      observedAt: "2026-07-25T20:00:00.000Z",
       resources: {
         workouts: { lastReceivedAt: acceptedAt },
       },

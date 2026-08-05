@@ -157,6 +157,7 @@ function createPrisma(input: {
       memberId: string;
     }>;
   } | null;
+  readableShares?: unknown[];
   shares?: unknown[];
 }) {
   const hostedGroupFindUnique = vi.fn().mockResolvedValue(
@@ -170,7 +171,13 @@ function createPrisma(input: {
         }
       : input.group,
   );
-  const hostedVaultShareFindMany = vi.fn().mockResolvedValue(input.shares ?? []);
+  const hostedVaultShareFindMany = vi.fn().mockImplementation(
+    (args: { where?: { id?: unknown } }) => Promise.resolve(
+      args.where?.id
+        ? input.readableShares ?? input.shares ?? []
+        : input.shares ?? [],
+    ),
+  );
   const deviceConnectionFindMany = vi.fn().mockResolvedValue(input.connections ?? []);
   const tx = {
     deviceConnection: { findMany: deviceConnectionFindMany },
@@ -599,6 +606,9 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           grantStatus: "granted",
         },
       ],
+    });
+    expect(result.members[0]?.projections[1]?.records[0]?.data).toMatchObject({
+      sources: [],
     });
     expect(result.members[1]).toMatchObject({
       displayName: "Alex",
@@ -1160,9 +1170,18 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(deviceConnectionFindMany).not.toHaveBeenCalled();
   });
 
-  it("filters inactive or explicitly revoked grantors while retaining every group member as missing", async () => {
+  it("keeps a consented grant visible when inactive access withholds its snapshot", async () => {
     installCiphertexts({});
-    const { hostedVaultShareFindMany, prisma } = createPrisma({ shares: [] });
+    const inactiveGrant = shareRow({
+      ciphertext: "must-not-decrypt",
+      id: "share_steps_a",
+      memberId: "member_a",
+      projectionScope: STEPS_SCOPE,
+    });
+    const { hostedVaultShareFindMany, prisma } = createPrisma({
+      readableShares: [],
+      shares: [inactiveGrant],
+    });
 
     const result = await readHostedGroupSharedDataByRuntimeMemberId({
       prisma,
@@ -1170,30 +1189,60 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       runtimeMemberId: RUNTIME_MEMBER_ID,
     });
 
-    expect(hostedVaultShareFindMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        grantor: expect.objectContaining({
-          AND: expect.arrayContaining([
-            expect.objectContaining({ suspendedAt: null }),
-            {
-              consentGrants: {
-                none: {
-                  scope: "launch.health-data",
-                  status: "revoked",
+    expect(hostedVaultShareFindMany).toHaveBeenCalledTimes(2);
+    expect(hostedVaultShareFindMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        select: expect.not.objectContaining({
+          projectionSnapshotCiphertext: true,
+        }),
+        where: expect.objectContaining({
+          grantor: {
+            AND: expect.arrayContaining([
+              { suspendedAt: null },
+              {
+                consentGrants: {
+                  none: {
+                    scope: "launch.health-data",
+                    status: "revoked",
+                  },
                 },
               },
-            },
-          ]),
+            ]),
+          },
         }),
       }),
-    }));
+    );
+    expect(hostedVaultShareFindMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        select: { id: true, projectionSnapshotCiphertext: true },
+        where: expect.objectContaining({
+          id: { in: [inactiveGrant.id] },
+          grantor: expect.objectContaining({
+            AND: expect.arrayContaining([
+              expect.objectContaining({ suspendedAt: null }),
+              {
+                consentGrants: {
+                  none: {
+                    scope: "launch.health-data",
+                    status: "revoked",
+                  },
+                },
+              },
+            ]),
+          }),
+        }),
+      }),
+    );
     expect(result.status).toBe("ok");
     if (result.status !== "ok") throw new Error("expected ok result");
     expect(result.members).toHaveLength(3);
     expect(result.members.map((member) => member.projections[0])).toEqual([
       expect.objectContaining({
         dataStatus: "missing",
-        grantStatus: "not_granted",
+        grantedAt: GRANTED_AT.toISOString(),
+        grantStatus: "granted",
         records: [],
       }),
       expect.objectContaining({
@@ -1207,6 +1256,35 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         records: [],
       }),
     ]);
+  });
+
+  it("does not synthesize device data when inactive access withholds the device grant", async () => {
+    installCiphertexts({});
+    const inactiveDeviceGrant = shareRow({
+      id: "share_device_a",
+      memberId: "member_a",
+      projectionScope: DEVICE_SCOPE,
+    });
+    const { deviceConnectionFindMany, prisma } = createPrisma({
+      readableShares: [],
+      shares: [inactiveDeviceGrant],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [DEVICE_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(deviceConnectionFindMany).not.toHaveBeenCalled();
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.members[0]?.projections[0]).toEqual(expect.objectContaining({
+      dataStatus: "missing",
+      grantedAt: GRANTED_AT.toISOString(),
+      grantStatus: "granted",
+      records: [],
+    }));
   });
 
   it.each(["", "   "])(

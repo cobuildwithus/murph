@@ -109,9 +109,17 @@ export async function getHostedDashboardPageAuthSnapshot(): Promise<HostedPageAu
 export async function redirectHostedDashboardCheckoutIfNeeded(
   auth: HostedPageAuthSnapshot,
 ): Promise<void> {
+  if (await readHostedDashboardCheckoutRequired(auth)) {
+    redirect("/join");
+  }
+}
+
+export async function readHostedDashboardCheckoutRequired(
+  auth: HostedPageAuthSnapshot,
+): Promise<boolean> {
   const member = auth.authenticatedMember;
   if (!member) {
-    return;
+    return false;
   }
 
   const stageWithoutSponsoredAccess = deriveHostedPostVerificationStage({
@@ -123,14 +131,14 @@ export async function redirectHostedDashboardCheckoutIfNeeded(
     suspendedAt: member.suspendedAt,
   });
   if (stageWithoutSponsoredAccess !== "checkout") {
-    return;
+    return false;
   }
 
   if (await readActiveHostedMemberAccess({ memberId: member.id })) {
-    return;
+    return false;
   }
 
-  redirect("/join");
+  return true;
 }
 
 const resolveHostedSidebarAuthSnapshot = cache(async (): Promise<HostedSidebarAuthSnapshot> => {

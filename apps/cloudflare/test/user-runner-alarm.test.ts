@@ -1288,6 +1288,54 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
+  it.each(["source_active", "destination_active"] as const)(
+    "dispatches %s cutover restores through the role-aware fenced control plane",
+    async (cutoverPhase) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(FIXED_NOW));
+      const snapshotId = `snapshot_${cutoverPhase}`;
+      const snapshotRef = await createWorkspaceSnapshotV2RefWithRuntimeRootForTest({
+        objectKey: await hostedWorkspaceSnapshotObjectKey({
+          snapshotId,
+          userId: TEST_USER_ID,
+        }),
+        snapshotId,
+      });
+      const { invoke, runner } = createRunnerHarness({
+        runnerRuntimeEnvSource: {
+          ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+          HOSTED_R2_CUTOVER_PHASE: cutoverPhase,
+          HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "test-access-key",
+          HOSTED_R2_PRESIGN_ACCOUNT_ID: "account123",
+          HOSTED_R2_PRESIGN_BUCKET_NAME: "murph-test",
+          HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "murph-test-enam",
+          HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "test-secret-key",
+        },
+        workspace: createWorkspaceState({
+          snapshotRef,
+          version: "5",
+        }),
+      });
+      await runner.bindUser(TEST_USER_ID);
+
+      await expect(runner.ensureRuntimeProcessingForUser({
+        orchestrationAttemptId: "test-orchestration-attempt",
+        userId: TEST_USER_ID,
+      })).resolves.toMatchObject({
+        action: "started",
+        kind: "runtime_processing_accepted",
+      });
+
+      await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+      expect(invoke.mock.calls[0]?.[0].job).not.toHaveProperty("preparedSnapshotRestore");
+      expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Hosted workspace snapshot restore preparation unavailable.",
+        }),
+      );
+    },
+  );
+
   it("reuses cached runner stores when applying a caller command budget", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -4695,7 +4743,7 @@ describe("HostedUserRunner execution coordination", () => {
       r2Cutover: {
         coexisting: true,
         phase: "destination_active",
-        protocolVersion: "r2-oc-enam-v1",
+        protocolVersion: "r2-oc-enam-v2",
       },
     });
     await expect(runner.deleteHostedUserData(TEST_USER_ID)).resolves.toMatchObject({
