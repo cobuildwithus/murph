@@ -2,8 +2,12 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { isAllowedNextEnvRouteTypesImportPath } from "./check-no-js.ts";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const routeTypesImportPattern = /import\s+["'](\.\/[^"'`]*types\/routes\.d\.ts)["'];/u;
+const rootParamsTypesImportPattern =
+  /import\s+["'](\.\/[^"'`]*types\/root-params\.d\.ts)["'];/u;
 const defaultRouteTypesImportPath = "./.next/types/routes.d.ts";
 const nextEnvCommonLines = [
   '/// <reference types="next" />',
@@ -17,6 +21,12 @@ const nextEnvTrailingLines = [
 ];
 const routeTypesStubContents = [
   "// Auto-generated route-type stub for clean typecheck flows.",
+  "export {};",
+  "",
+].join("\n");
+const rootParamsTypesStubContents = [
+  "// Type definitions for Next.js root params (next/root-params)",
+  "// No root params detected.",
   "export {};",
   "",
 ].join("\n");
@@ -38,22 +48,28 @@ export function extractNextRouteTypesImport(nextEnvContents: string): string | n
   return nextEnvContents.match(routeTypesImportPattern)?.[1] ?? null;
 }
 
+export function extractNextRootParamsTypesImport(nextEnvContents: string): string | null {
+  return nextEnvContents.match(rootParamsTypesImportPattern)?.[1] ?? null;
+}
+
 export async function ensureNextRouteTypeStub(nextEnvPath: string): Promise<string | null> {
   const nextEnvContents = await readOrCreateNextEnvDeclaration(nextEnvPath);
   const stubRelativeImportPath = extractNextRouteTypesImport(nextEnvContents);
 
-  if (!stubRelativeImportPath) {
-    return null;
+  if (!stubRelativeImportPath || !isAllowedNextEnvRouteTypesImportPath(stubRelativeImportPath)) {
+    throw new Error("next-env.d.ts is missing the generated Next 16.3 route-types import.");
   }
 
+  const rootParamsRelativeImportPath = stubRelativeImportPath.replace(
+    /routes\.d\.ts$/u,
+    "root-params.d.ts",
+  );
   const stubPath = path.resolve(path.dirname(nextEnvPath), stubRelativeImportPath);
-  await mkdir(path.dirname(stubPath), { recursive: true });
-
-  try {
-    await readFile(stubPath, "utf8");
-  } catch {
-    await writeFile(stubPath, routeTypesStubContents, "utf8");
-  }
+  await ensureDeclarationStub(stubPath, routeTypesStubContents);
+  await ensureDeclarationStub(
+    path.resolve(path.dirname(nextEnvPath), rootParamsRelativeImportPath),
+    rootParamsTypesStubContents,
+  );
 
   await ensureNextRouteTypesRuntimeStub(stubPath);
   await removeStaleNextValidatorStub(stubPath);
@@ -62,23 +78,69 @@ export async function ensureNextRouteTypeStub(nextEnvPath: string): Promise<stri
 }
 
 async function readOrCreateNextEnvDeclaration(nextEnvPath: string): Promise<string> {
+  let contents: string;
   try {
-    return await readFile(nextEnvPath, "utf8");
+    contents = await readFile(nextEnvPath, "utf8");
   } catch (error) {
     if (!isNodeErrorWithCode(error, "ENOENT")) {
       throw error;
     }
+
+    contents = buildNextEnvDeclarationArtifact(defaultRouteTypesImportPath);
+    await writeFile(nextEnvPath, contents, "utf8");
+    return contents;
   }
 
-  const contents = buildNextEnvDeclarationArtifact(defaultRouteTypesImportPath);
-  await writeFile(nextEnvPath, contents, "utf8");
-  return contents;
+  const routeTypesImportPath = extractNextRouteTypesImport(contents);
+  if (!routeTypesImportPath || !isAllowedNextEnvRouteTypesImportPath(routeTypesImportPath)) {
+    throw new Error("next-env.d.ts has an unsupported generated route-types import.");
+  }
+
+  const expectedCurrentContents = buildNextEnvDeclarationArtifact(routeTypesImportPath);
+  if (normalizeDeclarationContents(contents) === normalizeDeclarationContents(expectedCurrentContents)) {
+    return contents;
+  }
+
+  const legacyContents = buildLegacyNextEnvDeclarationArtifact(routeTypesImportPath);
+  if (normalizeDeclarationContents(contents) !== normalizeDeclarationContents(legacyContents)) {
+    throw new Error("next-env.d.ts does not match the generated Next 16.2 or 16.3 declaration shape.");
+  }
+
+  const migratedContents = contents.includes("\r\n")
+    ? expectedCurrentContents.replace(/\n/g, "\r\n")
+    : expectedCurrentContents;
+  await writeFile(nextEnvPath, migratedContents, "utf8");
+  return migratedContents;
 }
 
 function buildNextEnvDeclarationArtifact(routeTypesImportPath: string): string {
+  const rootParamsImportPath = routeTypesImportPath.replace(/routes\.d\.ts$/u, "root-params.d.ts");
+  return [
+    ...nextEnvCommonLines,
+    `import "${routeTypesImportPath}";`,
+    `import "${rootParamsImportPath}";`,
+    ...nextEnvTrailingLines,
+  ].join("\n");
+}
+
+function buildLegacyNextEnvDeclarationArtifact(routeTypesImportPath: string): string {
   return [...nextEnvCommonLines, `import "${routeTypesImportPath}";`, ...nextEnvTrailingLines].join(
     "\n",
   );
+}
+
+function normalizeDeclarationContents(contents: string): string {
+  return contents.replace(/\r\n/g, "\n").replace(/\n$/u, "");
+}
+
+async function ensureDeclarationStub(stubPath: string, contents: string): Promise<void> {
+  await mkdir(path.dirname(stubPath), { recursive: true });
+
+  try {
+    await readFile(stubPath, "utf8");
+  } catch {
+    await writeFile(stubPath, contents, "utf8");
+  }
 }
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
