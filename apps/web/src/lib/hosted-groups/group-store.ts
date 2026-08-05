@@ -943,6 +943,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
       recordsByMemberAndScope.set(share.grantorMemberId, memberRecords);
     }
 
+    const readableGrantIds = new Set(capture.shares.map((share) => share.id));
     const grantsByMember = new Map<
       string,
       Map<string, HostedGroupSharedProjectionGrantEntry>
@@ -999,11 +1000,13 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
           }
 
           const records = projectionScopeKey === HOSTED_GROUP_SHARED_READ_DEVICE_SCOPE_KEY
-            ? [buildHostedGroupSharedDeviceSyncRecord({
-                connections: connectionsByMember.get(memberId) ?? [],
-                now,
-                projectionScope,
-              })]
+            ? readableGrantIds.has(grant.id)
+              ? [buildHostedGroupSharedDeviceSyncRecord({
+                  connections: connectionsByMember.get(memberId) ?? [],
+                  now,
+                  projectionScope,
+                })]
+              : null
             : storedRecords?.get(projectionScopeKey) ?? null;
           const normalizedRecords = records ?? [];
           return {

@@ -224,14 +224,6 @@ function renderGroupJoin(input: {
             {view.viewerCanLeave ? (
               <GroupJoinLeaveButton groupName={groupName} joinCode={input.joinCode} />
             ) : null}
-            {input.launchConsentStatus?.launchGranted ? (
-              <Link
-                href={input.postJoinDestination}
-                className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-              >
-                {alreadyActiveMember ? "Go home" : "Not now"}
-              </Link>
-            ) : null}
           </div>
         ) : (
           <div className="flex flex-col gap-2">

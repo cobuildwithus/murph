@@ -607,6 +607,9 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         },
       ],
     });
+    expect(result.members[0]?.projections[1]?.records[0]?.data).toMatchObject({
+      sources: [],
+    });
     expect(result.members[1]).toMatchObject({
       displayName: "Alex",
       memberId: "member_b",
@@ -1253,6 +1256,35 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         records: [],
       }),
     ]);
+  });
+
+  it("does not synthesize device data when inactive access withholds the device grant", async () => {
+    installCiphertexts({});
+    const inactiveDeviceGrant = shareRow({
+      id: "share_device_a",
+      memberId: "member_a",
+      projectionScope: DEVICE_SCOPE,
+    });
+    const { deviceConnectionFindMany, prisma } = createPrisma({
+      readableShares: [],
+      shares: [inactiveDeviceGrant],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [DEVICE_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(deviceConnectionFindMany).not.toHaveBeenCalled();
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.members[0]?.projections[0]).toEqual(expect.objectContaining({
+      dataStatus: "missing",
+      grantedAt: GRANTED_AT.toISOString(),
+      grantStatus: "granted",
+      records: [],
+    }));
   });
 
   it.each(["", "   "])(

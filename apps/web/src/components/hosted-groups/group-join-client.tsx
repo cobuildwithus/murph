@@ -116,6 +116,46 @@ export function GroupJoinLegalConsentGate({
   );
 }
 
+export function GroupJoinSuccess(props: {
+  alreadyActiveMember: boolean;
+  groupName: string;
+  postJoinContactOption: MurphContactOption | null;
+  postJoinDestination: GroupJoinPostJoinDestination;
+}) {
+  const returnLabel = props.postJoinDestination === "/join"
+    ? GROUP_JOIN_SETUP_LABEL
+    : GROUP_JOIN_RETURN_LABEL;
+
+  return (
+    <div className="flex flex-col items-center gap-4 text-center">
+      <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+        <Check className="size-6" strokeWidth={2.5} />
+      </div>
+      <p className="text-base font-medium text-foreground" role="status">
+        {props.alreadyActiveMember ? "Your sharing is updated." : `You're in ${props.groupName}.`}
+      </p>
+      {props.postJoinContactOption ? (
+        <MurphContactLink
+          actionLabel={returnLabel}
+          className={buttonVariants({ className: "w-full", size: "xl" })}
+          option={props.postJoinContactOption}
+        >
+          {returnLabel}
+        </MurphContactLink>
+      ) : (
+        <Button
+          render={<Link href={props.postJoinDestination} />}
+          nativeButton={false}
+          size="xl"
+          className="w-full"
+        >
+          {returnLabel}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function GroupJoinAcceptForm(props: {
   activeVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
   alreadyActiveMember: boolean;
@@ -155,6 +195,11 @@ export function GroupJoinAcceptForm(props: {
     ),
     [props.permissions, initialSelectedScopeKeys],
   );
+  const secondaryLabel = props.postJoinDestination === "/join"
+    ? GROUP_JOIN_SETUP_LABEL
+    : props.alreadyActiveMember
+      ? "Go home"
+      : "Not now";
 
   function togglePermissionGroup(scopeKeys: readonly string[]) {
     setSelected((current) => {
@@ -206,36 +251,13 @@ export function GroupJoinAcceptForm(props: {
   }
 
   if (status === "joined") {
-    const returnLabel = props.postJoinDestination === "/join"
-      ? GROUP_JOIN_SETUP_LABEL
-      : GROUP_JOIN_RETURN_LABEL;
     return (
-      <div className="flex flex-col items-center gap-4 text-center">
-        <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <Check className="size-6" strokeWidth={2.5} />
-        </div>
-        <p className="text-base font-medium text-foreground">
-          {props.alreadyActiveMember ? "Your sharing is updated." : `You're in ${props.groupName}.`}
-        </p>
-        {props.postJoinContactOption ? (
-          <MurphContactLink
-            actionLabel={returnLabel}
-            className={buttonVariants({ className: "w-full", size: "xl" })}
-            option={props.postJoinContactOption}
-          >
-            {returnLabel}
-          </MurphContactLink>
-        ) : (
-          <Button
-            render={<Link href={props.postJoinDestination} />}
-            nativeButton={false}
-            size="xl"
-            className="w-full"
-          >
-            {returnLabel}
-          </Button>
-        )}
-      </div>
+      <GroupJoinSuccess
+        alreadyActiveMember={props.alreadyActiveMember}
+        groupName={props.groupName}
+        postJoinContactOption={props.postJoinContactOption}
+        postJoinDestination={props.postJoinDestination}
+      />
     );
   }
 
@@ -321,6 +343,12 @@ export function GroupJoinAcceptForm(props: {
           </>
         )}
       </div>
+      <Link
+        href={props.postJoinDestination}
+        className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+      >
+        {secondaryLabel}
+      </Link>
     </div>
   );
 }

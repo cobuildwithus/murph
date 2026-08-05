@@ -48,10 +48,17 @@ Updated: 2026-08-05
 
 - Recovery reuses the existing dashboard page-auth checkout decision and continues first-checkout members directly to `/join`; the group feature derives no billing or setup state itself.
 - Grant authorization metadata and data readability are separate facts; absence after an access filter must not be labeled as absence of consent.
+- The device-status projection follows the same readability boundary as encrypted projections. An inactive member's exact grant remains visible as `granted` with `missing` data, but the reader does not synthesize an empty available-device record for a grant excluded from the readable snapshot.
+- The accept form owns its pre-submit secondary destination and replaces that entire state with the success presentation after save. This keeps one truthful `/join` recovery action before save and one fallback action after save without parallel page-level copy or duplicate controls.
+
+## Review remediation
+
+- Preliminary specialist review and final ReviewGPT round 1 both identified the device-status synthetic-record exception. A failing inactive-member regression reproduced it; the correction now requires the exact grant ID to be present in the access-authorized snapshot before synthesizing device status, while an active empty-device grant remains available.
+- Preliminary specialist review also identified stale `Go home` copy for an existing first-checkout member and insufficient rendered proof of the post-save state. The secondary action moved into the real client form, the real success presentation is shared with the design study, and a browser interaction test proved save completion precedes setup navigation across desktop and mobile captures.
 
 ## Verification
 
-- Local evidence: 75 focused Vitest cases pass across group join client/page, page auth, and shared reads; `pnpm --dir apps/web typecheck`, docs drift, design-proof checker tests, and the scoped Web lint pass (with one unchanged pre-existing warning in `group-store.ts`). Desktop and mobile catalog captures render the recovery study without overflow.
+- Local evidence: 77 focused Vitest cases pass across group join client/page, page auth, and shared reads; `pnpm --dir apps/web typecheck`, design-proof checker tests, and the scoped Web lint pass (with one unchanged pre-existing warning in `group-store.ts`). The direct Playwright proof intercepts the real accept request, proves it resolves before `/join` is requested, verifies one setup action after save, and captures the real new-member and existing-member success states at desktop and mobile viewports.
 - Claude Code UI double-check: attempted with Fable after the rendered evidence stabilized; explicit usage-credit exhaustion prevented a second-model review, which the completion workflow records as non-blocking without a substitute.
-- Remaining exact-head evidence: privacy/identifier scan, exact-head GitHub Actions, preliminary `completion-specialists`, and final ReviewGPT.
+- Remaining exact-head evidence: rerun docs drift after this remediation update, privacy/identifier scan, exact-head GitHub Actions, a valid preliminary `completion-specialists` retry, and final ReviewGPT round 2.
 - Expected outcomes: no unauthorized projection bytes are decrypted; successful first-checkout saves replace the route with `/join` exactly once; CI and both required review gates pass.

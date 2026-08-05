@@ -637,7 +637,11 @@ test("returns to the dashboard through a real link once membership succeeds", as
 });
 
 test("continues an incomplete account into canonical setup after membership succeeds", async () => {
-  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+  let finishRequest: (() => void) | null = null;
+  const request = new Promise<{ ok: true }>((resolve) => {
+    finishRequest = () => resolve({ ok: true });
+  });
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(request);
   const { GroupJoinAcceptForm } = await import(
     "@/src/components/hosted-groups/group-join-client"
   );
@@ -655,17 +659,30 @@ test("continues an incomplete account into canonical setup after membership succ
   );
   cleanupRender = cleanup;
 
+  const setupEscape = container.querySelector('a[href="/join"]');
+  expect(setupEscape?.textContent).toContain("Finish setting up Murph");
+  expect(container.textContent).not.toContain("Go home");
+
   await act(async () => {
     button.dispatchEvent(new window.Event("click", { bubbles: true }));
     await Promise.resolve();
   });
 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+  expect(mocks.routerReplace).not.toHaveBeenCalled();
+  expect(container.textContent).not.toContain("You're in Sunday Sleep Crew.");
+
+  await act(async () => {
+    if (!finishRequest) throw new Error("expected pending group join request");
+    finishRequest();
+    await request;
+  });
+
   expect(mocks.routerReplace).toHaveBeenCalledTimes(1);
   expect(mocks.routerReplace).toHaveBeenCalledWith("/join");
   expect(container.textContent).toContain("You're in Sunday Sleep Crew.");
   expect(container.textContent).toContain("Finish setting up Murph");
-  expect(container.querySelector('a[href="/join"]')).toBeTruthy();
+  expect(container.querySelectorAll('a[href="/join"]')).toHaveLength(1);
 });
 
 test("hands a messaging member back to the channel Murph reaches them on", async () => {

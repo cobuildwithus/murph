@@ -1,6 +1,4 @@
 "use client";
-
-import Link from "next/link";
 import {
   buildHostedVaultShareProjectionScopeKey,
   type HostedVaultShareProjectionScope,
@@ -10,6 +8,7 @@ import {
   GroupJoinAcceptForm,
   GroupJoinInviteMismatchRecovery,
   GroupJoinLeaveButton,
+  GroupJoinSuccess,
   type GroupJoinPermissionDisplay,
 } from "@/src/components/hosted-groups/group-join-client";
 import { HostedAuthPanel } from "@/src/components/hosted-onboarding/hosted-auth-panel";
@@ -131,7 +130,6 @@ export function GroupJoinStudy() {
             postJoinContactOption={null}
             postJoinDestination="/home"
           />
-          <GroupJoinHomeLink label="Not now" />
         </GroupJoinPageMock>
       </GroupJoinVariant>
 
@@ -165,7 +163,6 @@ export function GroupJoinStudy() {
             postJoinDestination="/home"
           />
           <GroupJoinLeaveButton groupName={DESIGN_GROUP_NAME} joinCode={DESIGN_JOIN_CODE} />
-          <GroupJoinHomeLink label="Back to Murph" />
         </GroupJoinPageMock>
       </GroupJoinVariant>
 
@@ -184,26 +181,38 @@ export function GroupJoinStudy() {
             postJoinContactOption={null}
             postJoinDestination="/home"
           />
-          <GroupJoinHomeLink label="Not now" />
         </GroupJoinPageMock>
       </GroupJoinVariant>
 
       <GroupJoinVariant
-        caption="A first-checkout member keeps the same explicit sharing choice. After a successful save, Murph continues into the existing account setup route; the success action remains a direct fallback."
-        title="New invitee · setup recovery"
+        caption="After the membership and explicit sharing save succeed, Murph continues into the existing account setup route. If navigation stalls, this real success state keeps one direct setup action."
+        title="New invitee · setup success fallback"
       >
         <GroupJoinPageMock alreadyActiveMember={false}>
+          <GroupJoinSuccess
+            alreadyActiveMember={false}
+            groupName={DESIGN_GROUP_NAME}
+            postJoinContactOption={null}
+            postJoinDestination="/join"
+          />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="A first-checkout member who reloads after joining keeps the same sharing controls, while every secondary action names the setup destination truthfully."
+        title="Existing member · setup recovery"
+      >
+        <GroupJoinPageMock alreadyActiveMember>
           <GroupJoinAcceptForm
             activeVaultShareProjectionScopes={[]}
-            alreadyActiveMember={false}
-            expectedMembershipId={null}
+            alreadyActiveMember
+            expectedMembershipId="membership_design"
             groupName={DESIGN_GROUP_NAME}
             joinCode={DESIGN_JOIN_CODE}
             permissions={DESIGN_SLEEP_SOURCE_PERMISSIONS}
             postJoinContactOption={null}
             postJoinDestination="/join"
           />
-          <GroupJoinHomeLink label="Not now" />
         </GroupJoinPageMock>
       </GroupJoinVariant>
 
@@ -235,7 +244,6 @@ export function GroupJoinStudy() {
             postJoinDestination="/home"
           />
           <GroupJoinLeaveButton groupName={DESIGN_GROUP_NAME} joinCode={DESIGN_JOIN_CODE} />
-          <GroupJoinHomeLink label="Back to Murph" />
         </GroupJoinPageMock>
       </GroupJoinVariant>
     </div>
@@ -316,16 +324,5 @@ function GroupJoinPageMock({
 
       <div className="flex flex-col gap-2">{children}</div>
     </div>
-  );
-}
-
-function GroupJoinHomeLink({ label }: { label: string }) {
-  return (
-    <Link
-      href="/home"
-      className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-    >
-      {label}
-    </Link>
   );
 }
