@@ -176,8 +176,11 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('For running-challenge standings')
     expect(section).toContain('`not_granted`, `granted` plus `missing`, and `available`')
     expect(section).toContain('stored snapshots, never proof of a provider recheck')
-    expect(section).toContain('New shares use exact v1 with every source')
-    expect(section).toContain('v0 is one source-neutral value, not v1 consent')
+    expect(section).toContain('Default to exact v1')
+    expect(section).toContain(
+      'Use v0 only for an explicit one-value/no-source request',
+    )
+    expect(section).toContain('never upgrade v0')
     expect(section).toContain('list conflicts by source')
     expect(section).toContain('Use `read_current` for membership and permission configuration only')
     expect(section).toContain('Neither path grants Apple Health access')
