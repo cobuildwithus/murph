@@ -908,6 +908,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   activation side effects, and email paths must not persist provider payloads
   or expose recipients in logs.
 
+  Reserved verified-private support escalation requires a two-turn authority
+  contract before the existing product-feedback callback: Murph shows the exact
+  de-identified product-only summary, discloses that internal support receives
+  it linked to the member's account, and waits for affirmative approval. A
+  generic escalation request, group, unverified audience, or unsafe summary
+  does not authorize the tool. This runner policy lands and reaches exact
+  bundle-fingerprint convergence before a separate Web release may add issue
+  text to the existing metadata-only support email; no flag or second consent
+  owner is introduced.
+
   A separate authenticated ten-minute Vercel cron performs work only during the
   6pm Eastern hour and sends one daily internal product-feedback digest through
   that existing Resend transport. Web reads its owned

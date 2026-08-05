@@ -1,24 +1,24 @@
 # Hosted support escalation
 
-Last verified: 2026-08-01
+Last verified: 2026-08-04
 
-Implementation plan: `agent-docs/exec-plans/active/2026-08-01-hosted-support-escalation.md`.
+Consent prerequisite plan: `agent-docs/exec-plans/completed/2026-08-04-support-escalation-consent-prerequisite.md`.
 
 ## User purpose
 
-A member who reaches a Murph-owned product blocker should not be left at a hard wall. Murph must provide a real support address immediately and, when the member explicitly asks in their private Murph conversation, can pass a de-identified issue to the product team.
+A member who reaches a Murph-owned product blocker should not be left at a hard wall. Murph must provide a real support address immediately and, after truthful account-linkage disclosure and approval in the member's private Murph conversation, can pass an exact de-identified product-only issue to internal support.
 
 ## Conversation contract
 
 - For a Murph product problem, connection failure, or hard product wall, give `support@withmurph.ai` directly. Do not route the member through legal or privacy pages to discover it.
-- In a verified private direct conversation, Murph may offer: “I can send a de-identified report to the product team.” The offer itself sends nothing.
-- An explicit request to alert humans, escalate, open support, or an affirmative response to that offer authorizes one report for the current issue.
+- In a verified private direct conversation, Murph may offer escalation only by showing the exact de-identified product-only summary it intends to send, stating that internal support will receive that summary linked to the member's Murph account, and asking a natural confirmation question. The offer itself sends nothing.
+- A generic request to alert humans, escalate, or open support does not authorize unseen account linkage or an unseen summary. One report for the current issue is authorized only after the member affirmatively approves that exact disclosed summary and linkage.
 - Reuse `murph.submit_product_feedback` with `kind: "frustration"` and a sanitized product-only summary beginning exactly `Support escalation:`.
 - In a group or unverified audience, give the support address but do not create an account-linked escalation from the synthetic room or uncertain audience. Direct the requester to their private Murph conversation for that action. The deterministic unverified-audience safety reply also names the support address so an unverifiable conversation is never a dead end.
 - A summary beginning with the reserved `Support escalation:` prefix must carry the exact shape (`frustration` kind, no changelog references, non-empty de-identified content after the prefix); any other prefixed payload is rejected synchronously at the tool boundary so the model can correct it instead of silently degrading.
 - The tool boundary also rejects a reserved support payload when the hosted user-action scope is not a verified direct conversation, as defense in depth ahead of the Web synthetic-room check.
 - In the hosted runtime, the exact support shape is recorded through the Web callback inside the turn, before the model may confirm anything, so the member-facing confirmation is backed by a durable member-linked record. Ordinary feedback keeps the existing best-effort post-delivery flush.
-- After the tool reports the record accepted, say it was queued and give the support address. Do not claim that a human has read it, that a ticket exists, that Murph will automatically message later, or that a fix has a deadline.
+- After the tool reports the record accepted, say the account-linked product summary was recorded and give the support address. Do not claim that a human has read it, that a ticket exists, that Murph will automatically message later, or that a fix has a deadline.
 - If the tool is unavailable or the durable record fails, say the direct notification did not complete and give the support address.
 
 ## Data and privacy
@@ -29,6 +29,11 @@ A member who reaches a Murph-owned product blocker should not be left at a hard 
 - Member-linked support rows are excluded from the daily product-feedback digest; only anonymous rows enter that audience.
 - The support email contains exactly: a fixed escalation sentence, the internal feedback id, and the internal member id.
 - Never include raw conversation or voice text, names, handles, email addresses, phone numbers, health facts, measurements, diagnoses, medications, precise locations, secrets, provider payloads, or any other unsanitized context in the support summary or email.
+
+## Deployment prerequisite
+
+- This consent-only release changes the hosted runner prompt but leaves Web's support email metadata-only. Land it separately, deploy Cloudflare/runner with `container_rollout=immediate`, and require managed-container smoke to report the exact new bundle fingerprint.
+- A follow-up release may place the approved issue beside the member id in email only after that convergence proof. Until then, the existing metadata-only email is the safe compatibility boundary. Do not replace the split landing with a feature flag or model-asserted consent version.
 
 ## Rate and replay behavior
 

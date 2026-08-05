@@ -16,16 +16,31 @@ describe("Murph Codex base support guidance", () => {
       "Support escalation:",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Only in a verified private direct conversation",
+      "In a verified private direct conversation",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "In groups or unverified audiences, give the address and move account-linked escalation to private Murph.",
+      "show the exact de-identified product-only summary",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "support will receive it linked to their Murph account",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "A generic request does not approve unseen linkage or summary; wait for affirmative approval.",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "If no safe summary exists, or outside private direct chat, give the address and do not call.",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "account-linked summary is saved",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
+      "a de-identified report is queued",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Never promise a ticket, response, fix, follow-up, or timing",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "never retry or evade the daily limit",
+      "never retry or evade daily limits",
     );
   });
 
