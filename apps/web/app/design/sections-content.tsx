@@ -176,7 +176,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Environment progressive voice capture">
+      <StudySection title="Environment full-width progressive voice capture">
         <EnvironmentProgressStudy />
       </StudySection>
 

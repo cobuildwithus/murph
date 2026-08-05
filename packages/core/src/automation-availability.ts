@@ -162,7 +162,9 @@ export function replaceAutomationAvailabilityConflictSnapshot(input: {
   instructions: string;
   now?: Date;
 }): string {
-  const base = stripAutomationAvailabilityConflictBlock(input.instructions);
+  const base = stripAutomationAvailabilityConflictEvidenceForProvider(
+    input.instructions,
+  );
   const block = [
     AVAILABILITY_CONFLICT_BLOCK_START,
     "Availability conflict snapshot:",

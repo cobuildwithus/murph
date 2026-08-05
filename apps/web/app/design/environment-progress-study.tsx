@@ -3,9 +3,20 @@
 import {
   EnvironmentCaptureCard,
   EnvironmentEmptyState,
+  EnvironmentReport,
+  EnvironmentShell,
   EnvironmentVoiceRefreshNotice,
 } from "../(dashboard)/environment/environment-page-client";
+import {
+  deriveCategoryNote,
+  overallGrade,
+} from "../(dashboard)/environment/category-notes";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
+import {
+  type HabitatValues,
+  resolveEnvironmentCoverage,
+  resolveHabitatScene,
+} from "../(dashboard)/environment/home-model";
 
 const DESIGN_CONTACT_OPTIONS = [
   {
@@ -19,6 +30,28 @@ const DESIGN_CONTACT_OPTIONS = [
     label: "Telegram",
   },
 ];
+
+const REPORT_DESIGN_VALUES: HabitatValues = {
+  "home-air": {
+    damp_or_mold: "none",
+    smoke_sources: "none",
+    ventilation: "mechanical",
+  },
+  lighting: {
+    daytime_light: "by_window",
+    evening_light: "warm_dim",
+    morning_light_access: "outdoor_routine",
+  },
+  "sleep-environment": {
+    darkness: "blackout",
+    night_noise: "quiet",
+    night_temp_c: 20,
+  },
+  workspace: {
+    breaks: "systematic",
+    screen_at_eye_level: true,
+  },
+};
 
 const GAP_SCRIPTS: Readonly<Record<10 | 30 | 70, EnvironmentVoiceScript>> = {
   10: gapScript([
@@ -62,6 +95,11 @@ const UPDATE_SCRIPT: EnvironmentVoiceScript = {
 };
 
 export function EnvironmentProgressStudy() {
+  const reportScene = resolveHabitatScene(REPORT_DESIGN_VALUES);
+  const reportNotes = reportScene.categories.map((category) =>
+    deriveCategoryNote(category, REPORT_DESIGN_VALUES),
+  );
+
   return (
     <div
       className="flex flex-col gap-10"
@@ -70,7 +108,28 @@ export function EnvironmentProgressStudy() {
       inert
     >
       <StudyState label="0% · Auth-gated first walkthrough">
-        <EnvironmentEmptyState contactOptions={DESIGN_CONTACT_OPTIONS} />
+        <div id="environment-empty-dashboard-shell">
+          <EnvironmentShell>
+            <EnvironmentEmptyState contactOptions={DESIGN_CONTACT_OPTIONS} />
+          </EnvironmentShell>
+        </div>
+      </StudyState>
+      <StudyState label="Populated report · Shared dashboard width">
+        <div id="environment-populated-dashboard-shell">
+          <EnvironmentShell>
+            <EnvironmentReport
+              conditions={{ outdoorAir: "Good", weather: "Clear · 21°C" }}
+              contactOptions={DESIGN_CONTACT_OPTIONS}
+              coverage={resolveEnvironmentCoverage(reportScene)}
+              grade={overallGrade(reportNotes)}
+              notes={reportNotes}
+              onVoiceAccepted={() => {}}
+              scene={reportScene}
+              values={REPORT_DESIGN_VALUES}
+              voiceCaptureDisabled={false}
+            />
+          </EnvironmentShell>
+        </div>
       </StudyState>
       <StudyState label="10% · Build the core picture">
         <EnvironmentCaptureCard
