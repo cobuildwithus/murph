@@ -2348,6 +2348,11 @@ leave an older due occurrence or queued intent able to reach a provider. The
 blocked due occurrence uses normal retry/backoff without being consumed. A
 terminally stale queued predecessor payload is cleared, while its canonical
 source and pending occurrence remain available to the managed reconciler.
+Because hosted idle work applies managed automations before draining outbox,
+the predecessor-to-current rewrite defers while canonical runtime still owns a
+pending delivery intent. Outbox therefore settles against the revision that
+authorized the obsolete payload, and a later managed pass converts the retained
+occurrence.
 Those records distinguish a
 persisted onboarding state from the missing-state default and carry only state
 status and timestamps, the last authority gate checked, finite-window and

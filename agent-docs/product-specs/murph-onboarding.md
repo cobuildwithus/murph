@@ -57,8 +57,10 @@ privacy, authorization, or provider boundaries.
   reconciliation rewrites it to the current finite definition. A due
   predecessor enters ordinary retry/backoff without consuming its occurrence;
   a terminally stale queued predecessor intent is cleared while its source and
-  pending occurrence remain reconcilable. Editable slug, tags, title, and
-  instructions confer no onboarding-state authority.
+  pending occurrence remain reconcilable. Managed conversion defers while that
+  queued intent remains attached, so hosted idle ordering cannot replace the
+  predecessor identity before outbox settlement observes it. Editable slug,
+  tags, title, and instructions confer no onboarding-state authority.
 - Keep the post-onboarding choice point separate from unfinished-onboarding
   recovery. It is one finite managed one-shot for members who answered
   onboarding, not another collection flow, recurring cadence, or profile.
@@ -598,6 +600,11 @@ intent is not retried, but delivery reconciliation likewise preserves the
 canonical source and pending occurrence for managed conversion. This may
 under-send during a failed migration; it cannot resurrect the older cadence,
 lose the migration source, or bypass the current three-day authority.
+On an ordinary hosted idle pass, managed reconciliation runs before the
+automation lane drains outbox. A predecessor with a pending delivery intent
+therefore stays unchanged for that pass; outbox settles the obsolete payload,
+and the next managed pass performs the existing finite conversion against the
+retained occurrence.
 
 Hosted queue-only delivery carries the automation revision into the existing
 outbox authority fence. Immediately before external provider entry, that owner

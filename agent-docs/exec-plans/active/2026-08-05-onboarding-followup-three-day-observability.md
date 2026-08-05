@@ -21,6 +21,9 @@ metadata-only hosted runtime logs.
 - The second correction made predecessors effect-ineligible but reused
   terminal skip/stale finalization, which could consume and archive the
   one-shot before managed reconciliation recovered it.
+- The third correction preserved predecessor settlement by source identity,
+  but hosted idle ordering could rewrite that source before draining its old
+  queued intent and re-expose the generic consuming path.
 - Existing logs expose schedule and delivery mechanics but not the
   onboarding-state source or a stable lifecycle decision reason.
 
@@ -39,6 +42,9 @@ metadata-only hosted runtime logs.
 - Every exact recognized predecessor is effect-ineligible until the existing
   reconciler durably produces the current finite definition, and failed
   reconciliation cannot consume its source or pending occurrence.
+- Managed conversion defers while a predecessor runtime owns a pending delivery
+  intent, allowing the existing outbox drain to settle the obsolete payload
+  before the next managed pass rewrites the retained occurrence.
 - Logs identify the managed automation, onboarding-state status and source,
   lifecycle action, execution outcome, and safe reason code without member
   identity, transcript text, health data, delivery targets, or local paths.

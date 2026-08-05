@@ -46,6 +46,7 @@ import {
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
 } from '../src/assistant/onboarding-followup-automation.ts'
+import { applyMurphManagedAutomations } from '../src/assistant/managed-automations.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import {
   buildAssistantOutboxSummary,
@@ -3352,7 +3353,7 @@ describe('assistant outbox runtime', () => {
     'makes a queued $label predecessor terminally stale until managed reconciliation completes',
     async ({ definition, label, schedule }) => {
       vi.useFakeTimers()
-      vi.setSystemTime(new Date('2026-07-20T17:31:00.000Z'))
+      vi.setSystemTime(new Date('2026-04-09T13:31:00.000Z'))
       const { paths, vaultRoot } = await createInitializedAssistantVault(
         `assistant-outbox-onboarding-predecessor-${label.replaceAll(' ', '-')}-`,
       )
@@ -3360,7 +3361,7 @@ describe('assistant outbox runtime', () => {
       const automation = await upsertAutomation({
         continuityPolicy: definition.continuityPolicy,
         instructions: definition.instructions,
-        now: new Date('2026-07-20T17:29:00.000Z'),
+        now: new Date('2026-04-08T15:00:00.000Z'),
         route: {
           channel: 'telegram',
           deliveryTarget: 'telegram-chat',
@@ -3393,7 +3394,7 @@ describe('assistant outbox runtime', () => {
       })
       const occurrenceAt = schedule.kind === 'at'
         ? schedule.at
-        : '2026-07-20T17:30:00.000Z'
+        : '2026-04-09T13:30:00.000Z'
       const runtimeRecord = createAssistantCronCanonicalRuntimeRecord({
         jobId: automation.record.automationId,
         now: automation.record.updatedAt,
@@ -3406,9 +3407,20 @@ describe('assistant outbox runtime', () => {
         jobs: [runtimeRecord],
         version: 1,
       })
-      const onboardingStatePath = resolveAssistantOnboardingStatePath(vaultRoot)
-      await mkdir(path.dirname(onboardingStatePath), { recursive: true })
-      await writeFile(onboardingStatePath, '{not valid json', 'utf8')
+
+      await applyMurphManagedAutomations({
+        defaultRoute: automation.record.route,
+        now: new Date('2026-04-09T13:31:00.000Z'),
+        vaultRoot,
+      })
+      await expect(showAutomation({
+        automationId: automation.record.automationId,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        instructions: definition.instructions,
+        schedule,
+        status: 'active',
+      })
 
       const blocked = await dispatchAssistantOutboxIntent({
         force: true,
@@ -3421,9 +3433,6 @@ describe('assistant outbox runtime', () => {
         code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
       })
       expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
-      await expect(readFile(onboardingStatePath, 'utf8')).resolves.toBe(
-        '{not valid json',
-      )
       await expect(showAutomation({
         automationId: automation.record.automationId,
         vaultRoot,
@@ -3444,6 +3453,41 @@ describe('assistant outbox runtime', () => {
       expect(
         runtimeStore.jobs[0]?.state.pendingDeliveryIntentId,
       ).toBeUndefined()
+
+      await applyMurphManagedAutomations({
+        defaultRoute: automation.record.route,
+        now: new Date('2026-04-09T13:32:00.000Z'),
+        vaultRoot,
+      })
+      await expect(showAutomation({
+        automationId: automation.record.automationId,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+        instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+        schedule: expect.objectContaining({ kind: 'dailyLocal' }),
+        status: 'active',
+        summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+        tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
+        title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      })
+      const convertedRuntimeStore =
+        await readAssistantCronCanonicalRuntimeStore(paths)
+      expect(convertedRuntimeStore.jobs).toContainEqual(expect.objectContaining({
+        jobId: automation.record.automationId,
+        state: expect.objectContaining({
+          pendingOccurrenceAt: occurrenceAt,
+        }),
+      }))
+      await expect(listAssistantCronJobs(vaultRoot)).resolves.toContainEqual(
+        expect.objectContaining({
+          jobId: automation.record.automationId,
+          prompt: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+          state: expect.objectContaining({
+            nextRunAt: '2026-04-09T13:31:30.000Z',
+          }),
+        }),
+      )
     },
   )
 

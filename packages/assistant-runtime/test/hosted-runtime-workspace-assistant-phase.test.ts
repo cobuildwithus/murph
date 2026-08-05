@@ -2860,7 +2860,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("checkpoints hosted managed automation changes before continuing assistant work", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const events: string[] = [];
     mocks.applyMurphManagedAutomations.mockImplementationOnce(async (input) => {
+      events.push("managed-automation");
       input.onOnboardingFollowupDiagnostic?.({
         action: "migrated_three_day_window",
         activeUntil: "2026-04-30T15:00:00.000Z",
@@ -2877,6 +2879,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         created: 1,
         skipped: 0,
         updated: 0,
+      };
+    });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      events.push("automation-lane");
+      return {
+        assistantAutomationProgressed: false,
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        nextWakeAt: null,
+        redactedLogEntries: [],
       };
     });
 
@@ -2898,6 +2909,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       vaultRoot: "/tmp/murph-hosted-vault",
     });
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(["managed-automation", "automation-lane"]);
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "assistant_runtime_commit",
       progressed: true,

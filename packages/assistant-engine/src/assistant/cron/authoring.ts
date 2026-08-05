@@ -68,6 +68,7 @@ export interface AddAssistantCronJobInput
 
 export interface UpsertAssistantCronAutomationInput {
   activeUntil?: string | null
+  deferUpdateWhileDeliveryPending?: boolean
   firstOccurrenceAt?: string
   firstOccurrenceActiveDayCount?: number
   firstOccurrenceActiveUntilLocalTime?: string
@@ -241,6 +242,16 @@ export async function upsertAssistantCronAutomation(
           existingAutomation.automationId,
         )
       : null
+    // A queued intent carries the source revision that authorized its payload.
+    // Keep that revision in place until the existing outbox owner settles the
+    // intent, so reconciliation cannot erase the occurrence by changing the
+    // identity that delivery finalization observes.
+    if (
+      input.deferUpdateWhileDeliveryPending === true &&
+      existingRuntimeState?.state.pendingDeliveryIntentId
+    ) {
+      return null
+    }
     const requestedFirstOccurrenceAt = input.firstOccurrenceAt === undefined
       ? null
       : normalizeFirstOccurrenceAt(input.firstOccurrenceAt)

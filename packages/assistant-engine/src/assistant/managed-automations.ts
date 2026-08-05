@@ -1605,6 +1605,8 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
   }
   const reconciled = await upsertAssistantCronAutomation({
     activeUntil,
+    deferUpdateWhileDeliveryPending:
+      !isCurrentMurphOnboardingFollowupAutomation(existing),
     firstOccurrenceAt,
     firstOccurrencePolicy: 'after-current-local-day',
     instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
