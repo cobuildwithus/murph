@@ -372,6 +372,82 @@ async function createLegacyProfileDisplayNameVault(displayName: string): Promise
   return vaultRoot;
 }
 
+async function createSleepSourceProjectionVault(
+  days: readonly {
+    date: string;
+    providers: readonly string[];
+  }[],
+): Promise<string> {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-sleep-source-window-"));
+  await mkdir(join(vaultRoot, "ledger", "events", "2026"), { recursive: true });
+  await writeFile(
+    join(vaultRoot, "vault.json"),
+    `${JSON.stringify({
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4E",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      title: "Synthetic sleep-source window",
+      timezone: "UTC",
+    })}\n`,
+    "utf8",
+  );
+  const records = days.flatMap((day, dayIndex) =>
+    day.providers.flatMap((provider, providerIndex) => {
+      const suffix = `${dayIndex}_${providerIndex}`;
+      const recordedAt = `${day.date}T07:0${providerIndex}:00.000Z`;
+      const externalRef = {
+        system: "junction",
+        resourceType: "sleep",
+        resourceId: `sleep_source_window_${suffix}`,
+      };
+      const dataOrigin = {
+        aggregatorProvider: "junction",
+        originConfidence: "high",
+        sourceProviderSlug: provider,
+        version: 1,
+      };
+      return [
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_sleep_source_window_session_${suffix}`,
+          kind: "sleep_session",
+          occurredAt: `${day.date}T07:00:00.000Z`,
+          recordedAt,
+          dayKey: day.date,
+          source: "device",
+          title: "Overnight sleep",
+          startAt: `${day.date}T00:00:00.000Z`,
+          endAt: `${day.date}T07:00:00.000Z`,
+          durationMinutes: 420,
+          dataOrigin,
+          externalRef,
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_sleep_source_window_deep_${suffix}`,
+          kind: "observation",
+          occurredAt: `${day.date}T07:00:00.000Z`,
+          recordedAt,
+          dayKey: day.date,
+          source: "device",
+          title: "Deep sleep",
+          metric: "sleep-deep-minutes",
+          value: 70 + dayIndex * 10 + providerIndex,
+          unit: "minutes",
+          dataOrigin,
+          externalRef,
+        },
+      ];
+    })
+  );
+  await writeFile(
+    join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl"),
+    `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    "utf8",
+  );
+  return vaultRoot;
+}
+
 describe("offerHostedVaultShareProjectionBestEffort", () => {
   it("is a no-op without a vault-share port", async () => {
     const result = await offerHostedVaultShareProjectionBestEffort({
@@ -830,6 +906,66 @@ describe("selectProjectableDailyMetricDays", () => {
       expect(JSON.stringify(selected)).not.toMatch(
         /sourceInstanceId|connectionId|accountId|timeZone|resourceId/u,
       );
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps valid dates when more than four providers appear across the window", async () => {
+    const vaultRoot = await createSleepSourceProjectionVault([
+      { date: "2026-07-02", providers: ["fitbit", "garmin", "oura", "polar"] },
+      { date: "2026-07-03", providers: ["suunto"] },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const selected = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec("deep-sleep-sources-days.v1"),
+      );
+
+      expect(selected.map((record) => record.recordKey).sort()).toEqual([
+        "2026-07-02",
+        "2026-07-03",
+      ]);
+      const sourceCounts = new Map(selected.map((record) => [
+        record.recordKey,
+        "sources" in record.data && Array.isArray(record.data.sources)
+          ? record.data.sources.length
+          : 0,
+      ]));
+      expect(sourceCounts).toEqual(new Map([
+        ["2026-07-02", 4],
+        ["2026-07-03", 1],
+      ]));
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("omits only an over-bound date while preserving other source-aware dates", async () => {
+    const vaultRoot = await createSleepSourceProjectionVault([
+      { date: "2026-07-02", providers: ["fitbit"] },
+      {
+        date: "2026-07-03",
+        providers: ["fitbit", "garmin", "oura", "polar", "suunto"],
+      },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const selected = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec("deep-sleep-sources-days.v1"),
+      );
+
+      expect(selected.map((record) => record.recordKey)).toEqual(["2026-07-02"]);
+      expect(selected[0]?.data).toMatchObject({
+        date: "2026-07-02",
+        sources: [expect.objectContaining({ source: "fitbit", selected: true })],
+      });
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });

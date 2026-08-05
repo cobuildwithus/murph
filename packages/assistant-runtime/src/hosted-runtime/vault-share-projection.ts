@@ -578,9 +578,6 @@ async function readProjectableSleepMetricSourcesByDate(input: {
       && source.metricsContributed.includes(summaryMetricKey)
     )
     .sort((left, right) => left.provider.localeCompare(right.provider));
-  if (providers.length > HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES) {
-    return null;
-  }
 
   const summariesByProvider = await Promise.all(providers.map(async (source) => ({
     source,

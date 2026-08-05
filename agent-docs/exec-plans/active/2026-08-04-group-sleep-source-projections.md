@@ -35,7 +35,11 @@ Make consented group sleep reads truthful when a participant has multiple connec
 
 - The exact v1 contract rejects missing, duplicate, malformed, future-dated, source-ambiguous, oversized, or more-than-four-source records while keeping legacy v0 provider-neutral records readable.
 - A synthetic three-source projection returns all three public sources, exactly one canonical selection, per-source recorded times, and truthful disagreement state without raw provider identifiers.
+- The four-source bound is enforced per date: provider churn across the window preserves every valid date, while a single over-bound date is omitted without clearing its neighbors.
+- Native one-reaction consent names the by-source values, source names, and recorded times, and the accepted offer grants only its exact v1 scope.
+- A hosted-local scenario crosses exact consent, a real Temporal-backed maintenance checkpoint, encrypted Web delivery, and the destination group's authorized `read_shared` result with three synthetic sources and no provider fetch.
 - Focused tests pass across hosted execution, query, assistant runtime, assistant engine, Web, and the Cloudflare runner; affected package/app typechecks pass.
+- The source-aware runtime path measures 10,159,653 bytes in the macOS runner assembly; the bundle baseline records that intended growth while retaining the existing 32 KiB ratchet tolerance and forbidden-boot-input guard.
 - The real consent component renders in a dedicated design-catalog study at desktop and mobile widths; local and hosted lossless captures remain legible at native resolution.
 - The required fresh Fable UI double-check was attempted after the rendered surface stabilized but could not run because the account reported explicit usage-credit exhaustion.
 

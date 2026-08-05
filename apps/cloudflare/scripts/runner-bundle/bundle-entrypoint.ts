@@ -100,7 +100,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // closure, and 10,119,605B total on 2026-08-01. No forbidden subsystem
 // entered the boot graph. Ratchet each baseline to the merged measurement and
 // retain the established allowances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_119_605 + 32_768;
+//
+// Source-aware deep- and REM-sleep group projections extend the existing
+// vault-share projection path without adding a forbidden boot input. macOS
+// assembly measured 10,159,653B total on 2026-08-04; retain the established
+// allowance above that measured baseline.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_159_653 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_699_250;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_442_983;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

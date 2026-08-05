@@ -107,6 +107,11 @@ describe("hosted-local harness", () => {
       "apps/cloudflare/test/hosted-local-family-sponsored-group-roundtrip-e2e.test.ts",
     );
     expect(
+      resolveHostedLocalE2eScenarios("group-sleep-source-sharing")[0]?.file,
+    ).toBe(
+      "apps/cloudflare/test/hosted-local-group-sleep-source-sharing-e2e.test.ts",
+    );
+    expect(
       resolveHostedLocalE2eScenarios("linq-unknown-first-contact-fallback")[0]?.file,
     ).toBe(
       "apps/cloudflare/test/hosted-local-linq-unknown-first-contact-fallback-e2e.test.ts",

@@ -46,6 +46,7 @@ export type HostedLocalE2eScenarioName =
   | "device-sync-wake"
   | "direct-r2-presigned-put"
   | "family-sponsored-group-roundtrip"
+  | "group-sleep-source-sharing"
   | "foreground-reply-priority"
   | "idle-checkpoint-deferred-progress"
   | "junction-link-connect"
@@ -163,6 +164,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
     name: "idle-checkpoint-deferred-progress",
     testControls: true,
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-group-sleep-source-sharing-e2e.test.ts",
+    name: "group-sleep-source-sharing",
   },
   {
     file: "apps/cloudflare/test/hosted-local-junction-link-connect-e2e.test.ts",
