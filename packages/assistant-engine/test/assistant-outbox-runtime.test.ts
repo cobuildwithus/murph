@@ -43,6 +43,10 @@ import {
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
+import {
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+} from '../src/assistant/onboarding-followup-automation.ts'
+import { applyMurphManagedAutomations } from '../src/assistant/managed-automations.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import {
   buildAssistantOutboxSummary,
@@ -101,6 +105,9 @@ import {
 } from '../src/outbound-channel.ts'
 import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 import { createTempVaultContext } from './test-helpers.ts'
+import {
+  onboardingFollowupPredecessorDefinitions,
+} from './onboarding-followup-predecessor-fixtures.ts'
 
 const mockedDeliverAssistantMessageOverBinding = vi.mocked(
   deliverAssistantMessageOverBinding,
@@ -3242,6 +3249,247 @@ describe('assistant outbox runtime', () => {
     })
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(2)
   })
+
+  it('revalidates unfinished onboarding when a queued follow-up reaches provider entry', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-20T17:31:00.000Z'))
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-onboarding-followup-authority-',
+    )
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      activeUntil: '2026-07-22T19:00:00.000Z',
+      continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+      now: new Date('2026-07-20T17:29:00.000Z'),
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '13:30',
+      },
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      status: 'active',
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      vaultRoot,
+    })
+    const queueFollowup = (suffix: string) => deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: `Onboarding follow-up ${suffix}.`,
+      sessionId: `session-outbox-onboarding-followup-${suffix}`,
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: `turn-outbox-onboarding-followup-${suffix}`,
+      vault: vaultRoot,
+    })
+    const eligible = await queueFollowup('eligible')
+    const temporarilyUnavailable = await queueFollowup('unavailable')
+    const completedBeforeDelivery = await queueFollowup('completed')
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        idempotencyKey: eligible.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-onboarding-followup',
+        sentAt: '2026-07-20T17:31:00.000Z',
+        target: 'telegram-chat',
+        targetKind: 'explicit',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+    const sent = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: eligible.intent.intentId,
+      vault: vaultRoot,
+    })
+    expect(sent.intent.status).toBe('sent')
+
+    await mkdir(
+      path.dirname(resolveAssistantOnboardingStatePath(vaultRoot)),
+      { recursive: true },
+    )
+    await writeFile(
+      resolveAssistantOnboardingStatePath(vaultRoot),
+      '{not valid json',
+      'utf8',
+    )
+    const retryable = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: temporarilyUnavailable.intent.intentId,
+      vault: vaultRoot,
+    })
+    expect(retryable.intent.status).toBe('retryable')
+    expect(retryable.deliveryError).toMatchObject({
+      code: 'ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE',
+    })
+
+    await completeAssistantOnboarding({
+      completedAt: '2026-07-20T17:32:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    const blocked = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: completedBeforeDelivery.intent.intentId,
+      vault: vaultRoot,
+    })
+    expect(blocked.intent.status).toBe('failed')
+    expect(blocked.deliveryError).toMatchObject({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+  })
+
+  it.each(onboardingFollowupPredecessorDefinitions)(
+    'makes a queued $label predecessor terminally stale until managed reconciliation completes',
+    async ({ definition, label, schedule }) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-09T13:31:00.000Z'))
+      const { paths, vaultRoot } = await createInitializedAssistantVault(
+        `assistant-outbox-onboarding-predecessor-${label.replaceAll(' ', '-')}-`,
+      )
+      const opaqueSuffix = label.replaceAll(' ', '-')
+      const automation = await upsertAutomation({
+        continuityPolicy: definition.continuityPolicy,
+        instructions: definition.instructions,
+        now: new Date('2026-04-08T15:00:00.000Z'),
+        route: {
+          channel: 'telegram',
+          deliveryTarget: 'telegram-chat',
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+        schedule,
+        slug: definition.slug,
+        status: 'active',
+        summary: definition.summary,
+        tags: [...definition.tags],
+        title: definition.title,
+        vaultRoot,
+      })
+      const queued = await deliverAssistantOutboxMessage({
+        automationAuthority: {
+          automationId: automation.record.automationId,
+          expectedUpdatedAt: automation.record.updatedAt,
+        },
+        channel: 'telegram',
+        dispatchMode: 'queue-only',
+        explicitTarget: 'telegram-chat',
+        message: `Queued ${label} predecessor.`,
+        sessionId: `session-outbox-onboarding-predecessor-${opaqueSuffix}`,
+        threadId: 'telegram-chat',
+        threadIsDirect: true,
+        turnId: `turn-outbox-onboarding-predecessor-${opaqueSuffix}`,
+        vault: vaultRoot,
+      })
+      const occurrenceAt = schedule.kind === 'at'
+        ? schedule.at
+        : '2026-04-09T13:30:00.000Z'
+      const runtimeRecord = createAssistantCronCanonicalRuntimeRecord({
+        jobId: automation.record.automationId,
+        now: automation.record.updatedAt,
+      })
+      runtimeRecord.updatedAt = automation.record.updatedAt
+      runtimeRecord.state.lastRunAt = occurrenceAt
+      runtimeRecord.state.pendingDeliveryIntentId = queued.intent.intentId
+      runtimeRecord.state.pendingOccurrenceAt = occurrenceAt
+      await writeAssistantCronCanonicalRuntimeStore(paths, {
+        jobs: [runtimeRecord],
+        version: 1,
+      })
+
+      await applyMurphManagedAutomations({
+        defaultRoute: automation.record.route,
+        now: new Date('2026-04-09T13:31:00.000Z'),
+        vaultRoot,
+      })
+      await expect(showAutomation({
+        automationId: automation.record.automationId,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        instructions: definition.instructions,
+        schedule,
+        status: 'active',
+      })
+
+      const blocked = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: queued.intent.intentId,
+        vault: vaultRoot,
+      })
+
+      expect(blocked.intent.status).toBe('failed')
+      expect(blocked.deliveryError).toMatchObject({
+        code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+      })
+      expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+      await expect(showAutomation({
+        automationId: automation.record.automationId,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        instructions: definition.instructions,
+        schedule,
+        status: 'active',
+      })
+      const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+      expect(runtimeStore.jobs).toContainEqual(expect.objectContaining({
+        jobId: automation.record.automationId,
+        state: expect.objectContaining({
+          consecutiveFailures: 1,
+          pendingOccurrenceAt: occurrenceAt,
+          retryAfterAt: expect.any(String),
+        }),
+      }))
+      expect(
+        runtimeStore.jobs[0]?.state.pendingDeliveryIntentId,
+      ).toBeUndefined()
+
+      await applyMurphManagedAutomations({
+        defaultRoute: automation.record.route,
+        now: new Date('2026-04-09T13:32:00.000Z'),
+        vaultRoot,
+      })
+      await expect(showAutomation({
+        automationId: automation.record.automationId,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+        instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+        schedule: expect.objectContaining({ kind: 'dailyLocal' }),
+        status: 'active',
+        summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+        tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
+        title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      })
+      const convertedRuntimeStore =
+        await readAssistantCronCanonicalRuntimeStore(paths)
+      expect(convertedRuntimeStore.jobs).toContainEqual(expect.objectContaining({
+        jobId: automation.record.automationId,
+        state: expect.objectContaining({
+          pendingOccurrenceAt: occurrenceAt,
+        }),
+      }))
+      await expect(listAssistantCronJobs(vaultRoot)).resolves.toContainEqual(
+        expect.objectContaining({
+          jobId: automation.record.automationId,
+          prompt: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+          state: expect.objectContaining({
+            nextRunAt: '2026-04-09T13:31:30.000Z',
+          }),
+        }),
+      )
+    },
+  )
 
   it('blocks a queued one-shot at activeUntil before provider entry', async () => {
     vi.useFakeTimers()

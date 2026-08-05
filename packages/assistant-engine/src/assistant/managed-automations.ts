@@ -12,6 +12,7 @@ import {
 } from '@murphai/hosted-execution/env'
 import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+  formatTimeZoneDateTimeParts,
   MURPH_PRODUCT_ORIGIN,
   normalizeIanaTimeZone,
   parseAutomationSupportSeriesTag,
@@ -34,6 +35,7 @@ import {
 import {
   computeAssistantCronFirstRunAfterCurrentLocalDay,
 } from './cron/schedule.js'
+import { upsertAssistantCronAutomation } from './cron/authoring.js'
 import {
   prepareExperimentLifecycleAutomations,
 } from './experiment-support-automations.js'
@@ -45,6 +47,7 @@ import {
 } from './onboarding-goal-checkin-automation.js'
 import type { AssistantMaintenanceProfile } from './maintenance-evidence.js'
 import {
+  isCurrentMurphOnboardingFollowupAutomation,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   resolveMurphOnboardingFollowupActiveUntil,
   resolveMurphOnboardingFollowupSchedule,
@@ -86,6 +89,9 @@ export interface MurphManagedAutomationSeed {
 export interface ApplyMurphManagedAutomationsInput {
   defaultRoute?: AutomationRoute | null
   onDiagnosticStage?: ((diagnostic: MurphManagedAutomationDiagnosticStage) => void) | null
+  onOnboardingFollowupDiagnostic?: (
+    (diagnostic: MurphOnboardingFollowupDiagnostic) => void
+  ) | null
   now?: Date
   operatorHomeRoot?: string | null
   routeValidationProfile?: AssistantCronDeliveryRouteValidationProfile
@@ -118,6 +124,24 @@ export interface ApplyMurphManagedAutomationsResult {
   stableKeyRetryNeeded?: true
   updated: number
   yielded?: true
+}
+
+export interface MurphOnboardingFollowupDiagnostic {
+  action:
+    | 'archived_completed'
+    | 'archived_window_elapsed'
+    | 'migrated_three_day_window'
+    | 'unchanged'
+    | 'updated_three_day_window'
+  activeUntil: string | null
+  firstOccurrenceAt: string | null
+  onboardingStateCreatedAt: string | null
+  onboardingStateSource: 'default_missing' | 'persisted'
+  onboardingStateStatus: 'completed' | 'open'
+  onboardingStateUpdatedAt: string | null
+  opportunityDays: number
+  previousScheduleKind: AutomationSchedule['kind']
+  scheduleKind: AutomationSchedule['kind']
 }
 
 export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
@@ -274,7 +298,41 @@ const LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_TAGS = [
   'onboarding',
 ] as const
 
-const PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION = {
+const IMMEDIATE_PREVIOUS_ONESHOT_ONBOARDING_FOLLOWUP_AUTOMATION = {
+  continuityPolicy: 'preserve',
+  instructions: [
+    'Goal: make one finite, low-pressure final attempt to reopen unfinished Murph onboarding and get a reply. This one-shot is consumed whether you send or skip. Never create, re-enable, or reschedule another onboarding follow-up; ordinary health help and reply-driven onboarding remain available after this run.',
+    '',
+    'Before deciding, read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md`, run `vault-cli assistant onboarding resume-context --format json`, and read the available recent user messages. The skill is the single owner of conversation order, checkpoint meaning, persistence, and completion; do not create a second state machine in this automation.',
+    '',
+    'Success criteria: onboarding is no longer open, or one brief, skill-compatible question gives the member an easy way to reply and continue.',
+    '',
+    'If `onboarding.status` is `completed`, return skip. The managed-automation owner archives this follow-up deterministically.',
+    '',
+    'This background occurrence must never run the onboarding completion command or otherwise mutate onboarding state. If the visible and saved evidence shows onboarding is already answered, declined, deferred, or no longer useful to reopen, return an ordinary skip. Only a later foreground user reply may advance or complete onboarding.',
+    '',
+    'Otherwise use exactly the next unresolved step from the onboarding skill, including aspiration capture, explicit parking, foundation questions, contextual return, and its targeted-read rules for omitted, truncated, or errored evidence. If that step is only a reflection or parking transition, combine it with the next skill-approved question when the skill permits; otherwise return skip. Do not compress, reorder, or bypass that policy merely because this is a scheduled run.',
+    '',
+    'This automation never owns a promised check-in, reminder, or proactive support action. Those use the canonical plan and dedicated automation required by `behavior-followthrough`, which owns timing, due evaluation, delivery, retry, and skip behavior.',
+    '',
+    'Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, decline, or a newer topic that should win. Follow the onboarding skill’s finite next-day recovery rule exactly. Do not re-ask known or resolved context, repeat an unanswered setup question, or rotate to another setup question. Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever the finite reopening question would not be timely or useful.',
+    '',
+    "Output: send at most one brief, natural, low-pressure in-chat continuation. It must contain exactly one easy, reply-oriented question; otherwise return an ordinary skip. Do not mention internal state, setup completion, final attempts, schedules, or this automation, and do not use a fixed script. The user's reply will be handled by the next normal Murph onboarding turn.",
+  ].join('\n'),
+  slug: 'finish-onboarding-followup',
+  summary:
+    'One finite next-day invitation to continue unfinished Murph onboarding.',
+  tags: [
+    'assistant',
+    'scheduled',
+    'murph-managed',
+    'onboarding',
+    'murph-managed:onboarding-followup',
+  ],
+  title: 'Final Murph onboarding follow-up',
+} as const
+
+const HISTORICAL_RECURRING_ONBOARDING_FOLLOWUP_AUTOMATION = {
   continuityPolicy: 'preserve',
   instructions: [
     'Goal: advance Murph onboarding through an anchored health aspiration, a finite health-context foundation, and a contextual return without turning it into a drip questionnaire or unsolicited plan. Ordinary health help remains available while onboarding is open. The first scheduled occurrence is intentionally deferred until the next local day after the relationship begins.',
@@ -1177,6 +1235,12 @@ export async function applyMurphManagedAutomations(
     if (onboardingReconciliation.yielded) {
       return { ...result, yielded: true }
     }
+    if (onboardingReconciliation.diagnostic) {
+      reportMurphOnboardingFollowupDiagnostic(
+        input,
+        onboardingReconciliation.diagnostic,
+      )
+    }
     if (onboardingReconciliation.updated) {
       result.updated += 1
     }
@@ -1261,6 +1325,17 @@ function reportMurphManagedAutomationDiagnosticStage(
 ): void {
   try {
     input.onDiagnosticStage?.(diagnostic)
+  } catch {
+    // Diagnostics are best-effort and must not affect reconciliation.
+  }
+}
+
+function reportMurphOnboardingFollowupDiagnostic(
+  input: ApplyMurphManagedAutomationsInput,
+  diagnostic: MurphOnboardingFollowupDiagnostic,
+): void {
+  try {
+    input.onOnboardingFollowupDiagnostic?.(diagnostic)
   } catch {
     // Diagnostics are best-effort and must not affect reconciliation.
   }
@@ -1389,28 +1464,41 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
   now: Date
   shouldYield: (() => boolean) | null
   vaultRoot: string
-}): Promise<{ updated: boolean; yielded: boolean }> {
+}): Promise<{
+  diagnostic: MurphOnboardingFollowupDiagnostic | null
+  updated: boolean
+  yielded: boolean
+}> {
   if (input.shouldYield?.() === true) {
-    return { updated: false, yielded: true }
+    return { diagnostic: null, updated: false, yielded: true }
   }
   const existing = await showAutomation({
     slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
     vaultRoot: input.vaultRoot,
   })
   if (input.shouldYield?.() === true) {
-    return { updated: false, yielded: true }
+    return { diagnostic: null, updated: false, yielded: true }
   }
   if (!existing || existing.status === 'archived') {
-    return { updated: false, yielded: false }
+    return { diagnostic: null, updated: false, yielded: false }
   }
 
-  if (!isManagedOnboardingFollowupAutomation(existing)) {
-    return { updated: false, yielded: false }
+  if (!isRecognizedMurphOnboardingFollowupAutomation(existing)) {
+    return { diagnostic: null, updated: false, yielded: false }
   }
 
   const onboardingState = await readAssistantOnboardingState(input.vaultRoot)
+  const onboardingStateDiagnostic = {
+    onboardingStateCreatedAt: onboardingState.createdAt,
+    onboardingStateSource:
+      onboardingState.createdAt === null
+        ? 'default_missing' as const
+        : 'persisted' as const,
+    onboardingStateStatus: onboardingState.status,
+    onboardingStateUpdatedAt: onboardingState.updatedAt,
+  }
   if (input.shouldYield?.() === true) {
-    return { updated: false, yielded: true }
+    return { diagnostic: null, updated: false, yielded: true }
   }
   if (onboardingState.status === 'completed') {
     await patchAutomation({
@@ -1419,78 +1507,157 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
       status: 'archived',
       vaultRoot: input.vaultRoot,
     })
-    return { updated: true, yielded: false }
+    return {
+      diagnostic: {
+        action: 'archived_completed',
+        activeUntil: existing.activeUntil,
+        firstOccurrenceAt:
+          existing.schedule.kind === 'at' ? existing.schedule.at : null,
+        ...onboardingStateDiagnostic,
+        opportunityDays: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
+        previousScheduleKind: existing.schedule.kind,
+        scheduleKind: existing.schedule.kind,
+      },
+      updated: true,
+      yielded: false,
+    }
   }
 
-  const migrateRecurringSchedule = existing.schedule.kind !== 'at'
   const vault = await loadVault({ vaultRoot: input.vaultRoot })
   if (input.shouldYield?.() === true) {
-    return { updated: false, yielded: true }
+    return { diagnostic: null, updated: false, yielded: true }
   }
   const vaultId = typeof vault.metadata.vaultId === 'string'
     ? vault.metadata.vaultId.trim()
     : ''
   const timeZone = normalizeIanaTimeZone(vault.metadata.timezone) ?? 'UTC'
-  let migratedSchedule: AutomationSchedule | undefined
-  if (migrateRecurringSchedule) {
-    const schedule = resolveMurphOnboardingFollowupSchedule(
-      vaultId || existing.automationId,
-    )
-    migratedSchedule = {
-      kind: 'at',
-      at: computeAssistantCronFirstRunAfterCurrentLocalDay({
-        after: input.now,
-        schedule: {
-          ...schedule,
-          timeZone,
-        },
-      }),
-    }
-  }
-  const scheduledAt =
-    migratedSchedule?.kind === 'at'
-      ? migratedSchedule.at
-      : existing.schedule.kind === 'at'
-        ? existing.schedule.at
-        : null
-  if (scheduledAt === null) {
-    throw new Error('Onboarding follow-up migration did not produce a one-shot.')
-  }
-  const activeUntil =
-    !migrateRecurringSchedule && typeof existing.activeUntil === 'string'
-      ? existing.activeUntil
-      : resolveMurphOnboardingFollowupActiveUntil({
-          scheduledAt,
+  const existingCreatedAt = new Date(existing.createdAt)
+  const lifecycleAnchor = Number.isFinite(existingCreatedAt.getTime())
+    ? existingCreatedAt
+    : input.now
+  const schedule = existing.schedule.kind === 'dailyLocal'
+    ? existing.schedule
+    : existing.schedule.kind === 'at'
+      ? resolveOnboardingFollowupDailyScheduleFromOccurrence({
+          occurrenceAt: existing.schedule.at,
           timeZone,
         })
+      : resolveMurphOnboardingFollowupSchedule(
+          vaultId || existing.automationId,
+        )
+  const firstOccurrenceAt =
+    existing.schedule.kind === 'at'
+      ? existing.schedule.at
+      : computeAssistantCronFirstRunAfterCurrentLocalDay({
+          after: lifecycleAnchor,
+          schedule: {
+            ...schedule,
+            timeZone,
+          },
+        })
+  const activeUntil = resolveMurphOnboardingFollowupActiveUntil({
+    scheduledAt: firstOccurrenceAt,
+    timeZone,
+  })
+  const previousScheduleKind = existing.schedule.kind
+  if (input.now.getTime() >= Date.parse(activeUntil)) {
+    await patchAutomation({
+      lookup: existing.automationId,
+      now: input.now,
+      status: 'archived',
+      vaultRoot: input.vaultRoot,
+    })
+    return {
+      diagnostic: {
+        action: 'archived_window_elapsed',
+        activeUntil,
+        firstOccurrenceAt,
+        ...onboardingStateDiagnostic,
+        opportunityDays: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
+        previousScheduleKind,
+        scheduleKind: schedule.kind,
+      },
+      updated: true,
+      yielded: false,
+    }
+  }
 
   if (
-    !migrateRecurringSchedule &&
+    existing.schedule.kind === schedule.kind &&
+    existing.schedule.localTime === schedule.localTime &&
     existing.activeUntil === activeUntil &&
     !onboardingFollowupAutomationDefinitionChanged(existing)
   ) {
-    return { updated: false, yielded: false }
+    return {
+      diagnostic: {
+        action: 'unchanged',
+        activeUntil,
+        firstOccurrenceAt,
+        ...onboardingStateDiagnostic,
+        opportunityDays: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
+        previousScheduleKind,
+        scheduleKind: schedule.kind,
+      },
+      updated: false,
+      yielded: false,
+    }
   }
 
   if (input.shouldYield?.() === true) {
-    return { updated: false, yielded: true }
+    return { diagnostic: null, updated: false, yielded: true }
   }
-  await patchAutomation({
+  const reconciled = await upsertAssistantCronAutomation({
     activeUntil,
-    continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+    deferUpdateWhileDeliveryPending:
+      !isCurrentMurphOnboardingFollowupAutomation(existing),
+    firstOccurrenceAt,
+    firstOccurrencePolicy: 'after-current-local-day',
     instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
-    lookup: existing.automationId,
     now: input.now,
-    ...(migratedSchedule === undefined
-      ? {}
-      : { schedule: migratedSchedule }),
+    route: existing.route,
+    schedule,
+    slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
     summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
     tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
     title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
-    vaultRoot: input.vaultRoot,
+    vault: input.vaultRoot,
   })
+  if (!reconciled) {
+    return { diagnostic: null, updated: false, yielded: false }
+  }
 
-  return { updated: true, yielded: false }
+  return {
+    diagnostic: {
+      action:
+        previousScheduleKind === schedule.kind
+          ? 'updated_three_day_window'
+          : 'migrated_three_day_window',
+      activeUntil,
+      firstOccurrenceAt,
+      ...onboardingStateDiagnostic,
+      opportunityDays: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
+      previousScheduleKind,
+      scheduleKind: schedule.kind,
+    },
+    updated: true,
+    yielded: false,
+  }
+}
+
+function resolveOnboardingFollowupDailyScheduleFromOccurrence(input: {
+  occurrenceAt: string
+  timeZone: string
+}): MurphManagedAutomationSchedule & { kind: 'dailyLocal' } {
+  const occurrence = formatTimeZoneDateTimeParts(
+    input.occurrenceAt,
+    input.timeZone,
+  )
+  return {
+    kind: 'dailyLocal',
+    localTime: [occurrence.hour, occurrence.minute]
+      .map((part) => String(part).padStart(2, '0'))
+      .join(':'),
+  }
 }
 
 async function resolveMurphManagedAutomationCreateRoute(
@@ -1584,43 +1751,77 @@ function onboardingFollowupAutomationDefinitionChanged(
     )
 }
 
-function isManagedOnboardingFollowupAutomation(
-  automation: AutomationRecord,
+type MurphOnboardingFollowupAutomationIdentity = Pick<
+  AutomationRecord,
+  | 'continuityPolicy'
+  | 'instructions'
+  | 'schedule'
+  | 'slug'
+  | 'summary'
+  | 'tags'
+  | 'title'
+>
+
+export function isRecognizedMurphOnboardingFollowupAutomation(
+  automation: MurphOnboardingFollowupAutomationIdentity,
 ): boolean {
   return isCurrentManagedOnboardingFollowupAutomation(automation) ||
-    isPreviousSeededOnboardingFollowupAutomation(automation) ||
+    isImmediatePreviousOneshotOnboardingFollowupAutomation(automation) ||
+    isHistoricalRecurringOnboardingFollowupAutomation(automation) ||
     isLegacySeededOnboardingFollowupAutomation(automation)
 }
 
 function isCurrentManagedOnboardingFollowupAutomation(
-  automation: AutomationRecord,
+  automation: MurphOnboardingFollowupAutomationIdentity,
 ): boolean {
-  return automation.slug === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
-    !onboardingFollowupAutomationDefinitionChanged(automation)
+  return isCurrentMurphOnboardingFollowupAutomation(automation)
 }
 
-function isPreviousSeededOnboardingFollowupAutomation(
-  automation: AutomationRecord,
+function isImmediatePreviousOneshotOnboardingFollowupAutomation(
+  automation: MurphOnboardingFollowupAutomationIdentity,
 ): boolean {
-  return automation.slug === PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
-    automation.title === PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.title &&
-    automation.summary === PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.summary &&
+  return automation.slug ===
+      IMMEDIATE_PREVIOUS_ONESHOT_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
+    automation.title ===
+      IMMEDIATE_PREVIOUS_ONESHOT_ONBOARDING_FOLLOWUP_AUTOMATION.title &&
+    automation.summary ===
+      IMMEDIATE_PREVIOUS_ONESHOT_ONBOARDING_FOLLOWUP_AUTOMATION.summary &&
     automation.continuityPolicy ===
-      PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy &&
+      IMMEDIATE_PREVIOUS_ONESHOT_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy &&
     automation.instructions ===
-      PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.instructions &&
+      IMMEDIATE_PREVIOUS_ONESHOT_ONBOARDING_FOLLOWUP_AUTOMATION.instructions &&
+    automation.schedule.kind === 'at' &&
+    murphManagedAutomationValuesEqual(
+      automation.tags,
+      IMMEDIATE_PREVIOUS_ONESHOT_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
+    )
+}
+
+function isHistoricalRecurringOnboardingFollowupAutomation(
+  automation: MurphOnboardingFollowupAutomationIdentity,
+): boolean {
+  return automation.slug ===
+      HISTORICAL_RECURRING_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
+    automation.title ===
+      HISTORICAL_RECURRING_ONBOARDING_FOLLOWUP_AUTOMATION.title &&
+    automation.summary ===
+      HISTORICAL_RECURRING_ONBOARDING_FOLLOWUP_AUTOMATION.summary &&
+    automation.continuityPolicy ===
+      HISTORICAL_RECURRING_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy &&
+    automation.instructions ===
+      HISTORICAL_RECURRING_ONBOARDING_FOLLOWUP_AUTOMATION.instructions &&
     murphManagedAutomationValuesEqual(
       automation.schedule,
-      PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
+      HISTORICAL_RECURRING_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
     ) &&
     murphManagedAutomationValuesEqual(
       automation.tags,
-      PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
+      HISTORICAL_RECURRING_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
     )
 }
 
 function isLegacySeededOnboardingFollowupAutomation(
-  automation: AutomationRecord,
+  automation: MurphOnboardingFollowupAutomationIdentity,
 ): boolean {
   return automation.slug === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
     automation.instructions === LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS &&
