@@ -5,6 +5,7 @@ import {
   isVaultError,
   setScheduledLogStatus,
   splitAutomationAvailabilityConflictBlock,
+  stripAutomationAvailabilityConflictEvidenceForProvider,
   upsertAutomation,
 } from '@murphai/core'
 import {
@@ -48,6 +49,9 @@ import {
 } from '../execution-context.js'
 import {
   isRetiredMurphManagedAutomationId,
+  MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   resolveMurphManagedAutomationOwnerScope,
   resolveMurphManagedMaintenancePolicy,
   type MurphManagedMaintenancePolicy,
@@ -166,12 +170,10 @@ const ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding is open.'
 const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding state could not be read.'
-const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
-  'murph-managed:weekly-health-insight',
-  'murph-managed:monthly-improvement-coach',
-  // Legacy tag retained while existing records reconcile to the monthly seed.
-  'murph-managed:weekly-improvement-coach',
-  'murph-managed:weekly-health-research-scout',
+const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_IDS = new Set([
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
 ])
 export const ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS = [
   'Independent automation authority (engine-supplied):',
@@ -1378,8 +1380,8 @@ function isResearchOrientedManagedAutomationCronJob(
   return (
     job.kind === 'canonical' &&
     job.source.kind === 'automation' &&
-    job.source.tags.some((tag) =>
-      MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS.has(tag),
+    MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_IDS.has(
+      job.source.automationId,
     )
   )
 }
@@ -1534,9 +1536,13 @@ function buildAssistantCronExecutionInstructions(
       .filter((section): section is string => section !== null)
       .join('\n\n')
   } catch {
-    // Malformed evidence remains fail-open for delivery. Preserve it exactly
-    // so the notification boundary can strip the untrusted suffix as before.
-    return [job.job.prompt, ...overlays].join('\n\n')
+    // Malformed evidence remains fail-open for delivery. Strip its untrusted
+    // suffix before appending trusted overlays so the notification boundary
+    // cannot truncate those overlays along with the evidence.
+    return [
+      stripAutomationAvailabilityConflictEvidenceForProvider(job.job.prompt),
+      ...overlays,
+    ].join('\n\n')
   }
 }
 

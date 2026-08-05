@@ -63,6 +63,9 @@ import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
 } from '../src/assistant/cron/execution.ts'
 import {
+  parseAssistantNotificationDecision,
+} from '../src/assistant/notification-turn.ts'
+import {
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
@@ -1455,9 +1458,10 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         workingDirectory,
       })
 
-      expect(JSON.parse(result.finalMessage.trim())).toMatchObject({
-        kind: expectedKind,
-      })
+      const decision = parseAssistantNotificationDecision(
+        result.finalMessage,
+      )
+      expect(decision.kind).toBe(expectedKind)
     } finally {
       await removeRealCodexTemporaryPaths([
         workingDirectory,
