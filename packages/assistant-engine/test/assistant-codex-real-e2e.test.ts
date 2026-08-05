@@ -2466,6 +2466,7 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
         developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
         dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
         env: config.env,
+        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         reasoningEffort: 'low',
