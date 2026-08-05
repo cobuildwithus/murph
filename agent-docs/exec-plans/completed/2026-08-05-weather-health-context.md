@@ -16,7 +16,7 @@ Key decisions:
 - Return the provider's normalized alerts and let the existing prompt restrict health context to heat, cold, and outdoor air quality.
 
 State:
-- In progress.
+- Complete.
 
 Done:
 - Traced the OpenWeather allowlist, connected-apps skill, direct health reasoning prompt, managed health automations, and focused prompt tests.
@@ -38,13 +38,14 @@ Done:
 - Suppressed the complete generic retry posture for this route and proved both retryable and non-retryable failures, including a scheduled real-model non-retryable probe.
 - Shortened duplicated connected-app prompt guidance after exact-head CI exposed the resident prompt-size ratchet; the fixed route, official-alert-only rule, one-call budget, causal boundary, and failure fallback remain explicit.
 - Added the August 5 public changelog edition for official local heat, cold, and outdoor-air-quality alert context, including a bounded try-it prompt.
-- Passed 175 focused assistant tests, assistant typecheck, 37 focused changelog tests, and web typecheck on the corrected source.
+- Passed 175 focused assistant tests, 75 focused Web tests, assistant and Web typechecks, and exact-head CI on the corrected source.
+- Final ChatGPT Pro review passed after the PR body disclosed the changelog entry point, current validation scope, and final change shape.
 
 Now:
-- Finish the final correction review and exact-head CI, then merge PR #1307 when both are green.
+- None.
 
 Next:
-- Run the signed production-runtime smoke read after the web route is deployed, then close the plan and retire the merged worktree.
+- After deployment, run the signed Web-control smoke read with the production OpenWeather key before the hosted assistant runtime uses the route.
 
 Open questions (UNCONFIRMED if needed):
 - None.
@@ -62,5 +63,6 @@ Working set (files/ids/commands):
 - apps/web/test/openweather-alerts.test.ts
 - apps/web/test/connected-apps-service.test.ts
 - pnpm exec vitest run --config packages/assistant-engine/vitest.config.ts --no-coverage <focused tests>
-Status: active
+Status: completed
 Updated: 2026-08-05
+Completed: 2026-08-05
