@@ -66,7 +66,7 @@ type ConnectSourceRecoveryKind = NonNullable<ConnectSource["recoveryKind"]>;
 type ConnectSourceDisconnectScope = NonNullable<ConnectSource["disconnectScope"]>;
 
 const MURPH_IOS_APP_STORE_URL = "https://apps.apple.com/us/app/murph-ai/id6786145859";
-const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>(["apple-health"]);
+const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>(["apple-health", "zepp"]);
 
 const CONNECT_SOURCE_UI = {
   "apple-health": {
@@ -75,6 +75,18 @@ const CONNECT_SOURCE_UI = {
     name: "Apple Health",
     unavailableActionLabel: "Download app",
     unavailableActionUrl: MURPH_IOS_APP_STORE_URL,
+  },
+  zepp: {
+    description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
+    logo: logoAsset(
+      "wearable-relay.svg",
+      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+      64,
+      40,
+    ),
+    name: "Zepp / Amazfit",
+    setupGuideActionLabel: "Set up sync",
+    setupGuideId: "zepp-apple-health",
   },
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
@@ -257,10 +269,16 @@ export default async function ConnectPage({
   const disconnectSourceProviderSlugBySourceId = new Map<string, string>();
   let historicalResetIncompleteSourceIds = new Set<string>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
-  const [recoveryContactAction, voiceMemoSources, whoopSyncContactAction] = await Promise.all([
+  const [
+    recoveryContactAction,
+    voiceMemoSources,
+    whoopSyncContactAction,
+    zeppSyncContactAction,
+  ] = await Promise.all([
     resolveDeviceConnectRecoveryContactAction(Boolean(auth.authenticatedMember)),
     resolveDeviceSyncVoiceMemoSources(auth.authenticatedMember?.id ?? null),
     resolveWhoopSyncContactAction(Boolean(auth.authenticatedMember)),
+    resolveZeppSyncContactAction(Boolean(auth.authenticatedMember)),
   ]);
 
   if (auth.authenticatedMember) {
@@ -340,6 +358,7 @@ export default async function ConnectPage({
         sources={sources}
         whoopSyncContactAction={whoopSyncContactAction}
         whoopSyncVoiceMemoSrc={voiceMemoSources.whoopSync}
+        zeppSyncContactAction={zeppSyncContactAction}
       />
     </div>
   );
@@ -359,6 +378,10 @@ export function listVisibleConnectSources(): ConnectSource[] {
             id: source.connectSourceId,
             logo: ui.logo,
             name: ui.name,
+            ...(ui.setupGuideActionLabel
+              ? { setupGuideActionLabel: ui.setupGuideActionLabel }
+              : {}),
+            ...(ui.setupGuideId ? { setupGuideId: ui.setupGuideId } : {}),
             ...(ui.unavailableActionLabel ? { unavailableActionLabel: ui.unavailableActionLabel } : {}),
             ...(ui.unavailableActionUrl ? { unavailableActionUrl: ui.unavailableActionUrl } : {}),
             ...(ui.unavailableMessage ? { unavailableMessage: ui.unavailableMessage } : {}),
@@ -387,6 +410,25 @@ async function resolveDeviceConnectRecoveryContactAction(authenticated: boolean)
 async function resolveWhoopSyncContactAction(
   authenticated: boolean,
 ): Promise<DeviceSyncCompletionContactAction | null> {
+  return resolveAppleHealthRelayContactAction(
+    authenticated,
+    "Help me finish setting up WHOOP through Apple Health.",
+  );
+}
+
+async function resolveZeppSyncContactAction(
+  authenticated: boolean,
+): Promise<DeviceSyncCompletionContactAction | null> {
+  return resolveAppleHealthRelayContactAction(
+    authenticated,
+    "Help me set up Zepp/Amazfit through Apple Health. Please walk me through it with a voice memo.",
+  );
+}
+
+async function resolveAppleHealthRelayContactAction(
+  authenticated: boolean,
+  messageBody: string,
+): Promise<DeviceSyncCompletionContactAction | null> {
   if (!authenticated) {
     return null;
   }
@@ -394,7 +436,7 @@ async function resolveWhoopSyncContactAction(
   try {
     const options = await resolveHostedMurphContactOptions({
       message: {
-        body: "Help me finish setting up WHOOP through Apple Health.",
+        body: messageBody,
       },
     });
     const option = options.find(
@@ -478,6 +520,7 @@ export function resolveConfiguredConnectSources(
     }),
   ).filter((source) =>
     source.connectionAvailable !== false
+    || Boolean(source.setupGuideId)
     || source.connected === true
     || source.requiresReconnect === true
     || Boolean(source.recoveryKind)
