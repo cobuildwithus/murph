@@ -567,7 +567,7 @@ and foreground reruns. A consented-member request remains checkpoint-gated;
 every accepted-input completion is admitted without a completion-kind context.
 Request import kicks the existing detached controller; completion import uses
 the existing foreground-causal delivery path. Neither starts or advances the
-at-least-60-second idle snapshot. Any unrelated system wake in that prefix
+at-least-90-second idle snapshot. Any unrelated system wake in that prefix
 keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
 pass re-enters the existing bounded pass loop after admitting any newly arrived
 personal input first, so multiple safe items or a safe item imported during the
@@ -2166,7 +2166,7 @@ old web deployment's `checkpointed: false` plus
 response remains a successful transport-level compatibility result and must not
 be collapsed into a generic HTTP conflict. Current web no longer produces it;
 post-upload local wake checks must not discard a valid snapshot on its behalf.
-In production, the configured idle checkpoint delay is at least 60 seconds,
+In production, the configured idle checkpoint delay is at least 90 seconds,
 and every dirty foreground pass restarts that hard lower bound. The exact
 assistant wake projected directly by the current foreground assistant phase may
 run once per dirty checkpoint generation before that boundary against the warm
