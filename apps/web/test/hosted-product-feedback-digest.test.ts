@@ -23,6 +23,10 @@ import {
   resolveHostedProductFeedbackDigestWindow,
   runHostedProductFeedbackDigest,
 } from "@/src/lib/hosted-execution/product-feedback-digest";
+import {
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
+} from "@/src/lib/hosted-execution/product-feedback";
 
 const feedbackDigestEnv = {
   HOSTED_LINQ_ALERT_EMAIL_FROM: "Murph Alerts <alerts@example.test>",
@@ -230,6 +234,53 @@ describe("hosted product feedback digest", () => {
       ].join("\n"),
     }));
     expect(JSON.stringify(sendEmail.mock.calls)).not.toContain("Must never render");
+  });
+
+  it("admits the anonymous written issue while excluding the linked support marker", async () => {
+    const writtenIssue =
+      "a connected source reports success but Murph does not finish the connection.";
+    mocks.groupBy.mockResolvedValue([
+      { _count: { _all: 1 }, kind: "frustration" },
+    ]);
+    mocks.findMany.mockResolvedValue([
+      { kind: "frustration", summary: writtenIssue },
+    ]);
+
+    const batch = await readHostedProductFeedbackDigestBatch({
+      endAt: new Date("2026-07-30T22:00:00.000Z"),
+      startAt: new Date("2026-07-29T22:00:00.000Z"),
+    });
+
+    expect(writtenIssue.startsWith(
+      HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+    )).toBe(false);
+    expect(HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY.startsWith(
+      HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+    )).toBe(true);
+    expect(batch.counts.frustration).toBe(1);
+    expect(batch.summariesByKind.frustration).toEqual([writtenIssue]);
+    expect(mocks.groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        NOT: {
+          summary: {
+            startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+          },
+        },
+      }),
+    }));
+    expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: {
+        kind: true,
+        summary: true,
+      },
+      where: expect.objectContaining({
+        NOT: {
+          summary: {
+            startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+          },
+        },
+      }),
+    }));
   });
 
   it("keeps per-kind counts truthful past the display cap", async () => {
