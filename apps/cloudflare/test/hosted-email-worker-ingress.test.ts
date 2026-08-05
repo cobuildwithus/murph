@@ -81,6 +81,7 @@ import {
 import worker from "../src/index.ts";
 import { sendHostedEmailMessage } from "../src/hosted-email/transport.ts";
 import { handleHostedEmailIngress as handleHostedEmailIngressImpl } from "../src/hosted-email/worker-ingress.ts";
+import { resolveHostedR2CutoverContext } from "../src/r2-cutover.ts";
 import type { WorkerEnvironmentSource } from "../src/worker-routes/shared.ts";
 
 import {
@@ -321,7 +322,7 @@ describe("hosted email worker ingress", () => {
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
   });
 
-  it("routes production Worker email writes to ENAM after destination promotion", async () => {
+  it("keeps a destination-only Worker email readable by a source-active consumer", async () => {
     const source = new BridgeMemoryEncryptedR2Bucket();
     const destination = new BridgeMemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
@@ -381,6 +382,21 @@ describe("hosted email worker ingress", () => {
 
     expect(listHostedEmailMessageKeys(source)).toEqual([]);
     expect(listHostedEmailMessageKeys(destination)).toHaveLength(1);
+    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
+    const rawMessageKey = appendInput?.body?.rawMessageKey;
+    expect(typeof rawMessageKey).toBe("string");
+    const sourceActiveContext = resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+      HOSTED_R2_CUTOVER_PHASE: "source_active",
+    });
+    await expect(readHostedEmailRawMessage({
+      bucket: sourceActiveContext.bucket,
+      key: TEST_KEY,
+      keyId: "v1",
+      rawMessageKey,
+      userId: "user_123",
+    })).resolves.toEqual(rawBytes);
   });
 
   it("persists and nudges alias ingress only after the web-owned signed alias lookup succeeds", async () => {
