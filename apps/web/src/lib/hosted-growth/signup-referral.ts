@@ -14,7 +14,7 @@ import { upsertHostedMemberIdentity } from "../hosted-onboarding/hosted-member-i
 import {
   getHostedOnboardingEnvironment,
   requireHostedOnboardingPublicBaseUrl,
-} from "../hosted-onboarding/environment";
+} from "../hosted-onboarding/runtime";
 import {
   generateHostedInviteCode,
   generateHostedInviteId,
