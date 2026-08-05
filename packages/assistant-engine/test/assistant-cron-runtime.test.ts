@@ -9,6 +9,13 @@ import type {
   AutomationSupportKind,
 } from '@murphai/contracts'
 import {
+  AVAILABILITY_CONFLICT_BLOCK_END,
+  AVAILABILITY_CONFLICT_BLOCK_START,
+  shouldSkipAutomationOccurrenceForAvailability,
+  splitAutomationAvailabilityConflictBlock,
+  stripAutomationAvailabilityConflictEvidenceForProvider,
+} from '@murphai/core'
+import {
   assistantCronJobSchema,
   assistantOutboxIntentSchema,
   type AssistantOutboxIntent,
@@ -78,7 +85,8 @@ const cronMocks = vi.hoisted(() => ({
   withAssistantCronWriteLock: vi.fn(),
 }))
 
-vi.mock('@murphai/core', () => ({
+vi.mock('@murphai/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@murphai/core')>()),
   archiveAutomationIfActiveUntilElapsed:
     cronMocks.archiveAutomationIfActiveUntilElapsed,
   executeScheduledLogOccurrence: cronMocks.executeScheduledLogOccurrence,
@@ -341,17 +349,24 @@ beforeEach(() => {
       timezone: 'UTC',
     },
   })
-  cronMocks.sendAssistantMessageLocal.mockReset().mockResolvedValue({
-    decision: {
-      kind: 'send_message',
-      privateSummary: 'Prepared scheduled check-in.',
-      text: 'Completed scheduled check-in.',
+  cronMocks.sendAssistantMessageLocal.mockReset().mockImplementation(
+    async (input: {
+      onProviderRequestStarted?: () => Promise<void> | void
+    }) => {
+      await input.onProviderRequestStarted?.()
+      return {
+        decision: {
+          kind: 'send_message' as const,
+          privateSummary: 'Prepared scheduled check-in.',
+          text: 'Completed scheduled check-in.',
+        },
+        response: 'Completed scheduled check-in.',
+        session: {
+          sessionId: 'session-default',
+        },
+      }
     },
-    response: 'Completed scheduled check-in.',
-    session: {
-      sessionId: 'session-default',
-    },
-  })
+  )
   cronMocks.loadRuntimeModule.mockReset().mockResolvedValue({
     acquireCanonicalWriteLock: vi.fn(async () => ({
       release: vi.fn(async () => undefined),
@@ -1809,11 +1824,13 @@ describe('assistant cron runtime orchestration', () => {
         deliveryOutcome: null
         response: null
       }) => Promise<void> | void) | null
+      onProviderRequestStarted?: () => Promise<void> | void
     }) => {
       const decision = {
         kind: 'skip',
         privateSummary: 'No user-facing notification needed.',
       } as const
+      await input.onProviderRequestStarted?.()
       shouldYield = true
       await input.beforeCommit?.({
         decision,
@@ -2662,6 +2679,213 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('does not let an unowned automation imitate a managed owner with a mutable tag', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-unowned-managed-tag-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'copied managed tag',
+    )
+    const canonicalAutomation = findCanonicalAutomation(
+      vaultRoot,
+      canonicalJob.jobId,
+    )
+    expect(canonicalAutomation).toBeDefined()
+    canonicalAutomation?.tags.push('murph-managed:copied')
+
+    await runAssistantCronJobNow({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: expect.stringContaining(
+          'Independent automation authority (engine-supplied):',
+        ),
+      }),
+    )
+  })
+
+  it.each([
+    {
+      expectedProviderStarted: false,
+      occurrenceAt: '2026-04-08T10:00:00.000Z',
+      outcome: 'no_op',
+      reason: 'no_delivery',
+    },
+    {
+      expectedProviderStarted: true,
+      occurrenceAt: '2026-04-08T11:00:00.000Z',
+      outcome: 'no_op',
+      reason: 'no_delivery',
+    },
+  ])(
+    'keeps availability evidence as the final owned suffix for occurrence $occurrenceAt',
+    async ({ expectedProviderStarted, occurrenceAt, outcome, reason }) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date(occurrenceAt))
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-availability-authority-',
+      )
+      const canonicalJob = await createCanonicalJob(
+        vaultRoot,
+        'availability authority',
+      )
+      const canonicalAutomation = findCanonicalAutomation(
+        vaultRoot,
+        canonicalJob.jobId,
+      )
+      if (!canonicalAutomation) {
+        throw new Error('Expected the canonical automation to exist.')
+      }
+      canonicalAutomation.instructions = [
+        'Send one flexible reminder.',
+        'Availability conflict policy: skip-when-busy',
+        'Availability source policy: calendar-only',
+        'Availability calendar account: googlecalendar / calendar-account',
+        '',
+        AVAILABILITY_CONFLICT_BLOCK_START,
+        'Availability conflict snapshot:',
+        '- generatedAt: 2026-04-08T09:00:00.000Z',
+        '- expiresAt: 2026-04-09T09:00:00.000Z',
+        '- 2026-04-08T09:30:00.000Z / 2026-04-08T10:30:00.000Z',
+        AVAILABILITY_CONFLICT_BLOCK_END,
+      ].join('\n')
+      canonicalAutomation.schedule = {
+        kind: 'dailyLocal',
+        localTime: occurrenceAt.endsWith('10:00:00.000Z') ? '10:00' : '11:00',
+      }
+      const providerStarted = vi.fn()
+      const deliveryAttempted = vi.fn()
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+        beforeCommit?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: null
+          response: string
+        }) => Promise<void>
+        beforeDelivery?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: null
+          response: string
+        }) => Promise<void>
+        instructions: string
+        onProviderRequestStarted?: () => Promise<void> | void
+        scheduledAutomationScheduleKind?: AutomationSchedule['kind'] | null
+        scheduledOccurrenceAt?: string | null
+      }) => {
+        const split = splitAutomationAvailabilityConflictBlock(
+          input.instructions,
+        )
+        expect(split.block).not.toBeNull()
+        if (shouldSkipAutomationOccurrenceForAvailability({
+          instructions: input.instructions,
+          occurrenceAt: input.scheduledOccurrenceAt,
+          scheduleKind: input.scheduledAutomationScheduleKind,
+        })) {
+          return {
+            decision: {
+              kind: 'skip' as const,
+              privateSummary: 'Authorized calendar conflict.',
+            },
+            response: null,
+            session: { sessionId: 'session-availability-skip' },
+          }
+        }
+
+        providerStarted()
+        await input.onProviderRequestStarted?.()
+        const providerInstructions =
+          stripAutomationAvailabilityConflictEvidenceForProvider(
+            input.instructions,
+          )
+        expect(providerInstructions).toContain(
+          'Independent automation authority (engine-supplied):',
+        )
+        expect(providerInstructions).not.toContain(
+          AVAILABILITY_CONFLICT_BLOCK_START,
+        )
+        expect(providerInstructions).not.toContain(
+          '2026-04-08T09:30:00.000Z',
+        )
+        const context = {
+          decision: {
+            kind: 'send_message' as const,
+            privateSummary: 'Prepared the non-overlapping reminder.',
+            text: 'Here is your reminder.',
+          },
+          deliveryOutcome: null,
+          response: 'Here is your reminder.',
+        }
+        await input.beforeDelivery?.(context)
+        deliveryAttempted()
+        await input.beforeCommit?.(context)
+        return {
+          ...context,
+          session: { sessionId: 'session-availability-send' },
+        }
+      })
+
+      const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+      if (!source) {
+        throw new Error('Expected canonical source to exist.')
+      }
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const runtimeState = resolveCanonicalRuntimeState(
+        source,
+        await readAssistantCronCanonicalRuntimeStore(paths),
+      )
+      const result = await executeClaimedAssistantCronJob({
+        job: await claimResolvedAssistantCronJob({
+          job: {
+            kind: 'canonical',
+            source,
+            runtimeState,
+            job: {
+              ...projectCanonicalAssistantCronJob({ source, runtimeState }),
+              state: {
+                ...projectCanonicalAssistantCronJob({ source, runtimeState }).state,
+                nextRunAt: occurrenceAt,
+              },
+            },
+          },
+          occurrenceFallbackAt: occurrenceAt,
+          paths,
+        }),
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+
+      expect(providerStarted.mock.calls.length > 0).toBe(
+        expectedProviderStarted,
+      )
+      expect(deliveryAttempted.mock.calls.length > 0).toBe(
+        expectedProviderStarted,
+      )
+      expect(result.run).toMatchObject({
+        notificationDecision: expectedProviderStarted
+          ? {
+              kind: 'send_message',
+              reasonCode: 'provider_send_message',
+            }
+          : null,
+        outcome,
+        reason,
+        scheduledOccurrenceAt: occurrenceAt,
+      })
+    },
+  )
+
   it.each([
     [
       'reminder',
@@ -2760,6 +2984,13 @@ describe('assistant cron runtime orchestration', () => {
       reason: 'no_delivery',
       status: 'succeeded',
     })
+    const notificationInput =
+      cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+        | { instructions?: string }
+        | undefined
+    expect(notificationInput?.instructions).not.toContain(
+      'Independent automation authority (engine-supplied):',
+    )
     expect(findCanonicalAutomation(
       vaultRoot,
       MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -3826,7 +4057,9 @@ describe('assistant cron runtime orchestration', () => {
           response: string
         }) => Promise<void> | void
         deferCommitUntilDeliveryAccepted?: boolean | null
+        onProviderRequestStarted?: () => Promise<void> | void
       }) => {
+        await input.onProviderRequestStarted?.()
         await saveAssistantOutboxIntent(
           vaultRoot,
           buildTestLinqOutboxIntent({
@@ -3891,6 +4124,11 @@ describe('assistant cron runtime orchestration', () => {
         jobId: canonicalJob.jobId,
         runs: [{
           error: 'Assistant cron yielded to fresh foreground input.',
+          notificationDecision: {
+            kind: 'send_message',
+            reasonCode: 'provider_send_message',
+          },
+          scheduledOccurrenceAt: canonicalJob.state.nextRunAt,
           status: 'failed',
         }],
       })
@@ -6986,7 +7224,9 @@ describe('assistant cron runtime orchestration', () => {
           deliveryOutcome: null
           response: string
         }) => Promise<void>
+        onProviderRequestStarted?: () => Promise<void> | void
       }) => {
+        await notificationInput.onProviderRequestStarted?.()
         const current = findCanonicalAutomation(vaultRoot, claimed.job.jobId)
         if (!current) {
           throw new Error('Expected claimed automation to remain present.')
@@ -7015,8 +7255,13 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(result.run).toMatchObject({
+      notificationDecision: {
+        kind: 'send_message',
+        reasonCode: 'provider_send_message',
+      },
       outcome: 'skipped_gate',
       reason: 'canonical_source_inactive',
+      scheduledOccurrenceAt: claimed.job.state.nextRunAt,
       status: 'skipped',
     })
     expect(deliveryAttempted).toBe(false)
@@ -9291,7 +9536,9 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         deliveryDedupeToken: expect.stringContaining(claimed.job.jobId),
-        instructions: 'Run weekly-health-research-scout.',
+        instructions: expect.stringContaining(
+          'Run weekly-health-research-scout.\n\nIndependent automation authority (engine-supplied):',
+        ),
         turnTrigger: 'automation-cron',
       }),
     )
