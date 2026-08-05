@@ -1336,17 +1336,20 @@ function subtractAssistantProviderUsageRecords(
   return result
 }
 
-export interface CodexSubagentTokenUsageSample {
+export interface CodexSubagentTurnTokenUsageSample {
   firstEvent: unknown
   lastEvent: unknown
+  occurredAt: string
+  threadId: string
+  turnId: string
 }
 
 // Codex ships no aggregate usage primitive for spawned subagent threads (no
 // usage RPC, no usage on the protocol Turn, no parent-side aggregation), so
 // the canonical pattern is consuming each child thread's tokenUsage
 // notifications. This converts the buffered first/final tokenUsage samples
-// per child thread into additional usage drafts on the parent turn, using
-// the same total-delta arithmetic as the parent's billed usage. Billing is
+// per child turn into additional usage drafts on the parent turn, using the
+// same total-delta arithmetic as the parent's billed usage. Billing is
 // gated on spawn evidence: only threads named by a parent-thread
 // collabAgentToolCall item's receiverThreadIds (multi-agent V1: spawnAgent,
 // sendInput, wait, resume — covering freshly spawned and reused children) or
@@ -1362,27 +1365,25 @@ export function extractCodexSubagentUsageDrafts(input: {
   ordinalStart: number
   parentModel?: string | null
   parentRawEvents: readonly unknown[]
-  providerRequestStartedAtByThread: ReadonlyMap<string, string>
   serviceTier?: AssistantProviderServiceTier | null
-  subagentTokenUsageByThread: ReadonlyMap<string, CodexSubagentTokenUsageSample>
+  subagentTokenUsageByTurn: ReadonlyMap<
+    string,
+    CodexSubagentTurnTokenUsageSample
+  >
 }): AssistantProviderUsageDraft[] {
-  if (input.subagentTokenUsageByThread.size === 0) {
+  if (input.subagentTokenUsageByTurn.size === 0) {
     return []
   }
 
   const spawnModelByThreadId = readCodexCollabSpawnModelsByThread(
     input.parentRawEvents,
   )
-  const attributedThreads = [...input.subagentTokenUsageByThread].filter(
-    ([threadId]) => spawnModelByThreadId.has(threadId),
+  const attributedTurns = [...input.subagentTokenUsageByTurn.values()].filter(
+    (sample) => spawnModelByThreadId.has(sample.threadId),
   )
   const drafts: AssistantProviderUsageDraft[] = []
   let ordinal = input.ordinalStart
-  for (const [threadId, sample] of attributedThreads) {
-    const occurredAt = input.providerRequestStartedAtByThread.get(threadId)
-    if (!occurredAt) {
-      continue
-    }
+  for (const sample of attributedTurns) {
     const pairs = (
       sample.firstEvent === sample.lastEvent
         ? [sample.firstEvent]
@@ -1396,7 +1397,8 @@ export function extractCodexSubagentUsageDrafts(input: {
       continue
     }
 
-    const model = spawnModelByThreadId.get(threadId) ?? input.parentModel ?? null
+    const model =
+      spawnModelByThreadId.get(sample.threadId) ?? input.parentModel ?? null
     const inputTokens = readAssistantProviderInteger(
       delta,
       'inputTokens',
@@ -1408,7 +1410,7 @@ export function extractCodexSubagentUsageDrafts(input: {
       'output_tokens',
     )
     drafts.push({
-      occurredAt,
+      occurredAt: sample.occurredAt,
       provider: 'codex-cli',
       providerRequestOrdinal: ordinal++,
       providerRequestOutcome: 'succeeded',
@@ -1452,7 +1454,7 @@ export function extractCodexSubagentUsageDrafts(input: {
             inputTokens,
             outputTokens,
           }),
-        usageExtractionSourcePath: 'subagent.thread.tokenUsage.total.delta',
+        usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
         usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
       },
     })

@@ -17597,6 +17597,15 @@ describe('assistant codex event shaping', () => {
               },
             }))
             child.stdout.write(jsonLine({
+              method: 'turn.started',
+              params: {
+                threadId: 'thread-subagent-child-b',
+                turn: {
+                  id: 'turn-subagent-child-b',
+                },
+              },
+            }))
+            child.stdout.write(jsonLine({
               method: 'thread/tokenUsage/updated',
               params: {
                 threadId: 'thread-subagent-child-b',
@@ -17683,6 +17692,280 @@ describe('assistant codex event shaping', () => {
           requireMockChildProcess(spawnedChildren[0] ?? null),
         ).filter((message) => message.method === 'thread/resume'),
       ).toHaveLength(0)
+    })
+
+    it.each(['completed', 'failed'] as const)(
+      'keeps reused child-turn usage on each side of a reset when the parent %s',
+      async (parentOutcome) => {
+        const workingDirectory = await createTempDir(
+          `assistant-codex-subagent-reset-${parentOutcome}-work-`,
+        )
+        const codexHome = await createTempDir(
+          `assistant-codex-subagent-reset-${parentOutcome}-home-`,
+        )
+        const spawnedChildren: MockChildProcess[] = []
+        mockProcessGroupSignalsForChildren(spawnedChildren)
+        const beforeReset = new Date('2026-07-23T11:59:59.000Z')
+        const afterReset = new Date('2026-07-23T12:00:01.000Z')
+
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(beforeReset)
+        try {
+          codexMocks.spawn.mockImplementation(() => {
+            const child = new MockChildProcess()
+            child.pid = 31_150 + spawnedChildren.length
+            spawnedChildren.push(child)
+
+            queueMicrotask(() => {
+              void (async () => {
+                const initialize = await waitForRpcMethod(child, 'initialize')
+                child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+                await writeWarmTurnStarted({
+                  child,
+                  requestCount: 1,
+                  threadId: 'thread-subagent-reset-parent',
+                  turnId: 'turn-subagent-reset-parent',
+                })
+                child.stdout.write(jsonLine({
+                  method: 'item/completed',
+                  params: {
+                    item: {
+                      id: 'collab-spawn-reset-child',
+                      type: 'collabAgentToolCall',
+                      tool: 'spawnAgent',
+                      status: 'completed',
+                      senderThreadId: 'thread-subagent-reset-parent',
+                      receiverThreadIds: ['thread-subagent-reset-child'],
+                      model: 'gpt-5.6-terra-mini',
+                    },
+                    threadId: 'thread-subagent-reset-parent',
+                    turnId: 'turn-subagent-reset-parent',
+                  },
+                }))
+                writeStartedTurn(
+                  child,
+                  'thread-subagent-reset-child',
+                  'turn-subagent-before-reset',
+                )
+                writeTokenUsage({
+                  child,
+                  last: {
+                    cachedInputTokens: 0,
+                    inputTokens: 80,
+                    outputTokens: 20,
+                    reasoningOutputTokens: 0,
+                    totalTokens: 100,
+                  },
+                  threadId: 'thread-subagent-reset-child',
+                  total: {
+                    cachedInputTokens: 0,
+                    inputTokens: 80,
+                    outputTokens: 20,
+                    reasoningOutputTokens: 0,
+                    totalTokens: 100,
+                  },
+                  turnId: 'turn-subagent-before-reset',
+                })
+                child.stdout.write(jsonLine({
+                  method: 'item/completed',
+                  params: {
+                    item: {
+                      id: 'collab-send-reset-child',
+                      type: 'collabAgentToolCall',
+                      tool: 'sendInput',
+                      status: 'completed',
+                      senderThreadId: 'thread-subagent-reset-parent',
+                      receiverThreadIds: ['thread-subagent-reset-child'],
+                    },
+                    threadId: 'thread-subagent-reset-parent',
+                    turnId: 'turn-subagent-reset-parent',
+                  },
+                }))
+
+                vi.setSystemTime(afterReset)
+                child.stdout.write(jsonLine({
+                  method: 'turn.started',
+                  params: {
+                    threadId: 'thread-subagent-reset-child',
+                    turn: { id: 'turn-subagent-after-reset' },
+                  },
+                }))
+                writeTokenUsage({
+                  child,
+                  last: {
+                    cachedInputTokens: 0,
+                    inputTokens: 40,
+                    outputTokens: 10,
+                    reasoningOutputTokens: 0,
+                    totalTokens: 50,
+                  },
+                  threadId: 'thread-subagent-reset-child',
+                  total: {
+                    cachedInputTokens: 0,
+                    inputTokens: 120,
+                    outputTokens: 30,
+                    reasoningOutputTokens: 0,
+                    totalTokens: 150,
+                  },
+                  turnId: 'turn-subagent-after-reset',
+                })
+                writeTokenUsage({
+                  child,
+                  last: {
+                    cachedInputTokens: 0,
+                    inputTokens: 80,
+                    outputTokens: 20,
+                    reasoningOutputTokens: 0,
+                    totalTokens: 100,
+                  },
+                  threadId: 'thread-subagent-reset-child',
+                  total: {
+                    cachedInputTokens: 0,
+                    inputTokens: 200,
+                    outputTokens: 50,
+                    reasoningOutputTokens: 0,
+                    totalTokens: 250,
+                  },
+                  turnId: 'turn-subagent-after-reset',
+                })
+
+                if (parentOutcome === 'completed') {
+                  writeCodexV2AssistantEventTurn({
+                    child,
+                    finalMessage: 'Reused child completed',
+                    threadId: 'thread-subagent-reset-parent',
+                    turnId: 'turn-subagent-reset-parent',
+                  })
+                } else {
+                  writeCompletedTurn(
+                    child,
+                    'thread-subagent-reset-parent',
+                    'turn-subagent-reset-parent',
+                    'failed',
+                  )
+                }
+              })()
+            })
+
+            return child
+          })
+
+          const turnResult = executeCodexAppServerTurn({
+            approvalPolicy: 'never',
+            codexHome,
+            env: { PATH: '/custom/bin' },
+            modelProvider: 'local-test-provider',
+            model: 'gpt-5.6-sol',
+            prompt: 'reuse one child across a usage reset',
+            sandbox: 'workspace-write',
+            workingDirectory,
+          })
+          const additionalUsages = parentOutcome === 'completed'
+            ? (await turnResult).additionalUsages
+            : readCodexAppServerTurnFailureContext(
+              await turnResult.then(
+                () => {
+                  throw new Error('expected the parent turn to fail')
+                },
+                (error: unknown) => error,
+              ),
+            )?.additionalUsages
+
+          expect(additionalUsages).toMatchObject([
+            {
+              occurredAt: beforeReset.toISOString(),
+              providerRequestOrdinal: 1,
+              usage: {
+                inputTokens: 80,
+                outputTokens: 20,
+                totalTokens: 100,
+                usageExtractionSourcePath:
+                  'subagent.turn.tokenUsage.total.delta',
+              },
+            },
+            {
+              occurredAt: afterReset.toISOString(),
+              providerRequestOrdinal: 2,
+              usage: {
+                inputTokens: 120,
+                outputTokens: 30,
+                totalTokens: 150,
+                usageExtractionSourcePath:
+                  'subagent.turn.tokenUsage.total.delta',
+              },
+            },
+          ])
+        } finally {
+          vi.useRealTimers()
+        }
+      },
+    )
+
+    it('does not bill parent-authorized child usage without a child turn start', async () => {
+      const workingDirectory = await createTempDir(
+        'assistant-codex-subagent-missing-start-work-',
+      )
+      const codexHome = await createTempDir(
+        'assistant-codex-subagent-missing-start-home-',
+      )
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_175 + spawnedChildren.length
+        spawnedChildren.push(child)
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            await writeWarmTurnStarted({
+              child,
+              requestCount: 1,
+              threadId: 'thread-subagent-missing-start-parent',
+              turnId: 'turn-subagent-missing-start-parent',
+            })
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'collab-spawn-missing-start',
+                  type: 'collabAgentToolCall',
+                  tool: 'spawnAgent',
+                  receiverThreadIds: ['thread-subagent-missing-start-child'],
+                },
+                threadId: 'thread-subagent-missing-start-parent',
+                turnId: 'turn-subagent-missing-start-parent',
+              },
+            }))
+            writeTokenUsage({
+              child,
+              last: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+              threadId: 'thread-subagent-missing-start-child',
+              total: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+              turnId: 'turn-subagent-missing-start-child',
+            })
+            writeCodexV2AssistantEventTurn({
+              child,
+              finalMessage: 'Missing child start stayed unbilled',
+              threadId: 'thread-subagent-missing-start-parent',
+              turnId: 'turn-subagent-missing-start-parent',
+            })
+          })()
+        })
+        return child
+      })
+
+      const result = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: { PATH: '/custom/bin' },
+        prompt: 'child usage without a child start',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      expect(result.additionalUsages).toEqual([])
     })
 
     it('answers subagent thread server requests with an error without failing the turn', async () => {
@@ -17788,6 +18071,15 @@ describe('assistant codex event shaping', () => {
                 },
                 threadId: 'thread-subagent-fail-parent',
                 turnId: 'turn-subagent-fail-parent',
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'turn/started',
+              params: {
+                threadId: 'thread-subagent-fail-child',
+                turn: {
+                  id: 'turn-subagent-fail-child',
+                },
               },
             }))
             child.stdout.write(jsonLine({
@@ -18301,6 +18593,15 @@ describe('assistant codex event shaping', () => {
                 reasoningOutputTokens: 0,
               }
               child.stdout.write(jsonLine({
+                method: 'turn/started',
+                params: {
+                  threadId: `thread-subagent-cap-${childIndex}`,
+                  turn: {
+                    id: `turn-subagent-cap-${childIndex}`,
+                  },
+                },
+              }))
+              child.stdout.write(jsonLine({
                 method: 'thread/tokenUsage/updated',
                 params: {
                   threadId: `thread-subagent-cap-${childIndex}`,
@@ -18430,6 +18731,15 @@ describe('assistant codex event shaping', () => {
                 },
                 threadId: 'thread-subagent-ordinal-parent',
                 turnId: 'turn-subagent-ordinal-parent',
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'turn/started',
+              params: {
+                threadId: 'thread-subagent-ordinal-child',
+                turn: {
+                  id: 'turn-subagent-ordinal-child',
+                },
               },
             }))
             child.stdout.write(jsonLine({
@@ -19375,6 +19685,15 @@ describe('assistant codex event shaping', () => {
                 reasoningOutputTokens: 0,
               }
               child.stdout.write(jsonLine({
+                method: 'turn/started',
+                params: {
+                  threadId: `thread-subagent-ghost-${ghostIndex}`,
+                  turn: {
+                    id: `turn-subagent-ghost-${ghostIndex}`,
+                  },
+                },
+              }))
+              child.stdout.write(jsonLine({
                 method: 'thread/tokenUsage/updated',
                 params: {
                   threadId: `thread-subagent-ghost-${ghostIndex}`,
@@ -19402,6 +19721,15 @@ describe('assistant codex event shaping', () => {
                 },
                 threadId: 'thread-subagent-evict-parent',
                 turnId: 'turn-subagent-evict-parent',
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'turn/started',
+              params: {
+                threadId: 'thread-subagent-evict-child',
+                turn: {
+                  id: 'turn-subagent-evict-child',
+                },
               },
             }))
             child.stdout.write(jsonLine({
@@ -21886,6 +22214,26 @@ function writeStartedTurn(
     params: {
       threadId,
       turn: { id: turnId },
+    },
+  }))
+}
+
+function writeTokenUsage(input: {
+  child: MockChildProcess
+  last: Record<string, number>
+  threadId: string
+  total: Record<string, number>
+  turnId: string
+}): void {
+  input.child.stdout.write(jsonLine({
+    method: 'thread/tokenUsage/updated',
+    params: {
+      threadId: input.threadId,
+      tokenUsage: {
+        last: input.last,
+        total: input.total,
+      },
+      turnId: input.turnId,
     },
   }))
 }

@@ -66,20 +66,25 @@ the same upgrade can grant the allowance again.
 
 Active.
 
-Focused proof completed on the candidate implementation: hosted Web and
-assistant-engine typechecks, 348 focused hosted Web assertions, 246 focused
-assistant-engine assertions, and five opt-in real-PostgreSQL ordering,
-notice, and rolling-writer assertions. The preliminary specialist review found
-two release-blocking boundaries: generic billing timestamps and nullable
-legacy state were not safe cutover authority, and detached/additional provider
-work did not own its start time. The recovered final-round output additionally
-found that ops recovery omitted the reset epoch from notice identity and that
-several non-core provider paths still used completion time. Remediation now records exact transition
-metadata in the authoritative
-billing writes, backfills existing period high-water state, fails closed on
-unclassified rows, binds ops recovery to the full notice epoch, and propagates
-per-operation provider starts. Corrected-head
-verification, final ReviewGPT correction review, CI, and plan closure remain.
+Focused proof is complete on the corrected candidate: hosted Web, Cloudflare,
+assistant-engine, assistant-runtime, and hosted-execution typechecks; 257 Codex
+runtime and subagent-usage assertions; 79 Assistant Ask engine assertions; 15
+detached Assistant Ask runtime assertions; and seven opt-in real-PostgreSQL
+plan-reset assertions. The preliminary pass and final rounds found unsafe
+generic cutover timestamps, ambiguous legacy state, incomplete
+provider-request starts, an incomplete ops notice key, optional
+additional-usage occurrence, an old-Web allowance-insert rollout gap, and
+Codex child usage collapsed across reused turns. Remediation records exact
+transition metadata, keeps a per-period high-water and reset epoch, makes each
+independently billed provider operation own its start, binds notice recovery to
+the full epoch, and installs the old-writer bridges in one locked migration
+transaction. Codex child usage is now keyed by child thread and child turn,
+uses only the observed child start, and calculates one cumulative-total delta
+per operation. The fresh-database migration proof applied all 163 migrations;
+direct and Family old-column-set inserts now prove exact reset, reused-child
+pre/post-cutover accounting, credit preservation, and no second reset. Final
+ReviewGPT correction review, exact-head CI, corrected-head product
+revalidation, and plan closure remain.
 
 Status: active
 Updated: 2026-08-05

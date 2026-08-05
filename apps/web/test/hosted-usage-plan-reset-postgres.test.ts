@@ -5,8 +5,9 @@ import {
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
-import type {
-  AssistantUsageRecord,
+import {
+  createAssistantUsageId,
+  type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import { describe, expect, it } from "vitest";
 
@@ -321,7 +322,7 @@ describe.skipIf(!runPostgresProof)(
     });
 
     it.each(["direct", "family"] as const)(
-      "seeds an old Web %s allowance insert before the exact upgrade cutover",
+      "seeds an old Web %s allowance insert and separates reused-child turns across the cutover",
       async (allowanceSource) => {
         const fixture = await createUsageResetFixture();
         const resetAt = new Date("2026-07-12T15:00:00.000Z");
@@ -330,9 +331,13 @@ describe.skipIf(!runPostgresProof)(
         const postResetRecord: AssistantUsageRecord = {
           ...fixture.record,
           occurredAt: "2026-07-12T15:00:01.000Z",
-          providerRequestId: "post_" + fixture.record.providerRequestId,
-          turnId: "post_" + fixture.record.turnId,
-          usageId: "post_" + fixture.record.usageId,
+          providerRequestId: null,
+          providerRequestOrdinal: 1,
+          usageId: createAssistantUsageId({
+            attemptCount: fixture.record.attemptCount,
+            providerRequestOrdinal: 1,
+            turnId: fixture.record.turnId,
+          }),
         };
         const groupId = "family_old_writer_" + randomUUID();
         const membershipId = "family_old_writer_membership_" + randomUUID();
@@ -459,6 +464,16 @@ describe.skipIf(!runPostgresProof)(
               tx,
             });
           }, transactionOptions);
+          await expect(fixture.observer.hostedMember.findUniqueOrThrow({
+            select: {
+              usageCreditBalanceUsdMicros: true,
+              usageCreditLedgerVersion: true,
+            },
+            where: { id: fixture.memberId },
+          })).resolves.toEqual({
+            usageCreditBalanceUsdMicros: 1_000_000n,
+            usageCreditLedgerVersion: 3n,
+          });
           await insertUsageResetRecord({
             prisma: fixture.observer,
             record: postResetRecord,
@@ -475,11 +490,20 @@ describe.skipIf(!runPostgresProof)(
           const [preResetUsage, postResetUsage, periodAfterPostResetUsage] =
             await Promise.all([
               fixture.observer.hostedAiUsage.findUniqueOrThrow({
-                select: { allowanceCounted: true },
+                select: {
+                  allowanceCounted: true,
+                  allowancePricingSnapshotJson: true,
+                  providerRequestOrdinal: true,
+                  turnId: true,
+                },
                 where: { id: fixture.record.usageId },
               }),
               fixture.observer.hostedAiUsage.findUniqueOrThrow({
-                select: { allowanceCounted: true },
+                select: {
+                  allowanceCounted: true,
+                  providerRequestOrdinal: true,
+                  turnId: true,
+                },
                 where: { id: postResetRecord.usageId },
               }),
               fixture.observer.hostedAiUsagePeriod.findUniqueOrThrow({
@@ -492,8 +516,20 @@ describe.skipIf(!runPostgresProof)(
                 },
               }),
             ]);
-          expect(preResetUsage.allowanceCounted).toBe(false);
-          expect(postResetUsage.allowanceCounted).toBe(true);
+          expect(preResetUsage).toMatchObject({
+            allowanceCounted: false,
+            allowancePricingSnapshotJson: {
+              allowanceDisposition: "forgiven_plan_reset",
+              planResetAt: resetAt.toISOString(),
+            },
+            providerRequestOrdinal: 0,
+            turnId: fixture.record.turnId,
+          });
+          expect(postResetUsage).toMatchObject({
+            allowanceCounted: true,
+            providerRequestOrdinal: 1,
+            turnId: fixture.record.turnId,
+          });
           expect(periodAfterPostResetUsage.spentUsdMicros).toBeGreaterThan(0n);
           await expect(fixture.observer.hostedMember.findUniqueOrThrow({
             select: {
