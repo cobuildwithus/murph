@@ -1105,35 +1105,44 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('Product feedback:')
     expect(prompt).toContain('`murph.submit_product_feedback`')
     expect(prompt).toContain(
-      'capture explicit Murph product frustration, feature requests, interest in shipped changelog or feature-catalog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
+      'capture Murph product frustration, feature requests, shipped-item interest, clear inferred workflow friction, and repeated Murph-observed product/tool friction',
     )
     expect(prompt).toContain(
-      'Treat the current request as a high-confidence inferred feature request when a Murph workflow is blocked, materially degraded, or forced into a manual workaround',
+      'Treat a request as high-confidence inferred feedback when a Murph workflow is blocked, degraded, or forced into a manual workaround',
     )
     expect(prompt).toContain(
-      'One current-request gap is enough; the user does not need to complain or name the feature',
+      'One gap is enough; no complaint or feature label is required',
     )
     expect(prompt).toContain(
-      'select the single most material qualifying gap and call the tool at most once in the same turn',
+      'Select the single most material gap and call at most once per accepted request',
     )
-    expect(prompt).toContain('Capture it silently without interrupting the workflow')
-    expect(prompt).toContain('do not mention the log or ask permission')
+    expect(prompt).toContain('Keep ordinary feedback silent')
     expect(prompt).toContain(
-      'Never retry after any tool result, including accepted, already accepted, or unavailable',
+      'acceptance of a clear Murph product failure may get one brief `flagged for the product team` acknowledgement',
     )
-    expect(prompt).toContain('persistence is best-effort after the reply')
-    expect(prompt).toContain('Continue with the best available fallback')
-    expect(prompt).toContain('purely external or transient failures')
-    expect(prompt).toContain('Use `feature_request` for a missing or unsupported path')
+    expect(prompt).toContain('Do not mention the log or ask permission unless asked')
     expect(prompt).toContain(
-      'Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known',
+      '`Support escalation:` is reserved',
     )
-    expect(prompt).toContain('Changelog ids are optional metadata')
-    expect(prompt).toContain('Start inferred summaries with `Speculative:`')
-    expect(prompt).toContain('assistant-observed summaries with `Murph-observed:`')
-    expect(prompt).toContain('Do not log vague low-confidence guesses')
     expect(prompt).toContain(
-      'Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads',
+      "follow the Support section's disclosure, approval, and durable-result contract",
+    )
+    expect(prompt).toContain(
+      'Never retry any result',
+    )
+    expect(prompt).toContain('Persistence is best-effort after reply')
+    expect(prompt).toContain('Continue with the best fallback')
+    expect(prompt).toContain('external/transient failures')
+    expect(prompt).toContain('Use `feature_request` for missing or unsupported paths')
+    expect(prompt).toContain(
+      'Record only kind, a concise product-only summary, and validated changelog ids when known',
+    )
+    expect(prompt).toContain('ids are optional')
+    expect(prompt).toContain('Prefix inferred summaries `Speculative:`')
+    expect(prompt).toContain('assistant-observed ones `Murph-observed:`')
+    expect(prompt).toContain('Skip vague guesses')
+    expect(prompt).toContain(
+      'Never include tags, topics, raw wording or conversation, health details, identifiers, contacts, secrets, or provider payloads',
     )
     expect(prompt).not.toContain('structured kind/topic')
     expect(prompt).not.toContain('feedback tags')

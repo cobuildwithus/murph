@@ -19,22 +19,31 @@ describe("Murph Codex base support guidance", () => {
       "de-identified summary not beginning `Support escalation:`",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "briefly say you flagged it for the product team",
+      "say it was flagged",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "This exception is not silent",
+      "Give support@withmurph.ai only when explicitly asked.",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Give support@withmurph.ai only when the user explicitly asks for it.",
+      "For verified-private human support",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Only after a verified-private user asks for Murph human support",
+      "show the exact product-only summary",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "without giving the address",
+      "disclose potential account linkage",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Never promise a ticket, response, fix, follow-up, or timing",
+      "the request alone is not approval",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "issue saved for triage and account-linked escalation recorded",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "Never claim email delivery/receipt",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "promise ticket, response, fix, follow-up, or timing",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "never retry",

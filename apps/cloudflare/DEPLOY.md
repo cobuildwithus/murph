@@ -1144,6 +1144,16 @@ That command:
 The gradual container rollout keeps the production `RunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
+The support-escalation consent prerequisite is a prompt-only runner release.
+Land it separately while Web's support alert remains metadata-only, deploy
+Cloudflare/runner with `container_rollout=immediate`, and require
+managed-container smoke to report the exact new runner-bundle fingerprint. A
+follow-up Web PR may add the approved issue beside the member id only after that
+production convergence proof. The consent-capable runner then becomes the
+rollback floor for the detailed-email release. This split landing uses the
+existing source/bundle fingerprint admission and adds no feature flag, callback
+version, or second consent owner.
+
 The accepted group-message participant rollout is Web-first. Deploy the Web
 release that accepts both new exact `groupRequester` / `participant` evidence
 and the legacy mailbox / self-opt-out fallbacks before deploying the Worker and
