@@ -433,6 +433,30 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBe("preview");
   });
 
+  it.each(["180000", "90000"])(
+    "passes an explicit %s idle checkpoint delay through to generated Worker vars",
+    (idleCheckpointDelayMs) => {
+      const environment = readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: idleCheckpointDelayMs,
+      });
+
+      const config = buildHostedWranglerDeployConfig(environment) as {
+        vars: Record<string, string>;
+      };
+
+      expect(environment.workerVars.HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS).toBe(
+        idleCheckpointDelayMs,
+      );
+      expect(config.vars.HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS).toBe(
+        idleCheckpointDelayMs,
+      );
+    },
+  );
+
   it("rejects partial numeric deploy automation values", () => {
     for (const runnerReadyTimeout of ["60000ms", "1e3"]) {
       expect(() =>

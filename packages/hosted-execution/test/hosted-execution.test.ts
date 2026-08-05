@@ -683,7 +683,7 @@ describe("hosted execution coverage gaps", () => {
     expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);
     expect(
       runtimeControlLimitsModule.HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS,
-    ).toBe(60_000);
+    ).toBe(90_000);
     expect(runtimeControlModule.HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS).toBe(
       runtimeControlLimitsModule.HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS,
     );
