@@ -336,6 +336,7 @@ describe('searchFoodLabels', () => {
     assert.equal(requestUrl.searchParams.get('q'), 'plain greek yogurt')
     assert.equal(requestUrl.searchParams.get('limit'), '2')
     assert.equal(requestUrl.searchParams.get('includeOffMarket'), 'true')
+    assert.equal(requestUrl.searchParams.get('nutritionOnly'), 'true')
     const init = fetchMock.mock.calls[0]?.[1]
     const headers = init?.headers instanceof Headers
       ? Object.fromEntries(init.headers.entries())
@@ -389,6 +390,47 @@ describe('searchFoodLabels', () => {
     assert.equal(requestUrl.pathname, '/api/foods')
     assert.equal(requestUrl.searchParams.get('q'), 'chicken breast cooked skinless')
     assert.equal(requestUrl.searchParams.get('genericOnly'), 'true')
+    assert.equal(requestUrl.searchParams.get('nutritionOnly'), 'true')
+  })
+
+  it('requests complete labels only when explicitly selected', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [
+        {
+          id: 'fdc:2259794',
+          dataOrigin: 'usda_branded',
+          dataOriginId: '2259794',
+          name: 'Plain Greek Yogurt',
+          brand: 'Example Dairy',
+          upc: '012345678905',
+          offMarket: false,
+          label: yogurtLabel,
+          contaminants: yogurtContaminants,
+        },
+      ],
+    }), {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      status: 200,
+    }))
+
+    const result = await searchFoodLabels(
+      {
+        q: 'plain greek yogurt',
+        fullLabel: true,
+      },
+      {
+        env: hostedRuntimeEnv,
+        fetchImpl: fetchMock,
+      },
+    )
+
+    assert.equal(result.limit, 1)
+    assert.deepEqual(result.items[0]?.contaminants, yogurtContaminants)
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.searchParams.get('limit'), '1')
+    assert.equal(requestUrl.searchParams.has('nutritionOnly'), false)
   })
 
   it('passes source-qualified USDA FDC ids through the server search policy', async () => {
@@ -607,6 +649,7 @@ describe('searchFoodLabelsBatch', () => {
       queries: ['plain greek yogurt', 'white rice'],
       limit: 3,
       includeOffMarket: true,
+      nutritionOnly: true,
     })
     const headers = init?.headers instanceof Headers
       ? Object.fromEntries(init.headers.entries())
@@ -667,9 +710,10 @@ describe('searchFoodLabelsBatch', () => {
     const init = fetchMock.mock.calls[0]?.[1]
     assert.deepEqual(JSON.parse(String(init?.body)), {
       queries: ['chicken breast'],
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
       genericOnly: true,
+      nutritionOnly: true,
     })
   })
 
@@ -706,8 +750,9 @@ describe('searchFoodLabelsBatch', () => {
     const init = fetchMock.mock.calls[0]?.[1]
     assert.deepEqual(JSON.parse(String(init?.body)), {
       queries,
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
+      nutritionOnly: true,
     })
   })
 

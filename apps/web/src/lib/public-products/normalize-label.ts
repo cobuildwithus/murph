@@ -182,6 +182,26 @@ function readServing(
     }
   }
 
+  if (Array.isArray(label.portions)) {
+    for (const candidate of label.portions.slice(0, 20)) {
+      if (!isRecord(candidate)) {
+        continue;
+      }
+
+      const description = firstText(
+        candidate.description,
+        candidate.text,
+      );
+      const amount = readPositiveNumber(candidate.amount);
+      const unit = readText(candidate.unit, 64);
+      const grams = readPositiveNumber(candidate.gramWeight) ?? fallbackGrams;
+
+      if (description || amount !== null || unit || grams !== null) {
+        return { description, amount, unit, grams };
+      }
+    }
+  }
+
   const description = readText(label.householdServing, 512);
   const amount = readPositiveNumber(label.servingSize);
   const unit = readText(label.servingSizeUnit, 64);

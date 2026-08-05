@@ -3,13 +3,26 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getFoodById: vi.fn(),
   getFoodByUpc: vi.fn(),
+  searchFoodNutritionSources: vi.fn(),
   searchFoods: vi.fn(),
+  toFoodNutritionSearchItem: vi.fn((item: Record<string, unknown>) => ({
+    ...item,
+    label: {
+      nutrition: {
+        basis: "per_100_g",
+        rows: [],
+      },
+      serving: null,
+    },
+  })),
 }));
 
 vi.mock("@/src/lib/foods", () => ({
   getFoodById: mocks.getFoodById,
   getFoodByUpc: mocks.getFoodByUpc,
+  searchFoodNutritionSources: mocks.searchFoodNutritionSources,
   searchFoods: mocks.searchFoods,
+  toFoodNutritionSearchItem: mocks.toFoodNutritionSearchItem,
 }));
 
 type FoodsRouteModule = typeof import("../app/api/foods/route");
@@ -207,6 +220,58 @@ describe("foods API route", () => {
             servingSizeUnit: "g",
           },
         },
+      ],
+    });
+  });
+
+  it("returns compact nutrition facts without requesting contaminant evidence", async () => {
+    const item = {
+      id: "fdc:123",
+      dataOrigin: "usda_foundation",
+      dataOriginId: "123",
+      name: "Example food",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {
+        nutrientsPer100g: [
+          { name: "Protein", unit: "g", value: 10 },
+        ],
+      },
+    };
+    mocks.searchFoodNutritionSources.mockResolvedValue([item]);
+
+    const response = await foodsRoute.GET(
+      new Request(
+        "https://web.example.test/api/foods?q=example&nutritionOnly=true",
+        {
+          headers: {
+            authorization: "Bearer test-data-api-key",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.searchFoodNutritionSources).toHaveBeenCalledWith({
+      q: "example",
+      limit: 1,
+      includeOffMarket: false,
+    });
+    expect(mocks.searchFoods).not.toHaveBeenCalled();
+    expect(mocks.toFoodNutritionSearchItem).toHaveBeenCalledWith(item);
+    await expect(response.json()).resolves.toEqual({
+      items: [
+        expect.objectContaining({
+          id: "fdc:123",
+          label: {
+            nutrition: {
+              basis: "per_100_g",
+              rows: [],
+            },
+            serving: null,
+          },
+        }),
       ],
     });
   });

@@ -7775,10 +7775,14 @@
                       "additionalProperties": false,
                       "properties": {
                         "limit": {
-                          "description": "Maximum label matches to return. Defaults to 5.",
+                          "description": "Maximum label matches to return. Defaults to 1.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 50
+                        },
+                        "fullLabel": {
+                          "description": "Return complete source labels and contaminant evidence instead of compact calorie, macro, and fiber facts.",
+                          "type": "boolean"
                         },
                         "generic": {
                           "description": "Search only USDA generic food rows, excluding branded food products.",
@@ -7812,10 +7816,14 @@
                           "description": "Food product, brand, or generic ingredient search text. Repeat --query for multiple values."
                         },
                         "limit": {
-                          "description": "Maximum label matches to return per query. Defaults to 5.",
+                          "description": "Maximum label matches to return per query. Defaults to 1.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 50
+                        },
+                        "fullLabel": {
+                          "description": "Return complete source labels and contaminant evidence instead of compact calorie, macro, and fiber facts.",
+                          "type": "boolean"
                         },
                         "generic": {
                           "description": "Search only USDA generic food rows, excluding branded food products.",

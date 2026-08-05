@@ -679,6 +679,104 @@ describe('Codex assistant registry helpers', () => {
     expect(JSON.stringify(profile)).not.toContain('private output')
   })
 
+  it('attributes vault-cli batches to allowlisted inner commands without arguments', () => {
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_batch_commands' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              id: 'item_batch_commands',
+              command: `vault-cli batch --compact --format json --command '["food","search-labels-batch","--query","private food"]' --command '["food","search-labels-batch","--query","private brand"]' --command '["meal","totals","--from","2026-01-01"]'`,
+              aggregatedOutput: 'private output',
+              durationMs: 22_060,
+            },
+          },
+        },
+      ],
+      turnId: 'turn_batch_commands',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 1,
+        durationMs: 22_060,
+        label: 'vault-cli batch food.search-labels-batch.x2 meal.totals',
+        outputChars: 14,
+      },
+    ])
+    expect(JSON.stringify(profile)).not.toContain('private food')
+    expect(JSON.stringify(profile)).not.toContain('private brand')
+    expect(JSON.stringify(profile)).not.toContain('private output')
+  })
+
+  it('fails closed for unknown or malformed vault-cli batch entries', () => {
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_batch_private' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              id: 'item_batch_private',
+              command: `vault-cli batch --command '["memory","private-health-term"]' --command 'not-json'`,
+              aggregatedOutput: '',
+              durationMs: 10,
+            },
+          },
+        },
+      ],
+      turnId: 'turn_batch_private',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 1,
+        durationMs: 10,
+        label: 'vault-cli batch other.x2',
+        outputChars: 0,
+      },
+    ])
+    expect(JSON.stringify(profile)).not.toContain('private-health-term')
+  })
+
+  it('counts failures against the privacy-safe command label', () => {
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_batch_failure' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              id: 'item_batch_failure',
+              command: `vault-cli batch --command '["food","search-labels-batch","--query","private food"]'`,
+              aggregatedOutput: 'private failure',
+              durationMs: 10_000,
+              exitCode: 1,
+            },
+          },
+        },
+      ],
+      turnId: 'turn_batch_failure',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 1,
+        durationMs: 10_000,
+        failedCalls: 1,
+        label: 'vault-cli batch food.search-labels-batch',
+        outputChars: 15,
+      },
+    ])
+    expect(JSON.stringify(profile)).not.toContain('private food')
+    expect(JSON.stringify(profile)).not.toContain('private failure')
+  })
+
   it('uses the full safe structured chain when raw shell quoting fails closed', () => {
     const profile = buildAssistantCodexTurnProfileJson({
       rawEvents: [

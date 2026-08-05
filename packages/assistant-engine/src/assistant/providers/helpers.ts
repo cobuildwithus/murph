@@ -625,10 +625,22 @@ const ASSISTANT_TURN_PROFILE_STRUCTURED_COMMAND_HEAD_BINARIES = new Set([
   'tail',
   'vault-cli',
 ])
+const ASSISTANT_TURN_PROFILE_BATCH_COMMAND_PATHS = new Set([
+  'food search-labels',
+  'food search-labels-batch',
+  'goal list',
+  'goal show',
+  'meal add',
+  'meal edit',
+  'meal show',
+  'meal totals',
+])
+const ASSISTANT_TURN_PROFILE_BATCH_COMMAND_LIMIT = 8
 
 interface AssistantTurnProfileToolAggregate {
   calls: number
   durationMs: number
+  failedCalls: number
   label: string
   outputChars: number
 }
@@ -695,6 +707,7 @@ export function buildAssistantCodexTurnProfileJson(input: {
     if (existing) {
       existing.calls += aggregate.calls
       existing.durationMs += aggregate.durationMs
+      existing.failedCalls += aggregate.failedCalls
       existing.outputChars += aggregate.outputChars
     } else {
       toolsByLabel.set(aggregate.label, aggregate)
@@ -718,7 +731,13 @@ export function buildAssistantCodexTurnProfileJson(input: {
     requests: requests.slice(-ASSISTANT_TURN_PROFILE_MAX_REQUESTS),
     requestsTruncated: requests.length > ASSISTANT_TURN_PROFILE_MAX_REQUESTS,
     schema: ASSISTANT_TURN_PROFILE_SCHEMA,
-    tools: tools.slice(0, ASSISTANT_TURN_PROFILE_MAX_TOOLS),
+    tools: tools.slice(0, ASSISTANT_TURN_PROFILE_MAX_TOOLS).map((tool) => ({
+      calls: tool.calls,
+      durationMs: tool.durationMs,
+      ...(tool.failedCalls > 0 ? { failedCalls: tool.failedCalls } : {}),
+      label: tool.label,
+      outputChars: tool.outputChars,
+    })),
     toolsTruncated: tools.length > ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   }
 }
@@ -735,6 +754,7 @@ function readAssistantTurnProfileToolAggregate(
     return {
       calls: 1,
       durationMs: readAssistantProviderInteger(item, 'durationMs', 'duration_ms') ?? 0,
+      failedCalls: isAssistantTurnProfileFailedTool(item) ? 1 : 0,
       label: buildAssistantTurnProfileCommandLabel(
         readAssistantProviderString(item.command),
         item.commandActions ?? item.command_actions,
@@ -757,12 +777,23 @@ function readAssistantTurnProfileToolAggregate(
     return {
       calls: 1,
       durationMs: readAssistantProviderInteger(item, 'durationMs', 'duration_ms') ?? 0,
+      failedCalls: isAssistantTurnProfileFailedTool(item) ? 1 : 0,
       label: truncateAssistantTurnProfileLabel(label.length > 0 ? label : itemType),
       outputChars: readAssistantTurnProfileTextLength(item.result),
     }
   }
 
   return null
+}
+
+function isAssistantTurnProfileFailedTool(item: Record<string, unknown>): boolean {
+  const exitCode = readAssistantProviderInteger(item, 'exitCode', 'exit_code')
+  if (exitCode !== null) {
+    return exitCode !== 0
+  }
+
+  const status = readAssistantProviderString(item.status)?.toLowerCase()
+  return status === 'failed' || status === 'errored'
 }
 
 // Tool labels must stay secret-safe: persist only the binary name unless the
@@ -773,7 +804,15 @@ function buildAssistantTurnProfileCommandLabel(
   command: string | null,
   commandActions: unknown,
 ): string {
-  const tokens = unwrapAssistantTurnProfileShellWrapper(command ?? '')
+  const unwrappedCommand = unwrapAssistantTurnProfileShellWrapper(command ?? '')
+  const batchCommands = readAssistantTurnProfileBatchCommands(unwrappedCommand)
+  if (batchCommands !== null) {
+    return truncateAssistantTurnProfileLabel(
+      ['vault-cli batch', ...batchCommands].join(' '),
+    )
+  }
+
+  const tokens = unwrappedCommand
     .split(/\s+/u)
     .filter((token) => token.length > 0)
   const labelTokens: string[] = []
@@ -827,6 +866,132 @@ function buildAssistantTurnProfileCommandLabel(
   return structuredHeads.length > 0
     ? truncateAssistantTurnProfileLabel(structuredHeads.join(' '))
     : 'command'
+}
+
+function readAssistantTurnProfileBatchCommands(command: string): string[] | null {
+  const tokens = splitAssistantTurnProfileShellTokens(command)
+  if (tokens[0] !== 'vault-cli' || tokens[1] !== 'batch') {
+    return null
+  }
+
+  const commands: string[] = []
+  for (let index = 2; index < tokens.length; index += 1) {
+    const token = tokens[index]!
+    let encodedCommand: string | null = null
+    if (token === '--command') {
+      encodedCommand = tokens[index + 1] ?? null
+      index += 1
+    } else if (token.startsWith('--command=')) {
+      encodedCommand = token.slice('--command='.length)
+    }
+    if (encodedCommand === null) {
+      continue
+    }
+
+    commands.push(readAssistantTurnProfileBatchCommand(encodedCommand))
+    if (commands.length >= ASSISTANT_TURN_PROFILE_BATCH_COMMAND_LIMIT) {
+      break
+    }
+  }
+
+  return commands.length > 0
+    ? runLengthEncodeAssistantTurnProfileBatchCommands(commands)
+    : null
+}
+
+function readAssistantTurnProfileBatchCommand(value: string): string {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return 'other'
+  }
+  if (!Array.isArray(parsed) || parsed.length < 2) {
+    return 'other'
+  }
+
+  const family = parsed[0]
+  const command = parsed[1]
+  if (typeof family !== 'string' || typeof command !== 'string') {
+    return 'other'
+  }
+  const path = `${family} ${command}`
+  return ASSISTANT_TURN_PROFILE_BATCH_COMMAND_PATHS.has(path)
+    ? `${family}.${command}`
+    : 'other'
+}
+
+function runLengthEncodeAssistantTurnProfileBatchCommands(
+  commands: readonly string[],
+): string[] {
+  const encoded: string[] = []
+  for (const command of commands) {
+    const last = encoded[encoded.length - 1]
+    const match = last?.match(/^(.*)\.x(\d+)$/u)
+    const lastCommand = match?.[1] ?? last
+    if (lastCommand !== command) {
+      encoded.push(command)
+      continue
+    }
+
+    const count = match ? Number.parseInt(match[2]!, 10) + 1 : 2
+    encoded[encoded.length - 1] = `${command}.x${count}`
+  }
+  return encoded
+}
+
+function splitAssistantTurnProfileShellTokens(command: string): string[] {
+  const tokens: string[] = []
+  let token = ''
+  let tokenStarted = false
+  let quote: "'" | '"' | null = null
+  let escaped = false
+
+  for (const char of command) {
+    if (escaped) {
+      token += char
+      tokenStarted = true
+      escaped = false
+      continue
+    }
+    if (char === '\\' && quote !== "'") {
+      escaped = true
+      tokenStarted = true
+      continue
+    }
+    if (quote !== null) {
+      if (char === quote) {
+        quote = null
+      } else {
+        token += char
+      }
+      tokenStarted = true
+      continue
+    }
+    if (char === "'" || char === '"') {
+      quote = char
+      tokenStarted = true
+      continue
+    }
+    if (/\s/u.test(char)) {
+      if (tokenStarted) {
+        tokens.push(token)
+        token = ''
+        tokenStarted = false
+      }
+      continue
+    }
+    token += char
+    tokenStarted = true
+  }
+
+  if (escaped || quote !== null) {
+    return []
+  }
+  if (tokenStarted) {
+    tokens.push(token)
+  }
+  return tokens
 }
 
 function readAssistantTurnProfileStructuredCommandHeads(

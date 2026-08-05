@@ -35,6 +35,12 @@ type ProductLabelsRouteQueries<TItem> = {
     limit: number;
     q: string;
   }) => Promise<TItem[]>;
+  searchNutrition?: (input: {
+    genericOnly?: boolean;
+    includeOffMarket: boolean;
+    limit: number;
+    q: string;
+  }) => Promise<TItem[]>;
 };
 
 type ProductLabelsRouteConfig<TItem> = ProductLabelsRouteQueries<TItem> & {
@@ -45,6 +51,7 @@ type ProductLabelsRouteConfig<TItem> = ProductLabelsRouteQueries<TItem> & {
   };
   isUnconfiguredError?: (error: unknown) => boolean;
   numericExactIdPrefix?: `${string}:`;
+  projectNutritionItem?: (item: TItem) => unknown;
   supportsGenericOnly?: boolean;
 };
 
@@ -94,6 +101,10 @@ export function createProductLabelsRouteHandlers<TItem>(
     const genericOnly =
       config.supportsGenericOnly === true &&
       params.get("genericOnly") === "true";
+    const nutritionOnly =
+      config.projectNutritionItem !== undefined &&
+      config.searchNutrition !== undefined &&
+      params.get("nutritionOnly") === "true";
 
     try {
       if (id) {
@@ -106,7 +117,9 @@ export function createProductLabelsRouteHandlers<TItem>(
           return json({ error: "not_found" }, { status: 404 });
         }
 
-        return json({ item });
+        return json({
+          item: projectProductLabelItem(config, item, nutritionOnly),
+        });
       }
 
       if (upc) {
@@ -119,7 +132,9 @@ export function createProductLabelsRouteHandlers<TItem>(
           return json({ error: "not_found" }, { status: 404 });
         }
 
-        return json({ item });
+        return json({
+          item: projectProductLabelItem(config, item, nutritionOnly),
+        });
       }
 
       if (!q) {
@@ -134,10 +149,14 @@ export function createProductLabelsRouteHandlers<TItem>(
         genericOnly,
         includeOffMarket,
         limit,
+        nutritionOnly,
         q,
       });
 
-      return json({ items });
+      return json({
+        items: items.map((item) =>
+          projectProductLabelItem(config, item, nutritionOnly)),
+      });
     } catch (error) {
       return apiFailed(error);
     }
@@ -180,6 +199,10 @@ export function createProductLabelsRouteHandlers<TItem>(
     const genericOnly =
       config.supportsGenericOnly === true &&
       payload.genericOnly === true;
+    const nutritionOnly =
+      config.projectNutritionItem !== undefined &&
+      config.searchNutrition !== undefined &&
+      payload.nutritionOnly === true;
 
     try {
       const uniqueQueries = dedupeBatchQueries(queries);
@@ -192,6 +215,7 @@ export function createProductLabelsRouteHandlers<TItem>(
             genericOnly,
             includeOffMarket,
             limit,
+            nutritionOnly,
             q,
           }),
         }),
@@ -208,7 +232,8 @@ export function createProductLabelsRouteHandlers<TItem>(
 
         return {
           query,
-          items,
+          items: items.map((item) =>
+            projectProductLabelItem(config, item, nutritionOnly)),
         };
       });
 
@@ -216,6 +241,7 @@ export function createProductLabelsRouteHandlers<TItem>(
         ...(genericOnly ? { genericOnly } : {}),
         includeOffMarket,
         limit,
+        ...(nutritionOnly ? { nutritionOnly: true } : {}),
         results,
       });
     } catch (error) {
@@ -232,6 +258,7 @@ async function lookupProductLabels<TItem>(
     genericOnly: boolean;
     includeOffMarket: boolean;
     limit: number;
+    nutritionOnly: boolean;
     q: string;
   },
 ): Promise<TItem[]> {
@@ -262,7 +289,10 @@ async function lookupProductLabels<TItem>(
       continue;
     }
 
-    return await config.search({
+    const search = input.nutritionOnly && config.searchNutrition
+      ? config.searchNutrition
+      : config.search;
+    return await search({
       ...(input.genericOnly ? { genericOnly: true } : {}),
       includeOffMarket: input.includeOffMarket,
       limit: input.limit,
@@ -271,6 +301,16 @@ async function lookupProductLabels<TItem>(
   }
 
   return [];
+}
+
+function projectProductLabelItem<TItem>(
+  config: ProductLabelsRouteConfig<TItem>,
+  item: TItem,
+  nutritionOnly: boolean,
+): unknown {
+  return nutritionOnly && config.projectNutritionItem
+    ? config.projectNutritionItem(item)
+    : item;
 }
 
 function resolveLabelLookupParams<TItem>(

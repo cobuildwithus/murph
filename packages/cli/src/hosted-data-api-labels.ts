@@ -198,18 +198,22 @@ export type HostedDataApiLabelBatchSearchInput = z.infer<typeof hostedDataApiLab
 export type HostedDataApiLabelSearchResultItem = z.infer<typeof hostedDataApiLabelSearchResultItemSchema>
 export type HostedDataApiLabelGenericSearchInput = HostedDataApiLabelSearchInput & {
   genericOnly?: boolean
+  nutritionOnly?: boolean
 }
 export type HostedDataApiLabelGenericBatchSearchInput = HostedDataApiLabelBatchSearchInput & {
   genericOnly?: boolean
+  nutritionOnly?: boolean
 }
 
 const hostedDataApiLabelGenericSearchInputSchema = hostedDataApiLabelSearchInputSchema.extend({
   genericOnly: z.boolean().optional(),
+  nutritionOnly: z.boolean().optional(),
 })
 
 const hostedDataApiLabelGenericBatchSearchInputSchema =
   hostedDataApiLabelBatchSearchInputSchema.extend({
     genericOnly: z.boolean().optional(),
+    nutritionOnly: z.boolean().optional(),
   })
 
 export type HostedDataApiLabelsDependencies = {
@@ -273,6 +277,7 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
     const limit = input.limit ?? DEFAULT_HOSTED_DATA_API_LABEL_LIMIT
     const includeOffMarket = input.includeOffMarket ?? false
     const genericOnly = input.genericOnly ?? false
+    const nutritionOnly = input.nutritionOnly ?? false
     const url = new URL(config.apiPath, apiBaseUrl)
     url.searchParams.set('q', input.q)
     url.searchParams.set('limit', String(limit))
@@ -281,6 +286,9 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
     }
     if (genericOnly) {
       url.searchParams.set('genericOnly', 'true')
+    }
+    if (nutritionOnly) {
+      url.searchParams.set('nutritionOnly', 'true')
     }
 
     const response = await fetchLabelsApi(config, fetchImpl, url, env)
@@ -306,12 +314,14 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
     const limit = input.limit ?? DEFAULT_HOSTED_DATA_API_LABEL_LIMIT
     const includeOffMarket = input.includeOffMarket ?? false
     const genericOnly = input.genericOnly ?? false
+    const nutritionOnly = input.nutritionOnly ?? false
     const url = new URL(config.apiPath, apiBaseUrl)
     const body = JSON.stringify({
       queries: input.queries,
       limit,
       includeOffMarket,
       ...(genericOnly ? { genericOnly } : {}),
+      ...(nutritionOnly ? { nutritionOnly } : {}),
     })
     const bodyBytes = Buffer.byteLength(body, 'utf8')
 

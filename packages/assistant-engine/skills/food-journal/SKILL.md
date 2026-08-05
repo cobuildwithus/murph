@@ -68,7 +68,10 @@ Before calculating a meal total:
   generic row is preferable; use normal lookup for branded, packaged, menu, UPC,
   or exact-FDC searches. Because `--generic` applies to the whole batch, split a
   mixed meal into at most two lookups: one generic USDA batch and one normal
-  branded/menu/package batch.
+  branded/menu/package batch. The default returns one compact nutrition match
+  per component. Increase `--limit` only for an ambiguous match, and use
+  `--full-label` only when micronutrients, ingredients, allergens, or
+  contaminant evidence are necessary for the user's request.
 - Prefer an exact visible or user-named product, restaurant item, variant, UPC,
   or FDC id over a nearby generic substitute. Never merge nutrition from
   similarly named variants without evidence that they are the same item.
@@ -81,8 +84,8 @@ Before calculating a meal total:
   could materially move the total. Avoid fake precision; set confidence from
   the weakest material identity, quantity, or preparation assumption.
 
-Increase the default result limit only when the first match is ambiguous or
-missing a likely variant. If the database is unavailable or incomplete, use an
+Increase the result limit only when the first match is ambiguous or missing a
+likely variant. If the database is unavailable or incomplete, use an
 official label, manufacturer, or restaurant menu source. Only after those fail
 may you use a clearly marked memory-based estimate with the assumptions and
 material uncertainty stated. Never invent an exact label or imply that a visual

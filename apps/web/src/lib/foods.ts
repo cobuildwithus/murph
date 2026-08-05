@@ -4,6 +4,7 @@ import type {
   ProductLabelDetail,
   ProductLabelsQueryClient,
   ProductLabelSearchItem,
+  ProductLabelSourceItem,
   PublicProductLabelRecord,
   PublicProductLabelSearchItem,
   PublicProductTestEvidence,
@@ -13,15 +14,34 @@ import {
   createPublicProductLabelsQueries,
   getDefaultProductLabelsPool,
 } from "./product-labels";
+import { normalizePublicProductLabel } from "./public-products/normalize-label";
 
 const GENERIC_FOOD_DATA_ORIGINS = [
   "usda_foundation",
   "usda_sr_legacy",
   "usda_fndds",
 ] as const;
+const FOOD_MEAL_NUTRITION_ROW_LIMIT = 16;
+const FOOD_MEAL_NUTRIENT_NAME_PATTERNS = [
+  /^(?:calories?|energy)(?:\b|\s*\()/u,
+  /^protein\b/u,
+  /^(?:carbohydrate|total carbohydrate|carbs?)\b/u,
+  /^(?:total lipid \(fat\)|total fat|fat)\b/u,
+  /^(?:fiber|dietary fiber|fiber, total dietary)\b/u,
+] as const;
 
 export type FoodSearchItem = ProductLabelSearchItem;
+export type FoodNutritionSourceItem = ProductLabelSourceItem;
 export type FoodDetail = ProductLabelDetail;
+export type FoodNutritionSearchItem = Omit<
+  FoodSearchItem,
+  "contaminants" | "label"
+> & {
+  label: {
+    nutrition: ReturnType<typeof normalizePublicProductLabel>["nutrition"];
+    serving: ReturnType<typeof normalizePublicProductLabel>["serving"];
+  };
+};
 
 let defaultFoodsQueriesInstance: ReturnType<typeof createFoodsQueries> | null =
   null;
@@ -44,6 +64,12 @@ export function createFoodsQueries(client: ProductLabelsQueryClient): {
     limit: number;
     q: string;
   }) => Promise<FoodSearchItem[]>;
+  searchFoodNutritionSources: (input: {
+    genericOnly?: boolean;
+    includeOffMarket: boolean;
+    limit: number;
+    q: string;
+  }) => Promise<FoodNutritionSourceItem[]>;
 } {
   const queries = createProductLabelsQueries(client, "foods", {
     genericSearch: {
@@ -55,6 +81,7 @@ export function createFoodsQueries(client: ProductLabelsQueryClient): {
     getFoodById: queries.getById,
     getFoodByUpc: queries.getByUpc,
     searchFoods: queries.search,
+    searchFoodNutritionSources: queries.searchWithoutContaminants,
   };
 }
 
@@ -90,6 +117,15 @@ export async function searchFoods(input: {
   return await defaultFoodsQueries().searchFoods(input);
 }
 
+export async function searchFoodNutritionSources(input: {
+  q: string;
+  limit: number;
+  includeOffMarket: boolean;
+  genericOnly?: boolean;
+}): Promise<FoodNutritionSourceItem[]> {
+  return await defaultFoodsQueries().searchFoodNutritionSources(input);
+}
+
 export async function getFoodById(input: {
   id: string;
   includeOffMarket: boolean;
@@ -102,6 +138,42 @@ export async function getFoodByUpc(input: {
   upc: string;
 }): Promise<FoodDetail | null> {
   return await defaultFoodsQueries().getFoodByUpc(input);
+}
+
+export function toFoodNutritionSearchItem(
+  item: FoodNutritionSourceItem,
+): FoodNutritionSearchItem {
+  const normalized = normalizePublicProductLabel({
+    kind: "food",
+    label: item.label,
+    servingGrams: null,
+  });
+  const mealNutritionRows = normalized.nutrition.rows
+    .filter((row) => {
+      const name = row.name.trim().toLowerCase();
+      return FOOD_MEAL_NUTRIENT_NAME_PATTERNS.some((pattern) =>
+        pattern.test(name));
+    })
+    .slice(0, FOOD_MEAL_NUTRITION_ROW_LIMIT);
+
+  return {
+    id: item.id,
+    dataOrigin: item.dataOrigin,
+    dataOriginId: item.dataOriginId,
+    name: item.name,
+    brand: item.brand,
+    upc: item.upc,
+    offMarket: item.offMarket,
+    label: {
+      nutrition: {
+        basis: mealNutritionRows.length > 0
+          ? normalized.nutrition.basis
+          : "unavailable",
+        rows: mealNutritionRows,
+      },
+      serving: normalized.serving,
+    },
+  };
 }
 
 export async function searchPublicFoods(input: {

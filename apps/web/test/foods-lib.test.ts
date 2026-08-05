@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createFoodsQueries,
   createPublicFoodsQueries,
+  toFoodNutritionSearchItem,
 } from "../src/lib/foods";
 import {
   createProductLabelsQueries,
@@ -25,6 +26,92 @@ function isProductTestsQuery(text: string): boolean {
 }
 
 describe("foods query helpers", () => {
+  it("projects meal nutrition without unrelated label or contaminant payloads", () => {
+    const projected = toFoodNutritionSearchItem({
+      id: "fdc:123",
+      dataOrigin: "usda_foundation",
+      dataOriginId: "123",
+      name: "Example food",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {
+        nutrientsPer100g: [
+          { name: "Energy", unit: "kcal", value: 120 },
+          { name: "Protein", unit: "g", value: 10 },
+          { name: "Sodium", unit: "mg", value: 400 },
+        ],
+        portions: [
+          { amount: 1, description: "slice", gramWeight: 28 },
+        ],
+        unrelatedSourcePayload: "x".repeat(500_000),
+      },
+    });
+
+    expect(projected.label).toEqual({
+      nutrition: {
+        basis: "per_100_g",
+        rows: [
+          {
+            name: "Energy",
+            amount: { display: "120", unit: "kcal", value: 120 },
+            dailyValuePercent: null,
+            basis: "per_100_g",
+          },
+          {
+            name: "Protein",
+            amount: { display: "10", unit: "g", value: 10 },
+            dailyValuePercent: null,
+            basis: "per_100_g",
+          },
+        ],
+      },
+      serving: {
+        amount: 1,
+        description: "slice",
+        grams: 28,
+        unit: null,
+      },
+    });
+    expect(JSON.stringify(projected)).not.toContain("unrelatedSourcePayload");
+    expect(JSON.stringify(projected)).not.toContain("contaminants");
+    expect(JSON.stringify(projected).length).toBeLessThan(2_000);
+  });
+
+  it("skips contaminant queries for nutrition-only food searches", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return {
+          rows: [
+            {
+              id: "fdc:123",
+              dataOrigin: "usda_foundation",
+              dataOriginId: "123",
+              name: "Example food",
+              brand: null,
+              upc: null,
+              offMarket: false,
+              label: { nutrientsPer100g: [] },
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    const rows = await queries.searchFoodNutritionSources({
+      q: "example food",
+      limit: 1,
+      includeOffMarket: false,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).not.toHaveProperty("contaminants");
+    expect(calls).toHaveLength(1);
+    expect(isProductTestsQuery(calls[0]!.text)).toBe(false);
+  });
+
   it("normalizes shared labels database connection strings for pg", () => {
     expect(
       normalizeProductLabelsConnectionString(
