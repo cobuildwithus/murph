@@ -3,9 +3,10 @@ import { Link2 } from "lucide-react";
 import { IntegrationsConnectLauncherView } from "@/src/components/connected-apps/integrations-connect-launcher";
 
 const launcherStates = [
-  { label: "Waiting", state: "waiting" },
-  { label: "Connecting", state: "connecting" },
-  { label: "Failed", state: "failed" },
+  { autoContinueEnabled: true, label: "Waiting", state: "waiting" },
+  { autoContinueEnabled: false, label: "Paused", state: "waiting" },
+  { autoContinueEnabled: true, label: "Connecting", state: "connecting" },
+  { autoContinueEnabled: true, label: "Failed", state: "failed" },
 ] as const;
 
 export function ConnectedAppAuthorizationStudy() {
@@ -16,9 +17,9 @@ export function ConnectedAppAuthorizationStudy() {
       id="connected-app-authorization-handoff"
       inert
     >
-      <div className="grid gap-px bg-border lg:grid-cols-3">
-        {launcherStates.map(({ label, state }) => (
-          <article className="bg-background text-foreground" key={state}>
+      <div className="grid gap-px bg-border lg:grid-cols-2">
+        {launcherStates.map(({ autoContinueEnabled, label, state }) => (
+          <article className="bg-background text-foreground" key={label}>
             <p className="border-b border-border px-4 py-3 font-mono text-xs uppercase tracking-wide text-muted-foreground">
               {label}
             </p>
@@ -36,7 +37,10 @@ export function ConnectedAppAuthorizationStudy() {
                 <p className="mt-4 max-w-lg text-sm leading-6 text-muted-foreground text-pretty break-words">
                   Murph uses Composio to securely connect Gmail. On the next screen, you’ll review and approve access.
                 </p>
-                <IntegrationsConnectLauncherView state={state} />
+                <IntegrationsConnectLauncherView
+                  autoContinueEnabled={autoContinueEnabled}
+                  state={state}
+                />
               </section>
             </div>
           </article>

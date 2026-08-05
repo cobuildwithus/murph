@@ -13,7 +13,9 @@ interface IntegrationsConnectLauncherProps {
 }
 
 interface IntegrationsConnectLauncherViewProps {
+  autoContinueEnabled: boolean;
   onContinue?: () => void;
+  onPause?: () => void;
   state: LauncherState;
 }
 
@@ -24,6 +26,7 @@ export function IntegrationsConnectLauncher({
   // so they can never race into two POSTs.
   const hasStartedRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const [autoContinueEnabled, setAutoContinueEnabled] = useState(true);
   const [state, setState] = useState<LauncherState>("waiting");
 
   const startConnection = useCallback(async () => {
@@ -92,7 +95,8 @@ export function IntegrationsConnectLauncher({
     const armTimeout = () => {
       clearPendingTimeout();
       if (
-        document.visibilityState !== "visible"
+        !autoContinueEnabled
+        || document.visibilityState !== "visible"
         || hasStartedRef.current
       ) {
         return;
@@ -111,18 +115,22 @@ export function IntegrationsConnectLauncher({
       clearPendingTimeout();
       abortControllerRef.current?.abort();
     };
-  }, [startConnection]);
+  }, [autoContinueEnabled, startConnection]);
 
   return (
     <IntegrationsConnectLauncherView
+      autoContinueEnabled={autoContinueEnabled}
       onContinue={() => void startConnection()}
+      onPause={() => setAutoContinueEnabled(false)}
       state={state}
     />
   );
 }
 
 export function IntegrationsConnectLauncherView({
+  autoContinueEnabled,
   onContinue,
+  onPause,
   state,
 }: IntegrationsConnectLauncherViewProps) {
   if (state === "failed") {
@@ -150,12 +158,24 @@ export function IntegrationsConnectLauncherView({
 
   return (
     <div className="mt-8 flex flex-col items-center gap-4">
-      <p className="max-w-lg text-sm leading-6 text-muted-foreground text-pretty">
-        Continuing in {AUTO_CONTINUE_SECONDS} seconds…
+      <p
+        aria-live="polite"
+        className="max-w-lg text-sm leading-6 text-muted-foreground text-pretty"
+      >
+        {autoContinueEnabled
+          ? `Continuing in ${AUTO_CONTINUE_SECONDS} seconds…`
+          : "Automatic continuation paused."}
       </p>
-      <Button onClick={onContinue} type="button">
-        Continue now
-      </Button>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button onClick={onContinue} type="button">
+          Continue now
+        </Button>
+        {autoContinueEnabled ? (
+          <Button onClick={onPause} type="button" variant="ghost">
+            Stay here
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

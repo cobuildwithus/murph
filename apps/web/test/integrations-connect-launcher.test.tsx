@@ -90,6 +90,59 @@ test("lets the member continue immediately without starting twice", async () => 
   }
 });
 
+test("lets the member pause automatic continuation and continue later", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async () =>
+    successfulResponse("https://auth.composio.dev/connect/paused"),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    {
+      location: {
+        href: "https://example.test/integrations/connect/test-claim",
+      },
+    },
+  );
+
+  try {
+    const buttons = [...rendered.container.querySelectorAll("button")];
+    const stayHereButton = buttons.find(
+      (button) => button.textContent?.includes("Stay here"),
+    );
+    expect(stayHereButton).toBeDefined();
+
+    await act(async () => {
+      stayHereButton?.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+    expect(rendered.container.textContent).toContain(
+      "Automatic continuation paused",
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      rendered.button.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("waits for five visible seconds when mounted in a hidden tab", async () => {
   vi.useFakeTimers();
   const fetchMock = vi.fn(async () =>
@@ -187,6 +240,85 @@ test("restarts the five-second interval after the tab becomes visible again", as
     expect(fetchMock).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
+  }
+});
+
+test("stays on the page with an alert when the start request fails", async () => {
+  vi.useFakeTimers();
+  const initialHref = "https://example.test/integrations/connect/test-claim";
+  const fetchMock = vi.fn(async () => new Response(null, { status: 503 }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    { location: { href: initialHref } },
+  );
+
+  try {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(rendered.window.location.href).toBe(initialHref);
+    expect(rendered.container.querySelector('[role="alert"]')?.textContent)
+      .toContain("Could not start the connection");
+    expect(rendered.container.querySelector("button")).toBeNull();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("aborts an in-flight start and ignores its late success after unmount", async () => {
+  vi.useFakeTimers();
+  const initialHref = "https://example.test/integrations/connect/test-claim";
+  let requestSignal: AbortSignal | null | undefined;
+  let resolveFetch: ((response: Response) => void) | undefined;
+  const fetchResult = new Promise<Response>((resolve) => {
+    resolveFetch = resolve;
+  });
+  const fetchMock = vi.fn((
+    _input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    requestSignal = init?.signal;
+    return fetchResult;
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    { location: { href: initialHref } },
+  );
+  let cleanedUp = false;
+
+  try {
+    await act(async () => {
+      rendered.button.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestSignal?.aborted).toBe(false);
+
+    await rendered.cleanup();
+    cleanedUp = true;
+    expect(requestSignal?.aborted).toBe(true);
+
+    resolveFetch?.(successfulResponse("https://auth.composio.dev/connect/late"));
+    await fetchResult;
+    await Promise.resolve();
+
+    expect(rendered.window.location.href).toBe(initialHref);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  } finally {
+    if (!cleanedUp) {
+      await rendered.cleanup();
+    }
   }
 });
 
