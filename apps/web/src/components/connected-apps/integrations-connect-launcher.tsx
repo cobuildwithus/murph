@@ -82,6 +82,10 @@ export function IntegrationsConnectLauncher({
   }, [claim]);
 
   useEffect(() => {
+    return () => abortControllerRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
     let timeout: number | null = null;
 
     const clearPendingTimeout = () => {
@@ -113,7 +117,6 @@ export function IntegrationsConnectLauncher({
     return () => {
       document.removeEventListener("visibilitychange", armTimeout);
       clearPendingTimeout();
-      abortControllerRef.current?.abort();
     };
   }, [autoContinueEnabled, startConnection]);
 

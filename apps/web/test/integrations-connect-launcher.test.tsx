@@ -143,6 +143,60 @@ test("lets the member pause automatic continuation and continue later", async ()
   }
 });
 
+test("does not abort a connection that starts as the member pauses", async () => {
+  vi.useFakeTimers();
+  const redirectUrl = "https://auth.composio.dev/connect/boundary";
+  let requestSignal: AbortSignal | null | undefined;
+  let resolveFetch: ((response: Response) => void) | undefined;
+  const fetchResult = new Promise<Response>((resolve) => {
+    resolveFetch = resolve;
+  });
+  const fetchMock = vi.fn((
+    _input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    requestSignal = init?.signal;
+    return fetchResult;
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(IntegrationsConnectLauncher, { claim: "test-claim" }),
+    {
+      location: {
+        href: "https://example.test/integrations/connect/test-claim",
+      },
+    },
+  );
+
+  try {
+    const stayHereButton = [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("Stay here"));
+    expect(stayHereButton).toBeDefined();
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+      stayHereButton?.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestSignal?.aborted).toBe(false);
+
+    resolveFetch?.(successfulResponse(redirectUrl));
+    await act(async () => {
+      await fetchResult;
+      await Promise.resolve();
+    });
+
+    expect(requestSignal?.aborted).toBe(false);
+    expect(rendered.window.location.href).toBe(redirectUrl);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("waits for five visible seconds when mounted in a hidden tab", async () => {
   vi.useFakeTimers();
   const fetchMock = vi.fn(async () =>
