@@ -1059,15 +1059,19 @@ testHostedCodexAuthE2e(
             && parseJsonObject(turnMetadata ?? "")?.request_kind !== "memory"
           ),
       );
-      const currentTimeReminders = requests
+      const promptRequests = requests
         .slice(0, fixedRequestCount)
-        .flatMap(
+        .filter(
           (request) =>
-            request.match(
-              /"role":"developer","content":\[\{"type":"input_text","text":"It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\."\}\]/gu,
-            ) ?? [],
+            request.includes(individualPrompt) || request.includes(groupPrompt),
         );
-      assert.equal(currentTimeReminders.length, 2);
+      const currentTimeReminderCounts = promptRequests.map(
+        (request) =>
+          request.match(
+            /"role":"developer","content":\[\{"type":"input_text","text":"It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\."\}\]/gu,
+          )?.length ?? 0,
+      );
+      assert.ok(currentTimeReminderCounts.every((count) => count === 1));
 
       const enabledCodexHome = path.join(operatorHomeRoot, ".codex-native");
       await mkdir(enabledCodexHome, { mode: 0o700, recursive: true });
