@@ -1,0 +1,79 @@
+name: Agent Apple Health relay patch
+
+on:
+  push:
+    branches:
+      - agent/apple-health-relay-wearables
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-apple-health-relay-wearables
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/apple-health-relay-wearables
+
+      - name: Apply Apple Health relay changes
+        shell: bash
+        env:
+          PATCH_GZIP_BASE64: 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
+        run: |
+          printf '%s' "$PATCH_GZIP_BASE64" | base64 --decode | gzip --decompress > /tmp/apply.py
+          python3 /tmp/apply.py
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run focused checks
+        id: checks
+        continue-on-error: true
+        run: |
+          pnpm --dir apps/web test:prepared -- connect-page.test.ts connect-source-and-experiment-card-routes.test.tsx
+          pnpm --dir packages/assistant-engine test -- model-behavior.test.ts
+          pnpm --dir packages/device-syncd test
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir apps/web prisma:generate
+          pnpm --dir apps/web typecheck:prepared
+
+      - name: Commit final branch changes and remove temporary workflow
+        run: |
+          rm .github/workflows/agent-apple-health-relays.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/web/app/'(dashboard)'/connect/connect-page-client.tsx \
+            apps/web/app/'(dashboard)'/connect/connect-page-content.tsx \
+            apps/web/app/'(dashboard)'/connect/connect-page-types.ts \
+            apps/web/app/'(dashboard)'/connect/connect-source-order.ts \
+            apps/web/src/lib/device-sync/apple-health-relay-setup-guide.ts \
+            apps/web/test/connect-page.test.ts \
+            apps/web/test/connect-source-and-experiment-card-routes.test.tsx \
+            packages/assistant-engine/src/assistant/system-prompt.ts \
+            packages/assistant-engine/test/model-behavior.test.ts \
+            packages/device-syncd/src/config/connect-routes.ts \
+            .github/workflows/agent-apple-health-relays.yml
+          git commit -m "feat: add Apple Health relay wearables"
+          git push origin HEAD:agent/apple-health-relay-wearables
+
+      - name: Surface focused-check failures
+        if: steps.checks.outcome == 'failure'
+        run: exit 1
