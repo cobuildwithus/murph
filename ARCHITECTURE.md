@@ -1390,9 +1390,14 @@ first-active-sender fallback continues when the provider roster read completed.
 An unavailable roster leaves recovery-backed ownership indeterminate and
 returns a typed retry before route creation; a completed empty or oversized
 roster cannot match another member's setup but may retain the active-sender
-fallback. Sender inactivity or unresolved sender identity disqualifies only
-that fallback; it does not veto a distinct active roster-matched owner. The
-setup must cover the provider event time and remain unexpired at processing
+fallback. Explicit suspension or health-data-consent withdrawal stops unbound
+admission before roster preparation or setup outreach. Other sender inactivity
+or unresolved sender identity disqualifies only the fallback; it does not veto
+a distinct active roster-matched owner. Only after the prepared-route boundary
+returns no route may an unknown or inactive non-withdrawn sender receive the
+existing group-setup handoff, and an unknown sender must first pass the existing
+first-contact admission gate. The setup must cover the provider event time and
+remain unexpired at processing
 time. The selected row stays locked through
 `ensureHostedThreadContainerRouteTx`, which remains the only route and
 `ownerMemberId` owner, and is deleted only when that transaction creates the
