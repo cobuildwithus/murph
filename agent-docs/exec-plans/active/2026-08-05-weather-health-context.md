@@ -4,6 +4,7 @@ Goal (incl. success criteria):
 
 Constraints/Assumptions:
 - Use OpenWeather One Call 3 official alerts and the existing server-held API key. Do not call the live provider until its subscription is active.
+- Do not deploy the direct or scheduled alert guidance until One Call 3 is active for the exact production key and a signed smoke read succeeds.
 - Do not add a cron, persisted state, cache, dependency, provider, or Murph-defined weather threshold.
 - Reuse the existing connected-app execution boundary and geocoding tool.
 - Preserve city/region privacy, provider-failure fallback, calibrated causal language, and the existing proactive send bar.
@@ -23,12 +24,15 @@ Done:
 - Added the fixed One Call alert read through the existing connected-app execution service.
 - Added the narrow prompt and skill changes for direct conversation, weekly digest, weekly insight, and monthly coach behavior.
 - Added mocked provider tests. No live One Call request is part of verification.
+- Recorded One Call activation plus a successful signed smoke read as a deployment prerequisite.
+- Kept the exact alert instruction out of the shared group-visible skill and preserved the existing group rejection boundary.
+- Final ReviewGPT round 1 found the missing entitlement gate and the shared-skill group leak. Both findings were accepted and corrected without expanding the group allowlist.
 
 Now:
-- Run focused local checks and review the exact candidate diff.
+- Commit and push the combined review remediation.
 
 Next:
-- Push the candidate, complete the required specialist and final review gates, confirm CI, then close the plan.
+- Complete the preliminary specialist pass and final correction round, confirm exact-head CI, then close the plan.
 
 Open questions (UNCONFIRMED if needed):
 - None.

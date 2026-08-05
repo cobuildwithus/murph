@@ -2373,10 +2373,13 @@ describe('assistant experiment onboarding guidance', () => {
       'Before personal improvement or new-goal advice, or whether to take, keep, reorder, or drop a supplement or other intervention, read personal evidence that could change the answer. Open with what it shows (such as the latest panel date and markers), not goals alone; if none exists, say so.',
     )
     expect(prompt).toContain(
-      'When an official heat, cold, or outdoor-air-quality alert could change advice about exercise, recovery, sleep, fatigue, symptoms, or time outdoors, reuse a known city/region and use the accountless OpenWeather national-alert read as needed.',
+      'When a local heat, cold, or air-quality alert could change health advice, reuse a known city/region.',
     )
     expect(prompt).toContain(
-      'never infer one from raw weather or AQI',
+      'Call `OPENWEATHER_API_GET_GEOCODING_DIRECT`, then call `MURPH_OPENWEATHER_GET_NATIONAL_ALERTS` once with only `lat` and `lon`.',
+    )
+    expect(prompt).toContain(
+      'Never infer an alert from raw weather or AQI',
     )
     expect(prompt).toContain(
       'ask for city/region only when it could change the answer',
@@ -2475,7 +2478,7 @@ describe('assistant experiment onboarding guidance', () => {
       'Murph\'s edge is durable context: a progressively complete picture.',
     )
     expect(groupPrompt).not.toContain(
-      'use the accountless OpenWeather national-alert read as needed',
+      'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS',
     )
     expect(groupPrompt).not.toContain('Save durable context to its owner')
     expect(groupPrompt).not.toContain('Deepen longitudinal understanding when')

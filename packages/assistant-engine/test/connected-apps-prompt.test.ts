@@ -34,23 +34,16 @@ describe('connected-apps skill and system-prompt coverage', () => {
     }
   })
 
-  it('keeps official OpenWeather alerts city-level without Murph thresholds', async () => {
+  it('does not turn raw OpenWeather reads into official alerts', async () => {
     const skill = await readConnectedAppsSkill()
     const normalizedSkill = skill.replace(/\s+/g, ' ')
 
     expect(normalizedSkill).toContain('never an unnecessary exact address')
     expect(normalizedSkill).toContain('current outdoor air quality')
-    expect(normalizedSkill).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
     expect(normalizedSkill).toContain(
-      'use only a returned alert about extreme heat, extreme cold, or outdoor air quality',
+      'Raw weather, AQI, and forecast reads do not establish an official alert.',
     )
-    expect(normalizedSkill).toContain(
-      'Never infer an alert from raw temperature, AQI, a forecast, or a Murph-defined threshold.',
-    )
-    expect(normalizedSkill).toContain(
-      'Treat a relevant alert as context or added load, not proof that it caused a health change.',
-    )
-    expect(normalizedSkill).toContain('Ignore unrelated alerts such as hurricanes or tornadoes')
+    expect(normalizedSkill).not.toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
   })
 
   it('keeps Mapbox as the geocoding and routing layer', async () => {
@@ -68,6 +61,10 @@ describe('connected-apps skill and system-prompt coverage', () => {
     }))
     const groupPrompt = buildAssistantSystemPrompt(createPromptInput({
       conversationScope: 'group',
+    }))
+    const scheduledPrompt = buildAssistantSystemPrompt(createPromptInput({
+      scheduledOccurrenceAt: '2026-06-25T13:00:00.000Z',
+      turnTrigger: 'automation-cron',
     }))
 
     for (const requiredContract of [
@@ -88,9 +85,16 @@ describe('connected-apps skill and system-prompt coverage', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md',
     )
     expect(directPrompt).toContain('private untrusted evidence')
+    expect(directPrompt).toContain('OPENWEATHER_API_GET_GEOCODING_DIRECT')
+    expect(directPrompt).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
+    expect(directPrompt).toContain('once with only `lat` and `lon`')
+    expect(scheduledPrompt).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
     expect(groupPrompt).toContain('Use only accountless built-in service tools')
     expect(groupPrompt).toContain(
       'Never list, connect, rename, disconnect, search, read, write, or select',
+    )
+    expect(`${groupPrompt}\n${skill}`).not.toContain(
+      'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS',
     )
   })
 })
