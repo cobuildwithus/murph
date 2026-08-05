@@ -50,6 +50,9 @@ describe('assistant signup link guidance', () => {
       'Never choose, contact, or message the recipient',
     )
     expect(normalizedSkill).toContain(
+      'do not append billing, low-usage, mission, or sponsorship options unless the user also asked about them',
+    )
+    expect(normalizedSkill).toContain(
       'does not earn usage, complete a mission, or guarantee a reward',
     )
   })
