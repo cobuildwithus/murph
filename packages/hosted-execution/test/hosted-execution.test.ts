@@ -595,6 +595,7 @@ describe("hosted execution coverage gaps", () => {
       "./return-contact",
       "./routes",
       "./runtime-control",
+      "./runtime-control-limits",
       "./side-effects",
       "./subscription",
       "./temporal-env",
@@ -631,6 +632,8 @@ describe("hosted execution coverage gaps", () => {
       string,
       unknown
     >;
+    const runtimeControlLimitsModule =
+      await import("@murphai/hosted-execution/runtime-control-limits") as Record<string, unknown>;
     expect("createHostedExecutionDispatchClient" in rootModule).toBe(false);
     expect("buildHostedExecutionOutboxPayload" in rootModule).toBe(false);
     expect("buildHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
@@ -678,6 +681,12 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWorkspaceCheckpointRequest" in rootModule).toBe(false);
     expect(rootModule.HOSTED_USER_RUNTIME_WORKFLOW_TYPE).toBe("hostedUserRuntimeWorkflow");
     expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);
+    expect(
+      runtimeControlLimitsModule.HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS,
+    ).toBe(60_000);
+    expect(runtimeControlModule.HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS).toBe(
+      runtimeControlLimitsModule.HOSTED_WORKSPACE_INVOCATION_DEFAULT_IDLE_CHECKPOINT_DELAY_MS,
+    );
     expect("HOSTED_WORKSPACE_INVOCATION_REASONS" in runtimeControlModule).toBe(false);
     expect(subscriptionModule.parseHostedSubscriptionControlRequest).toBeTypeOf("function");
     expect(subscriptionModule.parseHostedRuntimeSubscriptionToolResponse).toBeTypeOf("function");
