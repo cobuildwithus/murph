@@ -1,6 +1,6 @@
 # fix-sponsorship-refill-recovery-urls
 
-Status: active
+Status: completed
 Created: 2026-08-05
 Updated: 2026-08-05
 
@@ -58,3 +58,13 @@ Updated: 2026-08-05
 - Expected outcomes: a reproduced mismatch fails before the fix, refill URLs contain the refill id after the fix, recovery produces a Stripe Checkout capability, no unrelated subscription or usage-credit behavior changes, and production has zero malformed nonterminal refill rows after repair.
 - Reproduction: the focused sponsorship authorization test failed before the source change because the refill success URL retained the activation purchase id.
 - Local proof: 185 focused tests pass across sponsorship authorization, signed group-target projection, and usage-credit purchase service, including first-attempt recovery through Stripe Checkout; the prepared web typecheck passes; scoped ESLint has zero errors.
+- Preliminary specialist review found the first-attempt `payment_failed` gap; the accepted fix and integration proof are included in the final head.
+- Final ReviewGPT round 1 passed with no qualifying code findings, and all exact-head GitHub Actions passed.
+
+## Outcome
+
+- New refills bind canonical success and cancel URLs to their deterministic purchase id at creation.
+- Pre-fix `created` rows self-heal under the existing fence, and pre-fix `payment_failed` rows self-heal inside the existing payer-recovery transition before target validation or Stripe I/O.
+- No schema, migration, endpoint, queue, dependency, alternate payment flow, or second state owner was added.
+- Direct production proof remains an authenticated **Review payment** click after deployment; the resulting state and logs are verified operationally without persisting private identifiers.
+Completed: 2026-08-05
