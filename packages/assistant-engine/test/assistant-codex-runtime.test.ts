@@ -214,6 +214,7 @@ function createHostedToolContext(input: {
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     groupTool: input.groupTool ?? null,
+    persistGeneratedImageCapture: async (write) => await write(),
     sendVaultFile: input.sendVaultFile ?? vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
@@ -1942,6 +1943,7 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         env: { OPENAI_API_KEY: 'openai-test-key' },
         fetchImpl,
+        hostedToolContext: createHostedToolContext(),
         prompt: 'generate then clear media',
         requireHostedPrivateImageDelivery: true,
         vaultRoot,
