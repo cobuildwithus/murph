@@ -409,8 +409,12 @@ the initial $5 activation purchase, whose amount is shown before payment;
 selecting a maximum alone does not charge the card. Keep both funding actions
 available at every current group-capacity state; capacity changes urgency and
 automatic refill timing, not the ability to fund. Keep an explicit one-time
-contribution as the secondary action. Dollar amounts are cost-weighted usage
-credit, never an owned or promised number of messages. Every cap increase
+contribution as the secondary action. On phones, open that contribution in the
+same bottom-drawer pattern as monthly sponsorship; keep the centered dialog on
+larger screens. Customer-facing amount choices say `usage`; cost weighting is
+an accounting detail, not interface copy. Keep the contribution action at the
+drawer's safe-area edge while its body scrolls. Dollar amounts remain usage
+capacity, never an owned or promised number of messages. Every cap increase
 requires fresh payer confirmation. Keep the alias, note, and eligible temporary
 running bit in one collapsible `Add a note` section, open by default, and attach
 them only to the activation or one-time purchase, never to automatic refills.
