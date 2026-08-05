@@ -13,7 +13,16 @@ review_gpt_review_phase="${REVIEW_GPT_REVIEW_PHASE:-final}"
 review_gpt_round_number="${REVIEW_GPT_ROUND_NUMBER:-}"
 review_gpt_first_reviewed_head="${REVIEW_GPT_FIRST_REVIEWED_HEAD:-}"
 review_gpt_previous_reviewed_head="${REVIEW_GPT_PREVIOUS_REVIEWED_HEAD:-}"
+review_gpt_context_anchor_head="${REVIEW_GPT_CONTEXT_ANCHOR_HEAD:-}"
 review_gpt_rendered_evidence_paths="${REVIEW_GPT_RENDERED_EVIDENCE_PATHS:-}"
+review_gpt_full_review_reason="${REVIEW_GPT_FULL_REVIEW_REASON:-}"
+review_gpt_context_mode="full_snapshot"
+
+if [[ -n "$review_gpt_full_review_reason" ]] \
+  && [[ -z "${review_gpt_full_review_reason//[[:space:]]/}" ]]; then
+  echo "Error: REVIEW_GPT_FULL_REVIEW_REASON must contain a concrete reason." >&2
+  exit 1
+fi
 
 review_gpt_require_full_sha() {
   local label="$1"
@@ -127,7 +136,8 @@ fi
 if [[ -z "$review_gpt_pr_ref" ]] \
   && { [[ -n "$review_gpt_round_number" ]] \
     || [[ -n "$review_gpt_first_reviewed_head" ]] \
-    || [[ -n "$review_gpt_previous_reviewed_head" ]]; }; then
+    || [[ -n "$review_gpt_previous_reviewed_head" ]] \
+    || [[ -n "$review_gpt_context_anchor_head" ]]; }; then
   echo "Error: ReviewGPT round metadata requires REVIEW_GPT_PR_URL or REVIEW_GPT_PR_REF." >&2
   exit 1
 fi
@@ -162,7 +172,8 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
   if [[ "$review_gpt_review_phase" == "preliminary" ]]; then
     if [[ -n "$review_gpt_round_number" ]] \
       || [[ -n "$review_gpt_first_reviewed_head" ]] \
-      || [[ -n "$review_gpt_previous_reviewed_head" ]]; then
+      || [[ -n "$review_gpt_previous_reviewed_head" ]] \
+      || [[ -n "$review_gpt_context_anchor_head" ]]; then
       echo "Error: preliminary specialist review must not set final ReviewGPT round metadata." >&2
       exit 1
     fi
@@ -181,8 +192,17 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       "$review_gpt_recorded_first_head"
 
     if [[ "$review_gpt_round_number" == "1" ]]; then
+      if [[ -n "$review_gpt_full_review_reason" ]]; then
+        echo "Error: REVIEW_GPT_FULL_REVIEW_REASON is only valid for round 2 or later." >&2
+        exit 1
+      fi
       if [[ -n "$review_gpt_previous_reviewed_head" ]]; then
         echo "Error: REVIEW_GPT_PREVIOUS_REVIEWED_HEAD must be unset for round 1." >&2
+        exit 1
+      fi
+      if [[ -n "$review_gpt_context_anchor_head" ]] \
+        && [[ "$review_gpt_context_anchor_head" != "$review_gpt_head_oid" ]]; then
+        echo "Error: round 1 context anchor must equal the current PR head." >&2
         exit 1
       fi
       if [[ -n "$review_gpt_first_reviewed_head" ]] \
@@ -195,6 +215,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
         exit 1
       fi
       review_gpt_first_reviewed_head="$review_gpt_recorded_first_head"
+      review_gpt_context_anchor_head="$review_gpt_head_oid"
     else
       if [[ -z "$review_gpt_first_reviewed_head" ]] \
         || [[ -z "$review_gpt_previous_reviewed_head" ]]; then
@@ -213,6 +234,17 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       if [[ "$review_gpt_previous_reviewed_head" == "$review_gpt_head_oid" ]]; then
         echo "Error: later ReviewGPT rounds require a new PR head; tooling retries reuse the same round." >&2
         exit 1
+      fi
+      if [[ -z "$review_gpt_full_review_reason" ]]; then
+        review_gpt_context_mode="same_thread_delta"
+        review_gpt_context_anchor_head="${review_gpt_context_anchor_head:-$review_gpt_first_reviewed_head}"
+      else
+        if [[ -n "$review_gpt_context_anchor_head" ]] \
+          && [[ "$review_gpt_context_anchor_head" != "$review_gpt_head_oid" ]]; then
+          echo "Error: a full-snapshot context anchor must equal the current PR head." >&2
+          exit 1
+        fi
+        review_gpt_context_anchor_head="$review_gpt_head_oid"
       fi
     fi
   fi
@@ -246,6 +278,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/review-phase.json"$'\n'"agent-docs/FRONTEND.md"$'\n'"PRODUCT.md"$'\n'"DESIGN.md"$'\n'"agent-docs/prompts/product-experience-review.md"$'\n'"agent-docs/prompts/prompt-review.md"$'\n'"agent-docs/prompts/frontend-review.md"$'\n'"agent-docs/prompts/coverage-write.md"
   else
     review_gpt_require_available_commit "first-reviewed head" "$review_gpt_first_reviewed_head"
+    review_gpt_require_available_commit "context anchor head" "$review_gpt_context_anchor_head"
     review_gpt_require_available_commit "current reviewed head" "$review_gpt_head_oid"
     review_gpt_first_head_is_ancestor="$(
       review_gpt_is_ancestor "$review_gpt_first_reviewed_head" "$review_gpt_head_oid"
@@ -257,6 +290,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     review_gpt_review_scope="full"
     review_gpt_previous_head_json="null"
     review_gpt_previous_head_is_ancestor_json="null"
+    review_gpt_context_anchor_is_ancestor_of_previous_json="null"
     if [[ "$review_gpt_round_number" == "1" ]]; then
       : > "$review_gpt_pr_context_dir/since-first-reviewed-head.diff"
       : > "$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"
@@ -265,14 +299,30 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       git diff --no-ext-diff --no-textconv --patch \
         "$review_gpt_previous_reviewed_head" "$review_gpt_head_oid" -- \
         > "$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"
-      git diff --no-ext-diff --no-textconv --patch \
-        "$review_gpt_first_reviewed_head" "$review_gpt_head_oid" -- \
-        > "$review_gpt_pr_context_dir/since-first-reviewed-head.diff"
+      git diff --name-only \
+        "$review_gpt_previous_reviewed_head" "$review_gpt_head_oid" -- \
+        > "$review_gpt_pr_context_dir/changed-since-previous-reviewed-head.txt"
+      if [[ "$review_gpt_context_mode" == "full_snapshot" ]]; then
+        git diff --no-ext-diff --no-textconv --patch \
+          "$review_gpt_first_reviewed_head" "$review_gpt_head_oid" -- \
+          > "$review_gpt_pr_context_dir/since-first-reviewed-head.diff"
+        printf '%s\n' "$review_gpt_full_review_reason" \
+          > "$review_gpt_pr_context_dir/full-review-reason.txt"
+      fi
       review_gpt_review_scope="correction"
       review_gpt_previous_head_json="\"$review_gpt_previous_reviewed_head\""
       review_gpt_previous_head_is_ancestor_json="$(
         review_gpt_is_ancestor "$review_gpt_previous_reviewed_head" "$review_gpt_head_oid"
       )"
+      if [[ "$review_gpt_context_mode" == "same_thread_delta" ]]; then
+        review_gpt_context_anchor_is_ancestor_of_previous_json="$(
+          review_gpt_is_ancestor "$review_gpt_context_anchor_head" "$review_gpt_previous_reviewed_head"
+        )"
+        if [[ "$review_gpt_context_anchor_is_ancestor_of_previous_json" != "true" ]]; then
+          echo "Error: context anchor head must be an ancestor of the previous reviewed head." >&2
+          exit 1
+        fi
+      fi
     fi
 
     {
@@ -280,46 +330,91 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       printf '  "schemaVersion": 1,\n'
       printf '  "roundNumber": %s,\n' "$review_gpt_round_number"
       printf '  "reviewScope": "%s",\n' "$review_gpt_review_scope"
+      printf '  "contextMode": "%s",\n' "$review_gpt_context_mode"
+      printf '  "contextAnchorHead": "%s",\n' "$review_gpt_context_anchor_head"
       printf '  "currentBaseHead": "%s",\n' "$review_gpt_base_oid"
       printf '  "firstReviewedHead": "%s",\n' "$review_gpt_first_reviewed_head"
       printf '  "previousReviewedHead": %s,\n' "$review_gpt_previous_head_json"
       printf '  "currentReviewedHead": "%s",\n' "$review_gpt_head_oid"
       printf '  "firstReviewedHeadIsAncestorOfCurrent": %s,\n' "$review_gpt_first_head_is_ancestor"
-      printf '  "previousReviewedHeadIsAncestorOfCurrent": %s\n' \
+      printf '  "previousReviewedHeadIsAncestorOfCurrent": %s,\n' \
         "$review_gpt_previous_head_is_ancestor_json"
+      printf '  "contextAnchorHeadIsAncestorOfPrevious": %s\n' \
+        "$review_gpt_context_anchor_is_ancestor_of_previous_json"
       printf '}\n'
     } > "$review_gpt_pr_context_dir/review-round.json"
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/review-round.json"$'\n'"$review_gpt_pr_context_dir/since-first-reviewed-head.diff"$'\n'"$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/review-round.json"$'\n'"$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"
+    if [[ "$review_gpt_round_number" == "1" ]]; then
+      COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/since-first-reviewed-head.diff"
+    elif [[ "$review_gpt_context_mode" == "full_snapshot" ]]; then
+      COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/since-first-reviewed-head.diff"$'\n'"$review_gpt_pr_context_dir/changed-since-previous-reviewed-head.txt"$'\n'"$review_gpt_pr_context_dir/full-review-reason.txt"
+    else
+      COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/changed-since-previous-reviewed-head.txt"
+    fi
   fi
   if [[ "$review_gpt_review_phase" == "preliminary" ]] \
     || [[ -n "$review_gpt_rendered_evidence_paths" ]]; then
     COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/rendered-evidence.txt"
     review_gpt_add_rendered_evidence
   fi
-  COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$(cat "$review_gpt_pr_context_dir/changed-files.txt")"
+
+  if [[ "$review_gpt_context_mode" == "same_thread_delta" ]]; then
+    review_gpt_correction_paths="$review_gpt_pr_context_dir/pr-body.md"$'\n'"$review_gpt_pr_context_dir/review-round.json"$'\n'"$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"$'\n'"$review_gpt_pr_context_dir/changed-since-previous-reviewed-head.txt"
+    while IFS= read -r review_gpt_correction_path; do
+      [[ -z "$review_gpt_correction_path" ]] && continue
+      if [[ -f "$review_gpt_correction_path" ]] && [[ ! -L "$review_gpt_correction_path" ]]; then
+        review_gpt_correction_paths="$review_gpt_correction_paths"$'\n'"$review_gpt_correction_path"
+      fi
+    done < "$review_gpt_pr_context_dir/changed-since-previous-reviewed-head.txt"
+    if [[ -f "$review_gpt_pr_context_dir/rendered-evidence.txt" ]]; then
+      review_gpt_correction_paths="$review_gpt_correction_paths"$'\n'"$review_gpt_pr_context_dir/rendered-evidence.txt"
+      while IFS= read -r review_gpt_correction_evidence_path; do
+        [[ -z "$review_gpt_correction_evidence_path" ]] && continue
+        review_gpt_correction_paths="$review_gpt_correction_paths"$'\n'"$review_gpt_correction_evidence_path"
+      done < "$review_gpt_pr_context_dir/rendered-evidence.txt"
+    fi
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$review_gpt_correction_paths"
+  fi
+  if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$(cat "$review_gpt_pr_context_dir/changed-files.txt")"
+  fi
   export COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS
 fi
 
 # Root dotfiles are not discovered by the ordinary source scan, but Crabbox
 # reviews depend on this provider/ref trust-root configuration even when the
 # current patch changes only its consumers.
-COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'".crabbox.yaml"
+if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
+  COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'".crabbox.yaml"
+fi
 export COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS
 
-export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'
-export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'
-export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'
+if [[ "$review_gpt_context_mode" == "same_thread_delta" ]]; then
+  export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='0'
+  export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='0'
+  export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='0'
+  export COBUILD_AUDIT_CONTEXT_SCAN_SPECS='review-gpt-pr-context:__always_paths_only__'
+  export COBUILD_AUDIT_CONTEXT_TEST_SCAN_SPECS='review-gpt-pr-context:__always_paths_only__'
+  export COBUILD_AUDIT_CONTEXT_DOC_SCAN_SPECS='review-gpt-pr-context:__always_paths_only__'
+  export COBUILD_AUDIT_CONTEXT_CI_SCAN_SPECS='review-gpt-pr-context:__always_paths_only__'
+else
+  export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'
+  export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'
+  export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'
+fi
 export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS="${COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS:-}"
-repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
-  "agent-docs/product-specs" \
-  "config" \
-  "packages" \
-  "src" \
-  "app" \
-  "apps" \
-  "contracts" \
-  "scripts" \
-  "docs"
+if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
+  repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
+    "agent-docs/product-specs" \
+    "config" \
+    "packages" \
+    "src" \
+    "app" \
+    "apps" \
+    "contracts" \
+    "scripts" \
+    "docs"
+fi
 package_audit_context_bin="$(cobuild_repo_tool_bin cobuild-package-audit-context)"
 if [[ "$review_gpt_cleanup_pr_context" == "1" ]]; then
   "$package_audit_context_bin" "$@"
