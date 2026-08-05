@@ -56,6 +56,7 @@ import {
   buildLinqIMessageAppLayout,
   encodeAppCardDataUrl,
   type AssistantResponseCard,
+  type LinqIMessageAppLayout,
 } from './assistant-response-cards.js'
 import type {
   AssistantMessageReaction,
@@ -202,14 +203,10 @@ type LinqIMessageAppCardRequest = {
         bundle_id: 'ai.withmurph.app.messages'
         app_store_id: 6786145859
       }
-      interactive: true
+      interactive: false
       url: string
       fallback_text: 'Open your Murph nutrition summary'
-      layout: {
-        caption: 'Murph'
-        subcaption: 'Nutrition summary'
-        trailing_caption: 'OPEN'
-      }
+      layout: LinqIMessageAppLayout
     }]
   }
 }
@@ -698,7 +695,7 @@ export async function sendLinqIMessageAppCard(
           bundle_id: 'ai.withmurph.app.messages',
           app_store_id: 6786145859,
         },
-        interactive: true,
+        interactive: false,
         url: encodeAppCardDataUrl(input.card),
         fallback_text: LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
         layout: buildLinqIMessageAppLayout(input.card),
