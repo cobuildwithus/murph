@@ -53,21 +53,16 @@ export function buildHostedVeniceResponsesRequestBody(input: {
     return null;
   }
   const upstreamModel = HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[record.model];
-  const hasResponsesLiteTools = Array.isArray(record.input)
-    && record.input.some((item) =>
-      isJsonObject(item) && item.type === "additional_tools"
-    );
-  const providerRecord = normalizeHostedVeniceResponsesLiteTools(record);
+  const providerRecord = adaptHostedVeniceResponsesLiteRequest(
+    record,
+    input.pathnameSuffix,
+  );
   if (!providerRecord) {
     return null;
   }
-  const cacheCompatibleRecord = input.pathnameSuffix === "/responses"
-    && hasResponsesLiteTools
-    ? addHostedVenicePromptCacheBreakpoint(providerRecord)
-    : providerRecord;
 
   return JSON.stringify({
-    ...cacheCompatibleRecord,
+    ...providerRecord,
     model: `${upstreamModel}:${HOSTED_VENICE_REQUIRED_MODEL_SUFFIX}`,
   });
 }
@@ -155,8 +150,9 @@ function hasPromptCacheBreakpoint(input: unknown[]): boolean {
   );
 }
 
-function normalizeHostedVeniceResponsesLiteTools(
+function adaptHostedVeniceResponsesLiteRequest(
   record: Record<string, unknown>,
+  pathnameSuffix: string,
 ): Record<string, unknown> | null {
   if (!Array.isArray(record.input)) {
     return record;
@@ -200,11 +196,14 @@ function normalizeHostedVeniceResponsesLiteTools(
     return null;
   }
 
-  return {
+  const providerRecord = {
     ...record,
     input: providerInput,
     tools: responsesLiteTools,
   };
+  return pathnameSuffix === "/responses"
+    ? addHostedVenicePromptCacheBreakpoint(providerRecord)
+    : providerRecord;
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
