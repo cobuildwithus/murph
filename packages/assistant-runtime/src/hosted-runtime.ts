@@ -200,7 +200,7 @@ import {
   readHostedSystemMailboxHandledThroughSeq,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
-  compactHostedConversationMailboxHandledItemIds,
+  compactHostedConversationMailboxHandledItemSelection,
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
@@ -3133,11 +3133,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 assistantAskRequestTargetKind: "joined_group" as const,
               }
             : wakeInitialMailboxImportContext;
+        const foregroundProbeRequestIdKind =
+          input.rearmIdleCheckpointAfterEmptyProbe
+            ? `${input.requestIdKind}-rearm`
+            : input.requestIdKind;
         const initialMailboxPrefetch = await createHostedForegroundMailboxPrefetch({
           lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
           limitPerLane: mailboxBudget.fetchLimitPerLane,
           requestId:
-            `${requestId}:${input.requestIdKind}-foreground-prefetch:${idleWakeOrdinal + 1}`,
+            `${requestId}:${foregroundProbeRequestIdKind}-foreground-prefetch:${idleWakeOrdinal + 1}`,
           runnerInput: baseRunnerInput,
         });
         if (!shouldContinue()) {
@@ -3161,7 +3165,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             initialMailboxImportLanes: lanes,
             initialMailboxPrefetch,
             requestId:
-              `${requestId}:${input.requestIdKind}-foreground-import:${idleWakeOrdinal}`,
+              `${requestId}:${foregroundProbeRequestIdKind}-foreground-import:${idleWakeOrdinal}`,
             signal: importSignal,
             workspace: passWorkspace,
           });
@@ -3261,6 +3265,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           systemImport.importResult.importedCount === 0
           && !systemImport.importResult.blocked.some((item) => item.retryable)
         ) {
+          deferCheckpointAfterEmptyForegroundProbe(systemImport);
           await finishMailboxImportWithoutAssistant(systemImport);
           return false;
         }
@@ -5129,8 +5134,8 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   }
 
   input.assertRuntimeNotAborted();
-  const handledConversationMailboxItemIds =
-    await compactHostedConversationMailboxHandledItemIds({
+  const handledConversationMailboxSelection =
+    await compactHostedConversationMailboxHandledItemSelection({
       consumedThroughSeq: readHostedConversationConsumedSeqFromStatus(
         input.redactedStatus,
       ),
@@ -5145,7 +5150,10 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     vaultRoot: input.vaultRoot,
   });
   const checkpointInput = {
-    handledConversationMailboxItemIds,
+    handledConversationFrontierSelected:
+      handledConversationMailboxSelection.frontierSelected,
+    handledConversationMailboxItemIds:
+      handledConversationMailboxSelection.itemIds,
     ...(input.idleCheckpointTrigger
       ? { idleCheckpointTrigger: input.idleCheckpointTrigger }
       : {}),

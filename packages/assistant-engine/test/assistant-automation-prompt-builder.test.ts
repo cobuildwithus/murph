@@ -1840,6 +1840,27 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result.prompt).toContain('- inbox projection: pending')
     expect(result.prompt).toContain('- raw evidence: not_attempted')
     expect(result.prompt).not.toContain('- parser output:')
+    expect(result.prompt).toContain(
+      'If the request does not depend on attachment contents, continue from available context without claiming inspection.',
+    )
+    expect(result.prompt).toContain(
+      'If it does depend and `murph.send_progress_update` is available, call it once with a brief acknowledgment.',
+    )
+    expect(result.prompt).toContain(
+      'For that attachment-dependent work, keep this turn active for up to 30 seconds total',
+    )
+    expect(result.prompt).toContain(
+      'recheck `raw/inbox/**` for a newly readable file matching this input\'s descriptor metadata',
+    )
+    expect(result.prompt).toContain(
+      'If it does not appear within 30 seconds, say the attachment is not yet available.',
+    )
+    expect(result.prompt).toContain(
+      'Do not claim inspection or escalate product feedback solely because hydration is still pending.',
+    )
+    expect(result.prompt).not.toContain(
+      'respond using any other available message context',
+    )
     expect(result.prompt).toContain('Attachment 1\nfileName: private-photo.jpg')
     expect(result.prompt).toContain('kind: image')
     expect(result.prompt).toContain('mime: image/jpeg')

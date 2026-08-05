@@ -248,7 +248,9 @@ describe("cloudflare worker routes", () => {
     expect(workerSource).not.toContain("startStuckInvocationForTest");
     expect(workerSource).not.toContain("readActiveRuntimeFenceForTest");
     expect(workerSource).not.toContain("armCanonicalCheckpointLostAckForTest");
+    expect(workerSource).not.toContain("foregroundPriorityOrderingControlForTest");
     expect(workerSource).not.toContain("armSnapshotPublicationCorruptionForTest");
+    expect(workerSource).not.toContain("armIdleSnapshotStartBarrierForTest");
     expect(workerSource).not.toContain("armShutdownCheckpointPublicationBarrierForTest");
     expect(workerSource).not.toContain("beginShutdownCheckpointGracefulStopForTest");
     expect(workerSource).not.toContain("readShutdownCheckpointPublicationBarrierForTest");
@@ -351,6 +353,7 @@ describe("cloudflare worker routes", () => {
       "test-run-until-idle",
       "test-run-alarm",
       "test-canonical-checkpoint-lost-ack",
+      "test-foreground-priority-ordering",
       "test-arm-generated-image-provider-barrier",
       "test-release-generated-image-provider-barrier",
       "test-snapshot-publication-corruption",
@@ -1287,6 +1290,22 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution bound user does not match the test runner user.",
     });
 
+    const foregroundPriorityOrderingResponse = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123"
+          + "/foreground-priority-ordering?action=status",
+        { method: "POST" },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(foregroundPriorityOrderingResponse.status).toBe(401);
+    await expect(foregroundPriorityOrderingResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test runner user.",
+    });
+
     const snapshotPublicationCorruptionResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/snapshot-publication-corruption",
@@ -1690,6 +1709,8 @@ describe("cloudflare worker routes", () => {
       vi.fn(async () => ({ ok: true as const }));
     const armCanonicalCheckpointPublicationBarrierForTest =
       vi.fn(async () => ({ ok: true as const }));
+    const armIdleSnapshotStartBarrierForTest =
+      vi.fn(async () => ({ ok: true as const }));
     const beginShutdownCheckpointGracefulStopForTest =
       vi.fn(async () => ({ ok: true as const }));
     const readShutdownCheckpointPublicationBarrierForTest =
@@ -1699,6 +1720,7 @@ describe("cloudflare worker routes", () => {
     const getByName = vi.fn((name: string) => ({
       ...baseRunnerContainerNamespace.getByName(name),
       armCanonicalCheckpointPublicationBarrierForTest,
+      armIdleSnapshotStartBarrierForTest,
       armShutdownCheckpointPublicationBarrierForTest,
       beginShutdownCheckpointGracefulStopForTest,
       readShutdownCheckpointPublicationBarrierForTest,
@@ -1712,7 +1734,13 @@ describe("cloudflare worker routes", () => {
       },
     });
     const request = async (
-      action: "arm" | "arm-canonical" | "release" | "shutdown" | "status",
+      action:
+        | "arm"
+        | "arm-canonical"
+        | "arm-snapshot-start"
+        | "release"
+        | "shutdown"
+        | "status",
     ) =>
       await hostedLocalTestWorker.fetch(
         await signControlRequest(new Request(
@@ -1727,6 +1755,7 @@ describe("cloudflare worker routes", () => {
 
     const armResponse = await request("arm");
     const armCanonicalResponse = await request("arm-canonical");
+    const armSnapshotStartResponse = await request("arm-snapshot-start");
     const statusResponse = await request("status");
     const shutdownResponse = await request("shutdown");
     const releaseResponse = await request("release");
@@ -1735,6 +1764,8 @@ describe("cloudflare worker routes", () => {
     await expect(armResponse.json()).resolves.toEqual({ ok: true });
     expect(armCanonicalResponse.status).toBe(200);
     await expect(armCanonicalResponse.json()).resolves.toEqual({ ok: true });
+    expect(armSnapshotStartResponse.status).toBe(200);
+    await expect(armSnapshotStartResponse.json()).resolves.toEqual({ ok: true });
     expect(statusResponse.status).toBe(200);
     await expect(statusResponse.json()).resolves.toEqual({ state: "entered" });
     expect(shutdownResponse.status).toBe(200);
@@ -1746,6 +1777,9 @@ describe("cloudflare worker routes", () => {
       userId: "member_123",
     });
     expect(armCanonicalCheckpointPublicationBarrierForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(armIdleSnapshotStartBarrierForTest).toHaveBeenCalledWith({
       userId: "member_123",
     });
     expect(readShutdownCheckpointPublicationBarrierForTest).toHaveBeenCalledWith({
@@ -1762,6 +1796,77 @@ describe("cloudflare worker routes", () => {
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123"
           + "/shutdown-checkpoint-publication-barrier?action=arm&extra=1",
+        { method: "POST" },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+    expect(invalidResponse.status).toBe(400);
+  });
+
+  it("maps the user-scoped foreground-priority ordering controls", async () => {
+    const baseRunnerContainerNamespace = createRunnerContainerNamespace();
+    const foregroundPriorityOrderingControlForTest = vi.fn(
+      async (input: unknown) => input,
+    );
+    const getByName = vi.fn((name: string) => ({
+      ...baseRunnerContainerNamespace.getByName(name),
+      foregroundPriorityOrderingControlForTest,
+    }));
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+      RUNNER_CONTAINER: {
+        getByName,
+      },
+    });
+    const request = async (action: string) =>
+      await hostedLocalTestWorker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/__test/users/member_123"
+            + `/foreground-priority-ordering?action=${action}`,
+          { method: "POST" },
+        ), {
+          boundUserId: "member_123",
+        }),
+        env,
+      );
+
+    for (const action of [
+      "arm-canonical",
+      "arm-empty-probe",
+      "clear",
+      "provider-start",
+      "release",
+      "status",
+    ]) {
+      const response = await request(action);
+      expect(response.status).toBe(200);
+    }
+
+    expect(foregroundPriorityOrderingControlForTest.mock.calls).toEqual([
+      [{
+        action: "arm",
+        barrierTarget: "canonical_post_commit",
+        userId: "member_123",
+      }],
+      [{
+        action: "arm",
+        barrierTarget: "empty_conversation_probe",
+        userId: "member_123",
+      }],
+      [{ action: "clear", userId: "member_123" }],
+      [{ action: "record-provider-start", userId: "member_123" }],
+      [{ action: "release", userId: "member_123" }],
+      [{ action: "status", userId: "member_123" }],
+    ]);
+    expect(getByName).toHaveBeenCalledWith(expect.stringContaining("member_123"));
+
+    const invalidResponse = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123"
+          + "/foreground-priority-ordering?action=status&extra=1",
         { method: "POST" },
       ), {
         boundUserId: "member_123",
