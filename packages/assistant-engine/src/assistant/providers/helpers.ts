@@ -638,7 +638,6 @@ const ASSISTANT_TURN_PROFILE_BATCH_COMMAND_PATHS = new Set([
   'meal show',
   'meal totals',
 ])
-const ASSISTANT_TURN_PROFILE_BATCH_COMMAND_LIMIT = 8
 
 interface AssistantTurnProfileToolAggregate {
   calls: number
@@ -646,11 +645,6 @@ interface AssistantTurnProfileToolAggregate {
   failedCalls: number
   label: string
   outputChars: number
-}
-
-interface AssistantTurnProfileToolRead {
-  aggregates: AssistantTurnProfileToolAggregate[]
-  truncated: boolean
 }
 
 // Compact per-turn profile derived entirely from notifications Codex already
@@ -685,7 +679,6 @@ export function buildAssistantCodexTurnProfileJson(input: {
   }
 
   const toolsByLabel = new Map<string, AssistantTurnProfileToolAggregate>()
-  let toolReadsTruncated = false
   const startIndex = findAssistantCodexTurnStartedEventIndex(input) ?? 0
   for (let index = startIndex; index < input.rawEvents.length; index += 1) {
     const record = readAssistantProviderRecord(input.rawEvents[index])
@@ -707,13 +700,12 @@ export function buildAssistantCodexTurnProfileJson(input: {
 
     const params = readAssistantProviderRecord(record?.params)
     const item = readAssistantProviderRecord(params?.item)
-    const toolRead = readAssistantTurnProfileToolAggregates(item)
-    if (!toolRead) {
+    const toolAggregates = readAssistantTurnProfileToolAggregates(item)
+    if (!toolAggregates) {
       continue
     }
-    toolReadsTruncated ||= toolRead.truncated
 
-    for (const aggregate of toolRead.aggregates) {
+    for (const aggregate of toolAggregates) {
       const existing = toolsByLabel.get(aggregate.label)
       if (existing) {
         existing.calls += aggregate.calls
@@ -750,14 +742,13 @@ export function buildAssistantCodexTurnProfileJson(input: {
       label: tool.label,
       outputChars: tool.outputChars,
     })),
-    toolsTruncated:
-      toolReadsTruncated || tools.length > ASSISTANT_TURN_PROFILE_MAX_TOOLS,
+    toolsTruncated: tools.length > ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   }
 }
 
 function readAssistantTurnProfileToolAggregates(
   item: Record<string, unknown> | null,
-): AssistantTurnProfileToolRead | null {
+): AssistantTurnProfileToolAggregate[] | null {
   const itemType = readAssistantProviderString(item?.type)
   if (!item || !itemType) {
     return null
@@ -770,19 +761,16 @@ function readAssistantTurnProfileToolAggregates(
       return batchRead
     }
 
-    return {
-      aggregates: [{
-        calls: 1,
-        durationMs: readAssistantProviderInteger(item, 'durationMs', 'duration_ms') ?? 0,
-        failedCalls: isAssistantTurnProfileFailedTool(item) ? 1 : 0,
-        label: buildAssistantTurnProfileCommandLabel(
-          readAssistantProviderString(item.command),
-          item.commandActions ?? item.command_actions,
-        ),
-        outputChars: readAssistantTurnProfileTextLength(aggregatedOutput),
-      }],
-      truncated: false,
-    }
+    return [{
+      calls: 1,
+      durationMs: readAssistantProviderInteger(item, 'durationMs', 'duration_ms') ?? 0,
+      failedCalls: isAssistantTurnProfileFailedTool(item) ? 1 : 0,
+      label: buildAssistantTurnProfileCommandLabel(
+        readAssistantProviderString(item.command),
+        item.commandActions ?? item.command_actions,
+      ),
+      outputChars: readAssistantTurnProfileTextLength(aggregatedOutput),
+    }]
   }
 
   if (itemType === 'mcpToolCall' || itemType === 'dynamicToolCall') {
@@ -794,16 +782,13 @@ function readAssistantTurnProfileToolAggregates(
       )
       .join('.')
 
-    return {
-      aggregates: [{
-        calls: 1,
-        durationMs: readAssistantProviderInteger(item, 'durationMs', 'duration_ms') ?? 0,
-        failedCalls: isAssistantTurnProfileFailedTool(item) ? 1 : 0,
-        label: truncateAssistantTurnProfileLabel(label.length > 0 ? label : itemType),
-        outputChars: readAssistantTurnProfileTextLength(item.result),
-      }],
-      truncated: false,
-    }
+    return [{
+      calls: 1,
+      durationMs: readAssistantProviderInteger(item, 'durationMs', 'duration_ms') ?? 0,
+      failedCalls: isAssistantTurnProfileFailedTool(item) ? 1 : 0,
+      label: truncateAssistantTurnProfileLabel(label.length > 0 ? label : itemType),
+      outputChars: readAssistantTurnProfileTextLength(item.result),
+    }]
   }
 
   return null
@@ -811,7 +796,7 @@ function readAssistantTurnProfileToolAggregates(
 
 function readAssistantTurnProfileBatchToolAggregates(
   value: unknown,
-): AssistantTurnProfileToolRead | null {
+): AssistantTurnProfileToolAggregate[] | null {
   if (typeof value !== 'string' || value.length === 0) {
     return null
   }
@@ -843,7 +828,7 @@ function readAssistantTurnProfileBatchToolAggregates(
 
   const aggregates: AssistantTurnProfileToolAggregate[] = []
   let failedCommands = 0
-  for (const [index, value] of commands.entries()) {
+  for (const value of commands) {
     const command = readAssistantProviderRecord(value)
     const argv = command?.argv
     const durationMs = command?.durationMs
@@ -867,9 +852,6 @@ function readAssistantTurnProfileBatchToolAggregates(
     if (!ok) {
       failedCommands += 1
     }
-    if (index >= ASSISTANT_TURN_PROFILE_BATCH_COMMAND_LIMIT) {
-      continue
-    }
 
     const family = argv[0]
     const subcommand = argv[1]
@@ -891,10 +873,7 @@ function readAssistantTurnProfileBatchToolAggregates(
     return null
   }
 
-  return {
-    aggregates,
-    truncated: commands.length > ASSISTANT_TURN_PROFILE_BATCH_COMMAND_LIMIT,
-  }
+  return aggregates
 }
 
 function isAssistantTurnProfileFailedTool(item: Record<string, unknown>): boolean {

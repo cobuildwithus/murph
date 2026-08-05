@@ -811,17 +811,20 @@ describe('Codex assistant registry helpers', () => {
     }
   })
 
-  it('marks structured batch telemetry truncated beyond its bounded child limit', () => {
+  it('attributes every structured batch child before the profile family cap', () => {
     const commands = Array.from({ length: 10 }, (_, index) => ({
       argv: index < 8
         ? ['goal', 'list', '--private-filter', `private-${index}`]
-        : ['food', 'search-labels-batch', '--query', `private-${index}`],
+        : index === 8
+          ? ['food', 'search-labels-batch', '--query', `private-${index}`]
+          : ['meal', 'add', '--note', `private-${index}`],
       data: { privateResult: `private-output-${index}` },
-      durationMs: index + 1,
+      durationMs: index === 8 ? 12_000 : index === 9 ? 100 : index + 1,
+      error: index === 8 ? { message: 'private-failure' } : undefined,
       index,
-      ok: true,
-      outputChars: 10,
-      stdout: '',
+      ok: index !== 8,
+      outputChars: index === 8 ? 500_000 : index === 9 ? 200 : 10,
+      stdout: index === 8 ? 'private-large-output' : '',
     }))
     const profile = buildAssistantCodexTurnProfileJson({
       rawEvents: [
@@ -834,7 +837,7 @@ describe('Codex assistant registry helpers', () => {
                 schema: VAULT_CLI_BATCH_RESULT_SCHEMA,
                 commands,
                 count: commands.length,
-                failed: 0,
+                failed: 1,
                 vault: '/private/member/vault',
               }),
               command: 'vault-cli batch --compact --format json',
@@ -850,13 +853,26 @@ describe('Codex assistant registry helpers', () => {
 
     expect(profile?.tools).toEqual([
       {
+        calls: 1,
+        durationMs: 12_000,
+        failedCalls: 1,
+        label: 'food.search-labels-batch',
+        outputChars: 500_000,
+      },
+      {
+        calls: 1,
+        durationMs: 100,
+        label: 'meal.add',
+        outputChars: 200,
+      },
+      {
         calls: 8,
         durationMs: 36,
         label: 'goal.list',
         outputChars: 80,
       },
     ])
-    expect(profile?.toolsTruncated).toBe(true)
+    expect(profile?.toolsTruncated).toBe(false)
     expect(JSON.stringify(profile)).not.toContain('private-')
     expect(JSON.stringify(profile)).not.toContain('/private/member/vault')
   })
