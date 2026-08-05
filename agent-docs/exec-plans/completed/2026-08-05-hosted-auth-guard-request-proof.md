@@ -1,6 +1,6 @@
 # Hosted Codex Auth Guard Request Proof
 
-Status: active
+Status: completed
 Created: 2026-08-05
 
 ## Goal
@@ -57,8 +57,23 @@ integrity guarantees.
   44 passed and 2 credential-gated cases skipped.
 - Passed `pnpm --filter @murphai/assistant-runtime typecheck`.
 - Passed `git diff --check` and the scoped direct-identifier/credential scan.
+- Exact-head GitHub Actions passed every substantive release, coverage, CLI,
+  repository-hygiene, and viewport check. The plan-closure commit will retrigger
+  those checks and the corrected PR-body architecture guard on the final head.
+- The preliminary completion-specialists pass returned no findings and
+  `SPECIALIST_OUTCOME: PASS`.
+- Final ReviewGPT round 1 returned no findings and `ROUND_OUTCOME: PASS` after
+  one tooling retry. The first attachment extraction omitted this plan even
+  though the PR diff referenced it; a freshly generated guarded ZIP was checked
+  locally for both changed files, and the unchanged exact head passed on a
+  different managed browser lane.
+- Parent review confirmed the final diff stays limited to the request-scoped
+  assertion and this plan, with no production runtime or configuration changes.
 
 ## State
 
-Focused implementation and local proof complete. PR review and exact-head gates
-remain pending.
+Implementation, local proof, preliminary specialist review, final ReviewGPT,
+and parent candidate review are complete with no findings. Archive this plan,
+push the docs-only closure commit, and confirm final-head CI and mergeability.
+Updated: 2026-08-05
+Completed: 2026-08-05
