@@ -95,6 +95,10 @@ Updated: 2026-08-04
   inspected preimage, so replay is idempotent at the tombstone, replaces only
   the original bytes, and rejects a third state. Legacy lazy snapshots
   materialize receipt targets before checking that preimage.
+- The existing execution-context normalizer preserves the generated-capture
+  persistence callback like its adjacent materialization capability. This is
+  the mandatory production boundary between the workspace runner and
+  synchronous/group generated-image tool contexts.
 
 ## Review anomaly retrospective
 
@@ -126,12 +130,14 @@ Updated: 2026-08-04
 ## Verification
 
 - Passed locally: core, assistant-engine, assistant-runtime, and hosted-Web
-  typechecks; 48 focused core tests; 95 image-generation/group-tool tests; the
-  complete 2,039-test assistant-runtime suite (2,036 passed, 3 skipped); 10
-  static Web migration tests; the local PostgreSQL re-arm proof;
-  workspace-boundary verification; documentation drift; and diff hygiene.
-- Remaining: exact-head GitHub Actions and final ReviewGPT correction
-  verification after accepted findings are pushed.
+  typechecks; the complete 774-test core suite including 48 focused retention
+  tests; 95 image-generation/group-tool tests; 66 assistant service/runtime
+  tests including the execution-context boundary regression; the complete
+  2,039-test assistant-runtime suite (2,036 passed, 3 skipped); 10 static Web
+  migration tests; the local PostgreSQL re-arm proof; workspace-boundary
+  verification; documentation drift; and diff hygiene.
+- Remaining: exact-head GitHub Actions and ReviewGPT round 4 after the accepted
+  round-3 execution-context finding is pushed.
 - Expected outcomes: old generated media is retired atomically and cannot be
   resurrected; fresh, unrelated, durable, and protected captures remain; all
   checks and reviews pass.

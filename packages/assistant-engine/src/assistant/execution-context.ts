@@ -621,6 +621,11 @@ export function normalizeAssistantExecutionContext(
             materializeWorkspaceArtifacts: hosted.materializeWorkspaceArtifacts,
           }
         : {}),
+      ...(typeof hosted?.persistGeneratedImageCapture === 'function'
+        ? {
+            persistGeneratedImageCapture: hosted.persistGeneratedImageCapture,
+          }
+        : {}),
       ...(defaultTarget
         ? {
             defaultTarget,
