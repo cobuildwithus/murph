@@ -1410,7 +1410,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Do not add generic consumer-health app examples or proactively name unsupported sources as caveats',
     )
     expect(prompt).toContain(
-      'If the user asks for a wearable/source other than Apple Health, WHOOP, or Zepp/Amazfit that is not in this list, say it is not supported yet',
+      'If the user asks for a wearable/source that is neither in this list nor named in the Apple Health relay section, say it is not supported yet',
     )
     expect(prompt).toContain(
       'Use `murph.device` to list accounts, create a real connection link, or queue reconciliation',
@@ -1423,7 +1423,7 @@ describe('assistant local PDF evidence guidance', () => {
       'It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.',
     )
     expect(prompt).toContain(
-      'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, or Zepp/Amazfit relay setup, open Murph, sign in, and connect Apple Health.',
+      'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.',
     )
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain('WHOOP limits third-party access')
@@ -1435,8 +1435,10 @@ describe('assistant local PDF evidence guidance', () => {
       'Zepp/Amazfit: share with Apple Health in Zepp',
     )
     expect(prompt).toContain(
-      'This relay has no direct cloud access or history backfill',
+      'Apple Health relay paths have no direct cloud access or guaranteed history backfill',
     )
+    expect(prompt).toContain('Xiaomi/Mi Fitness, RingConn, COROS, and Suunto')
+    expect(prompt).toContain('Huawei Health: Apple Health sharing varies')
     expect(prompt).toContain('Starting Murph: if asked how to begin')
     expect(prompt).toContain(MURPH_PRODUCT_ORIGIN)
     expect(prompt).toContain('accounts are created at')
@@ -1526,11 +1528,14 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain(
-      'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, or Zepp/Amazfit relay setup, open Murph, sign in, and connect Apple Health.',
+      'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.',
     )
     expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
     expect(prompt).toContain('WHOOP limits third-party access')
     expect(prompt).toContain('Zepp/Amazfit: share with Apple Health in Zepp')
+    expect(prompt).toContain('Xiaomi/Mi Fitness, RingConn, COROS, and Suunto')
+    expect(prompt).toContain('Huawei Health: Apple Health sharing varies')
+    expect(prompt).toContain('no direct cloud access or guaranteed history backfill')
     expect(prompt).toContain('accounts are created at')
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
     expect(prompt).toContain(

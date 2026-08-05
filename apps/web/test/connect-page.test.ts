@@ -170,7 +170,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
   assert.match(markup, /aria-label="Search sources"/);
-  assert.match(markup, />28 of 28 sources</);
+  assert.match(markup, />33 of 33 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
@@ -185,6 +185,11 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       body: "Help me set up Zepp/Amazfit through Apple Health. Please walk me through it with a voice memo.",
     },
   });
+  assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[2]?.[0], {
+    message: {
+      body: "Help me set up my wearable through Apple Health. Please walk me through it with a voice memo.",
+    },
+  });
 
   const sources = [
     {
@@ -196,6 +201,32 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       assetPath: "/brand-logos/connect/wearable-relay.svg",
       description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
       name: "Zepp / Amazfit",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description:
+        "Mi Band, Xiaomi Smart Band, and Redmi Watch activity, sleep, heart rate, and workouts through Apple Health.",
+      name: "Xiaomi / Mi Fitness",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description: "Smart-ring sleep, activity, heart rate, and supported data through Apple Health.",
+      name: "RingConn",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description: "Activity, sleep, heart rate, and supported workouts through Apple Health.",
+      name: "COROS",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description: "Activity, sleep, heart rate, and supported workouts through Apple Health.",
+      name: "Suunto",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description: "Selected watch and band data through Apple Health, where supported.",
+      name: "Huawei Health",
     },
     {
       assetPath: "/brand-logos/connect/whoop.svg",
@@ -329,9 +360,9 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     },
   ];
 
-  assert.equal(sources.length, 28);
-  assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length - 1);
-  assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length - 2);
+  assert.equal(sources.length, 33);
+  assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length - 6);
+  assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length - 7);
   assert.match(markup, /disabled=""/);
   assert.match(markup, /aria-label="Download app for Apple Health"/);
   assert.match(markup, /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859"/);
@@ -341,8 +372,17 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
   assert.match(markup, />Download app<\/a>/u);
-  assert.match(markup, /aria-label="Set up sync for Zepp \/ Amazfit"/u);
-  assert.match(markup, />Set up sync<\/button>/u);
+  for (const relayName of [
+    "Zepp / Amazfit",
+    "Xiaomi / Mi Fitness",
+    "RingConn",
+    "COROS",
+    "Suunto",
+    "Huawei Health",
+  ]) {
+    assert.match(markup, new RegExp(`aria-label="Set up sync for ${escapeRegExp(relayName)}"`, "u"));
+  }
+  assert.equal(markup.match(/>Set up sync<\/button>/gu)?.length, 6);
   assert.doesNotMatch(markup, /Not connected/u);
   assert.doesNotMatch(markup, />Connected</u);
   assert.doesNotMatch(markup, />Health Connect</u);
@@ -357,8 +397,13 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.ok(sourceHeadingIndex(markup, "Apple Health") < sourceHeadingIndex(markup, "Garmin"));
   assert.ok(sourceHeadingIndex(markup, "Garmin") < sourceHeadingIndex(markup, "Fitbit"));
   assert.ok(sourceHeadingIndex(markup, "Fitbit") < sourceHeadingIndex(markup, "Google Fit"));
-  assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Zepp / Amazfit"));
-  assert.ok(sourceHeadingIndex(markup, "Zepp / Amazfit") < sourceHeadingIndex(markup, "Withings"));
+  assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Xiaomi / Mi Fitness"));
+  assert.ok(sourceHeadingIndex(markup, "Xiaomi / Mi Fitness") < sourceHeadingIndex(markup, "Zepp / Amazfit"));
+  assert.ok(sourceHeadingIndex(markup, "Zepp / Amazfit") < sourceHeadingIndex(markup, "RingConn"));
+  assert.ok(sourceHeadingIndex(markup, "RingConn") < sourceHeadingIndex(markup, "COROS"));
+  assert.ok(sourceHeadingIndex(markup, "COROS") < sourceHeadingIndex(markup, "Suunto"));
+  assert.ok(sourceHeadingIndex(markup, "Suunto") < sourceHeadingIndex(markup, "Huawei Health"));
+  assert.ok(sourceHeadingIndex(markup, "Huawei Health") < sourceHeadingIndex(markup, "Withings"));
   assert.ok(sourceHeadingIndex(markup, "Withings") < sourceHeadingIndex(markup, "Oura"));
   assert.ok(sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"));
   assert.ok(sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "Dexcom"));
@@ -471,6 +516,28 @@ test("ConnectPage maps the Zepp setup Messages option at the server boundary", a
   });
 });
 
+test("ConnectPage maps the reusable Apple Health relay setup Messages option", async () => {
+  mocks.resolveHostedMurphContactOptions
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([
+      {
+        href: "sms:+15550100001?body=Help%20me%20set%20up%20my%20wearable",
+        kind: "text",
+        label: "Messages",
+      },
+    ]);
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
+  const page = await ConnectPage();
+
+  assert.deepEqual(readConnectSourcesGridProp(page, "appleHealthRelaySyncContactAction"), {
+    href: "sms:+15550100001?body=Help%20me%20set%20up%20my%20wearable",
+    kind: "imessage",
+    label: "Text Murph",
+  });
+});
+
 test("filterConnectSourcesForSearch matches source names, ids, and descriptions", async () => {
   const { filterConnectSourcesForSearch } = await import(
     "../app/(dashboard)/connect/connect-page-client"
@@ -488,6 +555,12 @@ test("filterConnectSourcesForSearch matches source names, ids, and descriptions"
       description: "Libre glucose history, sensor trends, and daily time-in-range context patterns.",
       logo: { className: "size-11 object-contain", height: 44, src: "/libre.png", width: 44 },
     },
+    {
+      id: "xiaomi-mi-fitness",
+      name: "Xiaomi / Mi Fitness",
+      description: "Mi Band and Redmi Watch data through Apple Health.",
+      logo: { className: "size-11 object-contain", height: 44, src: "/xiaomi.png", width: 44 },
+    },
   ];
 
   assert.deepEqual(
@@ -498,9 +571,14 @@ test("filterConnectSourcesForSearch matches source names, ids, and descriptions"
     filterConnectSourcesForSearch(sources, "freeStyle").map((source) => source.id),
     ["freestyle-libre"],
   );
+  assert.deepEqual(
+    filterConnectSourcesForSearch(sources, "mi band").map((source) => source.id),
+    ["xiaomi-mi-fitness"],
+  );
   assert.deepEqual(filterConnectSourcesForSearch(sources, "  ").map((source) => source.id), [
     "oura",
     "freestyle-libre",
+    "xiaomi-mi-fitness",
   ]);
 });
 
@@ -675,6 +753,54 @@ test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claimin
   assert.ok(rendered.container.querySelector(
     'a[href="https://apps.apple.com/us/app/murph-ai/id6786145859"]',
   ));
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid opens a reusable Xiaomi Apple Health setup guide", async () => {
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    appleHealthRelaySyncContactAction: {
+      href: "sms:+15550100001?body=Help%20me%20set%20up%20my%20wearable",
+      kind: "imessage",
+      label: "Text Murph",
+    },
+    sources: [
+      {
+        connectionAvailable: false,
+        description:
+          "Mi Band, Xiaomi Smart Band, and Redmi Watch activity, sleep, heart rate, and workouts through Apple Health.",
+        id: "xiaomi-mi-fitness",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 40,
+          src: "/brand-logos/connect/wearable-relay.svg",
+          width: 64,
+        },
+        name: "Xiaomi / Mi Fitness",
+        setupGuideActionLabel: "Set up sync",
+        setupGuideId: "xiaomi-mi-fitness-apple-health",
+      },
+    ],
+  }));
+
+  const setupButton = rendered.container.querySelector(
+    'button[aria-label="Set up sync for Xiaomi / Mi Fitness"]',
+  );
+  assert.ok(setupButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(rendered.container.querySelector("[data-connection-state]"), null);
+
+  await act(async () => {
+    setupButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Sync Xiaomi \/ Mi Fitness through Apple Health/,
+  );
+  assert.match(rendered.container.textContent ?? "", /Turn on Apple Health in Mi Fitness/);
+  assert.match(rendered.container.textContent ?? "", /Continue with Murph/);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /direct Xiaomi/u);
 
   await rendered.cleanup();
 });
