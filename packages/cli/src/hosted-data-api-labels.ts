@@ -166,6 +166,62 @@ const hostedDataApiLabelContaminantsSchema = z.object({
   observations: z.array(hostedDataApiLabelContaminantObservationSchema),
 })
 
+const hostedDataApiLabelContaminantSummaryResultSchema = z.object({
+  operator: hostedDataApiLabelContaminantResultOperatorSchema,
+  value: z.number().nonnegative().nullable(),
+  upperValue: z.number().nonnegative().nullable().optional(),
+  unit: z.string().min(1),
+  basis: z.string().min(1),
+})
+
+const hostedDataApiLabelContaminantSummarySourceSchema = z.object({
+  name: z.string().min(1),
+  reportDate: z.string().min(1).nullable(),
+})
+
+const hostedDataApiLabelContaminantSummarySchema = z.object({
+  status: z.enum(['no_known_product_tests', 'known_product_tests']),
+  murphConcernLevel: hostedDataApiLabelContaminantConcernSchema,
+  alertCount: z.number().int().nonnegative(),
+  alertsTruncated: z.boolean(),
+  alerts: z.array(z.object({
+    contaminantKey: z.string().min(1),
+    contaminantName: z.string().min(1),
+    concernLevel: z.enum(['low', 'medium', 'high']),
+    result: hostedDataApiLabelContaminantSummaryResultSchema.extend({
+      value: z.number().nonnegative(),
+    }).omit({ upperValue: true }),
+    threshold: z.object({
+      value: z.number().positive(),
+      unit: z.string().min(1),
+      basis: z.string().min(1),
+      authority: z.string().min(1),
+      name: z.string().min(1),
+    }),
+    screeningPolicy: z.object({
+      id: z.string().min(1),
+      assumedBodyWeightKg: z.number().positive(),
+      assumedServingsPerDay: z.number().positive(),
+      servingGrams: z.number().positive(),
+      exposure: z.object({
+        value: z.number().nonnegative(),
+        unit: z.string().min(1),
+        basis: z.string().min(1),
+      }),
+      ratio: z.number().nonnegative(),
+    }).optional(),
+    source: hostedDataApiLabelContaminantSummarySourceSchema,
+  })).max(5),
+  observationCount: z.number().int().nonnegative(),
+  observationsTruncated: z.boolean(),
+  observations: z.array(z.object({
+    contaminantKey: z.string().min(1),
+    contaminantName: z.string().min(1),
+    result: hostedDataApiLabelContaminantSummaryResultSchema,
+    source: hostedDataApiLabelContaminantSummarySourceSchema,
+  })).max(5),
+})
+
 export const hostedDataApiLabelSearchItemSchema = z.object({
   id: z.string().min(1),
   dataOrigin: z.string().min(1),
@@ -175,6 +231,7 @@ export const hostedDataApiLabelSearchItemSchema = z.object({
   upc: z.string().nullable(),
   offMarket: z.boolean(),
   label: z.json().optional(),
+  contaminantSummary: hostedDataApiLabelContaminantSummarySchema.optional(),
   contaminants: hostedDataApiLabelContaminantsSchema.optional(),
 })
 
@@ -198,18 +255,22 @@ export type HostedDataApiLabelBatchSearchInput = z.infer<typeof hostedDataApiLab
 export type HostedDataApiLabelSearchResultItem = z.infer<typeof hostedDataApiLabelSearchResultItemSchema>
 export type HostedDataApiLabelGenericSearchInput = HostedDataApiLabelSearchInput & {
   genericOnly?: boolean
+  nutritionOnly?: boolean
 }
 export type HostedDataApiLabelGenericBatchSearchInput = HostedDataApiLabelBatchSearchInput & {
   genericOnly?: boolean
+  nutritionOnly?: boolean
 }
 
 const hostedDataApiLabelGenericSearchInputSchema = hostedDataApiLabelSearchInputSchema.extend({
   genericOnly: z.boolean().optional(),
+  nutritionOnly: z.boolean().optional(),
 })
 
 const hostedDataApiLabelGenericBatchSearchInputSchema =
   hostedDataApiLabelBatchSearchInputSchema.extend({
     genericOnly: z.boolean().optional(),
+    nutritionOnly: z.boolean().optional(),
   })
 
 export type HostedDataApiLabelsDependencies = {
@@ -273,6 +334,7 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
     const limit = input.limit ?? DEFAULT_HOSTED_DATA_API_LABEL_LIMIT
     const includeOffMarket = input.includeOffMarket ?? false
     const genericOnly = input.genericOnly ?? false
+    const nutritionOnly = input.nutritionOnly ?? false
     const url = new URL(config.apiPath, apiBaseUrl)
     url.searchParams.set('q', input.q)
     url.searchParams.set('limit', String(limit))
@@ -281,6 +343,9 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
     }
     if (genericOnly) {
       url.searchParams.set('genericOnly', 'true')
+    }
+    if (nutritionOnly) {
+      url.searchParams.set('nutritionOnly', 'true')
     }
 
     const response = await fetchLabelsApi(config, fetchImpl, url, env)
@@ -306,12 +371,14 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
     const limit = input.limit ?? DEFAULT_HOSTED_DATA_API_LABEL_LIMIT
     const includeOffMarket = input.includeOffMarket ?? false
     const genericOnly = input.genericOnly ?? false
+    const nutritionOnly = input.nutritionOnly ?? false
     const url = new URL(config.apiPath, apiBaseUrl)
     const body = JSON.stringify({
       queries: input.queries,
       limit,
       includeOffMarket,
       ...(genericOnly ? { genericOnly } : {}),
+      ...(nutritionOnly ? { nutritionOnly } : {}),
     })
     const bodyBytes = Buffer.byteLength(body, 'utf8')
 

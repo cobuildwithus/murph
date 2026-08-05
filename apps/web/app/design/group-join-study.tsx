@@ -22,6 +22,27 @@ const DESIGN_ACTIVITY_SCOPE: HostedVaultShareProjectionScope = {
   projectionKind: "activity-days.v0",
 };
 
+const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
+  {
+    description:
+      "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+    label: "Deep sleep by source",
+    projectionScope: { projectionKind: "deep-sleep-sources-days.v1" },
+    projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
+      projectionKind: "deep-sleep-sources-days.v1",
+    }),
+  },
+  {
+    description:
+      "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
+    label: "REM sleep by source",
+    projectionScope: { projectionKind: "rem-sleep-sources-days.v1" },
+    projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
+      projectionKind: "rem-sleep-sources-days.v1",
+    }),
+  },
+];
+
 const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   {
     description: "Shares your last 7 days of active minutes.",
@@ -29,6 +50,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     projectionScope: DESIGN_ACTIVITY_SCOPE,
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey(DESIGN_ACTIVITY_SCOPE),
   },
+  ...DESIGN_SLEEP_SOURCE_PERMISSIONS,
   // The four gram-macro scopes render as a single "Daily macros" card; dietary
   // calories stay a separate "Daily calories" card.
   {
@@ -94,6 +116,25 @@ export function GroupJoinStudy() {
       id="group-join"
       inert
     >
+      <GroupJoinVariant
+        caption="A new sleep challenge asks for source names, each source's recorded time, and every available value under one exact consent choice. Provider-neutral legacy access stays separate."
+        title="Sleep sources · exact consent"
+      >
+        <GroupJoinPageMock alreadyActiveMember={false}>
+          <GroupJoinAcceptForm
+            activeVaultShareProjectionScopes={[]}
+            alreadyActiveMember={false}
+            expectedMembershipId={null}
+            groupName={DESIGN_GROUP_NAME}
+            joinCode={DESIGN_JOIN_CODE}
+            permissions={DESIGN_SLEEP_SOURCE_PERMISSIONS}
+            postJoinContactOption={null}
+            postJoinDestination="/home"
+          />
+          <GroupJoinHomeLink label="Not now" />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
       <GroupJoinVariant
         caption="A signed-out invitee who arrived from a group text sees only the phone-bound account path. The invite code stays attached through authentication so Murph can return them to this group."
         title="Message invite · signed out"
