@@ -58,10 +58,10 @@ Updated: 2026-08-04
 
 1. [x] Add the static layout and exact partial-card regression coverage.
 2. [x] Run focused tests, typecheck, and secret-safe diff review.
-3. [ ] Push the exact candidate, run required ReviewGPT gates with CI, and
-   resolve every accepted finding.
+3. [x] Push the exact candidate and run required ReviewGPT gates with CI.
 4. [ ] Close this plan through the scoped final commit and hand off deployment
-   verification.
+   verification after the accepted physical-device evidence finding is
+   resolved.
 
 ## Verification log
 
@@ -78,3 +78,18 @@ Updated: 2026-08-04
 - Agent-doc drift and doc-gardening checks passed with zero issues.
 - `git diff --check` and the changed-file identifier scan passed; no direct
   member or local-user identifiers are present in the change.
+- Every required exact-head GitHub Actions check passed on the pushed
+  candidate.
+- Final ReviewGPT round 1 passed with no findings after inspecting the full
+  patch, provider request, delivery callers, retry/fallback owners, schemas,
+  and runner dependency closure.
+- The preliminary product-experience and coverage review found no code or
+  coverage defect and returned no patch. It accepted one evidence-only gap at
+  the boundary that originally failed: a shipping iPhone must receive one
+  complete and one partial static card from this implementation and prove
+  visible balloons, truthful partial labeling, offline tap-through, and one
+  provider send without compensating text.
+- The local checkout intentionally has no live Linq credentials, and synthetic
+  nutrition values would be misleading. Keep the real-device scenario as a
+  post-deploy gate using fresh canonical cards rather than manufacturing a
+  health payload to close the evidence gap.
