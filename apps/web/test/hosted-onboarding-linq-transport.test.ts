@@ -528,6 +528,48 @@ describe("hosted Linq webhook transport", () => {
     expect(scheduleAfterResponse).not.toHaveBeenCalled();
   });
 
+  it("leaves uncorrelated recovery provider errors in flight", async () => {
+    vi.mocked(createHostedLinqChat).mockRejectedValueOnce(
+      new Error("provider replay timed out"),
+    );
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: "+15551234567",
+      },
+      sourceEventId: "event-group-line-recovery-timeout",
+      template: "group_line_recovery",
+      threadId: "chat-group-replay-timeout",
+    });
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await expect(drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      })).rejects.toThrow("provider replay timed out");
+
+      expect(markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it("rolls back before provider entry when the full request budget no longer remains", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -2446,6 +2488,92 @@ describe("hosted Linq webhook transport", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("durably records recovery acceptance before returning provider success", async () => {
+    const recoveryPhone = "+15550100042";
+    const memberPhone = "+15551234567";
+    const scheduleAfterResponse = vi.fn();
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: memberPhone,
+      },
+      sourceEventId: "event-group-line-recovery-correlation",
+      template: "group_line_recovery",
+      threadId: "chat-group-1",
+    });
+    const effectLookupKey =
+      createHostedLinqDeliveryIdempotencyLookupKey(effect.effectId);
+    const recoveryLookupKey = createHostedPhoneLookupKey(recoveryPhone);
+    if (!effectLookupKey || !recoveryLookupKey) {
+      throw new Error("Expected recovery delivery lookup keys.");
+    }
+    const sourceRef = buildHostedLinqGroupLineRecoverySourceRef({
+      effectId: effect.effectId,
+      sourceEventId: "event-group-line-recovery-correlation",
+    });
+    vi.mocked(markHostedLinqDeliveryAcceptedTx)
+      .mockRejectedValueOnce(new Error("accepted milestone unavailable"));
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      scheduleAfterResponse,
+      sideEffects: [effect],
+    })).rejects.toThrow("accepted milestone unavailable");
+
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
+    expect(createHostedLinqChat).toHaveBeenCalledTimes(1);
+
+    vi.mocked(readHostedLinqDeliveryProviderDispatchIntentsTx)
+      .mockResolvedValue([{
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        groupJoinOutreachId: null,
+        groupJoinReplyOccurredAt: null,
+        id: "hld-group-recovery-correlation",
+        idempotencyLookupKey: effectLookupKey,
+        lastProviderEventId: null,
+        phoneNumberLookupKey: recoveryLookupKey,
+        providerCorrelated: false,
+        sourceRef,
+        status: "attempted",
+        targetKind: "participant",
+        template: "group_line_recovery",
+      }]);
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      scheduleAfterResponse,
+      sideEffects: [effect],
+    })).resolves.toEqual({ sentCount: 1, skipped: [] });
+
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(createHostedLinqChat).toHaveBeenCalledTimes(2);
+    expect(createHostedLinqChat).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ idempotencyKey: effect.effectId }),
+    );
+    expect(createHostedLinqChat).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ idempotencyKey: effect.effectId }),
+    );
+    expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledTimes(2);
   });
 
   it("revalidates a verified email participant before private recovery", async () => {

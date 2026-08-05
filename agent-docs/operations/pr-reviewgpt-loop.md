@@ -240,9 +240,8 @@ requires it or the current user explicitly asks for it.
 2. Run ReviewGPT with the PR preset and the default randomized usable managed
    browser lane. Set `REVIEW_GPT_REVIEW_PHASE=final` and pass the PR ref and
    substantive round through `REVIEW_GPT_PR_URL` and
-   `REVIEW_GPT_ROUND_NUMBER`. The packager adds the full
-   PR body, current patch, exact round metadata, and the delta from the previous
-   reviewed head to the guarded `codebase.zip` source snapshot:
+   `REVIEW_GPT_ROUND_NUMBER`. Round 1 adds the full PR body, current patch,
+   exact round metadata, and guarded repository snapshot to `codebase.zip`:
 
    - `review-gpt-pr-context/pr-body.md`
    - `review-gpt-pr-context/pr.diff`
@@ -250,6 +249,9 @@ requires it or the current user explicitly asks for it.
    - `review-gpt-pr-context/review-round.json`
    - `review-gpt-pr-context/since-first-reviewed-head.diff`
    - `review-gpt-pr-context/since-previous-reviewed-head.diff`
+
+   Later rounds replace this with a small correction packet in the same
+   conversation, as described below.
 
    Round 1 defaults `REVIEW_GPT_FIRST_REVIEWED_HEAD` to the current PR head and
    leaves the remediation delta empty. For round 2 or later, preserve the
@@ -274,6 +276,8 @@ requires it or the current user explicitly asks for it.
    REVIEW_GPT_ROUND_NUMBER=<k> \
    REVIEW_GPT_FIRST_REVIEWED_HEAD=<round-1-full-sha> \
    REVIEW_GPT_PREVIOUS_REVIEWED_HEAD=<round-k-minus-1-full-sha> \
+   REVIEW_GPT_CONTEXT_ANCHOR_HEAD=<most-recent-full-snapshot-head> \
+   REVIEW_GPT_THREAD_URL=<current-context-chatgpt-url> \
      pnpm review:gpt pr-review \
        --wait \
        --wait-timeout 120m \
@@ -288,12 +292,28 @@ requires it or the current user explicitly asks for it.
    repository contents. If a completed retrospective permits continuation, name
    its decision and why the current delta stays inside it.
 
+   Round 1 opens a new conversation and attaches the full guarded snapshot.
+   Later rounds reuse that conversation. They send a short follow-up prompt and
+   attach only the immediate patch, its changed-file list, round metadata, and
+   current versions of files touched by the patch. If that context is
+   insufficient, omit `REVIEW_GPT_THREAD_URL` and set
+   `REVIEW_GPT_FULL_REVIEW_REASON` to a concrete reason. This starts a new
+   conversation with the full prompt and snapshot. It does not reset the round
+   number or immutable first-reviewed head. Save the new conversation URL and
+   reviewed head. Later delta rounds reuse that conversation and pass its full
+   snapshot head as `REVIEW_GPT_CONTEXT_ANCHOR_HEAD`.
+
    The repo wrapper chooses one usable ReviewGPT browser lane per run:
    `Eragon.app` on CDP port `9448`, `Phlebas.app` on `9442`,
    `Hercules.app` on `9444`, or `Mountain.app` on `9450`, always with profile `Default` and
    `app_connector=current` so review context comes from the guarded ZIP and
    not a ChatGPT connector. ReviewGPT attaches that snapshot as
    `codebase.zip`; Repomix is disabled by default and is not part of this flow.
+
+   `REVIEW_GPT_BROWSER_LANE_COUNT` limits the automatic pool to the first one
+   through four lanes and defaults to four. A local
+   `$XDG_CONFIG_HOME/murph/review-gpt.conf` may set this without committing
+   machine-specific preferences or account details.
 
    A lane is considered usable when its managed profile is unlocked, or when its
    configured CDP endpoint is already alive. The default random path skips a
@@ -311,6 +331,16 @@ requires it or the current user explicitly asks for it.
    `aragon` is accepted as an alias for `eragon`. Leave it unset for normal
    PR-review rounds.
 
+   After a concrete pre-completion staging, attachment, or profile failure, do
+   not leave the immediate retry on the random selector: pin a different lane
+   already known to be healthy and retry the same round number against the same
+   pushed head. This prevents the random selector from choosing the failed
+   profile again; return to the normal unpinned path on later independent runs.
+
+   Use `--wait` for normal review runs so ReviewGPT closes the tab it created
+   after capture. Do not resend an accepted prompt during recovery; continue
+   from the same thread and close any task-owned recovery tab when done.
+
 3. Confirm the captured output is an actual completed review before triaging
    it. If the run leaves an empty/preliminary response, lacks
    `REVIEW_COMPLETE`, or reports a missing/unreadable `codebase.zip`, the round
@@ -320,11 +350,14 @@ requires it or the current user explicitly asks for it.
    relaunch the model audit. Fix a concrete pre-completion tooling/profile
    failure before considering another run against the same pushed head.
 
-   Verify `review-round.json` names the intended round, first-reviewed head,
-   previous reviewed head, and current pushed head. Round 1 must have `full`
-   scope and empty cumulative and immediate remediation deltas; later rounds
-   must have `correction` scope, a previous head different from the current
-   head, and `true` first/previous ancestry. The packaged first head must match
+   Verify `review-round.json` names the intended round, context anchor,
+   first-reviewed head, previous reviewed head, and current pushed head. Round 1
+   must have `full` scope, `full_snapshot` context, and empty cumulative and
+   immediate remediation deltas. Later rounds must have `correction` scope,
+   `same_thread_delta` context unless a packaged reason justifies
+   `full_snapshot`, a previous head different from the current head, and `true`
+   first/previous ancestry. A delta also requires the context anchor to be an
+   ancestor of the previous reviewed head. The packaged first head must match
    the immutable PR-body line and the invocation. Missing, mismatched,
    unavailable, or non-ancestral baseline evidence invalidates the run; restore
    or reconstruct the lineage before retrying the same substantive round.

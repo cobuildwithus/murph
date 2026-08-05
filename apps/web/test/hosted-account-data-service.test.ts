@@ -173,6 +173,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_address_book_projection",
   "prisma.hosted_address_book_contact",
   "prisma.hosted_member_routing",
+  "prisma.hosted_pending_group_setup",
   "prisma.hosted_member_email_authorization",
   "prisma.hosted_member_billing_ref",
   "prisma.hosted_member_subscription_checkout",
@@ -1309,6 +1310,24 @@ describe("deleteHostedAccountData", () => {
       "prisma.clinical_record_retrieval_request": 1,
       "prisma.clinical_record_retrieval_run": 1,
     });
+  });
+
+  it("deletes pending next-group setup before member routing", async () => {
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => undefined,
+      operationOrder,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(operationOrder.indexOf("delete:hostedPendingGroupSetup"))
+      .toBeLessThan(operationOrder.indexOf("delete:hostedMemberRouting"));
+    expect(result.deletedCounts["prisma.hosted_pending_group_setup"]).toBe(1);
   });
 
   it("preempts a pending dispatch instead of stranding the deletion", async () => {

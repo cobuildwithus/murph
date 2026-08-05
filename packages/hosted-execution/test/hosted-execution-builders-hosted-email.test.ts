@@ -84,6 +84,8 @@ describe("hosted execution wake builders", () => {
     };
     const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "member-activation-1",
+      initialGroupRoomModelMarkdown:
+        "  ## Explicit setup\n\nKeep this room low-key.  ",
       memberChannels: defaultMemberChannels,
       memberId: "user_123",
       occurredAt,
@@ -96,6 +98,8 @@ describe("hosted execution wake builders", () => {
 
     expect(wake).toMatchObject({
       eventId: "member-activation-1",
+      initialGroupRoomModelMarkdown:
+        "## Explicit setup\n\nKeep this room low-key.",
       kind: "member.activated",
       signupWelcome: {
         route: {

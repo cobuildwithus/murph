@@ -11,15 +11,12 @@ import { afterEach, test } from "vitest";
 import {
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   resolveMurphDynamicTools,
+  stopWarmCodexAppServer,
   type CodexAppServerTurnInput,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 } from "@murphai/assistant-engine/assistant-skill-assets";
-import {
-  HOSTED_ASSISTANT_LUNA_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
-} from "@murphai/hosted-execution/assistant-model";
 import {
   MURPH_GROUP_READ_PERMISSION_PROFILE,
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
@@ -87,17 +84,10 @@ const EXPECTED_SUBAGENT_USAGE_HINT = [
 
 test("hosted Codex memory diagnostics expose only safe config metadata", () => {
   assert.deepEqual(HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS, {
-    codexOperatorMemoryDisableOnExternalContext: false,
-    codexOperatorMemoryFeatureEnabled: true,
-    codexOperatorMemoryGenerateMemories: true,
-    codexOperatorMemoryMaxRawMemoriesForConsolidation: 128,
-    codexOperatorMemoryMaxRolloutAgeDays: 10,
-    codexOperatorMemoryMaxRolloutsPerStartup: 1,
-    codexOperatorMemoryMaxUnusedDays: 30,
-    codexOperatorMemoryMinRateLimitRemainingPercent: 25,
-    codexOperatorMemoryMinRolloutIdleHours: 1,
-    codexOperatorMemoryMode: "codex-native-operator-context",
-    codexOperatorMemoryUseMemories: true,
+    codexOperatorMemoryFeatureEnabled: false,
+    codexOperatorMemoryGenerateMemories: false,
+    codexOperatorMemoryMode: "disabled",
+    codexOperatorMemoryUseMemories: false,
   });
 });
 
@@ -152,6 +142,7 @@ function executeCodexAppServerTurn(
 }
 
 afterEach(async () => {
+  await stopWarmCodexAppServer("hosted-codex-config-test-cleanup");
   await Promise.all(
     temporaryPaths.splice(0).map((target) =>
       removeTemporaryPath(target)
@@ -183,17 +174,12 @@ test("hosted Codex runtime config writes Venice Responses config without secret 
   assert.match(config, /wire_api = "responses"/u);
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.doesNotMatch(config, /signed-venice-egress-credential/u);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.match(
     config,
-    new RegExp(`^extract_model = "${HOSTED_ASSISTANT_LUNA_MODEL}"$`, "mu"),
+    /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
   );
-  assert.match(
-    config,
-    new RegExp(
-      `^consolidation_model = "${HOSTED_ASSISTANT_TERRA_MODEL}"$`,
-      "mu",
-    ),
-  );
+  assert.doesNotMatch(config, /^(?:extract|consolidation)_model = /mu);
 });
 
 test("hosted Codex runtime config preserves capabilities with custom inference", async () => {
@@ -227,13 +213,14 @@ test("hosted Codex runtime config preserves capabilities with custom inference",
   assert.match(config, /^stream_max_retries = 0$/mu);
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.doesNotMatch(config, /^model_reasoning_effort = /mu);
-  assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.match(config, /\[features\.multi_agent_v2\]\nenabled = true/u);
   assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
   assert.match(
     config,
-    /\[memories\]\nuse_memories = true\ngenerate_memories = true\nextract_model = "murph-custom-r7"\nconsolidation_model = "murph-custom-r7"/u,
+    /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
   );
+  assert.doesNotMatch(config, /^(?:extract|consolidation)_model = /mu);
   assert.equal(
     new Set<string>(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)
       .has("MURPH_CUSTOM_INFERENCE_API_KEY"),
@@ -320,7 +307,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
       "u",
     ),
   );
-  assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.doesNotMatch(config, /direct_only_tool_namespaces/u);
   assert.match(
     config,
@@ -343,7 +330,11 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.doesNotMatch(config, /This mode remains active until/u);
   assert.match(
     config,
-    /\[memories\]\nuse_memories = true\ngenerate_memories = true\nextract_model = "gpt-5\.6-luna"\nconsolidation_model = "gpt-5\.6-terra"\ndisable_on_external_context = false\nmin_rollout_idle_hours = 1\nmax_rollouts_per_startup = 1\nmax_rollout_age_days = 10\nmin_rate_limit_remaining_percent = 25\nmax_raw_memories_for_consolidation = 128\nmax_unused_days = 30/u,
+    /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
+  );
+  assert.doesNotMatch(
+    config,
+    /^(?:extract_model|consolidation_model|disable_on_external_context|min_rollout_idle_hours|max_rollouts_per_startup|max_rollout_age_days|min_rate_limit_remaining_percent|max_raw_memories_for_consolidation|max_unused_days) = /mu,
   );
   assert.doesNotMatch(config, /^plugins = true$/mu);
   assert.match(config, /\[skills\]\ninclude_instructions = false/u);
@@ -653,8 +644,12 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.match(config, /^stream_max_retries = 0$/mu);
   assert.doesNotMatch(config, /chatgpt-access-token/u);
   assert.match(config, /model_reasoning_effort = "low"/u);
-  assert.match(config, /^extract_model = "gpt-5\.6-sol"$/mu);
-  assert.match(config, /^consolidation_model = "gpt-5\.6-sol"$/mu);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
+  assert.match(
+    config,
+    /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
+  );
+  assert.doesNotMatch(config, /^(?:extract|consolidation)_model = /mu);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /\[shell_environment_policy\]/u);
   assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
@@ -946,14 +941,19 @@ test("hosted Codex runtime config rejects relative command overrides", async () 
 });
 
 testHostedCodexAuthE2e(
-  "hosted Codex runtime authenticates but the legacy built-in OpenAI config fails",
+  "hosted Codex runtime authenticates, excludes native memory, and rejects legacy OpenAI config",
   async () => {
     const operatorHomeRoot = await createTemporaryDirectory();
     const requests: string[] = [];
     const authorizationHeaders: string[] = [];
+    const nativeMemoryRequestMarkers: Array<{
+      memgen: string | null;
+      turnMetadata: string | null;
+    }> = [];
     const expectedAuthorization = ["Bearer", "hosted-auth-regression-key"].join(" ");
     const server = await startResponsesStubServer({
       authorizationHeaders,
+      nativeMemoryRequestMarkers,
       requiredAuthorization: expectedAuthorization,
       requests,
       responseText: "auth regression ok",
@@ -980,23 +980,57 @@ testHostedCodexAuthE2e(
       assert.match(config, /^requires_openai_auth = false$/mu);
       assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
 
-      const fixedResult = await executeCodexAppServerTurn({
-        approvalPolicy: "never",
+      const nativeMemoryProbe = "native-memory-probe-must-not-reach-provider";
+      const nativeMemoryRoot = path.join(result.runtimeEnv.CODEX_HOME, "memories");
+      await mkdir(nativeMemoryRoot, { mode: 0o700, recursive: true });
+      await writeFile(
+        path.join(nativeMemoryRoot, "memory_summary.md"),
+        nativeMemoryProbe,
+        { encoding: "utf8", mode: 0o600 },
+      );
+
+      const executeOrdinaryTurn = async (input: {
+        codexHome: string;
+        groupConversation: boolean;
+        prompt: string;
+      }) =>
+        await executeCodexAppServerTurn({
+          approvalPolicy: "never",
+          baseInstructions: input.groupConversation
+            ? "You are Murph in a representative group health conversation."
+            : "You are Murph in a representative individual health conversation.",
+          codexHome: input.codexHome,
+          developerInstructions:
+            "Answer the current message using the ordinary Murph conversation path.",
+          env: {
+            CODEX_HOME: input.codexHome,
+            HOME: operatorHomeRoot,
+            OPENAI_API_KEY: result.runtimeEnv.OPENAI_API_KEY,
+            PATH: result.runtimeEnv.PATH ?? process.env.PATH ?? "",
+          },
+          groupConversation: input.groupConversation,
+          prompt: input.prompt,
+          sandbox: "danger-full-access",
+          workingDirectory: operatorHomeRoot,
+        });
+
+      const individualPrompt = "measure individual native memory input";
+      const groupPrompt = "measure group native memory input";
+      const fixedIndividualResult = await executeOrdinaryTurn({
         codexHome: result.runtimeEnv.CODEX_HOME,
-        env: {
-          CODEX_HOME: result.runtimeEnv.CODEX_HOME,
-          HOME: operatorHomeRoot,
-          OPENAI_API_KEY: result.runtimeEnv.OPENAI_API_KEY,
-          PATH: result.runtimeEnv.PATH ?? process.env.PATH ?? "",
-        },
-        prompt: "hello hosted auth regression",
-        sandbox: "danger-full-access",
-        workingDirectory: operatorHomeRoot,
+        groupConversation: false,
+        prompt: individualPrompt,
+      });
+      const fixedGroupResult = await executeOrdinaryTurn({
+        codexHome: result.runtimeEnv.CODEX_HOME,
+        groupConversation: true,
+        prompt: groupPrompt,
       });
 
       const fixedRequestCount = requests.length;
       assert.ok(fixedRequestCount >= 1);
-      assert.equal(fixedResult.finalMessage, "auth regression ok");
+      assert.equal(fixedIndividualResult.finalMessage, "auth regression ok");
+      assert.equal(fixedGroupResult.finalMessage, "auth regression ok");
       assert.ok(
         authorizationHeaders
           .slice(0, fixedRequestCount)
@@ -1005,17 +1039,76 @@ testHostedCodexAuthE2e(
       assert.ok(
         requests
           .slice(0, fixedRequestCount)
-          .some((request) => /hello hosted auth regression/u.test(request)),
+          .some((request) => request.includes(individualPrompt)),
       );
-      const currentTimeReminders = requests
+      assert.ok(
+        requests
+          .slice(0, fixedRequestCount)
+          .some((request) => request.includes(groupPrompt)),
+      );
+      assert.ok(
+        requests
+          .slice(0, fixedRequestCount)
+          .every((request) => !request.includes(nativeMemoryProbe)),
+      );
+      assert.ok(
+        nativeMemoryRequestMarkers
+          .slice(0, fixedRequestCount)
+          .every(({ memgen, turnMetadata }) =>
+            memgen?.trim().toLowerCase() !== "true"
+            && parseJsonObject(turnMetadata ?? "")?.request_kind !== "memory"
+          ),
+      );
+      const promptRequests = requests
         .slice(0, fixedRequestCount)
-        .flatMap(
+        .filter(
           (request) =>
-            request.match(
-              /"role":"developer","content":\[\{"type":"input_text","text":"It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\."\}\]/gu,
-            ) ?? [],
+            request.includes(individualPrompt) || request.includes(groupPrompt),
         );
-      assert.equal(currentTimeReminders.length, 1);
+      const currentTimeReminderCounts = promptRequests.map(
+        (request) =>
+          request.match(
+            /"role":"developer","content":\[\{"type":"input_text","text":"It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\."\}\]/gu,
+          )?.length ?? 0,
+      );
+      assert.ok(currentTimeReminderCounts.every((count) => count === 1));
+
+      const enabledCodexHome = path.join(operatorHomeRoot, ".codex-native");
+      await mkdir(enabledCodexHome, { mode: 0o700, recursive: true });
+      await writeFile(
+        path.join(enabledCodexHome, "config.toml"),
+        enableCodexNativeMemoryForRegression(config),
+        { encoding: "utf8", mode: 0o600 },
+      );
+      const enabledMemoryRoot = path.join(enabledCodexHome, "memories");
+      await mkdir(enabledMemoryRoot, { mode: 0o700, recursive: true });
+      await writeFile(
+        path.join(enabledMemoryRoot, "memory_summary.md"),
+        nativeMemoryProbe,
+        { encoding: "utf8", mode: 0o600 },
+      );
+
+      const enabledRequestStart = requests.length;
+      const enabledIndividualResult = await executeOrdinaryTurn({
+        codexHome: enabledCodexHome,
+        groupConversation: false,
+        prompt: individualPrompt,
+      });
+      const enabledGroupResult = await executeOrdinaryTurn({
+        codexHome: enabledCodexHome,
+        groupConversation: true,
+        prompt: groupPrompt,
+      });
+      const enabledRequests = requests.slice(enabledRequestStart);
+      const enabledOrdinaryRequests = enabledRequests.filter((request) =>
+        request.includes(individualPrompt) || request.includes(groupPrompt)
+      );
+      assert.equal(enabledIndividualResult.finalMessage, "auth regression ok");
+      assert.equal(enabledGroupResult.finalMessage, "auth regression ok");
+      assert.equal(enabledOrdinaryRequests.length, 2);
+      assert.ok(
+        enabledOrdinaryRequests.every((request) => request.includes(nativeMemoryProbe)),
+      );
 
       const legacyCodexHome = await prepareLegacyBuiltInOpenAiCodexHome({
         baseUrl: `${readServerBaseUrl(server)}/v1`,
@@ -1052,6 +1145,137 @@ testHostedCodexAuthE2e(
     }
   },
   20_000,
+);
+
+testHostedCodexAuthE2e(
+  "disables native memory startup work for previously eligible rollouts",
+  async () => {
+    const requests: string[] = [];
+    const nativeMemoryRequestMarkers: Array<{
+      memgen: string | null;
+      turnMetadata: string | null;
+    }> = [];
+    const server = await startResponsesStubServer({
+      captureWebSocketMemoryMarkers: true,
+      nativeMemoryRequestMarkers,
+      requiredAuthorization: "Bearer hosted-memory-startup-key",
+      requests,
+      responseText: "memory startup regression ok",
+    });
+
+    const executeTurn = async (input: {
+      codexHome: string;
+      operatorHomeRoot: string;
+      prompt: string;
+    }) =>
+      await executeCodexAppServerTurn({
+        approvalPolicy: "never",
+        codexHome: input.codexHome,
+        env: {
+          CODEX_HOME: input.codexHome,
+          HOME: input.operatorHomeRoot,
+          OPENAI_API_KEY: "hosted-memory-startup-key",
+          PATH: process.env.PATH ?? "",
+        },
+        prompt: input.prompt,
+        sandbox: "danger-full-access",
+        workingDirectory: input.operatorHomeRoot,
+      });
+
+    const prepareEligibleRollout = async (operatorHomeRoot: string) => {
+      const result = await prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
+          [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+            `${readServerBaseUrl(server)}/v1`,
+          NODE_ENV: "test",
+          OPENAI_API_KEY: "hosted-memory-startup-key",
+          PATH: process.env.PATH ?? "",
+        },
+      });
+      const disabledConfig = await readFile(result.codexConfigPath, "utf8");
+      await writeFile(
+        result.codexConfigPath,
+        enableCodexNativeMemoryForRegression(disabledConfig, {
+          minRolloutIdleHours: 0,
+        }),
+        { encoding: "utf8", mode: 0o600 },
+      );
+      await executeTurn({
+        codexHome: result.runtimeEnv.CODEX_HOME,
+        operatorHomeRoot,
+        prompt: "seed a production-format eligible memory rollout",
+      });
+      await stopWarmCodexAppServer("memory-startup-regression-seed-complete");
+      markPersistedCodexRolloutEligibleForMemoryStartup(
+        result.runtimeEnv.CODEX_HOME,
+      );
+      await sleep(1_100);
+      return { disabledConfig, result };
+    };
+
+    try {
+      const enabledOperatorHome = await createTemporaryDirectory();
+      const enabled = await prepareEligibleRollout(enabledOperatorHome);
+      const enabledMarkerStart = nativeMemoryRequestMarkers.length;
+      await executeTurn({
+        codexHome: enabled.result.runtimeEnv.CODEX_HOME,
+        operatorHomeRoot: enabledOperatorHome,
+        prompt: "trigger enabled memory startup positive control",
+      });
+      await waitForNativeMemoryRequest({
+        markers: nativeMemoryRequestMarkers,
+        startIndex: enabledMarkerStart,
+      });
+      await stopWarmCodexAppServer("memory-startup-positive-control-complete");
+
+      const disabledOperatorHome = await createTemporaryDirectory();
+      const disabled = await prepareEligibleRollout(disabledOperatorHome);
+      await writeFile(
+        disabled.result.codexConfigPath,
+        disabled.disabledConfig,
+        { encoding: "utf8", mode: 0o600 },
+      );
+      const disabledMemoryProbe = "disabled-memory-rollout-probe";
+      const disabledMemoryRoot = path.join(
+        disabled.result.runtimeEnv.CODEX_HOME,
+        "memories",
+      );
+      await mkdir(disabledMemoryRoot, { mode: 0o700, recursive: true });
+      await writeFile(
+        path.join(disabledMemoryRoot, "memory_summary.md"),
+        disabledMemoryProbe,
+        { encoding: "utf8", mode: 0o600 },
+      );
+
+      const disabledMarkerStart = nativeMemoryRequestMarkers.length;
+      const disabledRequestStart = requests.length;
+      const disabledPrompt = "trigger disabled memory startup regression";
+      const disabledTurn = await executeTurn({
+        codexHome: disabled.result.runtimeEnv.CODEX_HOME,
+        operatorHomeRoot: disabledOperatorHome,
+        prompt: disabledPrompt,
+      });
+      await sleep(1_500);
+      assert.equal(disabledTurn.finalMessage, "memory startup regression ok");
+      assert.ok(
+        nativeMemoryRequestMarkers
+          .slice(disabledMarkerStart)
+          .every((marker) => !isNativeMemoryRequestMarker(marker)),
+      );
+      const disabledForegroundRequest = requests
+        .slice(disabledRequestStart)
+        .find((request) => request.includes(disabledPrompt));
+      assert.ok(disabledForegroundRequest);
+      assert.equal(disabledForegroundRequest.includes(disabledMemoryProbe), false);
+    } finally {
+      await stopWarmCodexAppServer("memory-startup-regression-complete");
+      await closeHttpServer(server);
+    }
+  },
+  60_000,
 );
 
 testHostedCodexAutocompactionE2e(
@@ -1629,7 +1853,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
       "[features]",
       "plugins = false",
-      "memories = true",
+      "memories = false",
       "",
       "[features.current_time_reminder]",
       "enabled = true",
@@ -1647,22 +1871,13 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       `multi_agent_mode_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_MODE_HINT)}`,
       `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
       "",
-      "# Codex-native operator memory remains enabled. Platform-funded generation",
-      "# is pinned to Murph's Luna/Terra policy and metered from exact terminal usage.",
-      "# Member-owned credentials and endpoints follow the configured foreground model.",
+      "# Codex-native memory generation and use stay disabled. The feature gate stops",
+      "# startup processing of previously eligible rollouts, while the explicit values",
+      "# keep newly created threads ineligible if the feature is toggled independently.",
       "# Murph product memory remains canonical in the vault.",
       "[memories]",
-      "use_memories = true",
-      "generate_memories = true",
-      "extract_model = \"gpt-5.6-luna\"",
-      "consolidation_model = \"gpt-5.6-terra\"",
-      "disable_on_external_context = false",
-      "min_rollout_idle_hours = 1",
-      "max_rollouts_per_startup = 1",
-      "max_rollout_age_days = 10",
-      "min_rate_limit_remaining_percent = 25",
-      "max_raw_memories_for_consolidation = 128",
-      "max_unused_days = 30",
+      "use_memories = false",
+      "generate_memories = false",
       "",
       "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
       "# runner paths change on each wake and break provider prefix caching.",
@@ -1705,7 +1920,7 @@ test("hosted Codex shell policy includes the image-pinned Health Commons package
   );
 });
 
-test("hosted Codex config keeps skill instructions disabled while enabling operator memory", () => {
+test("hosted Codex config keeps skill instructions and native memory disabled", () => {
   const config = buildHostedCodexConfigToml({
     model: "gpt-5.6-terra",
     provider: {
@@ -1722,7 +1937,7 @@ test("hosted Codex config keeps skill instructions disabled while enabling opera
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
   assert.match(config, /\[features\]\nplugins = false/u);
   assert.doesNotMatch(config, /^multi_agent_v2 = true$/mu);
-  assert.match(config, /^memories = true$/mu);
+  assert.match(config, /^memories = false$/mu);
   assert.match(config, /^\[features\.multi_agent_v2\]$/mu);
   assert.match(config, /^enabled = true$/mu);
   assert.doesNotMatch(config, /^expose_spawn_agent_model_overrides/mu);
@@ -1738,12 +1953,10 @@ test("hosted Codex config keeps skill instructions disabled while enabling opera
   ));
   assert.doesNotMatch(config, /Non-blocking delegation:/u);
   assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
-  assert.match(config, /\[memories\]\nuse_memories = true/u);
-  assert.match(config, /^generate_memories = true$/mu);
-  assert.match(config, /^extract_model = "gpt-5\.6-luna"$/mu);
-  assert.match(config, /^consolidation_model = "gpt-5\.6-terra"$/mu);
-  assert.match(config, /^disable_on_external_context = false$/mu);
-  assert.match(config, /^max_rollouts_per_startup = 1$/mu);
+  assert.match(config, /\[memories\]\nuse_memories = false/u);
+  assert.match(config, /^generate_memories = false$/mu);
+  assert.doesNotMatch(config, /^(?:extract|consolidation)_model = /mu);
+  assert.doesNotMatch(config, /^max_rollouts_per_startup = /mu);
   assert.match(config, /^check_for_update_on_startup = false$/mu);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
@@ -1900,8 +2113,13 @@ function isRetryableTemporaryCleanupError(error: unknown): boolean {
 
 async function startResponsesStubServer(input: {
   authorizationHeaders?: string[];
+  captureWebSocketMemoryMarkers?: boolean;
   compactionOutputKind?: "compaction" | "message";
   compactionRequestIndexes?: ReadonlySet<number>;
+  nativeMemoryRequestMarkers?: Array<{
+    memgen: string | null;
+    turnMetadata: string | null;
+  }>;
   requiredAuthorization?: string;
   requests: string[];
   requestUrls?: string[];
@@ -1934,6 +2152,14 @@ async function startResponsesStubServer(input: {
           ? request.headers.authorization
           : "",
       );
+      input.nativeMemoryRequestMarkers?.push({
+        memgen: typeof request.headers["x-openai-memgen-request"] === "string"
+          ? request.headers["x-openai-memgen-request"]
+          : null,
+        turnMetadata: typeof request.headers["x-codex-turn-metadata"] === "string"
+          ? request.headers["x-codex-turn-metadata"]
+          : null,
+      });
 
       const requestUrl = request.url ?? "";
       if (
@@ -2010,6 +2236,20 @@ async function startResponsesStubServer(input: {
     });
   });
 
+  if (input.captureWebSocketMemoryMarkers) {
+    server.on("upgrade", (request, socket) => {
+      input.nativeMemoryRequestMarkers?.push({
+        memgen: typeof request.headers["x-openai-memgen-request"] === "string"
+          ? request.headers["x-openai-memgen-request"]
+          : null,
+        turnMetadata: typeof request.headers["x-codex-turn-metadata"] === "string"
+          ? request.headers["x-codex-turn-metadata"]
+          : null,
+      });
+      socket.destroy();
+    });
+  }
+
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
@@ -2074,6 +2314,83 @@ function parseJsonObject(value: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function isNativeMemoryRequestMarker(input: {
+  memgen: string | null;
+  turnMetadata: string | null;
+}): boolean {
+  return input.memgen?.trim().toLowerCase() === "true"
+    || parseJsonObject(input.turnMetadata ?? "")?.request_kind === "memory";
+}
+
+async function waitForNativeMemoryRequest(input: {
+  markers: ReadonlyArray<{ memgen: string | null; turnMetadata: string | null }>;
+  startIndex: number;
+}): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (input.markers.slice(input.startIndex).some(isNativeMemoryRequestMarker)) {
+      return;
+    }
+    await sleep(50);
+  }
+  assert.fail("enabled-memory positive control must extract the eligible rollout");
+}
+
+function markPersistedCodexRolloutEligibleForMemoryStartup(
+  codexHome: string,
+): void {
+  const sqliteModule = process.getBuiltinModule("node:sqlite");
+  assert.ok(sqliteModule);
+  const database = new sqliteModule.DatabaseSync(
+    path.join(codexHome, "state_5.sqlite"),
+  );
+  try {
+    const result = database.prepare(
+      [
+        "UPDATE threads",
+        "SET archived = 0, preview = ?, source = 'vscode',",
+        "memory_mode = 'enabled', history_mode = 'legacy',",
+        "updated_at_ms = (unixepoch() * 1000) - 7200000",
+        "WHERE source = 'vscode'",
+      ].join(" "),
+    ).run("memory startup eligible rollout");
+    assert.equal(result.changes, 1);
+  } finally {
+    database.close();
+  }
+}
+
+function enableCodexNativeMemoryForRegression(
+  config: string,
+  options: { minRolloutIdleHours?: number } = {},
+): string {
+  const enabledFeatureConfig = config.replace(
+    "[features]\nplugins = false\nmemories = false",
+    "[features]\nplugins = false\nmemories = true",
+  );
+  assert.notEqual(enabledFeatureConfig, config);
+
+  const enabledMemoryConfig = enabledFeatureConfig.replace(
+    "[memories]\nuse_memories = false\ngenerate_memories = false",
+    [
+      "[memories]",
+      "use_memories = true",
+      "generate_memories = true",
+      'extract_model = "gpt-5.6-luna"',
+      'consolidation_model = "gpt-5.6-terra"',
+      "disable_on_external_context = false",
+      `min_rollout_idle_hours = ${options.minRolloutIdleHours ?? 1}`,
+      "max_rollouts_per_startup = 1",
+      "max_rollout_age_days = 10",
+      "min_rate_limit_remaining_percent = 25",
+      "max_raw_memories_for_consolidation = 128",
+      "max_unused_days = 30",
+    ].join("\n"),
+  );
+  assert.notEqual(enabledMemoryConfig, enabledFeatureConfig);
+  return enabledMemoryConfig;
 }
 
 function writeResponsesStubStream(input: {

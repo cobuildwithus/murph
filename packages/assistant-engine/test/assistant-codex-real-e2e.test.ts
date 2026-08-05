@@ -60,6 +60,12 @@ import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
+  ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
+} from '../src/assistant/cron/execution.ts'
+import {
+  parseAssistantNotificationDecision,
+} from '../src/assistant/notification-turn.ts'
+import {
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
@@ -999,6 +1005,122 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'prepares the next group from a private text request',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-prepare-e2e-'),
+      )
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_private_group_prepare',
+              recipientKey: 'recipient_private_group_prepare',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_private_group_prepare'],
+              conversationId: 'conversation_private_group_prepare',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_private_group_prepare'],
+              originSessionId: 'session_private_group_prepare',
+              recipientKey: 'recipient_private_group_prepare',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                return {
+                  action: 'prepare_next_group',
+                  result: {
+                    expiresAt: '2026-07-29T18:30:00.000Z',
+                    setup: request.action === 'prepare_next_group'
+                      ? request.setup ?? {}
+                      : {},
+                    status: 'prepared',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'I’m about to add you to an existing iMessage group. Prepare it for me, make your style casual with humor at 2, and remember that this room wants short direct replies.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const groupCall = actions.find((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )
+
+        expect(
+          actions.some((action) =>
+            action.kind === 'command'
+            && action.command.includes('group-chat/SKILL.md')
+            && action.output.includes('# Group Chat')
+          ),
+          'group-chat skill read',
+        ).toBe(true)
+        expect(groupCall).toBeDefined()
+        expect(groupRequests).toEqual([
+          expect.objectContaining({
+            action: 'prepare_next_group',
+            setup: expect.objectContaining({
+              roomContextMarkdown: expect.stringMatching(/short|direct/iu),
+              style: expect.objectContaining({
+                personality: expect.objectContaining({ humor: 2 }),
+                tone: 'casual',
+              }),
+            }),
+          }),
+        ])
+        expect(result.finalMessage).toMatch(/one (?:new )?group/iu)
+        expect(result.finalMessage).toMatch(/30 minutes/iu)
+        expect(result.finalMessage).not.toMatch(
+          /detect(?:ed|s|ing)? who|who (?:tapped|performed) add/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'delivers a group call preview in one turn and calls only after a later exact confirmation',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -1385,6 +1507,84 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
     },
     720_000,
   )
+})
+
+describeRealCodex('real Codex independent scheduled reminder authority e2e', () => {
+  it.each([
+    {
+      context: [
+        'Related context:',
+        '- The linked four-week training plan is marked complete.',
+        '- There is no evidence that today\'s separately scheduled workout reminder was delivered or completed.',
+      ].join('\n'),
+      expectedKind: 'send_message',
+      savedInstructions:
+        'Send the separately requested workout reminder for today.',
+      scenario: 'keeps a separate reminder deliverable after a related plan completes',
+    },
+    {
+      context: [
+        'Related context:',
+        '- The linked four-week training plan is marked complete.',
+      ].join('\n'),
+      expectedKind: 'skip',
+      savedInstructions: [
+        'Send the workout reminder for today.',
+        'Skip this reminder once the linked training plan is marked complete.',
+      ].join('\n'),
+      scenario: 'honors an explicit saved completion skip condition',
+    },
+    {
+      context: [
+        'Current occurrence evidence:',
+        '- A trusted delivery receipt proves this exact scheduled reminder occurrence was already delivered.',
+      ].join('\n'),
+      expectedKind: 'skip',
+      savedInstructions:
+        'Send the separately requested workout reminder for today.',
+      scenario: 'skips when current evidence proves the occurrence already happened',
+    },
+  ])('$scenario', async ({ context, expectedKind, savedInstructions }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-independent-reminder-e2e-'),
+    )
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildIndependentReminderDeveloperInstructions(),
+        dynamicTools: [],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          savedInstructions,
+          ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
+          context,
+        ].join('\n\n'),
+        reasoningEffort: 'medium',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+
+      const decision = parseAssistantNotificationDecision(
+        result.finalMessage,
+      )
+      expect(decision.kind).toBe(expectedKind)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 360_000)
 })
 
 describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
@@ -4220,6 +4420,29 @@ function buildExperimentOnboardingDeveloperInstructions(): string {
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
+  })
+}
+
+function buildIndependentReminderDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-05',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    scheduledOccurrenceAt: '2026-08-05T13:00:00.000Z',
+    turnTrigger: 'automation-cron',
   })
 }
 

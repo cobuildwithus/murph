@@ -22,8 +22,8 @@ Experiments are one optional primitive. Do not turn onboarding into an upfront
 profile questionnaire, capability tour, wearable funnel, or experiment funnel.
 Do not create a second context-collection lifecycle. This skill may create only
 the scheduled early-stall check-in defined below. A separate managed owner may
-invoke this skill through the single finite next-day recovery occurrence
-defined below; never create, replace, repeat, or reschedule that occurrence.
+invoke this skill through the finite three-day recovery window defined below;
+never create, replace, extend, or reschedule that owner.
 
 ## Resume without repeating
 
@@ -877,24 +877,27 @@ and do not ask another onboarding question. Do not use `user_declined` for one
 skipped category, and do not require a plan or support loop merely to use
 `user_answered`.
 
-During the finite next-day recovery occurrence, do not run the completion
+During a finite three-day recovery occurrence, do not run the completion
 command or otherwise mutate onboarding state. Return an ordinary scheduled
 notification skip when the evidence already answers the checkpoint, declines
 onboarding, defers it, or makes another question untimely or unhelpful. Only a
 later foreground user reply may advance or complete onboarding through the
 canonical state owner.
 
-### Finite next-day recovery
+### Finite three-day recovery
 
-A managed owner may invoke this skill once on the next local day after the
-welcome. That occurrence is the only scheduled recovery after the early-stall
-window. It is consumed whether it sends or skips and must never create,
-re-enable, rotate, or reschedule another onboarding follow-up.
+A managed owner may invoke this skill at most once on each of the next three
+local days after the welcome. This fixed window is the only scheduled recovery
+after the early-stall window. Each day's opportunity is consumed whether it
+sends or skips; no occurrence may create, re-enable, extend, rotate, or
+reschedule the owner.
 
 - Read current onboarding state and recent user messages before deciding.
-- If the latest onboarding question is still unanswered, do not repeat it and
-  do not rotate to another setup question. The occurrence may instead ask one
-  natural, low-pressure question that lets the user choose whether to continue.
+- If the latest onboarding question is still unanswered, do not repeat its
+  wording and do not rotate to another setup question. A later day's
+  occurrence may instead ask one shorter, natural, low-pressure question that
+  lets the user choose whether to continue, without urgency or escalating
+  pressure.
 - A visible message must contain exactly one easy question. Do not mention
   setup completion, internal state, schedules, automations, or final attempts.
 - Return skip after an answer, completion, overall decline, request for no
@@ -902,7 +905,8 @@ re-enable, rotate, or reschedule another onboarding follow-up.
   safety-sensitive context, or evidence too stale or incomplete to support a
   useful reopening question. Every one of these cases uses the ordinary
   scheduled notification skip and leaves onboarding state unchanged.
-- Send or skip ends this scheduled recovery. Any later member reply resumes
+- Send or skip consumes only the current local day's opportunity. The managed
+  owner ends permanently after day three. Any later member reply resumes
   through ordinary reply-driven onboarding.
 
 ## Reply and follow-up rules
@@ -929,8 +933,8 @@ re-enable, rotate, or reschedule another onboarding follow-up.
   setup question. Wait for a reply or later inbound message instead of
   escalating a drip questionnaire. Inside the first-minutes stall window, the
   scheduled early-stall check-in above is the only permitted nudge and it never
-  repeats. The separate finite next-day recovery rule above owns the only later
-  scheduled exception.
+  repeats. The separate finite three-day recovery rule above owns the only
+  later scheduled exception.
 - Skip visible onboarding advancement when the user asks for no follow-up, the
   situation is urgent or safety-sensitive, the immediate task failed and needs
   attention, or the current health-data reply should stand alone.

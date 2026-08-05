@@ -5,9 +5,11 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedDashboardCheckoutRequired: vi.fn(),
   readHostedConsentStatus: vi.fn(),
   readHostedGroupJoinView: vi.fn(),
   readHostedInitialOnboardingState: vi.fn(),
+  resolveHostedMurphContactOption: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -17,6 +19,7 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
     expectedMembershipId: string | null;
     groupName: string;
     inviteCode?: string | null;
+    postJoinContactOption: { href: string } | null;
     postJoinDestination: string;
   }) {
     return createElement(
@@ -25,6 +28,7 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
         "data-group-name": props.groupName,
         "data-invite-code": props.inviteCode ?? "",
         "data-membership-id": props.expectedMembershipId ?? "none",
+        "data-post-join-contact-href": props.postJoinContactOption?.href ?? "",
         "data-post-join-destination": props.postJoinDestination,
       },
       "Accept group invite",
@@ -72,6 +76,10 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
   },
 }));
 
+vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
+  resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
+}));
+
 vi.mock("@/src/lib/legal/consent", () => ({
   readHostedConsentStatus: mocks.readHostedConsentStatus,
 }));
@@ -82,6 +90,7 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+  readHostedDashboardCheckoutRequired: mocks.readHostedDashboardCheckoutRequired,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/initial-onboarding", () => ({
@@ -98,6 +107,12 @@ beforeEach(() => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
     authenticatedMember: null,
+  });
+  mocks.readHostedDashboardCheckoutRequired.mockResolvedValue(false);
+  mocks.resolveHostedMurphContactOption.mockResolvedValue({
+    href: "https://chat.example.test/murph",
+    kind: "telegram",
+    label: "Message Murph",
   });
   mocks.readHostedInitialOnboardingState.mockResolvedValue({
     preferences: { persona: "classic", tone: "formal", voice: "murph" },
@@ -209,8 +224,6 @@ test("forwards a phone-bound invite into the authenticated join form", async () 
   expect(markup).toContain('data-invite-code="invite_phone_bound"');
   expect(markup).toContain("Accept group invite");
   expect(markup).not.toContain('data-legal-consent-gate="true"');
-  expect(markup).toContain('href="/home"');
-  expect(markup).toContain("Not now");
 });
 
 test.each([
@@ -230,10 +243,56 @@ test.each([
     const markup = await renderGroupJoinPage("JOIN123", { postJoin });
 
     expect(markup).toContain(`data-post-join-destination="${destination.replaceAll("&", "&amp;")}"`);
-    expect(markup).toContain(`href="${destination.replaceAll("&", "&amp;")}"`);
-    expect(markup).toContain("Not now");
   },
 );
+
+test("routes an authenticated first-checkout member into setup after the group save", async () => {
+  const auth = {
+    authenticated: true,
+    authenticatedMember: { id: "member_123" },
+  };
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce(auth);
+  mocks.readHostedDashboardCheckoutRequired.mockResolvedValueOnce(true);
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+    launchGranted: true,
+  }));
+
+  const markup = await renderGroupJoinPage("JOIN123");
+
+  expect(mocks.readHostedDashboardCheckoutRequired).toHaveBeenCalledWith(auth);
+  expect(markup).toContain('data-post-join-destination="/join"');
+  expect(markup).toContain('data-post-join-contact-href=""');
+});
+
+test("routes an existing first-checkout group member into setup recovery", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: { id: "member_123" },
+  });
+  mocks.readHostedDashboardCheckoutRequired.mockResolvedValueOnce(true);
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+    launchGranted: true,
+  }));
+  mocks.readHostedGroupJoinView.mockResolvedValueOnce({
+    activeVaultShareProjectionKinds: [],
+    activeVaultShareProjectionScopes: [],
+    displayName: "Sunday Sleep Crew",
+    id: "hgrp_123",
+    kind: "family",
+    memberCount: 2,
+    requestedVaultShareProjections: [],
+    status: "active",
+    viewerCanLeave: true,
+    viewerMembershipId: "membership_existing",
+    viewerMembershipStatus: "active",
+  });
+
+  const markup = await renderGroupJoinPage("JOIN123");
+
+  expect(markup).toContain('data-post-join-destination="/join"');
+  expect(markup).toContain('data-membership-id="membership_existing"');
+  expect(markup).toContain('data-post-join-contact-href=""');
+});
 
 test("ignores the obsolete initial-visit marker on the legal consent decline exit", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
@@ -278,8 +337,6 @@ test("ignores the obsolete marker for an existing group member", async () => {
   expect(markup).toContain('data-membership-id="membership_existing"');
   expect(markup).toContain('data-join-code="JOIN123"');
   expect(markup).toContain("Leave group");
-  expect(markup).toContain('href="/home"');
-  expect(markup).toContain("Go home");
 });
 
 test("keeps self-service leave available when an existing member lacks launch consent", async () => {

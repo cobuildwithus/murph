@@ -6,6 +6,9 @@ import {
   parseFrontmatterDocument,
   withCanonicalResourceLocks,
 } from '@murphai/core'
+import {
+  containsHostedRuntimeRawParticipantHandle,
+} from '@murphai/hosted-execution/pending-group-setup'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { loadIntegratedRuntime } from '@murphai/vault-usecases/runtime'
@@ -55,6 +58,16 @@ export type AssistantGroupRoomModelReadState =
       status: string
     }
   | { kind: 'unavailable' }
+
+export type AssistantGroupRoomModelInitializeResult =
+  | {
+      kind: 'already_initialized'
+      state: Extract<AssistantGroupRoomModelReadState, { kind: 'present' }>
+    }
+  | {
+      kind: 'initialized'
+      state: Extract<AssistantGroupRoomModelReadState, { kind: 'present' }>
+    }
 
 interface AssistantGroupRoomModelReadDependencies {
   readTextFile?: (filePath: string) => Promise<string>
@@ -136,7 +149,7 @@ export async function readAssistantGroupRoomModelState(
       !body ||
       !status ||
       !assistantGroupRoomModelBodyFitsPrompt(body) ||
-      assistantGroupRoomModelBodyContainsRawParticipantHandle(body)
+      containsHostedRuntimeRawParticipantHandle(body)
     ) {
       return { kind: 'unavailable' }
     }
@@ -217,6 +230,64 @@ export async function replaceAssistantGroupRoomModel(input: {
   })
 }
 
+/**
+ * Initializes the fixed page once for a newly activated group runtime. Exact
+ * activation replay is idempotent; a different existing page is never
+ * overwritten.
+ */
+export async function initializeAssistantGroupRoomModel(input: {
+  body: string
+  vaultRoot: string
+}): Promise<AssistantGroupRoomModelInitializeResult> {
+  const body = normalizeKnowledgeBody(input.body)
+  assertAssistantGroupRoomModelBodyValid(body)
+
+  const initialState = await readAssistantGroupRoomModelState({
+    vaultRoot: input.vaultRoot,
+  })
+  if (initialState.kind === 'unavailable') {
+    throw new VaultCliError(
+      'group_room_model_unavailable',
+      'Group room-model state is unreadable or incompatible.',
+    )
+  }
+  if (initialState.kind === 'present') {
+    if (initialState.status === 'active' && initialState.body === body) {
+      return { kind: 'already_initialized', state: initialState }
+    }
+    throw new VaultCliError(
+      'group_room_model_initialization_conflict',
+      'Group room-model initialization must not overwrite existing state.',
+    )
+  }
+
+  try {
+    return {
+      kind: 'initialized',
+      state: await replaceAssistantGroupRoomModel({
+        body,
+        expectedDigest: initialState.digest,
+        vaultRoot: input.vaultRoot,
+      }),
+    }
+  } catch (error) {
+    // A simultaneous exact replay can win the canonical resource lock between
+    // the optimistic read and replacement. Treat only the exact resulting page
+    // as an idempotent success.
+    const current = await readAssistantGroupRoomModelState({
+      vaultRoot: input.vaultRoot,
+    })
+    if (
+      current.kind === 'present'
+      && current.status === 'active'
+      && current.body === body
+    ) {
+      return { kind: 'already_initialized', state: current }
+    }
+    throw error
+  }
+}
+
 export async function deleteAssistantGroupRoomModel(input: {
   expectedDigest: string
   vaultRoot: string
@@ -293,7 +364,7 @@ function assertAssistantGroupRoomModelBodyValid(body: string): void {
       },
     )
   }
-  if (assistantGroupRoomModelBodyContainsRawParticipantHandle(body)) {
+  if (containsHostedRuntimeRawParticipantHandle(body)) {
     throw new VaultCliError(
       'group_room_model_participant_handle_forbidden',
       'Group room-model body must not contain raw participant handles.',
@@ -306,19 +377,6 @@ function assistantGroupRoomModelBodyFitsPrompt(body: string): boolean {
     assistantConversationHistoryUtf8Bytes(
       renderAssistantGroupRoomModelPrompt(body),
     ) <= ASSISTANT_GROUP_ROOM_MODEL_PROMPT_MAX_BYTES
-  )
-}
-
-function assistantGroupRoomModelBodyContainsRawParticipantHandle(
-  body: string,
-): boolean {
-  return (
-    /(?:^|[^\p{L}\p{N}])\+\d{7,15}(?!\d)/u.test(body) ||
-    /(?:^|[^\p{L}\p{N}])Sender(?![\p{L}\p{N}])[^\p{L}\p{N}\r\n]{0,16}\d{1,16}(?![\p{L}\p{N}])/iu.test(body) ||
-    /(?:^|[^\p{L}\p{N}])\d{5,16}(?!\d)/u.test(body) ||
-    /\btelegram:[^\s`()[\]{}<>]+/iu.test(body) ||
-    /\bparticipant:[^\s`()[\]{}<>]+/iu.test(body) ||
-    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu.test(body)
   )
 }
 

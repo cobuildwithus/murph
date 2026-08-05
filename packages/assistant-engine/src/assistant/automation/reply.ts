@@ -182,7 +182,7 @@ export interface AssistantAutoReplyGroupContext {
 
 interface AssistantAutoReplyReplyDecision {
   crossSessionContext: AssistantAutoReplySelectedCrossSessionContext | null
-  deliveryTarget: string | null
+  bindingDeliveryTarget: string | null
   deliveryMessageReactionsAvailable: boolean | null
   deliveryReplyToMessageId: string | null
   kind: 'reply'
@@ -653,8 +653,8 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
         ...(assistantStyleSettingsAuthorized === undefined
           ? {}
           : { assistantStyleSettingsAuthorized }),
+        bindingDeliveryTarget: decision.bindingDeliveryTarget,
         context,
-        deliveryTarget: decision.deliveryTarget,
         executionContext: input.executionContext,
         historyReader: input.historyReader,
         onAcceptedContext(nextContext) {
@@ -669,7 +669,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     : null
   const hostedDelivery = createHostedAutoReplyDeliveryIdempotency({
     context,
-    deliveryTarget: decision.deliveryTarget,
+    deliveryTarget: decision.bindingDeliveryTarget,
     executionContext: input.executionContext,
   })
   const result = await executeAssistantAutoReply({
@@ -680,7 +680,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       inputSummaries: context.items.map((item) => item.summary),
       inputCandidates: context.items.map((item) => item.inputCandidate ?? null),
     }),
-    bindingDeliveryTarget: decision.deliveryTarget,
+    bindingDeliveryTarget: decision.bindingDeliveryTarget,
     ...(input.beforeProviderAcceptedInputs
       ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
       : {}),
@@ -690,7 +690,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     answeredMailboxItemIds: hostedDelivery.answeredMailboxItemIds,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     hostedDeliveryIdempotency: hostedDelivery.hostedDeliveryIdempotency,
-    deliveryTarget: decision.deliveryTarget,
     ...(decision.deliveryMessageReactionsAvailable === null
       ? {}
       : {
@@ -1414,9 +1413,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
     maxSessionAgeMs: input.sessionMaxAgeMs,
     vault: input.vault,
   })
-  const deliveryTarget = readAutoReplyDeliveryTarget(input.group)
+  const bindingDeliveryTarget = readAutoReplyBindingDeliveryTarget(input.group)
   const conversationDeliveryTarget =
-    deliveryTarget ?? readAutoReplyConversationDeliveryTarget(input.group)
+    bindingDeliveryTarget ?? readAutoReplyConversationDeliveryTarget(input.group)
   if (
     input.group.firstItem.summary.actorIsSelf &&
     await isRecentSelfAuthoredAssistantEcho({
@@ -1475,7 +1474,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
   if (
     input.executionContext?.hosted &&
     primaryReplyInput.source === 'telegram' &&
-    deliveryTarget === null &&
+    bindingDeliveryTarget === null &&
     shouldSuppressHostedTelegramAutoReplyMissingDeliveryTarget(input.group)
   ) {
     return createAdvancingSkipDecision(
@@ -1497,7 +1496,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
   }
 
   return {
-    deliveryTarget,
+    bindingDeliveryTarget,
     deliveryMessageReactionsAvailable:
       readAutoReplyDeliveryMessageReactionsAvailable({
         context: input.group,
@@ -2068,7 +2067,6 @@ async function executeAssistantAutoReply(input: {
   answeredMailboxItemIds: readonly string[]
   deliveryIdempotencyKey: string | null
   hostedDeliveryIdempotency: AssistantHostedDeliveryIdempotencyContext | null
-  deliveryTarget: string | null
   deliveryMessageReactionsAvailable?: boolean | null
   deliveryReplyToMessageId: string | null
   executionContext?: AssistantExecutionContext | null
@@ -2137,6 +2135,7 @@ async function executeAssistantAutoReply(input: {
       onFinishWithoutReplyAccepted:
         input.onFinishWithoutReplyAccepted ?? null,
       bindingDeliveryTarget: input.bindingDeliveryTarget,
+      deliveryKind: input.bindingDeliveryTarget === null ? null : 'thread',
       answeredMailboxItemIds: input.answeredMailboxItemIds,
       deliveryIdempotencyKey: input.deliveryIdempotencyKey,
       hostedDeliveryIdempotency: input.hostedDeliveryIdempotency,
@@ -2147,7 +2146,6 @@ async function executeAssistantAutoReply(input: {
             deliveryMessageReactionsAvailable:
               input.deliveryMessageReactionsAvailable,
           }),
-      deliveryTarget: input.deliveryTarget,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       receiptMetadata: {
         [AUTO_REPLY_RECEIPT_INPUT_ID_KEY]:
@@ -2251,8 +2249,8 @@ interface AssistantAutoReplyActiveTurnPendingAcceptance {
 
 function createAssistantAutoReplyActiveTurnInputHooks(input: {
   assistantStyleSettingsAuthorized?: boolean
+  bindingDeliveryTarget: string | null
   context: AssistantAutoReplyGroupContext
-  deliveryTarget: string | null
   executionContext?: AssistantExecutionContext | null
   historyReader: AssistantAutoReplyHistoryReader
   onAcceptedContext(context: AssistantAutoReplyGroupContext): void
@@ -2388,7 +2386,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       ? (await resolveAssistantAutoReplyExplicitLinqReplyContexts({
           deliveryTarget:
             readAutoReplyConversationDeliveryTarget(selectionContext)
-              ?? input.deliveryTarget,
+              ?? input.bindingDeliveryTarget,
           historyReader: input.historyReader,
           input: createAssistantAutoReplyPrimaryInput(firstLatePromptInput),
           inputs: latePromptInputs,
@@ -2409,7 +2407,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     )
     if (lateCaptureCandidates.length === 0) {
       return admitCapturelessAssistantInputs({
-        deliveryTarget: input.deliveryTarget,
+        bindingDeliveryTarget: input.bindingDeliveryTarget,
         executionContext: input.executionContext,
         getContext: () => context,
         inputSourceCursor: lateInputs.nextCursor,
@@ -2544,7 +2542,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     const hostedDelivery = createHostedAutoReplyDeliveryIdempotency({
       context: finalContext,
       deliveryTarget:
-        acceptedInputDeliveryTargetForIdempotency ?? input.deliveryTarget,
+        acceptedInputDeliveryTargetForIdempotency ?? input.bindingDeliveryTarget,
       executionContext: input.executionContext,
     })
     const result: AssistantActiveTurnInputAdmissionResult = {
@@ -2552,9 +2550,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
       hostedDeliveryIdempotency: hostedDelivery.hostedDeliveryIdempotency,
       answeredMailboxItemIds: hostedDelivery.answeredMailboxItemIds,
-      ...(acceptedInputDeliveryTarget !== null
-        ? { deliveryTarget: acceptedInputDeliveryTarget }
-        : {}),
       ...(acceptedInputMessageReactionsAvailable === null
         ? {}
         : {
@@ -2607,12 +2602,12 @@ async function listAutoReplyActiveTurnInputs(input: {
   signal?: AbortSignal
 }): Promise<AssistantInputCandidateBatch> {
   const expectedChannel = normalizeNullableString(input.context.firstItem.summary.source)
-  const deliveryTarget = readAutoReplyDeliveryTarget(input.context)
+  const bindingDeliveryTarget = readAutoReplyBindingDeliveryTarget(input.context)
   if (
     input.inputIds.length > 0 &&
     input.inputSource.listInputCandidatesByIds &&
     expectedChannel &&
-    deliveryTarget
+    bindingDeliveryTarget
   ) {
     const exact = await input.inputSource.listInputCandidatesByIds({
       afterCursor: input.afterCursor,
@@ -2627,7 +2622,7 @@ async function listAutoReplyActiveTurnInputs(input: {
       afterCursor: input.afterCursor,
       candidates: exact.inputs,
       conversation: input.conversation,
-      deliveryTarget,
+      deliveryTarget: bindingDeliveryTarget,
       expectedChannel,
       anchorSummary:
         input.context.items.at(-1)?.summary ?? input.context.firstItem.summary,
@@ -2642,7 +2637,7 @@ async function listAutoReplyActiveTurnInputs(input: {
     knownInputIds: input.knownInputIds,
     signal: input.signal,
   })
-  if (!input.inputSource.listInputCandidates || !expectedChannel || !deliveryTarget) {
+  if (!input.inputSource.listInputCandidates || !expectedChannel || !bindingDeliveryTarget) {
     return strict
   }
 
@@ -2661,7 +2656,7 @@ async function listAutoReplyActiveTurnInputs(input: {
     afterCursor: input.afterCursor,
     candidates: [...strict.inputs, ...route.inputs],
     conversation: input.conversation,
-    deliveryTarget,
+    deliveryTarget: bindingDeliveryTarget,
     expectedChannel,
     anchorSummary:
       input.context.items.at(-1)?.summary ?? input.context.firstItem.summary,
@@ -2889,7 +2884,7 @@ function assistantAutoReplyGroupItemFromInputCandidate(
 }
 
 async function admitCapturelessAssistantInputs(input: {
-  deliveryTarget: string | null
+  bindingDeliveryTarget: string | null
   executionContext?: AssistantExecutionContext | null
   getContext(): AssistantAutoReplyGroupContext
   inputSourceCursor: AssistantInputCandidate['event']['cursor'] | null
@@ -2967,13 +2962,15 @@ async function admitCapturelessAssistantInputs(input: {
     candidates: input.lateInputs,
     expectedChannel: queuedContext.firstItem.summary.source,
   })
-  const deliveryTarget = readLatestAssistantInputDeliveryTarget({
-    candidates: input.lateInputs,
-    expectedChannel: queuedContext.firstItem.summary.source,
-  })
+  const acceptedInputDeliveryTargetForIdempotency =
+    readLatestAssistantInputDeliveryTarget({
+      candidates: input.lateInputs,
+      expectedChannel: queuedContext.firstItem.summary.source,
+    })
   const hostedDelivery = createHostedAutoReplyDeliveryIdempotency({
     context: nextContext,
-    deliveryTarget: deliveryTarget ?? input.deliveryTarget,
+    deliveryTarget:
+      acceptedInputDeliveryTargetForIdempotency ?? input.bindingDeliveryTarget,
     executionContext: input.executionContext,
   })
 
@@ -2985,7 +2982,6 @@ async function admitCapturelessAssistantInputs(input: {
     ...(deliveryReplyToMessageId !== undefined
       ? { deliveryReplyToMessageId }
       : {}),
-    ...(deliveryTarget !== null ? { deliveryTarget } : {}),
     ...(() => {
       const deliveryMessageReactionsAvailable =
         readAutoReplyDeliveryMessageReactionsAvailable({
@@ -3308,7 +3304,7 @@ function readPromptInputReplyTargetMessageId(input: {
   return readAssistantTargetProviderScalar(replyTarget?.messageId)
 }
 
-function readAutoReplyDeliveryTarget(
+function readAutoReplyBindingDeliveryTarget(
   context: AssistantAutoReplyGroupContext,
 ): string | null {
   const replyTarget = readLatestAssistantInputReplyTarget({

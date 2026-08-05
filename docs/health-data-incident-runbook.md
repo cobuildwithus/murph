@@ -1,10 +1,12 @@
 # Health Data Incident Runbook
 
-Last verified: 2026-04-29
+Last verified: 2026-08-05
 
 ## Purpose
 
 This runbook is the engineering entry point for suspected incidents involving Murph health data, Consumer Health Data, legal consent records, health-data tracking disclosures, vendor incidents, or unauthorized hosted processing.
+
+Declare and coordinate the incident through `docs/incident-response.md`. incident.io is the operational source of truth; this runbook owns the health-data-specific containment and legal/privacy escalation path.
 
 Use the detailed compliance playbooks under `agent-docs/compliance/` for legal/compliance execution. This file summarizes the engineering response shape.
 
@@ -21,11 +23,12 @@ Start incident triage when any of the following is suspected:
 
 ## First Hour
 
-1. Preserve evidence without printing secrets or raw health payloads into chat, logs, tickets, or commits.
-2. Stop the bleeding: disable affected route, job, integration, key, provider, or feature flag where possible.
-3. Identify affected systems, data categories, members, vendors, time window, and whether data was encrypted.
-4. Open the FTC HBNR incident plan in `agent-docs/compliance/ftc-hbnr-incident-plan.md`.
-5. Notify the internal incident owner and legal/privacy reviewer.
+1. Declare the incident in incident.io as soon as the concern is credible. Mark it private when exposing its existence or details would create additional risk.
+2. Preserve evidence without printing secrets or raw health payloads into chat, logs, tickets, or commits.
+3. Stop the bleeding: disable affected route, job, integration, key, provider, or feature flag where possible.
+4. Identify affected systems, data categories, members, vendors, time window, and whether data was encrypted.
+5. Open the FTC HBNR incident plan in `agent-docs/compliance/ftc-hbnr-incident-plan.md`.
+6. Notify the internal incident owner and legal/privacy reviewer.
 
 ## Engineering Containment
 
@@ -49,7 +52,7 @@ For each affected surface, classify:
 
 Do not decide alone that no notice is required. Legal/privacy review must decide whether notices are required under consumer health data laws, FTC HBNR, state breach laws, contract terms, platform rules, or vendor agreements.
 
-Use templates in `agent-docs/compliance/ftc-hbnr-notice-templates.md` when notice is required.
+Use templates in `agent-docs/compliance/ftc-hbnr-notice-templates.md` when notice is required. Do not publish security, privacy, or health-data details to the public status page without the incident lead and legal/privacy reviewer approving the wording.
 
 ## Closeout
 

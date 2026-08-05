@@ -2151,7 +2151,7 @@ describe("cloudflare worker routes", () => {
         r2Cutover: {
           coexisting: true,
           phase: "source_active" as const,
-          protocolVersion: "r2-oc-enam-v1",
+          protocolVersion: "r2-oc-enam-v2",
         },
         userId: "member_123",
         workspace: null,
@@ -2171,7 +2171,7 @@ describe("cloudflare worker routes", () => {
       r2Cutover: {
         phase: "source_active",
         pausedCanaryConfigured: false,
-        protocolVersion: "r2-oc-enam-v1",
+        protocolVersion: "r2-oc-enam-v2",
         writeAdmission: "paused",
       },
     });
