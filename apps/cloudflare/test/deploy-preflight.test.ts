@@ -473,6 +473,14 @@ describe("deploy preflight helpers", () => {
     );
   });
 
+  it("allows destination promotion while runtime write admission remains open", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: undefined,
+      HOSTED_R2_WRITE_ADMISSION: "open",
+    }), { deployWorker: true })).toEqual([]);
+  });
+
   it("restricts the temporary paused canary digest to destination-active paused deploys", () => {
     expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
       HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "not-a-digest",
