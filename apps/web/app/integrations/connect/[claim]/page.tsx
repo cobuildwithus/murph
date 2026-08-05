@@ -75,7 +75,7 @@ export default async function IntegrationsConnectPage({
         </span>
       }
       title={`Connect ${renderable.accountLabel}`}
-      description={`Continue to securely connect ${renderable.accountLabel} to Murph.`}
+      description={`Murph uses Composio to securely connect ${renderable.accountLabel}. On the next screen, you’ll review and approve access.`}
     >
       <IntegrationsConnectLauncher claim={claim} />
     </ConnectScreen>

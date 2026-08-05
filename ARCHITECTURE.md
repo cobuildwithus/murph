@@ -12,7 +12,9 @@ service types expose no ref. One resolver binds that ref to the current
 delivery-context ordinal, reloads the stored event, rechecks route,
 conversation, audience, group-actor, provider-target, and action-specific
 capability authority, and returns only the accepted input id. Provider message
-ids stay inside the local delivery boundary. Both targeting tools are
+ids stay inside the local delivery boundary. The current thread-kind binding,
+not the one-off explicit-target override, is the provider-thread authority for
+that recheck. Both targeting tools are
 invocation-scoped root tools: the resident App Server may expose them to the
 active root turn, but descendant or foreign resident threads fail before the
 accepted-message resolver runs.
@@ -1343,7 +1345,15 @@ accepted input in the same live turn invalidates an earlier card-only decision,
 and attachment is rejected after the delivery context advances. Every
 card copies the immediately preceding single-date canonical meal-totals read.
 Both versions use the same deterministic text fallback, Linq capability
-boundary, and existing outbox idempotency lifecycle. Linq owns the
+boundary, and existing outbox idempotency lifecycle. Hosted inbound routing
+keeps the opaque conversation locator used for continuity separate from the
+trusted provider reply thread. Ordinary auto-replies pass that provider route
+once as a thread binding rather than copying it into an explicit target, so the
+existing direct Linq chat owns native-card delivery without a reverse map or a
+new-chat workaround. Same-route inputs accepted during the live turn may update
+the reply message, reaction capability, and delivery idempotency inputs, but do
+not recreate the explicit-target override or replace the turn's thread binding.
+Linq owns the
 noninteractive static transcript layout, which carries the date, meal count,
 available totals, an explicit partial marker, and the first available exact V2
 goal plus its frozen status in canonical metric order. Its required URL is a
