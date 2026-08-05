@@ -547,6 +547,8 @@ function HostedAssistantModelSettingsForm(
   const hasChanges = draftModel !== currentModel
     || routingChanged
     || dormantSolPreference;
+  const providerControlsVisible = veniceAvailable
+    || props.customInferenceAvailable === true;
 
   async function saveModel() {
     setIsSaving(true);
@@ -783,7 +785,7 @@ function HostedAssistantModelSettingsForm(
           </RadioGroup>
         </FieldSet>
 
-        {veniceAvailable || props.customInferenceAvailable ? (
+        {providerControlsVisible ? (
           <AssistantProviderSummary
             connection={connection}
             currentRouting={currentRouting}
@@ -814,7 +816,8 @@ function HostedAssistantModelSettingsForm(
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-48">
           <Button
             aria-describedby={
-              draftRouting === HOSTED_ASSISTANT_VENICE_PROVIDER
+              providerControlsVisible
+                && draftRouting === HOSTED_ASSISTANT_VENICE_PROVIDER
                 ? veniceUsageDisclosureId
                 : undefined
             }
@@ -838,7 +841,7 @@ function HostedAssistantModelSettingsForm(
           />
         </div>
       </form>
-      {veniceAvailable || props.customInferenceAvailable ? (
+      {providerControlsVisible ? (
         <AssistantProviderDialog
           chatCompletionsAvailable={props.chatCompletionsAvailable}
           configurationAvailable={props.configurationAvailable}

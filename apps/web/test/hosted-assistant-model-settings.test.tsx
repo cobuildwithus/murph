@@ -726,6 +726,27 @@ test("a deployment without Venice does not offer it in the routing dialog", asyn
   view.cleanup();
 });
 
+test("hidden provider controls do not leave a dangling Save description", async () => {
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      customInferenceAvailable: false,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: false,
+    }),
+  );
+
+  assert.equal(
+    findButton(view.container, "Save change").getAttribute("aria-describedby"),
+    null,
+  );
+  view.cleanup();
+});
+
 test("an endpoint that is not verified yet cannot be selected for replies", async () => {
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
