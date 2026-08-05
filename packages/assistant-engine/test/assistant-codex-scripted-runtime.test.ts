@@ -296,6 +296,13 @@ text(result.output);
     expect(result.finalMessage).toBe(
       'Logged it: about 345 calories, 18g protein, 45g carbs, 8g fat, and 5g fiber, based on 50g oats and one 240g kefir serving.',
     )
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain('The default returns one compact')
+    expect(toolOutputs).toContain('fdc:oats-1')
+    expect(toolOutputs).toContain('fdc:kefir-1')
+    expect(toolOutputs).toContain('meal_scripted_mixed')
     const invocations = (await readFile(commandLog, 'utf8'))
       .trim()
       .split('\n')
@@ -307,13 +314,6 @@ text(result.output);
     expect(invocations[1]).toContain('--nutrition-calories 344.5')
     expect(invocations[1]).toContain('USDA fdc:oats-1 scaled from 100 g')
     expect(invocations[1]).toContain('label fdc:kefir-1 scaled to its 240 g serving')
-    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
-      .flatMap((summary) => summary.customToolCallOutputs ?? [])
-      .join('\n')
-    expect(toolOutputs).toContain('The default returns one compact')
-    expect(toolOutputs).toContain('fdc:oats-1')
-    expect(toolOutputs).toContain('fdc:kefir-1')
-    expect(toolOutputs).toContain('meal_scripted_mixed')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
