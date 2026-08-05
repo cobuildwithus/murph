@@ -3050,7 +3050,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ): void => {
           if (
             input.rearmIdleCheckpointAfterEmptyProbe !== true
-            || input.latencySeed === null
             || !shouldContinue()
           ) {
             return;
@@ -3113,11 +3112,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 assistantAskRequestTargetKind: "joined_group" as const,
               }
             : wakeInitialMailboxImportContext;
+        const foregroundProbeRequestIdKind =
+          input.rearmIdleCheckpointAfterEmptyProbe
+            ? `${input.requestIdKind}-rearm`
+            : input.requestIdKind;
         const initialMailboxPrefetch = await createHostedForegroundMailboxPrefetch({
           lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
           limitPerLane: mailboxBudget.fetchLimitPerLane,
           requestId:
-            `${requestId}:${input.requestIdKind}-foreground-prefetch:${idleWakeOrdinal + 1}`,
+            `${requestId}:${foregroundProbeRequestIdKind}-foreground-prefetch:${idleWakeOrdinal + 1}`,
           runnerInput: baseRunnerInput,
         });
         if (!shouldContinue()) {
@@ -3141,7 +3144,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             initialMailboxImportLanes: lanes,
             initialMailboxPrefetch,
             requestId:
-              `${requestId}:${input.requestIdKind}-foreground-import:${idleWakeOrdinal}`,
+              `${requestId}:${foregroundProbeRequestIdKind}-foreground-import:${idleWakeOrdinal}`,
             signal: importSignal,
             workspace: passWorkspace,
           });
@@ -3241,6 +3244,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           systemImport.importResult.importedCount === 0
           && !systemImport.importResult.blocked.some((item) => item.retryable)
         ) {
+          deferCheckpointAfterEmptyForegroundProbe(systemImport);
           await finishMailboxImportWithoutAssistant(systemImport);
           return false;
         }
