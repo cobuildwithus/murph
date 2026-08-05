@@ -746,9 +746,15 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
     ) {
       return reactivateWithoutCharge();
     }
+    const returnUrls = buildHostedGroupSponsorshipRefillReturnUrls({
+      checkoutCancelUrl: failed.checkoutCancelUrl,
+      checkoutSuccessUrl: failed.checkoutSuccessUrl,
+      purchaseId: failed.id,
+    });
     const reset = await input.tx.hostedUsageCreditPurchase.updateMany({
       data: {
         checkoutExpiresAt: boundedCheckoutExpiresAt,
+        ...returnUrls,
         lastReconciledAt: null,
         reconciliationVersion: { increment: 1n },
         status: HostedUsageCreditPurchaseStatus.created,
@@ -803,8 +809,11 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
     orderBy: { groupSponsorshipChargeOrdinal: "asc" },
     select: {
       cashAmountMinor: true,
+      checkoutCancelUrl: true,
+      checkoutSuccessUrl: true,
       groupSponsorshipChargeOrdinal: true,
       id: true,
+      reconciliationVersion: true,
       status: true,
     },
     where: {
@@ -819,6 +828,13 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
     )
   );
   if (pendingAutomatic) {
+    if (pendingAutomatic.status === HostedUsageCreditPurchaseStatus.created) {
+      await normalizeHostedGroupSponsorshipRefillReturnUrlsTx({
+        now: input.now,
+        purchase: pendingAutomatic,
+        tx: input.tx,
+      });
+    }
     return pendingAutomatic.id;
   }
 
@@ -883,6 +899,11 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
   const offer = getHostedUsageCreditOfferDefinition(
     HOSTED_GROUP_SPONSORSHIP_REFILL_OFFER_CODE,
   );
+  const returnUrls = buildHostedGroupSponsorshipRefillReturnUrls({
+    checkoutCancelUrl: activationPurchase.checkoutCancelUrl,
+    checkoutSuccessUrl: activationPurchase.checkoutSuccessUrl,
+    purchaseId,
+  });
 
   try {
     await input.tx.hostedUsageCreditPurchase.create({
@@ -890,11 +911,11 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
         beneficiaryMemberId: authorization.beneficiaryMemberId,
         cashAmountMinor: offer.cashAmountMinor,
         cashCurrency: offer.cashCurrency,
-        checkoutCancelUrl: activationPurchase.checkoutCancelUrl,
+        checkoutCancelUrl: returnUrls.checkoutCancelUrl,
         checkoutExpiresAt: input.checkoutExpiresAt,
         checkoutRequestPolicyVersion:
           HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
-        checkoutSuccessUrl: activationPurchase.checkoutSuccessUrl,
+        checkoutSuccessUrl: returnUrls.checkoutSuccessUrl,
         clientRequestKey: buildHostedGroupSponsorshipRefillRequestKey({
           authorizationId: authorization.id,
           chargeOrdinal,
@@ -939,6 +960,90 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
   }
 
   return purchaseId;
+}
+
+function buildHostedGroupSponsorshipRefillReturnUrls(input: {
+  checkoutCancelUrl: string;
+  checkoutSuccessUrl: string;
+  purchaseId: string;
+}): { checkoutCancelUrl: string; checkoutSuccessUrl: string } {
+  return {
+    checkoutCancelUrl: rebindHostedGroupSponsorshipRefillReturnUrl({
+      outcome: "cancel",
+      purchaseId: input.purchaseId,
+      value: input.checkoutCancelUrl,
+    }),
+    checkoutSuccessUrl: rebindHostedGroupSponsorshipRefillReturnUrl({
+      outcome: "success",
+      purchaseId: input.purchaseId,
+      value: input.checkoutSuccessUrl,
+    }),
+  };
+}
+
+function rebindHostedGroupSponsorshipRefillReturnUrl(input: {
+  outcome: "cancel" | "success";
+  purchaseId: string;
+  value: string;
+}): string {
+  let url: URL;
+  try {
+    url = new URL(input.value);
+  } catch {
+    throw new TypeError(
+      "Hosted group sponsorship refill has an invalid return URL.",
+    );
+  }
+  if (
+    url.searchParams.get("usageCheckout") !== input.outcome ||
+    !url.searchParams.has("usagePurchase")
+  ) {
+    throw new TypeError(
+      "Hosted group sponsorship refill has an invalid return URL.",
+    );
+  }
+  url.searchParams.set("usagePurchase", input.purchaseId);
+  return url.toString();
+}
+
+async function normalizeHostedGroupSponsorshipRefillReturnUrlsTx(input: {
+  now: Date;
+  purchase: {
+    checkoutCancelUrl: string;
+    checkoutSuccessUrl: string;
+    id: string;
+    reconciliationVersion: bigint;
+  };
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const returnUrls = buildHostedGroupSponsorshipRefillReturnUrls({
+    checkoutCancelUrl: input.purchase.checkoutCancelUrl,
+    checkoutSuccessUrl: input.purchase.checkoutSuccessUrl,
+    purchaseId: input.purchase.id,
+  });
+  if (
+    returnUrls.checkoutCancelUrl === input.purchase.checkoutCancelUrl &&
+    returnUrls.checkoutSuccessUrl === input.purchase.checkoutSuccessUrl
+  ) {
+    return;
+  }
+  const updated = await input.tx.hostedUsageCreditPurchase.updateMany({
+    data: {
+      ...returnUrls,
+      reconciliationVersion: { increment: 1n },
+      updatedAt: input.now,
+    },
+    where: {
+      id: input.purchase.id,
+      reconciliationVersion: input.purchase.reconciliationVersion,
+      status: HostedUsageCreditPurchaseStatus.created,
+    },
+  });
+  if (updated.count !== 1) {
+    throw new TypeError(
+      "Hosted group sponsorship refill return URL repair lost its write fence.",
+    );
+  }
 }
 
 export async function hasHostedGroupSponsorshipPaymentAuthorityTx(input: {

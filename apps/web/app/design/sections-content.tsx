@@ -227,7 +227,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Persona onboarding with stacked tone samples">
-        <PersonaOnboardingStudy />
+        <div data-design-section="persona-onboarding">
+          <PersonaOnboardingStudy />
+        </div>
       </StudySection>
 
       <Separator />

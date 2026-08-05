@@ -8,10 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
-import {
-  HOSTED_APP_HOME_PATH,
-  HOSTED_APP_INITIAL_VISIT_HOME_PATH,
-} from "@/src/lib/hosted-onboarding/app-routes";
+import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
@@ -94,11 +91,7 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
         return;
       }
 
-      navigateHostedAuthRedirect(
-        payload.initialVisitEligible === true
-          ? HOSTED_APP_INITIAL_VISIT_HOME_PATH
-          : HOSTED_APP_HOME_PATH,
-      );
+      navigateHostedAuthRedirect(HOSTED_APP_HOME_PATH);
     },
     [],
   );

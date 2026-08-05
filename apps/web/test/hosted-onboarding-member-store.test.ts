@@ -22,6 +22,7 @@ import {
 
 import {
   composeHostedMemberSnapshot,
+  createHostedMember as createHostedMemberStore,
   lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberEmailSnapshots,
   readHostedMemberMessagingSetupState,
@@ -104,6 +105,29 @@ describe("hosted-member-store", () => {
       previousHostedContactPrivacyCurrentKeyVersion,
     );
     clearHostedOnboardingEnvCache();
+  });
+
+  it("creates current-version members with explicitly pending onboarding", async () => {
+    const create = vi.fn().mockResolvedValue({
+      billingStatus: HostedBillingStatus.incomplete,
+      createdAt: new Date("2026-08-04T12:00:00.000Z"),
+      id: "member_new_onboarding",
+      suspendedAt: null,
+      updatedAt: new Date("2026-08-04T12:00:00.000Z"),
+    });
+
+    await createHostedMemberStore({
+      billingStatus: HostedBillingStatus.incomplete,
+      memberId: "member_new_onboarding",
+      prisma: { hostedMember: { create } } as never,
+    });
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        id: "member_new_onboarding",
+        initialOnboardingCompletedAt: null,
+      }),
+    }));
   });
 
   it("keeps identity, routing, and billing refs nested under their owning slices", () => {
@@ -4254,6 +4278,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     assistantToneCausalSeq: null,
     assistantVoice: null,
     assistantVoiceCausalSeq: null,
+    initialOnboardingCompletedAt: null,
     billingStatus: HostedBillingStatus.not_started,
     createdAt: new Date("2026-04-06T00:00:00.000Z"),
     id: "member_123",

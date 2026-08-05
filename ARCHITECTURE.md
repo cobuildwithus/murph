@@ -1019,6 +1019,37 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/openclaw-plugin`: published OpenClaw-compatible bundle package in the default Claude bundle layout (`skills/**`) that teaches OpenClaw to use Murph's existing `vault-cli` surface against the operator's configured vault via OpenClaw's built-in `exec` tool, keeping the integration skill-first, vault-first, and free of any second Murph assistant runtime inside OpenClaw
 - `fixtures/` and `e2e/`: deterministic fixture corpus and end-to-end smoke flows
 
+### Cross-platform initial onboarding
+
+Postgres owns the one-time hosted-member onboarding fact through
+`hosted_member.initial_onboarding_completed_at`. The migration backfills every
+member that predates the field as complete. Its rolling-deploy compatibility
+default also marks rows from the still-serving legacy writer complete, while
+the current member creator explicitly writes null so new-version members begin
+pending. Remove that compatibility default only in a later deployment after
+the legacy writer can no longer serve. Every authenticated Home load reads the
+canonical fact and renders the flow while it is pending; query markers and Web
+session history are not eligibility owners. A user-initiated connection result
+temporarily takes foreground priority on Home, then its close refreshes plain
+Home so pending onboarding can render without competing dialogs. The iOS
+companion reads the same fact through the bearer-only companion route. Optional
+contact projection may remove only the contact-card step when unavailable on
+either surface; it cannot block the public catalog or the member's continuation
+to Health. The native
+client receives the closed web-owned persona, voice, tone, and contact-avatar
+catalog and keeps only unsaved presentation state; it has no durable completion
+flag or parallel catalog.
+
+Persona save and explicit persona skip/dismiss both use one shared transaction.
+The transaction locks the member row, refuses to overwrite preferences after a
+prior completion, writes all selected style fields through the existing
+preference owner, and then records completion. The first surface therefore wins
+an app/web race; a stale second surface receives `completedNow: false` and
+closes without replaying the welcome state. Contact-card skip merely advances
+the flow. Foreground native refresh and a fresh website load both re-read the
+same fact. The short-lived native vCard handoff reuses the existing signed card
+claim and never makes the app a routing-data owner.
+
 ### iOS address-book advisory names
 
 The iOS companion owns the optional system Contacts prompt and produces one
