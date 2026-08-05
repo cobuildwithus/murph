@@ -1,4 +1,4 @@
-name: Fix signup referral assistant contracts
+name: Apply signup link architecture cleanup
 
 on:
   push:
@@ -16,39 +16,521 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Keep the group tool contract bounded
+      - name: Apply the reviewed cleanup
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          tool_path = Path("packages/assistant-engine/src/assistant-codex/dynamic-tools.ts")
-          tool = tool_path.read_text()
-          redundant = " create_signup_referral_link returns a shareable attributed signup link only after an explicit link request; it never sends the link or arms an earned-usage mission, and a group request requires the exact message_ref."
-          if tool.count(redundant) != 1:
-              raise SystemExit("signup referral tool-description sentence did not match exactly once")
-          tool_path.write_text(tool.replace(redundant, "", 1))
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f"{path}: expected one replacement anchor, found {text.count(old)}")
+              target.write_text(text.replace(old, new, 1))
 
-          test_path = Path("packages/assistant-engine/test/assistant-codex-group-tool.test.ts")
-          test = test_path.read_text()
-          old = '''      "cancel_usage_referral",
-              "list_memberships",'''.replace("              ", "      ")
-          new = '''      "cancel_usage_referral",
+          # Keep the broad group tool description at its established prompt budget.
+          replace_once(
+              "packages/assistant-engine/src/assistant-codex/dynamic-tools.ts",
+              " create_signup_referral_link returns a shareable attributed signup link only after an explicit link request; it never sends the link or arms an earned-usage mission, and a group request requires the exact message_ref.",
+              "",
+          )
+
+          replace_once(
+              "packages/assistant-engine/test/assistant-codex-group-tool.test.ts",
+              '''      "cancel_usage_referral",
+              "list_memberships",'''.replace("              ", "      "),
+              '''      "cancel_usage_referral",
               "create_signup_referral_link",
-              "list_memberships",'''.replace("              ", "      ")
-          if test.count(old) != 1:
-              raise SystemExit("group action expectation anchor did not match exactly once")
-          test_path.write_text(test.replace(old, new, 1))
+              "list_memberships",'''.replace("              ", "      "),
+          )
 
+          # Give explicit signup links their own small policy owner instead of loading billing guidance.
+          low_usage_path = Path("packages/assistant-engine/skills/hosted-low-usage/SKILL.md")
+          low_usage = low_usage_path.read_text()
+          section_start = low_usage.find("\n## Explicit shareable signup links\n")
+          section_end = low_usage.find("\n## Follow-up options\n", section_start)
+          if section_start < 0 or section_end < 0:
+              raise SystemExit("hosted-low-usage signup-link section was not found")
+          low_usage_path.write_text(low_usage[:section_start] + low_usage[section_end:])
+
+          replace_once(
+              "packages/assistant-engine/src/assistant-skill-assets.ts",
+              '''  {
+            slug: 'hosted-low-usage',
+            name: 'hosted-low-usage',
+            triggerHint:
+              'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, the available ways to add or earn more usage, or explicitly asks for a Murph signup, invite, share, or referral link to send someone; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.',
+          },'''.replace("            ", "    "),
+              '''  {
+            slug: 'hosted-low-usage',
+            name: 'hosted-low-usage',
+            triggerHint:
+              'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.',
+          },
+          {
+            slug: 'signup-link',
+            name: 'signup-link',
+            triggerHint:
+              'Use only when a current member explicitly asks for a Murph signup link, invite link, referral link, or shareable link to forward to another person.',
+          },'''.replace("            ", "    "),
+          )
+
+          signup_skill_path = Path("packages/assistant-engine/skills/signup-link/SKILL.md")
+          signup_skill_path.parent.mkdir(parents=True, exist_ok=True)
+          if signup_skill_path.exists():
+              raise SystemExit("signup-link skill already exists")
+          signup_skill_path.write_text('''---
+          name: signup-link
+          description: Use only when a current member explicitly asks for a Murph signup link, invite link, referral link, or shareable link to forward to another person.
+          ---
+
+          # Shareable signup links
+
+          The existing group-chat introduction flow remains the default. Do not create a
+          link merely because someone mentions a friend, starts a group, asks about an
+          earned-usage mission, or agrees to introduce Murph.
+
+          Only when the current member explicitly asks for a signup, invite, referral, or
+          shareable link to forward, call `murph.group` with
+          `action="create_signup_referral_link"`. In a group, pass the exact accepted
+          `message_ref` from the requester.
+
+          Use only the exact returned `signupUrl`; mention `expiresAt` only when useful.
+          Return the link to the requester. Never choose, contact, or message the
+          recipient. The link records signup attribution only and does not earn usage,
+          complete a mission, or guarantee a reward.
+          '''.replace("          ", ""))
+
+          Path("packages/assistant-engine/test/assistant-signup-referral-skill-trigger.test.ts").write_text('''import { readFile } from 'node:fs/promises'
+          import path from 'node:path'
+
+          import { describe, expect, it } from 'vitest'
+
+          import {
+            ASSISTANT_SKILLS,
+            buildAssistantSkillFileRef,
+            resolveAssistantSkillsRoot,
+          } from '../src/assistant-skill-assets.js'
+
+          describe('assistant signup link guidance', () => {
+            it('loads a small dedicated skill only for an explicit shareable-link request', () => {
+              const skill = ASSISTANT_SKILLS.find(
+                (candidate) => candidate.slug === 'signup-link',
+              )
+              const lowUsage = ASSISTANT_SKILLS.find(
+                (candidate) => candidate.slug === 'hosted-low-usage',
+              )
+
+              expect(skill?.triggerHint).toContain('explicitly asks')
+              expect(skill?.triggerHint).toContain('shareable link')
+              expect(buildAssistantSkillFileRef('signup-link')).toBe(
+                '$MURPH_ASSISTANT_SKILLS_ROOT/signup-link/SKILL.md',
+              )
+              expect(lowUsage?.triggerHint).not.toContain('signup link')
+              expect(lowUsage?.triggerHint).not.toContain('invite link')
+            })
+
+            it('keeps group introductions as the default and separates attribution from rewards', async () => {
+              const skill = await readFile(
+                path.join(resolveAssistantSkillsRoot(), 'signup-link', 'SKILL.md'),
+                'utf8',
+              )
+              const normalizedSkill = skill.replace(/\\s+/gu, ' ')
+
+              expect(normalizedSkill).toContain(
+                'The existing group-chat introduction flow remains the default',
+              )
+              expect(normalizedSkill).toContain(
+                'Only when the current member explicitly asks for a signup, invite, referral, or shareable link to forward',
+              )
+              expect(normalizedSkill).toContain(
+                '`action="create_signup_referral_link"`',
+              )
+              expect(normalizedSkill).toContain(
+                'pass the exact accepted `message_ref` from the requester',
+              )
+              expect(normalizedSkill).toContain(
+                'Never choose, contact, or message the recipient',
+              )
+              expect(normalizedSkill).toContain(
+                'does not earn usage, complete a mission, or guarantee a reward',
+              )
+            })
+          })
+          '''.replace("          ", ""))
+
+          # Expose only the two fields consumed outside the invite implementation.
+          replace_once(
+              "apps/web/src/lib/hosted-growth/signup-referral.ts",
+              '''export interface HostedSignupReferralLink {
+            expiresAt: Date;
+            inviteCode: string;
+            signupUrl: string;
+            targetMemberId: string;
+          }'''.replace("            ", "  "),
+              '''export interface HostedSignupReferralLink {
+            expiresAt: Date;
+            signupUrl: string;
+          }'''.replace("            ", "  "),
+          )
+          replace_once(
+              "apps/web/src/lib/hosted-growth/signup-referral.ts",
+              '''  return {
+            expiresAt: invite.expiresAt,
+            inviteCode: invite.inviteCode,
+            signupUrl: buildHostedSignupReferralUrl(
+              invite.inviteCode,
+              input.publicBaseUrl,
+            ),
+            targetMemberId: invite.memberId,
+          };'''.replace("            ", "    "),
+              '''  return {
+            expiresAt: invite.expiresAt,
+            signupUrl: buildHostedSignupReferralUrl(
+              invite.inviteCode,
+              input.publicBaseUrl,
+            ),
+          };'''.replace("            ", "    "),
+          )
+
+          Path("apps/web/test/hosted-signup-referral.test.ts").write_text('''import { beforeEach, describe, expect, it, vi } from "vitest";
+
+          const mocks = vi.hoisted(() => ({
+            createHostedMember: vi.fn(),
+            generateHostedInviteCode: vi.fn(),
+            generateHostedInviteId: vi.fn(),
+            generateHostedMemberId: vi.fn(),
+            getHostedOnboardingEnvironment: vi.fn(),
+            lockHostedMemberRow: vi.fn(),
+            upsertHostedMemberIdentity: vi.fn(),
+          }));
+
+          vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+            createHostedMember: mocks.createHostedMember,
+          }));
+
+          vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+            upsertHostedMemberIdentity: mocks.upsertHostedMemberIdentity,
+          }));
+
+          vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+            getHostedOnboardingEnvironment: mocks.getHostedOnboardingEnvironment,
+            requireHostedOnboardingPublicBaseUrl: () => "https://www.withmurph.ai",
+          }));
+
+          vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => {
+            const original =
+              await importOriginal<typeof import("@/src/lib/hosted-onboarding/shared")>();
+            return {
+              ...original,
+              generateHostedInviteCode: mocks.generateHostedInviteCode,
+              generateHostedInviteId: mocks.generateHostedInviteId,
+              generateHostedMemberId: mocks.generateHostedMemberId,
+              lockHostedMemberRow: mocks.lockHostedMemberRow,
+            };
+          });
+
+          import {
+            buildHostedSignupReferralUrl,
+            issueHostedSignupReferralLink,
+          } from "@/src/lib/hosted-growth/signup-referral";
+
+          type ExistingInvite = {
+            expiresAt: Date;
+            inviteCode: string;
+            memberId: string;
+          };
+
+          function createPrisma(input: {
+            currentPrivyLookupKey?: string | null;
+            existingInvite?: ExistingInvite | null;
+            referrer?: { id: string; suspendedAt: Date | null } | null;
+          }) {
+            const existingInvite = input.existingInvite ?? null;
+            const referrer = input.referrer === undefined
+              ? { id: "member_referrer", suspendedAt: null }
+              : input.referrer;
+            const tx = {
+              hostedInvite: {
+                create: vi.fn().mockResolvedValue({
+                  expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+                  inviteCode: "new_invite",
+                  memberId: "member_target_new",
+                }),
+                findFirst: vi.fn().mockResolvedValue(existingInvite),
+              },
+              hostedMember: {
+                findUnique: vi.fn().mockResolvedValue(referrer),
+              },
+              hostedMemberIdentity: {
+                findUnique: vi.fn().mockResolvedValue(
+                  existingInvite
+                    ? { privyUserLookupKey: input.currentPrivyLookupKey ?? null }
+                    : null,
+                ),
+              },
+            };
+            const prisma = {
+              $transaction: vi.fn(
+                (run: (client: typeof tx) => Promise<unknown>) => run(tx),
+              ),
+            };
+
+            return { prisma, tx };
+          }
+
+          describe("hosted signup referral links", () => {
+            beforeEach(() => {
+              vi.clearAllMocks();
+              mocks.createHostedMember.mockResolvedValue({
+                billingStatus: "not_started",
+                createdAt: new Date("2026-08-04T22:30:00.000Z"),
+                id: "member_target_new",
+                suspendedAt: null,
+                updatedAt: new Date("2026-08-04T22:30:00.000Z"),
+              });
+              mocks.generateHostedInviteCode.mockReturnValue("new_invite");
+              mocks.generateHostedInviteId.mockReturnValue("invite_id");
+              mocks.generateHostedMemberId.mockReturnValue("member_target_new");
+              mocks.getHostedOnboardingEnvironment.mockReturnValue({
+                inviteTtlHours: 48,
+              });
+              mocks.lockHostedMemberRow.mockResolvedValue(undefined);
+              mocks.upsertHostedMemberIdentity.mockResolvedValue({});
+            });
+
+            it("builds an opaque handoff to the existing join flow", () => {
+              expect(
+                buildHostedSignupReferralUrl(
+                  "a b/c",
+                  "https://www.withmurph.ai/app?ignored=1#fragment",
+                ),
+              ).toBe("https://www.withmurph.ai/join/a%20b%2Fc");
+            });
+
+            it("reuses the current unclaimed attributed invite under both row locks", async () => {
+              const now = new Date("2026-08-04T22:30:00.000Z");
+              const existingInvite = {
+                expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+                inviteCode: "existing_invite",
+                memberId: "member_target_existing",
+              };
+              const { prisma, tx } = createPrisma({
+                currentPrivyLookupKey: null,
+                existingInvite,
+              });
+
+              await expect(issueHostedSignupReferralLink({
+                now,
+                prisma: prisma as never,
+                publicBaseUrl: "https://www.withmurph.ai",
+                referrerMemberId: "member_referrer",
+              })).resolves.toEqual({
+                expiresAt: existingInvite.expiresAt,
+                signupUrl: "https://www.withmurph.ai/join/existing_invite",
+              });
+
+              expect(tx.hostedInvite.findFirst).toHaveBeenCalledWith({
+                orderBy: { createdAt: "desc" },
+                select: {
+                  expiresAt: true,
+                  inviteCode: true,
+                  memberId: true,
+                },
+                where: {
+                  expiresAt: { gt: now },
+                  referrerMemberId: "member_referrer",
+                },
+              });
+              expect(mocks.createHostedMember).not.toHaveBeenCalled();
+              expect(tx.hostedInvite.create).not.toHaveBeenCalled();
+              expect(mocks.lockHostedMemberRow).toHaveBeenNthCalledWith(
+                1,
+                tx,
+                "member_referrer",
+              );
+              expect(mocks.lockHostedMemberRow).toHaveBeenNthCalledWith(
+                2,
+                tx,
+                "member_target_existing",
+              );
+            });
+
+            it("fails closed when the referring account no longer exists", async () => {
+              const { prisma, tx } = createPrisma({ referrer: null });
+
+              await expect(issueHostedSignupReferralLink({
+                now: new Date("2026-08-04T22:30:00.000Z"),
+                prisma: prisma as never,
+                referrerMemberId: "member_referrer",
+              })).rejects.toMatchObject({
+                code: "HOSTED_SIGNUP_REFERRER_NOT_FOUND",
+              });
+
+              expect(tx.hostedInvite.findFirst).not.toHaveBeenCalled();
+              expect(mocks.createHostedMember).not.toHaveBeenCalled();
+            });
+
+            it("fails closed for a suspended referring account", async () => {
+              const { prisma, tx } = createPrisma({
+                referrer: {
+                  id: "member_referrer",
+                  suspendedAt: new Date("2026-08-04T21:30:00.000Z"),
+                },
+              });
+
+              await expect(issueHostedSignupReferralLink({
+                now: new Date("2026-08-04T22:30:00.000Z"),
+                prisma: prisma as never,
+                referrerMemberId: "member_referrer",
+              })).rejects.toMatchObject({
+                code: "HOSTED_MEMBER_SUSPENDED",
+              });
+
+              expect(tx.hostedInvite.findFirst).not.toHaveBeenCalled();
+              expect(mocks.createHostedMember).not.toHaveBeenCalled();
+            });
+
+            it("rotates to a fresh attributed invite after the prior link is claimed", async () => {
+              const { prisma, tx } = createPrisma({
+                currentPrivyLookupKey: "hbidx:privy-user:v1:claimed",
+                existingInvite: {
+                  expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+                  inviteCode: "claimed_invite",
+                  memberId: "member_target_claimed",
+                },
+              });
+
+              await expect(issueHostedSignupReferralLink({
+                now: new Date("2026-08-04T22:30:00.000Z"),
+                prisma: prisma as never,
+                publicBaseUrl: "https://www.withmurph.ai",
+                referrerMemberId: "member_referrer",
+              })).resolves.toEqual({
+                expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+                signupUrl: "https://www.withmurph.ai/join/new_invite",
+              });
+
+              expect(mocks.createHostedMember).toHaveBeenCalledWith({
+                billingStatus: "not_started",
+                memberId: "member_target_new",
+                prisma: tx,
+              });
+              expect(mocks.upsertHostedMemberIdentity).toHaveBeenCalledWith(
+                expect.objectContaining({
+                  memberId: "member_target_new",
+                  phoneLookupKey: null,
+                  phoneNumber: null,
+                  prisma: tx,
+                  privyUserId: null,
+                }),
+              );
+              expect(tx.hostedInvite.create).toHaveBeenCalledWith({
+                data: expect.objectContaining({
+                  channel: "share",
+                  memberId: "member_target_new",
+                  referrerMemberId: "member_referrer",
+                }),
+                select: {
+                  expiresAt: true,
+                  inviteCode: true,
+                  memberId: true,
+                },
+              });
+            });
+          });
+          '''.replace("          ", ""))
+
+          group_tool_test = Path("apps/web/test/hosted-group-tool.test.ts")
+          group_test_text = group_tool_test.read_text()
+          old_mock = '''    mocks.issueHostedSignupReferralLink.mockResolvedValue({
+            expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+            inviteCode: "invite",
+            signupUrl: "https://www.withmurph.ai/?referral=invite",
+            targetMemberId: "member_target",
+          });'''.replace("            ", "    ")
+          new_mock = '''    mocks.issueHostedSignupReferralLink.mockResolvedValue({
+            expiresAt: new Date("2026-08-06T22:30:00.000Z"),
+            signupUrl: "https://www.withmurph.ai/join/signup_invite",
+          });'''.replace("            ", "    ")
+          if group_test_text.count(old_mock) != 1:
+              raise SystemExit("hosted group signup-link mock anchor did not match exactly once")
+          group_test_text = group_test_text.replace(old_mock, new_mock, 1)
+          if group_test_text.count("https://www.withmurph.ai/?referral=invite") != 1:
+              raise SystemExit("hosted group signup-link expected URL anchor did not match exactly once")
+          group_tool_test.write_text(
+              group_test_text.replace(
+                  "https://www.withmurph.ai/?referral=invite",
+                  "https://www.withmurph.ai/join/signup_invite",
+                  1,
+              )
+          )
+
+          # Keep the reviewed migration inventory and assert the attribution contract itself.
+          migration_test_path = Path(
+              "apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts"
+          )
+          migration_test = migration_test_path.read_text()
+          migration_const_anchor = '''    const hostedThreadContainerUsageDefaultMigrationSql = readFileSync('''
+          migration_const = '''    const hostedSignupReferralAttributionMigrationSql = readFileSync(
+              new URL(
+                "../prisma/migrations/20260804223000_hosted_signup_referral_attribution/migration.sql",
+                import.meta.url,
+              ),
+              "utf8",
+            );
+            const normalizedHostedSignupReferralAttributionMigrationSql =
+              hostedSignupReferralAttributionMigrationSql.replace(/\\s+/gu, " ");
+            const hostedThreadContainerUsageDefaultMigrationSql = readFileSync('''.replace("            ", "    ")
+          if migration_test.count(migration_const_anchor) != 1:
+              raise SystemExit("migration contract const anchor did not match exactly once")
+          migration_test = migration_test.replace(
+              migration_const_anchor,
+              migration_const,
+              1,
+          )
+          migration_list_anchor = '''      "20260802000000_add_hosted_linq_line_inventory_confirmed_at",
+            "migration_lock.toml",'''.replace("            ", "      ")
+          migration_list_replacement = '''      "20260802000000_add_hosted_linq_line_inventory_confirmed_at",
+            "20260804223000_hosted_signup_referral_attribution",
+            "migration_lock.toml",'''.replace("            ", "      ")
+          if migration_test.count(migration_list_anchor) != 1:
+              raise SystemExit("migration inventory anchor did not match exactly once")
+          migration_test = migration_test.replace(
+              migration_list_anchor,
+              migration_list_replacement,
+              1,
+          )
+          assertion_anchor = '''    ]);
+            expect(deviceSyncSignalSourceProviderMigrationSql).toContain('''.replace("            ", "    ")
+          assertion_replacement = '''    ]);
+            expect(normalizedHostedSignupReferralAttributionMigrationSql).toContain(
+              'ADD COLUMN "referrer_member_id" TEXT',
+            );
+            expect(normalizedHostedSignupReferralAttributionMigrationSql).toContain(
+              'CREATE INDEX "hosted_invite_referrer_member_id_created_at_idx" ON "hosted_invite"("referrer_member_id", "created_at")',
+            );
+            expect(normalizedHostedSignupReferralAttributionMigrationSql).toContain(
+              'FOREIGN KEY ("referrer_member_id") REFERENCES "hosted_member"("id") ON DELETE SET NULL ON UPDATE CASCADE',
+            );
+            expect(deviceSyncSignalSourceProviderMigrationSql).toContain('''.replace("            ", "    ")
+          if migration_test.count(assertion_anchor) != 1:
+              raise SystemExit("migration assertion anchor did not match exactly once")
+          migration_test_path.write_text(
+              migration_test.replace(assertion_anchor, assertion_replacement, 1)
+          )
+
+          # This workflow is only a transport for the reviewed patch; never ship it.
           Path(".github/workflows/fix-signup-referral-assistant-contracts.yml").unlink()
           PY
 
       - name: Check patch whitespace
         run: git diff --check
 
-      - name: Commit contract fixes
+      - name: Commit cleanup
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add packages/assistant-engine .github/workflows/fix-signup-referral-assistant-contracts.yml
-          git commit -m "fix: keep signup referral tool contract bounded"
+          git add -A
+          git commit -m "refactor: isolate explicit signup link flow"
           git push
