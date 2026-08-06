@@ -182,6 +182,7 @@ describe("Retell ask_murph route", () => {
           },
         },
         call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
       },
       event: "call_analyzed",
     };
@@ -193,10 +194,17 @@ describe("Retell ask_murph route", () => {
     };
     const transferEndedPayload = {
       call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "needs_user",
+            result: "An option was available before handoff.",
+          },
+        },
         call_cost: {
           combined_cost: 12.5,
         },
         call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
         disconnection_reason: "call_transfer",
         transfer_end_timestamp: 1_782_408_600_000,
       },
@@ -225,13 +233,26 @@ describe("Retell ask_murph route", () => {
         call_id: "retell_call_123",
       }),
     });
-    expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledWith({
+    expect(mocks.handleRetellCallAnalyzed).toHaveBeenNthCalledWith(1, {
       call: expect.objectContaining({
         call_id: "retell_call_123",
       }),
     });
+    expect(mocks.handleRetellCallAnalyzed).toHaveBeenNthCalledWith(2, {
+      call: expect.objectContaining({
+        call_analysis: expect.objectContaining({
+          custom_analysis_data: expect.objectContaining({
+            follow_up: expect.stringContaining("Ask the user what happened after the handoff"),
+            outcome: "needs_user",
+            result: expect.stringContaining("post-handoff outcome is unknown"),
+          }),
+        }),
+        call_id: "retell_call_123",
+        transfer_end_timestamp: 1_782_408_600_000,
+      }),
+    });
     expect(mocks.handleRetellCallEnded).toHaveBeenCalledTimes(1);
-    expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledTimes(1);
+    expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledTimes(2);
     expect(mocks.accountRetellPhoneCallUsage).toHaveBeenCalledTimes(3);
     expect(mocks.accountRetellPhoneCallUsage).toHaveBeenLastCalledWith({
       call: expect.objectContaining({
@@ -239,11 +260,67 @@ describe("Retell ask_murph route", () => {
         transfer_end_timestamp: 1_782_408_600_000,
       }),
     });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_123",
     });
+  });
+
+  it("defers transferred analysis until transfer_ended and sends one post-handoff result", async () => {
+    const pendingAnalysis = {
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            follow_up: "Approval is still needed.",
+            outcome: "needs_user",
+            result: "An option was available, but the automated leg did not complete it.",
+          },
+        },
+        call_id: "retell_call_transfer",
+        data_storage_setting: "basic_attributes_only",
+        disconnection_reason: "call_transfer",
+      },
+      event: "call_analyzed",
+    };
+    const transferEnded = {
+      call: {
+        ...pendingAnalysis.call,
+        transfer_end_timestamp: 1_782_408_600_000,
+      },
+      event: "transfer_ended",
+    };
+
+    await expect(retellWebhookRoute.POST(signedRetellRequest({
+      payload: pendingAnalysis,
+      url: "https://join.example.test/api/retell/webhook",
+    }))).resolves.toMatchObject({ status: 204 });
+
+    expect(mocks.accountRetellPhoneCallUsage).toHaveBeenCalledOnce();
+    expect(mocks.handleRetellCallAnalyzed).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+
+    await expect(retellWebhookRoute.POST(signedRetellRequest({
+      payload: transferEnded,
+      url: "https://join.example.test/api/retell/webhook",
+    }))).resolves.toMatchObject({ status: 204 });
+
+    expect(mocks.accountRetellPhoneCallUsage).toHaveBeenCalledTimes(2);
+    expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledOnce();
+    expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledWith({
+      call: expect.objectContaining({
+        call_analysis: expect.objectContaining({
+          custom_analysis_data: expect.objectContaining({
+            follow_up: expect.stringContaining("Ask the user what happened after the handoff"),
+            outcome: "needs_user",
+            result: expect.stringContaining(
+              "Murph successfully connected the user to the call recipient",
+            ),
+          }),
+        }),
+      }),
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
   });
 
   it("returns non-success when call analysis loses authority and requires replay", async () => {
