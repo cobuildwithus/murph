@@ -102,6 +102,7 @@ describe("hosted usage-limit notice delivery", () => {
           target: "telegram_thread_usage_notice_1",
         },
         periodStart,
+        planResetAt: null,
         prisma,
         source: "hosted_runtime_ai_usage_limit_notice",
         sourceRef: "usage_event_1",

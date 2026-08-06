@@ -419,6 +419,7 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   featureKey: string;
   memberId: string;
   model: string;
+  occurredAt: string;
   providerName?: string | null;
   tokenPricingBasis?: AssistantUsageTokenPricingBasis;
   triggerKind: string;
@@ -440,7 +441,7 @@ export function buildAssistantMaintenanceUsageRecord(input: {
     featureKey: input.featureKey,
     inputTokens: input.usage.inputTokens,
     memberId: input.memberId,
-    occurredAt: new Date().toISOString(),
+    occurredAt: input.occurredAt,
     outputTokens: input.usage.outputTokens,
     provider: "codex-cli",
     ...(input.providerName === undefined ? {} : { providerName: input.providerName }),
@@ -477,6 +478,7 @@ export function buildHostedTranscriptionUsageRecord(input: {
   durationMs: number | null;
   memberId: string;
   model: string;
+  occurredAt: string;
 }): AssistantUsageRecord {
   const turnId = `turn_transcribe_${randomUUID().replaceAll("-", "")}`;
 
@@ -485,7 +487,7 @@ export function buildHostedTranscriptionUsageRecord(input: {
     credentialSource: "platform",
     featureKey: "audio-transcription",
     memberId: input.memberId,
-    occurredAt: new Date().toISOString(),
+    occurredAt: input.occurredAt,
     provider: "workers-ai",
     providerName: "Workers AI",
     rawUsageJson: {
@@ -515,6 +517,7 @@ export function buildHostedElevenLabsTtsUsageRecord(input: {
   characterCount: number;
   memberId: string;
   model: string;
+  occurredAt: string;
 }): AssistantUsageRecord {
   const turnId = `turn_elevenlabs_tts_${randomUUID().replaceAll("-", "")}`;
 
@@ -525,7 +528,7 @@ export function buildHostedElevenLabsTtsUsageRecord(input: {
     credentialSource: "platform",
     featureKey: "assistant-reply",
     memberId: input.memberId,
-    occurredAt: new Date().toISOString(),
+    occurredAt: input.occurredAt,
     provider: "elevenlabs",
     providerName: "ElevenLabs",
     rawUsageJson: {
@@ -550,6 +553,7 @@ export function buildHostedElevenLabsMusicUsageRecord(input: {
   durationMs: number;
   memberId: string;
   model: string;
+  occurredAt: string;
   providerRequestId?: string | null;
 }): AssistantUsageRecord {
   const turnId = `turn_elevenlabs_music_${randomUUID().replaceAll("-", "")}`;
@@ -561,7 +565,7 @@ export function buildHostedElevenLabsMusicUsageRecord(input: {
     credentialSource: "platform",
     featureKey: "music-generation",
     memberId: input.memberId,
-    occurredAt: new Date().toISOString(),
+    occurredAt: input.occurredAt,
     provider: "elevenlabs",
     providerName: "ElevenLabs",
     providerRequestId: input.providerRequestId ?? null,
@@ -602,6 +606,7 @@ const HOSTED_XAI_SEARCH_RAW_USAGE_KEYS = [
 export function buildHostedXaiSearchUsageRecord(input: {
   memberId: string;
   model: string;
+  occurredAt: string;
   providerRequestId?: string | null;
   usage?: Record<string, unknown> | null;
 }): AssistantUsageRecord {
@@ -637,7 +642,7 @@ export function buildHostedXaiSearchUsageRecord(input: {
     credentialSource: "platform",
     featureKey: "x-search",
     memberId: input.memberId,
-    occurredAt: new Date().toISOString(),
+    occurredAt: input.occurredAt,
     provider: "xai",
     providerName: "xAI",
     providerRequestId: input.providerRequestId ?? null,

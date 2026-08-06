@@ -207,6 +207,7 @@ export interface AssistantProviderUsage {
 }
 
 export interface AssistantProviderUsageDraft {
+  occurredAt: string
   provider: string
   providerRequestOrdinal: number
   providerRequestOutcome?: AssistantProviderRequestOutcome
@@ -263,6 +264,8 @@ export interface AssistantProviderTurnExecutionResult {
 export interface AssistantProviderResponseSegment {
   deliveryContextOrdinal: number
   media?: readonly AssistantResponseMedia[] | null
+  /** Capability-free semantic text persisted into model-visible history. */
+  transcriptResponse?: string | null
   response: string
   targetInputId?: string | null
 }

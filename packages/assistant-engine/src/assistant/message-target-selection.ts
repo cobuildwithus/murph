@@ -7,6 +7,9 @@ import type {
 import {
   looksLikePrivateAssistantRoutePlaceholder,
 } from '@murphai/operator-config/assistant/current-delivery-route'
+import type {
+  AssistantBindingDelivery,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { getAssistantChannelAdapter } from './channel-adapters.js'
 import {
@@ -30,6 +33,15 @@ export type AssistantAcceptedMessageTargetAuthorizer = (input: {
     }
   | null
 >
+
+type AssistantAcceptedMessageRoute = {
+  actorId?: string | null
+  bindingDelivery: AssistantBindingDelivery | null
+  channel?: string | null
+  identityId?: string | null
+  threadId?: string | null
+  threadIsDirect?: boolean | null
+}
 
 export function readAssistantTargetProviderScalar(
   value: string | null | undefined,
@@ -99,18 +111,15 @@ export function readAssistantInputMessageRef(input: {
   return inputId
 }
 
-export function supportsAssistantAcceptedMessageTargetingRoute(input: {
-  channel?: string | null
-  explicitTarget?: string | null
-  threadId?: string | null
-  threadIsDirect?: boolean | null
-}): boolean {
+export function supportsAssistantAcceptedMessageTargetingRoute(
+  input: AssistantAcceptedMessageRoute,
+): boolean {
   const channel = normalizeNullableString(input.channel)?.toLowerCase() ?? null
   return (
     (channel === 'linq' || channel === 'telegram') &&
     normalizeNullableString(input.threadId) !== null &&
     typeof input.threadIsDirect === 'boolean' &&
-    readAssistantTargetProviderScalar(input.explicitTarget) !== null
+    readAssistantAcceptedMessageThreadTarget(input) !== null
   )
 }
 
@@ -118,14 +127,7 @@ export async function resolveAssistantAcceptedMessageTarget(input: {
   acceptedInputIds: readonly string[]
   action: 'native-reply' | 'reaction'
   messageRef: string
-  route: {
-    actorId?: string | null
-    channel?: string | null
-    explicitTarget?: string | null
-    identityId?: string | null
-    threadId?: string | null
-    threadIsDirect?: boolean | null
-  }
+  route: AssistantAcceptedMessageRoute
   vault: string
 }): Promise<{
   deliveryMessageReactionsAvailable?: true
@@ -163,7 +165,7 @@ export async function resolveAssistantAcceptedMessageTarget(input: {
   if (
     channel === 'telegram' &&
     parseTelegramThreadTarget(
-      readAssistantTargetProviderScalar(input.route.explicitTarget) ?? '',
+      readAssistantAcceptedMessageThreadTarget(input.route) ?? '',
     )?.businessConnectionId
   ) {
     throw createAssistantMessageTargetUnavailableError()
@@ -181,14 +183,7 @@ export async function resolveAssistantAcceptedMessageTarget(input: {
 export async function resolveAssistantAcceptedMessageParticipant(input: {
   acceptedInputIds: readonly string[]
   messageRef: string
-  route: {
-    actorId?: string | null
-    channel?: string | null
-    explicitTarget?: string | null
-    identityId?: string | null
-    threadId?: string | null
-    threadIsDirect?: boolean | null
-  }
+  route: AssistantAcceptedMessageRoute
   vault: string
 }): Promise<{
   participant: HostedExecutionAcceptedGroupMessageParticipant
@@ -225,14 +220,7 @@ export async function resolveAssistantAcceptedMessageParticipant(input: {
 async function resolveAssistantAcceptedMessage(input: {
   acceptedInputIds: readonly string[]
   messageRef: string
-  route: {
-    actorId?: string | null
-    channel?: string | null
-    explicitTarget?: string | null
-    identityId?: string | null
-    threadId?: string | null
-    threadIsDirect?: boolean | null
-  }
+  route: AssistantAcceptedMessageRoute
   vault: string
 }): Promise<{
   channel: 'linq' | 'telegram'
@@ -281,7 +269,7 @@ async function resolveAssistantAcceptedMessage(input: {
     !replyTarget ||
     normalizeNullableString(replyTarget.channel)?.toLowerCase() !== channel ||
     readAssistantTargetProviderScalar(replyTarget.threadId) !==
-      readAssistantTargetProviderScalar(input.route.explicitTarget)
+      readAssistantAcceptedMessageThreadTarget(input.route)
   ) {
     throw createAssistantMessageTargetUnavailableError()
   }
@@ -294,6 +282,14 @@ async function resolveAssistantAcceptedMessage(input: {
   }
 
   return { channel, event, providerMessageId }
+}
+
+function readAssistantAcceptedMessageThreadTarget(
+  input: Pick<AssistantAcceptedMessageRoute, 'bindingDelivery'>,
+): string | null {
+  return input.bindingDelivery?.kind === 'thread'
+    ? readAssistantTargetProviderScalar(input.bindingDelivery.target)
+    : null
 }
 
 function createAssistantMessageTargetUnavailableError(): VaultCliError {

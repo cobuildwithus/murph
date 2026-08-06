@@ -54,6 +54,10 @@ export interface HostedMemberStripeBillingRefSnapshot {
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   stripeSubscriptionScheduleId?: string | null;
+  usagePlanTransitionAt?: Date | null;
+  usagePlanTransitionFromCode?: string | null;
+  usagePlanTransitionKind?: string | null;
+  usagePlanTransitionToCode?: string | null;
 }
 
 export interface HostedMemberBillingEligibilityState {
@@ -96,6 +100,10 @@ export interface HostedMemberStripeBillingRefWriteInput {
   stripeSubscriptionId?: string | null;
   stripeSubscriptionScheduleId?: string | null;
   tx: Prisma.TransactionClient;
+  usagePlanTransitionAt?: Date | null;
+  usagePlanTransitionFromCode?: string | null;
+  usagePlanTransitionKind?: string | null;
+  usagePlanTransitionToCode?: string | null;
 }
 
 export interface HostedMemberStripeCheckoutAttempt {
@@ -1092,6 +1100,18 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
           lastStripeEventCreatedAt: billingRef.lastStripeEventCreatedAt,
         }
       : {}),
+    ...(billingRef.usagePlanTransitionAt !== undefined
+      ? { usagePlanTransitionAt: billingRef.usagePlanTransitionAt }
+      : {}),
+    ...(billingRef.usagePlanTransitionFromCode !== undefined
+      ? { usagePlanTransitionFromCode: billingRef.usagePlanTransitionFromCode }
+      : {}),
+    ...(billingRef.usagePlanTransitionKind !== undefined
+      ? { usagePlanTransitionKind: billingRef.usagePlanTransitionKind }
+      : {}),
+    ...(billingRef.usagePlanTransitionToCode !== undefined
+      ? { usagePlanTransitionToCode: billingRef.usagePlanTransitionToCode }
+      : {}),
     ...(billingRef.currentBillingPlanCode !== undefined
       ? { currentBillingPlanCode: billingRef.currentBillingPlanCode }
       : {}),
@@ -1214,6 +1234,10 @@ async function buildHostedMemberBillingRefCreateData(
     stripeSubscriptionScheduleLookupKey: createHostedStripeSubscriptionScheduleLookupKey(
       input.stripeSubscriptionScheduleId ?? null,
     ),
+    usagePlanTransitionAt: input.usagePlanTransitionAt ?? null,
+    usagePlanTransitionFromCode: input.usagePlanTransitionFromCode ?? null,
+    usagePlanTransitionKind: input.usagePlanTransitionKind ?? null,
+    usagePlanTransitionToCode: input.usagePlanTransitionToCode ?? null,
   };
 }
 
@@ -1224,6 +1248,18 @@ async function buildHostedMemberBillingRefUpdateData(
 
   if (input.stripeEventCreatedAt !== undefined) {
     data.lastStripeEventCreatedAt = input.stripeEventCreatedAt;
+  }
+  if (input.usagePlanTransitionAt !== undefined) {
+    data.usagePlanTransitionAt = input.usagePlanTransitionAt;
+  }
+  if (input.usagePlanTransitionFromCode !== undefined) {
+    data.usagePlanTransitionFromCode = input.usagePlanTransitionFromCode;
+  }
+  if (input.usagePlanTransitionKind !== undefined) {
+    data.usagePlanTransitionKind = input.usagePlanTransitionKind;
+  }
+  if (input.usagePlanTransitionToCode !== undefined) {
+    data.usagePlanTransitionToCode = input.usagePlanTransitionToCode;
   }
   if (input.currentBillingPlanCode !== undefined) {
     data.currentBillingPlanCode = input.currentBillingPlanCode;

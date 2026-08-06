@@ -22,7 +22,18 @@ import {
 } from "./stripe-billing-status";
 import {
   HOSTED_PULSE_TRIAL_OFFER,
+  isHostedBillingPlanImmediateUpgrade,
+  parseHostedBillingCheckoutOffer,
+  parseHostedBillingPhase,
+  parseHostedBillingPlanCode,
 } from "./billing-plans";
+
+type HostedUsagePlanTransitionWrite = {
+  usagePlanTransitionAt: Date;
+  usagePlanTransitionFromCode: string;
+  usagePlanTransitionKind: "plan_upgrade" | "trial_conversion";
+  usagePlanTransitionToCode: string;
+};
 
 export type HostedStripeBillingFreshnessPolicy =
   | "auto-pulse-trial-entitlement"
@@ -220,6 +231,13 @@ export async function writeHostedMemberStripeBillingTx(input: {
     input.currentBillingPlanCode !== undefined
     && input.currentBillingPlanCode !== null
     && input.currentBillingPlanCode === currentMember.billingRef?.scheduledBillingPlanCode;
+  const usagePlanTransition = resolveHostedUsagePlanTransitionWrite({
+    billingRef: currentMember.billingRef,
+    currentBillingPhase: input.currentBillingPhase,
+    currentBillingPlanCode: input.currentBillingPlanCode,
+    currentCheckoutOffer: input.currentCheckoutOffer,
+    eventCreatedAt: input.dispatchContext.eventCreatedAt,
+  });
 
   const writeBillingRef = () => writeHostedMemberStripeBillingRefTx({
     memberId: currentMember.core.id,
@@ -243,6 +261,7 @@ export async function writeHostedMemberStripeBillingTx(input: {
     stripeCustomerId: billingRefWriteValues.stripeCustomerId,
     stripeSubscriptionId: billingRefWriteValues.stripeSubscriptionId,
     tx: input.tx,
+    ...(usagePlanTransition ?? {}),
   });
 
   if (
@@ -284,6 +303,65 @@ export async function writeHostedMemberStripeBillingTx(input: {
   });
 }
 
+function resolveHostedUsagePlanTransitionWrite(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  currentBillingPhase?: string | null;
+  currentBillingPlanCode?: string | null;
+  currentCheckoutOffer?: string | null;
+  eventCreatedAt: Date;
+}): HostedUsagePlanTransitionWrite | null {
+  const fromPlanCode = parseHostedBillingPlanCode(
+    input.billingRef?.currentBillingPlanCode,
+  );
+  const toPlanCode = parseHostedBillingPlanCode(
+    input.currentBillingPlanCode === undefined
+      ? input.billingRef?.currentBillingPlanCode
+      : input.currentBillingPlanCode,
+  );
+  if (!fromPlanCode || !toPlanCode) {
+    return null;
+  }
+
+  const fromBillingPhase = parseHostedBillingPhase(
+    input.billingRef?.currentBillingPhase,
+  );
+  const toBillingPhase = parseHostedBillingPhase(
+    input.currentBillingPhase === undefined
+      ? input.billingRef?.currentBillingPhase
+      : input.currentBillingPhase,
+  );
+  const checkoutOffer = parseHostedBillingCheckoutOffer(
+    input.currentCheckoutOffer === undefined
+      ? input.billingRef?.currentCheckoutOffer
+      : input.currentCheckoutOffer,
+  );
+  const kind =
+    fromBillingPhase === "paid" &&
+      toBillingPhase === "paid" &&
+      isHostedBillingPlanImmediateUpgrade({
+        currentPlanCode: fromPlanCode,
+        targetPlanCode: toPlanCode,
+      })
+      ? "plan_upgrade"
+      : fromBillingPhase === "trial" &&
+          toBillingPhase === "paid" &&
+          fromPlanCode === "launch_monthly" &&
+          toPlanCode === "launch_monthly" &&
+          checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
+        ? "trial_conversion"
+        : null;
+  if (!kind) {
+    return null;
+  }
+
+  return {
+    usagePlanTransitionAt: input.eventCreatedAt,
+    usagePlanTransitionFromCode: fromPlanCode,
+    usagePlanTransitionKind: kind,
+    usagePlanTransitionToCode: toPlanCode,
+  };
+}
+
 export async function writeHostedMemberStripeBillingRefIfFreshTx(input: {
   currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;
@@ -314,6 +392,14 @@ export async function writeHostedMemberStripeBillingRefIfFreshTx(input: {
     return null;
   }
 
+  const usagePlanTransition = resolveHostedUsagePlanTransitionWrite({
+    billingRef: currentMember.billingRef,
+    currentBillingPhase: input.currentBillingPhase,
+    currentBillingPlanCode: input.currentBillingPlanCode,
+    currentCheckoutOffer: input.currentCheckoutOffer,
+    eventCreatedAt: input.dispatchContext.eventCreatedAt,
+  });
+
   await writeHostedMemberStripeBillingRefTx({
     memberId: input.memberId,
     currentBillingPhase: input.currentBillingPhase,
@@ -329,6 +415,7 @@ export async function writeHostedMemberStripeBillingRefIfFreshTx(input: {
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
     tx: input.tx,
+    ...(usagePlanTransition ?? {}),
   });
 
   return readHostedMemberBillingSnapshot({

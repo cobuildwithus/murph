@@ -20,6 +20,7 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   renderAssistantResponseCardText,
+  renderAssistantResponseCardTranscriptText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import type {
@@ -120,7 +121,7 @@ import {
   readNodeErrorCode,
 } from './assistant-codex/failures.js'
 import {
-  type CodexSubagentTokenUsageSample,
+  type CodexSubagentTurnTokenUsageSample,
   extractCodexSubagentUsageDrafts,
   isAssistantCodexTokenUsageEventType,
   readCodexCollabReceiverThreadIds,
@@ -610,11 +611,12 @@ export interface CodexAppServerResponseSegment {
   deliveryContextOrdinal: number
   media: AssistantResponseMedia[]
   response: string
+  transcriptResponse?: string
   targetInputId?: string
 }
 
 interface CodexAppServerTrailingResponseCandidate
-  extends CodexAppServerResponseSegment {
+  extends Omit<CodexAppServerResponseSegment, 'transcriptResponse'> {
   card: AssistantResponseCard | null
 }
 
@@ -2928,6 +2930,13 @@ function isCodexTurnStartedMethod(method: string | null): boolean {
   return method === 'turn/started' || method === 'turn.started'
 }
 
+function createCodexSubagentTurnUsageKey(input: {
+  threadId: string
+  turnId: string
+}): string {
+  return `${input.threadId}\u0000${input.turnId}`
+}
+
 function isCodexTurnCompletedMethod(method: string | null): boolean {
   return method === 'turn/completed' || method === 'turn.completed'
 }
@@ -3170,8 +3179,9 @@ async function runCodexAppServerTurnOnProcess(
   // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
   // assistant turn, owned here and threaded into the dynamic-tool executor.
   const askGrokTurnState = createAskGrokTurnState()
-  const subagentTokenUsageByThread =
-    new Map<string, CodexSubagentTokenUsageSample>()
+  const subagentTokenUsageByTurn =
+    new Map<string, CodexSubagentTurnTokenUsageSample>()
+  const trackedSubagentUsageThreadIds = new Set<string>()
   // Thread ids named by this turn's collab tool calls (spawn/sendInput/...),
   // collected live so evidenced subagent threads win buffer slots over
   // stale/unattributed foreign threads when the cap is reached.
@@ -3274,7 +3284,7 @@ async function runCodexAppServerTurnOnProcess(
       parentModel: normalizeNullableString(input.model) ?? null,
       parentRawEvents: jsonEvents,
       serviceTier: input.serviceTier ?? null,
-      subagentTokenUsageByThread,
+      subagentTokenUsageByTurn,
     })
 
   const hasNoReplyFinalActionPatch = (): boolean =>
@@ -3674,12 +3684,17 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    const response = trailingSteerCandidate.card
+      ? renderAssistantResponseCardText(trailingSteerCandidate.card)
+      : trailingSteerCandidate.response
+    const transcriptResponse = trailingSteerCandidate.card
+      ? renderAssistantResponseCardTranscriptText(trailingSteerCandidate.card)
+      : response
     precedingAgentMessageSegments.push({
       deliveryContextOrdinal: trailingSteerCandidate.deliveryContextOrdinal,
       media: [...trailingSteerCandidate.media],
-      response: trailingSteerCandidate.card
-        ? renderAssistantResponseCardText(trailingSteerCandidate.card)
-        : trailingSteerCandidate.response,
+      response,
+      ...(transcriptResponse === response ? {} : { transcriptResponse }),
       ...(trailingSteerCandidate.targetInputId
         ? { targetInputId: trailingSteerCandidate.targetInputId }
         : {}),
@@ -4763,33 +4778,68 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    if (!isAssistantCodexTokenUsageEventType(readCodexEventMethod(message))) {
+    const eventMethod = readCodexEventMethod(message)
+    const messageTurnId = extractCodexTurnIdFromMessage(message)
+    if (isCodexTurnStartedMethod(eventMethod)) {
+      if (!messageTurnId) {
+        return
+      }
+      const usageKey = createCodexSubagentTurnUsageKey({
+        threadId,
+        turnId: messageTurnId,
+      })
+      if (subagentTokenUsageByTurn.has(usageKey)) {
+        return
+      }
+      if (
+        !trackedSubagentUsageThreadIds.has(threadId)
+        && trackedSubagentUsageThreadIds.size >= MAX_CODEX_SUBAGENT_USAGE_THREADS
+      ) {
+        const evictableThreadId = collabReceiverThreadIds.has(threadId)
+          ? [...trackedSubagentUsageThreadIds].find(
+            (trackedThreadId) => !collabReceiverThreadIds.has(trackedThreadId),
+          )
+          : undefined
+        if (evictableThreadId === undefined) {
+          return
+        }
+        trackedSubagentUsageThreadIds.delete(evictableThreadId)
+        for (const [trackedUsageKey, sample] of subagentTokenUsageByTurn) {
+          if (sample.threadId === evictableThreadId) {
+            subagentTokenUsageByTurn.delete(trackedUsageKey)
+          }
+        }
+      }
+      trackedSubagentUsageThreadIds.add(threadId)
+      subagentTokenUsageByTurn.set(usageKey, {
+        firstEvent: null,
+        lastEvent: null,
+        occurredAt: new Date().toISOString(),
+        threadId,
+        turnId: messageTurnId,
+      })
+      return
+    }
+    if (
+      !isAssistantCodexTokenUsageEventType(eventMethod)
+      || !messageTurnId
+    ) {
       return
     }
 
-    const sample = subagentTokenUsageByThread.get(threadId)
-    if (sample) {
-      sample.lastEvent = message
+    const usageKey = createCodexSubagentTurnUsageKey({
+      threadId,
+      turnId: messageTurnId,
+    })
+    const sample = subagentTokenUsageByTurn.get(usageKey)
+    if (!sample) {
+      // A child token sample without an observed start has no safe accounting
+      // timestamp. Parent collab evidence authorizes the child but cannot
+      // establish when its provider operation began.
       return
     }
-    if (subagentTokenUsageByThread.size >= MAX_CODEX_SUBAGENT_USAGE_THREADS) {
-      // Evidenced subagent threads win buffer slots: evict an unattributed
-      // sample (e.g. a stale flush from a previous warm-process thread, which
-      // is never billable) before dropping a billable child's usage.
-      const evictableThreadId = collabReceiverThreadIds.has(threadId)
-        ? [...subagentTokenUsageByThread.keys()].find(
-          (bufferedThreadId) => !collabReceiverThreadIds.has(bufferedThreadId),
-        )
-        : undefined
-      if (evictableThreadId === undefined) {
-        return
-      }
-      subagentTokenUsageByThread.delete(evictableThreadId)
-    }
-    subagentTokenUsageByThread.set(threadId, {
-      firstEvent: message,
-      lastEvent: message,
-    })
+    sample.firstEvent ??= message
+    sample.lastEvent = message
   }
 
   const handleStaleParentTurnMessage = (message: CodexRpcMessage): void => {
@@ -5380,7 +5430,7 @@ async function runCodexAppServerTurnOnProcess(
     providerAuthoredFinalMessage: modelFinalMessage,
     transcriptMessage:
       finalResponseCard
-        ? renderAssistantResponseCardText(finalResponseCard)
+        ? renderAssistantResponseCardTranscriptText(finalResponseCard)
         : normalizeNullableString(modelFinalMessage) ??
           (finalResponseMedia.length > 0 ? '' : null),
     reactions: reactionPatches.map((entry) => ({
@@ -5391,6 +5441,9 @@ async function runCodexAppServerTurnOnProcess(
     precedingAgentMessageSegments: filteredPrecedingAgentMessageSegments.map((segment) => ({
       deliveryContextOrdinal: segment.deliveryContextOrdinal,
       response: segment.response,
+      ...(segment.transcriptResponse === undefined
+        ? {}
+        : { transcriptResponse: segment.transcriptResponse }),
       media: [...segment.media],
       ...(segment.targetInputId
         ? { targetInputId: segment.targetInputId }

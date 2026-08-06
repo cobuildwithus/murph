@@ -261,6 +261,7 @@ export async function executeGenerateImageTool(input: {
     })
     usageDraft = buildGeneratedImageUsageDraft({
       args: input.args,
+      occurredAt: openAiResult.occurredAt,
       operation,
       providerRequestId: openAiResult.providerRequestId,
       providerRequestOrdinal: input.providerRequestOrdinal,
@@ -491,6 +492,7 @@ async function saveGeneratedImageCapture(input: {
 
 function buildGeneratedImageUsageDraft(input: {
   args: GenerateImageToolArgs
+  occurredAt: string
   operation: GenerateImageOperation
   providerRequestId: string | null
   providerRequestOrdinal: number
@@ -504,6 +506,7 @@ function buildGeneratedImageUsageDraft(input: {
   usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath
 }): AssistantProviderUsageDraft {
   return {
+    occurredAt: input.occurredAt,
     provider: 'openai-images',
     providerRequestOrdinal: input.providerRequestOrdinal,
     providerRequestOutcome: input.providerRequestOutcome,

@@ -12,7 +12,9 @@ service types expose no ref. One resolver binds that ref to the current
 delivery-context ordinal, reloads the stored event, rechecks route,
 conversation, audience, group-actor, provider-target, and action-specific
 capability authority, and returns only the accepted input id. Provider message
-ids stay inside the local delivery boundary. Both targeting tools are
+ids stay inside the local delivery boundary. The current thread-kind binding,
+not the one-off explicit-target override, is the provider-thread authority for
+that recheck. Both targeting tools are
 invocation-scoped root tools: the resident App Server may expose them to the
 active root turn, but descendant or foreign resident threads fail before the
 accepted-message resolver runs.
@@ -918,6 +920,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   activation side effects, and email paths must not persist provider payloads
   or expose recipients in logs.
 
+  Reserved support escalation uses the existing product-feedback callback as a
+  one-turn explicit action. A verified-private request for Murph human support
+  authorizes one account-linked call with Murph's bounded, de-identified
+  product-only explanation after the reserved prefix; Murph does not first
+  display it or ask for separate approval. A generic bug handoff, group, or
+  unverified audience does not authorize the reserved shape. The callback keeps
+  the linked marker server-authored and the written issue in a separate
+  anonymous detail row; the paired detailed-email behavior reads that row back
+  before provider entry. This adds no second consent or state owner.
+
   A separate authenticated ten-minute Vercel cron performs work only during the
   6pm Eastern hour and sends one daily internal product-feedback digest through
   that existing Resend transport. Web reads its owned
@@ -1230,7 +1242,13 @@ application code.
   OpenAI uses its existing Responses intercept; Venice accepts only the two
   Responses POST paths and rewrites a canonical
   Luna/Terra/Sol model to the matching regular Venice GPT-5.6 provider id at
-  egress. The shared mapping is code-owned and exposes no duplicate operator
+  egress. For Codex Responses Lite requests to `/responses`, that same boundary
+  restores the standard top-level tool field and marks the end of Codex's
+  contiguous leading developer prefix as the explicit prompt-cache boundary;
+  it preserves Codex's session-stable cache key and any caller-owned cache
+  controls. Compact requests and ordinary non-Codex Responses payloads do not
+  receive the compatibility marker. This creates no Murph-owned cache or cache
+  state. The shared mapping is code-owned and exposes no duplicate operator
   model variables, so inference and pricing cannot drift independently. Web
   prices immutable usage rows by canonical model plus recorded provider, using
   Venice's distinct input, cache-read, cache-write, and output rates when
@@ -1343,7 +1361,15 @@ accepted input in the same live turn invalidates an earlier card-only decision,
 and attachment is rejected after the delivery context advances. Every
 card copies the immediately preceding single-date canonical meal-totals read.
 Both versions use the same deterministic text fallback, Linq capability
-boundary, and existing outbox idempotency lifecycle. Linq owns the
+boundary, and existing outbox idempotency lifecycle. Hosted inbound routing
+keeps the opaque conversation locator used for continuity separate from the
+trusted provider reply thread. Ordinary auto-replies pass that provider route
+once as a thread binding rather than copying it into an explicit target, so the
+existing direct Linq chat owns native-card delivery without a reverse map or a
+new-chat workaround. Same-route inputs accepted during the live turn may update
+the reply message, reaction capability, and delivery idempotency inputs, but do
+not recreate the explicit-target override or replace the turn's thread binding.
+Linq owns the
 noninteractive static transcript layout, which carries the date, meal count,
 available totals, an explicit partial marker, and the first available exact V2
 goal plus its frozen status in canonical metric order. Its required URL is a
@@ -2270,3 +2296,30 @@ workspace owners into the relevant tarballs, a local device-sync runtime with
 service/http tests, and inbox/parser package tests that exercise runtime rebuild,
 audio/video parser workers, parser-toolchain discovery, and parsed-pipeline
 flows inside the local TypeScript workspace.
+
+## Tracked Compact Table Response Cards
+
+Compact table response cards reuse the existing outbox-owned immutable effect
+and provider-rendered static Linq balloon. A compact card is a bounded
+presentation snapshot, never a mutable tracker: canonical workout events remain
+the only workout authority, qualitative set annotations live on canonical set
+notes, and an update is complete only after a successful workout re-read
+followed by a new V3 snapshot.
+
+The optional tracking reference is one exact canonical event ULID plus a
+canonical UTC snapshot instant. That reference remains in semantic transcript
+history so a later turn can reopen the workout without a second table store;
+the native presentation projection omits it before encoding the card URL.
+Linq requires an HTTPS app-card URL, so V3 compact-table envelopes use a
+bounded Base64URL fragment on the fixed `https://murph.ai/` origin. The
+fragment stays inside the immutable message URL, is not sent to the Web origin
+by an HTTPS request, and is decoded locally by the Messages extension. This is
+a narrow presentation exception to the fixed-URL rule: the fragment may contain
+the same bounded health-related values visible in the immutable message, but it
+must never contain a member identity, canonical record reference, credential,
+or other authority. The provider request rejects encoded URLs at 2,048
+characters, while the contract applies the same aggregate bound before
+delivery. Nutrition cards keep their existing fixed HTTPS URL and
+provider-rendered summary layout. The Messages extension remains offline and
+read-only. This adds no card API, database, background synchronization owner,
+authentication surface, or mutable message state.

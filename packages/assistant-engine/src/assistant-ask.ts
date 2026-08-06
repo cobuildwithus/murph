@@ -377,6 +377,7 @@ async function executeConfinedReadOnlyAssistantAskTurn(
       sandbox: 'read-only',
     })
     await input.beforeProviderEntry?.()
+    const providerRequestStartedAt = new Date().toISOString()
     try {
       const result = await executeCodexAppServerTurn({
         abortSignal: input.abortSignal,
@@ -409,6 +410,7 @@ async function executeConfinedReadOnlyAssistantAskTurn(
       captureReadOnlyAssistantAskCodexUsageBestEffort({
         additionalUsages: result.additionalUsages,
         primaryUsageOutcome: 'succeeded',
+        primaryUsageOccurredAt: providerRequestStartedAt,
         providerConfig,
         rawEvents: result.jsonEvents,
         serviceTier: input.serviceTier ?? null,
@@ -425,6 +427,7 @@ async function executeConfinedReadOnlyAssistantAskTurn(
         primaryUsageOutcome: input.abortSignal?.aborted === true
           ? 'aborted'
           : 'failed',
+        primaryUsageOccurredAt: providerRequestStartedAt,
         providerConfig,
         rawEvents: failureContext?.jsonEvents ?? [],
         requirePrimaryTokenUsage: true,
@@ -447,6 +450,7 @@ function captureReadOnlyAssistantAskCodexUsageBestEffort(input: {
   includePrimaryUsage?: boolean
   onProviderUsage: ReadOnlyAssistantAskInput['onProviderUsage']
   primaryUsageOutcome: NonNullable<AssistantProviderUsageDraft['providerRequestOutcome']>
+  primaryUsageOccurredAt: string
   providerConfig: AssistantProviderConfig
   rawEvents: readonly unknown[]
   requirePrimaryTokenUsage?: boolean
@@ -478,6 +482,7 @@ function captureReadOnlyAssistantAskCodexUsageBestEffort(input: {
         ? null
         : primaryUsage,
     primaryUsageOutcome: input.primaryUsageOutcome,
+    primaryUsageOccurredAt: input.primaryUsageOccurredAt,
     stage: input.stage,
   })
 }
@@ -487,11 +492,13 @@ function captureReadOnlyAssistantAskProviderUsageBestEffort(input: {
   onProviderUsage: NonNullable<ReadOnlyAssistantAskInput['onProviderUsage']>
   primaryUsage: AssistantProviderUsageDraft['usage'] | null
   primaryUsageOutcome: NonNullable<AssistantProviderUsageDraft['providerRequestOutcome']>
+  primaryUsageOccurredAt: string
   stage: ReadOnlyAssistantAskProviderUsageEvent['stage']
 }): void {
   const drafts: readonly AssistantProviderUsageDraft[] = [
     ...(input.primaryUsage
       ? [{
+          occurredAt: input.primaryUsageOccurredAt,
           provider: 'codex-cli',
           providerRequestOrdinal: 0,
           providerRequestOutcome: input.primaryUsageOutcome,

@@ -5,6 +5,9 @@ import {
   createAssistantProductFeedbackRecorder,
 } from "../src/assistant/turn-progress.js";
 
+const SUPPORT_SUMMARY =
+  "Support escalation: a connected source reports success but Murph does not finish the connection.";
+
 describe("assistant product support escalation", () => {
   it("replaces only an unpersisted ordinary candidate when explicit escalation arrives", async () => {
     let acceptedInputIds = ["assistant_input_1"];
@@ -31,8 +34,7 @@ describe("assistant product support escalation", () => {
     const supportFeedback = {
       kind: "frustration" as const,
       relatedChangelogItemIds: [],
-      summary:
-        "Support escalation: a connected source reports success but Murph does not finish the connection.",
+      summary: SUPPORT_SUMMARY,
     };
     await expect(
       recorder.recordProductFeedback(supportFeedback),
@@ -62,7 +64,7 @@ describe("assistant product support escalation", () => {
     const first = {
       kind: "frustration" as const,
       relatedChangelogItemIds: [],
-      summary: "Support escalation: the device connection did not finish.",
+      summary: SUPPORT_SUMMARY,
     };
 
     await expect(recorder.recordProductFeedback(first)).resolves.toEqual({
@@ -70,7 +72,8 @@ describe("assistant product support escalation", () => {
     });
     await expect(recorder.recordProductFeedback({
       ...first,
-      summary: "Support escalation: a later rewrite must not replace it.",
+      summary:
+        "Support escalation: Murph does not show an expected connected-source result.",
     })).resolves.toEqual({ recorded: false });
 
     expect(recorder.readProductFeedback()?.summary).toBe(first.summary);
@@ -96,7 +99,7 @@ describe("assistant product support escalation", () => {
     const supportFeedback = {
       kind: "frustration" as const,
       relatedChangelogItemIds: [],
-      summary: "Support escalation: the device connection did not finish.",
+      summary: SUPPORT_SUMMARY,
     };
 
     await expect(recorder.recordProductFeedback(supportFeedback)).resolves.toEqual({
@@ -144,7 +147,7 @@ describe("assistant product support escalation", () => {
     await expect(recorder.recordProductFeedback({
       kind: "frustration",
       relatedChangelogItemIds: [],
-      summary: "Support escalation: the connected-source flow does not complete.",
+      summary: SUPPORT_SUMMARY,
     })).resolves.toEqual({ recorded: true });
 
     expect(deliverProductSupportEscalation).toHaveBeenCalledOnce();
@@ -155,12 +158,13 @@ describe("assistant product support escalation", () => {
     const deliverProductSupportEscalation = vi
       .fn()
       .mockRejectedValue(new Error("callback timed out"));
+    const acceptProductFeedbackCandidate = vi.fn();
     const recorder = createAssistantProductFeedbackRecorder({
       acceptedInputItems: [
         { id: "assistant_input_1", source: "assistant-input" },
       ],
       productFeedbackCandidateSink: {
-        acceptProductFeedbackCandidate: vi.fn(),
+        acceptProductFeedbackCandidate,
         deliverProductSupportEscalation,
       },
     });
@@ -171,9 +175,23 @@ describe("assistant product support escalation", () => {
     await expect(recorder.recordProductFeedback({
       kind: "frustration",
       relatedChangelogItemIds: [],
-      summary: "Support escalation: the device connection did not finish.",
-    })).rejects.toThrow("callback timed out");
+      summary: "A connected-source flow did not complete.",
+    })).resolves.toEqual({ recorded: true });
+    const supportFeedback = {
+      kind: "frustration" as const,
+      relatedChangelogItemIds: [],
+      summary: SUPPORT_SUMMARY,
+    };
 
+    await expect(
+      recorder.recordProductFeedback(supportFeedback),
+    ).rejects.toThrow("callback timed out");
+    await expect(
+      recorder.recordProductFeedback(supportFeedback),
+    ).rejects.toThrow("unavailable for this turn");
+
+    expect(deliverProductSupportEscalation).toHaveBeenCalledOnce();
+    expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled();
     expect(recorder.readProductFeedback()).toBeNull();
   });
 });

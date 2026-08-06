@@ -393,7 +393,7 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_response_card',
   description:
-    'Attach one private-direct daily_nutrition card only when the current accepted member message explicitly requests it or during managed meal closeout. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. Immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. V2 adds fiber and nullable goal snapshots. Keep a goal null unless current active canonical goals prove exactly one daily target for that metric and unit; otherwise freeze the exact target and Murph\'s context-aware status without a universal threshold. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat nutrition values in final send_message. This tool does not send and cannot combine with response media.',
+    'Attach one private-direct response card only when the current accepted member message explicitly requests it, during managed meal closeout, or for an unambiguous update to the single active tracked workout whose table was explicitly established earlier. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. V2 adds fiber and nullable goal snapshots. Keep a goal null unless current active canonical goals prove exactly one daily target for that metric and unit; otherwise freeze the exact target and Murph\'s context-aware status without a universal threshold. Use compact_table only for an explicit table or structured-tracker request, or for that unambiguous active tracked-workout update; with no active table or multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update the canonical workout, re-read it successfully, and copy only that verified snapshot with its exact evt_<ULID> reference and canonical UTC snapshot instant. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -466,7 +466,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, a concise product-only summary, and optional related changelog item ids. The result reports whether the candidate was accepted, already accepted, or unavailable; persistence is best-effort after the reply, so do not retry after any result.',
+    'Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, a concise product-only summary, and optional related changelog item ids. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports accepted, already accepted, or unavailable; do not retry after any result.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -475,14 +475,14 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         type: 'string',
         enum: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
         description:
-          'Use feature_request for a missing or unsupported Murph path, frustration for a negative product experience without a clear requested capability, and feature_interest for interest in an available or shipped capability.',
+          'Use feature_request for a missing or unsupported Murph path, frustration for a negative product experience without a clear requested capability, and feature_interest for interest in an available or shipped capability. Reserved support escalation always uses frustration.',
       },
       summary: {
         type: 'string',
         minLength: 1,
         maxLength: HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
         description:
-          'Concise de-identified, product-only summary of the feedback. Make it actionable without the conversation: name the generic actor, exact Murph surface or workflow, requested or attempted action, expected versus observed result, and any concrete product constraint the source established. Preserve those distinctions instead of replacing them with vague labels. If a detail is not established, omit it or mark it unclear rather than infer or invent it. Abstract every private fact to the least-specific product concept that still explains the issue, such as "a health metric", "a connected source", or "a scheduled item"; do not preserve a private fact merely because it was relevant in the conversation. When a path is missing, name the desired outcome and missing Murph capability rather than summarizing the conversation. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Never include names, handles, account or member identifiers, raw user wording, quoted conversation or voice-memo content, diagnoses, symptoms, medications, treatments, lab results, biometrics, exact health/fitness/nutrition values, reproductive details, locations, relationships, contact details, secrets, provider payloads, tags, or topics.',
+          'Concise de-identified, product-only summary of the feedback. Make it actionable without the conversation: name the generic actor, exact Murph surface or workflow, requested or attempted action, expected versus observed result, and any concrete product constraint the source established. Preserve those distinctions instead of replacing them with vague labels. If a detail is not established, omit it or mark it unclear rather than infer or invent it. Abstract every private fact to the least-specific product concept that still explains the issue, such as "a health metric", "a connected source", or "a scheduled item"; do not preserve a private fact merely because it was relevant in the conversation. When a path is missing, name the desired outcome and missing Murph capability rather than summarizing the conversation. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Never include names, handles, account or member identifiers, raw user wording, quoted conversation or voice-memo content, diagnoses, symptoms, medications, treatments, lab results, biometrics, exact health/fitness/nutrition values, reproductive details, locations, relationships, contact details, secrets, provider payloads, tags, or topics. For explicit verified-private human support, begin exactly "Support escalation:" and follow it with Murph\'s concise de-identified explanation in its own words; never copy or quote the member\'s message.',
       },
       relatedChangelogItemIds: {
         type: 'array',
@@ -1937,6 +1937,26 @@ const submitProductFeedbackArgumentsSchema = z
       .default([]),
   })
   .strict()
+  .superRefine((value, context) => {
+    if (value.summary === 'Support escalation' || value.summary === HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX) {
+      context.addIssue({
+        code: 'custom',
+        message: 'support escalation requires a non-empty de-identified explanation after the reserved prefix',
+      })
+      return
+    }
+    if (value.summary.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)) {
+      if (
+        value.kind !== 'frustration'
+        || value.relatedChangelogItemIds.length > 0
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'support escalation requires kind frustration and no changelog ids',
+        })
+      }
+    }
+  })
 
 const familyPlanArgumentsSchema = z
   .discriminatedUnion('action', [
@@ -4077,7 +4097,7 @@ async function executeSubmitProductFeedbackTool(input: {
     }
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
-    if (userActionScope && userActionScope.conversationScope !== 'direct') {
+    if (userActionScope?.conversationScope !== 'direct') {
       return toolTextResult(
         false,
         'support escalation rejected: an account-linked support escalation is only available in a verified private direct conversation',

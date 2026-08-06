@@ -6,6 +6,7 @@ import {
   type AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  renderAssistantResponseCardTranscriptText,
   renderAssistantResponseCardText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
@@ -355,11 +356,26 @@ async function persistUserTurn(
 }
 
 const UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE =
-  "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph. If you're reporting a Murph product problem, you can also email support@withmurph.ai directly."
+  "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph."
+const UNVERIFIED_EXTERNAL_SUPPORT_CONTACT_RESPONSE =
+  `${UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE} You can email support@withmurph.ai.`
+
+function resolveUnverifiedExternalAudienceResponse(prompt: string): string {
+  const asksForSupportContact = /\bsupport\b/iu.test(prompt)
+    && /\b(?:address|contact|e-?mail|reach)\b/iu.test(prompt)
+    && (/[?]/u.test(prompt)
+      || /\b(?:give|how|need|please|send|share|tell|want|what|where)\b/iu.test(
+        prompt,
+      ))
+  return asksForSupportContact
+    ? UNVERIFIED_EXTERNAL_SUPPORT_CONTACT_RESPONSE
+    : UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE
+}
 
 async function completeUnverifiedExternalAudienceTurn(input: {
   message: AssistantMessageInput
   plan: AssistantTurnSharedPlan
+  response: string
   session: AssistantSession
   turnId: string
   userTurn: PersistedUserTurn
@@ -386,7 +402,7 @@ async function completeUnverifiedExternalAudienceTurn(input: {
     [{
       createdAt: turnCreatedAt,
       kind: 'assistant',
-      text: UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE,
+      text: input.response,
     }],
   )
 
@@ -399,14 +415,14 @@ async function completeUnverifiedExternalAudienceTurn(input: {
   })
   const outcome = await dispatchAssistantReply({
     input: input.message,
-    response: UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE,
+    response: input.response,
     session: savedSession,
     sharedPlan: input.plan,
     turnId: input.turnId,
   })
   await finalizeDeliveredAssistantTurn({
     outcome,
-    response: UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE,
+    response: input.response,
     turnId: input.turnId,
     vault: input.message.vault,
   })
@@ -426,7 +442,7 @@ async function completeUnverifiedExternalAudienceTurn(input: {
           : null,
       media: outcome.media,
       prompt: input.message.prompt,
-      response: UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE,
+      response: input.response,
       session: outcome.session,
       status: 'completed',
       vault: redactAssistantDisplayPath(input.message.vault),
@@ -559,10 +575,11 @@ export async function sendAssistantMessageLocal(
             sharedPlan,
             receipt.turnId,
           )
-          responseText = UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE
+          responseText = resolveUnverifiedExternalAudienceResponse(input.prompt)
           const completed = await completeUnverifiedExternalAudienceTurn({
             message: input,
             plan: sharedPlan,
+            response: responseText,
             session: resolved.session,
             turnId: receipt.turnId,
             userTurn,
@@ -1323,6 +1340,9 @@ export async function sendAssistantMessageLocal(
           const usageRecordStartedAt = Date.now()
           await recordAssistantUsageEvent({
             executionContext,
+            ...(providerRequestStartedAtMs === null
+              ? {}
+              : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
             providerRequestAcceptedInputIds,
             providerRequestOrdinal,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
@@ -1561,6 +1581,9 @@ export async function sendAssistantMessageLocal(
         const usageRecordStartedAt = Date.now()
         await recordAssistantUsageEvent({
           executionContext,
+          ...(providerRequestStartedAtMs === null
+            ? {}
+            : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
           providerRequestAcceptedInputIds,
           providerRequestOrdinal,
           providerResult,
@@ -1647,6 +1670,9 @@ export async function sendAssistantMessageLocal(
             precedingResponseSegments.push({
               deliveryContext: resolvedDeliveryContext.context,
               response: segment.response,
+              ...(segment.transcriptResponse === undefined
+                ? {}
+                : { transcriptResponse: segment.transcriptResponse }),
               media: segment.media ?? [],
               ...(segment.targetInputId
                 ? {
@@ -1662,7 +1688,7 @@ export async function sendAssistantMessageLocal(
               context: segment.deliveryContext ?? null,
               input: currentInput,
             }),
-            rawResponse: segment.response,
+            rawResponse: segment.transcriptResponse ?? segment.response,
             session: currentSession,
             sharedPlan,
           })
@@ -1697,9 +1723,10 @@ export async function sendAssistantMessageLocal(
               })
         const rawTranscriptResponseText = noReplySelected
           ? null
-          : providerResult.responseCard
-            ? renderAssistantResponseCardText(providerResult.responseCard)
-            : providerResult.transcriptResponse
+          : providerResult.transcriptResponse ??
+            (providerResult.responseCard
+              ? renderAssistantResponseCardTranscriptText(providerResult.responseCard)
+              : null)
         const transcriptResponseText =
           rawTranscriptResponseText === null
             ? null

@@ -8,6 +8,9 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
+  AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
+import type {
   HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
@@ -60,6 +63,21 @@ const CODEX_MODEL_PROVIDER_CONFIG = {
   baseUrl: 'https://ai-gateway.vercel.sh/v1',
   envKey: 'VERCEL_AI_API_KEY',
   wireApi: 'responses' as const,
+}
+const TRACKED_COMPACT_TABLE_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Strength session',
+  subtitle: null,
+  rowHeader: 'Exercise',
+  columns: ['Set 1'],
+  rows: [{ label: 'Bench press', values: ['185 lb × 8'] }],
+  footer: null,
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-04T21:30:00.000Z',
+  },
 }
 
 afterEach(async () => {
@@ -278,9 +296,9 @@ test('sendAssistantMessageLocal delivers an exact approval URL without persistin
   )
 })
 
-test('sendAssistantMessageLocal replies safely without starting the provider for an unverified external audience', async () => {
+test('sendAssistantMessageLocal does not volunteer support contact for an unverified external audience', async () => {
   const safetyResponse =
-    "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph. If you're reporting a Murph product problem, you can also email support@withmurph.ai directly."
+    "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph."
   const session = createAssistantSession({
     binding: {
       actorId: 'stored-direct-actor',
@@ -343,7 +361,7 @@ test('sendAssistantMessageLocal replies safely without starting the provider for
   })
 
   expect(result.response).toBe(safetyResponse)
-  expect(result.response).toContain('support@withmurph.ai')
+  expect(result.response).not.toContain('support@withmurph.ai')
   expect(result.delivery).toEqual(expect.objectContaining({
     target: 'external-thread',
   }))
@@ -747,6 +765,94 @@ test('sendAssistantMessageLocal preserves image presence for preceding replies',
         response: 'The first image is ready.',
       }),
     ])
+})
+
+test('sendAssistantMessageLocal separates preceding tracked-card delivery from transcript authority', async () => {
+  const session = createAssistantSession()
+  const publicResponse = 'Strength session\n\nBench press: Set 1: 185 lb × 8'
+  const transcriptResponse = `${publicResponse}\n\n[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ; snapshot: 2026-08-04T21:30:00.000Z]`
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: createDirectSharedPlan(),
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        precedingResponseSegments: [{
+          deliveryContextOrdinal: 0,
+          media: [],
+          response: publicResponse,
+          transcriptResponse,
+        }],
+        response: 'Follow-up answer.',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'Follow-up answer.',
+        route: { routeId: 'route-preceding-tracked-card' },
+        session,
+      },
+    },
+    session,
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Track this, then answer the follow-up',
+    vault: '/vaults/test',
+  })
+
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.precedingAssistantTranscriptTexts,
+  ).toEqual([transcriptResponse])
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        response: publicResponse,
+        transcriptResponse,
+      }),
+    ])
+  expect(
+    mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments?.[0]
+      ?.response,
+  ).toBe(publicResponse)
+})
+
+test('sendAssistantMessageLocal persists the provider transcript for a final tracked card', async () => {
+  const session = createAssistantSession()
+  const publicResponse = 'Strength session\n\nBench press: Set 1: 185 lb × 8'
+  const transcriptResponse = `${publicResponse}\n\n[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ; snapshot: 2026-08-04T21:30:00.000Z]`
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: createDirectSharedPlan(),
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response: publicResponse,
+        responseCard: TRACKED_COMPACT_TABLE_RESPONSE_CARD,
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse,
+        route: { routeId: 'route-final-tracked-card' },
+        session,
+      },
+    },
+    session,
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Track this workout in a table',
+    vault: '/vaults/test',
+  })
+
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+  ).toBe(transcriptResponse)
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
+    .toBe(publicResponse)
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
+    .not.toContain('evt_')
 })
 
 test('sendAssistantMessageLocal keeps manual chat on the session Codex thread', async () => {
@@ -2298,6 +2404,11 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
   })
 
   expect(providerRequestStarted).toHaveBeenCalledTimes(1)
+  expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledWith(
+    expect.objectContaining({
+      occurredAt: '2026-06-09T00:00:00.000Z',
+    }),
+  )
   const event = providerRequestStarted.mock.calls[0]?.[0] as {
     admissionMs: number
     codexAppServerInitializeMs: number
@@ -8569,6 +8680,7 @@ async function loadLocalServiceModule(input?: {
             deliveryContextOrdinal: number
             media?: AssistantDeliveryOutcome['media']
             response: string
+            transcriptResponse?: string | null
           }[]
           reactions?: readonly {
             deliveryContextOrdinal: number
@@ -8583,6 +8695,7 @@ async function loadLocalServiceModule(input?: {
           response: string
           responseDeliveryContextOrdinal: number
           responseMedia?: readonly AssistantResponseMedia[] | null
+          responseCard?: AssistantResponseCard | null
           session: AssistantSession
           targetInputId?: string | null
           transcriptResponse: string | null

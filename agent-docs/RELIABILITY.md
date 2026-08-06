@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-04
+Last verified: 2026-08-05
 
 ## Current Guardrails
 
@@ -15,7 +15,14 @@ Last verified: 2026-08-04
   text-only replay under the original key. Once that transition commits, the
   effective text intent and key also own the current provider attempt and any
   authorized stale-direct-thread materialization; the pre-transition card
-  request is no longer recovery authority. Transport ambiguity, timeouts, rate
+  request is no longer recovery authority. An inbound auto-reply carries its
+  trusted provider reply thread once as binding delivery; the opaque
+  conversation locator is not a provider target, and a duplicate explicit
+  target must not change the route kind. Active-turn admission preserves that
+  binding while updating only accepted-message and idempotency context. Native
+  reply and reaction authorization rechecks the accepted event against the same
+  thread binding, so deleting the duplicate does not remove those tools or
+  change the provider contract. Transport ambiguity, timeouts, rate
   limits, and server failures remain failed delivery attempts and must not
   start a second send.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
@@ -40,7 +47,17 @@ Last verified: 2026-08-04
   request bodies above 20 MiB
   fail closed before provider egress. Rollback removes Web exposure first; it
   does not add a queue, repair pass, provider fallback, or second preference
-  owner.
+  owner. Codex Responses Lite `/responses` requests also receive one explicit
+  prompt-cache breakpoint at the end of their stable leading developer prefix,
+  while retaining Codex's stable cache key and Venice's implicit-cache fallback.
+  Activation requires two sequential, capped requests from one resumed thread
+  through the exact candidate's pinned Codex App Server, not hand-authored
+  ordinary Responses payloads. Candidate proof must join that real Responses
+  Lite envelope to the production Worker transform and show the stable key,
+  restored tools, removed `additional_tools`, and one correctly placed marker.
+  The live second request must report a nonzero cache read and materially fewer
+  cache-write tokens. Otherwise Venice remains hidden and rollback begins at
+  Web exposure.
 - Web selects immutable allowance rates from both the canonical product model
   and recorded provider. Venice standard usage uses Venice's documented
   input, cache-read, cache-write, and output rates and records the provider

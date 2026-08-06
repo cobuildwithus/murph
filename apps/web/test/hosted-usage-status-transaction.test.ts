@@ -76,6 +76,7 @@ function buildTrialDecision(): HostedAiUsageGateDecisionWithSource {
     memberId: "member_usage_transaction",
     periodEnd: PERIOD_END,
     periodStart: PERIOD_START,
+    planResetAt: null,
     remainingUsdMicros: 1_000_000n,
     spentUsdMicros: 9_000_000n,
     usageCreditBalanceUsdMicros: 0n,
