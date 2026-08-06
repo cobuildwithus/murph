@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertEstablishedR2ColdStartAttempt,
-  assertNoRecoveredWorkspaceSnapshotRestore,
   assertSingleSuccessfulColdStartAttempt,
 } from "./hosted-local-cold-start-benchmark.js";
 
@@ -13,6 +12,7 @@ const validRestoreBreakdown = {
     encryptedBytes: 128,
     objectFetchMs: 12,
     plainBytes: 512,
+    replaySafeReadMaxAttempt: 1,
   },
 } as const;
 
@@ -63,46 +63,6 @@ describe("hosted local cold-start benchmark integrity", () => {
     ).toThrow("more than one runtime attempt");
   });
 
-  it("accepts one failure-free workspace snapshot restore", () => {
-    expect(() => assertNoRecoveredWorkspaceSnapshotRestore([
-      {
-        details: {
-          operation: "workspace_snapshot_restore",
-          workspaceSnapshotRestoreAttempt: 1,
-          workspaceSnapshotRestoreStep: "object_fetch",
-        },
-        message: "Hosted workspace snapshot restore step completed.",
-      },
-    ])).not.toThrow();
-  });
-
-  it("rejects a replay-safe workspace snapshot restore retry", () => {
-    expect(() => assertNoRecoveredWorkspaceSnapshotRestore([
-      {
-        details: {
-          operation: "workspace_snapshot_restore",
-          retrying: true,
-          workspaceSnapshotRestoreAttempt: 1,
-          workspaceSnapshotRestoreStep: "object_fetch",
-        },
-        message: "Hosted workspace snapshot restore read step failed; retrying.",
-      },
-    ])).toThrow("recovered workspace snapshot restore");
-  });
-
-  it("rejects a later workspace snapshot restore step attempt", () => {
-    expect(() => assertNoRecoveredWorkspaceSnapshotRestore([
-      {
-        details: {
-          operation: "workspace_snapshot_restore",
-          workspaceSnapshotRestoreAttempt: 2,
-          workspaceSnapshotRestoreStep: "object_fetch",
-        },
-        message: "Hosted workspace snapshot restore step completed.",
-      },
-    ])).toThrow("recovered workspace snapshot restore");
-  });
-
   it("accepts one measured cold v2 restore after setup logs were excluded", () => {
     expect(() => assertEstablishedR2ColdStartAttempt({
       expectedEncryptedBytes: 128,
@@ -114,6 +74,25 @@ describe("hosted local cold-start benchmark integrity", () => {
         runtimeAttemptId: "attempt-success",
       },
     })).not.toThrow();
+  });
+
+  it("rejects a replay-safe restore retry inside the measured attempt", () => {
+    expect(() => assertEstablishedR2ColdStartAttempt({
+      expectedEncryptedBytes: 128,
+      expectedPlainBytes: 512,
+      runtimeLogs: validMeasuredRuntimeLogs,
+      successfulAttemptId: "attempt-success",
+      trace: {
+        phaseBreakdown: {
+          ...validRestoreBreakdown,
+          restore: {
+            ...validRestoreBreakdown.restore,
+            replaySafeReadMaxAttempt: 2,
+          },
+        },
+        runtimeAttemptId: "attempt-success",
+      },
+    })).toThrow("recovered workspace snapshot restore");
   });
 
   it("rejects a missing cold restore trace", () => {

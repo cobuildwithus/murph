@@ -44,7 +44,6 @@ import {
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
   assertEstablishedR2ColdStartAttempt,
-  assertNoRecoveredWorkspaceSnapshotRestore,
   assertSingleSuccessfulColdStartAttempt,
 } from "./helpers/hosted-local-cold-start-benchmark.js";
 import {
@@ -296,7 +295,6 @@ async function runColdStartTrial(
     // first contact are imported by one genuinely cold runtime attempt.
     await activeScenario.enqueueWake(buildActivationWake(userId, ordinal), userId);
   }
-  const structuredLogRecordBaseline = readStructuredLogRecords().length;
   const providerRequestBaseline = listResponsesApiRequests().length;
   const totalProviderRequestBaseline = activeScenario.assistantProviderRequests.length;
   const totalAcceptedSendBaseline = activeLinqStub.acceptedSendRequests.length;
@@ -416,9 +414,6 @@ async function runColdStartTrial(
     || Date.parse(entry.at) <= deliveryObservedAtEpochMs
   );
   assertSingleSuccessfulColdStartAttempt(runtimeLogs, runtimeAttemptId);
-  assertNoRecoveredWorkspaceSnapshotRestore(
-    readStructuredLogRecords().slice(structuredLogRecordBaseline),
-  );
   // The attributed mailbox event proves the same attempt consumed the exact
   // measured input. First-contact trials also consume activation in that pass.
   expect(runtimeLogs).toContainEqual(expect.objectContaining({

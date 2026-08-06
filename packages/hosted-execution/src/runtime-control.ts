@@ -2116,6 +2116,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     extractMs?: number;
     encryptedBytes?: number;
     plainBytes?: number;
+    replaySafeReadMaxAttempt?: number;
   };
   boot?: {
     nodeStartupMs?: number;
@@ -2256,6 +2257,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "extractMs",
     "encryptedBytes",
     "plainBytes",
+    "replaySafeReadMaxAttempt",
   ],
   boot: ["nodeStartupMs", "restoreWasCold"],
   wake: [

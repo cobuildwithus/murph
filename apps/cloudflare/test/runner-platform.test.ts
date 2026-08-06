@@ -132,6 +132,9 @@ import {
 import {
   createEncryptedWorkspaceSnapshotFile,
 } from "../src/workspace-snapshot-local.ts";
+import {
+  assertEstablishedR2ColdStartAttempt,
+} from "./helpers/hosted-local-cold-start-benchmark.js";
 
 function requireFetchCallArgs(
   call: readonly unknown[] | undefined,
@@ -1582,6 +1585,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       expect(restoreTimings?.encryptedBytes).toBe(encrypted.encryptedByteSize);
       expect(restoreTimings?.plainBytes).toBe(encrypted.totalPlainBytes);
+      expect(restoreTimings?.replaySafeReadMaxAttempt).toBe(1);
 
       expect(fetchMock).toHaveBeenCalledTimes(3);
       const restoreRequests = fetchMock.mock.calls.map((call) =>
@@ -1747,7 +1751,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+      const restoreTiming = await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot,
         ref: {
           archive: {
@@ -1793,6 +1797,25 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         workspaceSnapshotRestoreAttempt: 1,
         workspaceSnapshotRestoreStep: "object_fetch",
       }));
+      expect(restoreTiming).toMatchObject({ replaySafeReadMaxAttempt: 2 });
+      expect(() => assertEstablishedR2ColdStartAttempt({
+        expectedEncryptedBytes: encrypted.encryptedByteSize,
+        expectedPlainBytes: encrypted.totalPlainBytes,
+        runtimeLogs: [{
+          attemptId: "runtime_write_123",
+          level: "info",
+          phase: "idle",
+        }],
+        successfulAttemptId: "runtime_write_123",
+        trace: {
+          phaseBreakdown: {
+            schemaVersion: 1,
+            boot: { restoreWasCold: true },
+            restore: restoreTiming ?? {},
+          },
+          runtimeAttemptId: "runtime_write_123",
+        },
+      })).toThrow("recovered workspace snapshot restore");
       const serializedLogs = JSON.stringify(readWorkspaceSnapshotDiagnosticLogs());
       expect(serializedLogs).not.toContain(objectKey);
       expect(serializedLogs).not.toContain(snapshotId);
