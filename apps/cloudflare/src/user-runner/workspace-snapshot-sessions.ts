@@ -742,6 +742,26 @@ async function cleanupBrowserVaultReplicaOrphanCandidate(input: {
   if (input.candidate.objectKey !== input.currentObjectKey) {
     await deleteR2ObjectIfSupported(input.bucket, input.candidate.objectKey);
   }
+  await deleteBrowserVaultReplicaOrphanCandidateIfUnchanged(input);
+}
+
+async function deleteBrowserVaultReplicaOrphanCandidateIfUnchanged(input: {
+  candidate: HostedBrowserVaultReplicaOrphanCandidate;
+  key: string;
+  state: DurableObjectStateLike;
+}): Promise<void> {
+  const currentValue = await input.state.storage.get<unknown>(input.key);
+  if (currentValue === undefined) {
+    return;
+  }
+  const currentCandidate = parseHostedBrowserVaultReplicaOrphanCandidate(currentValue);
+  if (
+    currentCandidate.createdAt !== input.candidate.createdAt
+    || currentCandidate.objectKey !== input.candidate.objectKey
+    || currentCandidate.userId !== input.candidate.userId
+  ) {
+    return;
+  }
   await input.state.storage.delete(input.key);
 }
 

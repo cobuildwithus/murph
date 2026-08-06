@@ -5346,6 +5346,69 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
+  it("does not erase a newer cleanup obligation registered while Web currentness is checked", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userPrefix = await hostedBrowserVaultReplicaUserPrefix({ userId: TEST_USER_ID });
+    const previousObjectKey = `${userPrefix}${"d".repeat(48)}.json`;
+    const nextObjectKey = `${userPrefix}${"e".repeat(48)}.json`;
+    await bucket.put(previousObjectKey, "previous-encrypted-replica");
+    await bucket.put(nextObjectKey, "next-encrypted-replica");
+    const workspace = createWorkspaceState({
+      browserVaultReplicaRef: createBrowserVaultReplicaRef({
+        objectKey: previousObjectKey,
+      }),
+    });
+    let runner!: HostedUserRunner;
+    let registeredDuringRead = false;
+    const harness = createRunnerHarness({
+      bucket,
+      onWorkspaceRead: async () => {
+        if (registeredDuringRead) {
+          return;
+        }
+        registeredDuringRead = true;
+        await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+          createdAt: FIXED_NOW,
+          objectKey: previousObjectKey,
+          schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+          userId: TEST_USER_ID,
+        });
+      },
+      workspace,
+    });
+    runner = harness.runner;
+    await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+      createdAt: "2026-04-26T00:00:00.000Z",
+      objectKey: previousObjectKey,
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: TEST_USER_ID,
+    });
+
+    await runner.alarm();
+
+    expect(bucket.objects.has(previousObjectKey)).toBe(true);
+    expect(harness.storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(previousObjectKey),
+    )).toMatchObject({
+      createdAt: FIXED_NOW,
+      objectKey: previousObjectKey,
+    });
+
+    workspace.browserVaultReplicaRef = createBrowserVaultReplicaRef({
+      objectKey: nextObjectKey,
+    });
+    vi.setSystemTime(new Date("2026-04-27T01:05:00.000Z"));
+    await runner.alarm();
+
+    expect(bucket.objects.has(previousObjectKey)).toBe(false);
+    expect(bucket.objects.has(nextObjectKey)).toBe(true);
+    expect(harness.storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(previousObjectKey),
+    )).toBeUndefined();
+  });
+
   it("keeps browser vault replica orphan cleanup retryable when R2 deletion fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
