@@ -6,9 +6,14 @@ import {
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
 import {
+  executeAutomationDynamicTool,
   MURPH_AUTOMATION_TOOL,
   readAutomationDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools/automation.js'
+import type {
+  AssistantHostedAutomationTool,
+  AssistantHostedAutomationToolRequest,
+} from '../src/assistant/execution-context.js'
 import {
   buildOnboardingFirstPersonalReadAutomationSaveRequest,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
@@ -94,6 +99,51 @@ describe('onboarding first personal read', () => {
     })
     expect(modelAuthoredOverride?.kind).toBe(
       'invalid-automation-arguments',
+    )
+  })
+
+  it('passes only the code-owned request through the hosted tool boundary', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-06T21:00:00.000Z'))
+
+    const parsed = readAutomationDynamicToolRequest({
+      arguments: {
+        action: MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
+      },
+      tool: 'automation',
+    })
+    if (parsed?.kind !== 'automation') {
+      throw new TypeError('Expected a parsed automation request.')
+    }
+
+    let received: AssistantHostedAutomationToolRequest | null = null
+    const automationTool: AssistantHostedAutomationTool = {
+      async request(request) {
+        received = request
+        return {
+          action: 'save',
+          automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+          created: true,
+          lookupId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+          routeBinding: 'current_conversation',
+          status: 'active',
+        }
+      },
+    }
+
+    const result = await executeAutomationDynamicTool({
+      automationTool,
+      request: parsed,
+    })
+
+    expect(received).toEqual(
+      buildOnboardingFirstPersonalReadAutomationSaveRequest({
+        now: new Date('2026-08-06T21:00:00.000Z'),
+      }),
+    )
+    expect(result.rpcResult.success).toBe(true)
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"routeBinding":"current_conversation"',
     )
   })
 
