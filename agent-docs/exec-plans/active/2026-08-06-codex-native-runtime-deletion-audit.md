@@ -506,6 +506,10 @@ audit:
 - **Murph product tools.** Codex owns dynamic-tool transport; Murph must retain
   consent, authorization, validation, canonical writes, and irreversible
   effects for health data, messaging, calls, cards, billing, and groups.
+- **A Murph-owned dynamic-tool discovery protocol.** Broad automation and group
+  schemas already use Codex 0.145 native deferred loading and `tool_search`.
+  That prior hard cut is the desired architecture; do not reintroduce a
+  `schema | execute` wrapper or another discovery registry.
 - **Replacing Murph connected apps with Codex Apps or a generic MCP server.**
   Codex Apps are scoped to Codex/ChatGPT connector identity and workspace
   policy. Murph's current gateway owns member-specific accounts, one-time
