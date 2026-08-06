@@ -67,3 +67,24 @@ the production bundle matches the corrected retained-infrastructure posture.
 - Run affected package typechecks and exact-head CI.
 - Complete preliminary coverage review plus the final cross-cutting ReviewGPT
   gate, then verify the deployed commit and managed-container smoke.
+
+## Completion record
+
+- Restored the authenticated HTTP/WebSocket relay, bounded parsing,
+  Venice/OpenAI diagnostics, and hosted usage-record construction while the
+  single config owner keeps feature, read, and generation gates false.
+- Closed the specialist coverage findings with interceptor-boundary WebSocket,
+  Venice accounting, and missing/malformed terminal-usage regressions.
+- Closed the final replay finding by preserving an already-completed provider
+  terminal when its one accounting attempt fails, with secret-safe warning
+  metadata and no new retry or reconciliation owner.
+- Focused proof passed: 254 Cloudflare node tests, 2 Workers WebSocket tests,
+  43 hosted Codex config tests with 4 opt-in cases skipped, Cloudflare typecheck,
+  docs drift, and diff checks.
+- ReviewGPT correction round 2 returned `ROUND_OUTCOME: PASS` with no remaining
+  qualifying findings. The reviewed behavior head was
+  `0e602961871b012fb967f1aeadcb7e61ee73a837`; the later merge from `main` was a
+  clean base-only update.
+Status: completed
+Updated: 2026-08-05
+Completed: 2026-08-05
