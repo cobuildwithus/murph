@@ -6,8 +6,8 @@ Updated: 2026-08-06
 
 ## Goal
 
-- Send privacy-safe internal Resend alerts when a Murph Stripe operation fails
-  or Stripe reports a checkout/payment failure, regardless of whether the
+- Send privacy-safe internal Resend alerts when a Stripe rejection aborts a
+  Murph checkout or Stripe reports a checkout/payment failure, regardless of whether the
   member started the action on the website or through the iMessage assistant.
 - Preserve Stripe and the existing Web-owned webhook receipt as billing truth;
   alerts are observability only and never authorize or change billing state.
@@ -22,11 +22,11 @@ Updated: 2026-08-06
 - A failed Stripe webhook reconciliation sends one event-scoped alert without
   changing its current retry, poison, or entitlement behavior.
 - Alerts contain only bounded operational metadata: operation or event type,
-  opaque Stripe request/event correlation, error tokens, HTTP status, and
+  opaque stable operation-attempt or Stripe request/event correlation, error tokens, HTTP status, and
   live/test mode. They exclude member identity, contact details, provider
   payloads, checkout contents, and raw error objects.
 - Webhook retries and repeated reporting reuse a stable Resend idempotency key
-  and identical payload for the same Stripe event or request.
+  and identical payload for the same Stripe event or operation attempt.
 - Missing or failed Resend configuration never changes the member-visible
   checkout result, webhook acknowledgement, reconciliation retry, or billing
   projection.
@@ -61,7 +61,8 @@ Updated: 2026-08-06
    Mitigation: omit raw/provider messages and payloads from alert content and
    use the existing token-only Stripe error projection.
 3. Risk: alert delivery delays or changes a failed member request.
-   Mitigation: report only after the Stripe operation has already failed and
+   Mitigation: let only the user-action owner report after the Stripe operation
+   has already failed; keep absorbed/recovered diagnostics log-only; and
    swallow only the alert provider's failure, never the original Stripe error.
 4. Risk: separately instrumenting web and iMessage drifts.
    Mitigation: instrument their existing shared Web-owned billing and webhook
@@ -72,7 +73,7 @@ Updated: 2026-08-06
 1. Inventory Stripe failure events, shared call paths, and operational email
    configuration against current provider docs.
 2. Implement the smallest privacy-safe Resend alert helper at the existing
-   Stripe error and webhook receipt boundaries.
+   checkout-action and webhook receipt boundaries.
 3. Add focused coverage for checkout/API failures, payment-failure events,
    replay identity, redaction, missing configuration, and Resend failure.
 4. Update the owning operational/security/reliability documentation.
@@ -86,8 +87,8 @@ Updated: 2026-08-06
   names; no configuration migration is justified for this alert family.
 - Alert on `checkout.session.async_payment_failed`,
   `payment_intent.payment_failed`, `invoice.payment_failed`, and
-  `invoice.finalization_failed`, plus caught Stripe SDK failures and failed
-  local Stripe-event reconciliation.
+  `invoice.finalization_failed`, plus Stripe SDK rejections that abort checkout
+  create/resume and failed local Stripe-event reconciliation.
 - Treat `checkout.session.expired` and canceled PaymentIntents as ordinary
   abandonment/cancellation rather than errors.
 - Apply the preliminary product-experience and coverage lenses because the
@@ -100,7 +101,7 @@ Updated: 2026-08-06
 ## Verification
 
 - Commands to run: focused Web Vitest suites for the Stripe alert owner,
-  Stripe error logging, webhook service, and event reconciliation; Web
+  integrated Resend delivery, Stripe error logging, webhook service, and event reconciliation; Web
   typecheck; `git diff --check`; exact-head GitHub Actions; preliminary
   `completion-specialists`; and the final ReviewGPT loop.
 - Direct proof: simulate one shared checkout API rejection and one verified
@@ -108,3 +109,17 @@ Updated: 2026-08-06
   proving stable keys/body, private-data exclusion, and unchanged original
   failure control flow; the existing Resend transport suite retains HTTP request
   serialization coverage.
+
+## Review remediation
+
+- Accepted the preliminary and final-round finding that the shared Stripe
+  diagnostic logger also observes recovered races and retry-owned work. It is
+  log-only again; operation email is owned only by checkout create/resume
+  boundaries that propagate the provider rejection to the caller.
+- Replaced random request-id fallback with a stable opaque operation-attempt
+  correlation and included that correlation plus live/test mode in the email.
+  A real Stripe request id still distinguishes separate provider requests on
+  the same attempt.
+- Added integrated proof through the real alert helper and Resend transport,
+  including two failed reconciliation claims producing exactly one
+  reconciliation email and zero retry-attempt operation emails.

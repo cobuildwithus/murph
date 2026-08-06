@@ -57,7 +57,7 @@ import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeCheckoutConfig,
 } from "./runtime";
-import { withHostedStripeFailureLog } from "./stripe-error-log";
+import { withHostedStripeOperationFailureAlert } from "./stripe-error-log";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -191,7 +191,7 @@ export async function createHostedBillingCheckout(
       routing: invite.member.routing,
     });
 
-    const { priceId, stripe } = requireHostedStripeCheckoutConfig({
+    const { priceId, stripe, stripeLiveMode } = requireHostedStripeCheckoutConfig({
       billingPlanCode,
     });
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
@@ -207,6 +207,7 @@ export async function createHostedBillingCheckout(
       prisma,
       publicBaseUrl,
       stripe,
+      stripeLiveMode,
       verifiedEmailAddress,
     });
 
@@ -255,6 +256,7 @@ async function createOrReuseHostedBillingCheckoutAttempt(input: {
   prisma: PrismaClient;
   publicBaseUrl: string;
   stripe: Stripe;
+  stripeLiveMode: boolean;
   verifiedEmailAddress: string | null;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
   for (let attemptIndex = 0; attemptIndex < 3; attemptIndex += 1) {
@@ -409,11 +411,16 @@ async function runHostedBillingCheckoutAttempt(input: {
   prisma: PrismaClient;
   publicBaseUrl: string;
   stripe: Stripe;
+  stripeLiveMode: boolean;
 }): Promise<HostedBillingCheckoutAttemptOutcome> {
   const currentAttempt = input.prepared.attempt;
   if (currentAttempt.stripeCheckoutSessionId) {
-    const session = await withHostedStripeFailureLog(
-      "checkout.sessions.retrieve.billing-start",
+    const session = await withHostedStripeOperationFailureAlert(
+      {
+        operationIdentity: currentAttempt.attemptId,
+        operationName: "checkout.sessions.retrieve.billing-start",
+        stripeLiveMode: input.stripeLiveMode,
+      },
       () => input.stripe.checkout.sessions.retrieve(
         currentAttempt.stripeCheckoutSessionId as string,
       ),
@@ -536,8 +543,12 @@ async function runHostedBillingCheckoutAttempt(input: {
     checkoutAttemptId: currentAttempt.attemptId,
     checkoutIntentHash: currentAttempt.intentHash,
   };
-  const session = await withHostedStripeFailureLog(
-    "checkout.sessions.create.billing-start",
+  const session = await withHostedStripeOperationFailureAlert(
+    {
+      operationIdentity: currentAttempt.attemptId,
+      operationName: "checkout.sessions.create.billing-start",
+      stripeLiveMode: input.stripeLiveMode,
+    },
     () => input.stripe.checkout.sessions.create({
       cancel_url: buildStripeCancelUrl(input.publicBaseUrl, input.inviteCode),
       client_reference_id: input.memberId,

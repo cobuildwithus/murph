@@ -127,6 +127,7 @@ describe("createHostedBillingCheckout", () => {
       billingPlanCode: "launch_monthly",
       priceId: "price_123",
       stripe: mocks.stripe,
+      stripeLiveMode: false,
     });
     let checkoutSession: {
       client_reference_id: string;

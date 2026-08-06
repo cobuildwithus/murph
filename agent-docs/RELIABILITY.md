@@ -322,14 +322,17 @@ Last verified: 2026-08-05
   customer confirms the change; the unsigned return query is display/polling
   context only and never entitlement authority.
 - Stripe failure email reuses the shared operational Resend transport as a
-  best-effort projection, never a retry or billing owner. The central provider
-  call observer schedules one metadata-only alert for a caught Stripe
-  rejection; new verified `checkout.session.async_payment_failed`,
+  best-effort projection, never a retry or billing owner. Only an action owner
+  schedules a metadata-only operation alert when a Stripe rejection actually
+  aborts checkout creation or resume; the central diagnostic logger remains
+  log-only because it also observes recovered reads and cleanup races. New
+  verified `checkout.session.async_payment_failed`,
   `payment_intent.payment_failed`, `invoice.payment_failed`, and
   `invoice.finalization_failed` receipts schedule event-scoped alerts; and only
   the first failed local reconciliation attempt schedules a reconciliation
-  alert. Request- and event-derived keys provide provider replay defense inside
-  Resend's external idempotency window. Duplicate webhook receipts do not
+  alert. Stable opaque operation-attempt and event-derived keys provide
+  provider replay defense inside Resend's external idempotency window.
+  Duplicate webhook receipts do not
   schedule another payment alert, later local reconciliation attempts do not
   schedule another reconciliation alert, and missing configuration or send
   failure cannot change the original checkout, webhook, retry, poison, or

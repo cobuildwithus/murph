@@ -110,6 +110,7 @@ export function requireHostedStripeCheckoutConfig(input?: {
   billingPlanCode: HostedBillingPlanCode;
   priceId: string;
   stripe: Stripe;
+  stripeLiveMode: boolean;
 } {
   return requireHostedStripeBillingPlanConfig(input);
 }
@@ -120,6 +121,7 @@ export function requireHostedStripeBillingPlanConfig(input?: {
   billingPlanCode: HostedBillingPlanCode;
   priceId: string;
   stripe: Stripe;
+  stripeLiveMode: boolean;
 } {
   const environment = getHostedOnboardingEnvironment();
   const billingPlanCode = input?.billingPlanCode ?? getHostedDefaultBillingPlanCode();
@@ -146,6 +148,9 @@ export function requireHostedStripeBillingPlanConfig(input?: {
     billingPlanCode,
     priceId,
     stripe: requireHostedStripeApi(),
+    stripeLiveMode: readHostedStripeSecretKeyLiveMode(
+      environment.stripeSecretKey,
+    ),
   };
 }
 

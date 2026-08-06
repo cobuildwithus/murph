@@ -783,7 +783,8 @@ Last verified: 2026-08-05
 - Resend-backed Stripe failure alerts must use only the environment-owned shared
   operational sender, recipient allowlist, and API key. Their plain-text body
   may include only bounded operation/event types, sanitized error tokens and
-  status, live/test mode, and opaque Stripe request/event correlation. It must
+  status, live/test mode, and opaque stable operation-attempt or Stripe
+  request/event correlation. It must
   not include member or customer identity, contact details, checkout contents,
   raw provider messages, raw errors, or webhook/provider payloads. Alert-send
   diagnostics may expose only the alert kind, sanitized provider status/code,

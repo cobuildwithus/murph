@@ -2,10 +2,7 @@ import "server-only";
 
 import { after } from "next/server";
 
-import {
-  generateHostedRandomPrefixedId,
-  sha256Hex,
-} from "../primitives";
+import { sha256Hex } from "../primitives";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { readHostedOperationalAlertEmailConfig } from "./operational-alert-email-config";
 import {
@@ -18,6 +15,8 @@ const HOSTED_STRIPE_ALERT_OPERATION_MAX_LENGTH = 120;
 const HOSTED_STRIPE_ALERT_TOKEN_PATTERN = /^[A-Za-z0-9_.\-[\]]{1,120}$/u;
 const HOSTED_STRIPE_ALERT_EVENT_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,128}$/u;
 const HOSTED_STRIPE_ALERT_REQUEST_ID_PATTERN = /^req_[A-Za-z0-9_-]{1,64}$/u;
+const HOSTED_STRIPE_ALERT_OPERATION_CORRELATION_PATTERN =
+  /^stripe_op_[a-f0-9]{24}$/u;
 const HOSTED_STRIPE_PAYMENT_FAILURE_EVENT_TYPES = new Set([
   "checkout.session.async_payment_failed",
   "invoice.finalization_failed",
@@ -34,7 +33,9 @@ type HostedStripeAlertEmailSend = typeof sendHostedResendPlainTextEmail;
 
 export function scheduleHostedStripeOperationFailureAlert(input: {
   fields: HostedStripeErrorFields;
+  operationCorrelationId: string;
   operationName: string;
+  stripeLiveMode: boolean;
 }): void {
   scheduleHostedStripeAlert(async () => {
     await reportHostedStripeOperationFailureAlertBestEffort(input);
@@ -44,8 +45,10 @@ export function scheduleHostedStripeOperationFailureAlert(input: {
 export async function sendHostedStripeOperationFailureAlert(input: {
   env?: Readonly<Record<string, string | undefined>>;
   fields: HostedStripeErrorFields;
+  operationCorrelationId: string;
   operationName: string;
   sendEmail?: HostedStripeAlertEmailSend;
+  stripeLiveMode: boolean;
 }): Promise<HostedStripeAlertEmailOutcome> {
   const emailConfig = readHostedOperationalAlertEmailConfig(
     input.env ?? process.env,
@@ -59,20 +62,27 @@ export async function sendHostedStripeOperationFailureAlert(input: {
     HOSTED_STRIPE_ALERT_OPERATION_MAX_LENGTH,
   ) ?? "unknown";
   const requestId = readHostedStripeAlertRequestId(input.fields.requestId);
-  const correlationId = requestId ??
-    generateHostedRandomPrefixedId("stripe_alert");
+  const operationCorrelationId = readHostedStripeOperationCorrelationId(
+    input.operationCorrelationId,
+  );
 
   await (input.sendEmail ?? sendHostedResendPlainTextEmail)({
     config: emailConfig.resend,
     idempotencyKey: buildHostedStripeAlertEmailIdempotencyKey({
       category: "operation",
-      identity: `${operationName}:${correlationId}`,
+      identity: [
+        input.stripeLiveMode ? "live" : "test",
+        operationName,
+        requestId ?? operationCorrelationId,
+      ].join(":"),
     }),
     subject: `Murph Stripe operation failed — ${operationName}`,
     text: [
       "A Murph Stripe API operation failed.",
       "",
       `operation: ${operationName}`,
+      `operation correlation: ${operationCorrelationId}`,
+      `mode: ${input.stripeLiveMode ? "live" : "test"}`,
       `error type: ${readHostedStripeAlertToken(input.fields.type) ?? "unknown"}`,
       `raw error type: ${readHostedStripeAlertToken(input.fields.rawType) ?? "unknown"}`,
       `error code: ${readHostedStripeAlertToken(input.fields.code) ?? "unknown"}`,
@@ -149,6 +159,7 @@ export function scheduleHostedStripeReconciliationFailureAlert(input: {
   errorCode: string;
   eventId: string;
   eventType: string;
+  livemode: boolean;
 }): void {
   scheduleHostedStripeAlert(async () => {
     await reportHostedStripeReconciliationFailureAlertBestEffort(input);
@@ -160,6 +171,7 @@ export async function sendHostedStripeReconciliationFailureAlert(input: {
   errorCode: string;
   eventId: string;
   eventType: string;
+  livemode: boolean;
   sendEmail?: HostedStripeAlertEmailSend;
 }): Promise<HostedStripeAlertEmailOutcome> {
   const emailConfig = readHostedOperationalAlertEmailConfig(
@@ -185,6 +197,7 @@ export async function sendHostedStripeReconciliationFailureAlert(input: {
       "",
       `event type: ${eventType}`,
       `Stripe event id: ${eventId ?? "unavailable"}`,
+      `mode: ${input.livemode ? "live" : "test"}`,
       `error code: ${errorCode}`,
       "",
       "The existing Stripe event receipt remains the retry owner. No billing state was changed by this alert, and no member identity, contact detail, or raw provider payload is included.",
@@ -199,9 +212,17 @@ export function isHostedStripePaymentFailureEventType(type: string): boolean {
   return HOSTED_STRIPE_PAYMENT_FAILURE_EVENT_TYPES.has(type);
 }
 
+export function buildHostedStripeOperationCorrelationId(
+  identity: string,
+): string {
+  return `stripe_op_${sha256Hex(identity).slice(0, 24)}`;
+}
+
 async function reportHostedStripeOperationFailureAlertBestEffort(input: {
   fields: HostedStripeErrorFields;
+  operationCorrelationId: string;
   operationName: string;
+  stripeLiveMode: boolean;
 }): Promise<void> {
   try {
     await sendHostedStripeOperationFailureAlert(input);
@@ -234,6 +255,7 @@ async function reportHostedStripeReconciliationFailureAlertBestEffort(input: {
   errorCode: string;
   eventId: string;
   eventType: string;
+  livemode: boolean;
 }): Promise<void> {
   try {
     await sendHostedStripeReconciliationFailureAlert(input);
@@ -271,6 +293,13 @@ function readHostedStripeAlertEventId(value: string): string | null {
 
 function readHostedStripeAlertRequestId(value: string | null): string | null {
   return value && HOSTED_STRIPE_ALERT_REQUEST_ID_PATTERN.test(value) ? value : null;
+}
+
+function readHostedStripeOperationCorrelationId(value: string): string {
+  if (!HOSTED_STRIPE_ALERT_OPERATION_CORRELATION_PATTERN.test(value)) {
+    throw new TypeError("Stripe alert operation correlation is invalid.");
+  }
+  return value;
 }
 
 function readHostedStripeAlertHttpStatus(value: number | null): number | null {

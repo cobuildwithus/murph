@@ -1472,12 +1472,15 @@ refund, and dispute owners. Browser state and synchronous PaymentIntent
 responses never grant credit.
 
 Stripe failure email is a best-effort observability projection at these shared
-Web-owned boundaries, not a billing owner. Caught provider-operation failures
-from website or assistant billing, a new verified canonical payment-failure
-event, and the first failed local event-reconciliation attempt schedule a
-plain-text Resend alert through the existing operational sender and recipient
-allowlist. Alert content is limited to bounded error tokens, operation/event
-type, opaque Stripe request/event correlation, HTTP status, and live/test mode;
+Web-owned boundaries, not a billing owner. A provider rejection that aborts
+website or assistant checkout creation/resume, a new verified canonical
+payment-failure event, and the first failed local event-reconciliation attempt
+schedule a plain-text Resend alert through the existing operational sender and
+recipient allowlist. The central Stripe diagnostic logger is not alert
+eligibility because cleanup races and recovery reads also log safely absorbed
+rejections. Alert content is limited to bounded error tokens, operation/event
+type, an opaque stable operation-attempt or Stripe request/event correlation,
+HTTP status, and live/test mode;
 member identity, contact details, checkout contents, raw errors, and provider
 payloads are excluded. Stripe receipts retain retry authority, and alert
 configuration or delivery failure cannot alter checkout results, webhook

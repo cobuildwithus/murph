@@ -5,6 +5,8 @@ const stripeAlertMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-alert-email", () => ({
+  buildHostedStripeOperationCorrelationId: () =>
+    `stripe_op_${"a".repeat(24)}`,
   scheduleHostedStripeOperationFailureAlert:
     stripeAlertMocks.scheduleHostedStripeOperationFailureAlert,
 }));
@@ -19,6 +21,7 @@ import {
   describeHostedStripeError,
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
+  reportHostedStripeOperationFailure,
   withHostedStripeFailureLog,
 } from "@/src/lib/hosted-onboarding/stripe-error-log";
 
@@ -148,18 +151,43 @@ describe("hosted Stripe failure logging", () => {
     });
     expect(
       stripeAlertMocks.scheduleHostedStripeOperationFailureAlert,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("alerts only when an action owner classifies the rejection as terminal", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const error = {
+      code: "api_error",
+      rawType: "api_error",
+      requestId: "req_checkout_123",
+      statusCode: 503,
+      type: "StripeAPIError",
+    };
+
+    reportHostedStripeOperationFailure({
+      error,
+      operationIdentity: "checkout-attempt-123",
+      operationName: "checkout.sessions.create.billing-start",
+      stripeLiveMode: true,
+    });
+
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(
+      stripeAlertMocks.scheduleHostedStripeOperationFailureAlert,
     ).toHaveBeenCalledWith({
       fields: {
-        code: "subscription_paused",
+        code: "api_error",
         declineCode: null,
-        message: "Cannot update a paused subscription.",
-        param: "pause_collection",
-        rawType: "invalid_request_error",
-        requestId: "req_abc123",
-        statusCode: 400,
-        type: "StripeInvalidRequestError",
+        message: null,
+        param: null,
+        rawType: "api_error",
+        requestId: "req_checkout_123",
+        statusCode: 503,
+        type: "StripeAPIError",
       },
-      operationName: "subscription.update.paused-pre-resume-cleanup",
+      operationCorrelationId: expect.stringMatching(/^stripe_op_[a-f0-9]{24}$/u),
+      operationName: "checkout.sessions.create.billing-start",
+      stripeLiveMode: true,
     });
   });
 

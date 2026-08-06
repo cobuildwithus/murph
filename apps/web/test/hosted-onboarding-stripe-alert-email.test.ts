@@ -9,6 +9,7 @@ vi.mock("next/server", () => ({
 }));
 
 import {
+  buildHostedStripeOperationCorrelationId,
   sendHostedStripeOperationFailureAlert,
   sendHostedStripePaymentFailureEventAlert,
   sendHostedStripeReconciliationFailureAlert,
@@ -51,18 +52,25 @@ describe("hosted Stripe alert email", () => {
       statusCode: 402,
       type: "StripeCardError",
     };
+    const operationCorrelationId = buildHostedStripeOperationCorrelationId(
+      "checkout-attempt-123",
+    );
 
     await expect(sendHostedStripeOperationFailureAlert({
       env: ALERT_ENV,
       fields,
+      operationCorrelationId,
       operationName: "checkout.sessions.create",
       sendEmail,
+      stripeLiveMode: true,
     })).resolves.toBe("sent");
     await sendHostedStripeOperationFailureAlert({
       env: ALERT_ENV,
       fields,
+      operationCorrelationId,
       operationName: "checkout.sessions.create",
       sendEmail,
+      stripeLiveMode: true,
     });
 
     expect(sendEmail).toHaveBeenCalledTimes(2);
@@ -75,10 +83,98 @@ describe("hosted Stripe alert email", () => {
     });
     expect(second).toEqual(first);
     expect(first?.text).toContain("Stripe request id: req_abc123");
+    expect(first?.text).toContain(
+      `operation correlation: ${operationCorrelationId}`,
+    );
+    expect(first?.text).toContain("mode: live");
     expect(first?.text).toContain("decline code: insufficient_funds");
     expect(first?.text).not.toContain(fields.message);
     expect(first?.text).not.toContain("user@example.com");
     expect(first?.text).not.toContain("https://example.test");
+  });
+
+  it.each([
+    { expectedMode: "live", stripeLiveMode: true },
+    { expectedMode: "test", stripeLiveMode: false },
+  ])(
+    "keeps a no-request-id $expectedMode operation alert stable and visibly correlated",
+    async ({ expectedMode, stripeLiveMode }) => {
+      const sendEmail = createSendEmailMock();
+      const operationCorrelationId = buildHostedStripeOperationCorrelationId(
+        `stable-${expectedMode}-attempt`,
+      );
+      const input = {
+        env: ALERT_ENV,
+        fields: {
+          code: "api_error",
+          declineCode: null,
+          message: null,
+          param: null,
+          rawType: "api_error",
+          requestId: null,
+          statusCode: 503,
+          type: "StripeAPIError",
+        },
+        operationCorrelationId,
+        operationName: "checkout.sessions.create",
+        sendEmail,
+        stripeLiveMode,
+      };
+
+      await sendHostedStripeOperationFailureAlert(input);
+      await sendHostedStripeOperationFailureAlert(input);
+
+      const first = sendEmail.mock.calls[0]?.[0];
+      expect(sendEmail.mock.calls[1]?.[0]).toEqual(first);
+      expect(first?.text).toContain(
+        `operation correlation: ${operationCorrelationId}`,
+      );
+      expect(first?.text).toContain(`mode: ${expectedMode}`);
+      expect(first?.text).toContain("Stripe request id: unavailable");
+    },
+  );
+
+  it("keeps distinct Stripe request failures on one checkout attempt distinct", async () => {
+    const sendEmail = createSendEmailMock();
+    const operationCorrelationId = buildHostedStripeOperationCorrelationId(
+      "retried-checkout-attempt",
+    );
+    const baseInput = {
+      env: ALERT_ENV,
+      fields: {
+        code: "api_error",
+        declineCode: null,
+        message: null,
+        param: null,
+        rawType: "api_error",
+        requestId: "req_first_failure",
+        statusCode: 503,
+        type: "StripeAPIError",
+      },
+      operationCorrelationId,
+      operationName: "checkout.sessions.create",
+      sendEmail,
+      stripeLiveMode: true,
+    };
+
+    await sendHostedStripeOperationFailureAlert(baseInput);
+    await sendHostedStripeOperationFailureAlert({
+      ...baseInput,
+      fields: {
+        ...baseInput.fields,
+        requestId: "req_second_failure",
+      },
+    });
+
+    expect(sendEmail.mock.calls[0]?.[0].idempotencyKey).not.toBe(
+      sendEmail.mock.calls[1]?.[0].idempotencyKey,
+    );
+    expect(sendEmail.mock.calls[0]?.[0].text).toContain(
+      `operation correlation: ${operationCorrelationId}`,
+    );
+    expect(sendEmail.mock.calls[1]?.[0].text).toContain(
+      `operation correlation: ${operationCorrelationId}`,
+    );
   });
 
   it.each([
@@ -138,6 +234,7 @@ describe("hosted Stripe alert email", () => {
       errorCode: "HOSTED_STRIPE_EVENT_RETRIEVE_RETRY_REQUIRED",
       eventId: "evt_reconcile_123",
       eventType: "invoice.payment_failed",
+      livemode: false,
       sendEmail,
     })).resolves.toBe("sent");
 
@@ -149,6 +246,7 @@ describe("hosted Stripe alert email", () => {
     expect(sendEmail.mock.calls[0]?.[0].text).toContain(
       "error code: HOSTED_STRIPE_EVENT_RETRIEVE_RETRY_REQUIRED",
     );
+    expect(sendEmail.mock.calls[0]?.[0].text).toContain("mode: test");
   });
 
   it("does not send when the shared operational email channel is unconfigured", async () => {
@@ -166,8 +264,12 @@ describe("hosted Stripe alert email", () => {
         statusCode: null,
         type: null,
       },
+      operationCorrelationId: buildHostedStripeOperationCorrelationId(
+        "unconfigured-attempt",
+      ),
       operationName: "customers.retrieve",
       sendEmail,
+      stripeLiveMode: false,
     })).resolves.toBe("not_configured");
     expect(sendEmail).not.toHaveBeenCalled();
   });
@@ -192,7 +294,11 @@ describe("hosted Stripe alert email", () => {
         statusCode: 503,
         type: "StripeAPIError",
       },
+      operationCorrelationId: buildHostedStripeOperationCorrelationId(
+        "delivery-failure-attempt",
+      ),
       operationName: "checkout.sessions.create",
+      stripeLiveMode: true,
     });
 
     const scheduledTask = nextServerMocks.after.mock.calls[0]?.[0];

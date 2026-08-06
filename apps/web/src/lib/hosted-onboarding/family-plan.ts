@@ -83,6 +83,7 @@ import {
 import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeApi,
+  requireHostedStripeApiMode,
   requireHostedStripeBillingPlanConfig,
   requireHostedStripeFamilyPlanConfig,
 } from "./runtime";
@@ -136,6 +137,7 @@ import {
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
   withHostedStripeFailureLog,
+  withHostedStripeOperationFailureAlert,
 } from "./stripe-error-log";
 import { closeUnboundHostedSubscriptionCheckout } from "./subscription-checkout-lifecycle";
 
@@ -2198,12 +2200,13 @@ async function createOrResumeHostedFamilyBillingCheckout(
     return upgradeHostedFamilyDirectPaidSubscription(checkoutInput);
   }
 
-  const stripe = requireHostedStripeApi();
+  const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
   if (checkoutInput.mode === "existingCheckout") {
     const existingCheckout = await resumeHostedFamilyBillingCheckout({
       checkoutInput,
       prisma,
       stripe,
+      stripeLiveMode,
     });
     if (existingCheckout === "restart") {
       if (!restartAllowed) {
@@ -2223,8 +2226,12 @@ async function createOrResumeHostedFamilyBillingCheckout(
     ...buildHostedFamilyStripeMetadata(checkoutInput.group),
     checkoutAttemptId: checkoutInput.checkoutAttemptId,
   };
-  const checkoutSession = await withHostedStripeFailureLog(
-    "checkout.sessions.create.family",
+  const checkoutSession = await withHostedStripeOperationFailureAlert(
+    {
+      operationIdentity: checkoutInput.checkoutAttemptId,
+      operationName: "checkout.sessions.create.family",
+      stripeLiveMode,
+    },
     () => stripe.checkout.sessions.create({
       cancel_url: `${checkoutInput.publicBaseUrl}/settings`,
       client_reference_id: checkoutInput.group.id,
@@ -2293,12 +2300,17 @@ async function resumeHostedFamilyBillingCheckout(input: {
   checkoutInput: HostedFamilyExistingBillingCheckoutInput;
   prisma: PrismaClient;
   stripe: ReturnType<typeof requireHostedStripeApi>;
+  stripeLiveMode: boolean;
 }): Promise<
   | { alreadyActive: false; url: string | null }
   | "restart"
 > {
-  const session = await withHostedStripeFailureLog(
-    "checkout.sessions.retrieve.family",
+  const session = await withHostedStripeOperationFailureAlert(
+    {
+      operationIdentity: input.checkoutInput.checkoutAttemptId,
+      operationName: "checkout.sessions.retrieve.family",
+      stripeLiveMode: input.stripeLiveMode,
+    },
     () => input.stripe.checkout.sessions.retrieve(
       input.checkoutInput.sessionId,
     ),

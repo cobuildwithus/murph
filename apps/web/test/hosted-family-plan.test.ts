@@ -32,6 +32,7 @@ const mailboxMocks = vi.hoisted(() => ({
 const runtimeMocks = vi.hoisted(() => ({
   requireHostedOnboardingPublicBaseUrl: vi.fn(),
   requireHostedStripeApi: vi.fn(),
+  requireHostedStripeApiMode: vi.fn(),
   requireHostedStripeBillingPlanConfig: vi.fn(),
   requireHostedStripeFamilyPlanConfig: vi.fn(),
 }));
@@ -78,6 +79,7 @@ vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: runtimeMocks.requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeApi: runtimeMocks.requireHostedStripeApi,
+  requireHostedStripeApiMode: runtimeMocks.requireHostedStripeApiMode,
   requireHostedStripeBillingPlanConfig: runtimeMocks.requireHostedStripeBillingPlanConfig,
   requireHostedStripeFamilyPlanConfig: runtimeMocks.requireHostedStripeFamilyPlanConfig,
 }));
@@ -271,6 +273,10 @@ describe("hosted Family plan", () => {
         }),
       },
     });
+    runtimeMocks.requireHostedStripeApiMode.mockImplementation(() => ({
+      stripe: runtimeMocks.requireHostedStripeApi(),
+      stripeLiveMode: false,
+    }));
     runtimeMocks.requireHostedStripeBillingPlanConfig.mockImplementation(({ billingPlanCode }) => ({
       billingPlanCode,
       priceId: billingPlanCode === "launch_edge_monthly" ? "price_edge" : "price_pulse",

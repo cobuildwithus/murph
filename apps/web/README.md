@@ -1066,7 +1066,9 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   time-zone setting is required for Stripe alerts. Confirm that the Stripe
   webhook endpoint subscribes to `checkout.session.async_payment_failed`,
   `payment_intent.payment_failed`, `invoice.payment_failed`, and
-  `invoice.finalization_failed`.
+  `invoice.finalization_failed`. Checkout create/resume alerts fire only when
+  the provider rejection aborts that user action; recovered reads and cleanup
+  races remain diagnostic logs and do not email.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep

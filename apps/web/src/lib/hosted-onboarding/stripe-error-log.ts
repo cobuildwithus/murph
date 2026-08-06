@@ -1,6 +1,9 @@
 import { sanitizeHostedOnboardingLogString } from "./http";
 import type { HostedOnboardingStructuredLogDetails } from "./logging";
-import { scheduleHostedStripeOperationFailureAlert } from "./stripe-alert-email";
+import {
+  buildHostedStripeOperationCorrelationId,
+  scheduleHostedStripeOperationFailureAlert,
+} from "./stripe-alert-email";
 
 const STRIPE_ERROR_TOKEN_MAX_LENGTH = 120;
 const STRIPE_ERROR_MESSAGE_MAX_LENGTH = 240;
@@ -85,17 +88,36 @@ function describeHostedStripeErrorForLog(input: {
 }
 
 /**
- * Records and schedules a metadata-only alert for a failed Stripe call so it
- * stays diagnosable even when the caller swallows or reshapes the rejection.
+ * Records a failed Stripe call. Logging is deliberately not alert eligibility:
+ * callers also use this diagnostic for provider rejections that are safely
+ * absorbed by a re-read, cleanup race, or canonical reconciliation retry.
  */
 export function logHostedStripeFailure(input: {
   error: unknown;
   operationName: string;
 }): void {
   console.error("Hosted Stripe call failed.", describeHostedStripeErrorForLog(input));
+}
+
+/**
+ * Records and alerts a Stripe rejection that is known to abort a user-visible
+ * billing action. The caller owns the stable attempt identity and live/test
+ * mode so the email remains both replay-safe and useful for triage.
+ */
+export function reportHostedStripeOperationFailure(input: {
+  error: unknown;
+  operationIdentity: string;
+  operationName: string;
+  stripeLiveMode: boolean;
+}): void {
+  logHostedStripeFailure(input);
   scheduleHostedStripeOperationFailureAlert({
     fields: describeHostedStripeError(input.error),
+    operationCorrelationId: buildHostedStripeOperationCorrelationId(
+      input.operationIdentity,
+    ),
     operationName: input.operationName,
+    stripeLiveMode: input.stripeLiveMode,
   });
 }
 
@@ -111,6 +133,26 @@ export async function withHostedStripeFailureLog<T>(
     return await operation();
   } catch (error) {
     logHostedStripeFailure({ error, operationName });
+    throw error;
+  }
+}
+
+/**
+ * Observes a Stripe rejection that aborts a user-visible billing action,
+ * schedules a best-effort alert, and rethrows it untouched.
+ */
+export async function withHostedStripeOperationFailureAlert<T>(
+  input: {
+    operationIdentity: string;
+    operationName: string;
+    stripeLiveMode: boolean;
+  },
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    reportHostedStripeOperationFailure({ error, ...input });
     throw error;
   }
 }

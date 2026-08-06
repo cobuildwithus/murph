@@ -1,6 +1,6 @@
 import { HostedBillingStatus, HostedStripeEventStatus, Prisma } from "@prisma/client";
 import type Stripe from "stripe";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import {
@@ -9,6 +9,14 @@ import {
 import {
   HostedStripeCheckoutLoserCleanupPendingError,
 } from "@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup";
+
+const nextServerMocks = vi.hoisted(() => ({
+  after: vi.fn<(task: () => Promise<void>) => void>(),
+}));
+
+vi.mock("next/server", () => ({
+  after: nextServerMocks.after,
+}));
 
 const mocks = vi.hoisted(() => ({
   applyStripeCheckoutCompleted: vi.fn(),
@@ -44,8 +52,6 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberStripeBillingLookupState: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
-  scheduleHostedStripeOperationFailureAlert: vi.fn(),
-  scheduleHostedStripeReconciliationFailureAlert: vi.fn(),
   sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
   sendHostedSignupWelcomeEmailForMember: vi.fn(),
   sendHostedSubscriptionCancellationEmailForMember: vi.fn(),
@@ -214,8 +220,13 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       billingPlanCode: "launch_monthly",
       priceId: "price_pulse_monthly_123",
       stripe: mocks.stripe,
+      stripeLiveMode: true,
     }),
     requireHostedStripeApi: () => mocks.stripe,
+    requireHostedStripeApiMode: () => ({
+      stripe: mocks.stripe,
+      stripeLiveMode: true,
+    }),
   };
 });
 
@@ -235,13 +246,6 @@ vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", async () => {
 vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
   sendHostedSignupNotificationEmailForMemberBestEffort:
     mocks.sendHostedSignupNotificationEmailForMemberBestEffort,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/stripe-alert-email", () => ({
-  scheduleHostedStripeOperationFailureAlert:
-    mocks.scheduleHostedStripeOperationFailureAlert,
-  scheduleHostedStripeReconciliationFailureAlert:
-    mocks.scheduleHostedStripeReconciliationFailureAlert,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/subscription-cancellation-email", () => ({
@@ -418,6 +422,11 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(null);
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
   it("stores only minimal Stripe receipt state when recording an event", async () => {
     const prisma = createStripeEventPrismaHarness();
 
@@ -544,6 +553,62 @@ describe("hosted Stripe event reconciliation", () => {
     ).toBeLessThan(
       vi.mocked(prisma.client.hostedStripeEvent.updateMany).mock.invocationCallOrder.at(-1) ?? 0,
     );
+  });
+
+  it("emails only the first reconciliation failure across repeated event-read retries", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ id: "email_reconciliation_123" }),
+      {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      },
+    ));
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    vi.stubEnv(
+      "HOSTED_LINQ_ALERT_EMAIL_FROM",
+      "Murph Alerts <alerts@example.com>",
+    );
+    vi.stubEnv("HOSTED_LINQ_ALERT_EMAILS", "operator@example.com");
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockRejectedValue(
+      Object.assign(new Error("Stripe event read unavailable"), {
+        statusCode: 503,
+        type: "StripeAPIError",
+      }),
+    );
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(nextServerMocks.after).toHaveBeenCalledTimes(1);
+    await nextServerMocks.after.mock.calls[0]?.[0]?.();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstRequest = fetchMock.mock.calls[0]?.[1];
+    const firstBody = JSON.parse(String(firstRequest?.body)) as {
+      subject: string;
+      text: string;
+    };
+    expect(firstBody.subject).toBe(
+      "Murph Stripe reconciliation failed — invoice.paid",
+    );
+    expect(firstBody.text).toContain("mode: live");
+    expect(firstBody.text).not.toContain("Stripe operation failed");
+
+    prisma.rows[0]!.nextAttemptAt = new Date(0);
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(mocks.stripe.events.retrieve).toHaveBeenCalledTimes(2);
+    expect(nextServerMocks.after).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("routes checkout completion through the live Stripe event without activating access", async () => {
@@ -1406,13 +1471,7 @@ describe("hosted Stripe event reconciliation", () => {
         poisoned: false,
       }),
     );
-    expect(
-      mocks.scheduleHostedStripeReconciliationFailureAlert,
-    ).toHaveBeenCalledWith({
-      errorCode: "Error",
-      eventId: event.id,
-      eventType: event.type,
-    });
+    expect(nextServerMocks.after).toHaveBeenCalledTimes(1);
 
     prisma.rows[0]!.nextAttemptAt = new Date(0);
     await expect(reconcileHostedStripeEventById({
@@ -1425,9 +1484,7 @@ describe("hosted Stripe event reconciliation", () => {
       {},
       { idempotencyKey: "hosted-family-legacy-cancel:sub_123" },
     );
-    expect(
-      mocks.scheduleHostedStripeReconciliationFailureAlert,
-    ).toHaveBeenCalledTimes(1);
+    expect(nextServerMocks.after).toHaveBeenCalledTimes(1);
     errorSpy.mockRestore();
   });
 

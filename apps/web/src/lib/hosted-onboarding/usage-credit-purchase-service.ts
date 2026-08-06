@@ -72,7 +72,7 @@ import {
   requireHostedUsageCreditLookupKey,
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
-import { logHostedStripeFailure } from "./stripe-error-log";
+import { reportHostedStripeOperationFailure } from "./stripe-error-log";
 import {
   tryChargeHostedUsageCreditSavedCard,
   type HostedUsageCreditSavedCardBillingAuthority,
@@ -1129,7 +1129,12 @@ export async function continueHostedUsageCreditCheckout(input: {
       idempotencyKey: buildHostedUsageCreditCheckoutIdempotencyKey(purchase.id),
     });
   } catch (error) {
-    logHostedStripeFailure({ error, operationName: "checkout.sessions.create" });
+    reportHostedStripeOperationFailure({
+      error,
+      operationIdentity: purchase.id,
+      operationName: "checkout.sessions.create.usage-credit",
+      stripeLiveMode,
+    });
     throw hostedOnboardingError({
       code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
       details: describeSafeHostedUsageCreditStripeError(error),
