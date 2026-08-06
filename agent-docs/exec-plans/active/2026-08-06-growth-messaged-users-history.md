@@ -104,8 +104,14 @@ Updated: 2026-08-06
 - Passed: hosted Web prepared TypeScript check and touched-file ESLint.
 - Passed: desktop and mobile Playwright accessibility/browser proof from
   `/design?tab=sections#ops-weekly-growth-compass` (2 tests), plus exact and
-  lower-bound desktop/mobile rendered studies. The final Fable review passed
-  after its stale-scorecard-proof finding was resolved with fresh captures.
+  lower-bound desktop/mobile rendered studies. All six hosted image variants
+  matched their inspected local captures byte-for-byte. The exact frontend
+  design-proof and PR architecture guards pass after registering the updated
+  section owner and adding their required proof bullets.
+- Unavailable on the corrected UI head: the required fresh Claude UI check was
+  attempted with both Fable and Opus, but both CLI routes returned no usable
+  output for a non-credit reason. An earlier Fable pass had accepted the
+  refreshed captures; the corrected-head attempt is not claimed as passed.
 - Passed with resolved findings: preliminary product-experience/frontend/
   coverage ReviewGPT and final sensitive ReviewGPT round 1. The accepted
   findings added non-color chart encoding, update-branch null coverage, and
@@ -115,6 +121,19 @@ Updated: 2026-08-06
   Failed updates now omit activity fields, while successful exact or
   proven-incomplete passes remain authoritative; the focused transition proof
   passes after merging current `main`.
-- Pending: a fresh gate-valid final sensitive ReviewGPT remediation round,
-  post-merge desktop/mobile browser proof, exact-head CI, and parent final
-  review.
+- Resolved from the gate-valid round 2 findings: activity and message history
+  share the existing snapshot projection; the UI and durable docs disclose the
+  retained shared-group boundary exactly; and the cron returns non-success
+  after committing legacy fields when activity capture is operationally
+  unavailable. Current focused tests, Web typecheck, Prisma validation, lint,
+  rendered proof, and parent full-diff review pass after the clean `main` merge.
+- Blocked: the fresh same-thread final ReviewGPT round never submitted. Eragon
+  reached an attached, ready draft but timed out in browser control before
+  submission; Phlebas and Hercules failed before the attachment/composer was
+  ready; Mountain was unavailable because its profile was already locked.
+  Read-only recovery found no completed new turn, so no duplicate prompt was
+  sent and no final-round pass is claimed.
+- Blocked: GitHub accepted repeated synchronize pushes but created no Actions
+  runs for the branch. GitHub's official status reports a partial system outage
+  with Actions in a major outage. Exact-head required CI therefore remains
+  pending for an external reason; Vercel remains the only emitted PR status.
