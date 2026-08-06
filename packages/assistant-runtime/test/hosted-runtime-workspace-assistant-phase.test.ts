@@ -9295,6 +9295,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         accountId: "identity_linq_a",
         actorId: "actor_linq_a",
         actorIsSelf: false,
+        sessionId: null,
         source: "linq",
         threadId: "thread_linq_a",
         threadIsDirect: true,
