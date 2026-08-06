@@ -1,6 +1,6 @@
 # Meal-photo enrollment ordering fence
 
-Status: active
+Status: completed
 Created: 2026-08-05
 Updated: 2026-08-06
 
@@ -145,3 +145,4 @@ Updated: 2026-08-06
 - Push the corrected candidate with the real PostgreSQL authority-ordering
   proof, then run final ReviewGPT round 3 and exact-head CI before closing this
   plan.
+Completed: 2026-08-06
