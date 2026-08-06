@@ -266,6 +266,10 @@ text(result.output);
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
       },
       prompt: 'Hey',
+      // This proof intentionally executes the staged skill and fake vault CLI.
+      // Match the existing scripted exec lane so GitHub's restricted Linux
+      // runner does not fail while bubblewrap configures loopback.
+      sandbox: 'danger-full-access',
     })
 
     expect(result.finalMessage).toBe(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)

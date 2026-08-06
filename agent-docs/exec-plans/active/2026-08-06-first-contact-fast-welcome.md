@@ -115,7 +115,7 @@ Updated: 2026-08-06
 - The three directly referenced owners are
   `aspiration-foundation-delegation.md`,
   `persistence-recovery-follow-up.md`, and
-  `return-launch-completion.md`. The complete asset is 59,833 bytes after
+  `return-launch-completion.md`. The complete asset is 59,832 bytes after
   adding explicit routing and reference ownership headers; the latency win
   comes from not loading irrelevant later-stage policy on the fresh greeting,
   not from deleting that policy.
@@ -128,6 +128,12 @@ Updated: 2026-08-06
   exact welcome, and proves no aspiration/foundation, completion, or recovery
   marker entered tool output. This uses no new production state or delivery
   path.
+- That scripted provider selects the tool sequence; it proves App Server/tool
+  plumbing and the compact output boundary, not a real model's reference-read
+  choice or realized latency. Its one `sed -n 1,260p` call would have returned
+  only the first 13,589 bytes of the old skill, whose remaining pages still had
+  to be read under the full-skill contract. Treat the projected one-to-three-
+  second gain as measurement-pending until an authorized actual-model canary.
 
 ## Verification
 
@@ -137,6 +143,12 @@ Updated: 2026-08-06
   - onboarding route planning: 1 passed;
   - onboarding injection: 3 passed;
   - assistant-engine typecheck, docs drift, and `git diff --check`: passed.
+- Exact-head assistant coverage exposed three proof-only portability/ownership
+  regressions: Linux bubblewrap could not configure loopback for the scripted
+  exec calls, and two legacy tests still read only the old monolithic root for
+  rules now owned by references. The App Server proof now reuses the existing
+  `danger-full-access` scripted-exec lane, and the two assertions read their
+  explicit stage owners. All three focused files pass (five tests total).
 - Remaining parent-owned gates: candidate commit/push, preliminary combined
   product/prompt/coverage review, exact-head CI, and final parent review. The
   PR must remain unmerged and undeployed.
