@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto'
 
 import { z } from 'zod'
 import {
+  HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX,
   hostedPhoneCallBriefSchema,
   type HostedPhoneCallBrief,
 } from '@murphai/hosted-execution/phone-calls'
 
 import type {
+  AssistantHostedScheduledPhoneCallScope,
   AssistantHostedToolRequestKeyScope,
 } from '../../assistant/hosted-tool-context.js'
 import type { AssistantConversationScope } from '../../assistant/conversation-policy.js'
@@ -116,6 +118,19 @@ export function createPhoneCallRequestKey(input: {
     }))
     .digest('hex')
   return `phone_call_${digest}`
+}
+
+export function createScheduledPhoneCallRequestKey(input: {
+  scope: AssistantHostedScheduledPhoneCallScope
+}): string {
+  const digest = createHash('sha256')
+    .update(stableJson({
+      automationId: input.scope.automationId,
+      occurrenceAt: input.scope.occurrenceAt,
+      schema: 'murph.create-phone-call.scheduled-occurrence-request-key.v1',
+    }))
+    .digest('hex')
+  return `${HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX}${digest}`
 }
 
 export function normalizePhoneCallBriefForConversationScope(input: {

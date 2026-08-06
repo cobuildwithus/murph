@@ -909,6 +909,177 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(JSON.stringify(result)).not.toContain("sourceRevision");
   });
 
+  it("lets a frozen v0 sleep read consume only the canonical value from a v1 grant", async () => {
+    const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const sourceAwareSleep = snapshot({
+      id: "share_deep_sources_for_legacy_read",
+      memberId: "member_legacy_reader",
+      projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      records: [{
+        data: {
+          date,
+          metricKey: "deep-sleep-minutes",
+          projectedAt: `${date}T12:00:00.000Z`,
+          sources: [
+            {
+              label: "fitbit",
+              recordedAt: `${date}T06:58:00.000Z`,
+              source: "fitbit",
+              unit: "minutes",
+              value: 64,
+            },
+            {
+              label: "Garmin",
+              recordedAt: `${date}T07:01:00.000Z`,
+              selected: true as const,
+              source: "garmin",
+              unit: "minutes",
+              value: 88,
+            },
+          ],
+          sourcesDisagree: true,
+          unit: "minutes",
+          value: 88,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+        sourceRevision: "E".repeat(32),
+      }],
+    });
+    installCiphertexts({ sourceAwareSleep });
+    const { prisma } = createPrisma({
+      group: {
+        members: [{
+          id: "participant_legacy_reader",
+          memberId: "member_legacy_reader",
+        }],
+      },
+      shares: [shareRow({
+        ciphertext: "sourceAwareSleep",
+        id: "share_deep_sources_for_legacy_read",
+        memberId: "member_legacy_reader",
+        projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      })],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [DEEP_SLEEP_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.requestedProjectionScopeKeys).toEqual([DEEP_SLEEP_KEY]);
+    expect(result.members[0]?.projections[0]).toEqual({
+      dataStatus: "available",
+      grantedAt: GRANTED_AT.toISOString(),
+      grantStatus: "granted",
+      projectionScope: DEEP_SLEEP_SCOPE,
+      projectionScopeKey: DEEP_SLEEP_KEY,
+      records: [{
+        data: {
+          date,
+          metricKey: "deep-sleep-minutes",
+          unit: "minutes",
+          value: 88,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+      }],
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /fitbit|Garmin|garmin|projectedAt|recordedAt|selected|sourcesDisagree|sourceRevision/u,
+    );
+  });
+
+  it("prefers an exact v0 sleep grant over a v1 compatibility fallback", async () => {
+    const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const legacySleep = snapshot({
+      id: "share_deep_exact_legacy",
+      memberId: "member_exact_legacy",
+      projectionScope: DEEP_SLEEP_SCOPE,
+      records: [{
+        data: {
+          date,
+          metricKey: "deep-sleep-minutes",
+          unit: "minutes",
+          value: 70,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+      }],
+    });
+    const sourceAwareSleep = snapshot({
+      id: "share_deep_sources_alternative",
+      memberId: "member_exact_legacy",
+      projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      records: [{
+        data: {
+          date,
+          metricKey: "deep-sleep-minutes",
+          projectedAt: `${date}T12:00:00.000Z`,
+          sources: [{
+            label: "Garmin",
+            recordedAt: `${date}T07:01:00.000Z`,
+            selected: true as const,
+            source: "garmin",
+            unit: "minutes",
+            value: 88,
+          }],
+          sourcesDisagree: false,
+          unit: "minutes",
+          value: 88,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+      }],
+    });
+    installCiphertexts({ legacySleep, sourceAwareSleep });
+    const { prisma } = createPrisma({
+      group: {
+        members: [{
+          id: "participant_exact_legacy",
+          memberId: "member_exact_legacy",
+        }],
+      },
+      shares: [
+        shareRow({
+          ciphertext: "legacySleep",
+          id: "share_deep_exact_legacy",
+          memberId: "member_exact_legacy",
+          projectionScope: DEEP_SLEEP_SCOPE,
+        }),
+        shareRow({
+          ciphertext: "sourceAwareSleep",
+          id: "share_deep_sources_alternative",
+          memberId: "member_exact_legacy",
+          projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+        }),
+      ],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [DEEP_SLEEP_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.members[0]?.projections[0]).toMatchObject({
+      dataStatus: "available",
+      grantStatus: "granted",
+      projectionScope: DEEP_SLEEP_SCOPE,
+      projectionScopeKey: DEEP_SLEEP_KEY,
+      records: [{ data: { value: 70 } }],
+    });
+  });
+
   it("returns the complete sleep-stage and workout-timing member-by-scope matrix", async () => {
     const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
       .toISOString()

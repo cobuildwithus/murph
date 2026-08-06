@@ -10,6 +10,8 @@ import type {
 export const HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS = 40_000;
 export const HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS = 45_000;
 export const HOSTED_PHONE_CALL_INBOUND_MAILBOX_ITEM_IDS_MAX = 32;
+export const HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX =
+  "phone_call_scheduled_";
 
 // Murph must never dial emergency or crisis dispatch: it is an unattended
 // caller that cannot hold a line, give a location, or stay reachable, so an
@@ -130,4 +132,13 @@ export function parseHostedPhoneCallStartResponse(
   value: unknown,
 ): HostedPhoneCallStartResponse {
   return hostedPhoneCallStartResponseSchema.parse(value);
+}
+
+export function isHostedScheduledPhoneCallRequestKey(
+  value: string,
+): boolean {
+  return value.startsWith(HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX)
+    && /^[a-f0-9]{64}$/u.test(
+      value.slice(HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX.length),
+    );
 }

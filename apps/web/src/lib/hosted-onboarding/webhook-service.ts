@@ -84,6 +84,8 @@ import {
 } from "./linq-first-contact-admission";
 import {
   ensureHostedLinqInstantStartPulseTrialEnrollment,
+  runHostedLinqInstantStartDeferredActivationWakeBestEffort,
+  type HostedLinqInstantStartDeferredActivationWake,
 } from "./auto-trial-enrollment-service";
 import {
   isHostedLinqInstantStartEventCandidate,
@@ -179,6 +181,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   let eventType: string | null = null;
   let responseReason: string | null = null;
   let instantStartTypingHint: HostedLinqInstantStartTypingHint | null = null;
+  let pendingInstantStartActivationWake: {
+    continuation: HostedLinqInstantStartDeferredActivationWake;
+    prisma: PrismaClient;
+  } | null = null;
+  const runPendingInstantStartActivationWake = async (): Promise<void> => {
+    const pending = pendingInstantStartActivationWake;
+    pendingInstantStartActivationWake = null;
+    if (!pending) {
+      return;
+    }
+    await runHostedLinqInstantStartDeferredActivationWakeBestEffort(pending);
+  };
 
   try {
     const verifyTiming = startHostedOnboardingTiming(
@@ -585,27 +599,26 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
       if (plan.instantStartEnrollment) {
         const instantStartEnrollment = plan.instantStartEnrollment;
-        // The member row is committed, but enrollment plus the replan below
-        // take seconds before the ordinary post-Temporal ensure fires. Start
-        // the container boot now so it overlaps that work, and show a typing
-        // indicator so the sender's first-ever message is not met with a
-        // silent chat while the runtime spins up. Both are best-effort
-        // latency/feedback hints with no authority and no reply path impact.
-        void startHostedDirectRuntimeWakeBestEffort({
-          source: "linq-instant-start",
-          userId: instantStartEnrollment.memberId,
-        });
+        // The member row is committed, so show feedback immediately while
+        // enrollment and the cold runtime path continue. This hint carries no
+        // authority and has no effect on the reply path.
         instantStartTypingHint = startHostedLinqInstantStartTypingHintBestEffort({
           event: planningEvent,
         });
         let enrollmentFailed = false;
         try {
-          await ensureHostedLinqInstantStartPulseTrialEnrollment({
+          const enrollment = await ensureHostedLinqInstantStartPulseTrialEnrollment({
             admissionEventId: instantStartEnrollment.admissionEventId,
             inviteCode: instantStartEnrollment.inviteCode,
             memberId: instantStartEnrollment.memberId,
             prisma,
           });
+          if (enrollment.deferredActivationWake) {
+            pendingInstantStartActivationWake = {
+              continuation: enrollment.deferredActivationWake,
+              prisma,
+            };
+          }
         } catch (error) {
           if (
             input.signal?.aborted
@@ -624,6 +637,15 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
             },
           );
+        }
+        if (!enrollmentFailed) {
+          // Enrollment has now activated access. Start the container before
+          // the active-member replan so this best-effort hint warms the same
+          // foreground mode that will consume the appended conversation item.
+          void startHostedDirectRuntimeWakeBestEffort({
+            source: "linq-instant-start",
+            userId: instantStartEnrollment.memberId,
+          });
         }
         plan = await runPlan(!enrollmentFailed);
         if (plan.instantStartEnrollment) {
@@ -788,6 +810,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         });
       }
     })();
+    // The ordinary conversation signal, when present, reconciles both its
+    // foreground lane and the activation item committed by enrollment. After
+    // that handoff settles, run the original activation continuation, which
+    // also owns pending group-join confirmation reconciliation.
+    await runPendingInstantStartActivationWake();
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       currentInboundReply,
       plan,
@@ -814,6 +841,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     return plan.response;
   } catch (error) {
+    // Activation is already durable even if replanning, delivery, or the
+    // conversation wake failed. Fall back to its original best-effort signal
+    // before propagating the error and asking the provider to retry.
+    await runPendingInstantStartActivationWake();
     // A failing webhook is retried later with no visible continuation until
     // then, so clear any started typing hint instead of letting its promise
     // decay into silence.

@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  normalizeIanaTimeZone,
   parseCompanionHrvRmssdObservation,
   type CompanionHrvRmssdObservation,
 } from "@murphai/contracts";
@@ -165,6 +166,50 @@ interface CompanionAuthDiagnosticLog {
 }
 
 export type CompanionConnectionIntent = "connect" | "resume";
+
+/** Maximum body size for the admission-only companion contract. */
+export const COMPANION_ADMISSION_BODY_LIMIT_BYTES = 256;
+
+const COMPANION_ADMISSION_ALLOWED_KEYS = new Set(["timeZone"]);
+
+export interface CompanionAdmissionV1Request {
+  timeZone: string | null;
+}
+
+export interface CompanionAdmissionV1Response {
+  ok: true;
+}
+
+/**
+ * Parses the closed v1 admission-only request.
+ *
+ * The route deliberately accepts no platform, installation, SDK, or
+ * connection-lifecycle metadata because canonical member admission grants no
+ * device authority. The contract version is code-owned: changing this exact
+ * request or response shape requires a new version rather than an additive
+ * catch-all reader.
+ */
+export function parseCompanionAdmissionV1RequestBody(
+  body: Record<string, unknown>,
+): CompanionAdmissionV1Request {
+  if (Object.keys(body).some((key) => !COMPANION_ADMISSION_ALLOWED_KEYS.has(key))) {
+    throw companionRequestInvalid("Companion admission contains unsupported fields.");
+  }
+
+  const rawTimeZone = body.timeZone;
+  if (rawTimeZone === undefined || rawTimeZone === null) {
+    return { timeZone: null };
+  }
+
+  const timeZone = typeof rawTimeZone === "string"
+    ? normalizeIanaTimeZone(rawTimeZone)
+    : null;
+  if (!timeZone) {
+    throw companionRequestInvalid("timeZone must be a valid IANA time zone when provided.");
+  }
+
+  return { timeZone };
+}
 
 /**
  * Validates the companion sign-in request and returns its lifecycle intent.

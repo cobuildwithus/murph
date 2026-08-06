@@ -144,6 +144,7 @@ const WEB_SAFE_DEVICE_SYNC_GRAPH_ROOTS = [
   "apps/web/app/api/device-sync/agent/connections/[connectionId]/local-heartbeat/route.ts",
   "apps/web/app/api/device-sync/agent/session/revoke/route.ts",
   "apps/web/app/api/device-sync/agents/pair/route.ts",
+  "apps/web/app/api/device-sync/companion/admission/route.ts",
   "apps/web/app/api/device-sync/companion/status/route.ts",
   "apps/web/app/api/device-sync/messaging-return/route.ts",
   "apps/web/app/api/internal/device-sync/recovery-sweep/route.ts",
