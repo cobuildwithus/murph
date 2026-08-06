@@ -7,6 +7,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import {
+  contentRuleIds,
   verifyReleaseArtifacts,
 } from './release-artifact-secret-guard.mjs';
 
@@ -64,7 +65,13 @@ test('accepts ordinary package code and obvious local placeholders', async () =>
       'const localDatabase = "postgresql://postgres:postgres@127.0.0.1:5432/example";',
       'const metricKey = "cohortKey_abcdefghijklmnopqrstuvwxyz012345";',
       'const TELEGRAM_SECRET_TOKEN_HEADER = "x-telegram-bot-api-secret-token";',
-      'export { localDatabase, metricKey, privateKeyHeader, TELEGRAM_SECRET_TOKEN_HEADER };',
+      'const HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN = "[redacted]";',
+      'const REDACTED_SECRET = "<REDACTED_SECRET>";',
+      'const REDACTED_SECRET_TEXT = "[REDACTED]";',
+      'const token = `-${suffix}`;',
+      'const laneDomains = { "clinical-records-token": "device", "device-sync-token": "device" };',
+      'const configShape = { "api-key": "api-key", "AUTH_TOKEN": { type: "string" } };',
+      'export { configShape, HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN, laneDomains, localDatabase, metricKey, privateKeyHeader, REDACTED_SECRET, REDACTED_SECRET_TEXT, TELEGRAM_SECRET_TOKEN_HEADER, token };',
     ].join('\n'),
     'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
   });
@@ -72,6 +79,97 @@ test('accepts ordinary package code and obvious local placeholders', async () =>
     await verifyReleaseArtifacts(fixture.root, fixture.packOutput);
   } finally {
     await fixture.cleanup();
+  }
+});
+
+test('limits generic fixture exemptions to known vendored incur test paths', async () => {
+  const genericFixtureSecret = ['secret', '123'].join('-');
+  const providerCredential = ['sk', 'live', 'A1b2C3d4E5f6G7h8I9j0K1l2'].join('_');
+  const acceptedFixture = await createTarball({
+    'node_modules/incur/src/Cli.test.ts': `const fixture = { API_TOKEN: "${genericFixtureSecret}" };`,
+    'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+  });
+  try {
+    await verifyReleaseArtifacts(acceptedFixture.root, acceptedFixture.packOutput);
+  } finally {
+    await acceptedFixture.cleanup();
+  }
+
+  const rejectedFixture = await createTarball({
+    'node_modules/incur/src/Cli.test.ts': `const fixture = { API_TOKEN: "${providerCredential}" };`,
+    'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+  });
+  try {
+    await assert.rejects(
+      verifyReleaseArtifacts(rejectedFixture.root, rejectedFixture.packOutput),
+      (error) => {
+        assert.match(error.message, /provider-token:stripe/u);
+        assert.equal(error.message.includes(providerCredential), false);
+        return true;
+      },
+    );
+  } finally {
+    await rejectedFixture.cleanup();
+  }
+});
+
+test('detects quoted and unquoted generic secret assignments', () => {
+  const secret = ['uY7nQ2pL9vR4', 'xT8mW3cD6fH1'].join('');
+  for (const assignment of [
+    `{"CLOUDFLARE_API_TOKEN":"${secret}"}`,
+    `CLOUDFLARE_API_TOKEN=${secret}`,
+    `export AUTH_TOKEN=${secret}`,
+    `client_secret: ${secret}`,
+    `client_secret = '${secret}'`,
+  ]) {
+    assert.ok(
+      contentRuleIds(assignment).includes('credential:generic-assignment'),
+      `expected generic credential rule for ${assignment.split(/[:=]/u, 1)[0]}`,
+    );
+  }
+
+  for (const assignment of [
+    'CLOUDFLARE_API_TOKEN=placeholder',
+    'client_secret: ${CLIENT_SECRET}',
+    'token=input.token',
+    'const TELEGRAM_SECRET_TOKEN_HEADER = "x-telegram-bot-api-secret-token";',
+  ]) {
+    assert.equal(
+      contentRuleIds(assignment).includes('credential:generic-assignment'),
+      false,
+    );
+  }
+});
+
+test('does not exempt complete credentials based on value shape', () => {
+  const uppercaseToken = ['ABCDEFGHJKLMNPQR', 'STUVWXYZ23456789'].join('');
+  const symbolPassword = ['correct-horse!', '#battery-staple'].join('');
+  const basicCredential = ['c2VydmljZTp', 'wYXNzd29yZA=='].join('');
+  const cases = [
+    {
+      ruleId: 'credential:connection-url',
+      text: 'postgresql://postgres:postgres@db.example.invalid/app',
+    },
+    {
+      ruleId: 'credential:url-query',
+      text: `https://api.example.invalid/deploy?token=${uppercaseToken}`,
+    },
+    {
+      ruleId: 'credential:generic-assignment',
+      text: `CLOUDFLARE_API_TOKEN=${uppercaseToken}`,
+    },
+    {
+      ruleId: 'credential:generic-assignment',
+      text: `password: "${symbolPassword}"`,
+    },
+    {
+      ruleId: 'credential:authorization-header',
+      text: `Authorization: Basic ${basicCredential}`,
+    },
+  ];
+
+  for (const testCase of cases) {
+    assert.ok(contentRuleIds(testCase.text).includes(testCase.ruleId));
   }
 });
 
@@ -154,7 +252,7 @@ test('rejects credential URLs, JSON secret assignments, and wallet keys', async 
     'dist/config.js': [
       `const database = "postgresql://service:${password}@db.example.invalid/app";`,
       `const deployHook = "https://api.example.invalid/deploy/service?key=${deployHookKey}";`,
-      `const provider = {"CLOUDFLARE_API_TOKEN":"${genericSecret}"};`,
+      `CLOUDFLARE_API_TOKEN=${genericSecret}`,
       `const wallet = {"ETH_WALLET_PRIVATE_KEY":"${walletKey}"};`,
     ].join('\n'),
     'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
@@ -179,7 +277,55 @@ test('rejects credential URLs, JSON secret assignments, and wallet keys', async 
   }
 });
 
-test('rejects mnemonic phrases and complete bearer credentials', async () => {
+test('rejects credential-bearing paths without printing credential material', async () => {
+  const credential = ['sk', 'live', 'A1b2C3d4E5f6G7h8I9j0K1l2'].join('_');
+  const fixture = await createTarball({
+    [`.env.${credential}`]: 'public fixture content',
+    [`dist/${credential}.txt`]: 'public fixture content',
+    'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+  });
+  try {
+    await assert.rejects(
+      verifyReleaseArtifacts(fixture.root, fixture.packOutput),
+      (error) => {
+        assert.match(error.message, /archive-path:provider-token:stripe/u);
+        assert.match(error.message, /sensitive-filename:dotenv/u);
+        assert.match(error.message, /<redacted-archive-path>/u);
+        assert.equal(error.message.includes(credential), false);
+        return true;
+      },
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('redacts credential material in the tarball filename', async () => {
+  const credential = ['sk', 'live', 'A1b2C3d4E5f6G7h8I9j0K1l2'].join('_');
+  const fixture = await createTarball(
+    {
+      'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+    },
+    {
+      tarballFilename: `fixture-${credential}.tgz`,
+    },
+  );
+  try {
+    await assert.rejects(
+      verifyReleaseArtifacts(fixture.root, fixture.packOutput),
+      (error) => {
+        assert.match(error.message, /tarball-path:provider-token:stripe/u);
+        assert.match(error.message, /<redacted-tarball>/u);
+        assert.equal(error.message.includes(credential), false);
+        return true;
+      },
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('rejects mnemonic phrases and complete authorization credentials', async () => {
   const mnemonic = [
     'alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot',
     'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima',
@@ -187,10 +333,12 @@ test('rejects mnemonic phrases and complete bearer credentials', async () => {
   const bearerCredential = [
     'opaque', 'bearer', 'credential', 'A1b2C3d4E5f6G7h8I9j0',
   ].join('.');
+  const basicCredential = ['c2VydmljZTp', 'wYXNzd29yZA=='].join('');
   const fixture = await createTarball({
     'dist/auth.js': [
       `const wallet = {"seed_phrase":"${mnemonic}"};`,
       `const authorization = "Authorization: Bearer ${bearerCredential}";`,
+      `const legacyAuthorization = "Authorization: Basic ${basicCredential}";`,
     ].join('\n'),
     'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
   });
@@ -202,9 +350,48 @@ test('rejects mnemonic phrases and complete bearer credentials', async () => {
         assert.match(error.message, /credential:authorization-header/u);
         assert.equal(error.message.includes(mnemonic), false);
         assert.equal(error.message.includes(bearerCredential), false);
+        assert.equal(error.message.includes(basicCredential), false);
         return true;
       },
     );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('accepts pack manifests and tarballs outside the repository', async () => {
+  const fixture = await createTarball({
+    'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+  });
+  const repoRoot = process.cwd();
+  const tarballPath = path.resolve(
+    fixture.root,
+    fixture.packOutput.packages[0].tarball,
+  );
+  const externalPackOutput = {
+    ...fixture.packOutput,
+    packages: [
+      {
+        ...fixture.packOutput.packages[0],
+        tarball: path.relative(repoRoot, tarballPath),
+      },
+    ],
+  };
+  const packOutputPath = path.join(fixture.root, 'pack-output.json');
+  await writeFile(packOutputPath, JSON.stringify(externalPackOutput));
+
+  try {
+    await verifyReleaseArtifacts(repoRoot, externalPackOutput);
+    const { stdout } = await execFileAsync(
+      'node',
+      [
+        'scripts/release-artifact-secret-guard.mjs',
+        '--pack-output',
+        packOutputPath,
+      ],
+      { cwd: repoRoot },
+    );
+    assert.match(stdout, /passed for 1 tarball/u);
   } finally {
     await fixture.cleanup();
   }

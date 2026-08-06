@@ -50,46 +50,43 @@ const providerPatterns = [
 
 const privateKeyBlockPattern =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]{32,16384}?-----END [A-Z0-9 ]*PRIVATE KEY-----/u;
-const bearerCredentialPattern =
-  /\bAuthorization\s*[:=]\s*["'`]?Bearer\s+[A-Za-z0-9._~+/=-]{20,}["'`]?/iu;
+const authorizationCredentialPatterns = [
+  /\bAuthorization\s*[:=]\s*["'`]?Bearer\s+[A-Za-z0-9._~+/=-]{20,}["'`]?/iu,
+  /\bAuthorization\s*[:=]\s*["'`]?Basic\s+[A-Za-z0-9+/]{8,}={0,2}["'`]?/iu,
+];
 const privateJwkPatterns = [
   /\bkty\s*["']?\s*:\s*["'](?:EC|OKP|RSA)["'][\s\S]{0,2000}?\bd\s*["']?\s*:\s*["']([A-Za-z0-9_-]{32,})["']/iu,
   /\bd\s*["']?\s*:\s*["']([A-Za-z0-9_-]{32,})["'][\s\S]{0,2000}?\bkty\s*["']?\s*:\s*["'](?:EC|OKP|RSA)["']/iu,
   /\bkty\s*["']?\s*:\s*["']oct["'][\s\S]{0,1000}?\bk\s*["']?\s*:\s*["']([A-Za-z0-9_-]{32,})["']/iu,
 ];
 const credentialUrlPattern =
-  /\b(?:amqps?|https?|mongodb(?:\+srv)?|mysql|nats|postgres(?:ql)?|redis|sftp):\/\/([^:\s/@]+):([^@\s/]+)@/giu;
+  /\b(?:amqps?|https?|mongodb(?:\+srv)?|mysql|nats|postgres(?:ql)?|redis|sftp):\/\/[^:\s/@]+:[^@\s/]+@[^\s"'`,;]+/giu;
 const credentialQueryPattern =
-  /[?&](?:api[_-]?key|key|secret|signature|token)=([^&#\s"'`]{16,})/giu;
-const secretAssignmentPattern =
-  /["'`]?\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b["'`]?\s*[:=]\s*["'`]([^"'`\s,;]{20,})["'`]/giu;
+  /[?&](?:api[_-]?key|key|secret|signature|token)=([^&#\s"'`]{1,4096})/giu;
+const structuredSecretAssignmentPattern =
+  /(?:^|[,{][ \t\r\n]*|\n[ \t]*)["'`]?\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b["'`]?\s*:\s*(["'`])([^"'`\r\n]{1,4096})\2/gimu;
+const declaredSecretAssignmentPattern =
+  /(?:^|[;\n][ \t]*)(?:export[ \t]+)?(?:const|let|var)[ \t]+\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b[ \t]*=[ \t]*(["'`])([^"'`\r\n]{1,4096})\2/gimu;
+const lineSecretAssignmentPattern =
+  /^[ \t]*(?:export[ \t]+)?["'`]?\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b["'`]?[ \t]*[:=][ \t]*(["'`]?)([^"'`\s,;]{1,4096})\2[ \t]*$/gimu;
 const walletPrivateKeyPattern =
   /["'`]?\b(?:eth(?:ereum)?[_-]?)?(?:wallet[_-]?)?private[_-]?key\b["'`]?\s*[:=]\s*["'`]?(0x[0-9a-f]{64})["'`]?/iu;
 const mnemonicPattern =
   /["'`]?\b(?:mnemonic|seed[_-]?phrase)\b["'`]?\s*[:=]\s*["'`]([a-z]+(?:\s+[a-z]+){11,23})["'`]/iu;
 
-const placeholderMarkers = [
+const exactPlaceholderValues = new Set([
+  'api-key',
   'changeme',
-  'dummy',
-  'example',
-  'fake',
-  'fixture',
-  'localhost',
   'placeholder',
-  'postgres',
   'redacted',
   'replace-me',
-  'sample',
   'test-only',
-];
-
-function isPathInside(parentPath, candidatePath) {
-  const relativePath = path.relative(parentPath, candidatePath);
-  return (
-    relativePath.length === 0
-    || (!relativePath.startsWith(`..${path.sep}`) && relativePath !== '..' && !path.isAbsolute(relativePath))
-  );
-}
+]);
+const vendoredGenericAssignmentFixturePaths = new Set([
+  'package/node_modules/incur/src/Cli.test.ts',
+  'package/node_modules/incur/src/Mcp.test.ts',
+  'package/node_modules/incur/src/e2e.test.ts',
+]);
 
 function normalizedArchivePath(value) {
   return value.replaceAll('\\', '/').replace(/^\.\//u, '');
@@ -146,51 +143,32 @@ function sensitiveFilenameRule(relativePath) {
   return null;
 }
 
-function shannonEntropy(value) {
-  const frequencies = new Map();
-  for (const character of value) {
-    frequencies.set(character, (frequencies.get(character) ?? 0) + 1);
-  }
-
-  let entropy = 0;
-  for (const count of frequencies.values()) {
-    const probability = count / value.length;
-    entropy -= probability * Math.log2(probability);
-  }
-  return entropy;
+function isExactPlaceholder(value) {
+  return exactPlaceholderValues.has(value.trim().toLowerCase());
 }
 
-function isObviousPlaceholder(value) {
-  const normalized = value.toLowerCase();
-  if (placeholderMarkers.some((marker) => normalized.includes(marker))) {
-    return true;
-  }
-  if (/^(?:x+|0+|1+|a+)$/iu.test(value)) {
-    return true;
-  }
-  if (/^[A-Z][A-Z0-9_]+$/u.test(value)) {
-    return true;
-  }
-  return false;
+function isCredentialReference(value) {
+  const trimmed = value.trim();
+  const withoutTemplateReferences = trimmed.replace(
+    /\$\{(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*[A-Za-z_$][A-Za-z0-9_$]*\}/gu,
+    '',
+  );
+  return (
+    /^\$\{?[A-Z][A-Z0-9_]*\}?$/u.test(trimmed)
+    || /^(?:[A-Za-z_$][A-Za-z0-9_$]*\.)+[A-Za-z_$][A-Za-z0-9_$]*$/u.test(trimmed)
+    || (
+      withoutTemplateReferences !== trimmed
+      && /^[A-Za-z0-9._/-]*$/u.test(withoutTemplateReferences)
+    )
+  );
 }
 
-function isPlausibleGenericSecret(value) {
-  if (
-    value.length < 20
-    || value.length > 4096
-    || isObviousPlaceholder(value)
-    || !/^[A-Za-z0-9._+/=-]+$/u.test(value)
-  ) {
-    return false;
-  }
-
-  const characterClasses = [
-    /[a-z]/u,
-    /[A-Z]/u,
-    /[0-9]/u,
-    /[^A-Za-z0-9]/u,
-  ].filter((pattern) => pattern.test(value)).length;
-  return characterClasses >= 2 && shannonEntropy(value) >= 3.25;
+function isCredentialLiteral(value) {
+  return (
+    !/\s/u.test(value)
+    && !isExactPlaceholder(value)
+    && !isCredentialReference(value)
+  );
 }
 
 function isPublicHeaderNameAssignment(key, value) {
@@ -200,7 +178,58 @@ function isPublicHeaderNameAssignment(key, value) {
   );
 }
 
-function contentRuleIds(text) {
+function isPublicCredentialMetadataAssignment(key, value) {
+  return (
+    isPublicHeaderNameAssignment(key, value)
+    || (/_REDACTION_TOKEN$/u.test(key) && value === '[redacted]')
+    || (
+      /^REDACTED_[A-Z0-9_]+$/u.test(key)
+      && (value === `<${key}>` || value === '[REDACTED]')
+    )
+    || (/_ENV$/iu.test(key) && /^[A-Z][A-Z0-9_]*$/u.test(value))
+    || (
+      /_(?:ENDPOINT_KIND|FILE_NAME|PATH|PREFIX|VERSION)$/iu.test(key)
+      && /^[A-Za-z0-9._/-]+$/u.test(value)
+    )
+    || (
+      (key === 'clinical-records-token' && value === 'device')
+      || (key === 'device-sync-token' && value === 'device')
+    )
+    || ['?', '[', '{', 'boolean', 'null', 'number', 'string', 'string[]', 'undefined'].includes(value)
+  );
+}
+
+function isAllowedLocalDatabasePlaceholder(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    return (
+      ['postgres:', 'postgresql:'].includes(parsed.protocol)
+      && ['127.0.0.1', '[::1]', 'localhost'].includes(parsed.hostname)
+      && parsed.username === 'postgres'
+      && parsed.password === 'postgres'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function secretAssignmentHasCredential(pattern, text, valueIndex) {
+  pattern.lastIndex = 0;
+  for (const match of text.matchAll(pattern)) {
+    const key = match[1] ?? '';
+    const value = match[valueIndex] ?? '';
+    if (
+      !isPublicCredentialMetadataAssignment(key, value)
+      && isCredentialLiteral(value)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function contentRuleIds(text, options = {}) {
+  const includeGenericAssignments = options.includeGenericAssignments ?? true;
   const ruleIds = new Set();
 
   for (const { pattern, ruleId } of providerPatterns) {
@@ -212,7 +241,7 @@ function contentRuleIds(text) {
   if (privateKeyBlockPattern.test(text)) {
     ruleIds.add('private-key:block');
   }
-  if (bearerCredentialPattern.test(text)) {
+  if (authorizationCredentialPatterns.some((pattern) => pattern.test(text))) {
     ruleIds.add('credential:authorization-header');
   }
   if (privateJwkPatterns.some((pattern) => pattern.test(text))) {
@@ -227,8 +256,7 @@ function contentRuleIds(text) {
 
   credentialUrlPattern.lastIndex = 0;
   for (const match of text.matchAll(credentialUrlPattern)) {
-    const password = match[2] ?? '';
-    if (!isObviousPlaceholder(password)) {
+    if (!isAllowedLocalDatabasePlaceholder(match[0])) {
       ruleIds.add('credential:connection-url');
       break;
     }
@@ -237,23 +265,21 @@ function contentRuleIds(text) {
   credentialQueryPattern.lastIndex = 0;
   for (const match of text.matchAll(credentialQueryPattern)) {
     const credential = match[1] ?? '';
-    if (!isObviousPlaceholder(credential)) {
+    if (isCredentialLiteral(credential)) {
       ruleIds.add('credential:url-query');
       break;
     }
   }
 
-  secretAssignmentPattern.lastIndex = 0;
-  for (const match of text.matchAll(secretAssignmentPattern)) {
-    const key = match[1] ?? '';
-    const value = match[2] ?? '';
-    if (
-      !isPublicHeaderNameAssignment(key, value)
-      && isPlausibleGenericSecret(value)
-    ) {
-      ruleIds.add('credential:generic-assignment');
-      break;
-    }
+  if (
+    includeGenericAssignments
+    && (
+      secretAssignmentHasCredential(structuredSecretAssignmentPattern, text, 3)
+      || secretAssignmentHasCredential(declaredSecretAssignmentPattern, text, 3)
+      || secretAssignmentHasCredential(lineSecretAssignmentPattern, text, 3)
+    )
+  ) {
+    ruleIds.add('credential:generic-assignment');
   }
 
   return [...ruleIds].sort();
@@ -311,7 +337,11 @@ async function scanExtractedTarball(rootPath) {
     }
 
     const text = (await readFile(file.absolutePath)).toString('utf8');
-    for (const ruleId of contentRuleIds(text)) {
+    for (const ruleId of contentRuleIds(text, {
+      includeGenericAssignments: !vendoredGenericAssignmentFixturePaths.has(
+        file.relativePath,
+      ),
+    })) {
       findings.push({ path: file.relativePath, ruleId });
     }
   }
@@ -349,7 +379,19 @@ async function scanTarball(tarballPath) {
     .filter((entry) => entry.length > 0)
     .map(validateArchiveEntryPath);
   if (entries.length === 0) {
-    throw new Error(`Release tarball is empty: ${path.basename(tarballPath)}`);
+    throw new Error('Release tarball is empty.');
+  }
+  const archivePathFindings = [];
+  const redactedArchivePaths = new Set();
+  for (const entry of entries) {
+    for (const ruleId of contentRuleIds(entry)) {
+      redactedArchivePaths.add(entry);
+      archivePathFindings.push({
+        path: entry,
+        redactPath: true,
+        ruleId: `archive-path:${ruleId}`,
+      });
+    }
   }
 
   const extractionRoot = await mkdtemp(
@@ -363,7 +405,14 @@ async function scanTarball(tarballPath) {
     } catch {
       throw new Error('Release tarball could not be extracted for scanning.');
     }
-    return await scanExtractedTarball(extractionRoot);
+    const extractedFindings = await scanExtractedTarball(extractionRoot);
+    return [
+      ...archivePathFindings,
+      ...extractedFindings.map((finding) =>
+        redactedArchivePaths.has(finding.path)
+          ? { ...finding, redactPath: true }
+          : finding),
+    ];
   } finally {
     await rm(extractionRoot, { force: true, recursive: true });
   }
@@ -375,8 +424,8 @@ function resolveTarballPath(repoRoot, tarball) {
   }
 
   const tarballPath = path.resolve(repoRoot, tarball);
-  if (!isPathInside(repoRoot, tarballPath) || path.extname(tarballPath) !== '.tgz') {
-    throw new Error(`Release pack metadata contains an invalid tarball path: ${tarball}`);
+  if (path.extname(tarballPath) !== '.tgz') {
+    throw new Error('Release pack metadata contains an invalid tarball path.');
   }
   return tarballPath;
 }
@@ -420,10 +469,23 @@ async function verifyReleaseArtifacts(repoRoot, packOutput) {
 
   const findings = [];
   for (const tarballPath of tarballPaths) {
+    const tarballName = path.basename(tarballPath);
+    const tarballPathRuleIds = contentRuleIds(tarballName);
+    const reportedTarballName = tarballPathRuleIds.length > 0
+      ? '<redacted-tarball>'
+      : tarballName;
+    for (const ruleId of tarballPathRuleIds) {
+      findings.push({
+        path: '<tarball-name>',
+        redactPath: true,
+        ruleId: `tarball-path:${ruleId}`,
+        tarball: reportedTarballName,
+      });
+    }
     for (const finding of await scanTarball(tarballPath)) {
       findings.push({
         ...finding,
-        tarball: path.basename(tarballPath),
+        tarball: reportedTarballName,
       });
     }
   }
@@ -435,7 +497,10 @@ async function verifyReleaseArtifacts(repoRoot, packOutput) {
   if (findings.length > 0) {
     const displayed = findings.slice(0, 50);
     const lines = displayed.map(
-      (finding) => `- ${finding.ruleId} in ${finding.tarball}:${finding.path}`,
+      (finding) =>
+        `- ${finding.ruleId} in ${finding.tarball}:${
+          finding.redactPath ? '<redacted-archive-path>' : finding.path
+        }`,
     );
     if (findings.length > displayed.length) {
       lines.push(`- ${findings.length - displayed.length} additional finding(s) omitted`);
@@ -464,9 +529,6 @@ async function main() {
   const options = parseCliArgs(process.argv.slice(2));
   const repoRoot = process.cwd();
   const packOutputPath = path.resolve(repoRoot, options.packOutput);
-  if (!isPathInside(repoRoot, packOutputPath)) {
-    throw new Error('Release pack metadata must stay inside the repository.');
-  }
   const packOutput = JSON.parse(await readFile(packOutputPath, 'utf8'));
   await verifyReleaseArtifacts(repoRoot, packOutput);
 }

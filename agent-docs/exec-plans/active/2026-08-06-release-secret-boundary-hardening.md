@@ -63,6 +63,10 @@ Updated: 2026-08-06
 3. Risk: a workflow-only check can be bypassed by another publisher.
    Mitigation: enforce the guard inside the pack and publish owners, then add an
    explicit GitHub Release pre-upload check for the action-owned release path.
+4. Risk: release callers that use an external output directory regress.
+   Mitigation: retain repository-relative manifest entries for `.tgz` files in
+   one exact inventory, accept the established external destination, and prove
+   it through the prepared real-release CLI test.
 
 ## Tasks
 
@@ -85,6 +89,10 @@ Updated: 2026-08-06
   environment has not yet received the staging values.
 - Use a dependency-free Node guard over final tarballs rather than adding a
   third-party scanner dependency to the release trust path.
+- Keep generic assignment detection syntax-scoped and value-authoritative.
+  Allow only exact public metadata/placeholders and the three known bundled
+  `incur` test-fixture paths; provider and complete credential rules still scan
+  those files.
 
 ## Verification
 
@@ -105,9 +113,23 @@ Updated: 2026-08-06
 - Secret scanning, push protection, non-provider patterns, validity checks, and
   AI detection all read back enabled.
 - The sole synthetic webhook alert reads back resolved as `used_in_tests`.
-- Focused scanner coverage passes with eight accepted/rejected fixture cases,
-  including secret-safe error reporting and archive-link rejection.
+- Focused scanner coverage passes with 14 accepted/rejected fixture cases,
+  including Basic auth, unquoted assignments, external outputs, secret-safe
+  path/tarball reporting, archive-link rejection, and the narrow bundled-fixture
+  exception with provider-token rejection preserved.
 - The clean workspace build and diff-scoped tooling lane pass; the latter ran
   31 repo-tool files and 469 tests.
 - All five real 1.3.0 npm tarballs pass both the pack-owner scan and a separate
   manifest-driven scan of the completed artifact inventory.
+- The existing prepared-runtime CLI release test passes with its generated
+  manifest and all five tarballs outside the checkout; the release workflow
+  owner test passes with guard ordering and one-day retention assertions.
+- The remediation diff-scoped lane passes: 31 repo-tool files with 469 tests,
+  CLI typecheck, and 118 CLI files with 1,112 passing tests and one skip.
+- Preliminary ReviewGPT accepted three findings: unquoted assignment coverage,
+  credential-bearing archive-path redaction, and explicit publication-owner
+  ordering coverage. Final ReviewGPT round 1 accepted three findings: preserve
+  external output support, replace broad shape/placeholder exemptions with
+  syntax-scoped authoritative checks, and redact tarball/path diagnostics.
+  Each accepted finding is implemented and awaits final round 2 on the pushed
+  remediation head.
