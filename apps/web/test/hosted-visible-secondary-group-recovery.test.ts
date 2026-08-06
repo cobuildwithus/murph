@@ -97,10 +97,112 @@ describe("Linq group-chat visible access recovery", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_private_member",
-      idempotencyKey: "visible-secondary-private:evt_group_setup_private",
+      idempotencyKey: expect.stringMatching(
+        /^visible-secondary-private:[0-9a-f]{32}$/u,
+      ),
       message: `${TRIAL_CONVERSION_MESSAGE}\n\nOnce that's sorted, send me another message in the group and I'll try again.`,
       replyToMessageId: null,
     }));
+  });
+
+  it("stabilizes private recovery by group day, member, and recovery kind", async () => {
+    const idempotencyKeys: string[] = [];
+    const noticeSeeds: string[] = [];
+    const sendHostedLinqChatMessage:
+      HostedVisibleSecondaryLinqDependencies["sendHostedLinqChatMessage"] =
+      async (input) => {
+        if (!input.idempotencyKey) {
+          throw new Error("Expected private recovery to carry an idempotency key.");
+        }
+        idempotencyKeys.push(input.idempotencyKey);
+        return {
+          chatId: "chat_private_member",
+          messageId: `msg_private_${idempotencyKeys.length}`,
+        };
+      };
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      joinUrl: "https://withmurph.ai/groups/start",
+      ok: true as const,
+      reason: "sent-group-setup",
+    }));
+    const run = async (input: {
+      createdAt: string;
+      eventId: string;
+      recoveryKind?: "access-notice" | "signup";
+    }) => {
+      const event = buildGroupLinqEvent(
+        input.eventId,
+        GROUP_SENDER_PHONE,
+        input.createdAt,
+      );
+      const dependencies = buildLinqDependencies({
+        event,
+        getHostedLinqChatSummary: vi.fn(async () => ({
+          handles: MATCHING_PRIVATE_HANDLES,
+          isGroup: false,
+        })),
+        readHostedMemberRoutingState: vi.fn(async () => ({
+          linqChatId: "chat_private_member",
+          linqRecipientPhone: "+15550000000",
+        }) as never),
+        resolveHostedRecognizedInboundAccess: vi.fn(async (accessInput) => {
+          noticeSeeds.push(accessInput.noticeSeed);
+          return input.recoveryKind === "signup"
+            ? {
+                inviteCode: "invite-123",
+                inviteId: "invite_123",
+                joinUrl: "https://withmurph.ai/join/invite-123",
+                kind: "signup" as const,
+                message: SIGNUP_MESSAGE,
+                responseReason: "sent-signup-link" as const,
+              }
+            : {
+                kind: "access_notice" as const,
+                message: TRIAL_CONVERSION_MESSAGE,
+                noticeCode: "trial_conversion_pending" as const,
+                responseReason: "sent-trial-conversion-notice",
+              };
+        }),
+        sendHostedLinqChatMessage,
+      });
+
+      await withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+        rawBody: JSON.stringify(event),
+        signature: "signature",
+        timestamp: "timestamp",
+      });
+    };
+
+    await run({
+      createdAt: "2026-07-27T12:00:00.000Z",
+      eventId: "evt_group_setup_same_day_a",
+    });
+    await run({
+      createdAt: "2026-07-27T20:00:00.000Z",
+      eventId: "evt_group_setup_same_day_b",
+    });
+    await run({
+      createdAt: "2026-07-28T12:00:00.000Z",
+      eventId: "evt_group_setup_next_day",
+    });
+    await run({
+      createdAt: "2026-07-27T22:00:00.000Z",
+      eventId: "evt_group_setup_changed_kind",
+      recoveryKind: "signup",
+    });
+
+    expect(idempotencyKeys).toHaveLength(4);
+    expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+    expect(idempotencyKeys[2]).not.toBe(idempotencyKeys[0]);
+    expect(idempotencyKeys[3]).not.toBe(idempotencyKeys[0]);
+    expect(noticeSeeds[1]).toBe(noticeSeeds[0]);
+    expect(noticeSeeds[2]).not.toBe(noticeSeeds[0]);
+    expect(noticeSeeds[3]).toBe(noticeSeeds[0]);
+    for (const idempotencyKey of idempotencyKeys) {
+      expect(idempotencyKey).toMatch(
+        /^visible-secondary-private:[0-9a-f]{32}$/u,
+      );
+    }
   });
 
   it("adds no disclosure when setup guidance has no safe private route", async () => {
@@ -1094,10 +1196,11 @@ function buildLinqDependencies(input: {
 function buildGroupLinqEvent(
   eventId: string,
   senderHandle = GROUP_SENDER_PHONE,
+  createdAt = "2026-07-27T12:00:00.000Z",
 ): ReturnType<typeof requireHostedLinqMessageReceivedEvent> {
   return requireHostedLinqMessageReceivedEvent({
     api_version: "v3",
-    created_at: "2026-07-27T12:00:00.000Z",
+    created_at: createdAt,
     data: {
       chat: {
         id: "chat_group_visible",
@@ -1125,7 +1228,7 @@ function buildGroupLinqEvent(
         id: "handle_sender",
         service: "imessage",
       },
-      sent_at: "2026-07-27T12:00:00.000Z",
+      sent_at: createdAt,
       service: "imessage",
     },
     event_id: eventId,

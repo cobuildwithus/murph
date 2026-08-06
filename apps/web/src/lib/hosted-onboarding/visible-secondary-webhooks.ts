@@ -7,6 +7,7 @@ import {
 import type { HostedMember, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { sha256Hex } from "../primitives";
 import { isHostedOnboardingError } from "./errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
@@ -16,6 +17,7 @@ import {
   sendHostedLinqChatMessage,
 } from "./linq";
 import { getHostedLinqChatSummary } from "./linq-client";
+import { buildHostedLinqGroupSetupEffectId } from "./linq-group-setup";
 import {
   createHostedLinqParticipantContactLookupKeyReadCandidates,
   normalizeHostedLinqParticipantContactValue,
@@ -137,6 +139,7 @@ type HostedVisibleSecondaryLinqSender = Pick<
 type HostedVisibleSecondaryLinqPrivateRecovery = {
   chatId: string;
   message: string;
+  recoveryKind: string;
 };
 
 type HostedVisibleSecondaryLinqPrivateRoute = {
@@ -184,16 +187,23 @@ export function withHostedVisibleSecondaryLinqOutcomes(
         })
       : null;
     const privateRecoveryReason = groupSetupAlreadySent ? "group-chat" : reason;
+    const privateRecoverySeed = groupSetupAlreadySent && recognizedSender
+      ? buildHostedLinqPrivateGroupSetupRecoverySeed({
+          chatId: context.summary.chatId,
+          memberId: recognizedSender.id,
+          occurredAt: context.occurredAt,
+        })
+      : event.event_id;
     const privateRecovery =
       recognizedSender
       && HOSTED_LINQ_PRIVATE_GROUP_RECOVERY_REASONS.has(privateRecoveryReason)
         ? await resolveHostedLinqPrivateGroupRecovery({
             currentChatId: context.summary.chatId,
-            eventId: event.event_id,
             incomingRecipientPhone: context.recipientPhoneNumber,
             participantContact: context.participantContact,
             prisma,
             reason: privateRecoveryReason,
+            noticeSeed: privateRecoverySeed,
             sender: recognizedSender,
             dependencies,
             ...(input.signal ? { signal: input.signal } : {}),
@@ -203,7 +213,12 @@ export function withHostedVisibleSecondaryLinqOutcomes(
       try {
         await dependencies.sendHostedLinqChatMessage({
           chatId: privateRecovery.chatId,
-          idempotencyKey: `visible-secondary-private:${event.event_id}`,
+          idempotencyKey: groupSetupAlreadySent
+            ? buildHostedLinqPrivateGroupSetupRecoveryId({
+                recoveryKind: privateRecovery.recoveryKind,
+                recoverySeed: privateRecoverySeed,
+              })
+            : `visible-secondary-private:${event.event_id}`,
           message: privateRecovery.message,
           replyToMessageId: null,
           ...(input.signal ? { signal: input.signal } : {}),
@@ -381,8 +396,8 @@ async function readHostedLinqSender(input: {
 async function resolveHostedLinqPrivateGroupRecovery(input: {
   currentChatId: string;
   dependencies: HostedVisibleSecondaryLinqDependencies;
-  eventId: string;
   incomingRecipientPhone: string | null;
+  noticeSeed: string;
   participantContact: HostedLinqParticipantContact | null;
   prisma: PrismaClient;
   reason: string;
@@ -424,7 +439,7 @@ async function resolveHostedLinqPrivateGroupRecovery(input: {
     allowSignupFallback: true,
     inviteChannel: "linq",
     member: input.sender,
-    noticeSeed: input.eventId,
+    noticeSeed: input.noticeSeed,
     prisma: input.prisma,
   });
   if (access.kind === "allowed" || access.kind === "silent") {
@@ -460,7 +475,33 @@ async function resolveHostedLinqPrivateGroupRecovery(input: {
   return {
     chatId: privateRoute.chatId,
     message: buildHostedGroupChatAccessRecoveryMessage(access.message),
+    recoveryKind: access.kind === "access_notice"
+      ? `access-notice:${access.noticeCode}`
+      : "signup",
   };
+}
+
+function buildHostedLinqPrivateGroupSetupRecoverySeed(input: {
+  chatId: string;
+  memberId: string;
+  occurredAt: string;
+}): string {
+  const groupSetupEffectId = buildHostedLinqGroupSetupEffectId({
+    chatId: input.chatId,
+    occurredAt: input.occurredAt,
+  });
+
+  return `linq-group-private-recovery-seed:${sha256Hex(JSON.stringify({
+    groupSetupEffectId,
+    memberId: input.memberId,
+  })).slice(0, 32)}`;
+}
+
+function buildHostedLinqPrivateGroupSetupRecoveryId(input: {
+  recoveryKind: string;
+  recoverySeed: string;
+}): string {
+  return `visible-secondary-private:${sha256Hex(JSON.stringify(input)).slice(0, 32)}`;
 }
 
 function resolveHostedLinqPrivateGroupRecoveryRoute(input: {

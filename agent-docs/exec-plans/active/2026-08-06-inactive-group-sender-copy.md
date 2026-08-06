@@ -50,6 +50,8 @@ Updated: 2026-08-06
 - Keep current-sender authority; do not borrow another roster participant's
   access before that participant sends a message.
 - Keep the existing one-offer-per-group-per-inbound-UTC-day identity.
+- Key private recovery to that group/day identity, member, and resolved
+  recovery kind so distinct webhook attempts cannot repeat it.
 - Add no schema, queue, scheduler, dependency, or new delivery owner.
 - Do not include real user feedback, phone numbers, member IDs, or transcript
   wording in repository artifacts.
@@ -71,6 +73,11 @@ Updated: 2026-08-06
 - After specialist privacy remediation, the focused group setup, route,
   transport, and visible-secondary recovery suite passed: 230 tests in four
   files.
+- After final-round ordering and idempotency remediation, five focused planner,
+  dispatch, transport, rendering, and private-recovery suites passed: 395
+  tests. Coverage proves stable same-day private identity, next-day and changed-
+  recovery separation, and retry-before-private behavior while room setup is in
+  flight.
 - Hosted Web TypeScript check passed after generating the standard ignored
   Prisma and Health Commons build inputs in the fresh task worktree.
 - Scoped ESLint passed across all changed source and test files after the
