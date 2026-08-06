@@ -2,88 +2,86 @@
 
 ## Status
 
-Active implementation contract for conversational usage rewards. Web owns the
-durable referral, qualification, and credit facts. Linq and Telegram normalize
-their ingress into the same provider-neutral state machine. A future provider
-must call that same boundary; it does not justify speculative channel code.
+Active implementation contract for earned usage rewards. Web owns attribution,
+qualification, receipts, caps, and credit accounting. Linq and Telegram
+normalize conversational mission evidence into the same provider-neutral state
+machine. Shareable signup links reuse that accounting system but do not invent a
+second mission lifecycle.
+
+There are two independent rollout gates:
+
+- `HOSTED_USAGE_REFERRALS_ENABLED=1` enables conversational referral missions;
+- `HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED=1` enables rewards for attributed
+  signup-link activations.
+
+The stable referral link itself remains available to an active signed-in member
+when either reward gate is disabled.
 
 ## Product behavior
 
-When trusted usage context says a personal or group Murph is running low, Murph
-may offer the exact current sender earned-continuity missions. When the current
-sender explicitly asks how to get more usage or what options exist, Murph treats
-that as an all-options request: it checks referral availability even when current
-usage is healthy and presents any returned earned paths beside the separately
-authorized plan, top-up, or group-funding path. The sender does not need to know
-the feature name or explicitly ask for a mission. Murph makes at most one
-pre-action referral-availability read per user turn and reuses that result
-throughout the answer. The only extra read is the authoritative recovery
-required after an arm or cancellation commits but its refreshed snapshot is
-unavailable. Describing missions is not consent. Murph arms each mission only
-after that person explicitly chooses its exact server-returned policy. Different
-policies are independent and may be active at the same time.
+Murph may offer conversational missions when trusted usage context says a
+personal or group Murph is running low. When the current sender explicitly asks
+how to get more usage or what options exist, Murph checks current mission
+availability even when usage is healthy and presents returned earned paths
+beside separately authorized plan, top-up, or group-funding paths.
 
-| Policy | Qualification | Reward |
+Describing a mission is not consent. Murph arms a mission only after the person
+explicitly chooses its exact server-returned policy. Different policies may be
+active at the same time.
+
+| Path | Qualification | Public reward label |
 | --- | --- | --- |
-| `new_person_activation_v1` | The referrer starts a fresh Murph group with a genuinely new person. That person activates their own Murph after the mission was armed and then speaks in the bound target group. | $2 of cost-weighted usage credit |
-| `active_group_v1` | The referrer starts a fresh Murph group that reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | $3.50 of cost-weighted usage credit |
+| Stable signup referral link | A genuinely new member completes ordinary Murph activation through an invite attributed to the sharing member. | About 100 more messages |
+| `new_person_activation_v1` mission | The referrer starts a fresh Murph iMessage group with a genuinely new person. That person activates after the mission was armed and speaks in the bound target group. | About 100 more messages |
+| `active_group_v1` mission | A fresh group reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | About 140 more messages |
 
-The source conversation determines the reward destination and where completion
-is celebrated:
+The message labels describe the approximate value of each fixed offer. The
+ledger continues to store exact cost-weighted usage value in USD micros. Actual
+message capacity varies by model, tools, media, task complexity, and response
+length, so these labels must never be reused to estimate a member's current
+messages remaining.
 
-- a mission armed in a personal conversation rewards that personal member;
-- a mission armed in a group rewards that source group;
-- each group participant may independently arm and earn a mission for the same
-  room;
-- the fixed ledger reward remains usage value, and the tool presents that
-  exact dollar-denominated cost-weighted usage-credit label both when read and
-  when completion is celebrated;
-- the tool never translates the reward into a message count or owned bundle;
-- trial rewards add usage capacity but never extend the trial end date.
+Trial rewards add usage capacity but never extend the trial end date.
 
-Completion is celebrated in that same source conversation. A personal mission
-freezes the runtime-injected source channel, blinded exact-thread locator, and
-directness fact; queueing later resolves that channel from current member
-routing and requires the same direct thread. A group
-mission uses its synthetic source-container route and live external-thread
-authority. Celebration copy never carries a detached profile name, so a
-durable mailbox item cannot outlive name-sharing permission or account
-deletion. A queued personal Linq celebration uses the existing explicit-target
-delivery shape for that resolved source. Provider entry rechecks the fixed
-target and records terminal delivery failure if authority moved or was revoked;
-it never replaces the source with a newer home conversation.
-The isolated celebration receives only a server-resolved tone, Humor, and
-Unhinged band. It receives no raw transcript or room history and therefore
-cannot claim a callback; it keeps any edge aimed at Murph rather than an absent
-person.
+## Stable signup referral links
 
-One fresh group binds every eligible unbound policy the creator has armed, and
-each mission then qualifies independently against the same admitted messages.
-One explicit arm request commits the sender's exact selected policy set or none
-of it. A policy already active for the same reward destination is idempotent.
-One policy can be armed for only one destination at a time; a read in another
-destination suppresses that policy without exposing where it is armed. A
-previously bound instance does not prevent arming the same policy for a future
-group. Earned rewards are final.
+Every active member has one deterministic, signed referral URL:
 
-The new-person mission deliberately reuses normal Murph onboarding instead of
-creating a referral-specific claim or activation system. After arming, Murph
-tells the referrer only to bring one new person and Murph together in a fresh
-group. The ordinary first-reply group setup flow owns the reciprocal onboarding:
-Murph shares its contact card once and naturally invites the newcomer to save
-and text it. Setup happens in the newcomer's 1:1 thread after they initiate it.
-Because that contact-card onboarding path is currently iMessage-owned, the
-runtime offers and arms the new-person mission only from an exact current Linq
-iMessage conversation. SMS, RCS, and Telegram remain eligible only for the
-provider-neutral active-group mission.
-The person completes the ordinary activation flow with the same provider
-identity observed in the target, returns to the group, and says hi. The
-combination of post-arm activation and target presence provides attribution;
-the browser never chooses the referrer, destination, target, policy, or reward.
+```text
+/r/<versioned-signed-token>
+```
 
-## State and attribution
+The token is bound to the referrer by the existing app-session HMAC authority
+under a separate domain. It contains no phone number, email address, health data,
+or recipient identity. HMAC-key rotation revokes outstanding stable URLs.
 
-`HostedUsageReferral` is the one durable state owner:
+Link issuance is read-only and creates no placeholder member, invite,
+attribution row, or reward state. The same issuance function serves:
+
+- the existing runtime `create_signup_referral_link` action when a member asks
+  Murph for their link;
+- the authenticated Settings `Copy link` action.
+
+A public `GET /r/<token>` only validates the token and renders a small landing
+page. Link previews, crawlers, and scanners therefore cannot allocate onboarding
+state. An explicit same-origin `POST /r/<token>/claim` creates a fresh ordinary
+`/join/<inviteCode>` invite and placeholder member. Every claimant receives
+isolated onboarding state, while `HostedInvite.referrerMemberId` remains attached
+to that invite throughout ordinary onboarding.
+
+Existing recipient-bound `/join/<inviteCode>` URLs remain valid. The browser
+never selects the referrer, reward, policy, destination, or accounting amount.
+
+## Attribution and qualification
+
+`HostedInvite.referrerMemberId` is the durable signup-link attribution source.
+`member.activated` is the durable qualification evidence. A signup-link reward
+requires exactly one distinct referrer on invites created no later than that
+activation. Attribution is re-read under the referrer lock before settlement.
+Ambiguous historical attribution fails closed.
+
+Conversational missions continue to use `HostedUsageReferral` as their durable
+multi-event lifecycle owner:
 
 ```text
 armed -> target_bound -> rewarded
@@ -91,18 +89,16 @@ armed -> target_bound -> rewarded
     \---------------> canceled | expired
 ```
 
-`superseded` remains a legacy terminal status for rows created by the original
-one-at-a-time contract. New arming never emits it.
+A signup-link activation is already one complete durable qualification event. It
+does not fabricate a group target, participant subject, or `target_bound` phase.
+Instead, one transaction creates the standard rewarded `HostedUsageReferral`
+receipt and its immutable referral grant. A distinct policy version preserves
+accurate Settings copy without relying on an ID prefix or a second table.
 
-Arming freezes the referrer, beneficiary, policy code and version, reward,
-seven-day window, and—only for a personal destination—the blinded source
-conversation. The current Linq transport service is trusted runtime context,
-not persisted referral state. The referrer's next newly created thread
-container binds every compatible policy that referrer has armed when its
-durable owner is that exact referrer and creation happened after arming. The
-new-person policy additionally requires an exact Linq iMessage target
-container; SMS, RCS, and Telegram containers leave it armed for a later
-eligible group. Existing rooms cannot bind.
+`superseded` remains a legacy terminal status for rows created by the original
+one-at-a-time mission contract. New arming does not emit it.
+
+## Conversational mission evidence
 
 The hosted runtime injects current Linq or Telegram sender handles from accepted
 input context. The model cannot provide identity, beneficiary, route, target,
@@ -110,79 +106,57 @@ amount, counters, or provider authority. Personal direct calls resolve to the
 authenticated runtime member. Group calls fail closed unless exactly one
 provider-scoped current sender resolves to an active personal member.
 
-No hidden watermark is created by low-usage copy. `read_usage_referral` reads
-availability; `arm_usage_referral` and `cancel_usage_referral` require fresh
-user-sourced input. Arming accepts one exact selected set of returned policies
-and commits every missing row in one transaction. Cancellation names one exact
-policy and applies only while that mission is unbound; every other mission is
-left unchanged.
-
-## Portable ingress evidence
+One newly created group binds every compatible policy that its creator has
+armed. Existing groups cannot bind. The new-person group mission remains exact
+Linq iMessage-only because its reciprocal contact-card onboarding path is
+currently iMessage-owned. SMS, RCS, and Telegram remain eligible for the
+provider-neutral active-group mission.
 
 Provider adapters pass only:
 
-- target container member id;
+- target container member ID;
 - a provider-domain-separated message lookup key;
 - occurrence time;
-- resolved sender member id when one is already authorized;
+- resolved sender member ID when already authorized;
 - a provider-domain-separated sender subject key.
 
-Raw phone numbers, email addresses, Telegram ids, message ids, and chat ids do
-not enter the referral row. A personal source stores only runtime-produced
-`hid_` conversation locators. Event and non-referrer speaker keys are bounded,
-deduplicated arrays and are cleared at terminal state.
+Raw phone numbers, email addresses, Telegram IDs, message IDs, and chat IDs do
+not enter referral rows. A personal mission source stores only runtime-produced
+`hid_` conversation locators. Event and speaker keys are bounded, deduplicated,
+and cleared at terminal state.
 
 One admitted inbound human provider message counts once. Murph output,
-reactions, empty unsupported events, and duplicate provider events do not
-count. The portable active-group rule deliberately measures observed
-participation rather than a provider roster: Telegram does not expose the same
-authoritative full-room roster as Linq.
+reactions, empty unsupported events, and duplicate provider events do not count.
+The active-group rule measures observed participation rather than a provider
+roster so it remains portable across Linq and Telegram.
 
-Provider occurrence time, not delivery order, decides admission inside a
-bounded delivery policy. Evidence at or after expiry is ignored. A bound row
-and its cap commitment remain eligible for delayed pre-expiry evidence through
-25 hours after that occurrence window closes. The first referrer-serialized
-expiry boundary after that grace terminally clears an unqualified row; evidence
-delivered later is outside policy. This single derived cutoff covers Linq's
-documented roughly 25-minute automatic webhook retry window and Telegram's
-documented maximum 24-hour pending-update retention with one hour of processing
-margin. Neither provider exposes a durable producer watermark, so the feature
-does not claim unlimited late admission or create another finality owner.
+Provider occurrence time, not delivery order, decides admission. Evidence at or
+after expiry is ignored. A bound row and its cap commitment remain eligible for
+delayed pre-expiry evidence through 25 hours after the occurrence window closes.
+The first referrer-serialized expiry boundary after that grace terminally clears
+an unqualified row.
 
 An unlinked Telegram participant in an already-bound group may contribute only
 bounded referral evidence. Their message remains excluded from the assistant
 mailbox, grants no assistant access, and produces no setup reply in that group.
-An unlinked direct message keeps the ordinary Telegram setup path. The
-new-person policy still requires normal member activation plus a later linked
-target-group message.
 
-## Credit accounting
+Provider timing references:
+
+- [Linq webhook delivery guarantees](https://docs.linqapp.com/guides/webhooks/)
+- [Telegram incoming-update retention](https://core.telegram.org/bots/api#making-requests-when-getting-updates)
+
+## Credit accounting and serialization
 
 `HostedUsageCreditEntry` remains the immutable accounting owner. Each
-`purchase_grant` or `referral_grant` entry freezes its source and provenance;
-the one-to-one `HostedUsageCreditGrant` row stores only that entry's mutable
+`purchase_grant` or `referral_grant` freezes its source and provenance. The
+one-to-one `HostedUsageCreditGrant` row stores only that entry's mutable
 remaining-capacity projection.
 
 - Purchase fulfillment creates a `purchase_grant` entry plus its projection.
-- Referral completion creates a `referral_grant` entry plus its projection.
+- Every referral path creates a `referral_grant` entry plus its projection.
 - Usage settlement consumes projected grant capacity FIFO by immutable entry.
-- The historical purchase remaining field is updated alongside the generic
-  projection during the expand/contract migration.
 - Refund and dispute reconciliation can touch only purchase-backed entries.
 - Referral-backed entries have no financial reversal or clawback path.
-
-The beneficiary member row remains the single serialization boundary for
-positive grants, debits, adjustments, the bounded balance/version projection,
-current-period unblock reconciliation, and referral-cap commitments. Arming
-locks the frozen beneficiary and admits the mission only when recent rewards,
-nonexpired armed commitments, and bound commitments still inside their
-late-evidence grace fit both caps. Referral observation never acquires that
-lock. It records evidence and `qualifiedAt` atomically in the ingress
-transaction.
-Once that pre-expiry qualification fence commits, later wall-clock expiry or
-newly armed commitments cannot disqualify it. Post-commit reconciliation locks
-the referrer and beneficiary, revalidates the frozen evidence, and issues
-credit.
 
 Grant identity is:
 
@@ -190,128 +164,123 @@ Grant identity is:
 hosted-usage-credit:referral:<referral-id>:grant:v1
 ```
 
-Reward completion is replay-safe. The source celebration is a derived mailbox
-notification appended after the reward commits. Its mailbox append and
-`celebrationQueuedAt` fence commit in one transaction. The webhook path attempts
-that append immediately; a Vercel-authenticated minute cron retries at most 50
-oldest qualified or uncelebrated referrals and re-signals at most 50 oldest
-unconsumed referral-celebration mailbox items per pass. A missing destination
-rotates to the back by updating the existing referral timestamp. A failed
-best-effort signal leaves the exact mailbox item eligible for the next bounded
-pass rather than creating another queue or notification.
-Missing route authority or notification failure cannot delay, reverse, or
-duplicate the reward. Group notifications carry the same external-thread
-authority as their route. Personal notifications fail closed when the frozen
-source channel is no longer routed to the same blinded conversation. Linq
-personal notifications encode the resolved source as an explicit target so
-generic current-home fallback cannot move delivery after queueing. The source
-locator is cleared once the celebration is durably queued; later authority loss
-records ordinary terminal outbox failure without moving or revoking the reward.
+Both signup-link rewards and conversational missions serialize through the same
+referrer advisory-lock namespace, beneficiary member lock, and introduced-member
+advisory-lock namespace. This prevents cap races, double attribution, and a link
+reward racing a group-mission reward for the same person.
+
+Rolling capacity includes recent completed rewards plus outstanding armed and
+bound mission commitments:
+
+- at most $10.50 per referrer in a rolling 30-day window;
+- at most $20 per beneficiary in a rolling 30-day window.
+
+The referrer cannot reward their own reconciled identity. Suspended referrers or
+introduced members are disqualified. One introduced member can own only one
+referral receipt across all acquisition paths.
+
+Signup-link receipt creation and grant insertion commit atomically. A failed
+grant rolls back the receipt. Replays observe the existing receipt and cannot
+append another credit entry. The focused PostgreSQL concurrency proof runs two
+independent clients through concurrent settlement and replay and requires one
+receipt, one immutable entry, one remaining-capacity projection, and one member
+ledger increment.
+
+## Recovery and celebrations
+
+The existing Vercel-authenticated referral recovery cron remains the only
+scheduler. Each bounded pass:
+
+1. scans up to 50 recent attributed `member.activated` events when signup-link
+   rewards are enabled;
+2. atomically settles eligible signup-link receipts and grants;
+3. reconciles up to 50 ordinary qualified missions or rewarded referrals with
+   an eligible frozen source conversation;
+4. re-signals up to 50 oldest unconsumed referral-celebration mailbox items.
+
+No signup-specific queue, scheduler, outbox, or grant worker exists.
+
+Conversational mission completion is celebrated in its frozen source
+conversation. Group notifications carry live external-thread authority. Personal
+notifications require the frozen direct thread and never move to a newer home
+conversation.
+
+For a signup-link reward, source routing is best-effort and must never delay or
+reverse credit. When settlement can freeze a direct Linq or Telegram source, the
+ordinary celebration machinery may use it. An email-only or currently unrouted
+member still receives usage, but no synthetic conversation or false
+`celebrationQueuedAt` marker is created.
+
+A failed notification cannot duplicate or claw back the reward. Once a mailbox
+item is durable, failed signaling leaves that same item eligible for the next
+bounded pass.
 
 ## Settings projection
 
-Settings keeps the existing combined AI usage meter as the aggregate balance
-owner. Its detail surface is a read-only projection:
+Settings keeps the combined AI usage meter as the aggregate balance owner. The
+Referrals detail surface is read-only:
 
-- purchase rows come only from immutable `purchase_grant` entries and do not
-  expose aggregate or per-grant remaining capacity;
-- mission rows include only the referrer's canonical outstanding commitments and
-  rewarded history;
-- a bound mission remains visible as `Checking final activity` between its exact
-  UTC deadline and the end of the bounded late-evidence grace; this is only a
-  projection of the durable referral state, not a second lifecycle;
-- the surface never creates another balance, mission lifecycle, qualification
-  counter, participant list, or group-name store;
-- the surface leads with compact mission rows showing title, status, deadline,
-  reward, and reward owner; qualification requirements and selection date stay
-  available in one native details disclosure rather than remaining expanded;
-- purchase-grant history follows the missions as a flat ledger, with no
-  explanatory hero or wide table;
-- the action opens the member's existing Murph channel with a prefilled question
-  about available missions; opening or sending that question does not arm a
-  mission by itself;
-- accounts without a supported Murph conversation keep existing credits and
-  mission history visible but receive no empty invitation or action;
-- disabling new referrals hides that action but does not hide current
-  commitments or already-earned history.
+- `Copy link` is available to every active signed-in member, independent of the
+  conversational mission rollout gate or messaging channel;
+- `Ask Murph` appears only when conversational missions are enabled and a
+  supported Murph conversation exists;
+- current mission rows show title, status, deadline, approximate message reward,
+  and reward owner;
+- qualification requirements and selection date stay in one native details
+  disclosure;
+- completed mission and signup-link rewards appear in History;
+- signup-link rows use their persisted policy version to display `Invite someone
+  to Murph` rather than masquerading as the fresh-group mission;
+- purchase-grant history follows referral history as a flat ledger;
+- the surface creates no second balance, lifecycle, counter, participant list,
+  or group-name store.
 
-Provider timing references:
-
-- [Linq webhook delivery guarantees](https://docs.linqapp.com/guides/webhooks/)
-- [Telegram incoming-update retention](https://core.telegram.org/bots/api#making-requests-when-getting-updates)
-
-## Abuse bounds
-
-- At most one unbound armed instance of a policy per referrer across reward
-  destinations.
-- At most three nonterminal missions per referrer across armed and bound state.
-- At most $10.50 in rolling-30-day rewards plus outstanding commitments per
-  referrer.
-- At most $20 in rolling-30-day rewards plus outstanding commitments per
-  beneficiary.
-- A target container may advance multiple different policies, but at most one
-  instance of each policy; each referral row binds only once.
-- One introduced member can produce one rewarded acquisition referral.
-- The referrer cannot qualify their own activation mission.
-- Every policy and amount comes from the versioned server catalog.
-
-These are server admission rules, not assistant-visible qualification counters.
+Opening Settings or copying a link never arms a mission or creates reward state.
 
 ## Privacy and deletion
 
-Unrewarded referral state is deleted when the referrer, beneficiary,
-introduced member, or target container is deleted. Credit entries and their
+Unrewarded referral state is deleted when the referrer, beneficiary, introduced
+member, or target container is deleted. Credit entries and their
 remaining-capacity projections are deleted when their beneficiary is deleted.
 
-If a referrer or introduced person deletes their account after a surviving
-group already earned the reward, deletion must not claw back that room's
-credit. The rewarded accounting receipt remains only while its beneficiary
-remains and is anonymized by clearing referrer, introduced-member,
-target-container, subject-key, source-conversation, and observation evidence.
-This minimal receipt preserves grant provenance without retaining cross-account
-identity.
+If an identity-owning participant deletes their account after a surviving group
+already earned the reward, deletion must not claw back that group's credit. The
+rewarded accounting receipt remains only while its beneficiary remains and is
+anonymized by clearing referrer, introduced-member, target-container,
+subject-key, source-conversation, and observation evidence. This minimal receipt
+preserves grant provenance without retaining cross-account identity.
 
-## Deployment
+Stable referral URLs contain only a random internal member identifier inside an
+authenticated token. They contain no recipient or health information. A claimant
+cannot see the referrer's private conversations, files, connected data, or
+health information.
 
-Referral production is fail-closed unless Web reads the exact value
-`HOSTED_USAGE_REFERRALS_ENABLED=1`. The rollout order is:
+## Deployment and rollback
 
-1. Keep that gate unset or disabled while the expand-only Prisma migration adds
-   the referral schema and entry-keyed grant projection, backfills existing
-   purchase grants, and deploys the compatible Web reader/writer.
-2. Apply normal migration
-   `20260728030000_hosted_usage_referral_credit_entry_constraints` while the
-   gate remains disabled. It replaces the old purchase-only ledger checks with
-   purchase-or-referral checks under a bounded metadata lock, then validates
-   every existing row outside that lock.
-3. Prove the compatible Web deployment is current, wait for the previous
-   Vercel function window to drain, and run the DML-only contract migration
-   `20260728031000_resynchronize_hosted_usage_credit_purchase_grants`. It
-   resynchronizes any purchase projection written during the expand window
-   without changing table constraints. It takes affected beneficiary locks in
-   the same deterministic order as live grant/debit/adjustment writers before
-   reading purchase capacity, and rolls back unless purchase/grant projections
-   converge.
-4. Enable `HOSTED_USAGE_REFERRALS_ENABLED=1`, redeploy that same or newer Web
-   head, then deploy Cloudflare/hosted runtime and assistant packages. Older
-   runtimes never emit the new actions.
-5. Before broad exposure, prove purchase projection parity and smoke one
-   personal and one group `read_usage_referral` request, one fresh-group bind,
-   one replayed reward, one recovery-cron retry, the source celebration, and
-   the next usage debit.
+The stable-link surface is Web-only and schema-free. Deploy the `/r/<token>`
+landing page, explicit claim route, authenticated Settings endpoint, and runtime
+handler together before sharing stable URLs. Existing `/join/<inviteCode>` URLs
+remain compatible.
 
-The composable-mission rollout changes the runtime wire contract from singular
-`active` to plural `activeMissions` and requires `policyCode` on cancellation.
-For that rollout, first disable `HOSTED_USAGE_REFERRALS_ENABLED`, deploy Web
-and the Cloudflare/hosted runtime plus assistant packages, verify one plural
-read and one exact-policy cancellation, and only then re-enable the gate. Do
-not expose a mixed-version Web/runtime pair.
+Keep `HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED` unset during deployment. Before
+enabling it:
 
-Before the first durable referral grant, rollback by disabling the gate while
-keeping the compatible Web consumer deployed; runtime code may then roll back
-independently. The first referral grant establishes a Web rollback floor:
-older settlement or deletion code that ignores referral-backed entries must
-not be restored while any referral credit remains. Forward-fix or keep this Web
-head or newer. Disabling the gate prevents new arming, binding, and observation
-but does not claw back earned credit or suppress reconciliation already queued
-by a qualifying observation.
+1. confirm exact-head unit, typecheck, app, viewport, and design-proof checks;
+2. run the focused local-PostgreSQL concurrent settlement and replay proof;
+3. smoke one attributed activation and confirm one receipt, entry, grant, member
+   balance increment, and accurate Settings history;
+4. replay the activation/recovery pass and confirm no second grant;
+5. smoke one cap rejection and one self-referral rejection;
+6. optionally smoke a routed completion celebration without making notification
+   delivery a condition of earning usage.
+
+Disabling the signup-reward gate immediately stops new activation scans. It does
+not revoke stable links, hide prior history, claw back existing credit, or
+suppress a celebration already represented by a durable mailbox item.
+
+Once the first signup-link referral grant exists, Web must not roll back below a
+version that understands referral-backed entries and the signup policy version.
+Forward-fix or keep this Web head or newer. Rolling back only the public link
+route after URLs have been shared would make those stable entry points
+unavailable, although already-created `/join/<inviteCode>` descendants remain
+ordinary invites.
