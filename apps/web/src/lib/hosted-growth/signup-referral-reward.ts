@@ -1,9 +1,6 @@
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
-import type {
-  HostedRuntimeUsageReferralSourceConversation,
-} from "@murphai/hosted-execution/runtime-control";
 
 import {
   lockHostedUsageCreditBeneficiaryTx,
@@ -334,23 +331,26 @@ export async function admitHostedSignupReferralActivation(input: {
 async function resolveHostedSignupReferralSourceConversation(input: {
   prisma: PrismaClient;
   referrerMemberId: string;
-}): Promise<HostedRuntimeUsageReferralSourceConversation | null> {
+}): Promise<Prisma.InputJsonObject | null> {
   const destination = await resolveHostedAssistantNotificationDestination({
     memberId: input.referrerMemberId,
     prisma: input.prisma,
   });
+  const route = destination?.route;
   if (
     !destination
     || destination.conversationShape !== "direct-member"
     || destination.externalThreadRouteAuthority !== null
-    || destination.route.threadIsDirect !== true
-    || !/^hid_[a-f0-9]{32}$/u.test(destination.route.threadId)
+    || route?.threadIsDirect !== true
+    || (route.channel !== "linq" && route.channel !== "telegram")
+    || typeof route.threadId !== "string"
+    || !/^hid_[a-f0-9]{32}$/u.test(route.threadId)
   ) {
     return null;
   }
   return {
-    channel: destination.route.channel,
-    threadId: destination.route.threadId,
+    channel: route.channel,
+    threadId: route.threadId,
     threadIsDirect: true,
   };
 }

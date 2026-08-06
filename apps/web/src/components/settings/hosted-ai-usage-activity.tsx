@@ -15,11 +15,6 @@ export function HostedAiUsageActivity(props: {
 }) {
   const canStartMissions =
     props.activity.missionsEnabled && props.missionContactOption !== null;
-  const canShareReferralLink = canStartMissions;
-  const hasMissionSurface =
-    canShareReferralLink
-    || canStartMissions
-    || props.activity.missions.length > 0;
   const currentMissions = props.activity.missions.filter(
     (mission) => mission.status !== "completed",
   );
@@ -28,73 +23,61 @@ export function HostedAiUsageActivity(props: {
   );
   const hasHistory =
     historicalMissions.length > 0 || props.activity.credits.length > 0;
-  const showReferralEmptyState =
-    canStartMissions &&
-    currentMissions.length === 0;
-
-  if (!hasMissionSurface && !hasHistory) {
-    return null;
-  }
 
   return (
     <div
       className="border-y border-border/80"
       data-hosted-ai-usage-activity
     >
-      {hasMissionSurface ? (
-        <section aria-label="Referrals">
-          <div className="flex min-h-14 items-center justify-between gap-4 py-3">
-            <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
-              Referrals
-            </h3>
-            <div className="flex items-center gap-4">
-              {canShareReferralLink ? (
-                <HostedSignupReferralLinkButton />
-              ) : null}
-              {canStartMissions && props.missionContactOption ? (
-                <MurphContactLink
-                  actionLabel="Ask Murph about referrals"
-                  className={buttonVariants({
-                    className: "h-auto px-0",
-                    size: "sm",
-                    variant: "link",
-                  })}
-                  option={props.missionContactOption}
-                >
-                  Ask Murph
-                </MurphContactLink>
-              ) : null}
-            </div>
+      <section aria-label="Referrals">
+        <div className="flex min-h-14 items-center justify-between gap-4 py-3">
+          <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+            Referrals
+          </h3>
+          <div className="flex items-center gap-4">
+            <HostedSignupReferralLinkButton />
+            {canStartMissions && props.missionContactOption ? (
+              <MurphContactLink
+                actionLabel="Ask Murph about referrals"
+                className={buttonVariants({
+                  className: "h-auto px-0",
+                  size: "sm",
+                  variant: "link",
+                })}
+                option={props.missionContactOption}
+              >
+                Ask Murph
+              </MurphContactLink>
+            ) : null}
           </div>
+        </div>
 
-          {currentMissions.length > 0 ? (
-            <ul
-              aria-label="Current usage referrals"
-              className="divide-y divide-border/70 border-t border-border/70"
-            >
-              {currentMissions.map((mission) => (
-                <MissionRow key={mission.id} mission={mission} />
-              ))}
-            </ul>
-          ) : null}
-          {showReferralEmptyState ? (
-            <div className="border-t border-border/70 py-5">
-              <p className="text-sm leading-6 text-muted-foreground">
-                Earn usage by inviting friends or adding Murph to a groupchat
-              </p>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
+        {currentMissions.length > 0 ? (
+          <ul
+            aria-label="Current usage referrals"
+            className="divide-y divide-border/70 border-t border-border/70"
+          >
+            {currentMissions.map((mission) => (
+              <MissionRow key={mission.id} mission={mission} />
+            ))}
+          </ul>
+        ) : (
+          <div className="border-t border-border/70 py-5">
+            <p className="text-sm leading-6 text-muted-foreground">
+              Invite friends to Murph or ask about referral missions.
+            </p>
+          </div>
+        )}
+      </section>
 
       {hasHistory ? (
         <section
-          aria-label={hasMissionSurface ? "History" : "Purchased credits"}
-          className={hasMissionSurface ? "border-t border-border/70" : undefined}
+          aria-label="History"
+          className="border-t border-border/70"
         >
           <details className="group">
             <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 rounded-sm py-3 text-sm font-medium text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-              {hasMissionSurface ? "History" : "Purchased credits"}
+              History
               <ChevronDown
                 aria-hidden="true"
                 className="size-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180"
