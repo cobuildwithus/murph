@@ -112,7 +112,6 @@ describe('assistant generated export-pack retirement', () => {
     const setup = await createExportPackDelivery('immediate-sent')
     const intent = await createDeliveryIntent({
       media: setup.media,
-      retirement: requireRetirement(setup.retirement),
       status: 'pending',
       vaultRoot: setup.vaultRoot,
     })
@@ -143,7 +142,6 @@ describe('assistant generated export-pack retirement', () => {
     const setup = await createExportPackDelivery('sent')
     await createDeliveryIntent({
       media: setup.media,
-      retirement: requireRetirement(setup.retirement),
       status: 'sent',
       vaultRoot: setup.vaultRoot,
     })
@@ -181,7 +179,6 @@ describe('assistant generated export-pack retirement', () => {
     const setup = await createExportPackDelivery(status)
     await createDeliveryIntent({
       media: setup.media,
-      retirement: requireRetirement(setup.retirement),
       status,
       vaultRoot: setup.vaultRoot,
     })
@@ -205,11 +202,10 @@ describe('assistant generated export-pack retirement', () => {
     }
   })
 
-  it('preserves a sent pack if either the archive receipt or live pack is stale', async () => {
+  it('preserves a sent pack if either the archive or live pack is stale', async () => {
     const changedPack = await createExportPackDelivery('changed-pack')
     await createDeliveryIntent({
       media: changedPack.media,
-      retirement: requireRetirement(changedPack.retirement),
       status: 'sent',
       vaultRoot: changedPack.vaultRoot,
     })
@@ -221,7 +217,6 @@ describe('assistant generated export-pack retirement', () => {
     const changedArchive = await createExportPackDelivery('changed-archive')
     await createDeliveryIntent({
       media: changedArchive.media,
-      retirement: requireRetirement(changedArchive.retirement),
       status: 'sent',
       vaultRoot: changedArchive.vaultRoot,
     })
@@ -250,7 +245,7 @@ async function createExportPackDelivery(seed: string): Promise<{
   packEntries: Array<readonly [string, string]>
   packId: string
   packPath: string
-  retirement: AssistantOutboxIntent['generatedDeliveryRetirement']
+  retirement: Awaited<ReturnType<typeof buildAssistantGeneratedDeliveryRetirement>>
   vaultRoot: string
 }> {
   const context = await createTempVaultContext(`assistant-export-pack-${seed}-`)
@@ -311,14 +306,12 @@ async function createExportPackDelivery(seed: string): Promise<{
 
 async function createDeliveryIntent(input: {
   media: AssistantVaultFileResponseMedia
-  retirement: NonNullable<AssistantOutboxIntent['generatedDeliveryRetirement']>
   status: 'failed' | 'pending' | 'sent'
   vaultRoot: string
 }): Promise<AssistantOutboxIntent> {
   const intent = await createAssistantOutboxIntent({
     channel: 'linq',
     createdAt: '2026-08-06T18:00:00.000Z',
-    generatedDeliveryRetirement: input.retirement,
     identityId: 'participant-export-pack',
     initialState: { status: 'pending' },
     media: [input.media],
@@ -353,13 +346,4 @@ function mediaForArchive(
 
 function createSha256(value: Uint8Array): string {
   return createHash('sha256').update(value).digest('hex')
-}
-
-function requireRetirement(
-  retirement: AssistantOutboxIntent['generatedDeliveryRetirement'],
-): NonNullable<AssistantOutboxIntent['generatedDeliveryRetirement']> {
-  if (!retirement) {
-    throw new Error('Expected a safe export-pack retirement receipt.')
-  }
-  return retirement
 }

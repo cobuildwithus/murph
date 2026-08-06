@@ -11,8 +11,8 @@ Updated: 2026-08-06
 
 ## Success criteria
 
-- A generated ZIP send records the exact valid export packs contained in the
-  archive without trusting its filename or generic `exports/**` paths.
+- A terminal generated ZIP send derives the exact valid export packs contained
+  in the archive without trusting its filename or generic `exports/**` paths.
 - Active, denied, expired, failed, missing, malformed, or changed deliveries
   never remove an export pack.
 - A terminal successful send removes only unchanged, manifest-valid derived
@@ -25,7 +25,7 @@ Updated: 2026-08-06
 
 ## Scope
 
-- In scope: generated ZIP inspection, runtime-owned retirement receipts,
+- In scope: generated ZIP inspection, runtime-derived retirement proof,
   generated-delivery cleanup, focused tests, and the durable vault/security
   contract.
 - Out of scope: deleting arbitrary ZIPs, user-owned files, generic
@@ -39,8 +39,8 @@ Updated: 2026-08-06
   insufficient.
 - Cleanup must fail closed on malformed archives, symlinks, inventory
   disagreement, changed bytes, or non-terminal delivery state.
-- Reuse the assistant runtime write lock, generated-delivery staging, outbox
-  terminal state, and quiescent residue pass.
+- Reuse the generated-delivery staging, outbox terminal state, and quiescent
+  residue pass without adding persisted state.
 
 ## Risks and mitigations
 
@@ -48,21 +48,21 @@ Updated: 2026-08-06
    root. Mitigation: accept only normalized `exports/packs/<safe-id>/` entries,
    reject traversal and nested ids, and resolve every path through the vault
    boundary.
-2. Risk: a pack changes between send preparation and cleanup. Mitigation:
-   persist exact file receipts and require an identical symlink-free inventory
-   immediately before removal.
+2. Risk: a pack changes between delivery and cleanup. Mitigation: derive exact
+   file receipts from the hash-bound sent archive and require an identical
+   symlink-free live inventory immediately before removal.
 3. Risk: denied or failed delivery removes the only prepared artifact.
    Mitigation: require a trusted outbox record with terminal `sent` state for
    the exact generated archive ref.
-4. Risk: metadata adds a competing lifecycle. Mitigation: keep the receipt
-   beside the owned generated file and consume it only inside the existing
-   quiescent residue pass.
+4. Risk: retirement adds a competing lifecycle. Mitigation: derive proof from
+   the existing sent attachment and retry only inside the existing quiescent
+   residue pass; add no queue, receipt file, or schema version.
 
 ## Tasks
 
 1. [completed] Prove the current generated ZIP, outbox, and export-pack
-   ownership paths and define the narrow retirement receipt.
-2. [completed] Implement bounded ZIP pack discovery and receipt persistence.
+   ownership paths and define the narrow retirement proof.
+2. [completed] Implement bounded ZIP pack discovery from the sent attachment.
 3. [completed] Extend terminal generated-delivery cleanup with unchanged-pack
    retirement and fail-closed checks.
 4. [completed] Add focused success, retry, refusal, mutation, archive, and path

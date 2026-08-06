@@ -41,7 +41,7 @@ import {
 } from './generated-delivery-files.js'
 import {
   retireSentAssistantExportPacks,
-  type SentAssistantGeneratedDeliveryRetirement,
+  type SentAssistantGeneratedExportArchive,
 } from './generated-export-pack-retirement.js'
 import {
   readAssistantInputEvent,
@@ -124,7 +124,7 @@ interface AssistantGeneratedDeliveryFileSnapshot {
 }
 
 interface AssistantGeneratedDeliveryPrunePlan {
-  exportPackRetirements: SentAssistantGeneratedDeliveryRetirement[]
+  exportPackArchives: SentAssistantGeneratedExportArchive[]
   files: AssistantGeneratedDeliveryFileSnapshot[]
   inventoryFiles: AssistantGeneratedDeliveryFileSnapshot[]
   root: string | null
@@ -195,7 +195,7 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
         vault: input.vault,
       })
       : {
-        exportPackRetirements: [],
+        exportPackArchives: [],
         files: [],
         inventoryFiles: [],
         root: null,
@@ -274,7 +274,7 @@ async function planAssistantGeneratedDeliveryPrune(input: {
 }): Promise<AssistantGeneratedDeliveryPrunePlan> {
   if (!input.outbox.trusted) {
     return {
-      exportPackRetirements: [],
+      exportPackArchives: [],
       files: [],
       inventoryFiles: [],
       root: null,
@@ -286,43 +286,41 @@ async function planAssistantGeneratedDeliveryPrune(input: {
     string,
     AssistantVaultFileResponseMedia[]
   >()
-  const sentRetirementByRef = new Map<string, {
-    retirement: NonNullable<AssistantOutboxIntent['generatedDeliveryRetirement']>
-    sizeBytes: number
-  }>()
-  const conflictedSentRetirementRefs = new Set<string>()
+  const sentExportArchiveByRef = new Map<
+    string,
+    AssistantVaultFileResponseMedia
+  >()
+  const conflictedSentExportArchiveRefs = new Set<string>()
   for (const { record } of input.outbox.records) {
-    const retirement = record.generatedDeliveryRetirement
-    if (record.status === 'sent' && retirement) {
-      if (conflictedSentRetirementRefs.has(retirement.archiveRef)) {
-        continue
-      }
+    if (record.status === 'sent') {
       const matchingMedia = record.media.filter(
         (media): media is AssistantVaultFileResponseMedia =>
           media.kind === 'vault_file'
-          && media.ref === retirement.archiveRef
-          && media.sha256 === retirement.archiveSha256,
+          && media.contentType === 'application/zip'
+          && isAssistantGeneratedDeliveryRef(media.ref)
+          && media.ref.toLowerCase().endsWith('.zip'),
       )
-      if (matchingMedia.length === 1 && matchingMedia[0]) {
-        const existing = sentRetirementByRef.get(retirement.archiveRef)
+      const file = matchingMedia[0]
+      if (record.media.length !== 1 || matchingMedia.length !== 1) {
+        for (const media of matchingMedia) {
+          sentExportArchiveByRef.delete(media.ref)
+          conflictedSentExportArchiveRefs.add(media.ref)
+        }
+      } else if (file && !conflictedSentExportArchiveRefs.has(file.ref)) {
+        const existing = sentExportArchiveByRef.get(file.ref)
         if (
           !existing
           || (
-            existing.sizeBytes === matchingMedia[0].sizeBytes
-            && JSON.stringify(existing.retirement) === JSON.stringify(retirement)
+            existing.contentType === file.contentType
+            && existing.sizeBytes === file.sizeBytes
+            && existing.sha256 === file.sha256
           )
         ) {
-          sentRetirementByRef.set(retirement.archiveRef, {
-            retirement,
-            sizeBytes: matchingMedia[0].sizeBytes,
-          })
+          sentExportArchiveByRef.set(file.ref, file)
         } else {
-          sentRetirementByRef.delete(retirement.archiveRef)
-          conflictedSentRetirementRefs.add(retirement.archiveRef)
+          sentExportArchiveByRef.delete(file.ref)
+          conflictedSentExportArchiveRefs.add(file.ref)
         }
-      } else {
-        sentRetirementByRef.delete(retirement.archiveRef)
-        conflictedSentRetirementRefs.add(retirement.archiveRef)
       }
     }
     if (!isActiveAssistantOutboxIntent(record)) {
@@ -357,7 +355,7 @@ async function planAssistantGeneratedDeliveryPrune(input: {
         || media.sha256 !== first.sha256)
     ) {
       return {
-        exportPackRetirements: [],
+        exportPackArchives: [],
         files: [],
         inventoryFiles: [],
         root: null,
@@ -383,7 +381,7 @@ async function planAssistantGeneratedDeliveryPrune(input: {
         )
       }
       return {
-        exportPackRetirements: [],
+        exportPackArchives: [],
         files: [],
         inventoryFiles: [],
         root: null,
@@ -471,13 +469,13 @@ async function planAssistantGeneratedDeliveryPrune(input: {
   }
 
   return {
-    exportPackRetirements: [...sentRetirementByRef.entries()].flatMap(
-      ([archiveRef, entry]) => {
+    exportPackArchives: [...sentExportArchiveByRef.entries()].flatMap(
+      ([archiveRef, file]) => {
         const archive = inventoryFiles.find((file) => file.ref === archiveRef)
-        return archive && archive.stats.size === entry.sizeBytes
+        return archive && archive.stats.size === file.sizeBytes
           ? [{
               archivePath: archive.absolutePath,
-              retirement: entry.retirement,
+              file,
             }]
           : []
       },
@@ -567,7 +565,7 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
   }
 
   const exportPackPruneResult = await retireSentAssistantExportPacks({
-    retirements: input.plan.exportPackRetirements,
+    archives: input.plan.exportPackArchives,
     vault: input.vault,
   })
 

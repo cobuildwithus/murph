@@ -5,21 +5,32 @@ import path from 'node:path'
 import { crc32, inflateRawSync } from 'node:zlib'
 
 import {
-  assistantGeneratedDeliveryRetirementSchema,
   assistantVaultFileMaxBytes,
   type AssistantOutboxIntent,
   type AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { z } from 'zod'
+import { isAssistantGeneratedDeliveryRef } from './generated-delivery-files.js'
 
-type AssistantGeneratedDeliveryRetirement = NonNullable<
-  AssistantOutboxIntent['generatedDeliveryRetirement']
->
-type AssistantGeneratedExportPackRetirement =
-  AssistantGeneratedDeliveryRetirement['packs'][number]
-type AssistantGeneratedExportPackRetirementFile =
-  AssistantGeneratedExportPackRetirement['files'][number]
+interface AssistantGeneratedExportPackRetirementFile {
+  path: string
+  sha256: string
+  sizeBytes: number
+}
+
+interface AssistantGeneratedExportPackRetirement {
+  basePath: string
+  files: AssistantGeneratedExportPackRetirementFile[]
+  packId: string
+}
+
+interface AssistantGeneratedDeliveryRetirement {
+  archiveRef: string
+  archiveSha256: string
+  kind: 'sent_export_packs_v1'
+  packs: AssistantGeneratedExportPackRetirement[]
+}
 
 interface ZipEntry {
   compressedSize: number
@@ -38,9 +49,9 @@ interface LiveExportPackSnapshot {
   rootStats: Stats
 }
 
-export interface SentAssistantGeneratedDeliveryRetirement {
+export interface SentAssistantGeneratedExportArchive {
   archivePath: string
-  retirement: AssistantGeneratedDeliveryRetirement
+  file: AssistantVaultFileResponseMedia
 }
 
 const exportPackManifestSchema = z
@@ -72,6 +83,7 @@ export async function buildAssistantGeneratedDeliveryRetirement(input: {
 }): Promise<AssistantGeneratedDeliveryRetirement | null> {
   if (
     input.file.contentType !== 'application/zip'
+    || !isAssistantGeneratedDeliveryRef(input.file.ref)
     || !input.file.ref.toLowerCase().endsWith('.zip')
     || input.file.sha256 !== sha256Hex(input.archiveBytes)
   ) {
@@ -169,27 +181,38 @@ export async function buildAssistantGeneratedDeliveryRetirement(input: {
   if (packs.length === 0 || packs.length > 20) {
     return null
   }
-  try {
-    return assistantGeneratedDeliveryRetirementSchema.parse({
-      archiveRef: input.file.ref,
-      archiveSha256: input.file.sha256,
-      kind: 'sent_export_packs_v1',
-      packs,
-    })
-  } catch {
-    return null
+  return {
+    archiveRef: input.file.ref,
+    archiveSha256: input.file.sha256,
+    kind: 'sent_export_packs_v1',
+    packs,
   }
 }
 
 export async function retireSentAssistantExportPacks(input: {
-  retirements: readonly SentAssistantGeneratedDeliveryRetirement[]
+  archives: readonly SentAssistantGeneratedExportArchive[]
   vault: string
 }): Promise<{ bytesPruned: number; packsPruned: number }> {
   let bytesPruned = 0
   let packsPruned = 0
   const visitedPackPaths = new Set<string>()
 
-  for (const { archivePath, retirement } of input.retirements) {
+  for (const { archivePath, file } of input.archives) {
+    const archiveBytes = await readMatchingGeneratedArchiveBytes(
+      archivePath,
+      file,
+    )
+    if (!archiveBytes) {
+      continue
+    }
+    const retirement = await buildAssistantGeneratedDeliveryRetirement({
+      archiveBytes,
+      file,
+      vault: input.vault,
+    })
+    if (!retirement) {
+      continue
+    }
     if (!(await archiveMatchesRetirement(archivePath, retirement))) {
       continue
     }
@@ -228,33 +251,61 @@ export async function retireAssistantExportPacksForSentIntent(input: {
   intent: AssistantOutboxIntent
   vault: string
 }): Promise<{ bytesPruned: number; packsPruned: number }> {
-  const retirement = input.intent.generatedDeliveryRetirement
-  if (input.intent.status !== 'sent' || !retirement) {
+  if (input.intent.status !== 'sent') {
     return { bytesPruned: 0, packsPruned: 0 }
   }
   const matchingMedia = input.intent.media.filter(
-    (media) => media.kind === 'vault_file'
+    (media): media is AssistantVaultFileResponseMedia =>
+      media.kind === 'vault_file'
       && media.contentType === 'application/zip'
-      && media.ref === retirement.archiveRef
-      && media.sha256 === retirement.archiveSha256,
+      && isAssistantGeneratedDeliveryRef(media.ref)
+      && media.ref.toLowerCase().endsWith('.zip'),
   )
-  if (matchingMedia.length !== 1) {
+  if (input.intent.media.length !== 1 || matchingMedia.length !== 1) {
+    return { bytesPruned: 0, packsPruned: 0 }
+  }
+  const file = matchingMedia[0]
+  if (!file) {
     return { bytesPruned: 0, packsPruned: 0 }
   }
   try {
     const archivePath = await resolveAssistantVaultPath(
       input.vault,
-      retirement.archiveRef,
+      file.ref,
       'file path',
     )
     return await retireSentAssistantExportPacks({
-      retirements: [{ archivePath, retirement }],
+      archives: [{ archivePath, file }],
       vault: input.vault,
     })
   } catch {
     // Delivery success is authoritative even if best-effort derived cleanup
     // cannot prove that the archive and pack are still safe to remove.
     return { bytesPruned: 0, packsPruned: 0 }
+  }
+}
+
+async function readMatchingGeneratedArchiveBytes(
+  archivePath: string,
+  file: AssistantVaultFileResponseMedia,
+): Promise<Buffer | null> {
+  try {
+    const before = await lstat(archivePath)
+    if (
+      !before.isFile()
+      || before.isSymbolicLink()
+      || before.nlink !== 1
+      || before.size !== file.sizeBytes
+    ) {
+      return null
+    }
+    const bytes = await readFile(archivePath)
+    const after = await lstat(archivePath)
+    return fileStatsMatch(before, after) && sha256Hex(bytes) === file.sha256
+      ? bytes
+      : null
+  } catch {
+    return null
   }
 }
 

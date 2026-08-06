@@ -50,9 +50,6 @@ import {
   isAssistantGeneratedDeliveryRef,
   resolveSupportedAssistantVaultFileContentType,
 } from './generated-delivery-files.js'
-import {
-  buildAssistantGeneratedDeliveryRetirement,
-} from './generated-export-pack-retirement.js'
 
 export const ASSISTANT_VAULT_FILE_SEND_ACTION_KIND = 'vault.file.send.v1'
 
@@ -123,21 +120,13 @@ export async function requestAssistantVaultFileSend(input: {
       vaultRoot: input.vault,
     })
   }
-  const fileSnapshot = await readAssistantVaultFileSnapshot({
+  const file = await resolveAssistantVaultFileResponseMedia({
     ...(generatedDelivery === null
       ? {}
       : { displayFilename: generatedDelivery.displayFilename }),
     ref: mediaRef,
     vaultRoot: input.vault,
   })
-  const file = fileSnapshot.file
-  const generatedDeliveryRetirement = generatedDelivery === null
-    ? null
-    : await buildAssistantGeneratedDeliveryRetirement({
-        archiveBytes: fileSnapshot.bytes,
-        file,
-        vault: input.vault,
-      })
   const approval = await input.actionApprovalPort.request(
     buildAssistantVaultFileSendApprovalRequestForTarget({
       channel: input.channel ?? null,
@@ -162,7 +151,6 @@ export async function requestAssistantVaultFileSend(input: {
       deliverySource: input.deliverySource ?? null,
       deliveryTransportIdempotent: input.deliveryTransportIdempotent,
       explicitTarget: input.explicitTarget ?? null,
-      generatedDeliveryRetirement,
       identityId: input.identityId ?? null,
       initialState: {
         nextAttemptAt: buildAssistantVaultFileApprovalFallbackWakeAt(
