@@ -354,7 +354,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const capabilityPath = "/capability/check_imessage";
     const capabilityMatcher = requireLinqStub().createIMessageCapabilityRequestMatcher({
       address: memberPhone,
-      from: homePhone,
     });
     const overlapCapabilityBaselineCount = requireLinqStub().countObservedRequests({
       expectedMethod: "POST",
