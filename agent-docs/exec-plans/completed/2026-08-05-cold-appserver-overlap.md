@@ -1,6 +1,6 @@
 # Overlap cold App Server initialization with first-contact bootstrap
 
-Status: active
+Status: completed
 Created: 2026-08-05
 Updated: 2026-08-06
 
@@ -70,13 +70,14 @@ Updated: 2026-08-06
    ordering and fails on the current implementation.
 3. [x] Make the smallest admission change and run scoped tests/typecheck plus
    direct diff and privacy review.
-4. [ ] Push the exact candidate, open a PR, and run preliminary specialists,
+4. [x] Push the exact candidate, open a PR, and run preliminary specialists,
    final ReviewGPT, and exact-head CI concurrently where allowed.
-5. [ ] Resolve accepted findings, close this plan with `scripts/finish-task`,
-   merge, deploy the runner bundle with immediate container rollout, and verify
-   the exact production fingerprint and error-free startup.
-6. [ ] Measure the next eligible cold first-contact trace, or report the
-   evidence-backed projected saving separately from production measurement.
+5. [x] Resolve accepted findings and close this plan with
+   `scripts/finish-task`; leave the verified PR open, unmerged, and undeployed
+   per the user's explicit instruction.
+6. [x] Report the evidence-backed projected saving separately from production
+   measurement; production measurement remains future work after an authorized
+   merge and deployment.
 
 ## Verification log
 
@@ -113,3 +114,13 @@ Updated: 2026-08-06
   scenario start because the local Docker API was unavailable while preparing
   the pinned runner base image. No bundle budget or runtime invariant was
   bypassed.
+- Preliminary specialist review's only accepted finding was the hosted-local
+  ownership coverage above. Final ReviewGPT passed the immutable candidate with
+  no findings; the later change is test/test-support proof only.
+- Exact-head GitHub Actions passed the CLI host matrix, release build/typecheck,
+  app verification, assistant/CLI/platform package coverage, fixture coverage,
+  frontend proof, overflow, and artifact-hygiene checks. The Vercel check passed
+  through its configured ignored-build path.
+- Parent final review found no unresolved source, ordering, privacy, delivery,
+  or documentation issue. The candidate remains open, unmerged, and undeployed.
+Completed: 2026-08-06
