@@ -33,12 +33,13 @@ export function assertHostedR2Bucket(input: {
   bucket: R2BucketInfo;
   bucketName: string;
   label: string;
+  location: "ENAM" | "OC";
 }): void {
   if (input.bucket.name !== input.bucketName) {
     throw new Error(`${input.label} bucket-info response did not match the requested bucket.`);
   }
-  if (input.bucket.location.toUpperCase() !== "ENAM") {
-    throw new Error(`${input.label} bucket must report ENAM.`);
+  if (input.bucket.location.toUpperCase() !== input.location) {
+    throw new Error(`${input.label} bucket must report ${input.location}.`);
   }
   if (input.bucket.defaultStorageClass.toLowerCase() !== "standard") {
     throw new Error(`${input.label} bucket must use Standard as its default storage class.`);

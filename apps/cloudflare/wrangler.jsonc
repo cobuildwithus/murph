@@ -90,6 +90,11 @@
       "binding": "BUNDLES",
       "bucket_name": "murph-hosted-bundles-enam",
       "preview_bucket_name": "murph-hosted-bundles-preview-enam"
+    },
+    {
+      "binding": "BUNDLES_RETIRING_OC",
+      "bucket_name": "murph-hosted-bundles",
+      "preview_bucket_name": "murph-hosted-bundles-preview"
     }
   ],
   "ai": {

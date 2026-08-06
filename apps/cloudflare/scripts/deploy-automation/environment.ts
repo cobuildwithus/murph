@@ -60,6 +60,8 @@ export interface HostedDeployAutomationEnvironment {
   allowedRunnerSecretKeys: string | null;
   bundlesBucketName: string;
   bundlesPreviewBucketName: string;
+  bundlesRetiringOcBucketName: string;
+  bundlesRetiringOcPreviewBucketName: string;
   compatibilityDate: string;
   containerInstanceType: HostedContainerInstanceType;
   containerMaxInstances: number;
@@ -115,11 +117,22 @@ export function readHostedDeployAutomationEnvironment(
     source.CF_BUNDLES_PREVIEW_BUCKET,
     "CF_BUNDLES_PREVIEW_BUCKET",
   );
+  const bundlesRetiringOcBucketName = requireConfiguredString(
+    source.CF_BUNDLES_RETIRING_OC_BUCKET,
+    "CF_BUNDLES_RETIRING_OC_BUCKET",
+  );
+  const bundlesRetiringOcPreviewBucketName = requireConfiguredString(
+    source.CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET,
+    "CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET",
+  );
   const workerName = requireConfiguredString(source.CF_WORKER_NAME, "CF_WORKER_NAME");
   const timeouts = readHostedDeployAutomationTimeouts(source);
   const workerVars = readHostedWorkerVars(source);
   assertHostedR2Configuration({
     bundlesBucketName,
+    bundlesPreviewBucketName,
+    bundlesRetiringOcBucketName,
+    bundlesRetiringOcPreviewBucketName,
     workerVars,
   });
 
@@ -127,6 +140,8 @@ export function readHostedDeployAutomationEnvironment(
     allowedRunnerSecretKeys: normalizeOptionalString(source.CF_ALLOWED_RUNNER_SECRET_KEYS),
     bundlesBucketName,
     bundlesPreviewBucketName,
+    bundlesRetiringOcBucketName,
+    bundlesRetiringOcPreviewBucketName,
     compatibilityDate: normalizeOptionalString(source.CF_COMPATIBILITY_DATE) ?? "2026-03-27",
     containerInstanceType: normalizeContainerInstanceType(
       source.CF_CONTAINER_INSTANCE_TYPE,
@@ -176,11 +191,24 @@ export function readHostedDeployAutomationEnvironment(
 
 function assertHostedR2Configuration(input: {
   bundlesBucketName: string;
+  bundlesPreviewBucketName: string;
+  bundlesRetiringOcBucketName: string;
+  bundlesRetiringOcPreviewBucketName: string;
   workerVars: Readonly<Record<string, string>>;
 }): void {
   if (input.workerVars.HOSTED_R2_PRESIGN_BUCKET_NAME !== input.bundlesBucketName) {
     throw new TypeError(
       "HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET.",
+    );
+  }
+  if (input.bundlesBucketName === input.bundlesRetiringOcBucketName) {
+    throw new TypeError(
+      "CF_BUNDLES_BUCKET and CF_BUNDLES_RETIRING_OC_BUCKET must be distinct.",
+    );
+  }
+  if (input.bundlesPreviewBucketName === input.bundlesRetiringOcPreviewBucketName) {
+    throw new TypeError(
+      "CF_BUNDLES_PREVIEW_BUCKET and CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET must be distinct.",
     );
   }
 }

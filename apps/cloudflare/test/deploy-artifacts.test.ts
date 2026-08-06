@@ -1301,6 +1301,8 @@ function createDeployArtifactFixtureSource(): Record<string, string> {
   return {
     CF_BUNDLES_BUCKET: "hosted-bundles",
     CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+    CF_BUNDLES_RETIRING_OC_BUCKET: "hosted-bundles-retiring-oc",
+    CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET: "hosted-bundles-retiring-oc-preview",
     CF_PUBLIC_BASE_URL: "https://hosted-worker.example.test",
     CF_WORKER_NAME: "hosted-worker",
     HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: "images-signing-fixture",

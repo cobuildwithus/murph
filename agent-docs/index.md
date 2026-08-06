@@ -50,8 +50,10 @@ specified by
 
 Hosted R2 uses one canonical ENAM production bucket and one isolated preview
 bucket. The Worker binding, presign target, lifecycle helper, cold restore, and
-account-deletion cleanup share that environment-selected owner. The contract is
-jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+runtime cleanup share that environment-selected owner. Account deletion also
+targets the former OC buckets through a deletion-only binding until an
+independent inventory proves them stably empty. The contract is jointly
+specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
 `agent-docs/RELIABILITY.md`, and `apps/cloudflare/README.md`.
 
 ## Canonical Docs

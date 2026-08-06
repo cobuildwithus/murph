@@ -153,6 +153,11 @@ export function buildHostedWranglerDeployConfig(
         bucket_name: environment.bundlesBucketName,
         preview_bucket_name: environment.bundlesPreviewBucketName,
       },
+      {
+        binding: "BUNDLES_RETIRING_OC",
+        bucket_name: environment.bundlesRetiringOcBucketName,
+        preview_bucket_name: environment.bundlesRetiringOcPreviewBucketName,
+      },
     ],
     ai: {
       binding: "AI",

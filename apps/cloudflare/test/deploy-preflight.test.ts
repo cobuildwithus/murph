@@ -23,6 +23,8 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
   return {
     CF_BUNDLES_BUCKET: "bundles",
     CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
+    CF_BUNDLES_RETIRING_OC_BUCKET: "bundles-retiring-oc",
+    CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET: "bundles-retiring-oc-preview",
     CF_PUBLIC_BASE_URL: HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
     CF_WORKER_NAME: "hosted-runner",
     CLOUDFLARE_ACCOUNT_ID: "r2-account",
@@ -74,6 +76,8 @@ function createRequiredPreviewWorkerDeployEnv(
   return createRequiredWorkerDeployEnv({
     CF_BUNDLES_BUCKET: "hosted-bundles-staging",
     CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-staging",
+    CF_BUNDLES_RETIRING_OC_BUCKET: "hosted-bundles-retiring-oc-staging",
+    CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET: "hosted-bundles-retiring-oc-staging",
     CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
     CF_WORKER_NAME: "hosted-runner-staging",
     HOSTED_CRYPTO_ENV: "preview",
@@ -90,7 +94,7 @@ function createRequiredPreviewWorkerDeployEnv(
 async function readValidR2BucketInfo(bucketName: string) {
   return {
     defaultStorageClass: "Standard",
-    location: "ENAM",
+    location: bucketName.includes("retiring-oc") ? "OC" : "ENAM",
     name: bucketName,
   };
 }
@@ -101,6 +105,8 @@ describe("deploy preflight helpers", () => {
       "CF_WORKER_NAME",
       "CF_BUNDLES_BUCKET",
       "CF_BUNDLES_PREVIEW_BUCKET",
+      "CF_BUNDLES_RETIRING_OC_BUCKET",
+      "CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET",
     ]);
   });
 
@@ -108,6 +114,8 @@ describe("deploy preflight helpers", () => {
     expect(listMissingHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
+      CF_BUNDLES_RETIRING_OC_BUCKET: "bundles-retiring-oc",
+      CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET: "bundles-retiring-oc-preview",
       CF_WORKER_NAME: "hosted-runner",
     }, { deployWorker: true })).toEqual([
       "CF_PUBLIC_BASE_URL",
@@ -137,6 +145,8 @@ describe("deploy preflight helpers", () => {
     expect(listMissingHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
+      CF_BUNDLES_RETIRING_OC_BUCKET: "bundles-retiring-oc",
+      CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET: "bundles-retiring-oc-preview",
       CF_WORKER_NAME: "hosted-runner",
     }, { deployWorker: false })).toEqual([]);
   });
@@ -145,6 +155,8 @@ describe("deploy preflight helpers", () => {
     expect(() => assertHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
+      CF_BUNDLES_RETIRING_OC_BUCKET: "bundles-retiring-oc",
+      CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET: "bundles-retiring-oc-preview",
       CF_WORKER_NAME: "hosted-runner",
     }, { deployWorker: false })).not.toThrow();
   });
@@ -153,6 +165,8 @@ describe("deploy preflight helpers", () => {
     expect(() => assertHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "   ",
+      CF_BUNDLES_RETIRING_OC_BUCKET: "bundles-retiring-oc",
+      CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET: "bundles-retiring-oc-preview",
       CF_PUBLIC_BASE_URL: "   ",
       CF_WORKER_NAME: "hosted-runner",
       HOSTED_EXECUTION_DEPLOY_CONTEXT: "   ",
@@ -875,6 +889,23 @@ describe("deploy preflight helpers", () => {
       },
     )).resolves.toContain(
       "R2 bucket metadata validation failed: Runtime R2 bucket must report ENAM.",
+    );
+  });
+
+  it("rejects a retiring erasure bucket outside OC before deployment", async () => {
+    await expect(listHostedDeployEnvironmentInvariantErrorsAsync(
+      createRequiredWorkerDeployEnv(),
+      { deployWorker: true },
+      {
+        readR2BucketInfo: async (bucketName) => ({
+          defaultStorageClass: "Standard",
+          location: "ENAM",
+          name: bucketName,
+        }),
+        resolveHostnameAddresses: async () => ["8.8.8.8"],
+      },
+    )).resolves.toContain(
+      "R2 bucket metadata validation failed: Retiring OC runtime R2 bucket must report OC.",
     );
   });
 

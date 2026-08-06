@@ -783,12 +783,15 @@ Last verified: 2026-08-05
   consented-member requests remain checkpoint-gated. Completion ordering uses
   the existing pending-input occurrence proof, and incomplete or invalid index
   evidence rejects the shortcut without repairing state.
-- Hosted R2 has one canonical production bucket in ENAM. Worker binding reads,
-  direct-upload presigns, cold restores, lifecycle application, and account
-  deletion all target that same bucket. Deploy preflight reads bucket metadata
-  and rejects a non-ENAM location or non-Standard default storage class. Runtime
-  code has no fallback bucket, migration phase, or storage-specific admission
-  gate; ordinary retry and mailbox durability remain the failure boundary.
+- Hosted R2 reads, writes, direct-upload presigns, cold restores, and lifecycle
+  application use one canonical production bucket in ENAM. The former OC bucket
+  remains reachable only by account deletion until its migrated duplicate
+  ciphertext is stably empty. Deletion must clear and re-list both buckets before
+  Durable Object state is removed; any failure retains retry ownership. Deploy
+  preflight requires canonical buckets to be ENAM Standard and retiring buckets
+  to be OC Standard. Runtime code has no fallback bucket, migration phase, or
+  storage-specific admission gate; ordinary retry and mailbox durability remain
+  the failure boundary.
 - One-time current-sender Assistant Ask reuses the same mailbox lifecycle,
   deterministic request identity, ten-minute expiry, isolated reviewed
   personal read, completion append, and exact-origin group delivery. Exact

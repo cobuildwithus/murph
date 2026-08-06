@@ -150,5 +150,15 @@ function createHostedUserRunner(
     env.BUNDLES,
     env,
     env.RUNNER_CONTAINER,
+    requireRetiringOcDeletionBucket(env),
   );
+}
+
+function requireRetiringOcDeletionBucket(env: WorkerEnvironmentSource): typeof env.BUNDLES {
+  if (!env.BUNDLES_RETIRING_OC) {
+    throw new Error(
+      "Hosted user deletion requires the retiring OC R2 binding until that bucket is empty.",
+    );
+  }
+  return env.BUNDLES_RETIRING_OC;
 }

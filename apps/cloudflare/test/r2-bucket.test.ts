@@ -23,7 +23,7 @@ beforeEach(() => {
 });
 
 describe("Wrangler R2 bucket metadata reader", () => {
-  it("requires the configured bucket to be ENAM Standard", () => {
+  it("requires the configured bucket to match its expected location and use Standard", () => {
     expect(() => assertHostedR2Bucket({
       bucket: {
         defaultStorageClass: "Standard",
@@ -32,6 +32,17 @@ describe("Wrangler R2 bucket metadata reader", () => {
       },
       bucketName: "hosted-bundles",
       label: "runtime",
+      location: "ENAM",
+    })).not.toThrow();
+    expect(() => assertHostedR2Bucket({
+      bucket: {
+        defaultStorageClass: "Standard",
+        location: "OC",
+        name: "hosted-bundles-retiring",
+      },
+      bucketName: "hosted-bundles-retiring",
+      label: "retiring runtime",
+      location: "OC",
     })).not.toThrow();
     expect(() => assertHostedR2Bucket({
       bucket: {
@@ -41,6 +52,7 @@ describe("Wrangler R2 bucket metadata reader", () => {
       },
       bucketName: "hosted-bundles",
       label: "runtime",
+      location: "ENAM",
     })).toThrow("runtime bucket must report ENAM");
     expect(() => assertHostedR2Bucket({
       bucket: {
@@ -50,6 +62,7 @@ describe("Wrangler R2 bucket metadata reader", () => {
       },
       bucketName: "hosted-bundles",
       label: "runtime",
+      location: "ENAM",
     })).toThrow("runtime bucket must use Standard");
   });
 

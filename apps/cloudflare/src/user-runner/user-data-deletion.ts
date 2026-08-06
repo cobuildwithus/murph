@@ -83,6 +83,7 @@ class HostedRunnerUserDataDeletionR2CleanupFailedError extends Error {
 
 export interface HostedRunnerUserDataDeletionServiceInput {
   bucket: R2BucketLike;
+  retiringOcBucket?: R2BucketLike;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   state: DurableObjectStateLike;
@@ -228,6 +229,7 @@ async function stopRunnerBeforeUserDataDeletion(input: {
 
 async function deleteHostedUserR2DataBeforeStateDeletion(input: {
   bucket: HostedRunnerUserDataDeletionServiceInput["bucket"];
+  retiringOcBucket?: HostedRunnerUserDataDeletionServiceInput["retiringOcBucket"];
   userId: string;
 }): Promise<HostedRunnerUserDataDeletionCompletedResult["r2"]> {
   try {
@@ -251,6 +253,7 @@ async function deleteHostedUserR2DataBeforeStateDeletion(input: {
 
 async function deleteHostedUserR2Data(input: {
   bucket: HostedRunnerUserDataDeletionServiceInput["bucket"];
+  retiringOcBucket?: HostedRunnerUserDataDeletionServiceInput["retiringOcBucket"];
   userId: string;
 }): Promise<HostedRunnerUserDataDeletionCompletedResult["r2"]> {
   const prefixes = [
@@ -264,21 +267,28 @@ async function deleteHostedUserR2Data(input: {
     await hostedEmailRawMessageUserPrefix({ userId: input.userId }),
   ];
   const fixedKey = await hostedRunnerSecretsObjectKey({ userId: input.userId });
-  const { bucket } = input;
+  const retiringOcBucket = input.retiringOcBucket ?? input.bucket;
+  const buckets = input.bucket === retiringOcBucket
+    ? [input.bucket]
+    : [input.bucket, retiringOcBucket];
   let deletedObjectCount = 0;
-  requireR2DeletionCapabilities(bucket);
-  for (const prefix of prefixes) {
-    deletedObjectCount += (await deleteR2ObjectsWithPrefix(bucket, prefix)).deletedCount;
+  for (const bucket of buckets) {
+    requireR2DeletionCapabilities(bucket);
+    for (const prefix of prefixes) {
+      deletedObjectCount += (await deleteR2ObjectsWithPrefix(bucket, prefix)).deletedCount;
+    }
+    deletedObjectCount += (await deleteR2ObjectRequired(bucket, fixedKey)).deletedCount;
   }
-  deletedObjectCount += (await deleteR2ObjectRequired(bucket, fixedKey)).deletedCount;
 
   // The write fence and the recorded direct-PUT drain deadline make these
   // stable-empty checks the final effect boundary. Any late object prevents
   // Durable Object state deletion and leaves the whole operation retryable.
-  for (const prefix of prefixes) {
-    await assertR2PrefixEmpty(bucket, prefix);
+  for (const bucket of buckets) {
+    for (const prefix of prefixes) {
+      await assertR2PrefixEmpty(bucket, prefix);
+    }
+    await assertR2ObjectAbsent(bucket, fixedKey);
   }
-  await assertR2ObjectAbsent(bucket, fixedKey);
 
   return {
     deletedObjectCount,

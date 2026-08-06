@@ -87,6 +87,8 @@ const REMOVED_HOSTED_ASSISTANT_VAR_NAMES = [
 ] as const;
 
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
+  CF_BUNDLES_RETIRING_OC_BUCKET: "murph-hosted-bundles",
+  CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET: "murph-hosted-bundles-preview",
   CF_PUBLIC_BASE_URL: "https://murph-hosted.cobuildwithus.workers.dev",
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
@@ -353,6 +355,11 @@ describe("hosted deploy automation helpers", () => {
         binding: "BUNDLES",
         bucket_name: "hosted-bundles",
         preview_bucket_name: "hosted-bundles-preview",
+      },
+      {
+        binding: "BUNDLES_RETIRING_OC",
+        bucket_name: "murph-hosted-bundles",
+        preview_bucket_name: "murph-hosted-bundles-preview",
       },
     ]);
     expect(config).not.toHaveProperty("queues");
