@@ -66,7 +66,7 @@ export function HealthDataConsentControlStudy() {
       data-design-component="health-data-consent-settings"
       inert
     >
-      <ConsentStateFrame label="Processing active">
+      <ConsentStateFrame label="Active source and consent controls">
         <HostedHealthDataConsentSettings
           authenticated
           initialStatus={DESIGN_ACTIVE_HEALTH_DATA_CONSENT_STATUS}

@@ -56,6 +56,7 @@ export interface HostedLocalLinqCanonicalChat {
 
 const linqCreateChatPath = "/chats";
 const linqCreateAttachmentPath = "/attachments";
+const linqIMessageCapabilityPath = "/capability/check_imessage";
 const linqAttachmentDownloadBasePath = "/attachment-downloads";
 const hostedLocalLinqObservedRequestWaitTimeoutMs = 180_000;
 const hostedLocalRunnerProviderHost = "host.docker.internal";
@@ -132,8 +133,12 @@ export interface HostedLocalLinqStub {
   }): number;
   createChatPath: string;
   createCreateChatRequestMatcher(userId: string): ObservedLinqRequestMatcher;
+  createIMessageCapabilityRequestMatcher(input: {
+    address: string;
+  }): ObservedLinqRequestMatcher;
   listObservedMessageIds(chatId: string): string[];
   observedRequests: ObservedLinqRequest[];
+  readObservedMessageAppCard(request: ObservedLinqRequest): Record<string, unknown> | null;
   readObservedMessageLink(request: ObservedLinqRequest): string | null;
   readObservedMessageText(request: ObservedLinqRequest): string | null;
   requireObservedChatId(userId: string): string;
@@ -326,6 +331,11 @@ export async function startHostedLocalLinqStub(input: {
       return;
     }
 
+    if (request.method === "POST" && request.url === linqIMessageCapabilityPath) {
+      writeJsonResponse(response, 200, { available: true });
+      return;
+    }
+
     if (request.method === "GET" && request.url && /^\/chats\/[^/]+$/u.test(request.url)) {
       const chatId = decodeURIComponent(request.url.split("/")[2] ?? "unknown");
       const canonicalChat = canonicalChats.get(chatId);
@@ -350,7 +360,7 @@ export async function startHostedLocalLinqStub(input: {
       const parsedBody = parseObservedLinqJson(body);
       if (!isObservedLinqMessagePayload(parsedBody)) {
         writeJsonResponse(response, 400, {
-          error: "Expected a Linq send-message payload with a valid text or media part.",
+          error: "Expected a Linq send-message payload with a supported message part.",
         });
         return;
       }
@@ -662,8 +672,13 @@ export async function startHostedLocalLinqStub(input: {
         return parsed?.from === expectedFrom && Array.isArray(to) && to[0] === expectedTo;
       };
     },
+    createIMessageCapabilityRequestMatcher: ({ address }) => (request) => {
+      const parsed = parseObservedLinqJson(request.body);
+      return parsed?.address === address;
+    },
     listObservedMessageIds: (chatId) => [...(observedMessageIdsByChat.get(chatId) ?? [])],
     observedRequests,
+    readObservedMessageAppCard: readObservedLinqIMessageAppCard,
     readObservedMessageLink: readObservedLinqMessageLink,
     readObservedMessageText: readObservedLinqMessageText,
     requireObservedChatId: (userId) => {
@@ -1068,6 +1083,21 @@ function isObservedLinqMessagePayload(payload: Record<string, unknown> | null): 
         && typeof part.value === "string"
         && part.value.startsWith("https://");
     }
+    if (part.type === "imessage_app") {
+      return parts.length === 1
+        && "url" in part
+        && typeof part.url === "string"
+        && part.url.startsWith("https://")
+        && "fallback_text" in part
+        && typeof part.fallback_text === "string"
+        && part.fallback_text.trim().length > 0
+        && "app" in part
+        && Boolean(part.app)
+        && typeof part.app === "object"
+        && "layout" in part
+        && Boolean(part.layout)
+        && typeof part.layout === "object";
+    }
     if (part.type !== "media") {
       return false;
     }
@@ -1104,6 +1134,30 @@ function readObservedLinqMessageLink(request: ObservedLinqRequest): string | nul
       && "value" in part
       && typeof part.value === "string"
     ? part.value
+    : null;
+}
+
+function readObservedLinqIMessageAppCard(
+  request: ObservedLinqRequest,
+): Record<string, unknown> | null {
+  const parsed = parseObservedLinqJson(request.body);
+  const message = parsed?.message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    return null;
+  }
+
+  const parts = "parts" in message ? message.parts : null;
+  if (!Array.isArray(parts) || parts.length !== 1) {
+    return null;
+  }
+
+  const part = parts[0];
+  return part
+      && typeof part === "object"
+      && !Array.isArray(part)
+      && "type" in part
+      && part.type === "imessage_app"
+    ? part as Record<string, unknown>
     : null;
 }
 

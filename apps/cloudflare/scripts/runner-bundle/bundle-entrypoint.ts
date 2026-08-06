@@ -116,11 +116,24 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // Linux CI measured an 8,540,082B static closure on 2026-08-05; retain the
 // established allowance above that reviewed measurement.
 //
+// Current main combines the reviewed support, usage, provider-routing, and
+// response-card additions. Protected Linux predeploy assembly measured
+// 10,222,070B total, while two clean macOS packaged assemblies both measured
+// 10,273,373B total on 2026-08-05. No forbidden subsystem entered the boot
+// graph. Ratchet to the higher cross-platform measurement and retain the
+// established reviewed-addition allowance.
+//
+// Restoring the disabled native-memory provider relay, diagnostics, and usage
+// accounting extends those existing runner chunks without adding a forbidden
+// boot input. Protected Linux predeploy assembly measured 10,222,098B total
+// and macOS measured 10,273,401B total on 2026-08-06. Ratchet to the higher
+// cross-platform measurement and retain the same allowance.
+//
 // Scheduled phone-call authority extends the existing Assistant Engine dynamic
-// tool path without adding a forbidden boot input. Linux CI measured
-// 10,224,158B and macOS measured 10,275,461B total on 2026-08-05; retain the
-// established allowance above the higher cross-platform measurement.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_275_461 + 32_768;
+// tool path without adding a forbidden boot input. After merging the native-
+// memory relay restoration, macOS measured 10,276,559B total on 2026-08-06;
+// retain the established allowance above that combined measurement.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_276_559 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_699_250;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_540_082;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

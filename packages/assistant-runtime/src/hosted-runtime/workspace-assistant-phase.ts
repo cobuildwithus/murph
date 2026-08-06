@@ -826,6 +826,16 @@ function resolveHostedInitialLinqDeliveryContexts(
     : [];
 }
 
+function resolveHostedCurrentLinqDeliveryContexts(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  initialContexts: readonly HostedAssistantLinqDeliveryContext[],
+): readonly HostedAssistantLinqDeliveryContext[] {
+  const latestContexts = input.latestAssistantInputBatch?.()?.linqDeliveryContexts ?? [];
+  return latestContexts.length === 0
+    ? initialContexts
+    : [...initialContexts, ...latestContexts];
+}
+
 function readHostedInitialAssistantInputIds(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): readonly string[] {
@@ -2333,6 +2343,10 @@ export async function runHostedWorkspaceAssistantPhase(
     });
     const providerCleanupOwnedByPostCheckpointDelivery =
       postCheckpointDeliveryResultOwnsProviderCleanup(continuingSystemMailboxResult);
+    const currentLinqDeliveryContexts = resolveHostedCurrentLinqDeliveryContexts(
+      input,
+      initialLinqDeliveryContexts,
+    );
     if (foregroundAssistantPass) {
       const foregroundCronReconciliationWake =
         input.assistantAutomationScheduleChanged?.() === true
@@ -2367,7 +2381,7 @@ export async function runHostedWorkspaceAssistantPhase(
         foregroundCronReconciliationWake,
         foregroundWorkspaceWake: createFutureExistingHostedAssistantWorkspaceWakeCandidate(input),
         input,
-        linqDeliveryContexts: initialLinqDeliveryContexts,
+        linqDeliveryContexts: currentLinqDeliveryContexts,
         providerCleanupPlan,
         skippedDeviceSyncWake: deviceSyncFollowUpWake,
         systemMailboxWake,
@@ -2434,7 +2448,7 @@ export async function runHostedWorkspaceAssistantPhase(
     });
     const deliveryEffectsPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: deliveryEffects,
-      linqDeliveryContexts: initialLinqDeliveryContexts,
+      linqDeliveryContexts: currentLinqDeliveryContexts,
       vaultRoot: input.restored.vaultRoot,
     });
 
