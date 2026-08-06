@@ -13,6 +13,7 @@ import {
   buildOnboardingFirstPersonalReadAutomationSaveRequest,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS,
 } from '../src/assistant/onboarding-first-personal-read-automation.js'
 
@@ -49,7 +50,8 @@ describe('onboarding first personal read', () => {
         kind: 'at',
         at: '2026-08-06T21:02:00.000Z',
       },
-      slug: 'onboarding-first-personal-read',
+      slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+      status: 'active',
       summary:
         'One private first read across the context and health data collected during onboarding.',
       tags: [
@@ -95,6 +97,33 @@ describe('onboarding first personal read', () => {
     )
   })
 
+  it('blocks generic save and patch from replacing the fixed prompt', () => {
+    const genericSave = readAutomationDynamicToolRequest({
+      arguments: {
+        action: 'save',
+        instructions: 'Replace the fixed policy.',
+        schedule: {
+          kind: 'at',
+          at: '2026-08-06T21:02:00.000Z',
+        },
+        slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+        title: 'Replacement',
+      },
+      tool: 'automation',
+    })
+    expect(genericSave?.kind).toBe('invalid-automation-arguments')
+
+    const genericPatch = readAutomationDynamicToolRequest({
+      arguments: {
+        action: 'patch',
+        instructions: 'Replace the fixed policy.',
+        lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+      },
+      tool: 'automation',
+    })
+    expect(genericPatch?.kind).toBe('invalid-automation-arguments')
+  })
+
   it('keeps the full evidence and interestingness policy in source code', () => {
     const prompt = MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS
 
@@ -117,7 +146,16 @@ describe('onboarding first personal read', () => {
       'Missing, stale, sparse, misclassified, contradictory, or still-importing data is not evidence',
     )
     expect(prompt).toContain(
+      'Never infer alcohol use, medication changes, illness, adherence, or another sensitive explanation from a proxy pattern.',
+    )
+    expect(prompt).toContain(
+      'Return skip when a recent proactive health question from Murph is still unanswered.',
+    )
+    expect(prompt).toContain(
       'Read `vault-cli knowledge show weekly-health-insights`.',
+    )
+    expect(prompt).toContain(
+      'vault-cli knowledge append-section weekly-health-insights',
     )
     expect(prompt).toContain(
       'A failed dedupe write must not make the member lose an otherwise sound first read.',
@@ -182,5 +220,16 @@ describe('onboarding first personal read', () => {
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'it accepts no prompt, timing, model, route, or other fields',
     )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'generic save or patch cannot replace it',
+    )
+  })
+
+  it('rejects invalid builder dates', () => {
+    expect(() =>
+      buildOnboardingFirstPersonalReadAutomationSaveRequest({
+        now: new Date(Number.NaN),
+      }),
+    ).toThrow('invalid current date')
   })
 })
