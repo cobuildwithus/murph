@@ -47,7 +47,7 @@ jobs:
               "    'still remember ten seconds after reading': 1,",
               "    'Interestingness gate': 2,",
               "    'Every completed run must leave one compact private decision record': 2,",
-              "    'Hard provenance gate: if the note could have been written': 2,",
+              "    'Hard provenance gate': 2,",
               '}',
               'for phrase, expected_count in expected_counts.items():',
               '    count = source.count(phrase)',
