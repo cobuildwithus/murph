@@ -94,6 +94,7 @@ import {
   cancelHostedPulseTrialLoserSubscriptionsForMember,
   isHostedPulseTrialSubscriptionForKnownPolicy,
 } from "./pulse-trial-subscription-cleanup";
+import { parseHostedPulseTrialStartSource } from "./pulse-trial-start-source";
 import {
   applyHostedFamilyStripeCheckoutExpiredTx,
   applyHostedFamilyStripeCheckoutCompletedTx,
@@ -766,6 +767,9 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
         parseHostedPulseTrialPolicyVersion(
           input.session.metadata?.trialPolicyVersion,
         ) ?? HOSTED_PULSE_TRIAL_POLICY_VERSION,
+      pulseTrialStartSource: parseHostedPulseTrialStartSource(
+        subscription.metadata.pulseTrialStartSource,
+      ),
       tx: input.tx,
     });
 

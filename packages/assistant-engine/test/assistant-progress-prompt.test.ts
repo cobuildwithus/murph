@@ -67,19 +67,22 @@ describe('assistant progress prompt contract', () => {
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description.length)
       .toBeLessThanOrEqual(260)
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'one brief user-visible progress update',
+      'a brief user-visible update',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'only before a real reply-critical wait',
+      'before reply-critical work likely to keep the member waiting',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'continue work immediately',
+      'continue immediately',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Success means this milestone update was sent; do not repeat it',
+      'A successful call means this update was sent',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'This is not a final answer',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).not.toContain(
+      'do not repeat it',
     )
 
     const textProperty =
@@ -87,9 +90,10 @@ describe('assistant progress prompt contract', () => {
     expect(textProperty).not.toHaveProperty('maxLength')
     expect(textProperty.description.length).toBeLessThanOrEqual(140)
     expect(textProperty.description).toContain(
-      'One short natural sentence about verified current progress',
+      'One short natural sentence orienting the member to the work and immediate next step',
     )
     expect(textProperty.description).toContain('no final conclusions')
-    expect(textProperty.description).toContain('unverified claims')
+    expect(textProperty.description).toContain('unverified result claims')
+    expect(textProperty.description).not.toContain('verified current progress')
   })
 })
