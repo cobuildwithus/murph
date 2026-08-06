@@ -2541,8 +2541,8 @@ describe("hosted group join policy", () => {
       ],
       schema: "murph.hosted-group.join-policy.v1",
     }).requestedVaultShareProjectionScopes).toEqual([
-      DEEP_SLEEP_SOURCES_SCOPE,
-      REM_SLEEP_SOURCES_SCOPE,
+      DEEP_SLEEP_SCOPE,
+      REM_SLEEP_SCOPE,
     ]);
 
     expect(readHostedGroupJoinPolicy({
@@ -2554,7 +2554,9 @@ describe("hosted group join policy", () => {
       ],
       schema: "murph.hosted-group.join-policy.v1",
     }).requestedVaultShareProjectionScopes).toEqual([
+      DEEP_SLEEP_SCOPE,
       DEEP_SLEEP_SOURCES_SCOPE,
+      REM_SLEEP_SCOPE,
       REM_SLEEP_SOURCES_SCOPE,
     ]);
 
@@ -2577,14 +2579,14 @@ describe("hosted group join policy", () => {
       },
       requestedVaultShareProjectionScopes: [DEEP_SLEEP_SCOPE],
     }).requestedVaultShareProjectionScopes;
-    expect(mergedSleep).toHaveLength(3);
+    expect(mergedSleep).toHaveLength(4);
     expect(mergedSleep).toEqual(expect.arrayContaining([
+      DEEP_SLEEP_SCOPE,
       DEEP_SLEEP_SOURCES_SCOPE,
-      REM_SLEEP_SOURCES_SCOPE,
+      REM_SLEEP_SCOPE,
       { projectionKind: "activity-days.v0" },
     ]));
-    expect(mergedSleep).not.toContainEqual(DEEP_SLEEP_SCOPE);
-    expect(mergedSleep).not.toContainEqual(REM_SLEEP_SCOPE);
+    expect(mergedSleep).not.toContainEqual(REM_SLEEP_SOURCES_SCOPE);
 
     expect(readHostedGroupJoinPolicy({
       requestedVaultShareProjectionKinds: ["all-health-data"],

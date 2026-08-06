@@ -2086,6 +2086,43 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     }));
   });
 
+  it("keeps an existing legacy sleep policy rollback-readable during ordinary link creation", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: true,
+      joinCode: "join_existing",
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["deep-sleep-days.v0"],
+    });
+
+    const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      tx,
+    });
+
+    expect(result.group.requestedVaultShareProjectionScopes).toEqual([
+      GROUP_EMAIL_SCOPE,
+      LEGACY_DEEP_SLEEP_SCOPE,
+    ]);
+    expect(tx.hostedGroup.update).toHaveBeenCalledWith({
+      data: {
+        joinPolicyJson: {
+          requestedVaultShareProjectionKinds: [
+            "group-email.v0",
+            "deep-sleep-days.v0",
+          ],
+          requestedVaultShareProjectionScopes: [
+            GROUP_EMAIL_SCOPE,
+            LEGACY_DEEP_SLEEP_SCOPE,
+          ],
+          schema: "murph.hosted-group.join-policy.v1",
+        },
+      },
+      where: { id: "group_1" },
+    });
+  });
+
   it("creates or reads a join link through the owner-authorized path", async () => {
     const tx = buildGroupLinkTx({
       joinCode: null,
@@ -2519,7 +2556,7 @@ describe("readHostedGroupJoinView leave affordance", () => {
     mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValue([]);
   });
 
-  it("loads the actual legacy sleep grant behind a canonical v1 policy", async () => {
+  it("derives one current sleep permission without rewriting its legacy policy", async () => {
     mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValueOnce([
       LEGACY_DEEP_SLEEP_SCOPE,
     ]);

@@ -1557,13 +1557,16 @@ export async function readHostedGroupJoinView(input: {
   }
 
   const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
+  const offeredProjectionScopes = normalizeHostedGroupAccessOfferProjectionScopes(
+    policy.requestedVaultShareProjectionScopes,
+  );
   const activeVaultShareProjectionScopes = input.memberId && group.runtimeMemberId
     ? await readActiveHostedVaultShareProjectionScopes({
         destinationMemberId: group.runtimeMemberId,
         grantorMemberId: input.memberId,
         prisma,
         projectionScopes: includeLegacyHostedGroupSleepProjectionScopes(
-          policy.requestedVaultShareProjectionScopes,
+          offeredProjectionScopes,
         ),
       })
     : [];
@@ -1578,7 +1581,7 @@ export async function readHostedGroupJoinView(input: {
     kind: group.kind,
     memberCount: group._count.members,
     requestedVaultShareProjections: projectHostedVaultShareProjectionDisplays(
-      policy.requestedVaultShareProjectionScopes,
+      offeredProjectionScopes,
     ),
     status: "active",
     viewerCanLeave: group.members.length > 0 && group.ownerMemberId !== input.memberId,
@@ -2013,7 +2016,10 @@ async function acceptHostedGroupJoinTx(input: {
   );
   const requestedProjectionScopes = input.policyProjectionScopes
     ? normalizeHostedVaultShareProjectionScopes(input.policyProjectionScopes)
-    : readHostedGroupJoinPolicy(group.joinPolicyJson).requestedVaultShareProjectionScopes;
+    : normalizeHostedGroupAccessOfferProjectionScopes(
+        readHostedGroupJoinPolicy(group.joinPolicyJson)
+          .requestedVaultShareProjectionScopes,
+      );
   const allowedSelectedSet = new Set(
     includeLegacyHostedGroupSleepProjectionScopes(requestedProjectionScopes)
       .map((scope) => buildHostedVaultShareProjectionScopeKey(scope)),

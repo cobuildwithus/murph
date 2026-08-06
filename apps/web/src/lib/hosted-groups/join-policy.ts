@@ -196,7 +196,7 @@ export function readHostedGroupJoinPolicy(value: unknown): HostedGroupJoinPolicy
     return emptyHostedGroupJoinPolicy();
   }
   return hostedGroupJoinPolicyFromScopes(
-    normalizeHostedGroupAccessOfferProjectionScopes(
+    normalizeHostedVaultShareProjectionScopes(
       record.requestedVaultShareProjectionScopes
         ?? record.requestedVaultShareProjectionKinds,
     ),
@@ -263,11 +263,10 @@ export function normalizeHostedVaultShareProjectionScopes(
 }
 
 /**
- * New group access offers expose one Deep sleep permission and one REM sleep
- * permission. Their source-aware v1 scopes are the complete contracts. Legacy
- * v0 grants remain parseable with their original narrower meaning, while
- * legacy requested policies map to the complete permission during rolling
- * deploys.
+ * Current group access offers expose one Deep sleep permission and one REM
+ * sleep permission. Their source-aware v1 scopes are the complete contracts.
+ * Durable join policies keep legacy v0 scopes exact so the previous Web remains
+ * able to show and revoke their independently authoritative grants on rollback.
  */
 export function normalizeHostedGroupAccessOfferProjectionScopes(
   value: unknown,
