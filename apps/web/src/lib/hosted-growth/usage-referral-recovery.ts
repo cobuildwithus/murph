@@ -66,6 +66,7 @@ export async function recoverPendingHostedUsageReferrals(input: {
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         id: true,
+        lane: true,
         laneSeq: true,
         userId: true,
       },
@@ -77,7 +78,6 @@ export async function recoverPendingHostedUsageReferrals(input: {
             "assistant.notification.requested:usage-referral-reward:",
         },
         kind: "assistant.notification.requested",
-        lane: "system",
       },
     }),
   ]);
@@ -130,7 +130,7 @@ export async function recoverPendingHostedUsageReferrals(input: {
       await signalHostedMailboxAppendRuntime({
         expectedUserId: celebration.userId,
         knownCheckpoint: {
-          lane: "system",
+          lane: celebration.lane,
           laneSeq: celebration.laneSeq.toString(),
           userId: celebration.userId,
         },
