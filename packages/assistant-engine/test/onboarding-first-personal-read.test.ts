@@ -275,8 +275,11 @@ describe('onboarding first personal read', () => {
       'The host owns the immutable automation identity, current-conversation route binding, two-minute delay, bounded active window, fresh continuity, Sol/high target, and complete first-read prompt.',
       'Do not call generic `save`, provide instructions, calculate timestamps, choose a model, or add fields.',
       'do not retry, block completion, or mention the failure',
-      'whether that\'s a pattern, a clearer interpretation, or what seems worth watching next',
+      'If I find something genuinely useful—whether that\'s a pattern, a clearer interpretation, or something worth watching next—I\'ll send it over.',
     ])
+    expect(onboarding).not.toContain(
+      'then send you the most useful thing I find',
+    )
     expect(onboarding).not.toContain(
       'slug: "onboarding-first-personal-read"',
     )
