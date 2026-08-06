@@ -75,7 +75,7 @@ describe("hosted signup referral UX", () => {
     assert.doesNotMatch(markup, />Join Murph</);
   });
 
-  it("renders a retry-later state after the bounded claim limit", async () => {
+  it("keeps the bounded claim limit directly retryable", async () => {
     const page = await import("../app/r/[referralCode]/page");
     const markup = renderToStaticMarkup(await page.default({
       params: Promise.resolve({ referralCode: "busy_referral" }),
@@ -84,6 +84,8 @@ describe("hosted signup referral UX", () => {
 
     assert.match(markup, /Try again soon/);
     assert.match(markup, /Wait a little while/);
+    assert.match(markup, /action="\/r\/busy_referral\/claim"/);
+    assert.match(markup, />Try again<\/button>/);
     assert.doesNotMatch(markup, />Join Murph</);
   });
 
