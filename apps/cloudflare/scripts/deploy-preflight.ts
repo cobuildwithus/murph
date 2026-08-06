@@ -57,8 +57,6 @@ const REQUIRED_DEPLOY_ENV_NAMES = [
   "CF_WORKER_NAME",
   "CF_BUNDLES_BUCKET",
   "CF_BUNDLES_PREVIEW_BUCKET",
-  "CF_BUNDLES_RETIRING_OC_BUCKET",
-  "CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET",
 ] as const;
 
 const REQUIRED_DEPLOY_WORKER_ENV_NAMES = [
@@ -120,8 +118,6 @@ const PREVIEW_DEPLOY_RESOURCE_LABELS = [
   "CF_WORKER_NAME",
   "CF_BUNDLES_BUCKET",
   "CF_BUNDLES_PREVIEW_BUCKET",
-  "CF_BUNDLES_RETIRING_OC_BUCKET",
-  "CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET",
 ] as const;
 
 const LOOPBACK_OR_PRIVATE_HOSTS = new Set([
@@ -296,26 +292,9 @@ export function listHostedDeployEnvironmentInvariantErrors(
   }
 
   const bundlesBucket = normalizeOptionalString(source.CF_BUNDLES_BUCKET);
-  const bundlesPreviewBucket = normalizeOptionalString(source.CF_BUNDLES_PREVIEW_BUCKET);
-  const retiringOcBucket = normalizeOptionalString(source.CF_BUNDLES_RETIRING_OC_BUCKET);
-  const retiringOcPreviewBucket = normalizeOptionalString(
-    source.CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET,
-  );
   const presignBucket = normalizeOptionalString(source.HOSTED_R2_PRESIGN_BUCKET_NAME);
   if (bundlesBucket && presignBucket && presignBucket !== bundlesBucket) {
     errors.push("HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET.");
-  }
-  if (bundlesBucket && retiringOcBucket && bundlesBucket === retiringOcBucket) {
-    errors.push("CF_BUNDLES_BUCKET and CF_BUNDLES_RETIRING_OC_BUCKET must be distinct.");
-  }
-  if (
-    bundlesPreviewBucket
-    && retiringOcPreviewBucket
-    && bundlesPreviewBucket === retiringOcPreviewBucket
-  ) {
-    errors.push(
-      "CF_BUNDLES_PREVIEW_BUCKET and CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET must be distinct.",
-    );
   }
   const cloudflareAccountId = normalizeOptionalString(source.CLOUDFLARE_ACCOUNT_ID);
   const presignAccountId = normalizeOptionalString(source.HOSTED_R2_PRESIGN_ACCOUNT_ID);
@@ -560,19 +539,13 @@ async function listHostedDeployR2BucketInvariantErrors(
 ): Promise<string[]> {
   const runtimeName = normalizeOptionalString(source.CF_BUNDLES_BUCKET);
   const previewName = normalizeOptionalString(source.CF_BUNDLES_PREVIEW_BUCKET);
-  const retiringOcRuntimeName = normalizeOptionalString(source.CF_BUNDLES_RETIRING_OC_BUCKET);
-  const retiringOcPreviewName = normalizeOptionalString(
-    source.CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET,
-  );
-  if (!runtimeName || !previewName || !retiringOcRuntimeName || !retiringOcPreviewName) {
+  if (!runtimeName || !previewName) {
     return [];
   }
 
   const buckets = [
     { label: "Runtime R2", location: "ENAM", name: runtimeName },
     { label: "Preview R2", location: "ENAM", name: previewName },
-    { label: "Retiring OC runtime R2", location: "OC", name: retiringOcRuntimeName },
-    { label: "Retiring OC preview R2", location: "OC", name: retiringOcPreviewName },
   ] as const;
   const bucketInfoByName = new Map<string, Promise<R2BucketInfo>>();
   const readBucketInfo = (bucketName: string): Promise<R2BucketInfo> => {

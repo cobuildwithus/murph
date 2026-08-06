@@ -43,8 +43,6 @@ function createDeployEnvironment() {
     allowedRunnerSecretKeys: null,
     bundlesBucketName: "bundles",
     bundlesPreviewBucketName: "bundles-preview",
-    bundlesRetiringOcBucketName: "bundles-retiring-oc",
-    bundlesRetiringOcPreviewBucketName: "bundles-retiring-oc-preview",
     platformEnvelopeKeyId: "v1",
     compatibilityDate: "2026-03-27",
     containerInstanceType: {

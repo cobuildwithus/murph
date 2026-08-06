@@ -298,58 +298,6 @@ describe("hosted runner user data cleanup", () => {
     expect(serializedLogs).not.toContain("R2 list failed for");
   });
 
-  it("clears canonical and retiring OC copies before deleting Durable Object state", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore();
-    const canonical = new ListableMemoryEncryptedR2Bucket();
-    const retiringOc = new ListableMemoryEncryptedR2Bucket();
-    const prefix = await hostedBundleUserPrefix({ userId: USER_ID });
-    await canonical.put(`${prefix}canonical.bundle.json`, "canonical");
-    await retiringOc.put(`${prefix}retiring.bundle.json`, "retiring");
-
-    const result = await deleteHostedRunnerUserData({
-      bucket: canonical,
-      retiringOcBucket: retiringOc,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
-      userId: USER_ID,
-    });
-
-    expect(result.ok).toBe(true);
-    expect(canonical.objects.size).toBe(0);
-    expect(retiringOc.objects.size).toBe(0);
-    expect(stateStore.deleteStateCallCount).toBe(1);
-  });
-
-  it("retains deletion ownership when retiring OC cleanup fails", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore();
-    const canonical = new ListableMemoryEncryptedR2Bucket();
-    const prefix = await hostedBundleUserPrefix({ userId: USER_ID });
-    const canonicalKey = `${prefix}canonical.bundle.json`;
-    const retiringKey = `${prefix}retiring.bundle.json`;
-    const retiringOc = new FailingDeleteListableR2Bucket(retiringKey);
-    await canonical.put(canonicalKey, "canonical");
-    await retiringOc.put(retiringKey, "retiring");
-
-    await expect(deleteHostedRunnerUserData({
-      bucket: canonical,
-      retiringOcBucket: retiringOc,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
-      userId: USER_ID,
-    })).rejects.toThrow("Hosted runner R2 cleanup failed");
-
-    expect(canonical.objects.has(canonicalKey)).toBe(false);
-    expect(retiringOc.objects.has(retiringKey)).toBe(true);
-    expect(stateStore.deleteStateCallCount).toBe(0);
-    expect(durable.deleteAllCount).toBe(0);
-  });
-
   it("rejects a bucket without list support instead of reporting success", async () => {
     const durable = createDurableObjectHarness();
     const stateStore = createDeletionStateStore();

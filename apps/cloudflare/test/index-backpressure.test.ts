@@ -37,14 +37,6 @@ describe("cloudflare worker queue backpressure routes", () => {
     vi.restoreAllMocks();
   });
 
-  it("fails closed when the retiring OC deletion binding is absent", () => {
-    expect(() => createUserRunnerDurableObject({
-      BUNDLES_RETIRING_OC: undefined,
-    })).toThrow(
-      "Hosted user deletion requires the retiring OC R2 binding until that bucket is empty.",
-    );
-  });
-
   it("keeps the removed dispatch route unavailable without relying on legacy local queue state", async () => {
     const harness = createUserRunnerDurableObject();
     await harness.durableObject.bindUser("member_123");
@@ -159,7 +151,6 @@ function createUserRunnerDurableObject(
   const baseEnv = {
     ...createHostedExecutionTestEnv(),
     BUNDLES: bucket.api,
-    BUNDLES_RETIRING_OC: bucket.api,
     RUNNER_CONTAINER: storage.runnerContainerNamespace,
     RUNNER_CONTAINER_SMOKE: storage.runnerContainerNamespace,
     ...overrides,

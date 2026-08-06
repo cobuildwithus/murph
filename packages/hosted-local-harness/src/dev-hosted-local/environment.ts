@@ -1132,13 +1132,6 @@ export function buildWranglerLocalDevConfig(
         bucket_name: "murph-hosted-bundles",
         preview_bucket_name: "murph-hosted-bundles-preview",
       },
-      {
-        // Hosted-local aliases the retiring erasure binding to the canonical
-        // bucket; production deploy validation requires a distinct OC bucket.
-        binding: "BUNDLES_RETIRING_OC",
-        bucket_name: "murph-hosted-bundles",
-        preview_bucket_name: "murph-hosted-bundles-preview",
-      },
     ],
     // Wrangler proxies the Workers AI binding through a remote session. The
     // Cloudflare dev wrapper strips CLOUDFLARE_API_TOKEN from the final

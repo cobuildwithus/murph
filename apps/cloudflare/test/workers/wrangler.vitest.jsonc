@@ -38,10 +38,6 @@
     {
       "binding": "BUNDLES",
       "bucket_name": "hosted-runner-vitest-bundles"
-    },
-    {
-      "binding": "BUNDLES_RETIRING_OC",
-      "bucket_name": "hosted-runner-vitest-bundles-retiring-oc"
     }
   ],
   "vars": {

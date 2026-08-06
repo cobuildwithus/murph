@@ -181,7 +181,6 @@ export interface WorkerEnvironmentContract<
 > extends Readonly<Record<string, unknown>> {
   AI?: WorkerAiBindingLike;
   BUNDLES: R2BucketLike;
-  BUNDLES_RETIRING_OC?: R2BucketLike;
   CF_VERSION_METADATA?: {
     id?: string;
     tag?: string;

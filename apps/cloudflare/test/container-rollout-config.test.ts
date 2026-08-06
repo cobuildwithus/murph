@@ -27,8 +27,6 @@ describe("Cloudflare container rollout config", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_BUNDLES_RETIRING_OC_BUCKET: "hosted-bundles-retiring-oc",
-      CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET: "hosted-bundles-retiring-oc-preview",
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
@@ -49,8 +47,6 @@ describe("Cloudflare container rollout config", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_BUNDLES_RETIRING_OC_BUCKET: "hosted-bundles-retiring-oc",
-      CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET: "hosted-bundles-retiring-oc-preview",
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
@@ -76,8 +72,6 @@ describe("Cloudflare container rollout config", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_BUNDLES_RETIRING_OC_BUCKET: "hosted-bundles-retiring-oc",
-      CF_BUNDLES_RETIRING_OC_PREVIEW_BUCKET: "hosted-bundles-retiring-oc-preview",
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });

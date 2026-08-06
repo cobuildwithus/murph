@@ -108,7 +108,6 @@ export class HostedUserRunner {
         runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
       }
     ).runnerContainerNamespace ?? null,
-    retiringOcBucket: R2BucketLike = bucket,
   ) {
     this.stateStore = new RunnerStateStore(state);
     this.privateMediaBucket = bucket;
@@ -146,7 +145,6 @@ export class HostedUserRunner {
     this.runtimeProcessing = runtimeProcessing;
     this.userDataDeletionInput = {
       bucket,
-      retiringOcBucket,
       runnerContainerNamespace,
       runnerRuntimeEnvSource,
       state,
