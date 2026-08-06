@@ -1,7 +1,18 @@
+import type {
+  HostedRuntimeLatencyPhaseBreakdown,
+} from "@murphai/hosted-execution/runtime-control";
+
 interface ColdStartRuntimeLog {
   attemptId: string | null;
+  component?: string;
   level: string;
   phase: string;
+  redactedJson?: Record<string, unknown> | null;
+}
+
+interface ColdStartLatencyTrace {
+  phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown | null;
+  runtimeAttemptId: string | null;
 }
 
 /**
@@ -26,4 +37,37 @@ export function assertSingleSuccessfulColdStartAttempt(
   if (attemptIds.size !== 1 || !attemptIds.has(successfulAttemptId)) {
     throw new Error("Cold-start benchmark observed more than one runtime attempt.");
   }
+}
+
+export function assertEstablishedR2ColdStartAttempt(input: {
+  expectedEncryptedBytes: number;
+  expectedPlainBytes: number;
+  runtimeLogs: readonly ColdStartRuntimeLog[];
+  successfulAttemptId: string;
+  trace: ColdStartLatencyTrace;
+}): void {
+  assertSingleSuccessfulColdStartAttempt(
+    input.runtimeLogs,
+    input.successfulAttemptId,
+  );
+
+  if (input.trace.runtimeAttemptId !== input.successfulAttemptId) {
+    throw new Error("Cold-start benchmark latency trace belongs to another runtime attempt.");
+  }
+  const phaseBreakdown = input.trace.phaseBreakdown;
+  if (!phaseBreakdown || phaseBreakdown.boot?.restoreWasCold !== true) {
+    throw new Error("Cold-start benchmark latency trace did not prove a cold restore.");
+  }
+  const restore = phaseBreakdown.restore;
+  if (
+    !restore
+    || restore.encryptedBytes !== input.expectedEncryptedBytes
+    || restore.plainBytes !== input.expectedPlainBytes
+    || typeof restore.objectFetchMs !== "number"
+    || !Number.isSafeInteger(restore.objectFetchMs)
+    || restore.objectFetchMs < 0
+  ) {
+    throw new Error("Cold-start benchmark latency trace did not match the restored v2 snapshot.");
+  }
+
 }

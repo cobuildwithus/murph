@@ -144,6 +144,7 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-cold-start-benchmark-e2e.test.ts",
     manualOnly: true,
     name: "cold-start-benchmark",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",

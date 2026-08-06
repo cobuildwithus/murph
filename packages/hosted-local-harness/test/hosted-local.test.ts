@@ -76,6 +76,7 @@ describe("hosted-local harness", () => {
       file: "apps/cloudflare/test/hosted-local-cold-start-benchmark-e2e.test.ts",
       manualOnly: true,
       name: "cold-start-benchmark",
+      testControls: true,
     });
     expect(resolveHostedLocalE2eScenarios("telegram")[0]?.name).toBe(
       "telegram-first-contact",
