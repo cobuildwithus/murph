@@ -102,6 +102,10 @@ test('detects quoted and unquoted generic secret assignments', () => {
     `{"CLOUDFLARE_API_TOKEN":"${secret}"}`,
     `CLOUDFLARE_API_TOKEN=${secret}`,
     `export AUTH_TOKEN=${secret}`,
+    `MAPBOX_ACCESS_TOKEN=${secret} vault-cli route estimate`,
+    `export AUTH_TOKEN=${secret} && deploy-release`,
+    `AUTH_TOKEN="${secret}" command`,
+    `AUTH_TOKEN=${secret} || exit 1`,
     `export AUTH_TOKEN=${secret};`,
     `AUTH_TOKEN=${secret} # production`,
     `client_secret: ${secret}`,
@@ -126,10 +130,64 @@ test('detects quoted and unquoted generic secret assignments', () => {
   }
 });
 
-test('does not trust a modified vendored fixture at an allowed path', async () => {
+test('rejects shell assignment suffixes through the complete tarball boundary', async () => {
+  const credential = ['uY7nQ2pL9vR4', 'xT8mW3cD6fH1'].join('');
+  for (const assignment of [
+    `MAPBOX_ACCESS_TOKEN=${credential} vault-cli route estimate`,
+    `export AUTH_TOKEN=${credential} && deploy-release`,
+    `AUTH_TOKEN="${credential}" command`,
+    `AUTH_TOKEN=${credential} || exit 1`,
+    `export AUTH_TOKEN=${credential};`,
+    `AUTH_TOKEN=${credential} # production`,
+  ]) {
+    const fixture = await createTarball({
+      'README.md': assignment,
+      'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+    });
+    try {
+      await assert.rejects(
+        verifyReleaseArtifacts(fixture.root, fixture.packOutput),
+        (error) => {
+          assert.match(error.message, /credential:generic-assignment/u);
+          assert.equal(error.message.includes(credential), false);
+          return true;
+        },
+      );
+    } finally {
+      await fixture.cleanup();
+    }
+  }
+});
+
+test('scans every shipped file without archive-path exceptions', async () => {
   const credential = ['uY7nQ2pL9vR4', 'xT8mW3cD6fH1'].join('');
   const fixture = await createTarball({
     'node_modules/incur/src/Cli.test.ts': `const fixture = { API_TOKEN: "${credential}" };`,
+    'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+  });
+  try {
+    await assert.rejects(
+      verifyReleaseArtifacts(fixture.root, fixture.packOutput),
+      (error) => {
+        assert.match(error.message, /credential:generic-assignment/u);
+        assert.equal(error.message.includes(credential), false);
+        return true;
+      },
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('scans equals assignments in declaration files but permits colon type fields', async () => {
+  const credential = ['uY7nQ2pL9vR4', 'xT8mW3cD6fH1'].join('');
+  const fixture = await createTarball({
+    'dist/index.d.ts': [
+      'export interface CredentialShape {',
+      '  API_TOKEN: string;',
+      '}',
+      `API_TOKEN=${credential}`,
+    ].join('\n'),
     'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
   });
   try {
@@ -184,6 +242,72 @@ test('does not exempt complete credentials based on value shape', () => {
 
   for (const testCase of cases) {
     assert.ok(contentRuleIds(testCase.text).includes(testCase.ruleId));
+  }
+});
+
+test('detects standard authorization, parameter, and camel-case credential forms', async () => {
+  const credential = ['uY7nQ2pL9vR4', 'xT8mW3cD6fH1'].join('');
+  const basicCredential = ['c2VydmljZTp', 'wYXNzd29yZA=='].join('');
+  const cases = [
+    `{"Authorization":"Bearer ${credential}"}`,
+    `headers["Authorization"] = "Bearer ${credential}"`,
+    `headers.set("Authorization", "Bearer ${credential}")`,
+    `new Headers([["Authorization", "Basic ${basicCredential}"]])`,
+    `https://provider.example/revoke?access_token=${credential}`,
+    `https://provider.example/token?client_secret=${credential}`,
+    `refresh_token=${credential}&grant_type=refresh_token`,
+    `const controlToken = "${credential}";`,
+    `const webhookSecret = "${credential}";`,
+    `config["signingSecret"] = "${credential}";`,
+    `const databasePassword = "${credential}";`,
+  ];
+  for (const text of cases) {
+    assert.ok(
+      contentRuleIds(text).some((ruleId) =>
+        ['credential:authorization-header', 'credential:generic-assignment', 'credential:url-query'].includes(ruleId)),
+      `expected credential rule for ${text.replaceAll(credential, '<synthetic>')}`,
+    );
+  }
+
+  for (const text of [
+    'headers.set("Authorization", `Bearer ${ACCESS_TOKEN}`)',
+    'const controlToken = process.env.CONTROL_TOKEN;',
+    'refresh_token=${REFRESH_TOKEN}&grant_type=refresh_token',
+  ]) {
+    assert.equal(
+      contentRuleIds(text).some((ruleId) =>
+        ['credential:authorization-header', 'credential:generic-assignment', 'credential:url-query'].includes(ruleId)),
+      false,
+    );
+  }
+
+  const fixture = await createTarball({
+    'dist/auth.js': [
+      `const jsonHeader = {"Authorization":"Bearer ${credential}"};`,
+      `headers["Authorization"] = "Bearer ${credential}";`,
+      `headers.set("Authorization", "Bearer ${credential}");`,
+      `const tupleHeaders = new Headers([["Authorization", "Basic ${basicCredential}"]]);`,
+      `const revokeUrl = "https://provider.example/revoke?access_token=${credential}";`,
+      `const exchangeUrl = "https://provider.example/token?client_secret=${credential}";`,
+      `const refreshBody = "refresh_token=${credential}&grant_type=refresh_token";`,
+      `const controlToken = "${credential}";`,
+      `const webhookSecret = "${credential}";`,
+    ].join('\n'),
+    'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+  });
+  try {
+    await assert.rejects(
+      verifyReleaseArtifacts(fixture.root, fixture.packOutput),
+      (error) => {
+        assert.match(error.message, /credential:authorization-header/u);
+        assert.match(error.message, /credential:url-query/u);
+        assert.match(error.message, /credential:generic-assignment/u);
+        assert.equal(error.message.includes(credential), false);
+        return true;
+      },
+    );
+  } finally {
+    await fixture.cleanup();
   }
 });
 

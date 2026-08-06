@@ -86,6 +86,12 @@ function shouldSkipExternalPayloadArtifact(sourcePath) {
   return path.basename(sourcePath) === 'node_modules' || shouldSkipPayloadArtifact(sourcePath);
 }
 
+const nonRuntimeIncurPayloadPaths = new Set([
+  'src/Cli.test.ts',
+  'src/Mcp.test.ts',
+  'src/e2e.test.ts',
+]);
+
 async function pathExists(targetPath) {
   try {
     await stat(targetPath);
@@ -183,7 +189,16 @@ async function copyExternalPackagePayload(packageName, packageJson, sourceDir, t
     }
 
     await copyPayloadPath(sourcePath, path.join(targetDir, relativePath), {
-      shouldSkip: shouldSkipExternalPayloadArtifact,
+      shouldSkip(candidatePath) {
+        const relativeCandidate = path.relative(sourceDir, candidatePath)
+          .split(path.sep)
+          .join('/');
+        return shouldSkipExternalPayloadArtifact(candidatePath)
+          || (
+            packageName === 'incur'
+            && nonRuntimeIncurPayloadPaths.has(relativeCandidate)
+          );
+      },
     });
   }
 }
@@ -461,7 +476,7 @@ for (const entry of context.orderedPackages) {
     version: entry.packageJson.version,
   });
 
-  console.log(`${entry.name}@${entry.packageJson.version} -> ${tarballFilename}`);
+  console.log(`${entry.name}@${entry.packageJson.version} packed.`);
 }
 
 const packOutput = {

@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -51,10 +50,8 @@ const providerPatterns = [
 
 const privateKeyBlockPattern =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]{32,16384}?-----END [A-Z0-9 ]*PRIVATE KEY-----/u;
-const authorizationCredentialPatterns = [
-  /\bAuthorization\s*[:=]\s*["'`]?Bearer\s+[A-Za-z0-9._~+/=-]{20,}["'`]?/iu,
-  /\bAuthorization\s*[:=]\s*["'`]?Basic\s+[A-Za-z0-9+/]{8,}={0,2}["'`]?/iu,
-];
+const authorizationCredentialPattern =
+  /\bAuthorization\b[\s\S]{0,96}?\b(Bearer|Basic)[ \t]+([A-Za-z0-9._~+/$={}-]{1,4096})/giu;
 const privateJwkPatterns = [
   /\bkty\s*["']?\s*:\s*["'](?:EC|OKP|RSA)["'][\s\S]{0,2000}?\bd\s*["']?\s*:\s*["']([A-Za-z0-9_-]{32,})["']/iu,
   /\bd\s*["']?\s*:\s*["']([A-Za-z0-9_-]{32,})["'][\s\S]{0,2000}?\bkty\s*["']?\s*:\s*["'](?:EC|OKP|RSA)["']/iu,
@@ -62,22 +59,23 @@ const privateJwkPatterns = [
 ];
 const credentialUrlPattern =
   /\b(?:amqps?|https?|mongodb(?:\+srv)?|mysql|nats|postgres(?:ql)?|redis|sftp):\/\/[^:\s/@]+:[^@\s/]+@[^\s"'`,;]+/giu;
-const credentialQueryPattern =
-  /[?&](?:api[_-]?key|key|secret|signature|token)=([^&#\s"'`]{1,4096})/giu;
-const structuredSecretAssignmentPattern =
-  /(?:^|[,{][ \t\r\n]*|\n[ \t]*)["'`]?\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b["'`]?\s*:\s*(["'`])([^"'`\r\n]{1,4096})\2/gimu;
-const declaredSecretAssignmentPattern =
-  /(?:^|[;\n][ \t]*)(?:export[ \t]+)?(?:const|let|var)[ \t]+\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b[ \t]*=[ \t]*(["'`])([^"'`\r\n]{1,4096})\2/gimu;
-const quotedLineSecretAssignmentPattern =
-  /^[ \t]*(?:export[ \t]+)?["'`]?\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b["'`]?[ \t]*[:=][ \t]*(["'`])([^"'`\r\n]{1,4096})\2[ \t]*(?:;[ \t]*)?(?:#[^\r\n]*)?$/gimu;
-const unquotedLineSecretAssignmentPattern =
-  /^[ \t]*(?:export[ \t]+)?["'`]?\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b["'`]?[ \t]*[:=][ \t]*([^"'`\s,;#]{1,4096})[ \t]*(?:;[ \t]*)?(?:#[^\r\n]*)?$/gimu;
+const credentialParameterPattern =
+  /(?:^|[?&])([A-Za-z_$][A-Za-z0-9_$-]{0,127})=([^&#\s"'`]{1,4096})/gimu;
+const quotedColonAssignmentPattern =
+  /(?:^|[,{][ \t\r\n]*|\n[ \t]*)["'`]?\b([A-Za-z_$][A-Za-z0-9_$-]*)\b["'`]?\s*:\s*(["'`])([^"'`\r\n]{1,4096})\2/gimu;
+const unquotedColonAssignmentPattern =
+  /^[ \t]*["'`]?\b([A-Za-z_$][A-Za-z0-9_$-]*)\b["'`]?[ \t]*:[ \t]*([^"'`\s,;#]{1,4096})[ \t]*(?:;[ \t]*)?(?:#[^\r\n]*)?$/gimu;
+const equalsAssignmentPattern =
+  /(?:^|[^A-Za-z0-9_$-])["'`]?\b([A-Za-z_$][A-Za-z0-9_$-]*)\b["'`]?[ \t]*=(?!=|>)[ \t]*(?:(["'`])([^"'`\r\n]{1,4096})\2|([^"'`\s,;#&|]{1,4096}))/gimu;
+const bracketEqualsAssignmentPattern =
+  /\[[ \t]*(["'`])([A-Za-z_$][A-Za-z0-9_$-]*)\1[ \t]*\][ \t]*=(?!=|>)[ \t]*(?:(["'`])([^"'`\r\n]{1,4096})\3|([^"'`\s,;#&|]{1,4096}))/gimu;
 const walletPrivateKeyPattern =
   /["'`]?\b(?:eth(?:ereum)?[_-]?)?(?:wallet[_-]?)?private[_-]?key\b["'`]?\s*[:=]\s*["'`]?(0x[0-9a-f]{64})["'`]?/iu;
 const mnemonicPattern =
   /["'`]?\b(?:mnemonic|seed[_-]?phrase)\b["'`]?\s*[:=]\s*["'`]([a-z]+(?:\s+[a-z]+){11,23})["'`]/iu;
 
 const exactPlaceholderValues = new Set([
+  '...',
   'api-key',
   'changeme',
   'placeholder',
@@ -121,28 +119,31 @@ const allowedPublicCredentialAssignments = new Set(
     ['claim_token', '?'],
     ['claim_token', 'null'],
     ['clientSecret', 'string'],
+    [
+      'clientUserIdSecret',
+      'is a provider-owned HMAC secret and is not supported in serialized runtime config.',
+    ],
     ['clinical-records-token', 'device'],
     ['device-sync-token', 'device'],
     ['token', '-${suffix}'],
+    [
+      'webhookSecret',
+      'is a provider-owned webhook secret and is not supported in serialized runtime config.',
+    ],
+    [
+      'webhookSigningSecret',
+      'is a provider-owned webhook signing secret and is not supported in serialized runtime config.',
+    ],
+    [
+      'webhookVerificationToken',
+      'is a provider-owned admin secret and is not supported in serialized runtime config.',
+    ],
+    [
+      'webhookVerifyToken',
+      'is a provider-owned admin secret and is not supported in serialized runtime config.',
+    ],
   ].map(([key, value]) => `${key}\0${value}`),
 );
-// The CLI must bundle patched incur@0.4.5. Only the pinned upstream test files
-// may skip generic assignment matching; every stronger rule still scans them.
-const allowedVendoredFixtureDigests = new Map([
-  [
-    'package/node_modules/incur/src/Cli.test.ts',
-    'c33b3cdd0609475674a995a9d4e0f32fd54bc2c83082b96c307f5f7d60ec402c',
-  ],
-  [
-    'package/node_modules/incur/src/Mcp.test.ts',
-    '7332e0e53c37da5fe510a226038f2cd08917dd4ed40d4568451e2b2259e51795',
-  ],
-  [
-    'package/node_modules/incur/src/e2e.test.ts',
-    '3f6d1c5e32414aa2d01bad1467585818b15b6499b15d18f5d344664f41cfb9cc',
-  ],
-]);
-
 function normalizedArchivePath(value) {
   return value.replaceAll('\\', '/').replace(/^\.\//u, '');
 }
@@ -210,6 +211,7 @@ function isCredentialReference(value) {
   );
   return (
     /^\$\{?[A-Z][A-Z0-9_]*\}?$/u.test(trimmed)
+    || /^(?:process\.)?env\.[A-Z][A-Z0-9_]*$/u.test(trimmed)
     || (
       withoutTemplateReferences !== trimmed
       && /^[A-Za-z0-9._/-]*$/u.test(withoutTemplateReferences)
@@ -223,6 +225,33 @@ function isCredentialLiteral(key, value) {
     && !isCredentialReference(value)
     && !allowedPublicCredentialAssignments.has(`${key}\0${value}`)
   );
+}
+
+function credentialKeyParts(key) {
+  return key
+    .replace(/([a-z0-9])([A-Z])/gu, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/gu, '$1_$2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter(Boolean);
+}
+
+function isCredentialKey(key, options = {}) {
+  const parts = credentialKeyParts(key);
+  const terminal = parts.at(-1);
+  if (['mnemonic', 'password', 'secret', 'token'].includes(terminal)) {
+    return true;
+  }
+  if (terminal === 'signature') {
+    return options.allowSignature === true;
+  }
+  if (terminal !== 'key') {
+    return false;
+  }
+  return (parts.length === 1 && options.allowBareKey === true) || parts
+    .slice(0, -1)
+    .some((part) =>
+      ['access', 'api', 'auth', 'client', 'private', 'secret', 'signing'].includes(part));
 }
 
 function isAllowedLocalDatabasePlaceholder(rawUrl) {
@@ -239,12 +268,27 @@ function isAllowedLocalDatabasePlaceholder(rawUrl) {
   }
 }
 
-function secretAssignmentHasCredential(pattern, text, valueIndex) {
+function secretAssignmentHasCredential(
+  pattern,
+  text,
+  keyIndex,
+  valueIndexes,
+  options = {},
+) {
   pattern.lastIndex = 0;
   for (const match of text.matchAll(pattern)) {
-    const key = match[1] ?? '';
-    const value = match[valueIndex] ?? '';
-    if (isCredentialLiteral(key, value)) {
+    const key = match[keyIndex] ?? '';
+    const matchedValue = valueIndexes
+      .map((index) => ({ index, value: match[index] }))
+      .find((entry) => entry.value !== undefined);
+    if (
+      options.includeUnquoted === false
+      && matchedValue?.index === options.unquotedValueIndex
+    ) {
+      continue;
+    }
+    const value = matchedValue?.value ?? '';
+    if (isCredentialKey(key) && isCredentialLiteral(key, value)) {
       return true;
     }
   }
@@ -252,9 +296,10 @@ function secretAssignmentHasCredential(pattern, text, valueIndex) {
 }
 
 function contentRuleIds(text, options = {}) {
-  const includeGenericAssignments = options.includeGenericAssignments ?? true;
-  const includeUnquotedLineAssignments =
-    options.includeUnquotedLineAssignments ?? true;
+  const includeUnquotedColonAssignments =
+    options.includeUnquotedColonAssignments ?? true;
+  const includeUnquotedEqualsAssignments =
+    options.includeUnquotedEqualsAssignments ?? true;
   const ruleIds = new Set();
 
   for (const { pattern, ruleId } of providerPatterns) {
@@ -266,8 +311,13 @@ function contentRuleIds(text, options = {}) {
   if (privateKeyBlockPattern.test(text)) {
     ruleIds.add('private-key:block');
   }
-  if (authorizationCredentialPatterns.some((pattern) => pattern.test(text))) {
-    ruleIds.add('credential:authorization-header');
+  authorizationCredentialPattern.lastIndex = 0;
+  for (const match of text.matchAll(authorizationCredentialPattern)) {
+    const value = match[2] ?? '';
+    if (value.length >= 8 && isCredentialLiteral('authorization', value)) {
+      ruleIds.add('credential:authorization-header');
+      break;
+    }
   }
   if (privateJwkPatterns.some((pattern) => pattern.test(text))) {
     ruleIds.add('private-key:jwk');
@@ -287,25 +337,32 @@ function contentRuleIds(text, options = {}) {
     }
   }
 
-  credentialQueryPattern.lastIndex = 0;
-  for (const match of text.matchAll(credentialQueryPattern)) {
-    const credential = match[1] ?? '';
-    if (isCredentialLiteral('url-query', credential)) {
+  credentialParameterPattern.lastIndex = 0;
+  for (const match of text.matchAll(credentialParameterPattern)) {
+    const key = match[1] ?? '';
+    const credential = match[2] ?? '';
+    if (
+      isCredentialKey(key, { allowBareKey: true, allowSignature: true })
+      && isCredentialLiteral(key, credential)
+    ) {
       ruleIds.add('credential:url-query');
       break;
     }
   }
 
   if (
-    includeGenericAssignments
-    && (
-      secretAssignmentHasCredential(structuredSecretAssignmentPattern, text, 3)
-      || secretAssignmentHasCredential(declaredSecretAssignmentPattern, text, 3)
-      || secretAssignmentHasCredential(quotedLineSecretAssignmentPattern, text, 3)
-      || (
-        includeUnquotedLineAssignments
-        && secretAssignmentHasCredential(unquotedLineSecretAssignmentPattern, text, 2)
-      )
+    secretAssignmentHasCredential(quotedColonAssignmentPattern, text, 1, [3])
+    || secretAssignmentHasCredential(equalsAssignmentPattern, text, 1, [3, 4], {
+      includeUnquoted: includeUnquotedEqualsAssignments,
+      unquotedValueIndex: 4,
+    })
+    || secretAssignmentHasCredential(bracketEqualsAssignmentPattern, text, 2, [4, 5], {
+      includeUnquoted: includeUnquotedEqualsAssignments,
+      unquotedValueIndex: 5,
+    })
+    || (
+      includeUnquotedColonAssignments
+      && secretAssignmentHasCredential(unquotedColonAssignmentPattern, text, 1, [2])
     )
   ) {
     ruleIds.add('credential:generic-assignment');
@@ -367,14 +424,15 @@ async function scanExtractedTarball(rootPath) {
 
     const contents = await readFile(file.absolutePath);
     const text = contents.toString('utf8');
-    const expectedFixtureDigest = allowedVendoredFixtureDigests.get(
-      file.relativePath,
-    );
-    const hasExactAllowedFixtureContents = expectedFixtureDigest !== undefined
-      && createHash('sha256').update(contents).digest('hex') === expectedFixtureDigest;
+    const isDeclarationFile = file.relativePath.endsWith('.d.ts');
+    const isJavaScriptOrTypeScript = /\.(?:[cm]?[jt]sx?)$/u.test(file.relativePath);
+    // Inline string credentials in JS/TS are quoted; unquoted right-hand sides
+    // are code expressions. Declaration files cannot contain executable
+    // assignments, so a KEY=value line there remains suspicious.
     for (const ruleId of contentRuleIds(text, {
-      includeGenericAssignments: !hasExactAllowedFixtureContents,
-      includeUnquotedLineAssignments: !file.relativePath.endsWith('.d.ts'),
+      includeUnquotedColonAssignments: !isJavaScriptOrTypeScript,
+      includeUnquotedEqualsAssignments:
+        !isJavaScriptOrTypeScript || isDeclarationFile,
     })) {
       findings.push({ path: file.relativePath, ruleId });
     }

@@ -175,7 +175,7 @@ for (const entry of summary.packages) {
     publishArgs.push('--tag', options.npmTag);
   }
 
-  console.log(`+ npm ${publishArgs.join(' ')}`);
+  console.log(`+ npm publish <verified-release-tarball> ${publishArgs.slice(2).join(' ')}`.trim());
   const publishCommand = resolvePublishCommand(publishArgs);
 
   try {

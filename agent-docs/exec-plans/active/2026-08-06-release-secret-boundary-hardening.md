@@ -91,9 +91,10 @@ Updated: 2026-08-06
   third-party scanner dependency to the release trust path.
 - Keep generic assignment detection syntax-scoped and value-authoritative.
   Allow only exact public metadata/placeholders and explicit source
-  interpolation syntax. Preserve the required patched `incur` bundle, but allow
-  its three source-test fixtures only when their exact paths and complete
-  content digests match the pinned inventory; strong rules remain active.
+  interpolation or environment-reference syntax. Preserve the required patched
+  `incur` bundle and its runtime/source entrypoints, but omit the three proven
+  non-runtime upstream test sources instead of weakening scanner policy for
+  their paths or contents.
 
 ## Verification
 
@@ -114,7 +115,7 @@ Updated: 2026-08-06
 - Secret scanning, push protection, non-provider patterns, validity checks, and
   AI detection all read back enabled.
 - The sole synthetic webhook alert reads back resolved as `used_in_tests`.
-- Focused scanner coverage passes with 14 accepted/rejected fixture cases,
+- Focused scanner coverage passes with 17 accepted/rejected fixture cases,
   including Basic auth, unquoted assignments, external outputs, secret-safe
   path/tarball reporting, archive-link rejection, shell terminators/comments,
   JWT-shaped values, and declaration-only `.d.ts` syntax.
@@ -141,12 +142,24 @@ Updated: 2026-08-06
   authoritative, public exceptions are exact, all artifact names are hidden by
   default, and path segments are scanned individually. The first attempt to
   remove bundled `incur` failed the existing package-shape invariant proving its
-  patched runtime requirement; the corrected design preserves the bundle but
-  replaces a path-only exception with exact full-file digests and changed-file
-  rejection. The correction still deletes conditional redaction and broad
-  dotted-reference concepts.
+  patched runtime requirement. The round-2 correction temporarily preserved
+  the three source-test files behind exact full-file digests; round 3 proved
+  those tests are not runtime payload and the final design omits them while
+  retaining `incur` runtime and source entrypoints. The correction also deletes
+  conditional redaction and broad dotted-reference concepts.
 - The corrected design passes fresh five-package packing/scanning, standalone
   five-tarball scanning, CLI package-shape verification, the external-output
   installed-contract test, the publication-owner test, and the complete
   diff-scoped lane again (31 repo-tool files / 469 tests, CLI typecheck, and 118
   CLI files / 1,112 passing tests with one skip).
+- Final ReviewGPT round 3 accepted the remaining assignment-mechanism gap for
+  command-prefixed shell syntax and declaration-file equals assignments, the
+  original gap for common authorization/parameter/camel-case serializations,
+  and the simplification of the `incur` fixture exception. Production-shaped
+  reproductions confirmed all three. The correction uses one shared
+  credential-key classifier, scans quoted code literals plus shell/config
+  tokens according to their syntax, omits only the three non-runtime upstream
+  tests, and removes tarball names from pack/publish command logs. Focused guard
+  tests, a fresh five-tarball scan, CLI package-shape verification, and the
+  prepared installed-CLI proof pass; the packed `incur` runtime/source
+  entrypoints remain present while the three test sources are absent.
