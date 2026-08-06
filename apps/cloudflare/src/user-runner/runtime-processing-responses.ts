@@ -6,6 +6,9 @@ import type {
 } from "@murphai/hosted-execution/orchestration-control";
 
 import type { HostedExecutionEnvironment } from "../env.js";
+import type {
+  WorkerAnalyticsEngineDatasetLike,
+} from "../worker-contracts.js";
 import {
   computeHostedRuntimeProcessingRecheckDelayMs,
 } from "../runtime-processing-timing.ts";
@@ -13,19 +16,28 @@ import type {
   RuntimeProcessingRetryReason,
 } from "./diagnostics.js";
 
-export function computeRuntimeProcessingRetryAt(
+export const HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA =
+  "murph.hosted-runtime-retry.v1";
+
+export function readRuntimeProcessingRetryDelayMs(
   reason: RuntimeProcessingRetryReason,
-): string {
-  const delayMs =
-    reason === "starting_fence_preserved" ? 3_000 :
+): number {
+  return reason === "starting_fence_preserved" ? 3_000 :
     reason === "container_busy" ? 5_000 :
     reason === "command_budget_exhausted" ? 10_000 :
     reason === "container_rpc_timeout" ? 10_000 :
     reason === "container_rpc_error" ? 30_000 :
+    reason === "health_data_processing_disallowed" ? 60_000 :
     reason === "missing_container_binding" ? 60_000 :
     15_000;
+}
 
-  return new Date(Date.now() + delayMs).toISOString();
+export function computeRuntimeProcessingRetryAt(
+  reason: RuntimeProcessingRetryReason,
+): string {
+  return new Date(
+    Date.now() + readRuntimeProcessingRetryDelayMs(reason),
+  ).toISOString();
 }
 
 export function computeRuntimeProcessingOwnerRecheckAt(input: {
@@ -35,6 +47,7 @@ export function computeRuntimeProcessingOwnerRecheckAt(input: {
 }
 
 export function createRuntimeProcessingRetryLater(input: {
+  analytics?: WorkerAnalyticsEngineDatasetLike | null;
   reason: RuntimeProcessingRetryReason;
   userId: string;
 }): HostedRuntimeEnsureProcessingResponse {
@@ -48,10 +61,29 @@ export function createRuntimeProcessingRetryLater(input: {
     phase: "runtime.starting",
     userId: input.userId,
   });
+  recordRuntimeProcessingRetry(input.analytics ?? null, input.reason);
   return {
     kind: "retry_later",
     retryAt: computeRuntimeProcessingRetryAt(input.reason),
   };
+}
+
+function recordRuntimeProcessingRetry(
+  analytics: WorkerAnalyticsEngineDatasetLike | null,
+  reason: RuntimeProcessingRetryReason,
+): void {
+  if (!analytics) {
+    return;
+  }
+  try {
+    analytics.writeDataPoint({
+      indexes: [reason],
+      blobs: [HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA, reason],
+      doubles: [1, readRuntimeProcessingRetryDelayMs(reason)],
+    });
+  } catch {
+    // Best-effort telemetry must never alter retry behavior.
+  }
 }
 
 function computeActiveRuntimeWakeRecheckAt(env: HostedExecutionEnvironment): string {

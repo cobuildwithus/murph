@@ -11,6 +11,7 @@ import {
   HOSTED_RUNTIME_STATUS_PATH,
 } from "@murphai/hosted-execution/routes";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
+import { HostedUserRunner } from "../src/user-runner.ts";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
 
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.js";
@@ -82,6 +83,38 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(runResponse.status).toBe(404);
     expect(stub.bindUser).not.toHaveBeenCalled();
     expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+  });
+
+  it("stamps UserRunner RPC entry before delegating to the hosted runner", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-06T12:00:00.000Z"));
+    const ensure = vi.spyOn(
+      HostedUserRunner.prototype,
+      "ensureRuntimeProcessingForUser",
+    ).mockResolvedValue({
+      action: "started",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-08-06T12:01:00.000Z",
+      runtimeAttemptId: "runtime-attempt-test",
+    });
+    const harness = createUserRunnerDurableObject();
+
+    await harness.durableObject.ensureRuntimeProcessingForUser({
+      orchestration: {
+        cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T11:59:59.900Z"),
+      },
+      orchestrationAttemptId: "rpc-entry-test",
+      userId: "member_123",
+    });
+
+    expect(ensure).toHaveBeenCalledWith({
+      orchestration: {
+        cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T11:59:59.900Z"),
+        userRunnerRpcStartedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
+      },
+      orchestrationAttemptId: "rpc-entry-test",
+      userId: "member_123",
+    });
   });
 
   it("keeps an active write fence in flight through the production Durable Object constructor", async () => {

@@ -18,6 +18,7 @@ export type RuntimeProcessingRetryReason =
   | "container_rpc_error"
   | "container_rpc_timeout"
   | "command_budget_exhausted"
+  | "health_data_processing_disallowed"
   | "missing_container_binding"
   | "starting_fence_preserved";
 

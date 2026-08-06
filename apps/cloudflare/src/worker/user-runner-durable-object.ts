@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import type {
+  HostedRuntimeLatencyPhaseBreakdown,
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -69,10 +70,17 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   async ensureRuntimeProcessingForUser(
     input: HostedRuntimeEnsureProcessingRequest & {
       commandTimeoutMs?: number;
+      orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
       userId: string;
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
-    return this.runner.ensureRuntimeProcessingForUser(input);
+    return this.runner.ensureRuntimeProcessingForUser({
+      ...input,
+      orchestration: {
+        ...(input.orchestration ?? {}),
+        userRunnerRpcStartedAtEpochMs: Date.now(),
+      },
+    });
   }
 
   async validateRuntimeWriteFence(input: {
@@ -155,5 +163,6 @@ function createHostedUserRunner(
     env,
     env.RUNNER_CONTAINER,
     r2CutoverContext,
+    env.HOSTED_RUNTIME_RETRY_ANALYTICS ?? null,
   );
 }

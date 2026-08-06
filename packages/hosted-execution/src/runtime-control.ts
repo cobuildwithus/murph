@@ -2071,7 +2071,15 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
     triggeredByWebDirect?: boolean;
+    userRunnerRpcStartedAtEpochMs?: number;
+    runtimeConsentLockAcquiredAtEpochMs?: number;
+    healthDataAdmissionReadStartedAtEpochMs?: number;
+    healthDataAdmissionReadFinishedAtEpochMs?: number;
     userRunnerEnsureStartedAtEpochMs?: number;
+    runnerStateBindStartedAtEpochMs?: number;
+    runnerStateBindFinishedAtEpochMs?: number;
+    runnerStateReadStartedAtEpochMs?: number;
+    runnerStateReadFinishedAtEpochMs?: number;
     activeFenceObservedAtEpochMs?: number;
     activeFenceTargetWasPriorVersion?: boolean;
     activeWakeStartedAtEpochMs?: number;
@@ -2223,7 +2231,15 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
     "triggeredByWebDirect",
+    "userRunnerRpcStartedAtEpochMs",
+    "runtimeConsentLockAcquiredAtEpochMs",
+    "healthDataAdmissionReadStartedAtEpochMs",
+    "healthDataAdmissionReadFinishedAtEpochMs",
     "userRunnerEnsureStartedAtEpochMs",
+    "runnerStateBindStartedAtEpochMs",
+    "runnerStateBindFinishedAtEpochMs",
+    "runnerStateReadStartedAtEpochMs",
+    "runnerStateReadFinishedAtEpochMs",
     "activeFenceObservedAtEpochMs",
     "activeFenceTargetWasPriorVersion",
     "activeWakeStartedAtEpochMs",
