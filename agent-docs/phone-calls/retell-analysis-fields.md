@@ -5,8 +5,16 @@ not the raw transcript.
 
 Subscribe the Retell webhook to `call_ended`, `call_analyzed`, and
 `transfer_ended` only, pointing at
-`/api/retell/webhook`. Murph verifies the raw `X-Retell-Signature`, updates the existing
-`HostedPhoneCall` row idempotently, and runs result handling only once when analysis first lands.
+`/api/retell/webhook`. Murph verifies the raw `X-Retell-Signature` and updates the existing
+`HostedPhoneCall` row idempotently. For an ordinary call, `call_analyzed` is the
+result boundary. When Retell reports `call_transfer`, that analysis describes
+only the automated leg, so Murph defers result persistence and notification
+until the human transfer leg ends. `transfer_ended` then becomes the result
+boundary: Murph records that the handoff connected while keeping the
+post-handoff outcome explicitly unknown and asks the member what happened. A
+cancelled or failed transfer remains on ordinary `call_analyzed` handling; only
+a successful transfer with a completed human leg is deferred.
+
 Signed terminal callbacks also record Retell's provider-reported aggregate call
 cost in the web-owned included-usage ledger. A `call_transfer` observation stays
 pending until `transfer_ended` so the immutable usage row includes transfer-leg
@@ -28,7 +36,8 @@ result
   Description:
     State the exact final outcome. Include all confirmed dates, times, locations, business names,
     provider names, prices, pickup details, confirmation codes, preparation instructions, and
-    relevant policies.
+    relevant policies. For a transferred call, this field describes only the automated leg before
+    handoff; Murph will not treat it as proof of what the member and recipient agreed afterward.
 
 follow_up
   Type: Text
