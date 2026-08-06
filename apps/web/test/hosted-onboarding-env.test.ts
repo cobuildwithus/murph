@@ -27,7 +27,7 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.inviteTtlHours).toBe(24 * 7);
     expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(1000);
     expect(environment.linqFirstContactAdmissionMode).toBe("off");
-    expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.6-terra");
+    expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.6-luna");
     expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBeNull();
     expect(environment.linqInstantStartPhonePrefixes).toEqual([
       "+351",
