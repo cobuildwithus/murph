@@ -1,6 +1,6 @@
 # Murph New-Member Onboarding
 
-Last verified: 2026-07-22
+Last verified: 2026-08-06
 
 ## Product Decision
 
@@ -92,6 +92,19 @@ privacy, authorization, or provider boundaries.
 - The onboarding skill owns conversation policy. The system-prompt overlay
   routes the open lifecycle into that skill, and the managed automation resumes
   it when a useful continuation exists.
+- The skill uses one package-owned progressive-disclosure asset. Its top-level
+  `SKILL.md` is a complete router capped at 12 KiB and directly owns the goal,
+  bounded resume check, immediate-need override, relationship promise, exact
+  welcome, and minimal-identity checkpoint. Aspiration/foundation/delegation,
+  persistence/recovery/follow-up, and return/launch/completion each live in one
+  directly referenced file under the same skill asset. A rule has one owner;
+  references do not restate the top-level policy or each other.
+- A fresh greeting or vague first message reads only the compact top-level
+  skill plus the one bounded `assistant onboarding resume-context` snapshot.
+  It does not preload a later-stage reference. A later or resumed turn reads
+  only the reference that owns its current decision; a turn that genuinely
+  crosses a stage boundary may read each newly relevant owner. All reference
+  files ship with the assistant-engine skill asset.
 - Hosted activation may start the first Linq conversation only after atomically
   reserving that line's proactive-conversation capacity for the current UTC
   day. A full preferred line falls through to another healthy line; when every

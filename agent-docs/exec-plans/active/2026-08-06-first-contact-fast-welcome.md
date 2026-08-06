@@ -107,8 +107,39 @@ Updated: 2026-08-06
 - Keep deterministic or prompt-bypass welcome handling out of this candidate;
   either would duplicate policy or broaden accepted-input terminal semantics.
 
+## Implementation evidence
+
+- The top-level skill is 9,837 bytes, down from 56,295 bytes: the fresh-turn
+  skill read is 46,458 bytes (82.5%) smaller and remains below the executable
+  12-KiB ceiling.
+- The three directly referenced owners are
+  `aspiration-foundation-delegation.md`,
+  `persistence-recovery-follow-up.md`, and
+  `return-launch-completion.md`. The complete asset is 59,833 bytes after
+  adding explicit routing and reference ownership headers; the latency win
+  comes from not loading irrelevant later-stage policy on the fresh greeting,
+  not from deleting that policy.
+- The asset regression failed before the split on the missing reference
+  inventory, then passed after the compact router and references landed. It
+  also checks direct reachability, exact inventory, early-stage ownership, and
+  representative single-owner safety/product invariants.
+- A real Codex App Server turn against the scripted Responses provider reads
+  the compact root, executes the bounded onboarding resume command, returns the
+  exact welcome, and proves no aspiration/foundation, completion, or recovery
+  marker entered tool output. This uses no new production state or delivery
+  path.
+
 ## Verification
 
+- Completed local proof:
+  - assistant skill assets: 27 passed, 6 existing skips;
+  - real App Server scripted fresh greeting: 1 passed;
+  - onboarding route planning: 1 passed;
+  - onboarding injection: 3 passed;
+  - assistant-engine typecheck, docs drift, and `git diff --check`: passed.
+- Remaining parent-owned gates: candidate commit/push, preliminary combined
+  product/prompt/coverage review, exact-head CI, and final parent review. The
+  PR must remain unmerged and undeployed.
 - Commands to run:
   - focused assistant-engine turn-planning and model-behavior Vitest files;
   - focused hosted-local Linq first-contact scenario when locally runnable;
