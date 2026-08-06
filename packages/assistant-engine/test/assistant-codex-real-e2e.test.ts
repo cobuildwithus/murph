@@ -1,5 +1,5 @@
-import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { homedir, tmpdir } from 'node:os'
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -8,9 +8,6 @@ import {
   readHabitatAspect,
   upsertHabitatAspect,
 } from '@murphai/core'
-import {
-  buildHostedLocalCodexSubscriptionSeedAuth,
-} from '@murphai/hosted-execution/hosted-codex-subscription-auth'
 import {
   assistantOnboardingResumeContextResultSchema,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -92,11 +89,6 @@ import type {
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const describeRealCodex = RUN_REAL_CODEX_E2E ? describe : describe.skip
 const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
-const REAL_CODEX_SUBSCRIPTION_AUTH_ENV =
-  'MURPH_REAL_CODEX_USE_SUBSCRIPTION_AUTH'
-const REAL_CODEX_SUBSCRIPTION_HOME_ENV =
-  'MURPH_REAL_CODEX_SUBSCRIPTION_HOME'
-const REAL_CODEX_SUBSCRIPTION_MINIMUM_RUNWAY_MS = 30 * 60 * 1_000
 const ONBOARDING_POLICY_PATHS = [
   ['SKILL.md', 'murph-onboarding/SKILL.md'],
   [
@@ -238,9 +230,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   it(
     'routes fresh, ordinary-record, incomplete-resume, and later turns through only their relevant onboarding policy',
     async () => {
-      const config = await resolveRealCodexE2eConfig({
-        allowSubscriptionAuth: true,
-      })
+      const config = await resolveRealCodexE2eConfig()
       const temporaryPaths = [...config.temporaryPaths]
 
       try {
@@ -378,123 +368,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
     },
     600_000,
   )
-})
-
-describe('real Codex subscription auth isolation', () => {
-  it('requires an explicit consumer opt-in and keeps copied credentials isolated', async () => {
-    const sourceHome = await mkdtemp(
-      path.join(tmpdir(), 'murph-codex-subscription-source-'),
-    )
-    const temporaryPaths = [sourceHome]
-    const envKeys = [
-      REAL_CODEX_SUBSCRIPTION_AUTH_ENV,
-      REAL_CODEX_SUBSCRIPTION_HOME_ENV,
-      OPENAI_API_KEY_ENV,
-      VERCEL_AI_GATEWAY_API_KEY_ENV,
-      'MURPH_REAL_CODEX_HOME',
-      'MURPH_REAL_CODEX_MODEL_PROVIDER',
-      'MURPH_REAL_CODEX_PROVIDER_ENV_KEY',
-    ] as const
-    const previousEnv = new Map(
-      envKeys.map((key) => [key, process.env[key]]),
-    )
-    const lastRefresh = '2026-08-05T12:00:00.000Z'
-    const writeSourceAuth = async (accessToken: string): Promise<void> => {
-      await writeFile(
-        path.join(sourceHome, 'auth.json'),
-        `${JSON.stringify({
-          auth_mode: 'chatgpt',
-          last_refresh: lastRefresh,
-          tokens: {
-            access_token: accessToken,
-            account_id: 'test-account',
-            id_token: buildRealCodexSubscriptionTestJwt(
-              Date.now() + 60 * 60 * 1_000,
-            ),
-            refresh_token: 'test-refresh-token',
-          },
-        })}\n`,
-        { encoding: 'utf8', mode: 0o600 },
-      )
-    }
-
-    try {
-      for (const key of envKeys) {
-        delete process.env[key]
-      }
-      process.env[REAL_CODEX_SUBSCRIPTION_AUTH_ENV] = '1'
-      process.env[REAL_CODEX_SUBSCRIPTION_HOME_ENV] = sourceHome
-      process.env[OPENAI_API_KEY_ENV] = 'test-provider-key'
-
-      const validAccessToken = buildRealCodexSubscriptionTestJwt(
-        Date.now() + 60 * 60 * 1_000,
-      )
-      await writeSourceAuth(validAccessToken)
-
-      const defaultConfig = await resolveRealCodexE2eConfig()
-      temporaryPaths.push(...defaultConfig.temporaryPaths)
-      expect(defaultConfig.modelProvider).toBe(OPENAI_ENV_MODEL_PROVIDER)
-
-      process.env[VERCEL_AI_GATEWAY_API_KEY_ENV] = 'test-gateway-key'
-      const subscriptionConfig = await resolveRealCodexE2eConfig({
-        allowSubscriptionAuth: true,
-      })
-      temporaryPaths.push(...subscriptionConfig.temporaryPaths)
-      expect(subscriptionConfig.modelProvider).toBe('openai')
-      expect(subscriptionConfig.env[OPENAI_API_KEY_ENV]).toBeUndefined()
-      expect(
-        subscriptionConfig.env[VERCEL_AI_GATEWAY_API_KEY_ENV],
-      ).toBeUndefined()
-
-      const copiedAuthPath = path.join(subscriptionConfig.codexHome, 'auth.json')
-      const copiedConfigPath = path.join(
-        subscriptionConfig.codexHome,
-        'config.toml',
-      )
-      expect(JSON.parse(await readFile(copiedAuthPath, 'utf8'))).toEqual({
-        OPENAI_API_KEY: null,
-        auth_mode: 'chatgptAuthTokens',
-        last_refresh: lastRefresh,
-        tokens: {
-          access_token: validAccessToken,
-          account_id: 'test-account',
-          id_token: expect.any(String),
-          refresh_token: '',
-        },
-      })
-      expect((await stat(copiedAuthPath)).mode & 0o777).toBe(0o600)
-      expect((await stat(copiedConfigPath)).mode & 0o777).toBe(0o600)
-
-      await removeRealCodexTemporaryPaths(subscriptionConfig.temporaryPaths)
-      await expect(stat(subscriptionConfig.codexHome)).rejects.toThrow()
-
-      const expiredAccessToken = buildRealCodexSubscriptionTestJwt(
-        Date.now() + 5 * 60 * 1_000,
-      )
-      await writeSourceAuth(expiredAccessToken)
-      let invalidRunwayFailure: unknown
-      try {
-        await resolveRealCodexE2eConfig({ allowSubscriptionAuth: true })
-      } catch (error) {
-        invalidRunwayFailure = error
-      }
-      expect(invalidRunwayFailure).toBeInstanceOf(Error)
-      const invalidRunwayMessage = invalidRunwayFailure instanceof Error
-        ? invalidRunwayFailure.message
-        : String(invalidRunwayFailure)
-      expect(invalidRunwayMessage).not.toContain(sourceHome)
-      expect(invalidRunwayMessage).not.toContain(expiredAccessToken)
-    } finally {
-      for (const [key, value] of previousEnv) {
-        if (value === undefined) {
-          delete process.env[key]
-        } else {
-          process.env[key] = value
-        }
-      }
-      await removeRealCodexTemporaryPaths(temporaryPaths)
-    }
-  })
 })
 
 describe('onboarding policy read detection', () => {
@@ -5835,15 +5708,11 @@ function buildRealCodexE2eFailureMessage(error: unknown): string {
 }
 
 async function removeRealCodexTemporaryPaths(paths: readonly string[]): Promise<void> {
-  const results = await Promise.allSettled(
-    paths.map((targetPath) => removeRealCodexTemporaryPath(targetPath)),
-  )
-  if (results.some((result) => result.status === 'rejected')) {
-    throw new Error('Failed to remove one or more real Codex temporary paths.')
-  }
+  await Promise.all(paths.map((targetPath) => removeRealCodexTemporaryPath(targetPath)))
 }
 
 async function removeRealCodexTemporaryPath(targetPath: string): Promise<void> {
+  let lastError: unknown
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     try {
       await rm(targetPath, {
@@ -5851,13 +5720,14 @@ async function removeRealCodexTemporaryPath(targetPath: string): Promise<void> {
         recursive: true,
       })
       return
-    } catch {
+    } catch (error) {
+      lastError = error
       if (attempt < 5) {
         await delay(50 * attempt)
       }
     }
   }
-  throw new Error('Failed to remove real Codex temporary path.')
+  throw lastError ?? new Error('Failed to remove real Codex temporary path.')
 }
 
 async function delay(milliseconds: number): Promise<void> {
@@ -6103,12 +5973,7 @@ function summarizeCodexEventSequence(
   })
 }
 
-async function resolveRealCodexE2eConfig(
-  input: { allowSubscriptionAuth?: boolean } = {},
-): Promise<RealCodexE2eConfig> {
-  const useSubscriptionAuth =
-    input.allowSubscriptionAuth === true
-    && process.env[REAL_CODEX_SUBSCRIPTION_AUTH_ENV] === '1'
+async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
   const model =
     normalizeEnvString(process.env.MURPH_REAL_CODEX_MODEL)
     ?? DEFAULT_REAL_CODEX_MODEL
@@ -6121,15 +5986,6 @@ async function resolveRealCodexE2eConfig(
 
   const explicitModelProvider =
     normalizeEnvString(process.env.MURPH_REAL_CODEX_MODEL_PROVIDER)
-  if (useSubscriptionAuth) {
-    if (explicitModelProvider && explicitModelProvider !== 'openai') {
-      throw new Error(
-        `${REAL_CODEX_SUBSCRIPTION_AUTH_ENV}=1 cannot be combined with a non-openai MURPH_REAL_CODEX_MODEL_PROVIDER.`,
-      )
-    }
-    return resolveRealCodexSubscriptionE2eConfig({ model })
-  }
-
   const modelProvider =
     explicitModelProvider
     ?? (
@@ -6195,90 +6051,6 @@ async function resolveRealCodexE2eConfig(
   }
 }
 
-async function resolveRealCodexSubscriptionE2eConfig(input: {
-  model: string
-}): Promise<RealCodexE2eConfig> {
-  let seedAuth: ReturnType<typeof buildHostedLocalCodexSubscriptionSeedAuth>
-  try {
-    const sourceHome =
-      normalizeEnvString(process.env[REAL_CODEX_SUBSCRIPTION_HOME_ENV])
-      ?? path.join(homedir(), '.codex')
-    seedAuth = buildHostedLocalCodexSubscriptionSeedAuth(
-      JSON.parse(await readFile(path.join(sourceHome, 'auth.json'), 'utf8')),
-    )
-    assertRealCodexSubscriptionTokenRunway(seedAuth.tokens.access_token)
-  } catch {
-    throw new Error(
-      `Subscription-backed real Codex e2e requires a valid ChatGPT Codex login with at least 30 minutes of access-token runway in ${REAL_CODEX_SUBSCRIPTION_HOME_ENV} or the default Codex home.`,
-    )
-  }
-  const codexHome = await mkdtemp(path.join(tmpdir(), 'murph-codex-home-'))
-  try {
-    await Promise.all([
-      writeFile(
-        path.join(codexHome, 'auth.json'),
-        `${JSON.stringify(seedAuth)}\n`,
-        { encoding: 'utf8', mode: 0o600 },
-      ),
-      writeFile(
-        path.join(codexHome, 'config.toml'),
-        buildRealCodexConfigToml({
-          apiKeyEnv: null,
-          model: input.model,
-          modelProvider: 'openai',
-        }),
-        { encoding: 'utf8', mode: 0o600 },
-      ),
-    ])
-
-    return {
-      codexHome,
-      env: buildRealCodexE2eEnv({}),
-      model: input.model,
-      modelProvider: 'openai',
-      temporaryPaths: [codexHome],
-    }
-  } catch (error) {
-    await removeRealCodexTemporaryPath(codexHome)
-    throw error
-  }
-}
-
-function assertRealCodexSubscriptionTokenRunway(accessToken: string): void {
-  const payloadSegment = accessToken.split('.')[1]
-  let expiryMs: number | null = null
-  if (payloadSegment) {
-    try {
-      const claims: unknown = JSON.parse(
-        Buffer.from(payloadSegment, 'base64url').toString('utf8'),
-      )
-      if (typeof claims === 'object' && claims !== null) {
-        const expirySeconds = Reflect.get(claims, 'exp')
-        if (typeof expirySeconds === 'number' && Number.isFinite(expirySeconds)) {
-          expiryMs = expirySeconds * 1_000
-        }
-      }
-    } catch {
-      expiryMs = null
-    }
-  }
-  if (
-    expiryMs === null
-    || expiryMs - Date.now() < REAL_CODEX_SUBSCRIPTION_MINIMUM_RUNWAY_MS
-  ) {
-    throw new Error('Codex subscription access token has insufficient runway.')
-  }
-}
-
-function buildRealCodexSubscriptionTestJwt(expiryMs: number): string {
-  const encode = (value: Record<string, unknown>) =>
-    Buffer.from(JSON.stringify(value)).toString('base64url')
-  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({
-    exp: Math.floor(expiryMs / 1_000),
-    sub: 'test-user',
-  })}.test-signature`
-}
-
 function resolveRealCodexProviderApiKeyEnv(modelProvider: string): string | null {
   if (modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER) {
     return VERCEL_AI_GATEWAY_API_KEY_ENV
@@ -6292,11 +6064,20 @@ function resolveRealCodexProviderApiKeyEnv(modelProvider: string): string | null
 }
 
 function buildRealCodexConfigToml(input: {
-  apiKeyEnv: string | null
+  apiKeyEnv: string
   model: string
   modelProvider: string
 }): string {
-  const config = [
+  const baseUrl =
+    input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
+      ? VERCEL_AI_GATEWAY_BASE_URL
+      : OPENAI_BASE_URL
+  const providerName =
+    input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
+      ? 'Vercel AI Gateway'
+      : 'OpenAI'
+
+  return [
     `model = ${tomlString(input.model)}`,
     `model_provider = ${tomlString(input.modelProvider)}`,
     'model_reasoning_effort = "low"',
@@ -6311,16 +6092,9 @@ function buildRealCodexConfigToml(input: {
     ...REAL_CODEX_E2E_ENV_ALLOWLIST.map((key) => `  ${tomlString(key)},`),
     ']',
     '',
-  ]
-  if (!input.apiKeyEnv) {
-    return config.join('\n')
-  }
-  const gateway = input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
-  return [
-    ...config,
     `[model_providers.${tomlKey(input.modelProvider)}]`,
-    `name = ${tomlString(gateway ? 'Vercel AI Gateway' : 'OpenAI')}`,
-    `base_url = ${tomlString(gateway ? VERCEL_AI_GATEWAY_BASE_URL : OPENAI_BASE_URL)}`,
+    `name = ${tomlString(providerName)}`,
+    `base_url = ${tomlString(baseUrl)}`,
     `env_key = ${tomlString(input.apiKeyEnv)}`,
     'wire_api = "responses"',
     'request_max_retries = 4',
@@ -6331,7 +6105,7 @@ function buildRealCodexConfigToml(input: {
 }
 
 function buildRealCodexE2eEnv(input: {
-  apiKeyEnv?: string
+  apiKeyEnv: string
   sourceEnv?: NodeJS.ProcessEnv
 }): NodeJS.ProcessEnv {
   const sourceEnv = input.sourceEnv ?? process.env
@@ -6344,11 +6118,9 @@ function buildRealCodexE2eEnv(input: {
     }
   }
 
-  if (input.apiKeyEnv) {
-    const apiKey = normalizeEnvString(sourceEnv[input.apiKeyEnv])
-    if (apiKey) {
-      env[input.apiKeyEnv] = apiKey
-    }
+  const apiKey = normalizeEnvString(sourceEnv[input.apiKeyEnv])
+  if (apiKey) {
+    env[input.apiKeyEnv] = apiKey
   }
 
   return env
