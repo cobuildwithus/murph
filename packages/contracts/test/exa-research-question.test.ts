@@ -30,6 +30,7 @@ const ALLOWED_PUBLIC_QUESTIONS = [
   "What do studies tell us about sleep regularity and cardiometabolic risk?",
   "How should we interpret conflicting evidence about morning light and sleep timing?",
   "What changed in human research from 2010-2020 about creatine and cognition?",
+  "What changed in human research from 2010 - 2020 about creatine and cognition?",
   "What should we do about sleep deprivation at a population level?",
 ] as const;
 
