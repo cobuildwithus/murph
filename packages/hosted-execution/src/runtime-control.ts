@@ -2914,13 +2914,6 @@ export interface HostedRunnerStatusResponse {
   mailboxLag: HostedMailboxLaneLag[];
   nextAlarmAt?: string | null;
   recentLogs?: HostedRuntimeLogEntry[];
-  r2Cutover?: {
-    coexisting: boolean;
-    pausedCanaryConfigured?: boolean;
-    phase: "destination_active" | "source_active";
-    protocolVersion: string;
-    writeAdmission?: "open" | "paused";
-  };
   userId: string;
   workspace: HostedWorkspaceState | null;
 }

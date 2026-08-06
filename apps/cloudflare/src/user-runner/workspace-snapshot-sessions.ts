@@ -135,10 +135,9 @@ export function createWorkspaceSnapshotSessionService(input: {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
-          r2BucketRole: updatedSession.r2BucketRole ?? "source",
           r2PutDrainRecorded: true,
         },
-        message: "Hosted runner recorded a bucket-affine snapshot PUT drain deadline.",
+        message: "Hosted runner recorded a snapshot PUT drain deadline.",
         phase: "wake.running",
         userId: updatedSession.userId,
       });

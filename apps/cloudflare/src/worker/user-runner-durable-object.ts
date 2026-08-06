@@ -20,9 +20,6 @@ import type {
   DurableObjectStateLike,
 } from "../user-runner.ts";
 import {
-  resolveHostedR2CutoverContext,
-} from "../r2-cutover.ts";
-import {
   asWorkerStringEnvironment,
 } from "../worker-contracts.ts";
 import type {
@@ -147,13 +144,11 @@ function createHostedUserRunner(
   state: DurableObjectStateLike,
   env: WorkerEnvironmentSource,
 ): HostedUserRunner {
-  const r2CutoverContext = resolveHostedR2CutoverContext(env);
   return new HostedUserRunner(
     state,
     readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
-    r2CutoverContext.bucket,
+    env.BUNDLES,
     env,
     env.RUNNER_CONTAINER,
-    r2CutoverContext,
   );
 }

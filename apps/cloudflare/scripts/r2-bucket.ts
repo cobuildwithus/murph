@@ -29,34 +29,19 @@ export interface R2BucketInfo {
   name: string;
 }
 
-export function assertR2FixedBucketPair(input: {
-  destination: R2BucketInfo;
-  destinationName: string;
+export function assertHostedR2Bucket(input: {
+  bucket: R2BucketInfo;
+  bucketName: string;
   label: string;
-  source: R2BucketInfo;
-  sourceName: string;
 }): void {
-  if (
-    input.source.name !== input.sourceName
-    || input.destination.name !== input.destinationName
-  ) {
-    throw new Error(
-      `${input.label} bucket-info response did not match the requested fixed-role pair.`,
-    );
+  if (input.bucket.name !== input.bucketName) {
+    throw new Error(`${input.label} bucket-info response did not match the requested bucket.`);
   }
-  if (input.source.location.toUpperCase() !== "OC") {
-    throw new Error(`${input.label} fixed source bucket must report OC.`);
+  if (input.bucket.location.toUpperCase() !== "ENAM") {
+    throw new Error(`${input.label} bucket must report ENAM.`);
   }
-  if (input.destination.location.toUpperCase() !== "ENAM") {
-    throw new Error(`${input.label} fixed destination bucket must report ENAM.`);
-  }
-  if (
-    input.source.defaultStorageClass.toLowerCase() !== "standard"
-    || input.destination.defaultStorageClass.toLowerCase() !== "standard"
-  ) {
-    throw new Error(
-      `${input.label} fixed-role buckets must both use Standard as their default storage class.`,
-    );
+  if (input.bucket.defaultStorageClass.toLowerCase() !== "standard") {
+    throw new Error(`${input.label} bucket must use Standard as its default storage class.`);
   }
 }
 

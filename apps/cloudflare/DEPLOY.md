@@ -525,15 +525,21 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
-- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` only during a declared destination-
-  active incident that requires paused-admission forward-repair validation; use
-  a lowercase SHA-256 digest of a quiescent operator-controlled member, never a
-  raw member ID
-- `HOSTED_R2_WRITE_ADMISSION=open` normally and throughout the healthy live
-  OC-to-ENAM cutover; `paused` is emergency incident containment only
 
 `CF_PUBLIC_BASE_URL` is a required non-secret Worker variable as well as the standard deploy-and-smoke target. Private-media capability creation uses that exact deployment origin, and hosted Web validates capabilities against its matching `HOSTED_EXECUTION_CONTROL_URL` origin. Production preflight pins both sides to `https://murph-hosted.cobuildwithus.workers.dev`; preview uses its isolated staging Worker origin and must reject production-origin capabilities. Change the production pin and deploy invariant together before moving the production origin. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
-`HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the Worker R2 binding. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
+`HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the Worker R2 binding. Deploy preflight reads both runtime and preview bucket metadata and requires ENAM with the Standard storage class. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
+
+For the one-time single-region retirement release, update
+`CF_BUNDLES_BUCKET`, `CF_BUNDLES_PREVIEW_BUCKET`, and
+`HOSTED_R2_PRESIGN_BUCKET_NAME` to their existing ENAM bucket names as one
+candidate-deploy operation. Changing GitHub Environment values does not mutate
+the already deployed Worker, but do not run an older two-binding deploy after
+that change. Deploy Cloudflare first, require the ordinary direct-R2 and runtime
+smokes, then deploy Web without the retired account-deletion maintenance guard.
+Only after the new Worker is at 100 percent and post-deploy reads, writes,
+checkpoints, email ingress, and deletion proof are healthy may operators remove
+the obsolete migration-only GitHub variables or consider deleting the old
+bucket. The old bucket is not a rollback target after new ENAM writes exist.
 For production deploys, `HOSTED_WEB_BASE_URL` must exactly match the normalized
 origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and
@@ -749,25 +755,6 @@ Core execution tuning:
   direct/local artifact rendering. The manual deploy workflow derives it from
   the selected `preview` or `production` target; do not configure a conflicting
   GitHub Environment value.
-- `HOSTED_R2_WRITE_ADMISSION` defaults to `open` and remains open throughout a
-  healthy live OC-to-ENAM cutover. First deploy bridge protocol v2 unchanged as
-  `source_active` and prove every runner reports it. Then promote
-  `HOSTED_R2_CUTOVER_PHASE` to `destination_active`; new writes target ENAM while
-  explicit reads prefer the phase-active bucket and use the other bucket only
-  after a definitive miss, and old source-bucket upload capabilities drain.
-  Both coexistence phases omit the fixed-source prepared snapshot URL; cold
-  restore uses the existing write-fenced `/presign-get` locator and presigns
-  the concrete bucket that contains the checkpoint.
-  `paused` is an incident-containment lever: it returns a bounded `retry_later`
-  from `runtime/ensure-processing` before any UserRunner Durable Object call.
-- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` must be unset during the healthy live
-  cutover, while admission is open, or while the source is active. Configure it
-  only during a declared destination-active paused incident, for a quiescent
-  operator-controlled member with no pending mailbox work, retry/recheck/wake,
-  alarm, or member-facing ingress. It opens a per-member callback-signed window,
-  not a one-shot request; source-active pauses, other members, and direct OIDC
-  hints remain fenced. Status exposes only `pausedCanaryConfigured`, never the
-  digest or raw member ID.
 - `HOSTED_R2_PRESIGN_ENDPOINT` optionally overrides the default account-scoped
   R2 S3 endpoint for direct snapshot presign URLs. Normally leave it unset. If
   set for deploys, it must be `https://<account-id>.r2.cloudflarestorage.com`.

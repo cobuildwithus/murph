@@ -38,10 +38,6 @@ import type {
   WorkerProviderEgressTokenValidationResult,
 } from "../worker-contracts.js";
 import {
-  readHostedR2CutoverStatus,
-  type HostedR2CutoverContext,
-} from "../r2-cutover.ts";
-import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../web-control-plane.ts";
 import {
@@ -101,11 +97,6 @@ export class HostedUserRunner {
   private readonly privateMediaDeliveryOrigin: string;
   private privateMediaMutationLock: Promise<void> | null = null;
   private runtimeConsentMutationLock: Promise<void> | null = null;
-  private readonly r2CutoverStatus: {
-    coexisting: boolean;
-    phase: "destination_active" | "source_active";
-    protocolVersion: string;
-  };
 
   constructor(
     state: DurableObjectStateLike,
@@ -117,7 +108,6 @@ export class HostedUserRunner {
         runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
       }
     ).runnerContainerNamespace ?? null,
-    r2CutoverContext: HostedR2CutoverContext | null = null,
   ) {
     this.stateStore = new RunnerStateStore(state);
     this.privateMediaBucket = bucket;
@@ -153,20 +143,8 @@ export class HostedUserRunner {
       stateStore: this.stateStore,
     });
     this.runtimeProcessing = runtimeProcessing;
-    this.r2CutoverStatus = r2CutoverContext
-      ? readHostedR2CutoverStatus(r2CutoverContext)
-      : {
-          coexisting: false,
-          phase: "source_active",
-          protocolVersion: "legacy-single-bucket",
-        };
     this.userDataDeletionInput = {
-      buckets: r2CutoverContext
-        ? {
-            destination: r2CutoverContext.destinationBucket,
-            source: r2CutoverContext.sourceBucket,
-          }
-        : { destination: bucket, source: bucket },
+      bucket,
       runnerContainerNamespace,
       runnerRuntimeEnvSource,
       state,
@@ -209,12 +187,10 @@ export class HostedUserRunner {
 
     const status: HostedRunnerStatusResponse & {
       activeWriteFence: RunnerWriteFenceToken | null;
-      r2Cutover: ReturnType<typeof readHostedR2CutoverStatus>;
     } = {
       ...webStatus,
       activeWriteFence,
       inFlight: record.writeFence !== null,
-      r2Cutover: this.r2CutoverStatus,
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
       ...(record.lastInvocationAt ? { lastInvocationAt: record.lastInvocationAt } : {}),
