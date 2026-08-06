@@ -1,6 +1,6 @@
 # first-contact-fast-welcome
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-06
 
@@ -114,6 +114,23 @@ Updated: 2026-08-06
   executable 12-KiB ceiling. The complete four-file asset is 61,901 bytes; its
   5,606-byte growth preserves explicit routing and every later-stage policy
   rather than deleting behavior.
+- Deterministic base/head capture of the complete provider-visible request
+  proves where that asset reduction appears. The literal first direct request
+  is unchanged at 23,926 tokens / 110,143 UTF-8 bytes because the skill remains
+  on demand. The first request after the same whole-root read falls from 32,632
+  tokens / 151,415 bytes to 26,556 / 122,687: 6,076 fewer tokens (18.6%) and
+  28,728 fewer bytes (19.0%). The welcome-producing request after the bounded
+  resume read keeps the same delta, from 32,765 / 151,934 to 26,689 / 123,206.
+  The initial group request is unchanged at 19,901 / 91,765 because this direct
+  onboarding skill is not exposed there.
+- That request capture used the pinned real Codex App Server and the repository's
+  hermetic Responses stub with `gpt-5.6-terra`, low reasoning, code mode, and
+  `gpt-tokenizer` 3.4.0's `o200k_harmony` tokenizer. It included provider-visible
+  input, tool-choice/parallel/include/text fields and available-tool metadata,
+  while excluding identical transport, cache, client, and account metadata.
+  The direct fixture uses its synthetic Telegram system prompt, so absolute
+  totals are fixture measurements rather than production/SLO evidence; the
+  base/head delta is exact and entirely attributable to the root tool output.
 - The three directly referenced owners are
   `aspiration-foundation-delegation.md`,
   `persistence-recovery-follow-up.md`, and
@@ -168,9 +185,11 @@ Updated: 2026-08-06
   selection, but it now reuses the test file's pre-existing API-key or gateway
   resolver. Host auth-store reads, copied credentials, token-runway logic, the
   temporary credential home, and their dedicated test scaffold are removed.
-- Final audit also restored injury history to the owning medical/safety
-  checkpoint and its complete synthetic resume evidence so an unresolved
-  safety fact cannot qualify a flow for contextual return.
+- Final audit also restored injury history to the owning, single optional
+  medical/safety checkpoint and its complete synthetic resume evidence. This
+  aligns the split prompt with the canonical contract without creating a
+  separate question, per-subfield completion gate, persistence owner, or
+  compulsory disclosure.
 - A post-round-3 independent audit correctly identified relationship promise
   and minimal identity as root-owned prerequisites, but its initial late-resume
   hard gate was not observable after bounded history aged out. ReviewGPT round
@@ -232,8 +251,25 @@ Updated: 2026-08-06
   required CI was green on that exact head. ReviewGPT round 4 accepted the
   subsequent relationship/minimal-identity concern but found its first hard
   gate unobservable after bounded history loss; that finding is accepted and
-  the transition-only/affirmative-omission correction is locally proven. Its
-  final exact-head CI and same-thread ReviewGPT round remain pending.
+  the transition-only/affirmative-omission correction is locally proven at the
+  final behavior-bearing head `7f486e5e110bf0ee2456a941786a0085848a7d87`.
+  ReviewGPT round 5 accepted that correction and found only the necessary but
+  undisclosed injury-history alignment. The PR intent contract now names that
+  sensitive surface, its existing owner, its non-questionnaire bounds, and its
+  regression proof. Two disclosure-retry responses completed below the repo's
+  6.5-minute trust floor and were retained only as diagnostics. The final
+  same-round retry independently rechecked the body, canonical spec, base
+  behavior, router, persistence boundaries, and named tests, then returned
+  `PASS` after about 10 minutes 29 seconds with a verified `gpt-5.6-pro` model
+  attestation. There are zero unresolved specialist or final-gate findings.
+- All required GitHub Actions are green on the exact behavior-bearing head,
+  including both CLI matrices, build/typecheck, assistant/CLI/platform and app
+  coverage, fixture coverage, frontend proof/overflow, hygiene, artifacts, and
+  release checks. The final focused local set is 65 passed with 38 gated skips;
+  the bounded-history planning regression, assistant-engine typecheck, docs
+  drift, diff check, and privacy scan also pass. Parent product-experience and
+  candidate review report no remaining material journey or architecture issue.
+  The PR is open and mergeable, and remains unmerged and undeployed as required.
 - Commands to run:
   - focused assistant-engine turn-planning and model-behavior Vitest files;
   - focused hosted-local Linq first-contact scenario when locally runnable;
@@ -243,3 +279,4 @@ Updated: 2026-08-06
   - fresh greeting reads the compact router and no later-stage reference;
   - substantive, resumed, and later-stage inputs load the required owner;
   - no delivery, provider, tool, schema, persisted-state, or channel regression.
+Completed: 2026-08-06
