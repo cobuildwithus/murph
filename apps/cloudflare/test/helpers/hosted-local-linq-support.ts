@@ -136,7 +136,6 @@ export interface HostedLocalLinqStub {
   createCreateChatRequestMatcher(userId: string): ObservedLinqRequestMatcher;
   createIMessageCapabilityRequestMatcher(input: {
     address: string;
-    from: string;
   }): ObservedLinqRequestMatcher;
   listObservedMessageIds(chatId: string): string[];
   observedRequests: ObservedLinqRequest[];
@@ -676,9 +675,9 @@ export async function startHostedLocalLinqStub(input: {
         return parsed?.from === expectedFrom && Array.isArray(to) && to[0] === expectedTo;
       };
     },
-    createIMessageCapabilityRequestMatcher: ({ address, from }) => (request) => {
+    createIMessageCapabilityRequestMatcher: ({ address }) => (request) => {
       const parsed = parseObservedLinqJson(request.body);
-      return parsed?.address === address && parsed.from === from;
+      return parsed?.address === address;
     },
     listObservedMessageIds: (chatId) => [...(observedMessageIdsByChat.get(chatId) ?? [])],
     observedRequests,
