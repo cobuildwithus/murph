@@ -49,8 +49,9 @@ describe("hosted runtime operational report contracts", () => {
       "directEnsureResponseReceivedAtEpochMs",
     );
     expect(coldStartReportSql).toContain(
-      "direct_start_ms - accepted_ms <= 5000",
+      "direct_orchestration_attempt_id = runtime_orchestration_attempt_id",
     );
+    expect(coldStartReportSql).not.toContain("abs(route_received_ms");
     expect(coldStartReportSql).toContain(
       "runner_job_accepted_at >= accepted_at",
     );
@@ -58,6 +59,7 @@ describe("hosted runtime operational report contracts", () => {
     expect(coldStartReportSql).toContain("WHERE phase.duration_ms >= 0");
     expect(coldStartReportSql).toContain("'web_direct_cold'");
     expect(coldStartReportSql).toContain("'temporal_recovery'");
+    expect(coldStartReportSql).toContain("'legacy_unclassified'");
     expect(coldStartReportSql).not.toContain("web_direct_existing_runtime");
     expect(coldStartReportSql).toContain(
       "GREATEST(fresh_start_container_ready_ms, fresh_start_invocation_prepared_ms)",
@@ -91,6 +93,7 @@ describe.skipIf(!runPostgresProof)(
 
         expect(stdout).toContain("temporal_only,1,4.000,4.000,4.000");
         expect(stdout).toContain("temporal_recovery,1,30.000,30.000,30.000");
+        expect(stdout).toContain("legacy_unclassified,1,5.000,5.000,5.000");
         expect(stdout).toContain("web_direct_cold,2,6.000,6.900,7.000");
         expect(stdout).not.toContain("web_direct_existing_runtime");
         expect(stdout).toContain(
@@ -225,7 +228,9 @@ function createFixtureSql(schemaName: string): string {
         'triggeredByWebDirect', true,
         'directEnsureRequestStartedAtEpochMs', base_ms + 1500,
         'directEnsureResponseReceivedAtEpochMs', base_ms + 1700,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-causal',
         'cloudflareRouteReceivedAtEpochMs', base_ms + 1600,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-causal',
         'userRunnerRpcStartedAtEpochMs', base_ms + 1700,
         'runtimeConsentLockAcquiredAtEpochMs', base_ms + 1800,
         'healthDataAdmissionReadStartedAtEpochMs', base_ms + 1810,
@@ -252,9 +257,27 @@ function createFixtureSql(schemaName: string): string {
         'triggeredByWebDirect', true,
         'directEnsureRequestStartedAtEpochMs', base_ms + 2500,
         'directEnsureResponseReceivedAtEpochMs', base_ms + 2700,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-reversed',
         'cloudflareRouteReceivedAtEpochMs', base_ms + 2600,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-reversed',
         'userRunnerRpcStartedAtEpochMs', base_ms + 2550,
         'freshStartRequestedAtEpochMs', base_ms + 2800
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'direct-inherited-invocation-mismatch',
+      t0 + INTERVAL '3 seconds',
+      t0 + INTERVAL '10 seconds',
+      'attempt-direct-inherited',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 3500,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 3700,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-later-b',
+        'cloudflareRouteReceivedAtEpochMs', base_ms + 3600,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-earlier-a',
+        'freshStartRequestedAtEpochMs', base_ms + 3800
       ))
     FROM fixture
     UNION ALL
@@ -291,7 +314,9 @@ function createFixtureSql(schemaName: string): string {
         'triggeredByWebDirect', true,
         'directEnsureRequestStartedAtEpochMs', base_ms + 7500,
         'directEnsureResponseReceivedAtEpochMs', base_ms + 7700,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-race',
         'cloudflareRouteReceivedAtEpochMs', base_ms + 7600,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-race',
         'freshStartRequestedAtEpochMs', base_ms + 7800
       ))
     FROM fixture
@@ -305,7 +330,9 @@ function createFixtureSql(schemaName: string): string {
         'triggeredByWebDirect', true,
         'directEnsureRequestStartedAtEpochMs', base_ms + 8500,
         'directEnsureResponseReceivedAtEpochMs', base_ms + 8700,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-race',
         'cloudflareRouteReceivedAtEpochMs', base_ms + 8600,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-race',
         'freshStartRequestedAtEpochMs', base_ms + 8800
       ))
     FROM fixture
@@ -317,7 +344,8 @@ function createFixtureSql(schemaName: string): string {
       'attempt-temporal-recovery',
       jsonb_build_object('orchestration', jsonb_build_object(
         'temporalActivityStartedAtEpochMs', base_ms + 10000,
-        'directEnsureRequestStartedAtEpochMs', base_ms + 10100
+        'directEnsureRequestStartedAtEpochMs', base_ms + 10100,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-temporal-recovery'
       ))
     FROM fixture
     UNION ALL
@@ -328,7 +356,8 @@ function createFixtureSql(schemaName: string): string {
       'attempt-temporal-recovery',
       jsonb_build_object('orchestration', jsonb_build_object(
         'temporalActivityStartedAtEpochMs', base_ms + 10000,
-        'directEnsureRequestStartedAtEpochMs', base_ms + 10100
+        'directEnsureRequestStartedAtEpochMs', base_ms + 10100,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-temporal-recovery'
       ))
     FROM fixture
     UNION ALL
@@ -339,6 +368,18 @@ function createFixtureSql(schemaName: string): string {
       'attempt-temporal-only',
       jsonb_build_object('orchestration', jsonb_build_object(
         'temporalActivityStartedAtEpochMs', base_ms + 12000
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'temporal-legacy-unclassified',
+      t0 + INTERVAL '12 seconds',
+      t0 + INTERVAL '17 seconds',
+      'attempt-temporal-legacy-unclassified',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'temporalActivityStartedAtEpochMs', base_ms + 12000,
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 12100
       ))
     FROM fixture
     UNION ALL
@@ -359,7 +400,9 @@ function createFixtureSql(schemaName: string): string {
         'triggeredByWebDirect', true,
         'directEnsureRequestStartedAtEpochMs', base_ms + 14500,
         'directEnsureResponseReceivedAtEpochMs', base_ms + 14700,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-invalid',
         'cloudflareRouteReceivedAtEpochMs', base_ms + 14600,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-invalid',
         'freshStartRequestedAtEpochMs', base_ms + 14800
       ))
     FROM fixture

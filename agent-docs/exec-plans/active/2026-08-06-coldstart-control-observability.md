@@ -64,9 +64,9 @@ Updated: 2026-08-06
    Mitigation: use the existing epoch-millisecond trace convention and derive
    only same-request intervals with chronology guards in the report.
 3. Risk: mixed direct and recovery samples preserve the misleading tail.
-   Mitigation: require one Web-owned request/response marker pair matching the
-   current Cloudflare route, omit ambiguous attempts, and report Temporal
-   activity timing separately.
+   Mitigation: require exact equality between the Web direct-ensure id and the
+   launched runtime invocation id, omit ambiguous or legacy attempts, and
+   report Temporal activity timing separately.
 4. Risk: duplicate recovery machinery creates multiple correctness owners.
    Mitigation: retain the existing accepted-attempt failure recheck and validate
    its focused concurrency and route tests instead of adding another path.
@@ -97,11 +97,37 @@ Updated: 2026-08-06
   reviewable and repeatable.
 - A runtime attempt is invocation-level and can be fanned out to more than one
   mailbox trace. Direct accepted-to-runner latency therefore uses only the one
-  row whose Web-only response marker matches the current direct request and
-  Cloudflare route within five seconds; no unique match means no sample. Warm
-  direct wakes create no new runner job and are omitted. Temporal attempts use
-  activity-to-runner timing from one unambiguous attempt stamp instead of a
-  mailbox acceptance chosen by row order.
+  row whose Web direct-ensure id exactly matches the launched runtime
+  invocation id; no unique match means no sample. Warm direct wakes create no
+  new runner job and are omitted. Temporal attempts use activity-to-runner
+  timing from one unambiguous attempt stamp instead of a mailbox acceptance
+  chosen by row order. Pre-deploy traces with a legacy direct marker but no
+  exact invocation id are reported as `legacy_unclassified`, not Temporal-only.
+
+## Review anomaly retrospective
+
+- Original requirement: make accepted-to-runner latency causally attributable
+  while adding no successful-path I/O or new recovery/state owner.
+- First-reviewed shape: the report selected one mailbox trace by row order for
+  an invocation-level runtime attempt. Round one correctly rejected that as
+  non-causal.
+- Current shape before this retrospective: the correction required a unique
+  mailbox row whose direct request/response timestamps were within five seconds
+  of the invocation route. Tests and docs grew substantially, but authored
+  production-source churn remained 177 lines; the numerical growth threshold
+  was not reached.
+- Repeated mechanism: the correction still inferred mailbox-to-invocation
+  identity from timestamp proximity. A later mailbox item can keep its own Web
+  direct markers while inheriting an earlier invocation's route and runner
+  milestones, so the same attribution ambiguity remained.
+- Decision: continue only with exact identity. Reuse the existing unique
+  `orchestrationAttemptId` already carried by every direct ensure from Web
+  through Cloudflare into the launched runtime. Preserve the Web request id and
+  the launched-invocation id as separate bounded diagnostic leaves and require
+  exact equality in the report. Mismatches and missing ids are omitted. Add no
+  timestamp tolerance, queue, state owner, awaited call, or recovery path; if
+  the exact identity cannot be preserved at the existing trace boundary, delete
+  the accepted-to-runner headline instead.
 
 ## Verification
 

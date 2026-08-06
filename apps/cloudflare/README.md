@@ -293,13 +293,17 @@ murph-prod-psql-ro -f apps/cloudflare/scripts/cold-start-latency-report.sql
 Pass `-v window_hours=6` (or another integer) before `-f` to change the UTC
 window. The report deduplicates causal rows by runtime attempt and keeps direct
 cold starts separate from Temporal recovery. A direct sample must be the only
-row in its runtime attempt whose Web-owned request/response markers match the
-current Cloudflare route within five seconds; ambiguous races, backlog rows,
-and missing markers are omitted. The first table reports accepted-to-runner-job
-time only for those causal direct cold starts. The second reports
-Temporal-activity-to-runner-job time by recovery versus Temporal-only attempt;
-warm direct wakes are omitted because they create no new runner job. The final
-table splits the same causal direct samples across Durable Object dispatch,
+row in its runtime attempt whose Web direct-ensure orchestration id exactly
+matches the id carried by the launched runtime invocation. Ambiguous races,
+mismatches, backlog rows, and missing ids are omitted. Exact direct samples
+begin only after the compatible Web and Cloudflare builds are deployed;
+historical rows are intentionally not inferred from timestamp proximity. The
+first table reports accepted-to-runner-job time only for those causal direct
+cold starts. The second reports Temporal-activity-to-runner-job time by exact
+recovery versus Temporal-only attempt; pre-deploy rows with legacy direct
+markers are labeled `legacy_unclassified` instead of being guessed. Warm direct
+wakes are omitted because they create no new runner job. The final table splits
+the same causal direct samples across Durable Object dispatch,
 consent locking, the existing health-data admission callback, runner-state
 operations, the parallel container-readiness and invocation-preparation
 branches, invocation launch, and runner-job acceptance. Per-phase chronology
