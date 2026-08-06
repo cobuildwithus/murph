@@ -176,8 +176,11 @@ remaining terminal setup failures normalize to
 `COMPANION_ADMISSION_SUPPORT_REQUIRED`. The client may retry only the former
 and must stop automatic admission attempts on the latter, while internal
 hosted lifecycle codes remain private. The route's static dependency graph is
-kept outside device-sync public ingress, so account admission cannot create,
-resume, reactivate, or otherwise mutate a Junction connection.
+kept outside device-sync public ingress, and this account-only caller uses the
+existing signup-welcome suppression policy. Admission therefore preserves
+trial activation and the internal `member.activated` fact without assigning a
+Linq home line, queueing or emailing a welcome, or creating, resuming,
+reactivating, or otherwise mutating a Junction connection.
 
 ### Cloudflare execution state
 
@@ -274,7 +277,8 @@ These are browser-initiated but lower-level than the settings surface. They must
 
 All are Privy-bearer-authenticated and consent-gated. Admission validates its
 complete bounded optional-time-zone body before canonical member mutation and
-does not enter device sync. Sign-in honors the
+suppresses signup-welcome routing and delivery without suppressing canonical
+trial activation; it does not enter device sync. Sign-in honors the
 resume, omitted-intent inference, and future explicit-connect authority split
 above. The derived route accepts only the closed overnight summary contract,
 reuses one active member-owned Junction connection, and never establishes or

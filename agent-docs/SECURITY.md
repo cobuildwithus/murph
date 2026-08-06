@@ -458,10 +458,14 @@ Last verified: 2026-08-05
   member through the existing consent, untouched-member trial, and access
   owner, but the closed request accepts only an optional validated IANA time
   zone and the response is always the non-identifying `{ "ok": true }`. The
-  route must not import or invoke device-sync public ingress, mint Junction
-  authority, or create, resume, reactivate, or otherwise mutate a device
-  connection. Validate the complete bounded body before acquiring Prisma or
-  running member admission. Its route-owned error boundary preserves only the
+  route requests the existing signup-welcome suppression policy so account
+  admission cannot reserve a Linq home line, queue a signup welcome, or send a
+  welcome email; canonical trial activation and its internal
+  `member.activated` fact remain unchanged. The route must not import or invoke
+  device-sync public ingress, mint Junction authority, or create, resume,
+  reactivate, or otherwise mutate a device connection. Validate the complete
+  bounded body before acquiring Prisma or running member admission. Its
+  route-owned error boundary preserves only the
   stable native login, consent, access, suspension, and alternate-sign-in
   identity-conflict outcomes, normalizes every other retryable owner failure
   to `COMPANION_ADMISSION_RETRYABLE`, and normalizes every remaining terminal

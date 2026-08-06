@@ -170,8 +170,12 @@ before status, token exchange, or any health setup:
 Admission grants no Junction or device authority. A newly authenticated signup
 must not request a sign-in token, sign in to the Junction SDK, or create or
 resume a hosted connection before the member explicitly chooses **Connect
-Health Connect**. Existing established-member session restoration retains its
-separate documented `resume` path and cannot turn admission itself into health
+Health Connect**. Account-only admission also suppresses the ordinary hosted
+signup welcome: it must not assign a Linq home line, queue a signup-welcome
+notification, or send a welcome email. Canonical Pulse trial activation,
+active-access proof, and the internal `member.activated` fact remain intact.
+Existing established-member session restoration retains its separate
+documented `resume` path and cannot turn admission itself into health
 connection authority.
 
 The Android home screen treats

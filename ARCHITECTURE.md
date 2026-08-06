@@ -1433,7 +1433,10 @@ boundary, not a device-sync lifecycle boundary. `POST
 time zone, delegates canonical identity creation/recovery, historical launch
 consent, untouched-member Pulse trial enrollment, and active-access assertion
 to the existing companion member-access owner, and returns only the fixed
-non-identifying success response. On failure it preserves the stable native
+non-identifying success response. This account-only caller suppresses the
+ordinary signup welcome while preserving the canonical trial activation and
+internal `member.activated` fact, so admission neither assigns a Linq home line
+nor queues or emails a welcome. On failure it preserves the stable native
 login, consent, access, suspension, and alternate-sign-in identity-conflict
 outcomes. Every other retryable owner failure becomes
 `COMPANION_ADMISSION_RETRYABLE`, while every remaining terminal setup failure

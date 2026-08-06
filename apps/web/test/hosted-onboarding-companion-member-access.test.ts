@@ -86,6 +86,15 @@ const identity = {
   userId: "did:privy:native-member",
   wallet: null,
 } as const;
+const emailIdentity = {
+  email: {
+    address: "native-member@example.test",
+    verifiedAt: 1_785_456_000,
+  },
+  phone: null,
+  telegram: null,
+  userId: "did:privy:native-email-member",
+} as const;
 
 function member(
   billingStatus: HostedBillingStatus = HostedBillingStatus.not_started,
@@ -230,6 +239,87 @@ describe("native companion hosted member admission", () => {
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     expect(mocks.ensureHostedAutoPulseTrialEnrollment).not.toHaveBeenCalled();
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+    expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+  });
+
+  it("admits a fresh consented phone signup without requiring an assignable Linq line and remains idempotent", async () => {
+    const activeMember = member(HostedBillingStatus.active);
+    mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({ identity });
+    mocks.lookupHostedMemberForPrivyPrincipal
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(activeMember);
+    mocks.readActiveHostedMemberAccess
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    mocks.ensureHostedAutoPulseTrialEnrollment.mockImplementation(
+      async (input: { suppressSignupWelcome?: boolean }) => {
+        if (!input.suppressSignupWelcome) {
+          throw hostedOnboardingError({
+            code: "LINQ_CONVERSATION_PHONE_REQUIRED",
+            httpStatus: 409,
+            message: "No assignable Linq line is available.",
+          });
+        }
+        return {
+          redirectPath: "/home",
+          status: "enrolled",
+        };
+      },
+    );
+
+    const firstResponse = await admissionRoute.POST(admissionRequest());
+    const repeatedResponse = await admissionRoute.POST(admissionRequest());
+
+    expect(firstResponse.status).toBe(200);
+    await expect(firstResponse.json()).resolves.toEqual({ ok: true });
+    expect(repeatedResponse.status).toBe(200);
+    await expect(repeatedResponse.json()).resolves.toEqual({ ok: true });
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledOnce();
+    expect(mocks.ensureHostedAutoPulseTrialEnrollment).toHaveBeenCalledOnce();
+    expect(mocks.ensureHostedAutoPulseTrialEnrollment).toHaveBeenCalledWith({
+      inviteCode: "invite_native",
+      member: {
+        id: "member_native",
+        suspendedAt: null,
+      },
+      now: expect.any(Date),
+      prisma,
+      suppressSignupWelcome: true,
+    });
+    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledOnce();
+    expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+  });
+
+  it("admits a fresh consented verified-email signup without a welcome delivery", async () => {
+    mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({
+      identity: emailIdentity,
+    });
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(null);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+
+    const response = await admissionRoute.POST(admissionRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
+      identity: emailIdentity,
+      now: expect.any(Date),
+      prisma,
+    });
+    expect(mocks.ensureHostedAutoPulseTrialEnrollment).toHaveBeenCalledWith({
+      inviteCode: "invite_native",
+      member: {
+        id: "member_native",
+        suspendedAt: null,
+      },
+      now: expect.any(Date),
+      prisma,
+      suppressSignupWelcome: true,
+    });
+    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
+      memberId: "member_native",
+      prisma,
+    });
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
   });
 

@@ -88,6 +88,7 @@ describe("POST /api/device-sync/companion/admission", () => {
     expect(mocks.requireHostedCompanionMemberIdFromRequest).toHaveBeenCalledWith({
       prisma: { label: "test-prisma" },
       request: incoming,
+      suppressSignupWelcome: true,
       timeZone: "America/Denver",
     });
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
@@ -104,6 +105,7 @@ describe("POST /api/device-sync/companion/admission", () => {
     expect(mocks.requireHostedCompanionMemberIdFromRequest).toHaveBeenCalledWith({
       prisma: { label: "test-prisma" },
       request: incoming,
+      suppressSignupWelcome: true,
       timeZone: "America/Denver",
     });
   });
@@ -118,6 +120,7 @@ describe("POST /api/device-sync/companion/admission", () => {
     expect(mocks.requireHostedCompanionMemberIdFromRequest).toHaveBeenCalledWith({
       prisma: { label: "test-prisma" },
       request: incoming,
+      suppressSignupWelcome: true,
       timeZone: "America/New_York",
     });
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();

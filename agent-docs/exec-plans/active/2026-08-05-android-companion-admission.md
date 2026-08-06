@@ -23,6 +23,9 @@ mutating any device-sync connection.
 - Return only the fixed non-identifying `{ "ok": true }` success response.
 - Do not instantiate device-sync public ingress or call Junction from the
   admission route.
+- Use the existing signup-welcome suppression policy for this account-only
+  caller so admission cannot assign a Linq home line or queue/email a welcome;
+  preserve canonical trial activation and the internal `member.activated` fact.
 - Add no table, queue, retry state, connection intent, SDK metadata, or second
   entitlement owner.
 
@@ -40,6 +43,7 @@ POST /api/device-sync/companion/admission
               +-- canonical identity create/recovery
               +-- historical launch-consent check
               +-- untouched-member Pulse trial enrollment
+              |     `-- signup-welcome suppression for admission only
               `-- active-access assertion
         |
         v
@@ -65,6 +69,9 @@ No public device-sync ingress or Junction boundary is reachable.
 - [x] Resolve final-review findings by closing the public native recovery
       vocabulary, exercising the real member owner through the route, and
       removing the accidental iOS-only build-spec change.
+- [x] Resolve corrected-head review by suppressing signup-welcome routing only
+      for account admission and proving fresh phone/email activation remains
+      successful, side-effect-free, and idempotent before explicit Connect.
 - [ ] Complete required exact-head review and CI after parent integration.
 
 ## Verification
@@ -81,7 +88,10 @@ No public device-sync ingress or Junction boundary is reachable.
   drift, diff, and privacy scans also pass.
 - Final ReviewGPT round 1 found the incomplete Android recovery vocabulary and
   accidental iOS-only build-spec scope. Both are accepted and corrected;
-  corrected-head round 2 and exact-head CI remain pending.
+  corrected-head round 2 then found that account admission inherited ordinary
+  signup-welcome routing. The admission caller now uses the existing
+  suppression policy while preserving trial activation and access; another
+  corrected-head review and exact-head CI remain pending.
 
 ## Rollout
 
