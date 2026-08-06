@@ -47,6 +47,12 @@ describe('Codex thread instructions', () => {
       'Continue from runtime summaries without restarting completed work',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Use final for the complete answer',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
+      'Use commentary for brief progress',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Answer, explanation, review, diagnosis, plan, or content requests—including "build me a plan"—do not by themselves authorize implementation or changes to saved state or external systems',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
