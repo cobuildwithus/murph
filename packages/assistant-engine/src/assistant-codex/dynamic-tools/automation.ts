@@ -9,6 +9,9 @@ import {
   automationStatusValues,
   automationSupportKindValues,
 } from '@murphai/contracts'
+import {
+  resolveAutomationUpsertSlug,
+} from '@murphai/core'
 import type {
   AssistantHostedAutomationTool,
   AssistantHostedAutomationToolRequest,
@@ -77,10 +80,14 @@ const saveAutomationArgumentsSchema = z.object({
   tags: automationTagsSchema.optional(),
   title: automationTitleSchema,
 }).strict().superRefine((value, context) => {
+  const requestedSlug = resolveAutomationUpsertSlug({
+    slug: value.slug,
+    title: value.title,
+  })
   if (
     value.automationId ===
       MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
-    || value.slug === MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
+    || requestedSlug === MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
   ) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
