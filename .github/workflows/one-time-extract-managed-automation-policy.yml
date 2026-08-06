@@ -16,6 +16,13 @@ jobs:
           const path = require('node:path')
           const { spawnSync } = require('node:child_process')
 
+          const slugs = [
+            'weekly-health-digest',
+            'weekly-health-insight',
+            'monthly-improvement-coach',
+            'weekly-health-research-scout',
+          ]
+
           function write(file, content) {
             fs.mkdirSync(path.dirname(file), { recursive: true })
             fs.writeFileSync(file, content.endsWith('\n') ? content : `${content}\n`)
