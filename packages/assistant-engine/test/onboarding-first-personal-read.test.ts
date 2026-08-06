@@ -56,6 +56,7 @@ describe('onboarding first personal read', () => {
         at: '2026-08-06T21:02:00.000Z',
       },
       slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+      status: 'active',
       summary:
         'One private first read across the context and health data collected during onboarding.',
       tags: [
