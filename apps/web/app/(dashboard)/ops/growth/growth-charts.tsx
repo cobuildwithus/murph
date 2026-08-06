@@ -20,7 +20,6 @@ import {
   type ChartConfig,
 } from "@/src/components/ui/chart";
 import type {
-  HostedGrowthActivityPoint,
   HostedGrowthDailyPoint,
   HostedGrowthMessagePoint,
   HostedGrowthSnapshotPoint,
@@ -77,7 +76,6 @@ const interactiveChartClassName =
   "mt-4 h-64 w-full rounded-sm has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring";
 
 interface GrowthChartsProps {
-  activitySeries: HostedGrowthActivityPoint[];
   dailySeries: HostedGrowthDailyPoint[];
   messageSeries: HostedGrowthMessagePoint[];
   snapshotSeries: HostedGrowthSnapshotPoint[];
@@ -107,10 +105,11 @@ export function GrowthCharts(input: GrowthChartsProps) {
             People who messaged Murph
           </h3>
           <p className="text-sm leading-6 text-muted-foreground">
-            Unique retained senders across personal and group chats; deleting
-            an account or group removes its activity. Solid sage tracks the
-            trailing seven-day window; dashed sand shows each completed UTC
-            day. Unknown history is left blank.
+            Unique retained senders across personal and group chats. Personal
+            and owned-group rows are removed with account deletion; activity
+            retained in another member&apos;s shared group follows normal content
+            retention. Solid sage tracks the trailing seven-day window; dashed
+            sand shows each completed UTC day. Unknown history is left blank.
           </p>
         </div>
         <ChartContainer
@@ -120,7 +119,7 @@ export function GrowthCharts(input: GrowthChartsProps) {
           <LineChart
             accessibilityLayer
             aria-labelledby={activityTitleId}
-            data={input.activitySeries}
+            data={input.messageSeries}
             margin={{ bottom: 0, left: 0, right: 8, top: 8 }}
           >
             <CartesianGrid

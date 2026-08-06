@@ -23,7 +23,6 @@ import {
 } from "../src/lib/hosted-onboarding/linq-participant-contact";
 import {
   addUtcDays,
-  buildHostedGrowthActivitySeries,
   buildHostedGrowthMessageSeries,
   buildHostedGrowthTrialStartAttribution,
   buildTrialCohortRows,
@@ -778,7 +777,7 @@ describe("hosted ops growth metrics", () => {
     expect(calculatePercentChange(6, 3)).toBe(100);
   });
 
-  it("preserves the 30-day message spine, known zeroes, and unavailable gaps", () => {
+  it("preserves one 30-day snapshot spine with activity zeroes and unavailable gaps", () => {
     const points = buildHostedGrowthMessageSeries({
       messagesBeforeSeries: 5_000,
       snapshots: [
@@ -789,11 +788,15 @@ describe("hosted ops growth metrics", () => {
         },
         {
           ...snapshotRow("2026-07-10", 2_900),
+          activeUsersPriorDay: 4,
+          activeUsersTrailing7Days: 18,
           inboundMessagesPriorDay: 42,
           outboundMessagesPriorDay: 57,
         },
         {
           ...snapshotRow("2026-07-11", 2_900),
+          activeUsersPriorDay: 0,
+          activeUsersTrailing7Days: 15,
           inboundMessagesPriorDay: 0,
           outboundMessagesPriorDay: 0,
         },
@@ -814,79 +817,46 @@ describe("hosted ops growth metrics", () => {
       ),
     );
     expect(points[0]).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
       date: "2026-07-01",
       messagesPerDay: null,
       totalMessages: null,
     });
     expect(points[6]).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
       date: "2026-07-07",
       messagesPerDay: null,
       totalMessages: null,
     });
     expect(points[8]).toEqual({
+      activeUsersPerDay: 4,
+      activeUsersTrailing7Days: 18,
       date: "2026-07-09",
       messagesPerDay: 99,
       totalMessages: 5_099,
     });
     expect(points[9]).toEqual({
+      activeUsersPerDay: 0,
+      activeUsersTrailing7Days: 15,
       date: "2026-07-10",
       messagesPerDay: 0,
       totalMessages: 5_099,
     });
     expect(points[10]).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
       date: "2026-07-11",
       messagesPerDay: null,
       totalMessages: null,
     });
     expect(points[11]).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
       date: "2026-07-12",
       messagesPerDay: 114,
       totalMessages: null,
-    });
-  });
-
-  it("preserves completed-day activity history without inventing legacy zeroes", () => {
-    const points = buildHostedGrowthActivitySeries({
-      snapshots: [
-        {
-          ...snapshotRow("2026-07-10", 2_900),
-          activeUsersPriorDay: 4,
-          activeUsersTrailing7Days: 18,
-        },
-        {
-          ...snapshotRow("2026-07-11", 2_900),
-          activeUsersPriorDay: 0,
-          activeUsersTrailing7Days: 15,
-        },
-        {
-          ...snapshotRow("2026-07-13", 2_900),
-          activeUsersPriorDay: null,
-          activeUsersTrailing7Days: null,
-        },
-      ],
-      windowEnd: new Date("2026-07-31T12:00:00.000Z"),
-    });
-
-    expect(points).toHaveLength(30);
-    expect(points[8]).toEqual({
-      activeUsersPerDay: 4,
-      activeUsersTrailing7Days: 18,
-      date: "2026-07-09",
-    });
-    expect(points[9]).toEqual({
-      activeUsersPerDay: 0,
-      activeUsersTrailing7Days: 15,
-      date: "2026-07-10",
-    });
-    expect(points[10]).toEqual({
-      activeUsersPerDay: null,
-      activeUsersTrailing7Days: null,
-      date: "2026-07-11",
-    });
-    expect(points[11]).toEqual({
-      activeUsersPerDay: null,
-      activeUsersTrailing7Days: null,
-      date: "2026-07-12",
     });
   });
 
@@ -932,11 +902,15 @@ describe("hosted ops growth metrics", () => {
 
     expect(dashboard.messageSeries).toHaveLength(30);
     expect(dashboard.messageSeries[0]).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
       date: "2026-06-06",
       messagesPerDay: 0,
       totalMessages: HOSTED_MESSAGE_VOLUME_BASE + 500,
     });
     expect(dashboard.messageSeries.at(-1)).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
       date: "2026-07-05",
       messagesPerDay: 99,
       totalMessages: HOSTED_MESSAGE_VOLUME_BASE + 599,
@@ -1311,7 +1285,7 @@ describe("hosted ops growth metrics", () => {
     );
   });
 
-  it("keeps admission-time group members stable when provider identity is missing or reassigned", async () => {
+  it("keeps a shared-group sender countable from retained admission-time identity", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const registeredPhone = requireLinqContact("phone", "+15550000001");
     queueCurrentMetricMocks();
@@ -1910,8 +1884,9 @@ describe("hosted ops growth metrics", () => {
       snapshotRow("2026-07-06", 2_900),
     );
 
-    await captureHostedGrowthDailySnapshot(now);
+    const capture = await captureHostedGrowthDailySnapshot(now);
 
+    expect(capture.activityAvailable).toBe(true);
     const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
     expect(upsertArg?.create).toMatchObject({
       activeUsersPriorDay: 2,
@@ -1941,8 +1916,9 @@ describe("hosted ops growth metrics", () => {
       snapshotRow("2026-07-06", 2_900),
     );
 
-    await captureHostedGrowthDailySnapshot(now);
+    const capture = await captureHostedGrowthDailySnapshot(now);
 
+    expect(capture.activityAvailable).toBe(true);
     const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
     expect(upsertArg?.create).toMatchObject({
       activeUsersPriorDay: null,
@@ -1976,7 +1952,8 @@ describe("hosted ops growth metrics", () => {
     );
 
     try {
-      await captureHostedGrowthDailySnapshot(now);
+      const capture = await captureHostedGrowthDailySnapshot(now);
+      expect(capture.activityAvailable).toBe(false);
       expect(errorSpy).toHaveBeenCalledWith(
         "Hosted growth activity snapshot attribution failed; preserving existing activity aggregates when present.",
       );
@@ -2112,6 +2089,52 @@ describe("hosted ops growth metrics", () => {
         snapshotDate: "2026-07-06T00:00:00.000Z",
       },
     });
+  });
+
+  it("reports activity failure after preserving the legacy cron snapshot", async () => {
+    const registeredPhone = requireLinqContact("phone", "+15550000001");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: registeredPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+      }),
+    ]);
+    mocks.decodeHostedMailboxStoredPayload.mockRejectedValueOnce(
+      new Error("unavailable sidecar"),
+    );
+    mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
+    mocks.hostedLinqDelivery.count.mockResolvedValueOnce(57);
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    try {
+      const response = await growthCronRoute.GET(new Request(
+        "https://join.example.test/api/internal/hosted-growth/snapshot/cron",
+      ));
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "HOSTED_GROWTH_ACTIVITY_UNAVAILABLE",
+        },
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      activeUsersPriorDay: null,
+      activeUsersTrailing7Days: null,
+      inboundMessagesPriorDay: 42,
+      outboundMessagesPriorDay: 57,
+    });
+    expect(upsertArg?.update).not.toHaveProperty("activeUsersPriorDay");
+    expect(upsertArg?.update).not.toHaveProperty("activeUsersTrailing7Days");
   });
 });
 

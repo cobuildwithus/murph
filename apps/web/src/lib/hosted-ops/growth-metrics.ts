@@ -39,10 +39,6 @@ import {
   type HostedLinqParticipantContactKind,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
-  buildHostedGrowthActivitySeries,
-  type HostedGrowthActivityPoint,
-} from "@/src/lib/hosted-ops/growth-activity-series";
-import {
   parseHostedPulseTrialStartSource,
   type HostedPulseTrialStartSource,
 } from "@/src/lib/hosted-onboarding/pulse-trial-start-source";
@@ -55,8 +51,6 @@ import { getPrisma } from "@/src/lib/prisma";
 
 export { buildHostedGrowthMessageSeries } from "@/src/lib/hosted-ops/growth-message-series";
 export type { HostedGrowthMessagePoint } from "@/src/lib/hosted-ops/growth-message-series";
-export { buildHostedGrowthActivitySeries } from "@/src/lib/hosted-ops/growth-activity-series";
-export type { HostedGrowthActivityPoint } from "@/src/lib/hosted-ops/growth-activity-series";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAILY_SERIES_DAYS = 30;
@@ -198,6 +192,11 @@ export interface HostedGrowthSnapshotRow {
   trialingMembers: number;
 }
 
+export interface HostedGrowthSnapshotCapture {
+  activityAvailable: boolean;
+  snapshot: HostedGrowthSnapshotRow;
+}
+
 export interface HostedGrowthStatusCounts {
   canceled: number;
   past_due: number;
@@ -257,7 +256,6 @@ export interface HostedGrowthTrialCohortRow {
 }
 
 export interface HostedGrowthDashboard {
-  activitySeries: HostedGrowthActivityPoint[];
   activeUsers: {
     today: number;
     todayComplete: boolean;
@@ -1444,10 +1442,6 @@ export async function readHostedGrowthDashboard(
   );
 
   return {
-    activitySeries: buildHostedGrowthActivitySeries({
-      snapshots,
-      windowEnd: now,
-    }),
     activeUsers: {
       today: activeUsers.today,
       todayComplete: activeUsers.todayComplete,
@@ -1532,7 +1526,7 @@ export async function readHostedGrowthDashboard(
 export async function captureHostedGrowthDailySnapshot(
   now: Date,
   prisma: HostedGrowthPrisma = getPrisma(),
-): Promise<HostedGrowthSnapshotRow> {
+): Promise<HostedGrowthSnapshotCapture> {
   const snapshotDate = startOfUtcDay(now);
   const priorDayStart = addUtcDays(snapshotDate, -1);
   const trailing7DayStart = addUtcDays(snapshotDate, -7);
@@ -1651,7 +1645,7 @@ export async function captureHostedGrowthDailySnapshot(
       activeUsersTrailing7Days: null,
     };
 
-  return prisma.hostedGrowthDailySnapshot.upsert({
+  const snapshot = await prisma.hostedGrowthDailySnapshot.upsert({
     create: {
       activeUsersPriorDay: activityCreateCounts.activeUsersPriorDay,
       activeUsersTrailing7Days: activityCreateCounts.activeUsersTrailing7Days,
@@ -1692,6 +1686,11 @@ export async function captureHostedGrowthDailySnapshot(
       snapshotDate,
     },
   });
+
+  return {
+    activityAvailable: activityCounts.available,
+    snapshot,
+  };
 }
 
 /**

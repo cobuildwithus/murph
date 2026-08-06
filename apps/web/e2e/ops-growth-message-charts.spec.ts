@@ -79,6 +79,12 @@ for (const viewport of VIEWPORTS) {
     }
 
     const activityLines = chartCards.nth(0).locator(".recharts-line-curve");
+    await expect(chartCards.nth(0)).toContainText(
+      "Personal and owned-group rows are removed with account deletion",
+    );
+    await expect(chartCards.nth(0)).toContainText(
+      "activity retained in another member's shared group follows normal content retention",
+    );
     await expect(activityLines).toHaveCount(2);
     await expect.poll(
       () => activityLines.nth(0).getAttribute("stroke-dasharray"),

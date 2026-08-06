@@ -217,8 +217,10 @@ with `10% target hit` or `Below 10% target` text. A missing comparison stays
 neutral and must not claim that a snapshot exists. Keep **Messaged Murph today**
 and **Messaged Murph · last 7 days** as prominent supporting readings beside the MRR
 lead; both count distinct people across personal and attributable group chats.
-Describe them as retained senders because account deletion removes the deleted
-account or group's activity instead of leaving an analytics-side deletion trail.
+Describe them as retained senders. Account deletion removes personal and
+owned-group source rows; activity retained in another member's shared-group
+container follows normal content retention instead of an analytics-side
+deletion trail.
 Active-user windows must not present intentionally retired group-sender evidence
 as an exact count: prefix an affected today, WAU, or MAU count with `At least`,
 explain the private evidence retirement in the supporting copy, and withhold a

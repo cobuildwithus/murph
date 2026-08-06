@@ -1,8 +1,4 @@
 import {
-  buildHostedGrowthActivitySeries,
-  type HostedGrowthActivitySnapshot,
-} from "@/src/lib/hosted-ops/growth-activity-series";
-import {
   buildHostedGrowthMessageSeries,
   type HostedGrowthMessageSnapshot,
 } from "@/src/lib/hosted-ops/growth-message-series";
@@ -36,8 +32,18 @@ const MESSAGE_SNAPSHOTS = GROWTH_DATES
     snapshotDate.setUTCDate(snapshotDate.getUTCDate() + 1);
     const messages = DAILY_MESSAGE_VOLUMES[messageIndex] ?? 0;
     const trackingAvailable = messageIndex >= MESSAGE_TRACKING_START_INDEX;
+    const activityIndex = messageIndex - 10;
+    const activeUsersTrailing7Days = activityIndex >= 0 && activityIndex !== 13
+      ? 68 + activityIndex * 2
+      : null;
 
     return [{
+      activeUsersPriorDay: activeUsersTrailing7Days === null
+        ? null
+        : activityIndex === 8
+          ? activeUsersTrailing7Days
+          : 12 + ((activityIndex * 5) % 17),
+      activeUsersTrailing7Days,
       inboundMessagesPriorDay: trackingAvailable
         ? Math.floor(messages * 0.45)
         : null,
@@ -51,26 +57,6 @@ const MESSAGE_SERIES = buildHostedGrowthMessageSeries({
   messagesBeforeSeries: 5_240,
   snapshots: MESSAGE_SNAPSHOTS,
   trackingEstablishedBeforeSeries: false,
-  windowEnd: new Date("2026-07-31T12:00:00.000Z"),
-});
-
-const ACTIVITY_SNAPSHOTS = GROWTH_DATES.slice(10).flatMap((activityDate, index) => {
-  if (index === 13) {
-    return [];
-  }
-  const snapshotDate = new Date(`${activityDate}T00:00:00.000Z`);
-  snapshotDate.setUTCDate(snapshotDate.getUTCDate() + 1);
-  const activeUsersTrailing7Days = 68 + index * 2;
-
-  return [{
-    activeUsersPriorDay:
-      index === 8 ? activeUsersTrailing7Days : 12 + ((index * 5) % 17),
-    activeUsersTrailing7Days,
-    snapshotDate,
-  } satisfies HostedGrowthActivitySnapshot];
-});
-const ACTIVITY_SERIES = buildHostedGrowthActivitySeries({
-  snapshots: ACTIVITY_SNAPSHOTS,
   windowEnd: new Date("2026-07-31T12:00:00.000Z"),
 });
 
@@ -256,7 +242,6 @@ export function GrowthScorecardStudy() {
           Thirty-day movement
         </div>
         <GrowthCharts
-          activitySeries={ACTIVITY_SERIES}
           dailySeries={DAILY_SERIES}
           messageSeries={MESSAGE_SERIES}
           snapshotSeries={SNAPSHOT_SERIES}

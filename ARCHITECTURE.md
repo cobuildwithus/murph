@@ -422,13 +422,17 @@ counts only when their group evidence is complete. The date-keyed upsert makes
 same-day cron and ops-page retries idempotent. An attribution integrity failure
 is reported and creates null activity values only when no same-date row exists;
 on retry it leaves any existing activity values untouched while still updating
-the snapshot's revenue, member, and message aggregates. Legacy or incomplete
-windows stay null, and the 30-day activity projection shifts each snapshot onto
-the completed day its windows ended instead of reconstructing identities after
-mailbox expiry. These metrics count the retained sender population at read or
-capture time: account deletion intentionally removes the deleted account and any
-owned group-container rows, matching the other row-derived growth metrics,
-rather than leaving a durable deletion-timestamp trail in anonymous analytics.
+the snapshot's revenue, member, and message aggregates. The cron returns a
+failure after that legacy snapshot write so monitoring and an authenticated
+manual rerun can recover the same date; Vercel does not retry failed cron
+invocations automatically. The ops-page retry may also recover the date without
+making the page all-or-nothing. Legacy or incomplete windows stay null, and the
+existing 30-day snapshot projection shifts each row onto the completed day its
+windows ended instead of reconstructing identities after mailbox expiry. These
+metrics count the retained sender population at read or capture time. Account
+deletion removes personal and owned group-container rows; activity retained in
+another member's shared-group container follows normal content retention
+instead of a durable deletion-timestamp trail in anonymous analytics.
 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 

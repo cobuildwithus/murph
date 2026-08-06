@@ -926,9 +926,13 @@ Last verified: 2026-08-05
   An activity-query, decrypt, or identity-resolution failure is reported and
   creates null activity only for a first same-date row. A later failed retry
   leaves existing activity fields untouched while still updating the daily
-  revenue, member, and message snapshot fields. A successful attribution pass
-  remains authoritative and may replace unknown values or write null when it
-  proves retained sender evidence incomplete.
+  revenue, member, and message snapshot fields. After that write, the cron
+  returns non-success so monitoring exposes the missed activity capture and the
+  same authenticated endpoint can be manually rerun for that UTC date; Vercel
+  does not retry a failed cron invocation automatically. An ops-page read is an
+  additional same-date recovery attempt but is not the cron's retry guarantee.
+  A successful attribution pass remains authoritative and may replace unknown
+  values or write null when it proves retained sender evidence incomplete.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an

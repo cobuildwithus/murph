@@ -47,9 +47,11 @@ Updated: 2026-08-06
   growth snapshot and chart semantics.
 - Retired group-sender evidence produces a lower bound live and a chart gap in
   durable history; it is never guessed.
-- The metric covers retained senders. Account deletion removes the deleted
-  account or owned group activity, matching the existing row-derived growth
-  metrics without adding a durable deletion-timestamp analytics trail.
+- The metric covers retained senders. Account deletion removes personal and
+  owned-group source rows, while activity retained in another member's
+  shared-group container follows normal content retention. This keeps the
+  existing row-derived architecture without a deletion-timestamp analytics
+  trail.
 - Activity attribution failure creates unknown activity on the first same-date
   write but cannot overwrite existing activity on retry; revenue, member, and
   message history still updates. A successful pass may replace unknown values
