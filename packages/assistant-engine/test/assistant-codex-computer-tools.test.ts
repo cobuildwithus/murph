@@ -97,9 +97,13 @@ describe("murph computer dynamic tools", () => {
     expect(actDescription.length).toBeLessThanOrEqual(320);
     expect(actDescription).toMatch(/macro-step/iu);
     expect(actDescription).toContain("current authorized run");
-    expect(actDescription).toContain("no missing or sensitive user input or final confirmation");
-    expect(actDescription).toContain("unknown outcome");
-    expect(actDescription).toContain("call computer_open before retrying or acting again");
+    expect(actDescription).toContain("No missing or sensitive input or final confirmation");
+    expect(actDescription).toContain("Before browser call two this turn");
+    expect(actDescription).toContain(
+      "call send_progress_update if available and not yet sent",
+    );
+    expect(actDescription).toContain("outcome uncertain");
+    expect(actDescription).toContain("call computer_open before retry/next action");
 
     expect(openDescription.length).toBeLessThanOrEqual(250);
     expect(openDescription).toContain("authorized browser");
@@ -107,8 +111,8 @@ describe("murph computer dynamic tools", () => {
     expect(openDescription).toContain("Before multi-step browsing each turn");
     expect(openDescription).toContain("call send_progress_update if available");
     expect(openDescription).toContain("prior-turn progress does not count");
-    expect(openDescription).toContain("reopen after handoff or uncertainty");
-    expect(openDescription).toContain("cannot prove prior effect failed");
+    expect(openDescription).toContain("reopen after handoff/uncertainty");
+    expect(openDescription).toContain("prior outcome stays unknown");
 
     expect(osControlDescription.length).toBeLessThanOrEqual(310);
     expect(osControlDescription).toContain("only when Playwright cannot operate");

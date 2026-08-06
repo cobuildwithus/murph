@@ -1256,7 +1256,7 @@ export const MURPH_COMPUTER_OPEN_TOOL = {
   namespace: 'murph',
   name: 'computer_open',
   description:
-    'Open/reuse authorized browser; reopen after handoff or uncertainty. Returns runId, URL, title, text; cannot prove prior effect failed. Before multi-step browsing each turn, call send_progress_update if available; prior-turn progress does not count.',
+    'Open/reuse authorized browser; reopen after handoff/uncertainty. Returns runId, URL, title, text; prior outcome stays unknown. Before multi-step browsing each turn, call send_progress_update if available; prior-turn progress does not count.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1332,7 +1332,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Execute one bounded Playwright macro-step in the current authorized run. Call only while no missing or sensitive user input or final confirmation is required. Return compact state. A transport or browser failure may have an unknown outcome; call computer_open before retrying or acting again.',
+    'One bounded Playwright macro-step in current authorized run; returns state. No missing or sensitive input or final confirmation. Before browser call two this turn, call send_progress_update if available and not yet sent. Failure leaves outcome uncertain; call computer_open before retry/next action.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
