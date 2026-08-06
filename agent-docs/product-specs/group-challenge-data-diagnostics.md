@@ -1,6 +1,6 @@
 # Group Challenge Data Diagnostics
 
-Last verified: 2026-07-30
+Last verified: 2026-08-05
 
 Status: Implemented
 
@@ -129,19 +129,42 @@ Revoke and regrant clear the ciphertext in the same authority transaction, and
 regrant rotates the share id, so a stale producer cannot write into a later
 grant generation.
 
-Deep and REM sleep have separate source-aware v1 scopes. The legacy
-`deep-sleep-days.v0` and `rem-sleep-days.v0` scopes remain provider-neutral and
-continue disclosing one canonical daily value only. The exact
-`deep-sleep-sources-days.v1` and `rem-sleep-sources-days.v1` grants disclose the
-canonical value plus one bounded entry for every public sleep source that has
-that metric on the date, up to four sources. Each entry carries the canonical
-public source key and label, its value and unit, its nullable canonical
-source-record time, and whether it supplied the canonical selected value. The
-record also carries `projectedAt`
-and a literal `sourcesDisagree` flag. Source-aware records fail closed instead
-of truncating when the source bound is exceeded or the selected source cannot
-be proved. Existing v0 grants are never upgraded or broadened in place; a v1
-scope requires its own server-owned access approval.
+Deep sleep and REM sleep are each one user-facing permission. New access offers
+always use the source-aware `deep-sleep-sources-days.v1` and
+`rem-sleep-sources-days.v1` scopes, which disclose the canonical value plus one
+bounded entry for every public sleep source that has that metric on the date,
+up to four sources. Each entry carries the canonical public source key and
+label, its value and unit, its nullable canonical source-record time, and
+whether it supplied the canonical selected value. The record also carries `projectedAt`
+and a literal `sourcesDisagree` flag. Source-aware records fail closed instead of
+truncating when the source bound is exceeded or the selected source cannot be
+proved. The legacy provider-neutral `deep-sleep-days.v0` and
+`rem-sleep-days.v0` scopes remain read-only compatibility contracts for
+existing policies and grants, disclosing one canonical daily value only. A new
+join view or access offer derives the matching legacy policy request as v1, so
+existing groups expose the same single complete permission without an owner
+reconfiguration step. The durable v0 policy entry remains exact. When Web
+acceptance explicitly approves v1, that scope is added alongside v0 in the same
+locked transaction as the grant change, so the previous Web can still show and
+revoke every active authority after rollback. This never upgrades or broadens
+an existing grant in place; each member's v1 grant still requires its own
+server-owned access approval.
+
+The authenticated sharing controls keep a legacy-active sleep grant visible
+under that same single Deep sleep or REM sleep row. Saving without changing it
+preserves the narrower v0 grant. The member can explicitly include source
+details, which grants v1 and revokes the matching v0 row in the same
+transaction, or turn the row off, which revokes both versions. A native reaction
+to a new v1 offer uses the same replacement semantics. No legacy grant is hidden
+or broadened by policy normalization.
+
+A persisted reader that still requests a legacy v0 sleep scope may use the
+canonical top-level value from the matching v1 grant when no exact v0 grant is
+active. That compatibility projection keeps the requested v0 scope identity and
+removes every source name, source value, recorded time, projection time, and
+disagreement field. When both grants exist, the exact v0 grant wins. This lets a
+frozen workflow converge after an explicit v1 approval without silently giving
+that workflow the broader source-aware contract.
 
 `projectedAt` is snapshot generation time, not proof of a provider fetch or a
 fresh sync. A source entry's `recordedAt` is canonical source-record evidence,

@@ -1,3 +1,5 @@
+import { buildHostedVaultShareProjectionScopeKey } from "@murphai/hosted-execution/vault-share";
+
 import type { GroupJoinPermissionDisplay } from "./group-join-client";
 
 /**
@@ -11,6 +13,7 @@ export interface GroupJoinPermissionGroup {
   description: string;
   key: string;
   label: string;
+  legacyScopeKeys: string[];
   scopeKeys: string[];
 }
 
@@ -76,6 +79,7 @@ export function groupJoinPermissionsForDisplay(
           `Shares your last 7 days of daily ${nutrientList} totals from meals in Murph, including meals imported from connected apps.`,
         key: MACROS_GROUP_KEY,
         label: "Daily macros",
+        legacyScopeKeys: [],
         scopeKeys: macroPermissions.map((macro) => macro.projectionScopeKey),
       });
       continue;
@@ -85,6 +89,9 @@ export function groupJoinPermissionsForDisplay(
       description: permission.description,
       key: permission.projectionScopeKey,
       label: permission.label,
+      legacyScopeKeys: permission.legacyProjectionScope
+        ? [buildHostedVaultShareProjectionScopeKey(permission.legacyProjectionScope)]
+        : [],
       scopeKeys: [permission.projectionScopeKey],
     });
   }
