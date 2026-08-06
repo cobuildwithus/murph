@@ -96,7 +96,8 @@
   },
   "devDependencies": {
     "@types/react": "^19.2.14",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "zod": "^4.4.3"
   },
   "bundleDependencies": [
     "@murphai/assistant-cli",

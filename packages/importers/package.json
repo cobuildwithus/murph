@@ -74,6 +74,7 @@
     "@murphai/health-metrics": "workspace:*"
   },
   "devDependencies": {
-    "@medplum/fhirtypes": "^5.1.24"
+    "@medplum/fhirtypes": "^5.1.24",
+    "zod": "^4.4.3"
   }
 }

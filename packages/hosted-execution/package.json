@@ -188,6 +188,9 @@
     "@murphai/importers": "workspace:*",
     "@murphai/runtime-state": "workspace:*"
   },
+  "devDependencies": {
+    "zod": "^4.4.3"
+  },
   "bundleDependencies": [
     "@murphai/clinical-records",
     "@murphai/core",

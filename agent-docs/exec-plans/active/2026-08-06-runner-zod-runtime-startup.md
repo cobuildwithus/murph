@@ -51,8 +51,8 @@ Updated: 2026-08-06
 
 ## Constraints
 
-- No dependency addition, bundler source rewrite, alias hack, second schema
-  owner, persisted state, queue, or lifecycle manager.
+- No production dependency addition, bundler source rewrite, alias hack, second
+  schema owner, persisted state, queue, or lifecycle manager.
 - Preserve foreground reply priority and the current health/readiness meaning.
 - Do not remove query-cache contents or move required provider work behind a
   misleading readiness signal.
@@ -137,12 +137,12 @@ Updated: 2026-08-06
 - Final ReviewGPT round 1 found that nine migrated packages still declared Zod
   as a direct production dependency, seven type-only namespace imports still
   emitted value edges, and one migrated import was unused. The correction
-  removes those nine dependency owners and their lockfile entries, makes the
+  moves those nine declarations out of production dependencies, makes the
   seven imports explicitly type-only, deletes the unused import, and routes the
   five remaining consumer tests through the contracts-owned runtime surface.
-  Production direct imports and dependencies now remain only in Contracts and
-  Gateway Core, whose independent `zod/v4` surface preserves the acyclic
-  package boundary.
+  Production direct imports and runtime dependencies now remain only in
+  Contracts and Gateway Core, whose independent `zod/v4` surface preserves the
+  acyclic package boundary.
 - Focused remediation proof passed: nine affected package typechecks, six
   focused test files (42 tests), workspace-boundary verification, package-cycle
   verification, and production runner assembly. The corrected assembly retains
@@ -160,3 +160,14 @@ Updated: 2026-08-06
   cycles pass. After deleting the stale Inbox Services Zod link and rerunning a
   frozen install, the link stayed absent and the package typecheck plus all ten
   focused tests passed.
+- Exact-head CI then exposed a distinct declaration-build requirement: emitted
+  schemas still name Zod types, and a clean parallel Importers build could not
+  resolve Clinical Records' emitted `zod/v4` references after every non-owner
+  declaration was removed. The nine schema packages now retain Zod only as a
+  build-time dev dependency. A frozen install creates their development links,
+  while the exact production assembly reports `devDependencies: skipped` and
+  stages no package-local Zod copies for those consumers.
+- Clinical Records and Importers builds/typechecks, the exhaustive boundary
+  policy, package cycles, and the exact production runner assembly pass after
+  that correction. Bundle bytes remain exactly 1,729,632 B entry, 8,182,922 B
+  static closure, and 9,862,735 B total.

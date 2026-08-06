@@ -428,6 +428,9 @@ importers:
       openai:
         specifier: 6.45.0
         version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/assistant-runtime:
     dependencies:
@@ -600,12 +603,19 @@ importers:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/clinical-records:
     dependencies:
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
+    devDependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/cloudflare-hosted-control:
     dependencies:
@@ -727,6 +737,10 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
+    devDependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/hosted-local-harness:
     dependencies:
@@ -758,6 +772,9 @@ importers:
       '@medplum/fhirtypes':
         specifier: ^5.1.24
         version: 5.1.24
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/inbox-services:
     dependencies:
@@ -785,6 +802,10 @@ importers:
       '@murphai/vault-usecases':
         specifier: workspace:*
         version: link:../vault-usecases
+    devDependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/inboxd:
     dependencies:
@@ -838,6 +859,9 @@ importers:
       '@linqapp/sdk':
         specifier: 0.28.0
         version: 0.28.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/parsers:
     dependencies:
@@ -862,6 +886,10 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
+    devDependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/runtime-state: {}
 
@@ -925,6 +953,10 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
+    devDependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
 packages:
 

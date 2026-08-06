@@ -80,6 +80,9 @@
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*"
   },
+  "devDependencies": {
+    "zod": "^4.4.3"
+  },
   "engines": {
     "node": ">=24.14.1"
   }

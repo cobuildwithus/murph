@@ -36,6 +36,9 @@
     "@murphai/runtime-state": "workspace:*",
     "@murphai/vault-usecases": "workspace:*"
   },
+  "devDependencies": {
+    "zod": "^4.4.3"
+  },
   "engines": {
     "node": ">=24.14.1"
   }
