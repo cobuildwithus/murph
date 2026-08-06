@@ -2299,11 +2299,36 @@ describe("hosted Linq webhook transport", () => {
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       usageCreditLedgerVersion: 2n,
     });
+    const resetAt = "2026-03-26T12:15:00.000Z";
+    const afterPlanResetEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        planResetAt: resetAt,
+        sentAt: "2026-03-26T12:45:01.000Z",
+        usageCreditLedgerVersion: "0",
+      },
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "edge_usage_limit_reached",
+      occurredAt: "2026-03-26T12:45:00.000Z",
+      replyToMessageId: "message-3",
+      sourceEventId: "event-ai-usage-after-reset",
+      template: "ai_usage_quota",
+    });
+    const afterPlanResetIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: "member-1",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      planResetAt: resetAt,
+      usageCreditLedgerVersion: 0n,
+    });
 
     expect(firstEffect.effectId).toBe(firstIdempotencyKey);
     expect(firstRetryEffect.effectId).toBe(firstIdempotencyKey);
     expect(secondEffect.effectId).toBe(secondIdempotencyKey);
     expect(secondEffect.effectId).not.toBe(firstEffect.effectId);
+    expect(afterPlanResetEffect.effectId).toBe(afterPlanResetIdempotencyKey);
+    expect(afterPlanResetEffect.effectId).not.toBe(firstEffect.effectId);
     expect(firstEffect.payload).toMatchObject({
       sourceEventId: "event-ai-usage-1",
     });

@@ -112,13 +112,22 @@ export function createAssistantProductFeedbackRecorder(input: {
   }
 
   let productFeedback: HostedRuntimeProductFeedbackRecord | null = null
-  let supportEscalationDelivered = false
+  let supportEscalationOutcome:
+    | 'unattempted'
+    | 'attempting'
+    | 'delivered'
+    | 'failed' = 'unattempted'
   return {
     async recordProductFeedback(feedback) {
       const normalized = normalizeAssistantProductFeedback(feedback)
       const supportEscalation = isHostedProductSupportEscalationFeedback(normalized)
-      if (supportEscalation && supportEscalationDelivered) {
-        return { recorded: false }
+      if (supportEscalation) {
+        if (supportEscalationOutcome === 'delivered') {
+          return { recorded: false }
+        }
+        if (supportEscalationOutcome !== 'unattempted') {
+          throw new Error('Product support escalation is unavailable for this turn.')
+        }
       }
       if (
         productFeedback
@@ -143,12 +152,19 @@ export function createAssistantProductFeedbackRecorder(input: {
         // Durable-before-confirmation: the support promise ("queued") must be
         // backed by the Web record before the model may state it, so this path
         // waits on the callback instead of joining the best-effort post-reply
-        // candidate flush. A same-turn ordinary candidate for the same issue is
-        // superseded by the durably recorded escalation.
-        const delivered = await deliverSupportEscalation(candidate)
-        supportEscalationDelivered = true
+        // candidate flush. The first attempt is terminal for this turn, so a
+        // same-turn ordinary candidate cannot become a fallback after an
+        // ambiguous callback failure.
+        supportEscalationOutcome = 'attempting'
         productFeedback = null
-        return { recorded: delivered.recorded }
+        try {
+          const delivered = await deliverSupportEscalation(candidate)
+          supportEscalationOutcome = 'delivered'
+          return { recorded: delivered.recorded }
+        } catch (error) {
+          supportEscalationOutcome = 'failed'
+          throw error
+        }
       }
       productFeedback = candidate
       return { recorded: true }

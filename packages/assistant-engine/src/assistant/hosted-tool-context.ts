@@ -310,6 +310,9 @@ export function createAssistantHostedToolContext(input: {
             void recordAssistantUsageEvent({
               effectiveEnv: usageInput.effectiveEnv,
               executionContext: { hosted: executionContext },
+              ...(usageInput.usageDraft.occurredAt === undefined
+                ? {}
+                : { occurredAt: usageInput.usageDraft.occurredAt }),
               providerRequestAcceptedInputIds: [
                 usageInput.originAssistantInputId,
               ],

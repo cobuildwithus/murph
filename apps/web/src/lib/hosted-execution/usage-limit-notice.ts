@@ -93,6 +93,7 @@ export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input:
   message: string;
   noticeCode?: HostedAiUsageLimitNoticeCode;
   periodStart: Date;
+  planResetAt?: Date | null;
   prisma: PrismaClient;
   replyToMessageId: string;
   sentAt: Date;
@@ -129,6 +130,7 @@ export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input:
             target: input.target,
           },
           periodStart: input.periodStart,
+          planResetAt: input.planResetAt ?? null,
           prisma: input.prisma,
           source: "hosted_runtime_ai_usage_limit_notice",
           sourceRef: input.sourceEventId,

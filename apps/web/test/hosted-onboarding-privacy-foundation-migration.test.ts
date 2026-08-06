@@ -164,6 +164,10 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'stripeSubscriptionScheduleLookupKey String? @unique @map("stripe_subscription_schedule_lookup_key")',
     'stripeSubscriptionScheduleIdEncrypted String? @map("stripe_subscription_schedule_id_encrypted")',
     'lastStripeEventCreatedAt DateTime? @map("last_stripe_event_created_at")',
+    'usagePlanTransitionAt DateTime? @map("usage_plan_transition_at")',
+    'usagePlanTransitionFromCode String? @map("usage_plan_transition_from_code")',
+    'usagePlanTransitionKind String? @map("usage_plan_transition_kind")',
+    'usagePlanTransitionToCode String? @map("usage_plan_transition_to_code")',
     'currentBillingPhase String? @map("current_billing_phase")',
     'currentBillingPlanCode String? @map("current_billing_plan_code")',
     'currentCheckoutOffer String? @map("current_checkout_offer")',
@@ -1064,6 +1068,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260804170000_add_initial_onboarding_completion",
       "20260804223000_hosted_signup_referral_attribution",
       "20260805010000_rearm_generated_image_capture_retention",
+      "20260805160000_hosted_usage_plan_reset_epoch",
       "migration_lock.toml",
     ]);
     expect(hostedPendingGroupSetupMigrationSql).toContain(

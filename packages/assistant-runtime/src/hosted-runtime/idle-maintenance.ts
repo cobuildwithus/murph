@@ -314,6 +314,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     // helper can never throw — an exception here aborts idle maintenance,
     // never the checkpoint.
     let outcome: CodexWarmThreadCompactionOutcome;
+    const compactStartedAt = new Date().toISOString();
     try {
       outcome = await compactWarmCodexThread({
         canAccountForModel: (model) =>
@@ -383,6 +384,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             featureKey: "assistant_idle_compact",
             memberId: input.memberId,
             model,
+            occurredAt: compactStartedAt,
             providerName,
             tokenPricingBasis,
             triggerKind: "automation_idle_compact",

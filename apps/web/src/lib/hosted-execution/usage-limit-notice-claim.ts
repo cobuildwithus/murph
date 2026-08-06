@@ -41,6 +41,7 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
   memberId: string;
   noticeDeliveryTarget: HostedRuntimeUsageNoticeDeliveryTarget;
   periodStart: Date;
+  planResetAt?: Date | null;
   prisma: PrismaClient;
   source: HostedAiUsageLimitNoticeDeliverySource;
   sourceRef: string;
@@ -77,6 +78,7 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
             attemptedAt: input.attemptedAt,
             memberId: input.memberId,
             periodStart: input.periodStart,
+            planResetAt: input.planResetAt ?? null,
             tx: claimPrisma,
           })) {
             throw noticeNotEligible;
@@ -88,6 +90,7 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
           : {}),
         memberId: input.memberId,
         periodStart: input.periodStart,
+        planResetAt: input.planResetAt ?? null,
         prisma,
         source: input.source,
         sourceRef: input.sourceRef,
@@ -132,6 +135,7 @@ async function lockHostedAiUsageLimitNoticeEligibilityTx(input: {
   attemptedAt: Date;
   memberId: string;
   periodStart: Date;
+  planResetAt: Date | null;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
   const rows = await input.tx.$queryRaw<Array<{ eligible: boolean }>>`
@@ -139,6 +143,7 @@ async function lockHostedAiUsageLimitNoticeEligibilityTx(input: {
     FROM "hosted_ai_usage_period"
     WHERE "member_id" = ${input.memberId}
       AND "period_start" = ${input.periodStart}
+      AND "plan_reset_at" IS NOT DISTINCT FROM ${input.planResetAt}
       AND "period_start" <= ${input.attemptedAt}
       AND "period_end" > ${input.attemptedAt}
       AND "blocked_at" IS NOT NULL

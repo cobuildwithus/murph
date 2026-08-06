@@ -17,6 +17,7 @@ export interface RetellCallPayload {
   duration_ms?: number | null;
   end_timestamp?: number | string | null;
   metadata?: Record<string, unknown> | null;
+  start_timestamp?: number | string | null;
   transcript?: string | null;
   transfer_end_timestamp?: number | string | null;
   [key: string]: unknown;
@@ -64,6 +65,17 @@ export function hasRetellBasicAttributesOnlyStorage(call: RetellCallPayload): bo
 
 export function readRetellCallEndAt(call: RetellCallPayload): Date | null {
   return readRetellTimestamp(call.end_timestamp);
+}
+
+export function readRetellCallStartAt(call: RetellCallPayload): Date | null {
+  const explicitStart = readRetellTimestamp(call.start_timestamp);
+  if (explicitStart) {
+    return explicitStart;
+  }
+  const end = readRetellCallEndAt(call);
+  return end && call.duration_ms !== null && call.duration_ms !== undefined
+    ? validRetellDate(end.getTime() - call.duration_ms)
+    : null;
 }
 
 export function readRetellTransferEndAt(call: RetellCallPayload): Date | null {
@@ -119,6 +131,7 @@ function parseRetellCallPayload(value: unknown): RetellCallPayload {
     duration_ms: readOptionalNonNegativeInteger(record.duration_ms),
     end_timestamp: readOptionalTimestamp(record.end_timestamp),
     metadata: readOptionalRecord(record.metadata, "Retell call metadata"),
+    start_timestamp: readOptionalTimestamp(record.start_timestamp),
     transcript: readOptionalString(record.transcript, "Retell transcript"),
     transfer_end_timestamp: readOptionalTimestamp(record.transfer_end_timestamp),
   };
@@ -213,7 +226,7 @@ function readOptionalTimestamp(value: unknown): number | string | null | undefin
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
-  throw new TypeError("Retell end timestamp must be a string or finite number.");
+  throw new TypeError("Retell timestamp must be a string or finite number.");
 }
 
 function readOptionalNonNegativeInteger(value: unknown): number | null | undefined {

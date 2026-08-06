@@ -210,6 +210,10 @@ describe("createHostedPhysicalNote", () => {
       status: "accepted",
     });
     expect(mocks.readUsageGate).toHaveBeenCalledOnce();
+    const paidRow = store.allRows().find(
+      (row) => row.id === paidResponse.physicalNoteId,
+    );
+    expect(paidRow).toBeDefined();
     expect(mocks.recordUsage).toHaveBeenCalledWith({
       accountAllowance: true,
       prisma: expect.anything(),
@@ -217,6 +221,7 @@ describe("createHostedPhysicalNote", () => {
       usage: [
         expect.objectContaining({
           featureKey: "physical-note",
+          occurredAt: paidRow?.createdAt.toISOString(),
           provider: "lob",
           providerRequestId: "ltr_paid",
           rawUsageJson: {
@@ -226,9 +231,7 @@ describe("createHostedPhysicalNote", () => {
         }),
       ],
     });
-    expect(store.allRows().find(
-      (row) => row.id === paidResponse.physicalNoteId,
-    )).toMatchObject({
+    expect(paidRow).toMatchObject({
       complimentaryOfferCode: null,
       providerLetterId: "ltr_paid",
       status: "accepted",

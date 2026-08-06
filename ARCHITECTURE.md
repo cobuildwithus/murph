@@ -920,6 +920,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   activation side effects, and email paths must not persist provider payloads
   or expose recipients in logs.
 
+  Reserved support escalation uses the existing product-feedback callback as a
+  one-turn explicit action. A verified-private request for Murph human support
+  authorizes one account-linked call with Murph's bounded, de-identified
+  product-only explanation after the reserved prefix; Murph does not first
+  display it or ask for separate approval. A generic bug handoff, group, or
+  unverified audience does not authorize the reserved shape. The callback keeps
+  the linked marker server-authored and the written issue in a separate
+  anonymous detail row; the paired detailed-email behavior reads that row back
+  before provider entry. This adds no second consent or state owner.
+
   A separate authenticated ten-minute Vercel cron performs work only during the
   6pm Eastern hour and sends one daily internal product-feedback digest through
   that existing Resend transport. Web reads its owned
@@ -1232,7 +1242,13 @@ application code.
   OpenAI uses its existing Responses intercept; Venice accepts only the two
   Responses POST paths and rewrites a canonical
   Luna/Terra/Sol model to the matching regular Venice GPT-5.6 provider id at
-  egress. The shared mapping is code-owned and exposes no duplicate operator
+  egress. For Codex Responses Lite requests to `/responses`, that same boundary
+  restores the standard top-level tool field and marks the end of Codex's
+  contiguous leading developer prefix as the explicit prompt-cache boundary;
+  it preserves Codex's session-stable cache key and any caller-owned cache
+  controls. Compact requests and ordinary non-Codex Responses payloads do not
+  receive the compatibility marker. This creates no Murph-owned cache or cache
+  state. The shared mapping is code-owned and exposes no duplicate operator
   model variables, so inference and pricing cannot drift independently. Web
   prices immutable usage rows by canonical model plus recorded provider, using
   Venice's distinct input, cache-read, cache-write, and output rates when
