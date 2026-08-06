@@ -7,7 +7,10 @@ import {
 } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
 import {
-  HOSTED_SIGNUP_REFERRAL_POLICY_VERSIONS,
+  appendHostedSignupReferralRewardNotice,
+} from "./signup-referral-notification";
+import {
+  isHostedSignupReferralPolicyVersion,
 } from "./signup-referral-policy";
 import {
   recoverPendingHostedSignupReferralRewards,
@@ -28,11 +31,10 @@ export interface HostedUsageReferralRecoveryResult {
 }
 
 /**
- * Bounded recovery for conversational referrals whose qualifying ingress
- * committed before reward reconciliation, or whose credit committed before the
- * source celebration reached the durable mailbox. Signup-link activations use
- * this cron only as a bounded trigger; they settle atomically and do not emit a
- * challenge-style celebration in the first version.
+ * One bounded recovery owner settles signup-link rewards, reconciles ordinary
+ * referral missions, queues each path's completion notice through the shared
+ * assistant-notification mailbox, and re-signals durable notices after a
+ * best-effort wake failure.
  */
 export async function recoverPendingHostedUsageReferrals(input: {
   prisma?: PrismaClient;
@@ -42,7 +44,10 @@ export async function recoverPendingHostedUsageReferrals(input: {
   const [referrals, unconsumedCelebrations] = await Promise.all([
     prisma.hostedUsageReferral.findMany({
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
-      select: { id: true },
+      select: {
+        id: true,
+        policyVersion: true,
+      },
       take: HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
       where: {
         OR: [
@@ -52,9 +57,6 @@ export async function recoverPendingHostedUsageReferrals(input: {
           },
           {
             celebrationQueuedAt: null,
-            policyVersion: {
-              notIn: [...HOSTED_SIGNUP_REFERRAL_POLICY_VERSIONS],
-            },
             status: "rewarded",
           },
         ],
@@ -85,10 +87,17 @@ export async function recoverPendingHostedUsageReferrals(input: {
   let queued = 0;
   for (const referral of referrals) {
     try {
-      const wake = await reconcileHostedUsageReferralRewardAfterCommit({
-        prisma,
-        referralId: referral.id,
-      });
+      const wake = isHostedSignupReferralPolicyVersion(
+          referral.policyVersion,
+        )
+        ? await appendHostedSignupReferralRewardNotice({
+            prisma,
+            referralId: referral.id,
+          })
+        : await reconcileHostedUsageReferralRewardAfterCommit({
+            prisma,
+            referralId: referral.id,
+          });
       if (!wake) {
         pending += 1;
         continue;
