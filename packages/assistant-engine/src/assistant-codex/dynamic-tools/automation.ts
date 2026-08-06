@@ -17,6 +17,8 @@ import type {
 import {
   buildOnboardingFirstPersonalReadAutomationSaveRequest,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
 } from '../../assistant/onboarding-first-personal-read-automation.js'
 import type {
   SafeToolCallValidationDigest,
@@ -74,7 +76,20 @@ const saveAutomationArgumentsSchema = z.object({
   supportSeriesId: automationSupportSeriesIdSchema.optional(),
   tags: automationTagsSchema.optional(),
   title: automationTitleSchema,
-}).strict()
+}).strict().superRefine((value, context) => {
+  if (
+    value.automationId ===
+      MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
+    || value.slug === MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'The onboarding first personal read must use its fixed structured action.',
+      path: ['action'],
+    })
+  }
+})
 
 const saveOnboardingFirstPersonalReadArgumentsSchema = z.object({
   action: z.literal(MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION),
@@ -97,6 +112,18 @@ const patchAutomationArgumentsSchema = z.object({
   tags: automationTagsSchema.optional(),
   title: automationTitleSchema.optional(),
 }).strict().superRefine((value, context) => {
+  if (
+    value.lookup === MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
+    || value.lookup === MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'The onboarding first personal read cannot be changed through generic patch.',
+      path: ['lookup'],
+    })
+  }
+
   const patchKeys = [
     'activeUntil',
     'assistantTargetOverride',
@@ -172,7 +199,7 @@ export const MURPH_AUTOMATION_TOOL = {
   name: 'automation',
   deferLoading: true,
   description:
-    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot after answered onboarding; it accepts no prompt, timing, model, route, or other fields. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
+    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot after answered onboarding; it accepts no prompt, timing, model, route, or other fields, and generic save or patch cannot replace it. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
