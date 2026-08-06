@@ -140,7 +140,7 @@ describe("hosted local active-turn latency e2e", () => {
     }
   }, 900_000);
 
-  it("does not run the full idle-shutdown snapshot immediately for projected wakes under the 90s idle delay", async () => {
+  it("does not run the full idle-shutdown snapshot immediately for projected wakes under the 60s idle delay", async () => {
     const database = await createSharedProbeDatabase();
 
     try {
