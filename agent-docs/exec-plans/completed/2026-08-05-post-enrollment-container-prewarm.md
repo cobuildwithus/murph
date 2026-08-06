@@ -1,6 +1,6 @@
 # Move instant-start container prewarm after enrollment
 
-Status: active
+Status: completed
 Created: 2026-08-05
 Updated: 2026-08-06
 
@@ -93,7 +93,7 @@ Updated: 2026-08-06
    crash-window reconciliation.
 6. [x] Re-run focused tests, Web typecheck, docs/diff/privacy checks, and parent
    call-path review for the combined correction.
-7. [ ] Push the exact candidate and complete required ReviewGPT and CI gates,
+7. [x] Push the exact candidate and complete required ReviewGPT and CI gates,
    then leave the PR open, unmerged, and undeployed for user review. Reserve
    production measurement for a separately authorized deployment.
 
@@ -139,6 +139,21 @@ Updated: 2026-08-06
 - `pnpm --dir apps/cloudflare typecheck` passed after the hosted-local proof.
 - `pnpm docs:drift` and `git diff --check` passed; the scoped diff and privacy
   scan were clean.
-- Final ReviewGPT round 1 passed against the original pushed candidate. The
-  hosted-local remediation still requires an exact-head correction-verification
-  round and refreshed CI before this plan can close.
+- Final ReviewGPT round 1 passed against the original behavior-bearing
+  candidate. Round 2 passed against
+  `33ad04a662799631fa927c6137ed4d6375a7b3a5` after the test-only hosted-local
+  remediation, with no accepted findings.
+- Exact-head app verification encountered two unrelated failures on successive
+  runs: a 6-second timeout in the untouched product-feedback port test and an
+  assertion in the untouched private-media test. Each exact test passed locally
+  in isolation, and a third same-head app-verification run passed without a
+  branch change. Every other required GitHub Actions check was green.
+- Parent final review found no unresolved source, ordering, recovery, privacy,
+  delivery, or proof issue. GitHub reports the PR mergeable; it remains open,
+  unmerged, and undeployed.
+- The traced affected cold instant-start shape paid about 2.24 seconds waiting
+  on the competing system owner. Removing that wrong-owner race still projects
+  roughly three seconds of improvement on affected cold instant starts. This
+  is not production-measured; measurement remains deferred until an explicitly
+  authorized deployment.
+Completed: 2026-08-06
