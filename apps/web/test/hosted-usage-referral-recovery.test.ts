@@ -169,6 +169,37 @@ describe("hosted usage-referral recovery", () => {
     );
   });
 
+  it("continues ordinary recovery when the gated signup scan throws", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const findReferrals = vi.fn().mockResolvedValue([]);
+    const findMailboxItems = vi.fn().mockResolvedValue([]);
+    const prisma = {
+      hostedMailboxItem: { findMany: findMailboxItems },
+      hostedUsageReferral: { findMany: findReferrals },
+    };
+    mocks.recoverPendingHostedSignupReferralRewards.mockRejectedValue(
+      new TypeError("invalid signup reward query"),
+    );
+
+    await expect(recoverPendingHostedUsageReferrals({
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      failed: 1,
+      pending: 0,
+      queued: 0,
+      resignaled: 0,
+      scanned: 0,
+    });
+
+    expect(findReferrals).toHaveBeenCalledOnce();
+    expect(findMailboxItems).toHaveBeenCalledOnce();
+    expect(consoleError).toHaveBeenCalledExactlyOnceWith(
+      "Hosted signup referral recovery failed.",
+      { errorName: "TypeError" },
+    );
+    consoleError.mockRestore();
+  });
+
   it("authenticates the cron before running an empty recovery pass", async () => {
     const prisma = {
       hostedMailboxItem: {
