@@ -148,21 +148,20 @@ Updated: 2026-08-06
   base/head comparison, production latency measurement, or SLO claim. In an
   earlier strict trace, eliminating the later-stage aspiration overread reduced
   that turn's input from 40,122 to 34,513 tokens (5,609 / 14.0%).
-- The exact-current Terra/low retry reached the provider but hit its usage limit
-  before the first model action, so it produced no new routing or latency
-  sample. The two new resume-boundary scenarios therefore have deterministic
-  fixture and policy proof but are not claimed as exact-current live-model
-  evidence.
+- The last Terra/low retry before the auth-harness simplification reached the
+  provider but hit its usage limit before the first model action, so it
+  produced no new routing or latency sample. The two new resume-boundary
+  scenarios therefore have deterministic fixture and policy proof but are not
+  claimed as exact-current live-model evidence.
 - The structural production estimate remains a one-to-three-second fresh-reply
   improvement. Realized production latency remains unmeasured because the
   branch is intentionally unmerged and undeployed.
-- Subscription-backed proof is explicitly onboarding-scoped. The shared
-  resolver requires both a consumer option and the environment gate, while all
-  other real-Codex tests retain their prior provider selection. It derives a
-  seed with no refresh token or API key, requires at least 30 minutes of
-  access-token runway, writes credentials only to a mode-0600 temporary Codex
-  home, never logs credential values, and awaits retrying cleanup while
-  surfacing only sanitized failure.
+- The mandatory round-3 retrospective chose deletion over disclosure for the
+  local subscription-auth adapter. The gated actual-model probe remains because
+  static assets and a scripted provider cannot prove real model reference
+  selection, but it now reuses the test file's pre-existing API-key or gateway
+  resolver. Host auth-store reads, copied credentials, token-runway logic, the
+  temporary credential home, and their dedicated test scaffold are removed.
 - Final audit also restored injury history to the owning medical/safety
   checkpoint and its complete synthetic resume evidence so an unresolved
   safety fact cannot qualify a flow for contextual return.
@@ -172,11 +171,11 @@ Updated: 2026-08-06
 - Completed local proof:
   - assistant skill assets: 27 passed, 6 existing skips;
   - real App Server scripted fresh greeting: 1 passed;
-  - provider-free subscription isolation and policy detectors: 3 passed, 36
-    gated skips;
+  - real-Codex harness and policy-detector regressions: 6 passed, 32 gated
+    skips;
   - prior-head exact Terra/low full-tree routing: 1 passed, 37 skipped;
-  - exact-current Terra/low retry: blocked by provider usage limit before the
-    first action and therefore not counted as a routing or latency result;
+  - final pre-shrink Terra/low retry: blocked by provider usage limit before
+    the first action and therefore not counted as a routing or latency result;
   - scripted runtime, food-journal owner, and proactive-support regressions: 32
     passed;
   - onboarding route planning: 1 passed;
@@ -192,9 +191,10 @@ Updated: 2026-08-06
 - The behavior-bearing candidate is committed and pushed at
   `5b85a07198521b77ccd9ffd1c8b9261c284e9635`. Preliminary combined review and
   final ReviewGPT round 1 passed. Round 2 found an over-broad contextual-return
-  predicate and an undisclosed file-wide subscription-auth switch; both are
-  corrected, independent prompt/auth re-audits pass, and final ReviewGPT round
-  3 remains pending. Exact-head CI is pending for the corrected candidate.
+  predicate and an undisclosed file-wide subscription-auth switch. The routing
+  predicate is corrected; the round-3 retrospective then removed the auth
+  switch and its scaffold entirely. Independent prompt/auth re-audits pass.
+  The same-thread round-3 retry and exact-head CI remain pending.
 - Commands to run:
   - focused assistant-engine turn-planning and model-behavior Vitest files;
   - focused hosted-local Linq first-contact scenario when locally runnable;
