@@ -8,6 +8,7 @@ import type {
 
 import {
   buildHostedUsageReferralOutstandingWhere,
+  buildHostedUsageReferralRewardLabel,
   getHostedUsageReferralPolicyDisplay,
   isHostedUsageReferralEnabled,
 } from "../hosted-growth/usage-referral";
@@ -51,7 +52,6 @@ interface HostedUsageReferralActivityRecord {
   policyCode: HostedUsageReferralPolicyCode;
   qualifiedAt: Date | null;
   rewardedAt: Date | null;
-  rewardUsdMicros: bigint;
   status: HostedUsageReferralStatus;
 }
 
@@ -101,7 +101,6 @@ export async function readHostedAiUsageActivity(input: {
       policyCode: true,
       qualifiedAt: true,
       rewardedAt: true,
-      rewardUsdMicros: true,
       status: true,
     },
     take: MAX_USAGE_MISSION_ROWS,
@@ -126,7 +125,6 @@ export async function readHostedAiUsageActivity(input: {
           policyCode: true,
           qualifiedAt: true,
           rewardedAt: true,
-          rewardUsdMicros: true,
           status: true,
         },
         take: remainingMissionRows,
@@ -167,14 +165,20 @@ function projectHostedUsageMissionActivity(input: {
 }): HostedAiUsageMissionActivityRow {
   const policy = getHostedUsageReferralPolicyDisplay(input.row.policyCode);
   const status = projectHostedUsageMissionStatus(input.row, input.now);
+  const destinationKind = input.row.beneficiaryMemberId === input.memberId
+    ? "personal"
+    : "group";
 
   return {
-    destinationLabel: input.row.beneficiaryMemberId === input.memberId
+    destinationLabel: destinationKind === "personal"
       ? "your Murph"
       : "the group",
     id: input.row.id,
     requirementsLabel: policy.requirementsLabel,
-    rewardLabel: formatUsdMicros(input.row.rewardUsdMicros),
+    rewardLabel: buildHostedUsageReferralRewardLabel({
+      destinationKind,
+      policyCode: input.row.policyCode,
+    }),
     selectedLabel: formatDate(input.row.armedAt),
     status,
     statusLabel: projectHostedUsageMissionStatusLabel(status),

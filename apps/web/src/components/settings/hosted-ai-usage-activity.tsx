@@ -1,6 +1,7 @@
 import { ChevronDown } from "lucide-react";
 
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
+import { HostedSignupReferralLinkButton } from "@/src/components/settings/hosted-signup-referral-link-button";
 import { buttonVariants } from "@/src/components/ui/button";
 import type {
   HostedAiUsageActivitySnapshot,
@@ -14,8 +15,11 @@ export function HostedAiUsageActivity(props: {
 }) {
   const canStartMissions =
     props.activity.missionsEnabled && props.missionContactOption !== null;
+  const canShareReferralLink = canStartMissions;
   const hasMissionSurface =
-    canStartMissions || props.activity.missions.length > 0;
+    canShareReferralLink
+    || canStartMissions
+    || props.activity.missions.length > 0;
   const currentMissions = props.activity.missions.filter(
     (mission) => mission.status !== "completed",
   );
@@ -43,19 +47,24 @@ export function HostedAiUsageActivity(props: {
             <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
               Referrals
             </h3>
-            {canStartMissions && props.missionContactOption ? (
-              <MurphContactLink
-                actionLabel="Ask Murph about referrals"
-                className={buttonVariants({
-                  className: "h-auto px-0",
-                  size: "sm",
-                  variant: "link",
-                })}
-                option={props.missionContactOption}
-              >
-                Ask Murph
-              </MurphContactLink>
-            ) : null}
+            <div className="flex items-center gap-4">
+              {canShareReferralLink ? (
+                <HostedSignupReferralLinkButton />
+              ) : null}
+              {canStartMissions && props.missionContactOption ? (
+                <MurphContactLink
+                  actionLabel="Ask Murph about referrals"
+                  className={buttonVariants({
+                    className: "h-auto px-0",
+                    size: "sm",
+                    variant: "link",
+                  })}
+                  option={props.missionContactOption}
+                >
+                  Ask Murph
+                </MurphContactLink>
+              ) : null}
+            </div>
           </div>
 
           {currentMissions.length > 0 ? (

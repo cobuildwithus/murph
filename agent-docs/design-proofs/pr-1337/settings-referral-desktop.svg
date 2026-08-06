@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+<rect width="1440" height="900" fill="#F7F5F0"/>
+<rect width="250" height="900" fill="#2E2A25"/>
+<g font-family="Arial, sans-serif">
+<text x="40" y="65" font-size="26" font-weight="700" fill="#fff">MURPH</text>
+<text x="40" y="145" font-size="18" font-weight="700" fill="#fff">Settings</text>
+<text x="44" y="205" font-size="14" fill="#F1ECE5">Account</text>
+<rect x="28" y="220" width="192" height="38" rx="10" fill="#494139"/>
+<text x="44" y="245" font-size="14" fill="#F1ECE5">AI usage</text>
+<text x="44" y="295" font-size="14" fill="#F1ECE5">Connections</text>
+<text x="44" y="343" font-size="14" fill="#F1ECE5">Privacy</text>
+<text x="330" y="100" font-size="38" font-weight="700" fill="#22201D">AI usage</text>
+<text x="330" y="135" font-size="17" fill="#716C65">Manage your plan, credits, and referrals.</text>
+<rect x="330" y="175" width="990" height="175" rx="20" fill="#fff" stroke="#DDD8D0"/>
+<text x="365" y="225" font-size="17" font-weight="700" fill="#22201D">Usage this month</text>
+<text x="365" y="290" font-size="34" font-weight="700" fill="#22201D">65% remaining</text>
+<rect x="365" y="312" width="915" height="14" rx="7" fill="#E7E2DA"/>
+<rect x="365" y="312" width="595" height="14" rx="7" fill="#8A9B7A"/>
+<line x1="330" y1="410" x2="1320" y2="410" stroke="#D9D4CC"/>
+<text x="330" y="465" font-size="27" font-weight="700" fill="#22201D">Referrals</text>
+<text x="1060" y="458" font-size="15" font-weight="700" fill="#506646">Copy link</text>
+<text x="1170" y="458" font-size="15" font-weight="700" fill="#506646">Ask Murph</text>
+<line x1="330" y1="490" x2="1320" y2="490" stroke="#D9D4CC"/>
+<text x="330" y="542" font-size="16" fill="#716C65">Earn usage by inviting friends or adding Murph to a groupchat</text>
+<line x1="330" y1="590" x2="1320" y2="590" stroke="#D9D4CC"/>
+<text x="330" y="640" font-size="16" font-weight="700" fill="#22201D">History</text>
+<text x="1260" y="640" font-size="20" fill="#716C65">⌄</text>
+<text x="330" y="830" font-size="12" fill="#918B83">Design proof · /design?tab=sections</text>
+</g></svg>
