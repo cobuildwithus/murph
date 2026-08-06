@@ -23,7 +23,7 @@ if (
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted signup-referral PostgreSQL serialization",
   () => {
-    it("creates one receipt and one grant across concurrent settlement and replay", async () => {
+    it("keeps delayed resumed attribution while creating one receipt and grant", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for this proof.");
       }
@@ -34,9 +34,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const inviteId = `invite_signup_referral_${fixtureId}`;
       const activationId = `hmi_signup_referral_${fixtureId}`;
       const now = new Date();
-      const introducedAt = new Date(now.getTime() - 10 * 60_000);
-      const attributedAt = new Date(now.getTime() - 8 * 60_000);
-      const activatedAt = new Date(now.getTime() - 5 * 60_000);
+      const introducedAt = new Date(now.getTime() - 25 * 24 * 60 * 60_000);
+      const attributedAt = new Date(now.getTime() - 24 * 24 * 60 * 60_000);
+      const activatedAt = new Date(now.getTime() - 2 * 24 * 60 * 60_000);
       const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
       const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -58,9 +58,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         await observer.hostedInvite.create({
           data: {
-            channel: "share",
+            // Ordinary authenticated onboarding resume may relabel an invite
+            // from signup-referral/share to web. Attribution authority is the
+            // durable referrerMemberId and must survive that mutable metadata.
+            channel: "web",
             createdAt: attributedAt,
-            expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+            expiresAt: new Date(
+              attributedAt.getTime() + 2 * 24 * 60 * 60_000,
+            ),
             id: inviteId,
             inviteCode: `signup-referral-${fixtureId}`,
             memberId: introducedMemberId,
@@ -110,6 +115,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               rewardedAt: true,
               rewardUsdMicros: true,
               status: true,
+              targetBoundAt: true,
             },
             where: { introducedMemberId },
           });
@@ -123,6 +129,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           rewardedAt: activatedAt,
           rewardUsdMicros: 2_000_000n,
           status: "rewarded",
+          targetBoundAt: attributedAt,
         });
 
         const replay = await Promise.all([
