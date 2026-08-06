@@ -854,6 +854,87 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
   );
 
+  it.each([
+    {
+      data: {
+        chat_id: "chat_icon_123",
+        new_value: "https://media.example.test/private/new-token",
+        old_value: "https://media.example.test/private/old-token",
+        updated_at: "2026-05-04T10:15:12.000Z",
+      },
+      eventType: "chat.group_icon_updated",
+      expectedFailureCode: null,
+      expectedProviderStatus: "updated",
+    },
+    {
+      data: {
+        chat_id: "chat_icon_123",
+        error_code: 3007,
+        failed_at: "2026-05-04T10:15:13.000Z",
+      },
+      eventType: "chat.group_icon_update_failed",
+      expectedFailureCode: "3007",
+      expectedProviderStatus: "failed",
+    },
+  ])(
+    "records $eventType as a privacy-minimized provider event",
+    async ({ data, eventType, expectedFailureCode, expectedProviderStatus }) => {
+      const createMany = vi.fn().mockResolvedValue({ count: 1 });
+      const prisma = asPrismaTransactionClient({
+        hostedLinqProviderEvent: {
+          createMany,
+        },
+      });
+      prisma.$transaction = vi.fn(async (
+        operation: (
+          transaction: HostedOnboardingLinqWebhookPrismaFixture,
+        ) => Promise<unknown>,
+      ) => operation(prisma));
+      const event = {
+        api_version: "v3",
+        created_at: "2026-05-04T10:15:10.000Z",
+        data,
+        event_id: `evt_${eventType}`,
+        event_type: eventType,
+        trace_id: "trace_group_icon_outcome",
+        webhook_version: "2026-02-03",
+      } as HostedLinqWebhookEvent;
+
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: JSON.stringify(event),
+        signature: null,
+        timestamp: null,
+      })).resolves.toEqual({
+        ignored: true,
+        ok: true,
+        reason: `recorded-linq-provider-event:${eventType}`,
+      });
+
+      expect(createMany).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType,
+          failureCode: expectedFailureCode,
+          providerStatus: expectedProviderStatus,
+        }),
+        skipDuplicates: true,
+      });
+      const persistedData = JSON.stringify(createMany.mock.calls);
+      expect(persistedData).not.toContain("new-token");
+      expect(persistedData).not.toContain("old-token");
+      expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+        expect.objectContaining({ step: "hosted-onboarding.webhook.linq" }),
+        "completed",
+        expect.objectContaining({
+          chatIdSuffix: "on_123",
+          eventType,
+          failureCode: expectedFailureCode,
+          providerStatus: expectedProviderStatus,
+        }),
+      );
+    },
+  );
+
   it("shares a delivered invite_signup_fallback contact card once in the newly created chat", async () => {
     const prisma = createHostedLinqDeliveryReceiptWebhookPrisma({
       providerEventCreateCounts: [1, 0],

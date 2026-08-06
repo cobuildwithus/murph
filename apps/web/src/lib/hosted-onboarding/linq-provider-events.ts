@@ -31,6 +31,8 @@ import { normalizePhoneNumber } from "./phone";
 import { normalizeNullableString, sha256Hex } from "../primitives";
 
 export const HOSTED_LINQ_PROVIDER_EVENT_TYPES = [
+  "chat.group_icon_updated",
+  "chat.group_icon_update_failed",
   "message.edited",
   "message.received",
   "message.sent",
@@ -225,6 +227,16 @@ export function parseHostedLinqProviderEvent(input: {
     });
   }
 
+  if (
+    event.event_type === "chat.group_icon_updated"
+    || event.event_type === "chat.group_icon_update_failed"
+  ) {
+    return parseHostedLinqGroupIconProviderEvent({
+      event,
+      rawBody: input.rawBody,
+    });
+  }
+
   if (event.event_type === "reaction.added" || event.event_type === "reaction.removed") {
     return parseHostedLinqReactionProviderEvent({
       event,
@@ -242,6 +254,59 @@ export function parseHostedLinqProviderEvent(input: {
   return parseGenericHostedLinqProviderEvent({
     event,
     rawBody: input.rawBody,
+  });
+}
+
+function parseHostedLinqGroupIconProviderEvent(input: {
+  event: HostedLinqProviderWebhookEvent;
+  rawBody?: string | null;
+}): ParsedHostedLinqProviderEvent {
+  const data = readRecord(input.event.data);
+  const chatId = readFirstStringAtPaths(data, [
+    ["chat_id"],
+    ["chatId"],
+    ["chat", "id"],
+  ] as const);
+  const failed = input.event.event_type === "chat.group_icon_update_failed";
+  const failureCode = failed
+    ? readFirstStringAtPaths(data, [
+        ["error_code"],
+        ["errorCode"],
+        ["error", "code"],
+      ] as const)
+    : null;
+  const providerCreatedAt = parseProviderDate(readFirstStringAtPaths(data, [
+    failed ? ["failed_at"] : ["updated_at"],
+    failed ? ["failedAt"] : ["updatedAt"],
+  ] as const));
+
+  return buildParsedProviderEvent({
+    chatId,
+    deliveryStatus: null,
+    direction: null,
+    event: input.event,
+    extraction: {
+      chatIdPresent: chatId !== null,
+      extractionStrategy: "group-icon-outcome",
+      failureCodePresent: failureCode !== null,
+      iconValuesRetained: false,
+      phoneNumberRole: "unknown",
+      providerTimestampPresent: providerCreatedAt !== null,
+      servicePresent: false,
+    },
+    failureCode,
+    failureReason: null,
+    messageId: null,
+    phoneNumber: null,
+    phoneNumberRole: "unknown",
+    providerCreatedAt,
+    providerReason: null,
+    providerStatus: failed ? "failed" : "updated",
+    rawBody: input.rawBody,
+    reactionCustomEmoji: null,
+    reactionFromHandle: null,
+    reactionType: null,
+    service: null,
   });
 }
 

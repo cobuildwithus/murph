@@ -54,7 +54,9 @@ import {
 import { createHostedLinqParticipantContactLookupKey } from "../hosted-onboarding/linq-participant-contact";
 import {
   deriveHostedOnboardingTimingErrorName,
+  finishHostedOnboardingTiming,
   sanitizeHostedOnboardingStructuredLogDetails,
+  startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
 } from "../hosted-onboarding/logging";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
@@ -1390,17 +1392,27 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
     return unavailable("group_chat_icon_url_unavailable");
   }
 
+  const timing = startHostedOnboardingTiming("hosted-groups.set-chat-avatar", {
+    chatIdSuffix: toHostedOnboardingLogIdSuffix(access.chatId),
+  });
   try {
     await updateHostedLinqChatAvatar({
       chatId: access.chatId,
       groupChatIconUrl,
     });
   } catch (error) {
+    const providerDiagnostics = readHostedLinqAvatarProviderDiagnostics(error);
+    finishHostedOnboardingTiming(timing, "provider-request-failed", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      providerErrorCode: providerDiagnostics?.providerErrorCode,
+    });
     return unavailable(
       "provider_unavailable",
-      readHostedLinqAvatarProviderDiagnostics(error),
+      providerDiagnostics,
     );
   }
+
+  finishHostedOnboardingTiming(timing, "provider-request-accepted");
 
   return {
     action: "set_chat_avatar",
