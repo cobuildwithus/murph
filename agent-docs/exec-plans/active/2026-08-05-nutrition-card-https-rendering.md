@@ -36,6 +36,14 @@ Updated: 2026-08-05
   target won delivery with kind `explicit`.
 - Native cards intentionally require kind `thread`, so this duplicated route
   representation skipped the app-card request and sent ordinary text.
+- After that route correction deployed, the physical reply still used the
+  deterministic text fallback. Runtime evidence showed the direct iMessage
+  input arrived after a device-sync invocation had started and joined its live
+  turn. The foreground importer retained the decoded direct-recipient context,
+  but the delivery phase read only its frozen startup context array. The native
+  card eligibility check therefore lacked the ephemeral recipient even though
+  the thread binding, directness, card intent, idempotency key, and provider
+  capability were all present.
 
 ## Success criteria
 
@@ -77,6 +85,8 @@ Updated: 2026-08-05
    admission, and move exact-message authorization to the existing thread
    binding beside the opaque conversation locator.
 8. [ ] Merge, deploy, and verify the real hosted reply on a physical device.
+9. [x] Carry the existing invocation-local Linq context from late active-turn
+   admission into the existing delivery owner and prove the regression.
 
 ## Verification log
 
@@ -126,3 +136,34 @@ Updated: 2026-08-05
   monolithic local-service file hit its existing 4 GB worker ceiling after 79
   passing tests when run whole; its three accepted-message authorization and
   second-pass authority tests pass in isolation.
+- The late-input correction adds no state or lookup path: the assistant phase
+  now combines its initial decoded Linq contexts with the foreground importer's
+  existing invocation-local batch before preparing and draining delivery.
+- The exact late-active-turn regression passes from an empty startup context to
+  outbox preparation and drain with the decoded direct iMessage context. The
+  existing matching-context resolver and native app-card capability branch each
+  pass independently, and the assistant-runtime suite passes with 2,049 tests
+  plus four skips across 81 files.
+- The assistant-runtime package typecheck, docs drift guard, and diff check pass
+  after the correction.
+- The preliminary specialist pass accepted one coverage gap: the phase-level
+  late-context proof and the native-card transport proof were separate. The
+  existing scheduled-system-work overlap journey now admits a direct nutrition
+  request after startup, drives the real response-card tool and delivery owners,
+  and asserts one same-chat `imessage_app`, its exact capability recipient, no
+  plaintext duplicate, and no Create Chat request.
+- The corrected Cloudflare test surface typechecks, and the shared Linq helper
+  suite passes with 10 tests. The canonical hosted-local journey is pending its
+  runtime execution because the unchanged runner bundle currently exceeds its
+  checked-in total-size ceiling; a separately owned, green PR contains the
+  measured ratchet, so this lane does not duplicate or weaken that invariant.
+- Final ReviewGPT round 1 passed with no findings. It identified only a PR-body
+  accounting discrepancy: the restored native path adds the already-existing
+  capability probe before the one card-or-text send, rather than keeping the
+  old text-only request count.
+- Final ReviewGPT round 2 found that the accepted hosted-local correction used
+  a bare empty string rejected by the shared response-script guard and omitted
+  the explicit iMessage service on the synthetic late inbound. The correction
+  now uses the existing structured empty-text response for a card-only model
+  completion and declares the inbound service explicitly; no production logic
+  or new test-harness branch was added.
