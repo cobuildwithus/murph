@@ -1628,7 +1628,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const initialMailboxImport = initialMailboxImportResult.result;
     const mailboxImportDoneAt = new Date().toISOString();
     const initialProviderStartCriticalPath =
-      hostedMailboxImportHasForegroundConversationWork(initialMailboxImport)
+      (initialMailboxImport.importResult.assistantInputIds?.length ?? 0) > 0
         ? createAssistantProviderStartCriticalPathContext(
             initialMailboxImportDoneAtMonotonicMs,
           )

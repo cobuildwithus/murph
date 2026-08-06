@@ -65,5 +65,15 @@ Updated: 2026-08-06
 - PASS after remediation: assistant automation plus partition tests (178),
   focused App Server production handoff (2), hosted-runtime maintenance (76),
   assistant-engine typecheck, and `git diff --check`.
-- Pending: push the corrected candidate, resolve the final ReviewGPT gate, and
-  require green exact-head CI.
+- ACCEPTED/FIXED: final ReviewGPT round 1 found that the initial telemetry gate
+  treated any conversation work as a foreground provider owner. A disabled-
+  channel import or retryable-blocked-only import could therefore carry the
+  timing into an older background reply. The gate now requires at least one
+  actual fresh assistant-input ID; the broader conversation-work predicate is
+  unchanged for its worker and checkpoint responsibilities.
+- PASS after final-round remediation: the production entrypoint suite passed
+  273 tests, including no-context regressions for imported-without-input and
+  retryable-blocked conversation work plus the positive fresh-input case;
+  assistant-runtime typecheck and `git diff --check` passed.
+- Pending: push the corrected candidate, resolve the final ReviewGPT delta
+  review, and require green exact-head CI.
