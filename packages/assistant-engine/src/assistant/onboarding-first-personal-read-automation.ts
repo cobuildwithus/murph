@@ -5,6 +5,9 @@ import type {
 export const MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID =
   'automation_01K7AV8Z2Y3X4W5V6T7R8Q9P0N'
 
+export const MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG =
+  'onboarding-first-personal-read'
+
 export const MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION =
   'save_onboarding_first_personal_read' as const
 
@@ -42,7 +45,7 @@ export const MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS = [
   '- If even that would be generic or unsupported, return `{"kind":"skip","privateSummary":"No first personal read cleared the evidence and interestingness bars."}`.',
   '',
   'Durable dedupe:',
-  '- When a send-worthy read exists, settle the complete outbound text first. Best-effort append one section headed `First read <Occurrence local date>` to the rolling `weekly-health-insights` page with the compact claim, evidence, uncertainty, and exact outbound text. Cite only canonical source paths actually used, never `derived/**` or `.runtime/**` paths.',
+  '- When a send-worthy read exists, settle the complete outbound text first. If `weekly-health-insights` does not already contain `First read <Occurrence local date>`, best-effort run `vault-cli knowledge append-section weekly-health-insights "First read <Occurrence local date>" --title "Weekly Health Insights" --position prepend --body <markdown> --source-path <path> ...`. The body contains only the compact claim, evidence, uncertainty, and exact outbound text. Cite only canonical source paths actually used, never `derived/**` or `.runtime/**` paths.',
   '- If that heading already exists, reuse its exact outbound text only when it still clears the current send and timing gates; otherwise return skip. Do not create another page or another section for this one-shot.',
   '- A failed dedupe write must not make the member lose an otherwise sound first read. The automation and outbox remain the delivery and replay owners.',
   '',
@@ -87,7 +90,7 @@ export function buildOnboardingFirstPersonalReadAutomationSaveRequest(input: {
         now.getTime() + FIRST_PERSONAL_READ_DELAY_MS,
       ).toISOString(),
     },
-    slug: 'onboarding-first-personal-read',
+    slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
     summary:
       'One private first read across the context and health data collected during onboarding.',
     tags: [
