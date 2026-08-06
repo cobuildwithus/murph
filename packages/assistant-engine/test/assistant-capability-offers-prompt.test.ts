@@ -176,10 +176,11 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('For running-challenge standings')
     expect(section).toContain('`not_granted`, `granted` plus `missing`, and `available`')
     expect(prompt).toContain('Deep/REM is stored, not rechecked')
-    expect(prompt).toContain('default v1')
+    expect(prompt).toContain('offer v1 only for new access')
     expect(prompt).toContain(
-      'use/keep v0 only if source-neutral is explicit',
+      'Read v0 only when an existing workflow already requests/grants it',
     )
+    expect(prompt).toContain('never newly offer v0')
     expect(prompt).toContain('projection/source times/conflicts')
     expect(prompt).toContain('`selected` score')
     expect(section).toContain('Use `read_current` for membership and permission configuration only')
@@ -289,7 +290,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(prompt).toContain('`device-sync-status.v0`')
     expect(prompt).toContain('public source labels/status/sync times')
     expect(prompt).toContain('raw provider/account IDs')
-    expect(prompt).toContain('neutral total/deep/REM')
+    expect(prompt).toContain('sleep timing/total; source-aware deep/REM')
     expect(prompt).toContain('`workouts.v0`: day-local start/duration/type')
     expect(prompt).toContain('canonical event zone (vault fallback)')
     expect(prompt).toContain(

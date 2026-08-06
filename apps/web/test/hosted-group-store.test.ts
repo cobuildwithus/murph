@@ -80,6 +80,9 @@ const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const SLEEP_DURATION_SCOPE = hostedVaultShareProjectionKindToScope("sleep-duration-days.v0");
+const LEGACY_DEEP_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope(
+  "deep-sleep-days.v0",
+);
 const DEEP_SLEEP_SOURCES_SCOPE = hostedVaultShareProjectionKindToScope(
   "deep-sleep-sources-days.v1",
 );
@@ -1875,6 +1878,50 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       grantorMemberId: "member_owner",
       now,
       projectionScope: GROUP_EMAIL_SCOPE,
+    }));
+  });
+
+  it("stores a legacy deep-sleep request as the single source-aware permission", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: false,
+      joinCode: null,
+      ownerMemberId: "member_owner",
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await expect(createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      now,
+      requestedVaultShareProjectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
+      tx,
+    })).resolves.toMatchObject({
+      group: {
+        requestedVaultShareProjectionKinds: [
+          "group-email.v0",
+          "deep-sleep-sources-days.v1",
+        ],
+        requestedVaultShareProjectionScopes: [
+          GROUP_EMAIL_SCOPE,
+          DEEP_SLEEP_SOURCES_SCOPE,
+        ],
+      },
+    });
+
+    expect(tx.hostedGroup.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        joinPolicyJson: {
+          requestedVaultShareProjectionKinds: [
+            "group-email.v0",
+            "deep-sleep-sources-days.v1",
+          ],
+          requestedVaultShareProjectionScopes: [
+            GROUP_EMAIL_SCOPE,
+            DEEP_SLEEP_SOURCES_SCOPE,
+          ],
+          schema: "murph.hosted-group.join-policy.v1",
+        },
+      }),
     }));
   });
 

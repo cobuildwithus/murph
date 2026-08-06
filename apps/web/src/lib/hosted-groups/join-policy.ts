@@ -143,7 +143,7 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
     description: "Shares your last 7 days of deep sleep minutes.",
   },
   "deep-sleep-sources-days.v1": {
-    label: "Deep sleep by source",
+    label: "Deep sleep",
     description:
       "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
   },
@@ -152,7 +152,7 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
     description: "Shares your last 7 days of REM sleep minutes.",
   },
   "rem-sleep-sources-days.v1": {
-    label: "REM sleep by source",
+    label: "REM sleep",
     description:
       "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
   },
@@ -195,7 +195,7 @@ export function readHostedGroupJoinPolicy(value: unknown): HostedGroupJoinPolicy
     return emptyHostedGroupJoinPolicy();
   }
   return hostedGroupJoinPolicyFromScopes(
-    normalizeHostedVaultShareProjectionScopes(
+    normalizeHostedGroupAccessOfferProjectionScopes(
       record.requestedVaultShareProjectionScopes
         ?? record.requestedVaultShareProjectionKinds,
     ),
@@ -261,15 +261,40 @@ export function normalizeHostedVaultShareProjectionScopes(
   );
 }
 
+/**
+ * New group access offers expose one Deep sleep permission and one REM sleep
+ * permission. Their source-aware v1 scopes are the complete contracts. Legacy
+ * v0 grants remain parseable with their original narrower meaning, while
+ * legacy requested policies map to the complete permission during rolling
+ * deploys.
+ */
+export function normalizeHostedGroupAccessOfferProjectionScopes(
+  value: unknown,
+): HostedVaultShareProjectionScope[] {
+  const offered = normalizeHostedVaultShareProjectionScopes(value).map((scope) => {
+    if (scope.projectionKind === "deep-sleep-days.v0") {
+      return { projectionKind: "deep-sleep-sources-days.v1" } as const;
+    }
+    if (scope.projectionKind === "rem-sleep-days.v0") {
+      return { projectionKind: "rem-sleep-sources-days.v1" } as const;
+    }
+    return scope;
+  });
+  return normalizeHostedVaultShareProjectionScopes(offered);
+}
+
 export function mergeHostedGroupJoinPolicy(input: {
   existing: unknown;
   requestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
 }): HostedGroupJoinPolicy {
   const existing = readHostedGroupJoinPolicy(input.existing);
+  const offered = normalizeHostedGroupAccessOfferProjectionScopes(
+    input.requestedVaultShareProjectionScopes,
+  );
   return hostedGroupJoinPolicyFromScopes(
     normalizeHostedVaultShareProjectionScopes([
       ...existing.requestedVaultShareProjectionScopes,
-      ...input.requestedVaultShareProjectionScopes,
+      ...offered,
     ]),
   );
 }
@@ -277,7 +302,9 @@ export function mergeHostedGroupJoinPolicy(input: {
 export function projectHostedVaultShareProjectionDisplays(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): HostedVaultShareProjectionDisplay[] {
-  return normalizeHostedVaultShareProjectionScopes(projectionScopes)
+  return collapseLegacySleepProjectionScopes(
+    normalizeHostedVaultShareProjectionScopes(projectionScopes),
+  )
     .map((projectionScope) => {
       const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
       return {
@@ -287,6 +314,21 @@ export function projectHostedVaultShareProjectionDisplays(
         ...hostedVaultShareProjectionScopeDisplay(projectionScope),
       };
     });
+}
+
+function collapseLegacySleepProjectionScopes(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
+): HostedVaultShareProjectionScope[] {
+  const hasDeepSleepV1 = projectionScopes.some(
+    (scope) => scope.projectionKind === "deep-sleep-sources-days.v1",
+  );
+  const hasRemSleepV1 = projectionScopes.some(
+    (scope) => scope.projectionKind === "rem-sleep-sources-days.v1",
+  );
+  return projectionScopes.filter((scope) =>
+    !(hasDeepSleepV1 && scope.projectionKind === "deep-sleep-days.v0")
+    && !(hasRemSleepV1 && scope.projectionKind === "rem-sleep-days.v0")
+  );
 }
 
 function hostedGroupJoinPolicyFromScopes(

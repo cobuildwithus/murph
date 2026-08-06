@@ -129,19 +129,23 @@ Revoke and regrant clear the ciphertext in the same authority transaction, and
 regrant rotates the share id, so a stale producer cannot write into a later
 grant generation.
 
-Deep and REM sleep have separate source-aware v1 scopes. The legacy
-`deep-sleep-days.v0` and `rem-sleep-days.v0` scopes remain provider-neutral and
-continue disclosing one canonical daily value only. The exact
-`deep-sleep-sources-days.v1` and `rem-sleep-sources-days.v1` grants disclose the
-canonical value plus one bounded entry for every public sleep source that has
-that metric on the date, up to four sources. Each entry carries the canonical
-public source key and label, its value and unit, its nullable canonical
-source-record time, and whether it supplied the canonical selected value. The
-record also carries `projectedAt`
-and a literal `sourcesDisagree` flag. Source-aware records fail closed instead
-of truncating when the source bound is exceeded or the selected source cannot
-be proved. Existing v0 grants are never upgraded or broadened in place; a v1
-scope requires its own server-owned access approval.
+Deep sleep and REM sleep are each one user-facing permission. New access offers
+always use the source-aware `deep-sleep-sources-days.v1` and
+`rem-sleep-sources-days.v1` scopes, which disclose the canonical value plus one
+bounded entry for every public sleep source that has that metric on the date,
+up to four sources. Each entry carries the canonical public source key and
+label, its value and unit, its nullable canonical source-record time, and
+whether it supplied the canonical selected value. The record also carries `projectedAt`
+and a literal `sourcesDisagree` flag. Source-aware records fail closed instead of
+truncating when the source bound is exceeded or the selected source cannot be
+proved. The legacy provider-neutral `deep-sleep-days.v0` and
+`rem-sleep-days.v0` scopes remain read-only compatibility contracts for
+existing policies and grants, disclosing one canonical daily value only. A new
+policy read or access offer replaces the matching legacy policy request with
+v1, so existing groups expose the same single complete permission without an
+owner reconfiguration step. This never upgrades or broadens an existing grant
+in place; each member's v1 grant still requires its own server-owned access
+approval.
 
 `projectedAt` is snapshot generation time, not proof of a provider fetch or a
 fresh sync. A source entry's `recordedAt` is canonical source-record evidence,

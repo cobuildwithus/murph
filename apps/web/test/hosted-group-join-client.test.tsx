@@ -183,14 +183,14 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
         {
           description:
             "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
-          label: "Deep sleep by source",
+          label: "Deep sleep",
           projectionScope: { projectionKind: "deep-sleep-sources-days.v1" as const },
           projectionScopeKey: "deep-sleep-sources-days.v1",
         },
         {
           description:
             "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
-          label: "REM sleep by source",
+          label: "REM sleep",
           projectionScope: { projectionKind: "rem-sleep-sources-days.v1" as const },
           projectionScopeKey: "rem-sleep-sources-days.v1",
         },
@@ -200,6 +200,10 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
     }),
   );
   cleanupRender = cleanup;
+
+  expect(Array.from(container.querySelectorAll("label")).map((label) =>
+    label.querySelector(".flex.flex-col > span:first-child")?.textContent
+  )).toEqual(["Deep sleep", "REM sleep"]);
 
   expect(container.textContent).toContain(
     "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",

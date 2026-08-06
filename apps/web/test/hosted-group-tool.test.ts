@@ -270,6 +270,7 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 import {
   mergeHostedGroupJoinPolicy,
+  normalizeHostedGroupAccessOfferProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
   readHostedGroupJoinPolicy,
 } from "@/src/lib/hosted-groups/join-policy";
@@ -2534,6 +2535,58 @@ describe("hosted group join policy", () => {
     ]);
 
     expect(readHostedGroupJoinPolicy({
+      requestedVaultShareProjectionKinds: [
+        "deep-sleep-days.v0",
+        "rem-sleep-days.v0",
+      ],
+      schema: "murph.hosted-group.join-policy.v1",
+    }).requestedVaultShareProjectionScopes).toEqual([
+      DEEP_SLEEP_SOURCES_SCOPE,
+      REM_SLEEP_SOURCES_SCOPE,
+    ]);
+
+    expect(readHostedGroupJoinPolicy({
+      requestedVaultShareProjectionKinds: [
+        "deep-sleep-days.v0",
+        "deep-sleep-sources-days.v1",
+        "rem-sleep-days.v0",
+        "rem-sleep-sources-days.v1",
+      ],
+      schema: "murph.hosted-group.join-policy.v1",
+    }).requestedVaultShareProjectionScopes).toEqual([
+      DEEP_SLEEP_SOURCES_SCOPE,
+      REM_SLEEP_SOURCES_SCOPE,
+    ]);
+
+    expect(normalizeHostedGroupAccessOfferProjectionScopes([
+      DEEP_SLEEP_SCOPE,
+      REM_SLEEP_SCOPE,
+    ])).toEqual([
+      DEEP_SLEEP_SOURCES_SCOPE,
+      REM_SLEEP_SOURCES_SCOPE,
+    ]);
+
+    const mergedSleep = mergeHostedGroupJoinPolicy({
+      existing: {
+        requestedVaultShareProjectionKinds: [
+          "deep-sleep-days.v0",
+          "rem-sleep-days.v0",
+          "activity-days.v0",
+        ],
+        schema: "murph.hosted-group.join-policy.v1",
+      },
+      requestedVaultShareProjectionScopes: [DEEP_SLEEP_SCOPE],
+    }).requestedVaultShareProjectionScopes;
+    expect(mergedSleep).toHaveLength(3);
+    expect(mergedSleep).toEqual(expect.arrayContaining([
+      DEEP_SLEEP_SOURCES_SCOPE,
+      REM_SLEEP_SOURCES_SCOPE,
+      { projectionKind: "activity-days.v0" },
+    ]));
+    expect(mergedSleep).not.toContainEqual(DEEP_SLEEP_SCOPE);
+    expect(mergedSleep).not.toContainEqual(REM_SLEEP_SCOPE);
+
+    expect(readHostedGroupJoinPolicy({
       requestedVaultShareProjectionKinds: ["all-health-data"],
       schema: "murph.hosted-group.join-policy.v1",
     }).requestedVaultShareProjectionKinds).toEqual([]);
@@ -2590,31 +2643,17 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "sleep-duration-days.v0",
       },
       {
-        description: "Shares your last 7 days of deep sleep minutes.",
-        label: "Deep sleep",
-        projectionKind: "deep-sleep-days.v0",
-        projectionScope: DEEP_SLEEP_SCOPE,
-        projectionScopeKey: "deep-sleep-days.v0",
-      },
-      {
         description:
           "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
-        label: "Deep sleep by source",
+        label: "Deep sleep",
         projectionKind: "deep-sleep-sources-days.v1",
         projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
         projectionScopeKey: "deep-sleep-sources-days.v1",
       },
       {
-        description: "Shares your last 7 days of REM sleep minutes.",
-        label: "REM sleep",
-        projectionKind: "rem-sleep-days.v0",
-        projectionScope: REM_SLEEP_SCOPE,
-        projectionScopeKey: "rem-sleep-days.v0",
-      },
-      {
         description:
           "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
-        label: "REM sleep by source",
+        label: "REM sleep",
         projectionKind: "rem-sleep-sources-days.v1",
         projectionScope: REM_SLEEP_SOURCES_SCOPE,
         projectionScopeKey: "rem-sleep-sources-days.v1",
@@ -2709,6 +2748,8 @@ describe("hosted group join policy", () => {
       HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
     ).map((entry) => entry.projectionScopeKey)).toEqual([
       ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES
+        .filter((scope) => scope.projectionKind !== "deep-sleep-days.v0"
+          && scope.projectionKind !== "rem-sleep-days.v0")
         .map((scope) => buildHostedVaultShareProjectionScopeKey(scope)),
     ]);
 
@@ -3397,16 +3438,18 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   });
 
   it.each([
-    ["deep sleep", "deep-sleep-sources-days.v1", "deep sleep by source"],
-    ["REM sleep", "rem-sleep-sources-days.v1", "REM sleep by source"],
+    ["deep sleep", "deep-sleep-days.v0", "deep-sleep-sources-days.v1", "deep sleep"],
+    ["REM sleep", "rem-sleep-days.v0", "rem-sleep-sources-days.v1", "REM sleep"],
   ] as const)(
-    "discloses each source and its recorded time in the native %s offer",
-    async (_label, projectionKind, displayLabel) => {
+    "upgrades legacy %s requests and discloses each source in the native offer",
+    async (_label, requestedProjectionKind, offeredProjectionKind, displayLabel) => {
       await expect(handleHostedRuntimeGroupTool({
         memberId: "member_container",
         request: {
           action: "post_join_offer",
-          joinOffer: { projectionScopes: [{ projectionKind }] },
+          joinOffer: {
+            projectionScopes: [{ projectionKind: requestedProjectionKind }],
+          },
           linqThread: LINQ_THREAD,
         },
       })).resolves.toMatchObject({
@@ -3420,6 +3463,23 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
             `Like or heart this message if these default sharing choices look right: your Murph profile name and ${displayLabel} (by-source sleep includes every available source's value and name, plus when Murph recorded that source value). Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.`,
         }),
       );
+      const offeredScopes = [{ projectionKind: offeredProjectionKind }];
+      expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
+        .toHaveBeenCalledWith(expect.objectContaining({
+          requestedVaultShareProjectionScopes: offeredScopes,
+        }));
+      expect(mocks.prepareHostedGroupJoinOfferPostTx).toHaveBeenCalledWith({
+        groupId: GROUP_SUMMARY.id,
+        projectionScopes: offeredScopes,
+        tx: fakeTx,
+      });
+      expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+        groupId: GROUP_SUMMARY.id,
+        message: { channel: "linq", messageId: "msg_offer_1" },
+        postedAt: expect.any(Date),
+        projectionScopes: offeredScopes,
+        tx: fakeTx,
+      });
     },
   );
 

@@ -25,7 +25,7 @@ const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   {
     description:
       "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
-    label: "Deep sleep by source",
+    label: "Deep sleep",
     projectionScope: { projectionKind: "deep-sleep-sources-days.v1" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
       projectionKind: "deep-sleep-sources-days.v1",
@@ -34,7 +34,7 @@ const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   {
     description:
       "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
-    label: "REM sleep by source",
+    label: "REM sleep",
     projectionScope: { projectionKind: "rem-sleep-sources-days.v1" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
       projectionKind: "rem-sleep-sources-days.v1",
@@ -116,7 +116,7 @@ export function GroupJoinStudy() {
       inert
     >
       <GroupJoinVariant
-        caption="A new sleep challenge asks for source names, each source's recorded time, and every available value under one exact consent choice. Provider-neutral legacy access stays separate."
+        caption="Deep sleep is one exact consent choice that includes source names, each source's recorded time, and every available value. Existing provider-neutral grants keep their original narrower meaning without becoming a second choice."
         title="Sleep sources · exact consent"
       >
         <GroupJoinPageMock alreadyActiveMember={false}>

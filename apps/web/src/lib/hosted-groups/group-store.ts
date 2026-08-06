@@ -71,6 +71,7 @@ import { parseHostedVaultShareRowProjectionScope } from "../hosted-vault-share/r
 import {
   emptyHostedGroupJoinPolicy,
   mergeHostedGroupJoinPolicy,
+  normalizeHostedGroupAccessOfferProjectionScopes,
   normalizeHostedVaultShareProjectionKinds,
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
@@ -244,11 +245,11 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     });
   }
 
-  const requested = normalizeHostedVaultShareProjectionScopes(
+  const requested = normalizeHostedGroupAccessOfferProjectionScopes(
     input.requestedVaultShareProjectionScopes
       ?? fixedProjectionKindsToScopes(input.requestedVaultShareProjectionKinds ?? []),
   );
-  const createdRequested = normalizeHostedVaultShareProjectionScopes([
+  const createdRequested = normalizeHostedGroupAccessOfferProjectionScopes([
     ...DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_SCOPES,
     ...requested,
   ]);
