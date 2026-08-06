@@ -498,6 +498,7 @@ async function sendHostedRuntimeUsageDeniedNoticeForPendingConversation(input: {
       chatId: wake.message.linqMessage.chatId,
       claimToken: {
         periodStart: decision.periodStart.toISOString(),
+        planResetAt: decision.planResetAt?.toISOString() ?? null,
         sentAt: attemptedAt.toISOString(),
         usageCreditLedgerVersion: decision.usageCreditLedgerVersion.toString(),
       },
@@ -529,6 +530,7 @@ async function sendHostedRuntimeUsageDeniedNoticeForPendingConversation(input: {
       }),
       noticeCode: decision.userNotice.code,
       periodStart: decision.periodStart,
+      planResetAt: decision.planResetAt,
       prisma: input.prisma,
       replyToMessageId: wake.message.telegramMessage.messageId,
       sentAt: attemptedAt,

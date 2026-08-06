@@ -35,6 +35,7 @@ describe.skipIf(!runPostgresProof)(
       const historicalPeriodStart = new Date("2026-06-01T00:00:00.000Z");
       const historicalPeriodEnd = periodStart;
       const firstAttemptedAt = new Date("2026-07-22T17:00:00.000Z");
+      const planResetAt = new Date("2026-07-12T15:00:00.000Z");
       const resetAt = new Date("2026-07-22T18:00:00.000Z");
       const reblockedAt = new Date("2026-07-22T18:01:00.000Z");
       const secondAttemptedAt = new Date("2026-07-22T18:02:00.000Z");
@@ -65,6 +66,7 @@ describe.skipIf(!runPostgresProof)(
                 limitUsdMicros,
                 periodEnd,
                 periodStart,
+                planResetAt,
                 spentUsdMicros: limitUsdMicros,
               }, {
                 billingPlanCode: "launch_monthly",
@@ -114,6 +116,7 @@ describe.skipIf(!runPostgresProof)(
           attemptedAt: firstAttemptedAt,
           memberId,
           periodStart,
+          planResetAt,
           prisma,
           source: "hosted_webhook_side_effect",
           sourceRef: `source_first_${fixtureId}`,
@@ -205,6 +208,7 @@ describe.skipIf(!runPostgresProof)(
           attemptedAt: secondAttemptedAt,
           memberId,
           periodStart,
+          planResetAt,
           prisma,
           source: "hosted_webhook_side_effect" as const,
           sourceRef: `source_second_${fixtureId}`,

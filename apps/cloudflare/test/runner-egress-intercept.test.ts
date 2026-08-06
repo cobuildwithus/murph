@@ -111,6 +111,7 @@ const OPENAI_WEBSOCKET_HANDSHAKE_HEADERS = {
   upgrade: "websocket",
 } as const;
 const TEST_TEXT_ENCODER = new TextEncoder();
+const PROVIDER_REQUEST_STARTED_AT = "2026-07-23T12:00:00.000Z";
 
 function createHostedExaResearchScoutRequestBody(
   overrides: Record<string, unknown> = {},
@@ -1371,6 +1372,8 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("injects ElevenLabs speech credentials and records successful TTS usage", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
         return Response.json({ recorded: true, usageId: "usage_1" });
@@ -1449,6 +1452,7 @@ describe("hostedRunnerIntercept", () => {
       credentialSource: "platform",
       featureKey: "assistant-reply",
       memberId: "member_123",
+      occurredAt: PROVIDER_REQUEST_STARTED_AT,
       provider: "elevenlabs",
       providerName: "ElevenLabs",
       rawUsageJson: { characterCount: "Short memo.".length },
@@ -1680,6 +1684,8 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("injects ElevenLabs music credentials and records successful music usage", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.startsWith("https://api.elevenlabs.io/")) {
@@ -1753,6 +1759,7 @@ describe("hostedRunnerIntercept", () => {
       credentialSource: "platform",
       featureKey: "music-generation",
       memberId: "member_123",
+      occurredAt: PROVIDER_REQUEST_STARTED_AT,
       provider: "elevenlabs",
       providerName: "ElevenLabs",
       providerRequestId: "elevenlabs-music-req-123",
@@ -1863,6 +1870,8 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("injects xAI credentials and records x_search usage with the provider-reported cost", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
     const upstreamPayload = {
       id: "resp_xai_123",
       output: [{ content: [{ text: '{"posts":[]}', type: "output_text" }], type: "message" }],
@@ -1945,9 +1954,7 @@ describe("hostedRunnerIntercept", () => {
     // payload, so this equality is the wire-compatibility proof.
     const postedTurnId = usageBody.usage.turnId;
     expect(postedTurnId).toMatch(/^turn_xai_search_[0-9a-f]{32}$/u);
-    expect(usageBody.usage.occurredAt).toMatch(
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
-    );
+    expect(usageBody.usage.occurredAt).toBe(PROVIDER_REQUEST_STARTED_AT);
     expect(usageBody).toEqual({
       usage: {
         ...HOSTED_XAI_SEARCH_USAGE_WIRE_FIXTURE.usage,
@@ -2520,7 +2527,7 @@ describe("hostedRunnerIntercept", () => {
     });
   });
 
-  it("normalizes Responses Lite tools before Venice upstream egress", async () => {
+  it("normalizes Responses Lite tools and marks the stable Venice cache prefix", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
@@ -2543,11 +2550,18 @@ describe("hostedRunnerIntercept", () => {
       ],
       type: "namespace",
     }];
-    const standardInput = [{
-      content: [{ text: "Show my connected apps.", type: "input_text" }],
-      role: "user",
-      type: "message",
-    }];
+    const standardInput = [
+      {
+        content: [{ text: "Stable Codex instructions.", type: "input_text" }],
+        role: "developer",
+        type: "message",
+      },
+      {
+        content: [{ text: "Show my connected apps.", type: "input_text" }],
+        role: "user",
+        type: "message",
+      },
+    ];
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.venice.ai/api/v1/responses", {
@@ -2580,7 +2594,18 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded).toBeInstanceOf(Request);
     const forwardedRequest = forwarded as Request;
     await expect(forwardedRequest.json()).resolves.toEqual({
-      input: standardInput,
+      input: [
+        {
+          content: [{
+            prompt_cache_breakpoint: { mode: "explicit" },
+            text: "Stable Codex instructions.",
+            type: "input_text",
+          }],
+          role: "developer",
+          type: "message",
+        },
+        standardInput[1],
+      ],
       model:
         "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
       parallel_tool_calls: false,
@@ -7355,6 +7380,8 @@ describe("maybeHandleHostedTranscribeRequest", () => {
   });
 
   it("authorizes via a runner-scoped provider credential and maps Workers AI output to the transcript payload", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
     const fetchMock = vi.fn<typeof fetch>(async () =>
       Response.json({ recorded: true, usageId: "usage_1" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -7428,6 +7455,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       credentialSource: "platform",
       featureKey: "audio-transcription",
       memberId: "member_123",
+      occurredAt: PROVIDER_REQUEST_STARTED_AT,
       provider: "workers-ai",
       rawUsageJson: { audioBytes: 9, durationMs: 2_940 },
       requestedModel: "@cf/openai/whisper-large-v3-turbo",

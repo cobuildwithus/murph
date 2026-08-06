@@ -30683,6 +30683,7 @@ function createAssistantProviderUsageDraft(
       usageExtractionVersion: "test-v1",
     },
     ...overrides,
+    occurredAt: overrides.occurredAt ?? TEST_NOW,
   };
 }
 

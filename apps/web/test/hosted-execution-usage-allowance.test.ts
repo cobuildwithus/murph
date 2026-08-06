@@ -1104,6 +1104,7 @@ describe("hosted AI usage allowance pricing", () => {
     const usage = buildHostedXaiSearchUsageRecord({
       memberId: "member_123",
       model: "grok-4.5",
+      occurredAt: "2026-03-29T12:00:00.000Z",
       providerRequestId: "resp_abc123",
       usage: {
         cached_input_tokens: 0,
@@ -1144,6 +1145,7 @@ describe("hosted AI usage allowance pricing", () => {
     const usage = buildHostedXaiSearchUsageRecord({
       memberId: "member_123",
       model: "grok-4.5",
+      occurredAt: "2026-03-29T12:00:00.000Z",
       usage: { cost_in_usd_ticks: 50_000_000 },
     });
 
@@ -1156,6 +1158,7 @@ describe("hosted AI usage allowance pricing", () => {
     const base = buildHostedXaiSearchUsageRecord({
       memberId: "member_123",
       model: "grok-4.5",
+      occurredAt: "2026-03-29T12:00:00.000Z",
       usage: { cost_in_usd_ticks: 37_756_000 },
     });
 
@@ -1625,6 +1628,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       memberId: "member_123",
       periodEnd: new Date("2026-04-01T00:00:00.000Z"),
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      planResetAt: null,
       sourceUsageId: "turn_123.attempt-1",
       usageCreditLedgerVersion: 0n,
       userNotice: expect.objectContaining({
@@ -1660,6 +1664,172 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         tx: tx as never,
       });
     }))).resolves.toEqual([null, null]);
+  });
+
+  it("keeps late pre-reset usage in history without charging the new allowance or credits", async () => {
+    const planResetAt = new Date("2026-03-29T12:00:02.000Z");
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      billingPlanCode: "launch_edge_monthly",
+      billingRefUpdatedAt: planResetAt,
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      planResetAt,
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 5_000n,
+      usageCreditLedgerVersion: 4n,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        allowanceAccountedAt: new Date("2026-03-29T12:00:05.000Z"),
+        allowanceCounted: false,
+        allowancePeriodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        allowancePeriodStart: new Date("2026-03-01T00:00:00.000Z"),
+        allowancePricingSnapshotJson: expect.objectContaining({
+          allowanceDisposition: "forgiven_plan_reset",
+          planResetAt: planResetAt.toISOString(),
+        }),
+      }),
+      where: {
+        allowanceAccountedAt: null,
+        id: BASE_USAGE_RECORD.usageId,
+      },
+    });
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(usageCreditMocks.settleHostedUsageCreditForUsageTx).not.toHaveBeenCalled();
+  });
+
+  it("charges usage that starts after the persisted plan reset", async () => {
+    const planResetAt = new Date("2026-03-29T11:59:59.000Z");
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      billingPlanCode: "launch_edge_monthly",
+      billingRefUpdatedAt: planResetAt,
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      planResetAt,
+      spentUsdMicros: 0n,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceCounted: true,
+      }),
+    }));
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("forgives late usage from a retained trial period after paid Pulse starts a distinct period", async () => {
+    const trialStart = new Date("2026-03-01T00:00:00.000Z");
+    const trialEnd = new Date("2026-03-08T00:00:00.000Z");
+    const paidPeriodEnd = new Date("2026-04-08T00:00:00.000Z");
+    const resetAt = new Date("2026-03-08T00:00:02.000Z");
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      billingPhase: "paid",
+      billingPlanCode: "launch_monthly",
+      billingRefUpdatedAt: resetAt,
+      checkoutOffer: "pulse_trial_7d",
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+      periodEnd: paidPeriodEnd,
+      periodStart: trialEnd,
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      pulseTrialRedeemedAt: trialStart,
+      spentUsdMicros: 0n,
+      trialEndsAt: trialEnd,
+      trialStartedAt: trialStart,
+    });
+    const record = {
+      ...BASE_USAGE_RECORD,
+      occurredAt: "2026-03-07T23:59:59.000Z",
+    } satisfies AssistantUsageRecord;
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-08T00:00:05.000Z"),
+      record,
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceCounted: false,
+        allowancePeriodEnd: trialEnd,
+        allowancePeriodStart: trialStart,
+        allowancePricingSnapshotJson: expect.objectContaining({
+          allowanceDisposition: "forgiven_plan_reset",
+          planResetAt: resetAt.toISOString(),
+        }),
+      }),
+    }));
+    expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("charges usage started after an early trial conversion", async () => {
+    const trialStart = new Date("2026-03-01T00:00:00.000Z");
+    const trialEnd = new Date("2026-03-08T00:00:00.000Z");
+    const resetAt = new Date("2026-03-05T12:00:00.000Z");
+    const paidPeriodEnd = new Date("2026-04-05T12:00:00.000Z");
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      billingPhase: "paid",
+      billingPlanCode: "launch_monthly",
+      billingRefUpdatedAt: resetAt,
+      checkoutOffer: "pulse_trial_7d",
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+      periodEnd: paidPeriodEnd,
+      periodStart: resetAt,
+      planResetAt: resetAt,
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      pulseTrialRedeemedAt: trialStart,
+      spentUsdMicros: 0n,
+      trialEndsAt: trialEnd,
+      trialStartedAt: trialStart,
+    });
+    const record = {
+      ...BASE_USAGE_RECORD,
+      occurredAt: "2026-03-06T00:00:00.000Z",
+    } satisfies AssistantUsageRecord;
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-06T00:00:05.000Z"),
+      record,
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceCounted: true,
+        allowancePeriodEnd: paidPeriodEnd,
+        allowancePeriodStart: resetAt,
+      }),
+    }));
+    expect(executeRaw).toHaveBeenCalledTimes(1);
   });
 
   it("returns a fresh notice candidate when replenished credit is consumed", async () => {
@@ -1751,6 +1921,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         durationMs: 2_940,
         memberId: "member_123",
         model: "@cf/openai/whisper-large-v3-turbo",
+        occurredAt: "2026-03-29T12:00:00.000Z",
       }),
       occurredAt: "2026-03-29T12:00:00.000Z",
     };
@@ -2190,6 +2361,7 @@ describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
     expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith({
       data: {
         billingPlanCode: "launch_monthly",
+        highestBillingPlanCode: "launch_monthly",
         limitUsdMicros: 4_500_000n,
         memberId: "member_123",
         periodEnd: extendedTrialEnd,
@@ -2208,15 +2380,18 @@ describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
       data: {
         billingPlanCode: string;
         blockedAt: Date | null;
+        highestBillingPlanCode: string;
         limitUsdMicros: bigint;
         periodEnd: Date;
       };
     }) => ({
       billingPlanCode: args.data.billingPlanCode,
       blockedAt: args.data.blockedAt,
+      highestBillingPlanCode: args.data.highestBillingPlanCode,
       limitUsdMicros: args.data.limitUsdMicros,
       periodEnd: args.data.periodEnd,
       periodStart: trialStartedAt,
+      planResetAt: null,
       spentUsdMicros: 4_500_000n,
     }));
     const tx = createGatePrisma({
@@ -2250,6 +2425,7 @@ describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
       data: {
         billingPlanCode: "launch_monthly",
         blockedAt,
+        highestBillingPlanCode: "launch_monthly",
         limitUsdMicros: 4_500_000n,
         periodEnd: extendedTrialEnd,
         updatedAt: now,
@@ -2919,6 +3095,7 @@ describe("resolveHostedAiUsageGate", () => {
   it("returns the normal Pulse allowance after a Pulse Trial converts to paid", async () => {
     const prisma = createGatePrisma({
       billingPhase: "paid",
+      billingRefUpdatedAt: new Date("2026-04-08T11:59:59.000Z"),
       checkoutOffer: "pulse_trial_7d",
       periodEnd: new Date("2026-05-08T12:00:00.000Z"),
       periodStart: new Date("2026-04-08T12:00:00.000Z"),
@@ -2993,6 +3170,7 @@ describe("resolveHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith({
       data: {
         billingPlanCode: "launch_edge_monthly",
+        highestBillingPlanCode: "launch_edge_monthly",
         limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
         memberId: "member_123",
         periodEnd,
@@ -3004,24 +3182,30 @@ describe("resolveHostedAiUsageGate", () => {
   });
 
   it("resets current-period spend when Pulse upgrades to Edge", async () => {
+    const planResetAt = new Date("2026-03-29T11:59:00.000Z");
     const update = vi.fn(async (args: {
       data: {
         billingPlanCode: string;
         blockedAt: Date | null;
+        highestBillingPlanCode: string;
         limitUsdMicros: bigint;
         periodEnd: Date;
+        planResetAt?: Date;
         spentUsdMicros?: bigint;
       };
     }) => ({
       billingPlanCode: args.data.billingPlanCode,
       blockedAt: args.data.blockedAt,
+      highestBillingPlanCode: args.data.highestBillingPlanCode,
       limitUsdMicros: args.data.limitUsdMicros,
       periodEnd: args.data.periodEnd,
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      planResetAt: args.data.planResetAt ?? null,
       spentUsdMicros: args.data.spentUsdMicros ?? 6_000_000n,
     }));
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
+      billingRefUpdatedAt: planResetAt,
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
         blockedAt: new Date("2026-03-28T12:00:00.000Z"),
@@ -3045,16 +3229,226 @@ describe("resolveHostedAiUsageGate", () => {
       billingPlanCode: "launch_edge_monthly",
       limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
       remainingUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      planResetAt,
       spentUsdMicros: 0n,
     });
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         billingPlanCode: "launch_edge_monthly",
         blockedAt: null,
+        highestBillingPlanCode: "launch_edge_monthly",
         limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+        planResetAt,
         spentUsdMicros: 0n,
       }),
     }));
+  });
+
+  it("adopts an old writer's reset epoch without erasing later Edge spend", async () => {
+    const planResetAt = new Date("2026-03-29T11:59:00.000Z");
+    const postResetSpendUsdMicros = 700_000n;
+    const update = vi.fn(async (args: {
+      data: {
+        billingPlanCode?: string;
+        blockedAt?: Date | null;
+        highestBillingPlanCode?: string;
+        limitUsdMicros?: bigint;
+        periodEnd?: Date;
+        planResetAt?: Date;
+      };
+    }) => ({
+      billingPlanCode: args.data.billingPlanCode ?? "launch_edge_monthly",
+      blockedAt: args.data.blockedAt ?? null,
+      highestBillingPlanCode:
+        args.data.highestBillingPlanCode ?? "launch_monthly",
+      limitUsdMicros:
+        args.data.limitUsdMicros ?? DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      periodEnd:
+        args.data.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      planResetAt: args.data.planResetAt ?? null,
+      spentUsdMicros: postResetSpendUsdMicros,
+    }));
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      billingRefUpdatedAt: planResetAt,
+      findUniquePeriod: {
+        billingPlanCode: "launch_edge_monthly",
+        highestBillingPlanCode: "launch_monthly",
+        limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        planResetAt: null,
+        spentUsdMicros: postResetSpendUsdMicros,
+      },
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: postResetSpendUsdMicros,
+      update,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      planResetAt,
+      spentUsdMicros: postResetSpendUsdMicros,
+    });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        highestBillingPlanCode: "launch_edge_monthly",
+        planResetAt,
+      }),
+    }));
+    const updateData = (update.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    }).data;
+    expect(updateData).not.toHaveProperty("spentUsdMicros");
+  });
+
+  it("keeps the authoritative cutover when unrelated billing bookkeeping changes later", async () => {
+    const planResetAt = new Date("2026-03-29T11:55:00.000Z");
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      billingRefBookkeepingUpdatedAt: new Date("2026-03-29T11:59:00.000Z"),
+      billingRefUpdatedAt: planResetAt,
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        highestBillingPlanCode: "launch_monthly",
+        limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: 6_000_000n,
+      },
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 6_000_000n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      planResetAt,
+      spentUsdMicros: 0n,
+    });
+  });
+
+  it("fails closed when a legacy row has no historical plan classification", async () => {
+    const update = vi.fn(async (args: {
+      data: {
+        billingPlanCode: string;
+        blockedAt: Date | null;
+        highestBillingPlanCode: string;
+        limitUsdMicros: bigint;
+        periodEnd: Date;
+      };
+    }) => ({
+      ...args.data,
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      planResetAt: null,
+      spentUsdMicros: 3_000_000n,
+    }));
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      billingRefUpdatedAt: new Date("2026-03-29T11:59:00.000Z"),
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        highestBillingPlanCode: null,
+        limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: 3_000_000n,
+      },
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 3_000_000n,
+      update,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      planResetAt: null,
+      spentUsdMicros: 3_000_000n,
+    });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        highestBillingPlanCode: "launch_edge_monthly",
+      }),
+    }));
+    const updateData = (update.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    }).data;
+    expect(updateData).not.toHaveProperty("planResetAt");
+    expect(updateData).not.toHaveProperty("spentUsdMicros");
+  });
+
+  it("does not grant Family Edge twice after a same-period downgrade and re-upgrade", async () => {
+    const update = vi.fn(async (args: {
+      data: {
+        billingPlanCode: string;
+        blockedAt: Date | null;
+        highestBillingPlanCode: string;
+        limitUsdMicros: bigint;
+        periodEnd: Date;
+        planResetAt?: Date;
+        spentUsdMicros?: bigint;
+      };
+    }) => ({
+      billingPlanCode: args.data.billingPlanCode,
+      blockedAt: args.data.blockedAt,
+      highestBillingPlanCode: args.data.highestBillingPlanCode,
+      limitUsdMicros: args.data.limitUsdMicros,
+      periodEnd: args.data.periodEnd,
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      planResetAt: args.data.planResetAt ?? new Date("2026-03-10T12:00:00.000Z"),
+      spentUsdMicros: args.data.spentUsdMicros ?? 3_000_000n,
+    }));
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_monthly",
+      billingStatus: HostedBillingStatus.not_started,
+      familyAccessActive: true,
+      familyPlanCode: "edge",
+      familyUpdatedAt: new Date("2026-03-29T12:00:00.000Z"),
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        blockedAt: null,
+        highestBillingPlanCode: "launch_edge_monthly",
+        limitUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        planResetAt: new Date("2026-03-10T12:00:00.000Z"),
+        spentUsdMicros: 3_000_000n,
+      },
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 3_000_000n,
+      update,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: FAMILY_EDGE_ALLOWANCE_USD_MICROS,
+      remainingUsdMicros: FAMILY_EDGE_ALLOWANCE_USD_MICROS - 3_000_000n,
+      spentUsdMicros: 3_000_000n,
+    });
+
+    const updateData = (update.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    }).data;
+    expect(updateData.highestBillingPlanCode).toBe("launch_edge_monthly");
+    expect(updateData).not.toHaveProperty("planResetAt");
+    expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
   it("resets trial spend when a same-period Pulse Trial converts to paid Pulse", async () => {
@@ -3078,6 +3472,7 @@ describe("resolveHostedAiUsageGate", () => {
     }));
     const prisma = createGatePrisma({
       billingPhase: "paid",
+      billingRefUpdatedAt: new Date("2026-04-08T11:59:59.000Z"),
       checkoutOffer: "pulse_trial_7d",
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
@@ -3180,6 +3575,7 @@ describe("resolveHostedAiUsageGate", () => {
     const update = vi.fn();
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
+      billingRefUpdatedAt: new Date("2026-03-29T11:59:00.000Z"),
       findUniquePeriod: {
         billingPlanCode: "launch_edge_monthly",
         limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
@@ -3407,6 +3803,7 @@ describe("readHostedAiUsageGate", () => {
   it("shows zero spend immediately when Pulse upgrades to Edge", async () => {
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
+      billingRefUpdatedAt: new Date("2026-03-29T11:59:00.000Z"),
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
         blockedAt: new Date("2026-03-28T12:00:00.000Z"),
@@ -3443,6 +3840,7 @@ describe("readHostedAiUsageGate", () => {
     const paidPeriodEnd = new Date("2026-05-01T12:00:00.000Z");
     const prisma = createGatePrisma({
       billingPhase: "paid",
+      billingRefUpdatedAt: new Date("2026-04-08T11:59:59.000Z"),
       checkoutOffer: "pulse_trial_7d",
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
@@ -4019,6 +4417,7 @@ describe("readHostedAiUsageGateSnapshots", () => {
 
     const increasedPlan = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
+      billingRefUpdatedAt: new Date("2026-07-22T16:54:00.000Z"),
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
         blockedAt: new Date("2026-07-22T16:55:00.000Z"),
@@ -4142,6 +4541,11 @@ describe("checkHostedAiUsageGate", () => {
         pulseTrialRedeemedAt: null,
         scheduledBillingEffectiveAt: null,
         scheduledBillingPlanCode: null,
+        usagePlanTransitionAt: null,
+        usagePlanTransitionFromCode: null,
+        usagePlanTransitionKind: null,
+        usagePlanTransitionToCode: null,
+        updatedAt: new Date("2026-03-01T00:00:00.000Z"),
       },
       billingStatus: HostedBillingStatus.active,
       id: "member_123",
@@ -4195,6 +4599,11 @@ describe("checkHostedAiUsageGate", () => {
         pulseTrialRedeemedAt: null,
         scheduledBillingEffectiveAt: null,
         scheduledBillingPlanCode: null,
+        usagePlanTransitionAt: null,
+        usagePlanTransitionFromCode: null,
+        usagePlanTransitionKind: null,
+        usagePlanTransitionToCode: null,
+        updatedAt: new Date("2026-03-01T00:00:00.000Z"),
       },
       billingStatus: HostedBillingStatus.active,
       id: "member_123",
@@ -4226,6 +4635,8 @@ describe("checkHostedAiUsageGate", () => {
 function createAllowanceTx(input: {
   billingPhase?: string | null;
   billingPlanCode?: string;
+  billingRefBookkeepingUpdatedAt?: Date;
+  billingRefUpdatedAt?: Date;
   blockedAt?: Date | null;
   checkoutOffer?: string | null;
   executeRaw: AllowanceExecuteRawMock;
@@ -4234,11 +4645,14 @@ function createAllowanceTx(input: {
   familyPlanCode?: "edge" | "pulse";
   familyPeriodEnd?: Date | null;
   familyPeriodStart?: Date | null;
+  familyUpdatedAt?: Date;
+  highestBillingPlanCode?: string | null;
   hostedAiUsageAggregate?: ReturnType<typeof vi.fn>;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
   limitUsdMicros?: bigint;
   periodEnd?: Date;
   periodStart?: Date;
+  planResetAt?: Date | null;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
   spentUsdMicros?: bigint;
@@ -4284,29 +4698,43 @@ function createAllowanceTx(input: {
       findUniqueOrThrow: vi.fn(async () => ({
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
         blockedAt: input.blockedAt ?? null,
+        highestBillingPlanCode:
+          input.highestBillingPlanCode === undefined
+            ? input.billingPlanCode ?? "launch_monthly"
+            : input.highestBillingPlanCode,
         lastUsageAt: null,
         limitUsdMicros: input.limitUsdMicros ?? DIRECT_PULSE_ALLOWANCE_USD_MICROS,
         periodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
         periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+        planResetAt: input.planResetAt ?? null,
         spentUsdMicros: input.spentUsdMicros ?? 0n,
       })),
       update: vi.fn(async (args?: {
         data?: {
           billingPlanCode?: string;
           blockedAt?: Date | null;
+          highestBillingPlanCode?: string;
           limitUsdMicros?: bigint;
           periodEnd?: Date;
+          planResetAt?: Date;
+          spentUsdMicros?: bigint;
         };
       }) => ({
         billingPlanCode: args?.data?.billingPlanCode ?? input.billingPlanCode ?? "launch_monthly",
         blockedAt: args?.data?.blockedAt ?? input.blockedAt ?? null,
+        highestBillingPlanCode:
+          args?.data?.highestBillingPlanCode
+          ?? input.highestBillingPlanCode
+          ?? input.billingPlanCode
+          ?? "launch_monthly",
         limitUsdMicros:
           args?.data?.limitUsdMicros
           ?? input.limitUsdMicros
           ?? DIRECT_PULSE_ALLOWANCE_USD_MICROS,
         periodEnd: args?.data?.periodEnd ?? input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
         periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
-        spentUsdMicros: input.spentUsdMicros ?? 0n,
+        planResetAt: args?.data?.planResetAt ?? input.planResetAt ?? null,
+        spentUsdMicros: args?.data?.spentUsdMicros ?? input.spentUsdMicros ?? 0n,
       })),
     },
     hostedAccountGroupMembership: {
@@ -4324,6 +4752,17 @@ function createAllowanceTx(input: {
             planCode: input.familyPlanCode ?? "pulse",
             role: "member",
             status: "active",
+            usagePlanTransitionAt: input.familyUpdatedAt ?? null,
+            usagePlanTransitionFromCode: input.familyUpdatedAt
+              ? "launch_monthly"
+              : null,
+            usagePlanTransitionKind: input.familyUpdatedAt
+              ? "plan_upgrade"
+              : null,
+            usagePlanTransitionToCode: input.familyUpdatedAt
+              ? "launch_edge_monthly"
+              : null,
+            updatedAt: input.familyUpdatedAt ?? new Date("2026-03-01T00:00:00.000Z"),
           }
         : null),
     },
@@ -4353,6 +4792,22 @@ function createAllowanceTx(input: {
           currentTrialStartedAt: input.trialStartedAt ?? null,
           pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
           pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
+          usagePlanTransitionAt: input.billingRefUpdatedAt ?? null,
+          usagePlanTransitionFromCode: input.billingRefUpdatedAt
+            ? "launch_monthly"
+            : null,
+          usagePlanTransitionKind: input.billingRefUpdatedAt
+            ? input.billingPhase === "paid" && input.trialStartedAt
+              ? "trial_conversion"
+              : "plan_upgrade"
+            : null,
+          usagePlanTransitionToCode: input.billingRefUpdatedAt
+            ? input.billingPlanCode ?? "launch_monthly"
+            : null,
+          updatedAt:
+            input.billingRefBookkeepingUpdatedAt
+            ?? input.billingRefUpdatedAt
+            ?? new Date("2026-03-01T00:00:00.000Z"),
         },
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
@@ -4381,6 +4836,8 @@ function createGatePrisma(input: {
   aggregate?: ReturnType<typeof vi.fn>;
   billingPhase?: string | null;
   billingPlanCode?: string;
+  billingRefBookkeepingUpdatedAt?: Date;
+  billingRefUpdatedAt?: Date;
   billingStatus?: HostedBillingStatus;
   checkoutOffer?: string | null;
   executeRaw?: ReturnType<typeof vi.fn>;
@@ -4389,18 +4846,23 @@ function createGatePrisma(input: {
   familyPlanCode?: "edge" | "pulse";
   familyPeriodEnd?: Date | null;
   familyPeriodStart?: Date | null;
+  familyUpdatedAt?: Date;
+  highestBillingPlanCode?: string | null;
   findUniquePeriod?: {
     billingPlanCode: string;
     blockedAt?: Date | null;
+    highestBillingPlanCode?: string | null;
     lastUsageAt?: Date | null;
     limitUsdMicros: bigint;
     periodEnd: Date;
     periodStart: Date;
+    planResetAt?: Date | null;
     spentUsdMicros: bigint;
   } | null;
   limitUsdMicros?: bigint;
   periodEnd?: Date;
   periodStart?: Date;
+  planResetAt?: Date | null;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
   queryRaw?: ReturnType<typeof vi.fn>;
@@ -4450,12 +4912,18 @@ function createGatePrisma(input: {
   const defaultPeriod = {
     billingPlanCode: input.billingPlanCode ?? "launch_monthly",
     blockedAt: null,
+    highestBillingPlanCode: input.highestBillingPlanCode === undefined
+      ? input.findUniquePeriod?.billingPlanCode
+        ?? input.billingPlanCode
+        ?? "launch_monthly"
+      : input.highestBillingPlanCode,
     lastUsageAt: input.spentUsdMicros > 0n
       ? new Date(periodStart.getTime() + 60_000)
       : null,
     limitUsdMicros: input.limitUsdMicros ?? DIRECT_PULSE_ALLOWANCE_USD_MICROS,
     periodEnd,
     periodStart,
+    planResetAt: input.planResetAt ?? null,
     spentUsdMicros: input.spentUsdMicros,
   };
 
@@ -4478,24 +4946,36 @@ function createGatePrisma(input: {
       createMany: vi.fn(async () => ({ count: 1 })),
       delete: vi.fn(async () => undefined),
       findUnique: vi.fn(async () =>
+        input.findUniquePeriod === null
+          ? null
+          : input.findUniquePeriod === undefined
+            ? defaultPeriod
+            : { ...defaultPeriod, ...input.findUniquePeriod }
+      ),
+      findUniqueOrThrow: vi.fn(async () =>
         input.findUniquePeriod === undefined
           ? defaultPeriod
-          : input.findUniquePeriod
+          : { ...defaultPeriod, ...input.findUniquePeriod }
       ),
-      findUniqueOrThrow: vi.fn(async () => input.findUniquePeriod ?? defaultPeriod),
       update: input.update ?? vi.fn(async (args?: {
         data?: {
           billingPlanCode?: string;
+          highestBillingPlanCode?: string;
           limitUsdMicros?: bigint;
           periodEnd?: Date;
+          planResetAt?: Date;
+          spentUsdMicros?: bigint;
         };
       }) => ({
         billingPlanCode: args?.data?.billingPlanCode ?? defaultPeriod.billingPlanCode,
         blockedAt: defaultPeriod.blockedAt,
+        highestBillingPlanCode:
+          args?.data?.highestBillingPlanCode ?? defaultPeriod.highestBillingPlanCode,
         limitUsdMicros: args?.data?.limitUsdMicros ?? defaultPeriod.limitUsdMicros,
         periodEnd: args?.data?.periodEnd ?? defaultPeriod.periodEnd,
         periodStart: defaultPeriod.periodStart,
-        spentUsdMicros: defaultPeriod.spentUsdMicros,
+        planResetAt: args?.data?.planResetAt ?? defaultPeriod.planResetAt,
+        spentUsdMicros: args?.data?.spentUsdMicros ?? defaultPeriod.spentUsdMicros,
       })),
     },
     hostedAccountGroupMembership: {
@@ -4513,6 +4993,17 @@ function createGatePrisma(input: {
             planCode: input.familyPlanCode ?? "pulse",
             role: "member",
             status: "active",
+            usagePlanTransitionAt: input.familyUpdatedAt ?? null,
+            usagePlanTransitionFromCode: input.familyUpdatedAt
+              ? "launch_monthly"
+              : null,
+            usagePlanTransitionKind: input.familyUpdatedAt
+              ? "plan_upgrade"
+              : null,
+            usagePlanTransitionToCode: input.familyUpdatedAt
+              ? "launch_edge_monthly"
+              : null,
+            updatedAt: input.familyUpdatedAt ?? periodStart,
           }
         : null),
     },
@@ -4544,6 +5035,22 @@ function createGatePrisma(input: {
           pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
           scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
           scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
+          usagePlanTransitionAt: input.billingRefUpdatedAt ?? null,
+          usagePlanTransitionFromCode: input.billingRefUpdatedAt
+            ? "launch_monthly"
+            : null,
+          usagePlanTransitionKind: input.billingRefUpdatedAt
+            ? input.billingPhase === "paid" && input.trialStartedAt
+              ? "trial_conversion"
+              : "plan_upgrade"
+            : null,
+          usagePlanTransitionToCode: input.billingRefUpdatedAt
+            ? input.billingPlanCode ?? "launch_monthly"
+            : null,
+          updatedAt:
+            input.billingRefBookkeepingUpdatedAt
+            ?? input.billingRefUpdatedAt
+            ?? periodStart,
         },
         billingStatus: input.billingStatus ?? HostedBillingStatus.active,
         id: "member_123",

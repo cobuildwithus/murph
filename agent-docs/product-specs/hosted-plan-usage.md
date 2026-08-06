@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-08-04
+Last verified: 2026-08-05
 Status: Implemented current-state contract
 
 ## Goal
@@ -106,6 +106,19 @@ spend returns to zero, the plan allowance replenishes, and unused usage credit
 remains available. The operation that crosses effective capacity may finish,
 but subsequent usage-bearing work blocks and accepted conversation input
 remains pending.
+
+An automatic same-period increase in included allowance, including trial to
+paid Pulse, Group to Pulse or Edge, Pulse to Edge, and Family Pulse to Edge,
+starts a new capacity epoch at zero included spend. The canonical period stores
+that cutover and the highest plan tier already granted during the period.
+Consequently a downgrade followed by a re-upgrade cannot mint the same reset
+twice. Usage whose provider work started before the cutover may arrive after
+reconciliation; its immutable usage and pricing history remain, but it is
+marked uncounted and cannot consume the new included allowance or purchased
+usage credit. Provider work that starts after the cutover counts normally. The
+meter uses the later of this cutover and the latest fulfilled purchase grant,
+so it displays the fresh capacity immediately and does not forecast from
+pre-reset work.
 
 For paid access, the included monthly usage value is exactly 80% of the
 server-owned recurring amount for that member's billing mode and tier. Direct
@@ -333,8 +346,11 @@ member routing or an external Linq target against persisted thread authority.
 An omitted target means no accepted conversation and permits the legacy
 personal-home fallback; explicit `null` means an accepted input had no single
 safe route and forbids lookup, claim, and send; an object permits only that
-exact target. Later counted usage may retry an uncompleted period claim, while
-the delivery owner permits at most one completed notice.
+exact target. Later counted usage may retry an uncompleted capacity-epoch
+claim, while the delivery owner permits at most one completed notice per
+period, plan-reset cutover, and usage-credit ledger version. A stale pre-reset
+candidate fails its locked eligibility recheck; exhaustion after a plan reset
+receives a fresh delivery identity.
 
 ### Operator usage recovery
 
@@ -504,15 +520,30 @@ unimplemented.
 
 ## Deployment
 
-Apply the additive mailbox-claim migration, then deploy Web, then deploy the
-Cloudflare runtime. An old runtime continues to send the empty plan-usage
-request, and new Web omits `subscriptionActionQuote`, preserving the old strict
-response shape. The new runtime opts into the quote field only after Web can
-parse that request and serve the durable action claim. A new runtime against
-old Web is unsupported because old Web rejects the opt-in request and does not
-provide the durable claim. Roll back Cloudflare before Web; the nullable column
-may remain. This order also preserves the originating-notice-target
-compatibility contract described in `hosted-plan-downgrades.md`.
+For the capacity-epoch change, deploy the assistant runtime that timestamps
+every provider operation at its own request start, then wait for work accepted
+by the previous runtime to drain. Apply the additive usage-period and
+billing-transition columns and promote the Web reconciliation owner only after
+that drain. Existing Web code ignores the new columns. Migration-owned
+transition bridges snapshot the exact Stripe event time for direct billing and
+the local membership cutover for Family changes made by a draining Web
+instance. New Web adopts such an already-applied reset without erasing usage
+accrued afterward. It otherwise fails closed if a row lacks historical plan
+classification or an exact transition marker: spend is preserved and no
+duplicate reset is granted. Audit current-period rows immediately after
+promotion for missing transition or high-water metadata. Roll back Web before
+the runtime; the nullable columns and bridges may remain.
+
+For the subscription-action quote contract, apply the additive mailbox-claim
+migration, then deploy Web, then deploy the Cloudflare runtime. An old runtime
+continues to send the empty plan-usage request, and new Web omits
+`subscriptionActionQuote`, preserving the old strict response shape. The new
+runtime opts into the quote field only after Web can parse that request and
+serve the durable action claim. A new runtime against old Web is unsupported
+because old Web rejects the opt-in request and does not provide the durable
+claim. Roll back Cloudflare before Web; the nullable column may remain. This
+order also preserves the originating-notice-target compatibility contract
+described in `hosted-plan-downgrades.md`.
 
 Existing billing mechanics remain in:
 

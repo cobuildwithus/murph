@@ -349,6 +349,7 @@ describe("hosted detached assistant ask controller", () => {
         stage: "answer",
         usage: createTestUsageDraft({
           inputTokens: 25,
+          occurredAt: "2026-07-15T12:00:02.000Z",
           outputTokens: 5,
           providerRequestOrdinal: 0,
         }),
@@ -357,6 +358,7 @@ describe("hosted detached assistant ask controller", () => {
         stage: "review",
         usage: createTestUsageDraft({
           inputTokens: 10,
+          occurredAt: "2026-07-15T12:00:08.000Z",
           outputTokens: 1,
           providerRequestOrdinal: 0,
         }),
@@ -436,6 +438,7 @@ describe("hosted detached assistant ask controller", () => {
         attemptCount: record.attemptCount,
         credentialSource: record.credentialSource,
         memberId: record.memberId,
+        occurredAt: record.occurredAt,
         providerRequestOrdinal: record.providerRequestOrdinal,
         sessionId: record.sessionId,
         turnId: record.turnId,
@@ -445,6 +448,7 @@ describe("hosted detached assistant ask controller", () => {
           attemptCount: 1,
           credentialSource: "member",
           memberId: TEST_USER_ID,
+          occurredAt: "2026-07-15T12:00:02.000Z",
           providerRequestOrdinal: 0,
           sessionId: "ask_event_disclosure",
           turnId: "turn_assistant_ask_ask_event_disclosure.stage-answer",
@@ -455,6 +459,7 @@ describe("hosted detached assistant ask controller", () => {
           attemptCount: 1,
           credentialSource: "member",
           memberId: TEST_USER_ID,
+          occurredAt: "2026-07-15T12:00:08.000Z",
           providerRequestOrdinal: 0,
           sessionId: "ask_event_disclosure",
           turnId: "turn_assistant_ask_ask_event_disclosure.stage-review",
@@ -1117,10 +1122,12 @@ async function waitUntil(
 
 function createTestUsageDraft(input: {
   inputTokens: number;
+  occurredAt?: string;
   outputTokens: number;
   providerRequestOrdinal: number;
 }): AssistantProviderUsageDraft {
   return {
+    occurredAt: input.occurredAt ?? TEST_NOW,
     provider: "codex-cli",
     providerRequestOrdinal: input.providerRequestOrdinal,
     providerRequestOutcome: "succeeded",

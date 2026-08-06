@@ -351,6 +351,7 @@ describe('murph.generate_image dynamic tool schema', () => {
       operationId: expect.stringContaining('murph.dynamic-tool.generate-image'),
       originAssistantInputId: 'input_image_origin',
       usageDraft: expect.objectContaining({
+        occurredAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/u),
         provider: 'openai-images',
       }),
     }))

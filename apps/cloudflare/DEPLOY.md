@@ -557,8 +557,27 @@ tool-bearing turn, and a compact request through the Worker intercept without
 exposing the key to the container. Confirm completed streams and usage
 snapshots identify `venice` plus the expected code-owned provider model. A
 static translation test or one successful tier is not sufficient activation
-proof. Only after the full matrix passes should Web enable the flag and
-redeploy so Settings can offer Venice.
+proof.
+
+The candidate must also pass a capped prompt-cache canary before Web exposure.
+Drive two sequential Sol `/responses` turns within five minutes through the
+exact candidate bundle's pinned Codex App Server and one resumed synthetic
+thread; do not hand-author ordinary Responses requests. The captured pre-egress
+shape must contain one valid nonempty Responses Lite `additional_tools`
+envelope, a nonempty stable `prompt_cache_key`, a contiguous leading developer
+prefix, and a different user tail on the second turn. Focused candidate proof
+must show that the final Worker body preserves the key, restores tools at top
+level, removes `additional_tools`, and adds exactly one breakpoint to the final
+supported block in that developer prefix.
+
+Retain only aggregate usage fields and provider request ids from the live
+canary; never log the body, prompt, or cache key. The second request must report
+a nonzero cache read and materially fewer cache-write tokens than the first. A
+schema rejection, missing or changed key/prefix evidence, zero cache reads, or
+another full-prefix cache write fails the gate: keep `HOSTED_VENICE_ENABLED`
+off and roll back the Worker candidate. Only after the full request matrix and
+cache canary pass should Web enable the flag and redeploy so Settings can offer
+Venice.
 
 Rollback in the opposite exposure order: disable the Web flag and redeploy Web
 first, verify new workspace reads omit the Venice override, and only then
