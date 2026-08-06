@@ -515,7 +515,8 @@ function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
       },
     ],
     model: input.model,
-    reasoning: { effort: "low" },
+    reasoning: { effort: "medium" },
+    service_tier: "priority",
     store: false,
     text: {
       format: {

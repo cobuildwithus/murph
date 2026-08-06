@@ -58,54 +58,66 @@ For round 2 or later, read `contextMode` from `review-round.json`:
   conversation for unchanged repository context. Its reviewed head must match
   `contextAnchorHead` in the current `review-round.json`.
 - `full_snapshot` means the current ZIP contains the full guarded snapshot. A
-  later round may use this only when `full-review-reason.txt` gives a concrete
-  reason why the prior conversation or small correction packet is insufficient.
-  This ZIP becomes the context anchor for later delta rounds in this conversation.
+  later round uses this when the PR is sensitive or undeclared, when a routine
+  PR meets the repository's large-change cutoff, or when
+  `full-review-reason.txt` gives another concrete reason for a full audit.
+  Review the complete current PR from this ZIP. It becomes the context anchor
+  for later delta rounds in this conversation.
 
-Stop as `INVALID` only when the code evidence itself will not support a review:
-the files required by the declared `contextMode` are missing, unreadable, or do
-not correspond to the checked commit. A `same_thread_delta` round is also
-invalid when its matching earlier full-snapshot ZIP is unavailable in this
-conversation. For round 2 or later, stop as invalid if either reviewed-head
-ancestry field is not `true`. A delta round also requires
-`contextAnchorHeadIsAncestorOfPrevious` to be `true`. State the exact evidence
-gap and stop.
+Stop as `INVALID` when the code evidence itself will not support a review: the
+files required by the declared `contextMode` are missing, unreadable, or do not
+correspond to the checked commit. A `same_thread_delta` round is also invalid
+when its matching earlier full-snapshot ZIP is unavailable in this conversation.
+For round 2 or later, stop as invalid if either reviewed-head ancestry field is
+not `true`. A delta round also requires
+`contextAnchorHeadIsAncestorOfPrevious` to be `true`. A later full audit also
+uses `INVALID` for the mandatory prior-finding summary gap defined below. State
+the exact evidence gap and stop.
 
 Do not stop for a discrepancy confined to the descriptive content of
 `review-gpt-pr-context/pr-body.md` — change-shape counts, validation claims, or
-prose that has drifted behind the current head — or for an invocation that is
-missing its prior-round summary. Those degrade the author's account of the
-change, not your ability to read the code. Record them as notes (see Output)
-and complete the substantive review. A stale table is never a reason to leave
-real defects unreviewed; say what is wrong with it and review anyway.
+prose that has drifted behind the current head. Those degrade the author's
+account of the change, not your ability to read the code. Record them as notes
+(see Output) and complete the substantive review. A stale table is never a
+reason to leave real defects unreviewed; say what is wrong with it and review
+anyway.
 
-For round 2 or later the invocation should state the same first-reviewed head as
-the artifact and summarize the prior round's findings, local dispositions,
-landed corrections, and underlying mechanisms. Treat that summary as process
+For round 2 or later the invocation must state the same first-reviewed head as
+the artifact and summarize every prior finding, its local disposition, any
+landed correction, and the underlying mechanism. Treat that summary as process
 metadata, not repository evidence, and verify its code claims against the ZIP.
-When it is absent or thin, reconstruct what you can from the current correction
-packet and earlier packets after the matching full-snapshot anchor. Note the gap
-and continue.
+This full-review prompt starts a new conversation, so a later round has no
+earlier review history: if the summary is absent, placeholder-only, or too thin
+to identify every prior accepted finding and claimed correction, return
+`ROUND_OUTCOME: INVALID` before the substantive audit.
 
-Round 1 is the only full-patch audit. In round 1, review `pr.diff` in repository
-context and classify a qualifying finding as `ORIGINAL_PR`.
+Read `reviewScope` from `review-round.json` and follow it exactly:
 
-Round 2 and later are correction-verification rounds, not fresh full-PR audits.
-Review `since-previous-reviewed-head.diff` and only its directly affected
-callers, owners, invariants, tests, and production paths. Classify every issue
-considered as:
+- `full` is a fresh full-patch audit. Review `pr.diff` in the current guarded
+  repository snapshot, including unchanged portions of the PR that another
+  full pass may examine differently. Round 1 is always `full`; a later large or
+  explicitly justified round may also be `full`.
+- `correction` is a same-thread correction-verification round. Review
+  `since-previous-reviewed-head.diff` and only its directly affected callers,
+  owners, invariants, tests, and production paths.
+
+Classify every issue considered as:
 
 - `REVIEW_INDUCED`: caused by the remediation delta;
 - `ORIGINAL_PR`: present in the PR before the remediation delta; or
 - `PRE_EXISTING_OR_ADJACENT`: equivalent on the base branch or outside the PR's
   stated outcome.
 
-Report a later-round finding only when it is `REVIEW_INDUCED`. Do not
-novelty-mine unchanged portions of a previously reviewed patch. If a later
-round exposes a serious `ORIGINAL_PR` issue that an earlier full audit missed,
-return `RETROSPECTIVE_REQUIRED` and name the issue as retrospective evidence
-instead of prescribing another tactical correction. Do not report
-`PRE_EXISTING_OR_ADJACENT` issues as PR findings.
+In a `full` audit, report either `ORIGINAL_PR` or `REVIEW_INDUCED` findings that
+meet the finding bar. A later full audit exists specifically to give a large PR
+another independent pass, so a newly found `ORIGINAL_PR` issue is an ordinary
+finding rather than a retrospective trigger. In a `correction` round, report a
+finding only when it is `REVIEW_INDUCED`; do not novelty-mine unchanged portions
+of the previously reviewed patch. If a correction round exposes a serious
+`ORIGINAL_PR` issue that the earlier full audit missed, return
+`RETROSPECTIVE_REQUIRED` and name it as retrospective evidence instead of
+prescribing another tactical correction. Never report `PRE_EXISTING_OR_ADJACENT`
+issues as PR findings.
 
 When the invocation explicitly identifies a disclosure-only verification retry
 for the same pushed head and substantive round, review only the corrected
@@ -396,9 +408,10 @@ End with exactly one of these lines:
 Use `PASS` only when there are no qualifying findings and every claimed prior
 correction is proven effective; body discrepancies and rendered evidence gaps
 are notes and do not withhold it. Use `INVALID` only when the code evidence will
-not support a review at all, as defined in Evidence and round scope; it does not
-count as a substantive round. An inaccurate PR body is never grounds for
-`INVALID`. Put the selected outcome
-immediately before this exact final line, and do not use the token elsewhere:
+not support a review or a later full audit lacks its mandatory prior-finding
+summary, as defined in Evidence and round scope; it does not count as a
+substantive round. An inaccurate PR body is never grounds for `INVALID`. Put
+the selected outcome immediately before this exact final line, and do not use
+the token elsewhere:
 
 REVIEW_COMPLETE
