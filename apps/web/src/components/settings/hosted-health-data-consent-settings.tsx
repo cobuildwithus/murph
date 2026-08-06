@@ -224,7 +224,11 @@ export function HostedHealthDataConsentControl({
   const unavailable = presentation === "unavailable";
 
   return (
-    <div className="grid grid-cols-1 items-start gap-4 border-b border-border pb-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+    <div
+      className={`grid grid-cols-1 items-start gap-4 border-b border-border pb-4 ${
+        active ? "" : "sm:grid-cols-[minmax(0,1fr)_auto]"
+      }`}
+    >
       <div className="flex min-w-0 items-start gap-3">
         {active ? (
           <ShieldCheck
@@ -261,40 +265,55 @@ export function HostedHealthDataConsentControl({
                     ? "Checking status..."
                     : errorMessage ?? "Status unavailable"}
           </p>
-          {active || paused ? (
+          {paused ? (
             <div className="mt-2">
               <Link
                 className="relative inline-flex min-h-10 items-center self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:content-['']"
                 href="/connect"
               >
-                {paused ? "Review source disconnections" : "Review or reconnect sources"}
+                Review source disconnections
               </Link>
             </div>
           ) : null}
         </div>
       </div>
-      <Button
-        className={
-          paused
-            ? "w-full sm:col-span-2"
-            : active
-              ? "-mt-1 ml-[18px] justify-self-start border-destructive/30 bg-transparent hover:border-destructive/40 hover:bg-destructive/[0.05] focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-transparent dark:hover:bg-destructive/[0.05] dark:focus-visible:ring-ring/50 sm:mt-0 sm:ml-0 sm:justify-self-end"
+      {active ? (
+        <div className="ml-[30px] flex min-w-0 items-center gap-2 justify-self-stretch">
+          <Link
+            className="relative inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:content-['']"
+            href="/connect"
+          >
+            Manage sources
+          </Link>
+          <Button
+            className="min-h-10"
+            disabled={pending}
+            onClick={onAction}
+            size="sm"
+            type="button"
+            variant="destructive"
+          >
+            Withdraw consent
+          </Button>
+        </div>
+      ) : (
+        <Button
+          className={
+            paused
+              ? "w-full sm:col-span-2"
               : "w-full sm:w-auto sm:self-start"
-        }
-        disabled={pending}
-        onClick={onAction}
-        size={active ? "sm" : "default"}
-        type="button"
-        variant={active ? "destructive" : "default"}
-      >
-        {active
-          ? "Withdraw consent"
-          : paused
+          }
+          disabled={pending}
+          onClick={onAction}
+          type="button"
+        >
+          {paused
             ? "Use Murph again"
             : unavailable
               ? statusPending ? "Checking..." : "Retry status"
               : "Review"}
-      </Button>
+        </Button>
+      )}
     </div>
   );
 }
