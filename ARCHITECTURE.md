@@ -1269,13 +1269,16 @@ app-server anchored there would hold a dead cwd inode and fail its next
 thread-start config load. Threads receive the current workspace through the
 explicit per-thread `cwd` param instead.
 
-For established hosted conversation work, the first fresh auto-reply-enabled
+For hosted conversation work, the first fresh auto-reply-enabled
 pre-pass Linq or Telegram input candidate staged after restore and final Codex
 config/auth preparation may begin process-only spawn and initialization while
 the remaining mailbox work continues. Email, self-authored Linq, bootstrap,
 system, maintenance, replay, and active-turn imports do not admit preparation;
-the first staged pre-pass conversation decides for the invocation. Readiness is
-memoized on the exact process and does not reserve a turn; a matching
+the first staged pre-pass conversation decides for the invocation. A bootstrap
+or system item itself never admits preparation, but after cold bootstrap has
+completed, an eligible conversation candidate staged later in that same
+pre-pass may admit it. Readiness is memoized on the exact process and does not
+reserve a turn; a matching
 foreground turn synchronously reserves that object before joining readiness.
 Preparation sends no thread, turn, provider, account, tool, or compaction
 request, and launches no detached child. Speculative preparation never evicts

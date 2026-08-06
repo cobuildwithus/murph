@@ -74,7 +74,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   initialization may start without reserving a turn, and a matching turn
   synchronously reserves that exact process before joining the same readiness
   work. Email, self-authored Linq, bootstrap, system, maintenance, replay, and
-  active-turn imports do not admit preparation. The existing engine-owned
+  active-turn imports do not admit preparation.
+  A bootstrap or system item itself never admits preparation; once cold
+  bootstrap completes, an eligible conversation candidate staged later in the
+  same pre-pass may admit it.
+  The existing engine-owned
   slot-transition lock serializes inspect, exact teardown, publication or
   reservation, and workspace-boundary admission; initialization readiness itself
   runs outside that lock. Do not add a second warm-slot lifecycle, lock owner,

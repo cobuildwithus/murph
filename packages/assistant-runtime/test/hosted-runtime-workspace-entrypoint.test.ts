@@ -8704,9 +8704,15 @@ describe("hosted workspace runtime entrypoint", () => {
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const imported: string[] = [];
     const assistantWorkspaceVersions: string[] = [];
+    const codexPreparationStarted = createDeferred<void>();
     let bootstrapImported = false;
     mocks.prepareHostedCodexAssistantProcess.mockClear();
     mocks.cancelPendingWarmCodexPreinitialization.mockClear();
+    mocks.prepareHostedCodexAssistantProcess.mockImplementationOnce(async () => {
+      events.push("codex.preinitialize");
+      codexPreparationStarted.resolve();
+      return null;
+    });
 
     const conversationItem = createMailboxItem({
       id: "mailbox_item_entrypoint_image_only_001",
@@ -8750,18 +8756,25 @@ describe("hosted workspace runtime entrypoint", () => {
           async importItem(item, context) {
             imported.push(`${item.item.lane}:${item.item.kind}`);
             if (item.item.kind === "member.activated") {
+              assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+              events.push("bootstrap.start");
               await initializeVault({ createdAt: TEST_NOW, vaultRoot });
               bootstrapImported = true;
+              events.push("bootstrap.done");
               return { status: "imported" };
             }
 
             assert.equal(bootstrapImported, true);
-            context?.onConversationInputStaged?.("linq");
+            const assistantInputId = await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            events.push("conversation.staged");
+            assert.ok(context?.onConversationInputStaged);
+            context.onConversationInputStaged("linq");
+            await codexPreparationStarted.promise;
             return {
-              assistantInputId: await stageAssistantInputEventForMailboxItem({
-                item: item.item,
-                vaultRoot,
-              }),
+              assistantInputId,
               status: "imported",
             };
           },
@@ -8778,6 +8791,7 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           async runAssistantPhase(input) {
+            events.push("assistant.foreground");
             const workspaceVersion = input.workspace?.version ?? "missing";
             assistantWorkspaceVersions.push(workspaceVersion);
             assert.equal(
@@ -8834,10 +8848,17 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, checkpointRequests[0]?.nextWakeAt);
       assert.equal(result.nextWakeReason, "assistant");
       assert.equal(result.status, "scheduled");
-      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 1);
       assert.equal(
         mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length,
         0,
+      );
+      assert.ok(events.indexOf("bootstrap.done") < events.indexOf("conversation.staged"));
+      assert.ok(
+        events.indexOf("conversation.staged") < events.indexOf("codex.preinitialize"),
+      );
+      assert.ok(
+        events.indexOf("codex.preinitialize") < events.indexOf("assistant.foreground"),
       );
     } finally {
       await removeTempRoot(vaultRoot);

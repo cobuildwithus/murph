@@ -773,8 +773,11 @@ Last verified: 2026-08-05
   restore, final managed Codex config/auth preparation, and staging of the first
   fresh auto-reply-enabled pre-pass Linq or Telegram input candidate. Email,
   self-authored Linq, bootstrap, system, maintenance, replay, and active-turn
-  imports cannot admit it. It uses the final ordinary-process launch identity
-  but issues no thread start or resume, turn start, provider request, account
+  imports cannot admit it. A bootstrap or system item itself never admits
+  preparation; once cold bootstrap completes, an eligible conversation
+  candidate staged later in the same pre-pass may admit it. It uses the final
+  ordinary-process launch identity but issues no thread start or resume, turn
+  start, provider request, account
   operation, dynamic-tool assembly, compaction, or child launch.
   Initialization is not accepted-input, provider-egress, canonical-write, or
   delivery authority; those remain bound to the later admitted foreground turn

@@ -139,8 +139,11 @@ Last verified: 2026-08-05
   readiness. Hosted preparation is a one-shot decision from the first fresh
   auto-reply-enabled pre-pass conversation candidate: Linq or Telegram may admit
   it; email, self-authored Linq, bootstrap, system, maintenance, replay, and
-  active-turn imports may not. The existing engine-owned slot-transition lock
-  serializes inspect, exact teardown, publication or reservation, and
+  active-turn imports may not. A bootstrap or system item itself never admits
+  preparation; once cold bootstrap completes, an eligible conversation
+  candidate staged later in the same pre-pass may admit it. The existing
+  engine-owned slot-transition lock serializes inspect, exact teardown,
+  publication or reservation, and
   workspace-boundary admission; it is not held while initialization readiness
   runs. The admitting caller receives a cancellation handle bound to that exact
   process, so a stale caller cannot cancel a later replacement. There is no

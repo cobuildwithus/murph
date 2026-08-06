@@ -1,0 +1,95 @@
+# Overlap cold App Server initialization with first-contact bootstrap
+
+Status: active
+Created: 2026-08-05
+Updated: 2026-08-05
+
+## Goal
+
+- Reduce fresh-number first-reply latency by starting the resident Codex App
+  Server after the first eligible conversation input is durably staged, even
+  when that same invocation first had to bootstrap the vault.
+- Preserve bootstrap ordering, accepted-input authority, provider-egress
+  authority, foreground ownership, checkpoint safety, and ordinary fallback.
+
+## Proven latency and code-path evidence
+
+- The closest fully correlated fresh-number trace spent about 1.9 seconds in
+  App Server initialization after conversation staging, inside an approximately
+  24.6-second end-to-end reply.
+- Current runtime code installs the existing process-preparation callback only
+  when vault metadata existed before the invocation. A cold first-contact
+  invocation therefore suppresses preparation even after system bootstrap has
+  created metadata and the Linq conversation import has staged its assistant
+  input.
+- The hosted runtime contract already permits process-only initialization after
+  restore, final managed Codex config/auth preparation, and staging of the first
+  fresh auto-reply-enabled Linq or Telegram candidate. Bootstrap itself remains
+  ineligible and must not trigger preparation.
+
+## Success criteria
+
+- A cold first-contact invocation starts process-only initialization only after
+  system bootstrap succeeds and the eligible conversation input is staged.
+- Bootstrap, system-only work, email, self-authored input, replay, maintenance,
+  and active-turn imports remain unable to admit preparation.
+- Preparation still starts no thread, turn, provider request, tool assembly, or
+  delivery, and any preparation failure falls back to authoritative foreground
+  startup without consuming accepted work.
+- Snapshot and invocation-release paths continue to join and cancel the exact
+  pending preparation handle before crossing the workspace boundary.
+- Focused regression tests, assistant-runtime typecheck, exact-head CI,
+  preliminary specialist review, and final ReviewGPT pass with no unresolved
+  findings.
+
+## Scope
+
+- In scope: the existing hosted-runtime preparation-admission callback and a
+  focused cold-bootstrap ordering regression, plus directly matching runtime
+  documentation if code inspection proves it stale.
+- Out of scope: Web/Temporal direct-wake collapse, container allocation,
+  assistant model selection, prompt changes, provider-turn optimization, new
+  queues, retries, state owners, dependencies, or user-visible message copy.
+
+## Constraints
+
+- Reuse the existing assistant-engine resident-process owner and exact-process
+  cancellation handle; add no second readiness or lifecycle owner.
+- Do not move initialization before final managed config/auth preparation or
+  before an eligible conversation candidate is staged.
+- Treat preparation as a best-effort latency optimization only. Foreground
+  admission and delivery remain authoritative and fail safe.
+- Keep all production evidence aggregate, bounded, and free of message content,
+  member identifiers, phone numbers, provider payloads, or local paths.
+
+## Tasks
+
+1. [x] Trace the current admission path, runtime contract, active-plan overlap,
+   and the measured App Server segment.
+2. [x] Add a focused cold-bootstrap regression that proves the required event
+   ordering and fails on the current implementation.
+3. [x] Make the smallest admission change and run scoped tests/typecheck plus
+   direct diff and privacy review.
+4. [ ] Push the exact candidate, open a PR, and run preliminary specialists,
+   final ReviewGPT, and exact-head CI concurrently where allowed.
+5. [ ] Resolve accepted findings, close this plan with `scripts/finish-task`,
+   merge, deploy the runner bundle with immediate container rollout, and verify
+   the exact production fingerprint and error-free startup.
+6. [ ] Measure the next eligible cold first-contact trace, or report the
+   evidence-backed projected saving separately from production measurement.
+
+## Verification log
+
+- Before the source change, the focused cold-bootstrap regression failed at the
+  staged conversation boundary because `onConversationInputStaged` was `null`.
+- After the one-condition admission correction, that focused regression passed
+  and proved `bootstrap complete -> conversation durably staged -> App Server
+  initialization -> foreground`.
+- The complete assistant-runtime Vitest suite passed: 81 files, 2,048 tests
+  passed, and 4 tests skipped.
+- `pnpm --filter @murphai/assistant-runtime typecheck` passed.
+- `pnpm docs:drift` and `git diff --check` passed.
+- Static parent and delegated review confirmed production conversation import
+  requires bootstrap metadata and durable input staging before the callback;
+  existing regressions retain system-only, email-first, active-turn, failure
+  fallback, and snapshot-cancellation exclusions.

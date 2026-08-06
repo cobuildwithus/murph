@@ -1541,10 +1541,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
     });
-    if (
-      (input.request.processingMode ?? "default") === "default"
-      && !initialMailboxImportPlan.bootstrapRequired
-    ) {
+    if ((input.request.processingMode ?? "default") === "default") {
       startCodexProcessPreparationForConversation = (channel) => {
         if (codexProcessPreparationStart) {
           return;

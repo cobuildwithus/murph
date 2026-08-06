@@ -144,9 +144,12 @@ auto-reply-enabled conversation candidate staged during the pre-pass may decide
 speculative process initialization. Linq and Telegram may admit process-only
 initialization while remaining mailbox projection and bookkeeping continue;
 email, self-authored Linq, bootstrap, system, maintenance, replay, and
-active-turn imports do not. Speculation starts no thread or turn and never
-replaces a healthy claimable resident with another launch identity. Before snapshot
-construction or invocation release, the runtime disables and joins this
+active-turn imports do not. A bootstrap or system item itself never admits
+preparation; once cold bootstrap completes, an eligible conversation candidate
+staged later in the same pre-pass may admit it. Speculation starts no thread or
+turn and never replaces a healthy claimable resident with another launch
+identity. Before snapshot construction or invocation release, the runtime
+disables and joins this
 asynchronous admission and cancels its exact pending process handle.
 
 Detached MultiAgent V2 work does not become a process-memory queue. Before the
