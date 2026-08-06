@@ -34,6 +34,18 @@ export interface HostedRuntimeControlPlaneFetchFailureDiagnostics {
   fetchTimeoutSignalAborted: boolean;
 }
 
+export class HostedRuntimeReplaySafeReadRetryableResponseError extends Error {
+  readonly status: number;
+  readonly statusCode: number;
+
+  constructor(input: { description: string; status: number }) {
+    super(`${input.description} failed with HTTP ${input.status}.`);
+    this.name = "HostedRuntimeReplaySafeReadRetryableResponseError";
+    this.status = input.status;
+    this.statusCode = input.status;
+  }
+}
+
 interface HostedRuntimeControlPlaneFetchSignalState {
   callerSignalAborted: boolean;
   requestSignalAborted: boolean;
@@ -331,7 +343,8 @@ export function shouldRetryHostedRuntimeReplaySafeRead(input: {
     return false;
   }
 
-  return isRetryableHostedRuntimeReplaySafeReadTransportError(input.error);
+  return input.error instanceof HostedRuntimeReplaySafeReadRetryableResponseError
+    || isRetryableHostedRuntimeReplaySafeReadTransportError(input.error);
 }
 
 export function isRetryableHostedRuntimeReplaySafeReadTransportError(

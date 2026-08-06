@@ -37,6 +37,9 @@ import {
 } from "../workspace-snapshot-restore-preparation.ts";
 import { requireHostedRuntimeWriteFenceHeaders, type HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import {
+  HostedRuntimeReplaySafeReadRetryableResponseError,
+} from "./control-plane-fetch.ts";
+import {
   buildHostedWorkspaceSnapshotRestoreLogDetails,
   readHostedRuntimeStepElapsedMs,
   runHostedWorkspaceSnapshotRestoreReplaySafeReadStep,
@@ -833,6 +836,19 @@ async function* readHostedWorkspaceSnapshotEncryptedResponseStream(input: {
   if (response.status === 404) {
     await cancelHostedWorkspaceSnapshotResponseBody(response.body);
     throw new Error("Hosted workspace snapshot encrypted object is unavailable.");
+  }
+  if (
+    response.status >= 500
+    && response.status <= 599
+    && response.headers.get(HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER)
+      === HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION
+  ) {
+    await cancelHostedWorkspaceSnapshotResponseBody(response.body);
+    assertHostedWorkspaceSnapshotOperationLive(input.signal);
+    throw new HostedRuntimeReplaySafeReadRetryableResponseError({
+      description: "Hosted workspace snapshot binding object read",
+      status: response.status,
+    });
   }
   if (!response.ok) {
     await cancelHostedWorkspaceSnapshotResponseBody(response.body);

@@ -5494,7 +5494,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
-  it("marks binding object read failures so current-Worker errors fail closed", async () => {
+  it("marks transient binding failures before a later object read succeeds", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_binding_failure";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
@@ -5509,27 +5509,49 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
 
-    const response = await handleRunnerOutboundRequest(
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    let getCount = 0;
+    const bucket = createWorkspaceSnapshotBucket(async () => {
+      getCount += 1;
+      if (getCount === 1) {
+        throw new Error("synthetic binding read failure");
+      }
+      return createWorkspaceSnapshotStreamingObject(snapshotRef, bytes);
+    });
+    const env = createRunnerOutboundEnv({
+      BUNDLES: bucket,
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const firstResponse = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotObjectReadRequest({
         objectKey,
         snapshotRef,
         snapshotId,
         workspaceVersion: "4",
       }),
-      createRunnerOutboundEnv({
-        BUNDLES: createWorkspaceSnapshotBucket(async () => {
-          throw new Error("synthetic binding read failure");
-        }),
-        USER_RUNNER: {
-          getByName: runner.getByName,
-        },
-      }),
+      env,
       "member_123",
     );
 
-    expect(response.status).toBe(500);
-    expect(response.headers.get(HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER))
+    expect(firstResponse.status).toBe(500);
+    expect(firstResponse.headers.get(HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER))
       .toBe(HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION);
+
+    const secondResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotObjectReadRequest({
+        objectKey,
+        snapshotRef,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+    expect(secondResponse.status).toBe(200);
+    await expect(secondResponse.arrayBuffer()).resolves.toEqual(toArrayBuffer(bytes));
+    expect(getCount).toBe(2);
   });
 
   it("presigns a destination-only snapshot for a source-active mixed-version reader", async () => {

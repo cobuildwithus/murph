@@ -60,6 +60,12 @@ Updated: 2026-08-06
    its body backpressured; cancel it if unwrap fails, reacquire on full replay,
    revalidate URL lifetime before every legacy GET, and carry one absolute
    expiry-derived deadline across response headers and body drain.
+5. Risk: a transient Worker-to-R2 binding rejection is converted into a
+   version-marked HTTP 500 and bypasses the existing transport retry.
+   Mitigation: classify only current-version object-route 5xx responses for the
+   existing one-shot replay, reacquire a fresh write fence, and keep every
+   compatibility, authority, integrity, timeout, and cancellation failure on
+   its existing fail-closed path.
 
 ## Tasks
 
@@ -85,7 +91,8 @@ Updated: 2026-08-06
   prepared `getUrl` field to the later compatibility cleanup release.
 - Mark every response handled by the current object route. An unversioned
   non-OK response identifies an older Worker/proxy and permits the fenced
-  compatibility path; a versioned current-Worker error fails closed.
+  compatibility path. A current-version 5xx replays the binding route once
+  without compatibility fallback; other current-Worker errors fail closed.
 - Treat a prepared URL as compatibility-only. The prepared data key remains
   usable for the binding route even when that URL is expired, while fallback
   rechecks the URL immediately before every GET and requests a fresh presign
@@ -99,7 +106,7 @@ Updated: 2026-08-06
   snapshot restore preparation, R2 ticketing, and local snapshot behavior,
   including the parent-added regression that proves an asynchronous binding
   failure is caught and version-marked. The two directly changed suites passed
-  165 tests after the final remediation.
+  361 tests after the final remediation.
 - `pnpm docs:drift` passed after indexing the durable-doc update.
 - `git diff --check` passed.
 - Parent review changed the object-route dispatch to `return await` so rejected
@@ -131,3 +138,11 @@ Updated: 2026-08-06
   double-counted. Additional tests cover a mid-stream retry whose prepared URL
   ages into the safety window, a single absolute compatibility deadline across
   headers and body, and caller cancellation with no retry.
+- Final ReviewGPT round 1 found that a current-version 5xx from a rejected
+  binding read did not reach the existing replay owner because HTTP-status
+  errors were deliberately excluded from transport retries. The correction
+  gives that exact marked response its own replay-safe error type. Cross-boundary
+  tests prove the first real binding read rejects and is version-marked, the
+  runner issues two internal object POSTs with a newly read fence, no presign
+  fallback occurs, the second stream restores atomically, and no partial root
+  survives.

@@ -1681,6 +1681,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it.each([
     ["before response headers", "before-response"],
     ["mid-stream", "mid-stream"],
+    ["after a current-Worker binding failure", "marked-500"],
   ] as const)("retries v2 workspace snapshot object fetch transport failures once (%s)", async (
     _failureLabel,
     failureMode,
@@ -1722,6 +1723,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
       let objectFetchCount = 0;
+      let leaseReadCount = 0;
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot restore retry fetch");
         if (request.url.includes(`/workspace-snapshots/${snapshotId}/data-key/unwrap`)) {
@@ -1738,6 +1740,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             vi.setSystemTime(new Date(Date.now() + 80));
             if (failureMode === "before-response") {
               throw new TypeError("connection reset before response headers");
+            }
+            if (failureMode === "marked-500") {
+              return new Response(JSON.stringify({ code: "runtime_error" }), {
+                headers: {
+                  "content-type": "application/json; charset=utf-8",
+                  [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+                    HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+                },
+                status: 500,
+              });
             }
             let prefixSent = false;
             return new Response(new ReadableStream<Uint8Array>({
@@ -1787,6 +1799,17 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const platform = buildTestHostedExecutionRuntimePlatform({
         boundUserId: "member_123",
         fetchImpl: fetchMock as typeof fetch,
+        workspaceCheckpointBridge: {
+          readCurrentLease: () => {
+            leaseReadCount += 1;
+            return {
+              attemptId: "runtime_write_123",
+              leaseGeneration: String(leaseReadCount),
+              userId: "member_123",
+              workspaceVersion: "6",
+            };
+          },
+        },
       });
 
       const restoreTimings = await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
@@ -1820,6 +1843,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(objectFetchCount).toBe(2);
       expect(restoreTimings?.objectFetchResponseHeadersMs).toBe(7);
       expect(restoreTimings?.objectFetchBodyReadMs).toBe(11);
+      const objectRequests = fetchMock.mock.calls
+        .map((call) => requireFetchRequest(call, "workspace snapshot retry request"))
+        .filter((request) => request.url.endsWith("/object"));
+      expect(objectRequests).toHaveLength(2);
+      expect(objectRequests.map((request) =>
+        request.headers.get("x-hosted-runtime-lease-generation")
+      )).toEqual(["2", "3"]);
+      expect(fetchMock.mock.calls.some((call) =>
+        requireFetchRequest(call, "workspace snapshot retry request").url.endsWith("/presign-get")
+      )).toBe(false);
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
       await expect(
         readdir(tempRoot).then((entries) =>
@@ -1832,15 +1865,21 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         );
       expect(retryLogs).toHaveLength(1);
       expect(retryLogs[0]?.details).toEqual(expect.objectContaining({
-        fetchCauseKind: "network",
         retrying: true,
         workspaceSnapshotRestoreAttempt: 1,
         workspaceSnapshotRestoreStep: "object_fetch",
       }));
+      if (failureMode !== "marked-500") {
+        expect(retryLogs[0]?.details?.fetchCauseKind).toBe("network");
+      }
       const serializedLogs = JSON.stringify(readWorkspaceSnapshotDiagnosticLogs());
       expect(serializedLogs).not.toContain(objectKey);
       expect(serializedLogs).not.toContain(snapshotId);
-      expect(serializedLogs).toContain("connection reset");
+      if (failureMode === "marked-500") {
+        expect(serializedLogs).toContain("HTTP 500");
+      } else {
+        expect(serializedLogs).toContain("connection reset");
+      }
       expect(serializedLogs).not.toContain(dataKeyBase64);
       expect(serializedLogs).not.toContain(tempRoot);
     } finally {
