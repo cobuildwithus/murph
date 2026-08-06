@@ -134,6 +134,7 @@ describe("HostedUserRunner execution coordination", () => {
       runtimeRetryAnalytics: { writeDataPoint },
     });
     await runner.bindUser(TEST_USER_ID);
+    mocks.emitHostedExecutionStructuredLog.mockClear();
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "revoked-consent-attempt",
@@ -143,30 +144,33 @@ describe("HostedUserRunner execution coordination", () => {
       retryAt: "2026-04-27T00:01:00.000Z",
     });
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
-    expect(writeDataPoint).toHaveBeenCalledWith({
-      blobs: [
-        "murph.hosted-runtime-retry.v1",
-        "health_data_processing_disallowed",
-      ],
-      doubles: [1, 60_000],
-      indexes: ["health_data_processing_disallowed"],
-    });
+    expect(writeDataPoint).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
   it("captures existing control-plane boundaries without writing retry analytics for an accepted start", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const fixedNowMs = Date.parse(FIXED_NOW);
     const writeDataPoint = vi.fn();
     const { invoke, runner } = createRunnerHarness({
+      readHealthDataConsentState: () => {
+        vi.setSystemTime(fixedNowMs + 10);
+        return "granted";
+      },
       runtimeRetryAnalytics: { writeDataPoint },
     });
     await runner.bindUser(TEST_USER_ID);
+    runner.installRuntimeProcessingStateTimingHooksForTest({
+      afterBindUser: () => vi.setSystemTime(fixedNowMs + 20),
+      afterReadState: () => vi.setSystemTime(fixedNowMs + 30),
+    });
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestration: {
-        cloudflareRouteReceivedAtEpochMs: Date.parse(FIXED_NOW) - 2,
-        userRunnerRpcStartedAtEpochMs: Date.parse(FIXED_NOW) - 1,
+        cloudflareRouteReceivedAtEpochMs: fixedNowMs - 2,
+        userRunnerRpcStartedAtEpochMs: fixedNowMs - 1,
       },
       orchestrationAttemptId: "control-plane-timing-attempt",
       userId: TEST_USER_ID,
@@ -177,16 +181,16 @@ describe("HostedUserRunner execution coordination", () => {
 
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
-      cloudflareRouteReceivedAtEpochMs: Date.parse(FIXED_NOW) - 2,
-      userRunnerRpcStartedAtEpochMs: Date.parse(FIXED_NOW) - 1,
-      runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
-      healthDataAdmissionReadStartedAtEpochMs: Date.parse(FIXED_NOW),
-      healthDataAdmissionReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
-      userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
-      runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
-      runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
-      runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
-      runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
+      cloudflareRouteReceivedAtEpochMs: fixedNowMs - 2,
+      userRunnerRpcStartedAtEpochMs: fixedNowMs - 1,
+      runtimeConsentLockAcquiredAtEpochMs: fixedNowMs,
+      healthDataAdmissionReadStartedAtEpochMs: fixedNowMs,
+      healthDataAdmissionReadFinishedAtEpochMs: fixedNowMs + 10,
+      userRunnerEnsureStartedAtEpochMs: fixedNowMs + 10,
+      runnerStateBindStartedAtEpochMs: fixedNowMs + 10,
+      runnerStateBindFinishedAtEpochMs: fixedNowMs + 20,
+      runnerStateReadStartedAtEpochMs: fixedNowMs + 20,
+      runnerStateReadFinishedAtEpochMs: fixedNowMs + 30,
     });
     expect(writeDataPoint).not.toHaveBeenCalled();
   });

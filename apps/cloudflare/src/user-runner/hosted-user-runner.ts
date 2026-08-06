@@ -76,10 +76,6 @@ import {
   RuntimeProcessingController,
   type RuntimeProcessingInput,
 } from "./runtime-processing-controller.js";
-import {
-  createRuntimeProcessingRetryLater,
-} from "./runtime-processing-responses.js";
-
 export type { DurableObjectStateLike } from "./types.js";
 
 export interface HostedRuntimeHealthDataConsentReconcileResult {
@@ -90,6 +86,8 @@ export interface HostedRuntimeHealthDataConsentReconcileResult {
   runnerContainerDestroyOk: boolean;
   userId: string;
 }
+
+const HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS = 60_000;
 
 export class HostedUserRunner {
   protected readonly stateStore: RunnerStateStore;
@@ -297,11 +295,12 @@ export class HostedUserRunner {
         healthDataAdmissionReadFinishedAtEpochMs: Date.now(),
       });
       if (!admission.processingAllowed) {
-        return createRuntimeProcessingRetryLater({
-          analytics: this.runtimeRetryAnalytics,
-          reason: "health_data_processing_disallowed",
-          userId: processingInput.userId,
-        });
+        return {
+          kind: "retry_later",
+          retryAt: new Date(
+            Date.now() + HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS,
+          ).toISOString(),
+        };
       }
       return await this.runtimeProcessing.ensureForUser(processingInput);
     });

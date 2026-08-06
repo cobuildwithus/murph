@@ -43,11 +43,11 @@ describe("runtime processing retry telemetry", () => {
           throw new Error("analytics unavailable");
         },
       },
-      reason: "health_data_processing_disallowed",
+      reason: "container_rpc_error",
       userId: "member_123",
     })).toEqual({
       kind: "retry_later",
-      retryAt: "2026-08-06T12:01:00.000Z",
+      retryAt: "2026-08-06T12:00:30.000Z",
     });
   });
 });
