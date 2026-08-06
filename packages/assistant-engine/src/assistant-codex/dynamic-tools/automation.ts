@@ -14,6 +14,10 @@ import type {
   AssistantHostedAutomationToolRequest,
   AssistantHostedAutomationToolResponse,
 } from '../../assistant/execution-context.js'
+import {
+  buildOnboardingFirstPersonalReadAutomationSaveRequest,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
+} from '../../assistant/onboarding-first-personal-read-automation.js'
 import type {
   SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
@@ -70,6 +74,10 @@ const saveAutomationArgumentsSchema = z.object({
   supportSeriesId: automationSupportSeriesIdSchema.optional(),
   tags: automationTagsSchema.optional(),
   title: automationTitleSchema,
+}).strict()
+
+const saveOnboardingFirstPersonalReadArgumentsSchema = z.object({
+  action: z.literal(MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION),
 }).strict()
 
 const patchAutomationArgumentsSchema = z.object({
@@ -153,6 +161,7 @@ const saveGroupNewsletterArgumentsSchema = z.object({
 
 const automationArgumentsSchema = z.discriminatedUnion('action', [
   saveAutomationArgumentsSchema,
+  saveOnboardingFirstPersonalReadArgumentsSchema,
   saveGroupNewsletterArgumentsSchema,
   patchAutomationArgumentsSchema,
   reconcileAutomationArgumentsSchema,
@@ -163,7 +172,7 @@ export const MURPH_AUTOMATION_TOOL = {
   name: 'automation',
   deferLoading: true,
   description:
-    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
+    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot after answered onboarding; it accepts no prompt, timing, model, route, or other fields. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -218,23 +227,26 @@ export function readAutomationDynamicToolRequest(input: {
   return parsed.ok
     ? {
         kind: 'automation',
-        request: parsed.args.action === 'save_newsletter'
-          ? buildGroupNewsletterAutomationSaveRequest({
-              configuration: {
-                customNote: parsed.args.customNote,
-                delivery: parsed.args.delivery,
-                healthScopes: parsed.args.healthScopes
-                  ?? (
-                    parsed.args.delivery === 'current_chat'
-                      ? [...GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES]
-                      : [...GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES]
-                  ),
-                newsletterName: parsed.args.newsletterName,
-                tone: parsed.args.tone,
-              },
-              schedule: parsed.args.schedule,
-            })
-          : parsed.args,
+        request:
+          parsed.args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION
+            ? buildOnboardingFirstPersonalReadAutomationSaveRequest()
+            : parsed.args.action === 'save_newsletter'
+              ? buildGroupNewsletterAutomationSaveRequest({
+                  configuration: {
+                    customNote: parsed.args.customNote,
+                    delivery: parsed.args.delivery,
+                    healthScopes: parsed.args.healthScopes
+                      ?? (
+                        parsed.args.delivery === 'current_chat'
+                          ? [...GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES]
+                          : [...GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES]
+                      ),
+                    newsletterName: parsed.args.newsletterName,
+                    tone: parsed.args.tone,
+                  },
+                  schedule: parsed.args.schedule,
+                })
+              : parsed.args,
       }
     : {
         kind: 'invalid-automation-arguments',
