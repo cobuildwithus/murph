@@ -47,6 +47,11 @@ Updated: 2026-08-06
   growth snapshot and chart semantics.
 - Retired group-sender evidence produces a lower bound live and a chart gap in
   durable history; it is never guessed.
+- The metric covers retained senders. Account deletion removes the deleted
+  account or owned group activity, matching the existing row-derived growth
+  metrics without adding a durable deletion-timestamp analytics trail.
+- Activity attribution failure writes unknown activity values without losing
+  the snapshot's pre-existing revenue, member, or message history.
 - The migration is additive and nullable so old Web versions and existing rows
   remain valid during deploy and rollback.
 - Keep the MRR weekly growth rate visually primary, with activity readings
@@ -88,10 +93,15 @@ Updated: 2026-08-06
 ## Verification
 
 - Passed: Prisma Client generation and schema validation.
-- Passed: focused hosted growth and migration Vitest suites (47 tests).
+- Passed: focused hosted growth and migration Vitest suites (48 tests).
 - Passed: hosted Web prepared TypeScript check and touched-file ESLint.
 - Passed: desktop and mobile Playwright accessibility/browser proof from
   `/design?tab=sections#ops-weekly-growth-compass` (2 tests), plus exact and
-  lower-bound desktop/mobile rendered studies and an independent UI review.
-- Pending: preliminary product-experience/frontend/coverage ReviewGPT lenses,
-  final sensitive ReviewGPT gate, exact-head CI, and parent final review.
+  lower-bound desktop/mobile rendered studies. The final Fable review passed
+  after its stale-scorecard-proof finding was resolved with fresh captures.
+- Passed with resolved findings: preliminary product-experience/frontend/
+  coverage ReviewGPT and final sensitive ReviewGPT round 1. The accepted
+  findings added non-color chart encoding, update-branch null coverage, and
+  isolation of activity-attribution failures from the legacy snapshot fields.
+- Pending: final sensitive ReviewGPT remediation round, exact-head CI, and
+  parent final review.

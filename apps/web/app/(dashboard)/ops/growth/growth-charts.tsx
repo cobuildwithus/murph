@@ -28,7 +28,7 @@ import type {
 
 const activityChartConfig = {
   activeUsersPerDay: {
-    color: "#D4C4A8",
+    color: "#9A815C",
     label: "Messaged that day",
   },
   activeUsersTrailing7Days: {
@@ -107,9 +107,10 @@ export function GrowthCharts(input: GrowthChartsProps) {
             People who messaged Murph
           </h3>
           <p className="text-sm leading-6 text-muted-foreground">
-            Unique senders across personal and group chats. Sage tracks the
-            trailing seven-day window; sand shows each completed UTC day.
-            Unknown history is left blank.
+            Unique retained senders across personal and group chats; deleting
+            an account or group removes its activity. Solid sage tracks the
+            trailing seven-day window; dashed sand shows each completed UTC
+            day. Unknown history is left blank.
           </p>
         </div>
         <ChartContainer
@@ -152,19 +153,22 @@ export function GrowthCharts(input: GrowthChartsProps) {
             />
             <Line
               connectNulls={false}
-              dataKey="activeUsersPerDay"
+              dataKey="activeUsersTrailing7Days"
               dot={false}
-              name="Messaged that day"
-              stroke="var(--color-activeUsersPerDay)"
+              isAnimationActive={false}
+              name="Messaged in trailing 7 days"
+              stroke="var(--color-activeUsersTrailing7Days)"
               strokeWidth={2}
               type="monotone"
             />
             <Line
               connectNulls={false}
-              dataKey="activeUsersTrailing7Days"
+              dataKey="activeUsersPerDay"
               dot={false}
-              name="Messaged in trailing 7 days"
-              stroke="var(--color-activeUsersTrailing7Days)"
+              isAnimationActive={false}
+              name="Messaged that day"
+              stroke="var(--color-activeUsersPerDay)"
+              strokeDasharray="6 4"
               strokeWidth={2}
               type="monotone"
             />

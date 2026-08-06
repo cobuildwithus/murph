@@ -57,10 +57,12 @@ const ACTIVITY_SNAPSHOTS = GROWTH_DATES.slice(10).flatMap((activityDate, index) 
   }
   const snapshotDate = new Date(`${activityDate}T00:00:00.000Z`);
   snapshotDate.setUTCDate(snapshotDate.getUTCDate() + 1);
+  const activeUsersTrailing7Days = 68 + index * 2;
 
   return [{
-    activeUsersPriorDay: 12 + ((index * 5) % 17),
-    activeUsersTrailing7Days: 68 + index * 2,
+    activeUsersPriorDay:
+      index === 8 ? activeUsersTrailing7Days : 12 + ((index * 5) % 17),
+    activeUsersTrailing7Days,
     snapshotDate,
   } satisfies HostedGrowthActivitySnapshot];
 });

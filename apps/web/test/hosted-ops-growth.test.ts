@@ -1864,6 +1864,57 @@ describe("hosted ops growth metrics", () => {
       activeUsersPriorDay: null,
       activeUsersTrailing7Days: null,
     });
+    expect(upsertArg?.update).toMatchObject({
+      activeUsersPriorDay: null,
+      activeUsersTrailing7Days: null,
+    });
+  });
+
+  it("preserves the legacy snapshot when activity attribution fails", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const registeredPhone = requireLinqContact("phone", "+15550000001");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: registeredPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+      }),
+    ]);
+    mocks.decodeHostedMailboxStoredPayload.mockRejectedValueOnce(
+      new Error("unavailable sidecar"),
+    );
+    mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
+    mocks.hostedLinqDelivery.count.mockResolvedValueOnce(57);
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    try {
+      await captureHostedGrowthDailySnapshot(now);
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Hosted growth activity snapshot attribution failed; storing unknown activity aggregates.",
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      activeUsersPriorDay: null,
+      activeUsersTrailing7Days: null,
+      inboundMessagesPriorDay: 42,
+      mrrUsdCents: 2_800,
+      outboundMessagesPriorDay: 57,
+    });
+    expect(upsertArg?.update).toMatchObject({
+      activeUsersPriorDay: null,
+      activeUsersTrailing7Days: null,
+      inboundMessagesPriorDay: 42,
+      mrrUsdCents: 2_800,
+      outboundMessagesPriorDay: 57,
+    });
   });
 
   it("anchors the prior-day message window to the UTC day at exactly midnight", async () => {

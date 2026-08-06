@@ -78,6 +78,28 @@ for (const viewport of VIEWPORTS) {
       await expect(chartSurfaces.nth(index)).toHaveAccessibleName(name);
     }
 
+    const activityLines = chartCards.nth(0).locator(".recharts-line-curve");
+    await expect(activityLines).toHaveCount(2);
+    await expect.poll(
+      () => activityLines.nth(0).getAttribute("stroke-dasharray"),
+    ).toBeNull();
+    await expect(activityLines.nth(1)).toHaveAttribute("stroke-dasharray", "6 4");
+
+    const activityTooltip = chartCards.nth(0).locator(
+      ".recharts-tooltip-wrapper",
+    );
+    await chartSurfaces.nth(0).focus();
+    for (let index = 0; index < 18; index += 1) {
+      await page.keyboard.press("ArrowRight");
+    }
+    await expect(activityTooltip).toBeVisible();
+    await expect(activityTooltip).toContainText("Jul 19");
+    await expect(activityTooltip).toContainText("Messaged that day");
+    await expect(activityTooltip).toContainText("Messaged in trailing 7 days");
+    await expect(
+      activityTooltip.getByText("84", { exact: true }),
+    ).toHaveCount(2);
+
     const dailyTooltip = chartCards.nth(2).locator(
       ".recharts-tooltip-wrapper",
     );
@@ -115,6 +137,7 @@ for (const viewport of VIEWPORTS) {
     await expect(dailyTooltip).toContainText("0");
 
     await page.emulateMedia({ forcedColors: "active" });
+    await expect(activityLines.nth(1)).toHaveAttribute("stroke-dasharray", "6 4");
     await chartSurfaces.nth(1).focus();
     await page.keyboard.press("Shift+Tab");
     const forcedColorFocus = await chartCards

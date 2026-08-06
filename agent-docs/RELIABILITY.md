@@ -917,6 +917,9 @@ Last verified: 2026-08-05
   windows from direct and attributable group messages. A same-date rerun may
   replace the aggregate, but retired group evidence makes the affected value
   null rather than silently freezing or lowering it, and charts retain that gap.
+  An activity-query, decrypt, or identity-resolution failure is reported and
+  writes both activity fields as null while preserving the pre-existing daily
+  revenue, member, and message snapshot fields.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an

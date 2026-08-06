@@ -1438,36 +1438,12 @@ export async function captureHostedGrowthDailySnapshot(
   const snapshotDate = startOfUtcDay(now);
   const priorDayStart = addUtcDays(snapshotDate, -1);
   const trailing7DayStart = addUtcDays(snapshotDate, -7);
-  const [
-    current,
-    inboundMessagesPriorDay,
-    outboundMessagesPriorDay,
-    activeUsersPriorDayDirectRows,
-    activeUsersTrailing7DayDirectRows,
-    activeUsersGroupRows,
-  ] =
-    await Promise.all([
-      readCurrentHostedGrowthMetrics(now, prisma),
-      prisma.hostedMailboxItem.count({
-        where: {
-          kind: INBOUND_MESSAGE_MAILBOX_KIND,
-          occurredAt: {
-            gte: priorDayStart,
-            lt: snapshotDate,
-          },
-        },
-      }),
-      prisma.hostedLinqDelivery.count({
-        where: {
-          attemptedAt: {
-            gte: priorDayStart,
-            lt: snapshotDate,
-          },
-          status: {
-            in: [...OUTBOUND_LINQ_SENT_STATUSES],
-          },
-        },
-      }),
+  const activityCountsPromise = (async () => {
+    const [
+      activeUsersPriorDayDirectRows,
+      activeUsersTrailing7DayDirectRows,
+      activeUsersGroupRows,
+    ] = await Promise.all([
       prisma.hostedMailboxItem.groupBy({
         by: ["userId"],
         where: {
@@ -1509,25 +1485,68 @@ export async function captureHostedGrowthDailySnapshot(
         },
       }),
     ]);
-  const activeUsers = await calculateHostedGrowthActiveUsers({
-    currentDirectRows: activeUsersTrailing7DayDirectRows,
-    groupRows: activeUsersGroupRows,
-    monthlyDirectRows: activeUsersTrailing7DayDirectRows,
-    monthlyStart: trailing7DayStart,
-    now: snapshotDate,
-    previousDirectRows: [],
-    previousStart: trailing7DayStart,
-    prisma,
-    todayDirectRows: activeUsersPriorDayDirectRows,
-    todayStart: priorDayStart,
-    trailing7DayStart,
+    const activeUsers = await calculateHostedGrowthActiveUsers({
+      currentDirectRows: activeUsersTrailing7DayDirectRows,
+      groupRows: activeUsersGroupRows,
+      monthlyDirectRows: activeUsersTrailing7DayDirectRows,
+      monthlyStart: trailing7DayStart,
+      now: snapshotDate,
+      previousDirectRows: [],
+      previousStart: trailing7DayStart,
+      prisma,
+      todayDirectRows: activeUsersPriorDayDirectRows,
+      todayStart: priorDayStart,
+      trailing7DayStart,
+    });
+
+    return {
+      activeUsersPriorDay: activeUsers.todayComplete
+        ? activeUsers.today
+        : null,
+      activeUsersTrailing7Days: activeUsers.trailing7DaysComplete
+        ? activeUsers.trailing7Days
+        : null,
+    };
+  })().catch(() => {
+    console.error(
+      "Hosted growth activity snapshot attribution failed; storing unknown activity aggregates.",
+    );
+    return {
+      activeUsersPriorDay: null,
+      activeUsersTrailing7Days: null,
+    };
   });
-  const activeUsersPriorDay = activeUsers.todayComplete
-    ? activeUsers.today
-    : null;
-  const activeUsersTrailing7Days = activeUsers.trailing7DaysComplete
-    ? activeUsers.trailing7Days
-    : null;
+  const [
+    current,
+    inboundMessagesPriorDay,
+    outboundMessagesPriorDay,
+    activityCounts,
+  ] =
+    await Promise.all([
+      readCurrentHostedGrowthMetrics(now, prisma),
+      prisma.hostedMailboxItem.count({
+        where: {
+          kind: INBOUND_MESSAGE_MAILBOX_KIND,
+          occurredAt: {
+            gte: priorDayStart,
+            lt: snapshotDate,
+          },
+        },
+      }),
+      prisma.hostedLinqDelivery.count({
+        where: {
+          attemptedAt: {
+            gte: priorDayStart,
+            lt: snapshotDate,
+          },
+          status: {
+            in: [...OUTBOUND_LINQ_SENT_STATUSES],
+          },
+        },
+      }),
+      activityCountsPromise,
+    ]);
+  const { activeUsersPriorDay, activeUsersTrailing7Days } = activityCounts;
 
   return prisma.hostedGrowthDailySnapshot.upsert({
     create: {

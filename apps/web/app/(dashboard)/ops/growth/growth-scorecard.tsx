@@ -297,7 +297,8 @@ function formatTodayActiveUsers(
 function formatTodayActiveUserDefinition(
   activeUsers: GrowthScorecardProps["activeUsers"],
 ): string {
-  const definition = "Distinct people across personal + group chats";
+  const definition =
+    "Each retained distinct sender counts once across personal + group chats";
   return activeUsers.todayComplete
     ? definition
     : `Today is a lower bound because group sender evidence was intentionally retired · ${definition}`;
