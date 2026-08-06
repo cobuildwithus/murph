@@ -102,6 +102,10 @@ describe('murph.ask_grok availability and framing', () => {
     expect(MURPH_ASK_GROK_TOOL.description).toContain('not independently verified')
     expect(MURPH_ASK_GROK_TOOL.description)
       .toContain('attribute what it reports to a live X search')
+    expect(MURPH_ASK_GROK_TOOL.description)
+      .toContain('those URLs are part of the requested deliverable')
+    expect(MURPH_ASK_GROK_TOOL.description)
+      .toContain('keep post text separate from media observations')
     expect(MURPH_ASK_GROK_TOOL.description).toContain('never claim a search happened')
   })
 })
@@ -159,6 +163,58 @@ describe('executeAskGrokTool', () => {
     expect(result.rpcText).toContain('First line\nSecond line')
     expect(result.rpcText).not.toContain('')
     expect(result.rpcText).not.toContain('‮')
+  })
+
+  it('keeps bounded X post citations when the answer prose omits them', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      citations: [
+        'https://x.com/i/status/2000000000000000002',
+        'https://example.com/not-an-x-post',
+      ],
+      output: [{
+        type: 'message',
+        role: 'assistant',
+        content: [{
+          type: 'output_text',
+          text: 'The video shows a runner crossing the finish line.',
+          annotations: [
+            { type: 'url_citation', url: 'https://x.com/example/status/2000000000000000001' },
+            { type: 'url_citation', url: 'https://x.com/example/status/2000000000000000001' },
+          ],
+        }],
+      }],
+      status: 'completed',
+    })))
+
+    const result = await executeAskGrokTool({
+      args: { question: 'what does the video show?' },
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.rpcText).toContain('X posts Grok inspected:')
+    expect(result.rpcText).toContain('https://x.com/example/status/2000000000000000001')
+    expect(result.rpcText).toContain('https://x.com/i/status/2000000000000000002')
+    expect(result.rpcText).not.toContain('https://example.com/not-an-x-post')
+    expect(result.rpcText.match(/2000000000000000001/gu)).toHaveLength(1)
+  })
+
+  it('retains a supplied X post URL when a clipped answer has no citations', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      answerPayload('x'.repeat(20000)),
+    )
+
+    const result = await executeAskGrokTool({
+      args: {
+        question: 'inspect https://x.com/example/status/2000000000000000003',
+      },
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.rpcText).toContain('the answer below is partial')
+    expect(result.rpcText).toContain('https://x.com/example/status/2000000000000000003')
+    expect(result.rpcText.length).toBeLessThan(8800)
   })
 
   it('bounds a long answer so one call cannot flood thread context', async () => {
@@ -324,7 +380,11 @@ describe('executeAskGrokTool', () => {
       { expected: 'unavailable', response: () => new Response('', { status: 503 }) },
       {
         expected: 'no answer',
-        response: () => new Response(JSON.stringify({ status: 'completed', output: [] }), {
+        response: () => new Response(JSON.stringify({
+          citations: ['https://x.com/example/status/2000000000000000004'],
+          status: 'completed',
+          output: [],
+        }), {
           headers: { 'content-type': 'application/json' },
         }),
       },

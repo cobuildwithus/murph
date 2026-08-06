@@ -39,6 +39,8 @@ const ASK_GROK_REQUEST_TIMEOUT_MS = 60_000
 // character count ASK_GROK_MAX_OUTPUT_TOKENS can produce so we do not pay for
 // output tokens and then discard them; the token ceiling is the real limit.
 const ASK_GROK_MAX_ANSWER_CHARS = 8000
+const ASK_GROK_MAX_SOURCE_URLS = 5
+const ASK_GROK_MAX_SOURCE_URL_CHARS = 512
 const ASK_GROK_DEVELOPER_INSTRUCTION =
   'Use the x_search tool to answer the question about X (Twitter). Inspect images '
   + 'and videos in relevant posts when they help answer it, and distinguish what '
@@ -154,7 +156,7 @@ export async function executeAskGrokTool(input: {
     timeout.cleanup()
   }
 
-  const answer = readAnswerText(payload)
+  const answer = readAnswer(payload, input.args.question)
   if (!answer.text) {
     return failure('X search returned no answer; nothing can be shown')
   }
@@ -173,15 +175,19 @@ function failure(rpcText: string): AskGrokToolResult {
 }
 
 /**
- * Concatenates the response's assistant text, sanitized and length-bounded,
- * reporting whether the bound dropped any of it.
+ * Concatenates the response's assistant text and X post citations, sanitized
+ * and length-bounded, reporting whether the bound dropped any answer text.
  */
-function readAnswerText(payload: unknown): { text: string; truncated: boolean } {
+function readAnswer(
+  payload: unknown,
+  question: string,
+): { text: string; truncated: boolean } {
   const output = asRecord(payload)?.output
   if (!Array.isArray(output)) {
     return { text: '', truncated: false }
   }
   const parts: string[] = []
+  const annotatedUrls: string[] = []
   for (const item of output) {
     const itemRecord = asRecord(item)
     if (itemRecord?.type !== 'message' || !Array.isArray(itemRecord.content)) {
@@ -194,17 +200,82 @@ function readAnswerText(payload: unknown): { text: string; truncated: boolean } 
         && typeof contentRecord.text === 'string'
       ) {
         parts.push(contentRecord.text)
+        if (Array.isArray(contentRecord.annotations)) {
+          for (const annotation of contentRecord.annotations) {
+            const url = asRecord(annotation)?.url
+            if (typeof url === 'string') {
+              annotatedUrls.push(url)
+            }
+          }
+        }
       }
     }
   }
-  const answer = parts
+  const rawAnswer = parts
     .join('\n')
     .replace(UNSAFE_ANSWER_CHARACTERS, '')
     .trim()
-  return {
-    text: answer.slice(0, ASK_GROK_MAX_ANSWER_CHARS),
-    truncated: answer.length > ASK_GROK_MAX_ANSWER_CHARS,
+  if (!rawAnswer) {
+    return { text: '', truncated: false }
   }
+  const sourceUrls = uniqueXPostUrls([
+    ...annotatedUrls,
+    ...readTopLevelCitationUrls(payload),
+    ...readUrls(question),
+  ])
+  const sourceBlock = sourceUrls.length > 0
+    ? `\n\nX posts Grok inspected:\n${sourceUrls.join('\n')}`
+    : ''
+  const answerLimit = Math.max(0, ASK_GROK_MAX_ANSWER_CHARS - sourceBlock.length)
+  return {
+    text: `${rawAnswer.slice(0, answerLimit)}${sourceBlock}`.trim(),
+    truncated: rawAnswer.length > answerLimit,
+  }
+}
+
+function readTopLevelCitationUrls(payload: unknown): string[] {
+  const citations = asRecord(payload)?.citations
+  return Array.isArray(citations)
+    ? citations.filter((citation): citation is string => typeof citation === 'string')
+    : []
+}
+
+function readUrls(value: string): string[] {
+  return value.match(/https:\/\/[^\s<>]+/giu) ?? []
+}
+
+function uniqueXPostUrls(candidates: string[]): string[] {
+  const urls: string[] = []
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    if (candidate.length > ASK_GROK_MAX_SOURCE_URL_CHARS) {
+      continue
+    }
+    let parsed: URL
+    try {
+      parsed = new URL(candidate)
+    } catch {
+      continue
+    }
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./u, '')
+    if (
+      (hostname !== 'x.com' && hostname !== 'twitter.com')
+      || !/(?:^|\/)status\/\d+(?:$|\/)/u.test(parsed.pathname)
+    ) {
+      continue
+    }
+    parsed.hash = ''
+    parsed.search = ''
+    const url = parsed.toString()
+    if (!seen.has(url)) {
+      seen.add(url)
+      urls.push(url)
+      if (urls.length === ASK_GROK_MAX_SOURCE_URLS) {
+        break
+      }
+    }
+  }
+  return urls
 }
 
 /**

@@ -130,6 +130,12 @@ describe("ChangelogPage", () => {
       expect.arrayContaining([
         {
           message: {
+            body: "Look at the images or video in this X post and tell me what they show: [paste X post URL]",
+            subject: "Try it: Ask about images and video on X",
+          },
+        },
+        {
+          message: {
             body: "I feel more tired than usual and planned an outdoor workout today. Check whether an official local alert should change my plan.",
             subject: "Try it: Murph can account for official local alerts",
           },
