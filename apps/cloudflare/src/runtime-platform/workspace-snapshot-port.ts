@@ -264,20 +264,20 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       });
       timing.sizeGuardMs = readHostedRuntimeStepElapsedMs(sizeGuardStartedAt);
 
-      let dataKey: string;
+      let dataKeyPromise: Promise<string>;
       let compatibilityGet: { expiresAtMs: number; getUrl: string } | null = null;
       if (input.preparedSnapshotRestore) {
         const prepared = requireHostedWorkspaceSnapshotPreparedRestoreForRef({
           prepared: input.preparedSnapshotRestore,
           ref: request.ref,
         });
-        dataKey = prepared.dataKey;
+        dataKeyPromise = Promise.resolve(prepared.dataKey);
         compatibilityGet = prepared.compatibilityGet;
         timing.dataKeyUnwrapMs = 0;
         timing.presignGetMs = 0;
       } else {
         const dataKeyUnwrapStartedAt = Date.now();
-        const dataKeyPromise = runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
+        dataKeyPromise = runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
           details: restoreLogDetails,
           run: async () => await unwrapWorkspaceSnapshotDataKey({
             aad: request.ref.encryption.aad,
@@ -292,49 +292,97 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         }).finally(() => {
           timing.dataKeyUnwrapMs = readHostedRuntimeStepElapsedMs(dataKeyUnwrapStartedAt);
         });
-
-        dataKey = await dataKeyPromise;
         timing.presignGetMs = 0;
       }
 
+      const firstObjectResponseAbort = new AbortController();
+      const firstObjectResponseSignal = request.signal
+        ? AbortSignal.any([request.signal, firstObjectResponseAbort.signal])
+        : firstObjectResponseAbort.signal;
+      const acquireObjectResponse = (signal: AbortSignal | null) => {
+        const objectFetchAttemptTiming = {
+          objectFetchResponseHeadersMs: 0,
+          objectFetchBodyReadMs: 0,
+        };
+        return acquireHostedWorkspaceSnapshotEncryptedObjectResponse({
+          compatibilityGet,
+          deadlineMs: Date.now() + input.timeoutMs,
+          fetchImpl: input.fetchImpl,
+          onCompatibilityPresignElapsedMs(elapsedMs) {
+            timing.presignGetMs = (timing.presignGetMs ?? 0) + elapsedMs;
+          },
+          ref: request.ref,
+          signal,
+          timing: objectFetchAttemptTiming,
+          timeoutMs: input.timeoutMs,
+          workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+        });
+      };
+      // Response acquisition is the network/control-plane half of restore. Start
+      // it beside data-key unwrap, as the former presign path did, while leaving
+      // body consumption backpressured until the key is available.
+      const firstObjectResponsePromise = acquireObjectResponse(firstObjectResponseSignal).then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason: unknown) => ({ reason, status: "rejected" as const }),
+      );
+      let dataKey: string;
+      try {
+        dataKey = await dataKeyPromise;
+      } catch (error) {
+        firstObjectResponseAbort.abort(error);
+        const abandoned = await firstObjectResponsePromise;
+        if (abandoned.status === "fulfilled") {
+          await cancelHostedWorkspaceSnapshotResponseBody(abandoned.value.response.body);
+        }
+        throw error;
+      }
+      // Keep the legacy objectFetchMs boundary comparable with historical
+      // restores: it measures the post-key critical path, while response
+      // acquisition may already be in flight beside the unwrap above.
       const objectFetchStartedAt = Date.now();
+      let firstObjectResponsePromiseAvailable = true;
       const archiveTimings = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
         details: restoreLogDetails,
         run: async () => {
-          const objectFetchAttemptTiming = {
-            objectFetchResponseHeadersMs: 0,
-            objectFetchBodyReadMs: 0,
-          };
-          const objectFetchTimeoutMs = input.timeoutMs;
-          const objectFetchDeadlineMs = Date.now() + objectFetchTimeoutMs;
-          const encryptedStream = readHostedWorkspaceSnapshotEncryptedObjectStream({
-            compatibilityGet,
-            deadlineMs: objectFetchDeadlineMs,
-            expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
-            fetchImpl: input.fetchImpl,
-            onCompatibilityPresignElapsedMs(elapsedMs) {
-              timing.presignGetMs = (timing.presignGetMs ?? 0) + elapsedMs;
-            },
-            ref: request.ref,
-            signal: request.signal ?? null,
-            timing: objectFetchAttemptTiming,
-            timeoutMs: objectFetchTimeoutMs,
-            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-          });
-          const archiveRestoreTiming =
-            await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+          const useFirstObjectResponse = firstObjectResponsePromiseAvailable;
+          firstObjectResponsePromiseAvailable = false;
+          const acquired = useFirstObjectResponse
+            ? await firstObjectResponsePromise.then((settled) => {
+              if (settled.status === "rejected") {
+                throw settled.reason;
+              }
+              return settled.value;
+            })
+            : await acquireObjectResponse(request.signal ?? null);
+          // Claim the prefetched response before consuming it. A mid-stream
+          // failure must replay from a newly acquired response, never a partly
+          // consumed body.
+          try {
+            const encryptedStream = readHostedWorkspaceSnapshotEncryptedResponseStream({
+              deadlineMs: acquired.deadlineMs,
+              expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
+              response: acquired.response,
+              signal: request.signal ?? null,
+              timing: acquired.timing,
+            });
+            const archiveRestoreTiming =
+              await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
               dataKey,
               durableRoot: request.durableRoot,
               encryptedStream,
               ref: request.ref,
               signal: request.signal ?? null,
             });
-          // Keep the subspans attempt-local: failed replay-safe attempts never
-          // leak partial values into the successful restore diagnostics.
-          timing.objectFetchResponseHeadersMs =
-            objectFetchAttemptTiming.objectFetchResponseHeadersMs;
-          timing.objectFetchBodyReadMs = objectFetchAttemptTiming.objectFetchBodyReadMs;
-          return archiveRestoreTiming;
+            // Keep the subspans attempt-local: failed replay-safe attempts never
+            // leak partial values into the successful restore diagnostics.
+            timing.objectFetchResponseHeadersMs =
+              acquired.timing.objectFetchResponseHeadersMs;
+            timing.objectFetchBodyReadMs = acquired.timing.objectFetchBodyReadMs;
+            return archiveRestoreTiming;
+          } catch (error) {
+            await cancelHostedWorkspaceSnapshotResponseBody(acquired.response.body);
+            throw error;
+          }
         },
         step: "object_fetch",
       });
@@ -607,22 +655,37 @@ async function unwrapWorkspaceSnapshotDataKey(input: {
   return dataKey;
 }
 
-async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
+interface HostedWorkspaceSnapshotEncryptedObjectResponse {
+  deadlineMs: number;
+  response: Response;
+  timing: {
+    objectFetchResponseHeadersMs: number;
+    objectFetchBodyReadMs: number;
+  };
+}
+
+const HOSTED_WORKSPACE_SNAPSHOT_COMPATIBILITY_GET_SAFETY_MS = 5_000;
+
+async function acquireHostedWorkspaceSnapshotEncryptedObjectResponse(input: {
   compatibilityGet: { expiresAtMs: number; getUrl: string } | null;
   deadlineMs: number;
-  expectedEncryptedByteSize: number;
   fetchImpl: typeof fetch;
   onCompatibilityPresignElapsedMs: (elapsedMs: number) => void;
   ref: HostedWorkspaceSnapshotV2Ref;
   signal?: AbortSignal | null;
+  timing: {
+    objectFetchResponseHeadersMs: number;
+    objectFetchBodyReadMs: number;
+  };
   timeoutMs: number;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
-}): AsyncIterable<Uint8Array> {
+}): Promise<HostedWorkspaceSnapshotEncryptedObjectResponse> {
   const headers = await requireHostedRuntimeWriteFenceHeaders(
     input.workspaceCheckpointBridge,
     "Hosted workspace snapshot object read",
   );
   headers.set("content-type", "application/json; charset=utf-8");
+  const responseHeadersStartedAt = Date.now();
   const response = await fetchHostedResponse({
     description: "Hosted workspace snapshot fetch",
     fetchImpl: input.fetchImpl,
@@ -644,6 +707,8 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
       `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
     ),
   });
+  input.timing.objectFetchResponseHeadersMs =
+    readHostedRuntimeStepElapsedMs(responseHeadersStartedAt);
   const responseVersion = response.headers.get(
     HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER,
   );
@@ -655,13 +720,18 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
     && !response.ok
   ) {
     await cancelHostedWorkspaceSnapshotResponseBody(response.body);
-    const compatibilityGet = input.compatibilityGet
-      ?? await presignWorkspaceSnapshotCompatibilityGet(input);
-    yield* readHostedWorkspaceSnapshotEncryptedCompatibilityStream({
+    let compatibilityGet = input.compatibilityGet;
+    if (
+      !compatibilityGet
+      || compatibilityGet.expiresAtMs - Date.now()
+        <= HOSTED_WORKSPACE_SNAPSHOT_COMPATIBILITY_GET_SAFETY_MS
+    ) {
+      compatibilityGet = await presignWorkspaceSnapshotCompatibilityGet(input);
+    }
+    return await acquireHostedWorkspaceSnapshotEncryptedCompatibilityResponse({
       ...input,
       compatibilityGet,
     });
-    return;
   }
   if (
     responseVersion !== HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION
@@ -669,10 +739,11 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
     await cancelHostedWorkspaceSnapshotResponseBody(response.body);
     throw new Error("Hosted workspace snapshot object read version is unsupported.");
   }
-  yield* readHostedWorkspaceSnapshotEncryptedResponseStream({
-    ...input,
+  return {
+    deadlineMs: input.deadlineMs,
     response,
-  });
+    timing: input.timing,
+  };
 }
 
 async function presignWorkspaceSnapshotCompatibilityGet(input: {
@@ -695,7 +766,11 @@ async function presignWorkspaceSnapshotCompatibilityGet(input: {
       workspaceCheckpointBridge: input.workspaceCheckpointBridge,
     });
     const expiresAtMs = Date.parse(result.expiresAt);
-    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+    if (
+      !Number.isFinite(expiresAtMs)
+      || expiresAtMs - Date.now()
+        <= HOSTED_WORKSPACE_SNAPSHOT_COMPATIBILITY_GET_SAFETY_MS
+    ) {
       throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
     }
     return {
@@ -707,22 +782,21 @@ async function presignWorkspaceSnapshotCompatibilityGet(input: {
   }
 }
 
-async function* readHostedWorkspaceSnapshotEncryptedCompatibilityStream(input: {
+async function acquireHostedWorkspaceSnapshotEncryptedCompatibilityResponse(input: {
   compatibilityGet: { expiresAtMs: number; getUrl: string };
-  deadlineMs: number;
-  expectedEncryptedByteSize: number;
   fetchImpl: typeof fetch;
   signal?: AbortSignal | null;
   timing: {
     objectFetchResponseHeadersMs: number;
     objectFetchBodyReadMs: number;
   };
-  timeoutMs: number;
-}): AsyncIterable<Uint8Array> {
-  const compatibilityTimeoutMs = Math.max(
-    1,
-    input.compatibilityGet.expiresAtMs - Date.now() - 5_000,
-  );
+}): Promise<HostedWorkspaceSnapshotEncryptedObjectResponse> {
+  const deadlineMs = input.compatibilityGet.expiresAtMs
+    - HOSTED_WORKSPACE_SNAPSHOT_COMPATIBILITY_GET_SAFETY_MS;
+  const compatibilityTimeoutMs = deadlineMs - Date.now();
+  if (compatibilityTimeoutMs <= 0) {
+    throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
+  }
   const responseHeadersStartedAt = Date.now();
   const response = await fetchHostedResponse({
     description: "Hosted workspace snapshot fetch",
@@ -738,11 +812,11 @@ async function* readHostedWorkspaceSnapshotEncryptedCompatibilityStream(input: {
   });
   input.timing.objectFetchResponseHeadersMs =
     readHostedRuntimeStepElapsedMs(responseHeadersStartedAt);
-  yield* readHostedWorkspaceSnapshotEncryptedResponseStream({
-    ...input,
-    deadlineMs: Date.now() + compatibilityTimeoutMs,
+  return {
+    deadlineMs,
     response,
-  });
+    timing: input.timing,
+  };
 }
 
 async function* readHostedWorkspaceSnapshotEncryptedResponseStream(input: {

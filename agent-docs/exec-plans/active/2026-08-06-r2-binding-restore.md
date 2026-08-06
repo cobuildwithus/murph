@@ -53,6 +53,13 @@ Updated: 2026-08-06
 3. Risk: cutover fallback reads the wrong bucket or performs HEAD plus GET.
    Mitigation: reuse the existing phase-ordered cutover bucket `get`, which
    consults the fallback only after a definitive primary miss.
+4. Risk: the binding request serializes behind data-key unwrap and regresses
+   the prior path's overlap, or an aging compatibility URL outlives its intended
+   request budget.
+   Mitigation: acquire the first binding response beside unwrap while keeping
+   its body backpressured; cancel it if unwrap fails, reacquire on full replay,
+   revalidate URL lifetime before every legacy GET, and carry one absolute
+   expiry-derived deadline across response headers and body drain.
 
 ## Tasks
 
@@ -70,6 +77,10 @@ Updated: 2026-08-06
 - Keep presigned PUT because large snapshot uploads must bypass Worker request
   body limits.
 - Keep data-key unwrap separate from the streamed encrypted object response.
+- Start first-response acquisition beside data-key unwrap, as the former
+  presign path did, but do not consume the response body until the key is
+  available. A transport replay acquires a new response rather than reusing a
+  rejected or partly consumed body.
 - Defer deletion of `/presign-get`, GET signing, locator HEAD logic, and the
   prepared `getUrl` field to the later compatibility cleanup release.
 - Mark every response handled by the current object route. An unversioned
@@ -77,16 +88,18 @@ Updated: 2026-08-06
   compatibility path; a versioned current-Worker error fails closed.
 - Treat a prepared URL as compatibility-only. The prepared data key remains
   usable for the binding route even when that URL is expired, while fallback
-  requests a fresh presign instead of attempting the stale capability.
+  rechecks the URL immediately before every GET and requests a fresh presign
+  instead of attempting a capability inside the safety window. Header wait and
+  body drain share the same absolute expiry-derived deadline.
 
 ## Verification
 
 - `pnpm --dir apps/cloudflare typecheck` passed.
-- Focused Node Vitest passed 371 tests across runner outbound, runtime platform,
-  and snapshot restore preparation, including the parent-added regression that
-  proves an asynchronous binding failure is caught and version-marked.
-- Focused Node Vitest passed 248 tests across R2 cutover and runner outbound
-  interception.
+- Focused Node Vitest passed 400 tests across runner outbound, runtime platform,
+  snapshot restore preparation, R2 ticketing, and local snapshot behavior,
+  including the parent-added regression that proves an asynchronous binding
+  failure is caught and version-marked. The two directly changed suites passed
+  165 tests after the final remediation.
 - `pnpm docs:drift` passed after indexing the durable-doc update.
 - `git diff --check` passed.
 - Parent review changed the object-route dispatch to `return await` so rejected
@@ -102,3 +115,19 @@ Updated: 2026-08-06
   exercises MinIO's S3-compatible path, not Cloudflare's production
   same-machine Container outbound plus R2-binding topology. Adding a bespoke
   proxy benchmark would not be truthful evidence for this candidate.
+- Preliminary ReviewGPT correctly found that the first draft serialized object
+  acquisition behind unwrap and that legacy fallback could reuse an aging URL
+  with a reset body deadline. The remediation restores concurrency, cancels an
+  abandoned response on unwrap failure, reacquires on either pre-header or
+  mid-stream retry, refreshes stale compatibility capabilities, and tests the
+  version/fallback matrix. ReviewGPT's requested production-topology canary is
+  intentionally not run because this task forbids deployment; candidate
+  latency therefore remains an explicit evidence gap rather than a claimed
+  measured win.
+- Independent remediation review found that the first concurrency fix moved the
+  historical `objectFetchMs` boundary ahead of unwrap. The final shape keeps
+  acquisition concurrent but starts that legacy critical-path metric after key
+  resolution; deterministic timing coverage proves the unwrap interval is not
+  double-counted. Additional tests cover a mid-stream retry whose prepared URL
+  ages into the safety window, a single absolute compatibility deadline across
+  headers and body, and caller cancellation with no retry.

@@ -546,20 +546,41 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("does not open the snapshot object body when the data-key unwrap fails", async () => {
+  it("starts binding response acquisition beside unwrap and cancels the unread body when unwrap fails", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-no-body-before-unwrap-"));
     const ref = createWorkspaceSnapshotV2Ref({
       encryptedByteSize: 128,
     });
     let objectFetchCount = 0;
+    let objectBodyCanceled = false;
+    let resolveObjectRequestStarted: (() => void) | null = null;
+    const objectRequestStarted = new Promise<void>((resolve) => {
+      resolveObjectRequestStarted = resolve;
+    });
     const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
       const request = requireFetchRequest(args, "workspace snapshot unwrap body fetch");
       if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
-        await delayWithAbort(50, request.signal);
+        await objectRequestStarted;
         return new Response("unwrap denied", { status: 403 });
       }
-      objectFetchCount += 1;
-      return new Response("unexpected object fetch", { status: 500 });
+      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/object`)) {
+        objectFetchCount += 1;
+        resolveObjectRequestStarted?.();
+        resolveObjectRequestStarted = null;
+        return new Response(new ReadableStream<Uint8Array>({
+          cancel: () => {
+            objectBodyCanceled = true;
+          },
+        }), {
+          headers: {
+            "content-length": String(ref.archive.encryptedByteSize),
+            [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+              HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+          },
+          status: 200,
+        });
+      }
+      return new Response("unexpected", { status: 500 });
     });
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -572,7 +593,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         ref,
       })).rejects.toThrow(/data key unwrap request failed/u);
 
-      expect(objectFetchCount).toBe(0);
+      expect(objectFetchCount).toBe(1);
+      expect(objectBodyCanceled).toBe(true);
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }
@@ -586,6 +608,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
     const abortController = new AbortController();
     let objectFetchCount = 0;
+    let objectBodyCanceled = false;
     let unwrapBodyCanceled = false;
     let resolveUnwrapBodyOpened: (() => void) | null = null;
     const unwrapBodyOpened = new Promise<void>((resolve) => {
@@ -609,8 +632,22 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
-      objectFetchCount += 1;
-      return new Response("unexpected object fetch", { status: 500 });
+      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/object`)) {
+        objectFetchCount += 1;
+        return new Response(new ReadableStream<Uint8Array>({
+          cancel: () => {
+            objectBodyCanceled = true;
+          },
+        }), {
+          headers: {
+            "content-length": String(ref.archive.encryptedByteSize),
+            [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+              HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+          },
+          status: 200,
+        });
+      }
+      return new Response("unexpected", { status: 500 });
     });
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -628,7 +665,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
       await expect(restore).rejects.toThrow("restore aborted while reading unwrap response");
       expect(unwrapBodyCanceled).toBe(true);
-      expect(objectFetchCount).toBe(0);
+      expect(objectFetchCount).toBe(1);
+      expect(objectBodyCanceled).toBe(true);
       await expect(access(durableRoot)).rejects.toThrow();
       expect(readWorkspaceSnapshotDiagnosticLogs().filter((log) =>
         log.message === "Hosted workspace snapshot restore read step failed; retrying."
@@ -1431,7 +1469,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const durableRoot = path.join(tempRoot, "durable");
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
-
     try {
       await mkdir(sourceRoot, { mode: 0o700, recursive: true });
       await writeFile(path.join(sourceRoot, "note.md"), "restored through direct r2\n", {
@@ -1463,9 +1500,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await rm(snapshotScratchRoot, { force: true, recursive: true });
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
+      let resolveObjectRequestStarted: (() => void) | null = null;
+      const objectRequestStarted = new Promise<void>((resolve) => {
+        resolveObjectRequestStarted = resolve;
+      });
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot restore fetch");
         if (request.url.includes(`/workspace-snapshots/${snapshotId}/data-key/unwrap`)) {
+          await objectRequestStarted;
           return new Response(
             JSON.stringify({ dataKey: dataKeyBase64 }),
             {
@@ -1477,6 +1519,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           );
         }
         if (request.url.includes(`/workspace-snapshots/${snapshotId}/object`)) {
+          resolveObjectRequestStarted?.();
+          resolveObjectRequestStarted = null;
           vi.setSystemTime(new Date(Date.now() + 25));
           let bodySent = false;
           return new Response(new ReadableStream<Uint8Array>({
@@ -1563,10 +1607,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(restoreTimings?.plainBytes).toBe(encrypted.totalPlainBytes);
       expect(restoreTimings?.objectFetchResponseHeadersMs).toBe(25);
       expect(restoreTimings?.objectFetchBodyReadMs).toBe(30);
-      expect(
-        (restoreTimings?.objectFetchResponseHeadersMs ?? 0)
-          + (restoreTimings?.objectFetchBodyReadMs ?? 0),
-      ).toBeLessThanOrEqual(restoreTimings?.decryptMs ?? 0);
+      expect(restoreTimings?.objectFetchBodyReadMs).toBeLessThanOrEqual(
+        restoreTimings?.decryptMs ?? 0,
+      );
 
       expect(fetchMock).toHaveBeenCalledTimes(2);
       const restoreRequests = fetchMock.mock.calls.map((call) =>
@@ -1635,7 +1678,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("retries v2 workspace snapshot object fetch transport failures once", async () => {
+  it.each([
+    ["before response headers", "before-response"],
+    ["mid-stream", "mid-stream"],
+  ] as const)("retries v2 workspace snapshot object fetch transport failures once (%s)", async (
+    _failureLabel,
+    failureMode,
+  ) => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-retry-"));
     const sourceRoot = path.join(tempRoot, "source");
     const durableRoot = path.join(tempRoot, "durable");
@@ -1687,6 +1736,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           objectFetchCount += 1;
           if (objectFetchCount === 1) {
             vi.setSystemTime(new Date(Date.now() + 80));
+            if (failureMode === "before-response") {
+              throw new TypeError("connection reset before response headers");
+            }
             let prefixSent = false;
             return new Response(new ReadableStream<Uint8Array>({
               pull(controller) {
@@ -2043,7 +2095,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         ref,
       })).rejects.toThrow("Hosted workspace snapshot data key unwrap failed with HTTP 500.");
 
-      // The unwrap failure stops restore before presign or object fetch work.
+      // The unwrap failure remains authoritative while concurrent object
+      // acquisition is abandoned and cannot replace its diagnostic owner.
       const failedUnwrapLogs = readWorkspaceSnapshotDiagnosticLogs()
         .filter((log) => log.message === "Hosted workspace snapshot restore step failed.")
         .filter((log) => log.details?.workspaceSnapshotRestoreStep === "data_key_unwrap");

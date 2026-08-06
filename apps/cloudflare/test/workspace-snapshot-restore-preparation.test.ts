@@ -293,6 +293,385 @@ describe("workspace snapshot restore preparation", () => {
     }
   });
 
+  it.each([
+    ["unversioned success", null],
+    ["unsupported version", "99"],
+  ] as const)("fails closed on %s without compatibility fallback", async (
+    _caseLabel,
+    responseVersion,
+  ) => {
+    const fixture = await createSnapshotFixture();
+    const getUrl = createPreparedGetUrl("prepared-version-rejection.enc");
+    let bodyCanceled = false;
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      cancel: () => {
+        bodyCanceled = true;
+      },
+    }), {
+      headers: responseVersion === null
+        ? undefined
+        : {
+          [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]: responseVersion,
+        },
+      status: 200,
+    }));
+    const port = createCloudflareWorkspaceSnapshotPort({
+      boundUserId: TEST_USER_ID,
+      fetchImpl: fetchMock as typeof fetch,
+      preparedSnapshotRestore: createPreparedRestore(fixture, getUrl),
+      timeoutMs: 5_000,
+      workspaceCheckpointBridge: createWorkspaceCheckpointBridge(),
+    });
+
+    try {
+      await expect(port.restoreWorkspaceSnapshot({
+        durableRoot: "/tmp/unused-prepared-version-rejection",
+        ref: fixture.ref,
+      })).rejects.toThrow("Hosted workspace snapshot object read version is unsupported.");
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(readRequestUrl(fetchMock.mock.calls[0])).toBe(
+        `http://workspace-snapshots.worker/workspace-snapshots/${fixture.ref.snapshotId}/object`,
+      );
+      expect(readRequestUrl(fetchMock.mock.calls[0])).not.toBe(getUrl);
+      expect(bodyCanceled).toBe(true);
+    } finally {
+      fixture.dataKey.fill(0);
+      fixture.rootKey.fill(0);
+    }
+  });
+
+  it("uses a still-valid prepared URL directly after an old-Worker miss", async () => {
+    const fixture = await createSnapshotFixture();
+    const getUrl = createPreparedGetUrl("prepared-old-worker-fallback.enc");
+    const events: string[] = [];
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const url = readRequestUrl(args);
+      if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/object`)) {
+        events.push("object");
+        return new Response("old Worker route missing", { status: 404 });
+      }
+      if (url === getUrl) {
+        events.push("prepared-get");
+        return new Response("unavailable", { status: 500 });
+      }
+      if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/presign-get`)) {
+        events.push("unexpected-presign");
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const port = createCloudflareWorkspaceSnapshotPort({
+      boundUserId: TEST_USER_ID,
+      fetchImpl: fetchMock as typeof fetch,
+      preparedSnapshotRestore: createPreparedRestore(fixture, getUrl),
+      timeoutMs: 5_000,
+      workspaceCheckpointBridge: createWorkspaceCheckpointBridge(),
+    });
+
+    try {
+      await expect(port.restoreWorkspaceSnapshot({
+        durableRoot: "/tmp/unused-prepared-old-worker-fallback",
+        ref: fixture.ref,
+      })).rejects.toThrow(/Hosted workspace snapshot fetch failed with HTTP 500/u);
+      expect(events).toEqual(["object", "prepared-get"]);
+    } finally {
+      fixture.dataKey.fill(0);
+      fixture.rootKey.fill(0);
+    }
+  });
+
+  it("refreshes a prepared URL that enters the safety window during an old-Worker miss", async () => {
+    vi.useFakeTimers();
+    const fixture = await createSnapshotFixture();
+    const issuedAtMs = Date.parse("2026-08-06T12:00:00.000Z");
+    vi.setSystemTime(issuedAtMs);
+    const staleGetUrl = createPreparedGetUrl("aging-prepared.enc", 10, issuedAtMs);
+    const freshGetUrl = createPreparedGetUrl("fresh-presigned.enc", 60, issuedAtMs + 6_000);
+    const events: string[] = [];
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const url = readRequestUrl(args);
+      if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/object`)) {
+        events.push("object");
+        vi.setSystemTime(issuedAtMs + 6_000);
+        return new Response("old Worker route missing", { status: 404 });
+      }
+      if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/presign-get`)) {
+        events.push("presign");
+        return jsonResponse({
+          expiresAt: new Date(issuedAtMs + 66_000).toISOString(),
+          getUrl: freshGetUrl,
+        });
+      }
+      if (url === freshGetUrl) {
+        events.push("fresh-get");
+        return new Response("unavailable", { status: 500 });
+      }
+      if (url === staleGetUrl) {
+        events.push("stale-get");
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const port = createCloudflareWorkspaceSnapshotPort({
+      boundUserId: TEST_USER_ID,
+      fetchImpl: fetchMock as typeof fetch,
+      preparedSnapshotRestore: createPreparedRestore(fixture, staleGetUrl),
+      timeoutMs: 5_000,
+      workspaceCheckpointBridge: createWorkspaceCheckpointBridge(),
+    });
+
+    try {
+      await expect(port.restoreWorkspaceSnapshot({
+        durableRoot: "/tmp/unused-aging-prepared-old-worker-fallback",
+        ref: fixture.ref,
+      })).rejects.toThrow(/Hosted workspace snapshot fetch failed with HTTP 500/u);
+      expect(events).toEqual(["object", "presign", "fresh-get"]);
+    } finally {
+      fixture.dataKey.fill(0);
+      fixture.rootKey.fill(0);
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes compatibility access when a midstream retry reaches the URL safety window", async () => {
+    const fixture = await createSnapshotFixture();
+    const issuedAtMs = Date.parse("2026-08-06T12:00:00.000Z");
+    let virtualNowMs = issuedAtMs;
+    const dateNowSpy = vi.spyOn(Date, "now").mockImplementation(() => virtualNowMs);
+    const agingGetUrl = createPreparedGetUrl("midstream-aging.enc", 10, issuedAtMs);
+    const freshGetUrl = createPreparedGetUrl("midstream-fresh.enc", 60, issuedAtMs + 6_000);
+    const events: string[] = [];
+    let objectRequestCount = 0;
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const url = readRequestUrl(args);
+      if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/object`)) {
+        objectRequestCount += 1;
+        events.push(`object-${objectRequestCount}`);
+        return new Response("old Worker route missing", { status: 404 });
+      }
+      if (url === agingGetUrl) {
+        events.push("aging-get");
+        let prefixSent = false;
+        return new Response(new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (!prefixSent) {
+              prefixSent = true;
+              controller.enqueue(new Uint8Array(16));
+              virtualNowMs = issuedAtMs + 6_000;
+              return;
+            }
+            controller.error(new TypeError("compatibility stream reset"));
+          },
+        }), {
+          headers: {
+            "content-length": String(fixture.ref.archive.encryptedByteSize),
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/presign-get`)) {
+        events.push("presign");
+        return jsonResponse({
+          expiresAt: new Date(issuedAtMs + 66_000).toISOString(),
+          getUrl: freshGetUrl,
+        });
+      }
+      if (url === freshGetUrl) {
+        events.push("fresh-get");
+        return new Response("unavailable", { status: 500 });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const port = createCloudflareWorkspaceSnapshotPort({
+      boundUserId: TEST_USER_ID,
+      fetchImpl: fetchMock as typeof fetch,
+      preparedSnapshotRestore: createPreparedRestore(fixture, agingGetUrl),
+      timeoutMs: 30_000,
+      workspaceCheckpointBridge: createWorkspaceCheckpointBridge(),
+    });
+
+    try {
+      const restore = port.restoreWorkspaceSnapshot({
+        durableRoot: "/tmp/unused-midstream-aging-restore",
+        ref: fixture.ref,
+      });
+      await expect(restore).rejects.toThrow(
+        /Hosted workspace snapshot fetch failed with HTTP 500/u,
+      );
+      expect(events).toEqual([
+        "object-1",
+        "aging-get",
+        "object-2",
+        "presign",
+        "fresh-get",
+      ]);
+    } finally {
+      dateNowSpy.mockRestore();
+      fixture.dataKey.fill(0);
+      fixture.rootKey.fill(0);
+    }
+  });
+
+  it("keeps one compatibility deadline across response headers and body", async () => {
+    vi.useFakeTimers();
+    const fixture = await createSnapshotFixture();
+    const issuedAtMs = Date.parse("2026-08-06T12:00:00.000Z");
+    vi.setSystemTime(issuedAtMs);
+    const getUrl = createPreparedGetUrl("shared-deadline.enc", 60, issuedAtMs);
+    const events: string[] = [];
+    let objectRequestCount = 0;
+    let bodyCanceled = false;
+    let resolveBodyCanceled: (() => void) | null = null;
+    const bodyCanceledPromise = new Promise<void>((resolve) => {
+      resolveBodyCanceled = resolve;
+    });
+    let resolveCompatibilityStarted: (() => void) | null = null;
+    const compatibilityStarted = new Promise<void>((resolve) => {
+      resolveCompatibilityStarted = resolve;
+    });
+    let resolveBodyOpened: (() => void) | null = null;
+    const bodyOpened = new Promise<void>((resolve) => {
+      resolveBodyOpened = resolve;
+    });
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const url = readRequestUrl(args);
+      if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/object`)) {
+        objectRequestCount += 1;
+        events.push(`object-${objectRequestCount}`);
+        if (objectRequestCount === 1) {
+          return new Response("old Worker route missing", { status: 404 });
+        }
+        return new Response("current Worker unavailable", {
+          headers: {
+            [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+              HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+          },
+          status: 500,
+        });
+      }
+      if (url === getUrl) {
+        events.push("compatibility-get");
+        resolveCompatibilityStarted?.();
+        resolveCompatibilityStarted = null;
+        await new Promise<void>((resolve) => setTimeout(resolve, 40_000));
+        return new Response(new ReadableStream<Uint8Array>({
+          cancel: () => {
+            bodyCanceled = true;
+            resolveBodyCanceled?.();
+            resolveBodyCanceled = null;
+          },
+          start: () => {
+            resolveBodyOpened?.();
+            resolveBodyOpened = null;
+          },
+        }), {
+          headers: {
+            "content-length": String(fixture.ref.archive.encryptedByteSize),
+          },
+          status: 200,
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const port = createCloudflareWorkspaceSnapshotPort({
+      boundUserId: TEST_USER_ID,
+      fetchImpl: fetchMock as typeof fetch,
+      preparedSnapshotRestore: createPreparedRestore(fixture, getUrl),
+      timeoutMs: 120_000,
+      workspaceCheckpointBridge: createWorkspaceCheckpointBridge(),
+    });
+
+    try {
+      const restore = port.restoreWorkspaceSnapshot({
+        durableRoot: "/tmp/unused-shared-deadline-restore",
+        ref: fixture.ref,
+      });
+      const rejected = expect(restore).rejects.toThrow(
+        "The operation was aborted due to timeout",
+      );
+      await compatibilityStarted;
+      await vi.advanceTimersByTimeAsync(40_000);
+      await bodyOpened;
+      await vi.advanceTimersByTimeAsync(16_000);
+      await bodyCanceledPromise;
+      await vi.runAllTimersAsync();
+      await rejected;
+
+      expect(events).toEqual([
+        "object-1",
+        "compatibility-get",
+      ]);
+      expect(Date.now() - issuedAtMs).toBeLessThan(60_000);
+      expect(bodyCanceled).toBe(true);
+    } finally {
+      fixture.dataKey.fill(0);
+      fixture.rootKey.fill(0);
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not retry an active compatibility GET after caller cancellation", async () => {
+    const fixture = await createSnapshotFixture();
+    const getUrl = createPreparedGetUrl("caller-cancel.enc");
+    const abortController = new AbortController();
+    const abortReason = new Error("caller canceled compatibility restore");
+    const events: string[] = [];
+    let compatibilityBodyCancelCount = 0;
+    let resolveCompatibilityBodyOpened: (() => void) | null = null;
+    const compatibilityBodyOpened = new Promise<void>((resolve) => {
+      resolveCompatibilityBodyOpened = resolve;
+    });
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const url = readRequestUrl(args);
+      if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/object`)) {
+        events.push("object");
+        return new Response("old Worker route missing", { status: 404 });
+      }
+      if (url === getUrl) {
+        events.push("compatibility-get");
+        return new Response(new ReadableStream<Uint8Array>({
+          cancel: () => {
+            compatibilityBodyCancelCount += 1;
+          },
+          start: () => {
+            resolveCompatibilityBodyOpened?.();
+            resolveCompatibilityBodyOpened = null;
+          },
+        }), {
+          headers: {
+            "content-length": String(fixture.ref.archive.encryptedByteSize),
+          },
+          status: 200,
+        });
+      }
+      events.push("unexpected");
+      return new Response("unexpected", { status: 500 });
+    });
+    const port = createCloudflareWorkspaceSnapshotPort({
+      boundUserId: TEST_USER_ID,
+      fetchImpl: fetchMock as typeof fetch,
+      preparedSnapshotRestore: createPreparedRestore(fixture, getUrl),
+      timeoutMs: 30_000,
+      workspaceCheckpointBridge: createWorkspaceCheckpointBridge(),
+    });
+
+    try {
+      const restore = port.restoreWorkspaceSnapshot({
+        durableRoot: "/tmp/unused-caller-cancel-restore",
+        ref: fixture.ref,
+        signal: abortController.signal,
+      });
+      await compatibilityBodyOpened;
+      abortController.abort(abortReason);
+
+      await expect(restore).rejects.toBe(abortReason);
+      expect(events).toEqual(["object", "compatibility-get"]);
+      expect(compatibilityBodyCancelCount).toBe(1);
+    } finally {
+      fixture.dataKey.fill(0);
+      fixture.rootKey.fill(0);
+    }
+  });
+
   it("fails closed before fetch when prepared data targets another snapshot", async () => {
     const fixture = await createSnapshotFixture();
     const fetchMock = vi.fn(async () => new Response("unexpected", { status: 500 }));
@@ -360,10 +739,15 @@ describe("workspace snapshot restore preparation", () => {
     const fixture = await createSnapshotFixture();
     const getUrl = "https://r2.example.test/fallback-snapshot.enc";
     const events: string[] = [];
+    let resolvePresignStarted: (() => void) | null = null;
+    const presignStarted = new Promise<void>((resolve) => {
+      resolvePresignStarted = resolve;
+    });
     const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
       const url = readRequestUrl(args);
       if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/data-key/unwrap`)) {
         events.push("unwrap");
+        await presignStarted;
         return jsonResponse({ dataKey: fixture.dataKeyBase64 });
       }
       if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/object`)) {
@@ -372,6 +756,8 @@ describe("workspace snapshot restore preparation", () => {
       }
       if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/presign-get`)) {
         events.push("presign");
+        resolvePresignStarted?.();
+        resolvePresignStarted = null;
         return jsonResponse({
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
           getUrl,
