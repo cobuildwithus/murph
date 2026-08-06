@@ -503,6 +503,14 @@ export async function activateMealPhotoCaptureEnrollmentForScopedToken(input: {
     ) {
       throw mealPhotoCaptureAuthRequired();
     }
+    await assertHostedHistoricalLaunchConsentGranted({
+      memberId: current.memberId,
+      prisma: tx,
+    });
+    await assertActiveHostedMemberAccessAllowed({
+      memberId: current.memberId,
+      prisma: tx,
+    });
     if (current.activatedAt || current.authorityRevision === 0) {
       return { activated: true };
     }

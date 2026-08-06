@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-05
-Updated: 2026-08-05
+Updated: 2026-08-06
 
 ## Goal
 
@@ -10,7 +10,7 @@ Updated: 2026-08-05
   authority when its delayed `POST` reaches Web after the member's disabling
   `DELETE`.
 - Prevent a schema-v2 enrollment whose response is lost across process death
-  from becoming usable upload authority before the native host durably saves
+  from becoming usable upload authority before the iOS host durably saves
   the returned credential.
 - Preserve the existing iOS schema-v1 enrollment behavior until an installation
   adopts the fenced schema-v2 contract.
@@ -38,7 +38,7 @@ Updated: 2026-08-05
 - `HostedMealPhotoCaptureEnrollment` remains the sole durable authority owner
   for one member and hashed installation id.
 - Schema v2 adds a positive per-installation `authorityRevision` bounded to the
-  signed PostgreSQL `INTEGER` range (`1...2_147_483_647`). The native client
+  signed PostgreSQL `INTEGER` range (`1...2_147_483_647`). The iOS client
   durably allocates a fresh larger revision before every identity enrollment or
   revocation request.
 - Web accepts a v2 mutation only when its revision is newer than the stored
@@ -57,6 +57,10 @@ Updated: 2026-08-05
   token. Activation first followed by deletion ends revoked; deletion first
   makes activation fail authorization. A delayed prepare or lost response is
   harmless because prepared credentials never authorize upload.
+- Before activation or idempotent activation replay can succeed, Web rechecks
+  historical launch consent and active hosted access inside that same locked
+  transaction. A consent withdrawal or access loss therefore remains
+  authoritative even when cleanup is delayed or fails.
 - Existing rows begin at revision zero and remain immediately active. A null
   activation marker on a legacy revision-zero row is treated as active during
   the rollout window and backfilled after old Web drains. Schema-v1 identity
@@ -67,7 +71,7 @@ Updated: 2026-08-05
 ## Compatibility and rollback
 
 - Deploy the additive/nullable Web schema and fence-aware Web code before any
-  schema-v2 native client.
+  schema-v2 iOS client.
 - Legacy iOS schema-v1 installations continue unchanged at revision zero.
 - The post-drain credential-shape constraint makes fence-aware Web the database
   rollback floor because older revocation code retained credential columns.
@@ -102,9 +106,11 @@ Updated: 2026-08-05
   newer enrollment; a fresh higher revision can explicitly re-enable.
 - A duplicate or same-revision enrollment cannot rotate an unrecoverable
   plaintext bearer.
-- A schema-v2 response lost before durable client save remains prepared and
+- A schema-v2 response lost before durable iOS-client save remains prepared and
   cannot upload. Persist-then-activate succeeds, exact activation replay is
   idempotent, and scoped activation/deletion are proven in both orders.
+- Prepared and already-activated tokens both reject activation after consent
+  withdrawal or hosted-access loss; a denied prepared token remains inactive.
 - Schema-v1 behavior remains unchanged at revision zero and cannot cross a
   positive fence.
 - Active upload lookup rejects prepared state, tombstones, expiry, and
@@ -117,6 +123,9 @@ Updated: 2026-08-05
 
 ## Completion boundary
 
-- Update PR #1343 with one focused corrected candidate after local proof. The
-  immutable initial-head final review continues independently; do not start a
-  second ReviewGPT pass for this remediation.
+- Final ReviewGPT round 1 found that scoped activation did not recheck consent
+  or active access, and that the backend documentation accidentally expanded
+  automatic meal capture beyond the iOS-only product boundary. Both findings
+  are accepted and corrected without adding state or a second owner.
+- Update PR #1343 with the focused corrected candidate after local proof, then
+  run final ReviewGPT round 2 and exact-head CI before closing this plan.

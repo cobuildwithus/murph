@@ -342,6 +342,102 @@ describe("meal photo capture enrollment credentials", () => {
     expect(prisma.getRecord()?.activatedAt).toEqual(activatedAt);
   });
 
+  it("rejects prepared activation after consent withdrawal commits before cleanup", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    const issued = await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2EnrollmentRequest(1),
+    });
+    const consentError = new Error("historical launch consent was withdrawn");
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockClear();
+    mocks.assertActiveHostedMemberAccessAllowed.mockClear();
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockRejectedValueOnce(
+      consentError,
+    );
+
+    await expect(activateMealPhotoCaptureEnrollmentForScopedToken({
+      prisma: prisma.client,
+      token: issued.uploadToken,
+    })).rejects.toBe(consentError);
+
+    expect(prisma.getRecord()).toMatchObject({
+      activatedAt: null,
+      revokedAt: null,
+      uploadTokenHash: sha256(issued.uploadToken),
+    });
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: prisma.tx,
+    });
+    expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+  });
+
+  it("rejects prepared activation when hosted access is inactive", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    const issued = await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2EnrollmentRequest(1),
+    });
+    const accessError = new Error("hosted member access is inactive");
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockClear();
+    mocks.assertActiveHostedMemberAccessAllowed.mockClear();
+    mocks.assertActiveHostedMemberAccessAllowed.mockRejectedValueOnce(accessError);
+
+    await expect(activateMealPhotoCaptureEnrollmentForScopedToken({
+      prisma: prisma.client,
+      token: issued.uploadToken,
+    })).rejects.toBe(accessError);
+
+    expect(prisma.getRecord()).toMatchObject({
+      activatedAt: null,
+      revokedAt: null,
+      uploadTokenHash: sha256(issued.uploadToken),
+    });
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: prisma.tx,
+    });
+    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: prisma.tx,
+    });
+  });
+
+  it("rechecks consent and active access before idempotent activation success", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    const activatedAt = new Date("2026-07-12T12:00:01.000Z");
+    const issued = await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2EnrollmentRequest(1),
+    });
+    await activateMealPhotoCaptureEnrollmentForScopedToken({
+      now: activatedAt,
+      prisma: prisma.client,
+      token: issued.uploadToken,
+    });
+
+    const consentError = new Error("historical launch consent was withdrawn");
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockRejectedValueOnce(
+      consentError,
+    );
+    await expect(activateMealPhotoCaptureEnrollmentForScopedToken({
+      prisma: prisma.client,
+      token: issued.uploadToken,
+    })).rejects.toBe(consentError);
+    expect(prisma.getRecord()?.activatedAt).toEqual(activatedAt);
+
+    const accessError = new Error("hosted member access is inactive");
+    mocks.assertActiveHostedMemberAccessAllowed.mockRejectedValueOnce(accessError);
+    await expect(activateMealPhotoCaptureEnrollmentForScopedToken({
+      prisma: prisma.client,
+      token: issued.uploadToken,
+    })).rejects.toBe(accessError);
+    expect(prisma.getRecord()?.activatedAt).toEqual(activatedAt);
+  });
+
   it("lets a delayed schema-v2 POST after scoped teardown install only prepared state", async () => {
     const prisma = createEnrollmentPrismaHarness();
     const prior = await issueMealPhotoCaptureEnrollment({
