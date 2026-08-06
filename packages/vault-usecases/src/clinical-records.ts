@@ -36,7 +36,7 @@ import {
   resolveRuntimePaths,
   writeJsonFileAtomic,
 } from "@murphai/runtime-state/node";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 import { loadRuntimeModule } from "./runtime-import.js";
 

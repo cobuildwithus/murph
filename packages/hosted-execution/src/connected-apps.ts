@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 export const HOSTED_CONNECTED_APPS_PATH = "/api/internal/connected-apps";
 
