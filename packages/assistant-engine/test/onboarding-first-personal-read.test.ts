@@ -1,10 +1,20 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
+import {
+  MURPH_AUTOMATION_TOOL,
+  readAutomationDynamicToolRequest,
+} from '../src/assistant-codex/dynamic-tools/automation.js'
+import {
+  buildOnboardingFirstPersonalReadAutomationSaveRequest,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS,
+} from '../src/assistant/onboarding-first-personal-read-automation.js'
 
 async function readOnboardingSkill(): Promise<string> {
   const skillsRoot = resolveAssistantSkillsRoot()
@@ -15,11 +25,121 @@ async function readOnboardingSkill(): Promise<string> {
   return raw.replace(/\s+/gu, ' ')
 }
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('onboarding first personal read', () => {
-  it('arms one route-bound high-reasoning read before answered completion', async () => {
+  it('builds one fixed route-bound high-reasoning automation request', () => {
+    const request = buildOnboardingFirstPersonalReadAutomationSaveRequest({
+      now: new Date('2026-08-06T21:00:00.000Z'),
+    })
+
+    expect(request).toEqual({
+      action: 'save',
+      activeUntil: '2026-08-06T22:02:00.000Z',
+      assistantTargetOverride: {
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'high',
+      },
+      automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      instructions: MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS,
+      schedule: {
+        kind: 'at',
+        at: '2026-08-06T21:02:00.000Z',
+      },
+      slug: 'onboarding-first-personal-read',
+      summary:
+        'One private first read across the context and health data collected during onboarding.',
+      tags: [
+        'assistant',
+        'scheduled',
+        'onboarding',
+        'first-personal-read',
+      ],
+      title: 'First personal health read',
+    })
+  })
+
+  it('turns the zero-argument action into the code-owned request', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-06T21:00:00.000Z'))
+
+    const parsed = readAutomationDynamicToolRequest({
+      arguments: {
+        action: MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
+      },
+      tool: 'automation',
+    })
+
+    expect(parsed?.kind).toBe('automation')
+    if (parsed?.kind !== 'automation') {
+      throw new TypeError('Expected a parsed automation request.')
+    }
+    expect(parsed.request).toEqual(
+      buildOnboardingFirstPersonalReadAutomationSaveRequest({
+        now: new Date('2026-08-06T21:00:00.000Z'),
+      }),
+    )
+
+    const modelAuthoredOverride = readAutomationDynamicToolRequest({
+      arguments: {
+        action: MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
+        instructions: 'Use a weaker model-authored prompt instead.',
+      },
+      tool: 'automation',
+    })
+    expect(modelAuthoredOverride?.kind).toBe(
+      'invalid-automation-arguments',
+    )
+  })
+
+  it('keeps the full evidence and interestingness policy in source code', () => {
+    const prompt = MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS
+
+    expect(new TextEncoder().encode(prompt).byteLength).toBeLessThanOrEqual(
+      50_000,
+    )
+    expect(prompt).toContain(
+      'It is better to send nothing than to manufacture a weak insight.',
+    )
+    expect(prompt).toContain(
+      'I did not know that about me, that is interesting',
+    )
+    expect(prompt).toContain(
+      'Suppress true-but-boring findings.',
+    )
+    expect(prompt).toContain(
+      'Treat proprietary readiness, recovery, sleep, or strain scores as summaries, not independent evidence.',
+    )
+    expect(prompt).toContain(
+      'Missing, stale, sparse, misclassified, contradictory, or still-importing data is not evidence',
+    )
+    expect(prompt).toContain(
+      'Read `vault-cli knowledge show weekly-health-insights`.',
+    )
+    expect(prompt).toContain(
+      'A failed dedupe write must not make the member lose an otherwise sound first read.',
+    )
+    expect(prompt).toContain(
+      'I took a deeper look across what you shared.',
+    )
+    expect(prompt).toContain(
+      'at most one optional low-burden next action or question',
+    )
+    expect(prompt).toContain(
+      'Do not diagnose, prescribe, alarm, shame, dump metrics, stack findings, create a habit, plan, experiment, reminder, or other action',
+    )
+    expect(prompt).toContain(
+      'do not spawn a child; this scheduled turn owns the complete read, selection, and delivery',
+    )
+  })
+
+  it('keeps onboarding responsible only for invoking the fixed action', async () => {
     const onboarding = await readOnboardingSkill()
     const firstReadIndex = onboarding.indexOf(
-      'slug: "onboarding-first-personal-read"',
+      `{"action":"${MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION}"}`,
     )
     const completionIndex = onboarding.indexOf(
       'vault-cli assistant onboarding complete --reason user_answered',
@@ -28,61 +148,39 @@ describe('onboarding first personal read', () => {
     expect(firstReadIndex).toBeGreaterThan(-1)
     expect(completionIndex).toBeGreaterThan(firstReadIndex)
     expect(
-      onboarding.match(/slug: "onboarding-first-personal-read"/gu),
+      onboarding.match(
+        new RegExp(MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION, 'gu'),
+      ),
     ).toHaveLength(1)
     expect(onboarding).toContain(
-      'schedule the occurrence for two minutes later and set `activeUntil` to sixty-two minutes later',
+      'The host owns the immutable automation identity, current-conversation route binding, two-minute delay, bounded active window, fresh continuity, Sol/high target, and complete first-read prompt.',
     )
-    expect(onboarding).toContain('continuityPolicy: "fresh"')
-    expect(onboarding).toContain('"model": "gpt-5.6-sol"')
-    expect(onboarding).toContain('"reasoningEffort": "high"')
     expect(onboarding).toContain(
-      'Never arm it from the finite scheduled recovery occurrence',
+      'Do not call generic `save`, provide instructions, calculate timestamps, choose a model, or add fields.',
     )
-    expect(onboarding).toContain('or for `user_declined`')
     expect(onboarding).toContain(
       'do not retry, block completion, or mention the failure',
     )
     expect(onboarding).toContain(
-      'When the first-personal-read save succeeded',
+      'whether that\'s a pattern, a clearer interpretation, or what seems worth watching next',
+    )
+    expect(onboarding).not.toContain(
+      'slug: "onboarding-first-personal-read"',
+    )
+    expect(onboarding).not.toContain(
+      'schedule the occurrence for two minutes later',
+    )
+    expect(onboarding).not.toContain(
+      'assistantTargetOverride: { "model": "gpt-5.6-sol"',
     )
   })
 
-  it('keeps the delayed result grounded, contextual, and action-optional', async () => {
-    const onboarding = await readOnboardingSkill()
-
-    expect(onboarding).toContain(
-      'the currently available canonical evidence that could materially change the user\'s named open threads',
+  it('documents the structured action as fixed and fieldless', () => {
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot after answered onboarding',
     )
-    expect(onboarding).toContain(
-      'read `vault-cli wearables sources list` before relying on wearable trends',
-    )
-    expect(onboarding).toContain(
-      'Missing, stale, sparse, misclassified, contradictory, or still-importing data is not evidence',
-    )
-    expect(onboarding).toContain(
-      'do not spawn a child; this scheduled turn owns the complete read, selection, and delivery',
-    )
-    expect(onboarding).toContain(
-      'Read the newest committed conversation again immediately before composing',
-    )
-    expect(onboarding).toContain(
-      'return skip rather than interrupting it',
-    )
-    expect(onboarding).toContain(
-      'I took the deeper look I mentioned.',
-    )
-    expect(onboarding).toContain(
-      'at most one optional low-burden next action or question',
-    )
-    expect(onboarding).toContain(
-      'Do not diagnose, prescribe, dump metrics, stack findings, create a habit, plan, experiment, reminder, or other action',
-    )
-    expect(onboarding).toContain(
-      'do not fabricate one and do not send a sync or process note',
-    )
-    expect(onboarding).toContain(
-      'You can keep texting me normally in the meantime.',
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'it accepts no prompt, timing, model, route, or other fields',
     )
   })
 })
