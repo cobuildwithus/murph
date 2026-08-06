@@ -555,12 +555,14 @@ export class RunnerContainer extends Container {
     operation.result = result;
     this.workspaceInvocationOperations.push(operation);
     const completedResult = await result;
-    await this.recordRuntimeCompletionBestEffort({
-      attemptId: input.job.request.attemptId,
-      generation: input.job.request.leaseGeneration,
-      result: completedResult,
-      userId: routeUserId,
-    });
+    if (this.readWorkspaceInvocationOperation() !== operation) {
+      await this.recordRuntimeCompletionBestEffort({
+        attemptId: input.job.request.attemptId,
+        generation: input.job.request.leaseGeneration,
+        result: completedResult,
+        userId: routeUserId,
+      });
+    }
     return completedResult;
   }
 
