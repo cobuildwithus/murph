@@ -37,6 +37,9 @@ export function HostedAiUsageActivity(props: {
           </h3>
           <div className="ml-auto flex items-center gap-4">
             <HostedSignupReferralLinkButton
+              identityKey={
+                props.activity.referralIdentityKey ?? "referral-design-preview"
+              }
               signupUrl={props.signupReferralUrl}
             />
             {canStartMissions && props.missionContactOption ? (
