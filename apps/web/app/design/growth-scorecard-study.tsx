@@ -8,6 +8,7 @@ import {
   type GrowthScorecardProps,
 } from "../(dashboard)/ops/growth/growth-scorecard";
 import { GrowthCharts } from "../(dashboard)/ops/growth/growth-charts";
+import { GrowthWeeklyTable } from "../(dashboard)/ops/growth/growth-weekly-table";
 import { TrialStartAttribution } from "../(dashboard)/ops/growth/trial-start-attribution";
 
 const GROWTH_DATES = Array.from({ length: 30 }, (_, index) => {
@@ -98,6 +99,36 @@ const TRIAL_START_ATTRIBUTION = {
   ],
   windowStartDate: "2026-07-02",
 } satisfies HostedGrowthDashboard["trialStartAttribution"];
+
+const EMPTY_TRIAL_START_ATTRIBUTION = {
+  counts: {
+    companion_onboarding: 0,
+    linq_instant_start: 0,
+    unknown: 0,
+    web_onboarding: 0,
+  },
+  recent: [],
+  windowStartDate: "2026-07-02",
+} satisfies HostedGrowthDashboard["trialStartAttribution"];
+
+const WEEKLY_ROWS: HostedGrowthDashboard["weeklyRows"] = [
+  {
+    endDate: "2026-07-31",
+    newMembers: 34,
+    newMembersWowPercent: 13.3,
+    startDate: "2026-07-25",
+    trialStarts: 23,
+    trialStartsWowPercent: 9.5,
+  },
+  {
+    endDate: "2026-07-24",
+    newMembers: 30,
+    newMembersWowPercent: null,
+    startDate: "2026-07-18",
+    trialStarts: 21,
+    trialStartsWowPercent: null,
+  },
+];
 
 const STUDY_INPUT = {
   activeUsers: {
@@ -205,6 +236,24 @@ export function GrowthScorecardStudy() {
         <TrialStartAttribution
           attribution={TRIAL_START_ATTRIBUTION}
           titleId="design-trial-start-attribution-title"
+        />
+      </div>
+      <div id="growth-trial-start-attribution-empty">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Empty trial start provenance
+        </div>
+        <TrialStartAttribution
+          attribution={EMPTY_TRIAL_START_ATTRIBUTION}
+          titleId="design-empty-trial-start-attribution-title"
+        />
+      </div>
+      <div id="growth-weekly-intake-and-activation">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Weekly intake semantics
+        </div>
+        <GrowthWeeklyTable
+          rows={WEEKLY_ROWS}
+          titleId="design-growth-weekly-title"
         />
       </div>
       <StudyState id="target-hit" label="Target hit" mrrWowPercent={10.8} />

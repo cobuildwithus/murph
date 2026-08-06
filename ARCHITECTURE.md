@@ -2143,14 +2143,17 @@ messages, group chats, local guard rejects, deterministic URL/STOP-style spam,
 and other non-invite paths bypass the classifier.
 
 Pulse-trial acquisition provenance is descriptive, not entitlement authority.
-The enrollment owner writes `web_onboarding`, `companion_onboarding`, or
-`linq_instant_start` into Stripe subscription metadata and copies that value to
-`HostedMemberBillingRef.pulseTrialStartSource` beside the redeemed timestamp.
-Retries therefore recover the event-time source from the existing provider
-record without another state owner. Historical billing rows remain null rather
-than inferring provenance from mutable identity state. The ops growth read maps
-null or invalid values to Unknown and exposes only the existing masked phone
-hint; it never decrypts contact data for attribution.
+The auto-enrollment owner writes `web_onboarding`, `companion_onboarding`, or
+`linq_instant_start` into Stripe subscription metadata. The card-based website
+fallback writes `web_onboarding` into its existing Checkout Session and
+subscription metadata. Both acceptance paths copy the canonical subscription
+value to `HostedMemberBillingRef.pulseTrialStartSource` beside the redeemed
+timestamp. Retries therefore recover the event-time source from the existing
+provider record without another state owner. Historical billing rows and
+in-flight legacy Checkout sessions remain null rather than inferring provenance
+from mutable identity state. The ops growth read maps null or invalid values to
+Unknown and exposes only the existing masked phone hint; it never decrypts
+contact data for attribution.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable

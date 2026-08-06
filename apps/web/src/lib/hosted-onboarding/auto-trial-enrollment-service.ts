@@ -1528,8 +1528,8 @@ function buildHostedAutoPulseTrialMetadata(
       billingPlanCode: "launch_monthly",
       checkoutOffer: HOSTED_PULSE_TRIAL_OFFER,
       memberId,
+      pulseTrialStartSource,
     }),
-    pulseTrialStartSource,
   };
 }
 

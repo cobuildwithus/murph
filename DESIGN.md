@@ -235,8 +235,8 @@ chart one visible focus surface named by its heading. Keep acquisition and
 revenue snapshots as the second chart row.
 
 Below the chart grid, show trial-start provenance in one flat bordered surface:
-30-day UTC totals for Direct text, Website, Companion, and Unknown followed by
-a recent-start ledger. Direct text means an inbound iMessage or SMS initiated
+30-day UTC totals for Direct iMessage, Website, Companion, and Unknown followed
+by a recent-start ledger. Direct iMessage means an inbound iMessage initiated
 the trial. The ledger may show only the persisted masked phone hint and must
 pair the trial timestamp with the member-record creation date or age so delayed
 activation is visible. Historical rows without event-time provenance stay

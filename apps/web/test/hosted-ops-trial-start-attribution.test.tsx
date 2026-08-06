@@ -34,10 +34,32 @@ describe("ops growth trial-start attribution", () => {
     );
 
     expect(markup).toContain("Trial start paths");
-    expect(markup).toContain("Inbound iMessage or SMS");
+    expect(markup).toContain("Direct iMessage");
+    expect(markup).toContain("Inbound iMessage");
+    expect(markup).not.toContain("SMS");
     expect(markup).toContain("Phone *** 0194");
     expect(markup).toContain("Created same UTC day");
     expect(markup).toContain("56 days earlier");
     expect(markup).not.toContain("member_");
+  });
+
+  it("shows a bounded empty state without inventing recent starts", () => {
+    const markup = renderToStaticMarkup(
+      <TrialStartAttribution
+        attribution={{
+          counts: {
+            companion_onboarding: 0,
+            linq_instant_start: 0,
+            unknown: 0,
+            web_onboarding: 0,
+          },
+          recent: [],
+          windowStartDate: "2026-07-01",
+        }}
+      />,
+    );
+
+    expect(markup).toContain("No trial starts since Jul 1, 2026");
+    expect(markup).not.toContain("No phone hint");
   });
 });

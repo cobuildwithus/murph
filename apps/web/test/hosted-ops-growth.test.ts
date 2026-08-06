@@ -326,7 +326,7 @@ describe("hosted ops growth metrics", () => {
   it("keeps trial-start attribution explicit and orders recent starts newest first", () => {
     const attribution = buildHostedGrowthTrialStartAttribution({
       endExclusive: new Date("2026-08-01T00:00:00.000Z"),
-      limit: 3,
+      limit: 4,
       rows: [
         {
           memberCreatedAt: new Date("2026-07-30T09:00:00.000Z"),
@@ -347,6 +347,12 @@ describe("hosted ops growth metrics", () => {
           pulseTrialStartSource: null,
         },
         {
+          memberCreatedAt: new Date("2026-07-27T10:00:00.000Z"),
+          phoneHint: "*** 4827",
+          pulseTrialRedeemedAt: new Date("2026-07-27T10:06:00.000Z"),
+          pulseTrialStartSource: "web_onboarding",
+        },
+        {
           memberCreatedAt: new Date("2026-06-01T10:00:00.000Z"),
           phoneHint: "*** 4421",
           pulseTrialRedeemedAt: new Date("2026-06-30T18:00:00.000Z"),
@@ -361,7 +367,7 @@ describe("hosted ops growth metrics", () => {
         companion_onboarding: 1,
         linq_instant_start: 1,
         unknown: 1,
-        web_onboarding: 0,
+        web_onboarding: 1,
       },
       recent: [
         {
@@ -381,6 +387,12 @@ describe("hosted ops growth metrics", () => {
           phoneHint: null,
           pulseTrialStartSource: "unknown",
           trialStartedAt: "2026-07-28T18:00:00.000Z",
+        },
+        {
+          memberCreatedAt: "2026-07-27T10:00:00.000Z",
+          phoneHint: "*** 4827",
+          pulseTrialStartSource: "web_onboarding",
+          trialStartedAt: "2026-07-27T10:06:00.000Z",
         },
       ],
       windowStartDate: "2026-07-01",

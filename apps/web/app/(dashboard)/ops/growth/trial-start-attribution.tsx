@@ -22,7 +22,7 @@ interface TrialStartAttributionProps {
 const SOURCE_SUMMARIES = [
   {
     className: "",
-    label: "Direct text",
+    label: "Direct iMessage",
     source: "linq_instant_start",
   },
   {
@@ -48,8 +48,8 @@ const SOURCE_PRESENTATION = {
     label: "Companion app",
   },
   linq_instant_start: {
-    description: "Inbound iMessage or SMS",
-    label: "Direct text",
+    description: "Inbound iMessage",
+    label: "Direct iMessage",
   },
   unknown: {
     description: "Source was not captured",
@@ -77,8 +77,8 @@ export function TrialStartAttribution(input: TrialStartAttributionProps) {
           Trial start paths
         </h2>
         <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-          Source is captured when a Pulse trial begins. Direct text means an
-          inbound iMessage or SMS started the trial. Historical starts without
+          Source is captured when a Pulse trial begins. Direct iMessage means
+          an inbound iMessage started the trial. Historical starts without
           persisted provenance remain Unknown.
         </p>
       </div>

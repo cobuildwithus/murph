@@ -790,6 +790,7 @@ export async function writeAcceptedHostedMemberPulseTrialBillingTx(input: {
   memberId: string;
   preparedCompletion: PreparedHostedMemberStripeCheckoutCompletion;
   pulseTrialPolicyVersion: string;
+  pulseTrialStartSource: HostedPulseTrialStartSource | null;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
   if (input.preparedCompletion.memberId !== input.memberId) {
@@ -807,6 +808,7 @@ export async function writeAcceptedHostedMemberPulseTrialBillingTx(input: {
       currentTrialStartedAt: input.currentTrialStartedAt,
       pulseTrialPolicyVersion: input.pulseTrialPolicyVersion,
       pulseTrialRedeemedAt: input.currentTrialStartedAt,
+      pulseTrialStartSource: input.pulseTrialStartSource,
     },
     where: {
       memberId: input.memberId,

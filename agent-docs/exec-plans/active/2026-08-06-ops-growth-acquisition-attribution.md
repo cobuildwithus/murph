@@ -28,8 +28,9 @@ Updated: 2026-08-06
 ## Scope
 
 - In scope: additive hosted billing attribution, direct-iMessage/web/companion
-  trial-start callers, growth metrics and ops UI, privacy-safe recent-start
-  display, focused tests, design study, and owner documentation.
+  auto-trial callers, the card-based website trial fallback, growth metrics and
+  ops UI, privacy-safe recent-start display, focused tests, design study, and
+  owner documentation.
 - Out of scope: heuristic backfills, marketing analytics vendors, changing
   trial eligibility or entitlement, changing instant-start ordering, or showing
   full phone numbers or email addresses.
@@ -57,13 +58,18 @@ Updated: 2026-08-06
    extra database or provider call and no entitlement decision based on it.
 4. Risk: deploy skew causes old writers to omit the new field.
    Mitigation: use a nullable additive column and render null as legacy/unknown.
+5. Risk: card-based website trial fallback bypasses auto-enrollment attribution.
+   Mitigation: put the server-selected website source in existing Checkout and
+   subscription metadata, then persist the canonical subscription value in the
+   accepted redemption write; standard paid Checkout remains source-free.
 
 ## Tasks
 
 1. Prove the exact billing write and all trial-start caller surfaces, then select
    the smallest source vocabulary and immutable owner.
 2. Add the additive schema migration and thread the server-selected source
-   through direct iMessage, authenticated web, and companion trial starts.
+   through direct iMessage, authenticated web (auto and card fallback), and
+   companion trial starts.
 3. Extend growth metrics with source totals and privacy-safe recent records;
    relabel raw member records precisely.
 4. Render the production section in the ops page and design catalog with focused
@@ -84,10 +90,11 @@ Updated: 2026-08-06
 
 ## Verification
 
-- Commands to run: focused Vitest suites for auto-trial enrollment, growth
-  metrics, and ops rendering; Prisma schema/migration checks; `apps/web`
-  typecheck; design catalog browser screenshots; `git diff --check`; exact-head
-  required CI; preliminary specialist and final ReviewGPT passes.
+- Commands to run: focused Vitest suites for auto-trial enrollment, card
+  Checkout creation/completion, growth metrics, and ops rendering; Prisma
+  schema/migration checks; `apps/web` typecheck; focused growth Playwright proof;
+  design catalog browser screenshots; `git diff --check`; exact-head required
+  CI; preliminary specialist and final ReviewGPT passes.
 - Expected outcomes: all new sources persist exactly once, unknown legacy data
   remains visible without guesswork, UI is readable and responsive, no full
   identifiers enter output/artifacts, and all required gates are green.
