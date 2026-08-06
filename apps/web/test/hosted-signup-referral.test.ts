@@ -202,14 +202,12 @@ describe("hosted signup referral links", () => {
     ]);
     expect(tx.hostedInvite.count).toHaveBeenNthCalledWith(1, {
       where: {
-        channel: "signup-referral",
         createdAt: { gte: new Date("2026-08-06T11:05:00.000Z") },
         referrerMemberId: "member_referrer",
       },
     });
     expect(tx.hostedInvite.count).toHaveBeenNthCalledWith(2, {
       where: {
-        channel: "signup-referral",
         createdAt: { gte: new Date("2026-09-06T11:05:00.000Z") },
         referrerMemberId: "member_referrer",
       },
@@ -217,7 +215,7 @@ describe("hosted signup referral links", () => {
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
   });
 
-  it("bounds explicit claims before allocating a placeholder member", async () => {
+  it("bounds attributed claims after ordinary onboarding relabels", async () => {
     const now = new Date("2026-08-06T12:00:00.000Z");
     const { prisma, tx } = createPrisma({
       recentClaimCount: HOSTED_SIGNUP_REFERRAL_MAX_CLAIMS_PER_HOUR,
@@ -240,7 +238,6 @@ describe("hosted signup referral links", () => {
 
     expect(tx.hostedInvite.count).toHaveBeenCalledWith({
       where: {
-        channel: "signup-referral",
         createdAt: {
           gte: new Date("2026-08-06T11:00:00.000Z"),
         },
