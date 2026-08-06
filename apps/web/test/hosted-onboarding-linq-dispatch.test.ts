@@ -4824,7 +4824,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("prewarms the runner container and starts a typing hint before instant-start enrollment", async () => {
+  it("starts the typing hint before enrollment and prewarms before the active-member replan", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const memberId = "member_instant_start_prewarm";
     const eventId = "evt_instant_start_prewarm";
@@ -4873,6 +4873,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       sentAt: null,
       status: "pending",
     };
+    const callOrder: string[] = [];
     let trialActive = false;
     const prisma = asPrismaTransactionClient({
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -4896,19 +4897,24 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         create: vi.fn(),
-        findUnique: vi.fn(async () => ({
-          accountGroupMemberships: [],
-          billingStatus: trialActive
-            ? HostedBillingStatus.active
-            : HostedBillingStatus.not_started,
-          createdAt: new Date("2026-03-26T12:00:00.000Z"),
-          id: memberId,
-          invites: [],
-          phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
-          suspendedAt: null,
-          threadContainer: null,
-          updatedAt: new Date("2026-03-26T12:00:00.000Z"),
-        })),
+        findUnique: vi.fn(async () => {
+          if (trialActive) {
+            callOrder.push("replan");
+          }
+          return {
+            accountGroupMemberships: [],
+            billingStatus: trialActive
+              ? HostedBillingStatus.active
+              : HostedBillingStatus.not_started,
+            createdAt: new Date("2026-03-26T12:00:00.000Z"),
+            id: memberId,
+            invites: [],
+            phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+            suspendedAt: null,
+            threadContainer: null,
+            updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+          };
+        }),
         update: vi.fn(),
       },
       hostedMemberRouting,
@@ -4917,7 +4923,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       id: "mailbox_item_123",
       userId: memberId,
     });
-    const callOrder: string[] = [];
     const ensureResult = createDeferred<{ accepted: boolean }>();
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
     const ensureRuntimeProcessing = vi.fn((input: { userId: string }) => {
@@ -4975,10 +4980,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     const enrollmentIndex = callOrder.indexOf("enrollment");
     const prewarmIndex = callOrder.indexOf(`ensure:${memberId}`);
+    const replanIndex = callOrder.indexOf("replan");
     const typingIndex = callOrder.indexOf("typing:chat_123");
     expect(enrollmentIndex).toBeGreaterThanOrEqual(0);
     expect(prewarmIndex).toBeGreaterThanOrEqual(0);
-    expect(prewarmIndex).toBeLessThan(enrollmentIndex);
+    expect(prewarmIndex).toBeGreaterThan(enrollmentIndex);
+    expect(replanIndex).toBeGreaterThan(prewarmIndex);
     expect(typingIndex).toBeGreaterThanOrEqual(0);
     expect(typingIndex).toBeLessThan(enrollmentIndex);
     expect(ensureRuntimeProcessing.mock.calls[0]?.[0]).toMatchObject({
@@ -5003,7 +5010,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.stopHostedLinqChatTypingIndicator).not.toHaveBeenCalled();
   });
 
-  it("keeps the signup-link fallback intact when enrollment fails after the prewarm", async () => {
+  it("keeps the signup-link fallback intact without prewarming when enrollment fails", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const memberId = "member_instant_start_prewarm_fail";
     const eventId = "evt_instant_start_prewarm_fail";
@@ -5131,10 +5138,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
 
-    expect(ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
-    expect(ensureRuntimeProcessing.mock.calls[0]?.[0]).toMatchObject({
-      userId: memberId,
-    });
+    expect(ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {
       expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(

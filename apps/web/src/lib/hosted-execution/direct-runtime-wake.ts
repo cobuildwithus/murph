@@ -16,10 +16,11 @@ export type HostedDirectRuntimeWakeSource =
 /**
  * Starts the payloadless Cloudflare latency hint and always settles. Temporal
  * must accept the durable mailbox signal before a caller invokes this helper,
- * with one exception: the `linq-instant-start` prewarm fires right after the
- * planner transaction creating the instant-start member commits, because the
- * same webhook request then performs the ordinary Temporal-then-direct wake
- * and the ensure grants no authority either way.
+ * with one exception: after trial enrollment activates access and its
+ * activation-wake attempt returns, the `linq-instant-start` prewarm fires
+ * before the active-member replan and conversation signal. The same webhook
+ * request then performs the ordinary Temporal-then-direct wake, and the ensure
+ * grants no authority either way.
  */
 export function startHostedDirectRuntimeWakeBestEffort(input: {
   onTiming?: (

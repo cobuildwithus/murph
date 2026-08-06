@@ -968,12 +968,15 @@ server-bound append checks. Web always awaits the applicable Temporal
 start the direct ensure. An access failure or Temporal acceptance failure starts
 no direct wake. One narrow prewarm exception exists: on the Linq instant-start
 path, the webhook handler fires one additional best-effort payloadless ensure
-immediately after the planner transaction creating the new member commits and
-before enrollment or any Temporal signal, so the container boot overlaps
-enrollment instead of following it. The same request then performs the ordinary
-Temporal-then-direct wake; the prewarm grants no authority, may be dropped, and
-a racing or duplicate ensure lands on the existing fence/active-wake path. This
-is a latency hint only, not a second durable wake authority:
+immediately after trial enrollment atomically activates the new member and its
+best-effort activation-wake handoff returns, before the active-member replan or
+conversation-mailbox Temporal signal. That placement lets the container boot
+overlap the replan while ensuring it enters the same foreground mode as the real
+reply. Enrollment failure starts no prewarm. The same request then performs the
+ordinary Temporal-then-direct wake; the prewarm grants no authority, may be
+dropped, and a racing or duplicate ensure lands on the existing
+fence/active-wake path. This is a latency hint only, not a second durable wake
+authority:
 accepted Linq reply delivery stamps `consumedAt` on the exact
 `HostedMailboxItem`, while Assistant Ask uses deterministic request/completion
 ids, mailbox dedupe, and idempotent continuation delivery. Do not add

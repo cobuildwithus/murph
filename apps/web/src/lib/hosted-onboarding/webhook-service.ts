@@ -585,16 +585,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
       if (plan.instantStartEnrollment) {
         const instantStartEnrollment = plan.instantStartEnrollment;
-        // The member row is committed, but enrollment plus the replan below
-        // take seconds before the ordinary post-Temporal ensure fires. Start
-        // the container boot now so it overlaps that work, and show a typing
-        // indicator so the sender's first-ever message is not met with a
-        // silent chat while the runtime spins up. Both are best-effort
-        // latency/feedback hints with no authority and no reply path impact.
-        void startHostedDirectRuntimeWakeBestEffort({
-          source: "linq-instant-start",
-          userId: instantStartEnrollment.memberId,
-        });
+        // The member row is committed, so show feedback immediately while
+        // enrollment and the cold runtime path continue. This hint carries no
+        // authority and has no effect on the reply path.
         instantStartTypingHint = startHostedLinqInstantStartTypingHintBestEffort({
           event: planningEvent,
         });
@@ -624,6 +617,15 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
             },
           );
+        }
+        if (!enrollmentFailed) {
+          // Enrollment has now activated access. Start the container before
+          // the active-member replan so this best-effort hint warms the same
+          // foreground mode that will consume the appended conversation item.
+          void startHostedDirectRuntimeWakeBestEffort({
+            source: "linq-instant-start",
+            userId: instantStartEnrollment.memberId,
+          });
         }
         plan = await runPlan(!enrollmentFailed);
         if (plan.instantStartEnrollment) {
