@@ -5,60 +5,55 @@ import { useEffect, useState } from "react";
 import { Button } from "@/src/components/ui/button";
 
 type CopyState =
+  | "copied"
+  | "copy_error"
   | "copying"
-  | "error"
-  | "idle"
+  | "load_error"
   | "loading"
-  | "success";
-
-let inFlightReferralLinkPromise: Promise<string> | null = null;
+  | "ready";
 
 export function HostedSignupReferralLinkButton(props: {
   signupUrl?: string | null;
 }) {
   const [signupUrl, setSignupUrl] = useState(props.signupUrl ?? null);
   const [state, setState] = useState<CopyState>(
-    props.signupUrl ? "idle" : "loading",
+    props.signupUrl ? "ready" : "loading",
   );
 
   useEffect(() => {
     if (props.signupUrl) {
       setSignupUrl(props.signupUrl);
-      setState("idle");
+      setState("ready");
       return;
     }
 
-    let active = true;
-    void readHostedSettingsSignupReferralLink()
+    const controller = new AbortController();
+    void loadHostedSettingsSignupReferralLink(controller.signal)
       .then((url) => {
-        if (!active) {
-          return;
-        }
         setSignupUrl(url);
-        setState("idle");
+        setState("ready");
       })
-      .catch(() => {
-        if (active) {
-          setState("error");
+      .catch((error) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setState("load_error");
         }
       });
-    return () => {
-      active = false;
-    };
+    return () => controller.abort();
   }, [props.signupUrl]);
 
-  async function copyReferralLink() {
+  async function handleAction() {
     if (state === "loading" || state === "copying") {
       return;
     }
+
     if (!signupUrl) {
       setState("loading");
       try {
-        const url = await readHostedSettingsSignupReferralLink();
+        const url = await loadHostedSettingsSignupReferralLink();
         setSignupUrl(url);
-        setState("idle");
+        setState("ready");
       } catch {
-        setState("error");
+        setState("load_error");
       }
       return;
     }
@@ -66,9 +61,9 @@ export function HostedSignupReferralLinkButton(props: {
     setState("copying");
     try {
       await navigator.clipboard.writeText(signupUrl);
-      setState("success");
+      setState("copied");
     } catch {
-      setState("error");
+      setState("copy_error");
     }
   }
 
@@ -77,19 +72,25 @@ export function HostedSignupReferralLinkButton(props: {
       ? "Loading..."
       : state === "copying"
         ? "Copying..."
-        : state === "success"
+        : state === "copied"
           ? "Copied"
-          : state === "error"
-            ? "Try again"
-            : "Copy link";
+          : state === "load_error"
+            ? "Reload link"
+            : state === "copy_error"
+              ? "Try copy again"
+              : "Copy link";
 
   return (
     <>
       <Button
-        aria-label="Copy your Murph referral link"
+        aria-label={
+          state === "load_error"
+            ? "Reload your Murph referral link"
+            : "Copy your Murph referral link"
+        }
         className="h-auto px-0"
         disabled={state === "loading" || state === "copying"}
-        onClick={copyReferralLink}
+        onClick={handleAction}
         size="sm"
         type="button"
         variant="link"
@@ -97,43 +98,39 @@ export function HostedSignupReferralLinkButton(props: {
         {label}
       </Button>
       <span aria-live="polite" className="sr-only">
-        {state === "success"
+        {state === "copied"
           ? "Referral link copied."
-          : state === "error"
-            ? "Could not load or copy the referral link."
-            : ""}
+          : state === "load_error"
+            ? "Could not load the referral link."
+            : state === "copy_error"
+              ? "Could not copy the referral link."
+              : state === "ready"
+                ? "Referral link ready to copy."
+                : ""}
       </span>
     </>
   );
 }
 
-function readHostedSettingsSignupReferralLink(): Promise<string> {
-  if (!inFlightReferralLinkPromise) {
-    inFlightReferralLinkPromise = fetch(
-      "/api/settings/signup-referral-link",
-      {
-        cache: "no-store",
-        method: "GET",
-      },
-    )
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Referral link unavailable");
-        }
-        const payload = await response.json() as {
-          signupUrl?: unknown;
-        };
-        if (
-          typeof payload.signupUrl !== "string"
-          || payload.signupUrl.length === 0
-        ) {
-          throw new Error("Referral link missing");
-        }
-        return payload.signupUrl;
-      })
-      .finally(() => {
-        inFlightReferralLinkPromise = null;
-      });
+async function loadHostedSettingsSignupReferralLink(
+  signal?: AbortSignal,
+): Promise<string> {
+  const response = await fetch("/api/settings/signup-referral-link", {
+    cache: "no-store",
+    method: "GET",
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error("Referral link unavailable");
   }
-  return inFlightReferralLinkPromise;
+  const payload = await response.json() as {
+    signupUrl?: unknown;
+  };
+  if (
+    typeof payload.signupUrl !== "string"
+    || payload.signupUrl.length === 0
+  ) {
+    throw new Error("Referral link missing");
+  }
+  return payload.signupUrl;
 }
