@@ -146,3 +146,18 @@ Updated: 2026-08-05
   plus four skips across 81 files.
 - The assistant-runtime package typecheck, docs drift guard, and diff check pass
   after the correction.
+- The preliminary specialist pass accepted one coverage gap: the phase-level
+  late-context proof and the native-card transport proof were separate. The
+  existing scheduled-system-work overlap journey now admits a direct nutrition
+  request after startup, drives the real response-card tool and delivery owners,
+  and asserts one same-chat `imessage_app`, its exact capability recipient, no
+  plaintext duplicate, and no Create Chat request.
+- The corrected Cloudflare test surface typechecks, and the shared Linq helper
+  suite passes with 10 tests. The canonical hosted-local journey is pending its
+  runtime execution because the unchanged runner bundle currently exceeds its
+  checked-in total-size ceiling; a separately owned, green PR contains the
+  measured ratchet, so this lane does not duplicate or weaken that invariant.
+- Final ReviewGPT round 1 passed with no findings. It identified only a PR-body
+  accounting discrepancy: the restored native path adds the already-existing
+  capability probe before the one card-or-text send, rather than keeping the
+  old text-only request count.
