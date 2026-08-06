@@ -1,0 +1,29 @@
+name: Agent Snapshot Export
+
+on:
+  push:
+    branches:
+      - agent/linq-egress-route-contract
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Export exact Git tree
+        run: git archive --format=tar.gz --output=/tmp/murph-source.tar.gz HEAD
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: murph-source-snapshot
+          path: /tmp/murph-source.tar.gz
+          retention-days: 1
+          if-no-files-found: error
