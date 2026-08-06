@@ -9,9 +9,6 @@ import {
   automationStatusValues,
   automationSupportKindValues,
 } from '@murphai/contracts'
-import {
-  resolveAutomationUpsertSlug,
-} from '@murphai/core'
 import type {
   AssistantHostedAutomationTool,
   AssistantHostedAutomationToolRequest,
@@ -64,6 +61,16 @@ const automationTagsSchema = z
     }
   })
 
+function deriveAutomationSlugFromTitle(title: string): string {
+  // Mirrors the canonical automation title fallback without importing the
+  // filesystem-heavy core package into deferred tool schema assembly.
+  return title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+}
+
 const saveAutomationArgumentsSchema = z.object({
   action: z.literal('save'),
   activeUntil: automationActiveUntilSchema.nullable().optional(),
@@ -80,10 +87,8 @@ const saveAutomationArgumentsSchema = z.object({
   tags: automationTagsSchema.optional(),
   title: automationTitleSchema,
 }).strict().superRefine((value, context) => {
-  const requestedSlug = resolveAutomationUpsertSlug({
-    slug: value.slug,
-    title: value.title,
-  })
+  const requestedSlug =
+    value.slug ?? deriveAutomationSlugFromTitle(value.title)
   if (
     value.automationId ===
       MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
