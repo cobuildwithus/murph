@@ -118,10 +118,12 @@ describe("cloudflare worker queue backpressure routes", () => {
   });
 
   it("keeps an active write fence in flight through the production Durable Object constructor", async () => {
+    const writeDataPoint = vi.fn();
     const harness = createUserRunnerDurableObject({
       CF_VERSION_METADATA: {
         id: "worker_version_current",
       },
+      HOSTED_RUNTIME_RETRY_ANALYTICS: { writeDataPoint },
     });
     const stateStore = new RunnerStateStore(harness.storage.state);
     await stateStore.bindUser("member_123");
@@ -171,6 +173,12 @@ describe("cloudflare worker queue backpressure routes", () => {
 
     expect(state.writeFence).toMatchObject({
       kind: "runtime",
+    });
+    expect(writeDataPoint).toHaveBeenCalledOnce();
+    expect(writeDataPoint).toHaveBeenCalledWith({
+      blobs: ["murph.hosted-runtime-retry.v1", "container_rpc_error"],
+      doubles: [1, 30_000],
+      indexes: ["container_rpc_error"],
     });
   });
 

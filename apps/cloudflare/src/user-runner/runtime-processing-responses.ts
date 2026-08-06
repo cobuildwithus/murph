@@ -27,7 +27,6 @@ export function readRuntimeProcessingRetryDelayMs(
     reason === "command_budget_exhausted" ? 10_000 :
     reason === "container_rpc_timeout" ? 10_000 :
     reason === "container_rpc_error" ? 30_000 :
-    reason === "health_data_processing_disallowed" ? 60_000 :
     reason === "missing_container_binding" ? 60_000 :
     15_000;
 }

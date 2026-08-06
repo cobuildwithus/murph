@@ -292,11 +292,19 @@ murph-prod-psql-ro -f apps/cloudflare/scripts/cold-start-latency-report.sql
 
 Pass `-v window_hours=6` (or another integer) before `-f` to change the UTC
 window. The report deduplicates causal rows by runtime attempt and keeps direct
-cold starts, direct existing-runtime wakes, Temporal recovery, Temporal-only,
-and unclassified samples separate. Its second table splits direct cold starts
-across Durable Object dispatch, consent locking, the existing health-data
-admission callback, and existing runner-state operations. It returns no member,
-mailbox, trace, or attempt identifiers.
+cold starts separate from Temporal recovery. A direct sample must be the only
+row in its runtime attempt whose Web-owned request/response markers match the
+current Cloudflare route within five seconds; ambiguous races, backlog rows,
+and missing markers are omitted. The first table reports accepted-to-runner-job
+time only for those causal direct cold starts. The second reports
+Temporal-activity-to-runner-job time by recovery versus Temporal-only attempt;
+warm direct wakes are omitted because they create no new runner job. The final
+table splits the same causal direct samples across Durable Object dispatch,
+consent locking, the existing health-data admission callback, runner-state
+operations, the parallel container-readiness and invocation-preparation
+branches, invocation launch, and runner-job acceptance. Per-phase chronology
+guards omit unavailable or reversed cross-runtime clock samples. It returns no
+member, mailbox, trace, or attempt identifiers.
 
 ## Runner Container Lifecycle
 

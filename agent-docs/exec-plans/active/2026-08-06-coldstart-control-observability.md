@@ -20,8 +20,8 @@ Updated: 2026-08-06
   around existing operations.
 - Retry reasons are written to a private aggregate dataset only on the existing
   `retry_later` path, without identifiers or payloads.
-- Operators have a repeatable aggregate report with separate direct,
-  Temporal-recovery, Temporal-only, and unclassified cohorts.
+- Operators have a repeatable aggregate report with causal direct cold starts
+  separate from Temporal-recovery and Temporal-only activity timing.
 - The successful hot path gains no new network, storage, timer, or awaited
   operation.
 - Focused tests, typechecking, exact-head CI, and required review gates pass.
@@ -49,6 +49,9 @@ Updated: 2026-08-06
   has already chosen `retry_later`.
 - Aggregate dimensions must not include member, mailbox, attempt, or payload
   identifiers.
+- Health-data admission outcomes must not enter the retry analytics destination,
+  even without identifiers; the prior 60-second denial response remains local
+  to the consent boundary.
 - Keep Cloudflare execution, Web product state, and Temporal recovery ownership
   boundaries unchanged.
 
@@ -61,8 +64,9 @@ Updated: 2026-08-06
    Mitigation: use the existing epoch-millisecond trace convention and derive
    only same-request intervals with chronology guards in the report.
 3. Risk: mixed direct and recovery samples preserve the misleading tail.
-   Mitigation: classify by the accepted invocation's orchestration markers and
-   deduplicate by runtime attempt before percentile calculation.
+   Mitigation: require one Web-owned request/response marker pair matching the
+   current Cloudflare route, omit ambiguous attempts, and report Temporal
+   activity timing separately.
 4. Risk: duplicate recovery machinery creates multiple correctness owners.
    Mitigation: retain the existing accepted-attempt failure recheck and validate
    its focused concurrency and route tests instead of adding another path.
@@ -86,10 +90,18 @@ Updated: 2026-08-06
   runtime-log persistence. A duplicate path would violate single ownership.
 - Use Analytics Engine for retry aggregates because `writeDataPoint()` is a
   synchronous, immediate enqueue API and does not require `await` or
-  `waitUntil`. The write is off the successful path.
+  `waitUntil`. The write is off the successful path and excludes health-data
+  admission outcomes.
 - Use a checked-in aggregate SQL report instead of a new operations screen.
   This keeps production request paths untouched and makes cohort definitions
   reviewable and repeatable.
+- A runtime attempt is invocation-level and can be fanned out to more than one
+  mailbox trace. Direct accepted-to-runner latency therefore uses only the one
+  row whose Web-only response marker matches the current direct request and
+  Cloudflare route within five seconds; no unique match means no sample. Warm
+  direct wakes create no new runner job and are omitted. Temporal attempts use
+  activity-to-runner timing from one unambiguous attempt stamp instead of a
+  mailbox acceptance chosen by row order.
 
 ## Verification
 
@@ -102,6 +114,20 @@ Updated: 2026-08-06
 - Cloudflare, hosted-execution, and hosted-local-harness typechecks: passed.
 - The aggregate cold-start SQL report executed successfully through the
   read-only production helper and returned only cohort/phase aggregates.
+- Exact SQL PostgreSQL fixture: 3 passed, including backlog-versus-causal row
+  selection, racing-direct omission, Temporal deduplication, missing stamps,
+  reversed phases, and invalid chronology.
+- ReviewGPT preliminary specialists: coverage findings accepted and resolved;
+  the production Durable Object binding, non-zero timestamp boundaries, exact
+  SQL fixture, and retry query/writer schema contract are now covered.
+- ReviewGPT final round 1: privacy and causal-attribution findings accepted and
+  resolved; consent denial emits no analytics/log event and the report no
+  longer selects the oldest mailbox row or reports warm accepted-to-runner
+  latency.
+- Corrected Cloudflare focused tests: 121 passed, 1 opt-in PostgreSQL test
+  skipped in the default lane; the opt-in PostgreSQL lane passed all 3 report
+  tests.
+- Corrected Cloudflare typecheck: passed.
 - `git diff --check`: passed.
-- Pending: exact-head CI, ReviewGPT gates, parent final review, plan closure,
-  and mergeability proof.
+- Pending: corrected-head ReviewGPT, exact-head CI, parent final review, plan
+  closure, and mergeability proof.
