@@ -12,16 +12,20 @@ export interface RuntimeProcessingCommandBudget {
 
 export function createRuntimeProcessingCommandBudget(input: {
   commandTimeoutMs: number | null;
+  requestStartedAtMs?: number | null;
   startedAtMs: number;
   webControlTimeoutMs: number;
 }): RuntimeProcessingCommandBudget {
-  const effectiveTimeoutMs = Math.min(
-    input.webControlTimeoutMs,
-    input.commandTimeoutMs ?? DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
+  const requestStartedAtMs = Math.min(
+    input.requestStartedAtMs ?? input.startedAtMs,
+    input.startedAtMs,
   );
+  const requestDeadlineAtMs = requestStartedAtMs
+    + (input.commandTimeoutMs ?? DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS);
+  const localDeadlineAtMs = input.startedAtMs + input.webControlTimeoutMs;
   return {
-    deadlineAtMs:
-      input.startedAtMs + effectiveTimeoutMs - HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
+    deadlineAtMs: Math.min(requestDeadlineAtMs, localDeadlineAtMs)
+      - HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
   };
 }
 

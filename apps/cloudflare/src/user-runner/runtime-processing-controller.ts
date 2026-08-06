@@ -162,9 +162,17 @@ export class RuntimeProcessingController {
     });
     const commandBudget = createRuntimeProcessingCommandBudget({
       commandTimeoutMs: processingInput.commandTimeoutMs ?? null,
+      requestStartedAtMs:
+        processingInput.orchestration?.temporalActivityRequestStartedAtEpochMs ?? null,
       startedAtMs: runtimeWakeStartedAt,
       webControlTimeoutMs: this.input.env.webControlTimeoutMs,
     });
+    if (!this.hasRuntimeProcessingCommandBudgetRemaining(commandBudget)) {
+      return createRuntimeProcessingRetryLater({
+        reason: "command_budget_exhausted",
+        userId: processingInput.userId,
+      });
+    }
     await this.input.stateStore.bindUser(processingInput.userId);
     const record = await this.input.stateStore.readState();
     if (record.writeFence) {

@@ -1419,6 +1419,114 @@ describe("HostedUserRunner execution coordination", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
   });
 
+  it("includes elapsed Temporal request time in the caller command budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspaceReadTimeouts: number[] = [];
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { invoke, runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      onWorkspaceRead: (input) => {
+        workspaceReadTimeouts.push(input.timeoutMs);
+      },
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 10_000,
+      orchestration: {
+        temporalActivityRequestStartedAtEpochMs: Date.now() - 7_000,
+      },
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    expect(workspaceReadTimeouts).toEqual([2_000]);
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+      ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+    )).toEqual([
+      [expect.objectContaining({ timeoutMs: 2_000 })],
+    ]);
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 2_000,
+      userId: TEST_USER_ID,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+  });
+
+  it("returns retry_later when the Temporal request command budget is already exhausted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const onWorkspaceRead = vi.fn();
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      onWorkspaceRead,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 10_000,
+      orchestration: {
+        temporalActivityRequestStartedAtEpochMs: Date.now() - 9_000,
+      },
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:10.000Z",
+    });
+
+    expect(onWorkspaceRead).not.toHaveBeenCalled();
+    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+  });
+
+  it("does not let future Temporal request timing extend the local command budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspaceReadTimeouts: number[] = [];
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      onWorkspaceRead: (input) => {
+        workspaceReadTimeouts.push(input.timeoutMs);
+      },
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 5_000,
+      orchestration: {
+        temporalActivityRequestStartedAtEpochMs: Date.now() + 60_000,
+      },
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    expect(workspaceReadTimeouts).toEqual([4_000]);
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 4_000,
+      userId: TEST_USER_ID,
+    });
+  });
+
   it("does not let caller timeout metadata increase Cloudflare's configured cap", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -1437,6 +1545,9 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs: 120_000,
+      orchestration: {
+        temporalActivityRequestStartedAtEpochMs: Date.now() - 7_000,
+      },
       orchestrationAttemptId: "test-orchestration-attempt",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
@@ -4316,7 +4427,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("serializes simultaneous fresh ensure calls behind one write fence", async () => {
+  it("serializes simultaneous direct and Temporal ensures behind one write fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
@@ -4335,10 +4446,15 @@ describe("HostedUserRunner execution coordination", () => {
 
     const results = await Promise.all([
       runner.ensureRuntimeProcessingForUser({
+        orchestration: { triggeredByWebDirect: true },
         orchestrationAttemptId: "test-orchestration-attempt-first",
         userId: TEST_USER_ID,
       }),
       runner.ensureRuntimeProcessingForUser({
+        commandTimeoutMs: 10_000,
+        orchestration: {
+          temporalActivityRequestStartedAtEpochMs: Date.now(),
+        },
         orchestrationAttemptId: "test-orchestration-attempt-second",
         userId: TEST_USER_ID,
       }),
