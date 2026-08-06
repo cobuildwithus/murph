@@ -53,6 +53,10 @@ import {
   createHostedPulseTrialStripeCustomer,
 } from "./pulse-trial-customer";
 import {
+  parseHostedPulseTrialStartSource,
+  type HostedPulseTrialStartSource,
+} from "./pulse-trial-start-source";
+import {
   writeHostedMemberStripeBillingTx,
 } from "./stripe-billing-policy";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
@@ -94,6 +98,10 @@ export interface HostedAutoPulseTrialEnrollmentInput {
   member: HostedAutoPulseTrialAuthenticatedMember;
   now?: Date;
   prisma?: PrismaClient;
+  pulseTrialStartSource: Exclude<
+    HostedPulseTrialStartSource,
+    "linq_instant_start"
+  >;
   suppressSignupWelcome?: boolean;
 }
 
@@ -131,6 +139,7 @@ type HostedAutoPulseTrialEnrollmentPolicy = {
     inviteCode: string;
   };
   provisionUnderMemberLock: boolean;
+  pulseTrialStartSource: HostedPulseTrialStartSource;
   requireLaunchConsent: boolean;
   requireUnboundStripeCustomer: boolean;
   suppressSignupWelcome: boolean;
@@ -233,6 +242,11 @@ type HostedAutoPulseTrialEnrollmentWithPolicyResult = {
   result: HostedAutoPulseTrialEnrollmentResult;
 };
 
+type HostedAutoPulseTrialEnrollmentWithPolicyInput = Pick<
+  HostedAutoPulseTrialEnrollmentInput,
+  "inviteCode" | "member" | "now" | "prisma"
+>;
+
 const EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS: HostedAutoPulseTrialPostCommitEffects = {
   activatedMemberId: null,
   hostedExecutionEventId: null,
@@ -244,6 +258,7 @@ export async function ensureHostedAutoPulseTrialEnrollment(
 ): Promise<HostedAutoPulseTrialEnrollmentResult> {
   const enrollment = await ensureHostedAutoPulseTrialEnrollmentWithPolicy(input, {
     provisionUnderMemberLock: false,
+    pulseTrialStartSource: input.pulseTrialStartSource,
     requireLaunchConsent: true,
     requireUnboundStripeCustomer: false,
     suppressSignupWelcome: input.suppressSignupWelcome ?? false,
@@ -280,6 +295,7 @@ export async function ensureHostedLinqInstantStartPulseTrialEnrollment(
     // transition. Keep provider provisioning inside the existing member owner
     // so another inbound cannot observe a customer-bound inactive midpoint.
     provisionUnderMemberLock: true,
+    pulseTrialStartSource: "linq_instant_start",
     requireLaunchConsent: false,
     // Instant start is only for a genuinely new billing identity. Reusing an
     // existing customer could silently inherit a saved payment method and
@@ -308,7 +324,7 @@ export async function runHostedLinqInstantStartDeferredActivationWakeBestEffort(
 }
 
 async function ensureHostedAutoPulseTrialEnrollmentWithPolicy(
-  input: HostedAutoPulseTrialEnrollmentInput,
+  input: HostedAutoPulseTrialEnrollmentWithPolicyInput,
   policy: HostedAutoPulseTrialEnrollmentPolicy,
 ): Promise<HostedAutoPulseTrialEnrollmentWithPolicyResult> {
   const prisma = input.prisma ?? getPrisma();
@@ -385,7 +401,10 @@ async function ensureHostedAutoPulseTrialEnrollmentWithPolicy(
   assertHostedAutoPulseTrialEligible(initialMember);
   assertHostedAutoPulseTrialCustomerPolicy(initialMember, policy);
 
-  const metadata = buildHostedAutoPulseTrialMetadata(invite.member.id);
+  const metadata = buildHostedAutoPulseTrialMetadata(
+    invite.member.id,
+    policy.pulseTrialStartSource,
+  );
 
   if (policy.provisionUnderMemberLock) {
     return ensureHostedAutoPulseTrialEnrollmentUnderMemberLock({
@@ -1337,6 +1356,9 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
     member: input.currentMember,
     pulseTrialPolicyVersion: trialPolicyVersion,
     pulseTrialRedeemedAt: input.trialSnapshot.trialStartedAt,
+    pulseTrialStartSource: parseHostedPulseTrialStartSource(
+      input.subscription.metadata.pulseTrialStartSource,
+    ),
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.subscription.id,
     tx: input.tx,
@@ -1497,12 +1519,18 @@ function readHostedAutoPulseTrialEligibilityError(
   return null;
 }
 
-function buildHostedAutoPulseTrialMetadata(memberId: string): Record<string, string> {
-  return buildHostedBillingOfferMetadata({
-    billingPlanCode: "launch_monthly",
-    checkoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-    memberId,
-  });
+function buildHostedAutoPulseTrialMetadata(
+  memberId: string,
+  pulseTrialStartSource: HostedPulseTrialStartSource,
+): Record<string, string> {
+  return {
+    ...buildHostedBillingOfferMetadata({
+      billingPlanCode: "launch_monthly",
+      checkoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+      memberId,
+      pulseTrialStartSource,
+    }),
+  };
 }
 
 async function createHostedAutoPulseTrialStripeSubscription(input: {

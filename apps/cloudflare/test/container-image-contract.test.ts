@@ -493,7 +493,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).not.toContain("bubblewrap \\");
     expect(baseDockerfile).toContain("file \\");
     expect(baseDockerfile).toContain("jq \\");
-    expect(baseDockerfile).toContain("mupdf-tools \\");
+    expect(baseDockerfile).not.toContain("mupdf-tools");
     expect(baseDockerfile).toContain("poppler-utils \\");
     expect(baseDockerfile).toContain("python-is-python3 \\");
     expect(baseDockerfile).toContain("python3 \\");
@@ -862,13 +862,12 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain("codexHostedCliVaultCommandProofCount");
     expect(hostedRunnerSmokeChild).toContain("codexHostedCliVaultWriteProofCount");
     expect(hostedRunnerSmokeChild).toContain("codexHostedShellPythonVersion");
-    expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("mutool")');
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("pdfinfo")');
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("pdftotext")');
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("pdftoppm")');
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("qpdf")');
     expect(hostedRunnerSmokeChild).toContain('runTextCommand("qpdf", ["--check", input.pdfPath])');
-    expect(hostedRunnerSmokeChild).toContain('runTextCommand("mutool", ["info", input.pdfPath])');
+    expect(hostedRunnerSmokeChild).not.toContain('runTextCommand("mutool"');
     expect(hostedRunnerSmokeChild).toContain('expectedProviderId: "poppler.pdf"');
     expect(hostedRunnerSmokeChild).toContain("pdfParserProviderId: pdfParse.providerId");
     expect(hostedRunnerSmokeChild).toContain('"libmp3lame",\n    "-b:a",\n    "64k"');
