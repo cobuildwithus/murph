@@ -14,6 +14,9 @@ import {
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
+  HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
+} from "./signup-referral-policy";
+import {
   buildHostedUsageReferralOutstandingWhere,
   HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS,
   HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
@@ -22,17 +25,9 @@ import {
 
 export const HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED_ENV =
   "HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED";
-export const HOSTED_SIGNUP_REFERRAL_POLICY_VERSION =
-  "hosted-signup-referral-activation-2026-08-v1";
 export const HOSTED_SIGNUP_REFERRAL_RECOVERY_BATCH_SIZE = 50;
 export const HOSTED_SIGNUP_REFERRAL_RECOVERY_LOOKBACK_MS =
   30 * 24 * 60 * 60 * 1_000;
-
-export const HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY = {
-  requirementsLabel:
-    "A new member completed Murph setup through your referral link.",
-  title: "Invite someone to Murph",
-} as const;
 
 const SIGNUP_REFERRAL_RECEIPT_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -49,8 +44,7 @@ type HostedSignupReferralAdmissionOutcome =
   | "ambiguous_attribution"
   | "disqualified"
   | "not_activated"
-  | "not_attributed"
-  | "route_unavailable";
+  | "not_attributed";
 
 export interface HostedSignupReferralAdmissionResult {
   outcome: HostedSignupReferralAdmissionOutcome;
@@ -67,12 +61,6 @@ export function isHostedSignupReferralRewardEnabled(
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): boolean {
   return source[HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED_ENV] === "1";
-}
-
-export function isHostedSignupReferralPolicyVersion(
-  policyVersion: string,
-): boolean {
-  return policyVersion === HOSTED_SIGNUP_REFERRAL_POLICY_VERSION;
 }
 
 /**
@@ -176,13 +164,11 @@ export async function admitHostedSignupReferralActivation(input: {
   referrerMemberId: string;
 }): Promise<HostedSignupReferralAdmissionResult> {
   const prisma = input.prisma ?? getPrisma();
-  const sourceConversation = await resolveHostedSignupReferralSourceConversation({
-    prisma,
-    referrerMemberId: input.referrerMemberId,
-  });
-  if (!sourceConversation) {
-    return { outcome: "route_unavailable", referralId: null };
-  }
+  const sourceConversation =
+    await resolveOptionalHostedSignupReferralSourceConversation({
+      prisma,
+      referrerMemberId: input.referrerMemberId,
+    });
 
   return prisma.$transaction(async (tx) => {
     await acquireHostedSignupReferralReferrerLockTx({
@@ -319,7 +305,9 @@ export async function admitHostedSignupReferralActivation(input: {
         referrerMemberId: input.referrerMemberId,
         rewardUsdMicros:
           HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
-        sourceConversationJson: sourceConversation,
+        ...(sourceConversation
+          ? { sourceConversationJson: sourceConversation }
+          : {}),
         status: "target_bound",
         targetBoundAt: attribution.createdAt,
       },
@@ -328,7 +316,7 @@ export async function admitHostedSignupReferralActivation(input: {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
-async function resolveHostedSignupReferralSourceConversation(input: {
+async function resolveOptionalHostedSignupReferralSourceConversation(input: {
   prisma: PrismaClient;
   referrerMemberId: string;
 }): Promise<Prisma.InputJsonObject | null> {

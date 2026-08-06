@@ -9,7 +9,7 @@ import type {
 import {
   HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY,
   isHostedSignupReferralPolicyVersion,
-} from "../hosted-growth/signup-referral-reward";
+} from "../hosted-growth/signup-referral-policy";
 import {
   buildHostedUsageReferralOutstandingWhere,
   buildHostedUsageReferralRewardLabel,

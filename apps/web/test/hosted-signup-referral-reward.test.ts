@@ -244,9 +244,10 @@ describe("hosted signup referral reward admission", () => {
     });
   });
 
-  it("waits rather than creating an uncelebratable receipt without a direct route", async () => {
+  it("admits credit evidence even when no direct celebration route exists", async () => {
     mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(null);
-    const { introducedMemberId, prisma, referrerMemberId } = createPrisma();
+    const { created, introducedMemberId, prisma, referrerMemberId } =
+      createPrisma();
 
     await expect(admitHostedSignupReferralActivation({
       activatedAt: ACTIVATED_AT,
@@ -254,9 +255,14 @@ describe("hosted signup referral reward admission", () => {
       prisma: prisma as never,
       referrerMemberId,
     })).resolves.toEqual({
-      outcome: "route_unavailable",
-      referralId: null,
+      outcome: "admitted",
+      referralId: "hur_signup_link",
     });
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(created[0]).toMatchObject({
+      introducedMemberId,
+      status: "target_bound",
+    });
+    expect(created[0]).not.toHaveProperty("sourceConversationJson");
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
 });
