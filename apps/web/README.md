@@ -676,6 +676,12 @@ Hosted onboarding extras:
 - `RESEND_API_KEY`, `HOSTED_SIGNUP_WELCOME_EMAIL_FROM`, and `HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME` enable the plain-text post-activation signup welcome email to the member's verified email address, or to the Stripe checkout email when no verified email is linked yet. Leave any of them unset to disable the send path.
 - `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients when Stripe reconciliation accepts a hosted signup or trial activation. Leave it unset to disable the internal notification path.
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
+- `HOSTED_LINQ_ALERT_EMAIL_FROM` and `HOSTED_LINQ_ALERT_EMAILS`, together with
+  `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe
+  uses it for metadata-only alerts on caught provider-call failures, new
+  verified payment-failure events, and the first failed reconciliation attempt.
+  Both website and iMessage Assistant billing use the same Web-owned Stripe
+  services, so there is no separate channel-specific configuration.
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID`
 - `PRIVY_CUSTOM_AUTH_DOMAIN`
@@ -1055,6 +1061,12 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   The time zone is the monitor opt-in: without it the monitor stays disabled;
   with it, incomplete Resend email config or an invalid time zone fails the
   cron visibly. The latency path has no Linq/iMessage fallback.
+- The same `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`, and
+  `HOSTED_LINQ_ALERT_EMAILS` configuration enables Stripe failure alerts. No
+  time-zone setting is required for Stripe alerts. Confirm that the Stripe
+  webhook endpoint subscribes to `checkout.session.async_payment_failed`,
+  `payment_intent.payment_failed`, `invoice.payment_failed`, and
+  `invoice.finalization_failed`.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep

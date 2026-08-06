@@ -44,6 +44,8 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberStripeBillingLookupState: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
+  scheduleHostedStripeOperationFailureAlert: vi.fn(),
+  scheduleHostedStripeReconciliationFailureAlert: vi.fn(),
   sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
   sendHostedSignupWelcomeEmailForMember: vi.fn(),
   sendHostedSubscriptionCancellationEmailForMember: vi.fn(),
@@ -233,6 +235,13 @@ vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", async () => {
 vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
   sendHostedSignupNotificationEmailForMemberBestEffort:
     mocks.sendHostedSignupNotificationEmailForMemberBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/stripe-alert-email", () => ({
+  scheduleHostedStripeOperationFailureAlert:
+    mocks.scheduleHostedStripeOperationFailureAlert,
+  scheduleHostedStripeReconciliationFailureAlert:
+    mocks.scheduleHostedStripeReconciliationFailureAlert,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/subscription-cancellation-email", () => ({
@@ -1397,6 +1406,13 @@ describe("hosted Stripe event reconciliation", () => {
         poisoned: false,
       }),
     );
+    expect(
+      mocks.scheduleHostedStripeReconciliationFailureAlert,
+    ).toHaveBeenCalledWith({
+      errorCode: "Error",
+      eventId: event.id,
+      eventType: event.type,
+    });
 
     prisma.rows[0]!.nextAttemptAt = new Date(0);
     await expect(reconcileHostedStripeEventById({
@@ -1409,6 +1425,9 @@ describe("hosted Stripe event reconciliation", () => {
       {},
       { idempotencyKey: "hosted-family-legacy-cancel:sub_123" },
     );
+    expect(
+      mocks.scheduleHostedStripeReconciliationFailureAlert,
+    ).toHaveBeenCalledTimes(1);
     errorSpy.mockRestore();
   });
 

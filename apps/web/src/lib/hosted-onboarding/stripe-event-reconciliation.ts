@@ -79,6 +79,7 @@ import {
   logHostedStripeFailure,
   withHostedStripeFailureLog,
 } from "./stripe-error-log";
+import { scheduleHostedStripeReconciliationFailureAlert } from "./stripe-alert-email";
 import {
   cleanupHostedStandardCheckoutLoser,
   HostedStripeCheckoutLoserCleanupPendingError,
@@ -1007,6 +1008,7 @@ async function processClaimedHostedStripeEvent(
       !(error instanceof HostedStripeEventRetrieveRetryableError) &&
       !usageCreditEventHandled &&
       !isHostedUsageCreditStripeRetryableError(error);
+    const reconciliationErrorCode = deriveHostedStripeEventErrorCode(error);
     logHostedStripeEventReconciliationFailure({
       attemptCount: claimed.attemptCount,
       error,
@@ -1014,6 +1016,13 @@ async function processClaimedHostedStripeEvent(
       eventType: claimed.type,
       poisoned,
     });
+    if (claimed.attemptCount === 1) {
+      scheduleHostedStripeReconciliationFailureAlert({
+        errorCode: reconciliationErrorCode,
+        eventId: claimed.eventId,
+        eventType: claimed.type,
+      });
+    }
     await prisma.hostedStripeEvent.updateMany({
       where: {
         attemptCount: claimed.attemptCount,
@@ -1023,7 +1032,7 @@ async function processClaimedHostedStripeEvent(
       data: {
         claimExpiresAt: null,
         lastErrorCode: sanitizeHostedOnboardingPersistedErrorCode(
-          deriveHostedStripeEventErrorCode(error),
+          reconciliationErrorCode,
         ),
         lastErrorMessage: sanitizeHostedOnboardingPersistedErrorMessage(
           error instanceof Error ? error.message : String(error),

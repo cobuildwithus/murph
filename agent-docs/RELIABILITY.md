@@ -321,6 +321,20 @@ Last verified: 2026-08-05
   Stripe webhooks remain the retry and local-reconciliation owner after the
   customer confirms the change; the unsigned return query is display/polling
   context only and never entitlement authority.
+- Stripe failure email reuses the shared operational Resend transport as a
+  best-effort projection, never a retry or billing owner. The central provider
+  call observer schedules one metadata-only alert for a caught Stripe
+  rejection; new verified `checkout.session.async_payment_failed`,
+  `payment_intent.payment_failed`, `invoice.payment_failed`, and
+  `invoice.finalization_failed` receipts schedule event-scoped alerts; and only
+  the first failed local reconciliation attempt schedules a reconciliation
+  alert. Request- and event-derived keys provide provider replay defense inside
+  Resend's external idempotency window. Duplicate webhook receipts do not
+  schedule another payment alert, later local reconciliation attempts do not
+  schedule another reconciliation alert, and missing configuration or send
+  failure cannot change the original checkout, webhook, retry, poison, or
+  entitlement outcome. There is no new queue, cursor, retry loop, or persisted
+  alert state.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.

@@ -1,5 +1,6 @@
 import { sanitizeHostedOnboardingLogString } from "./http";
 import type { HostedOnboardingStructuredLogDetails } from "./logging";
+import { scheduleHostedStripeOperationFailureAlert } from "./stripe-alert-email";
 
 const STRIPE_ERROR_TOKEN_MAX_LENGTH = 120;
 const STRIPE_ERROR_MESSAGE_MAX_LENGTH = 240;
@@ -84,19 +85,23 @@ function describeHostedStripeErrorForLog(input: {
 }
 
 /**
- * Records a failed Stripe call so it stays diagnosable even when the caller
- * swallows or reshapes the rejection.
+ * Records and schedules a metadata-only alert for a failed Stripe call so it
+ * stays diagnosable even when the caller swallows or reshapes the rejection.
  */
 export function logHostedStripeFailure(input: {
   error: unknown;
   operationName: string;
 }): void {
   console.error("Hosted Stripe call failed.", describeHostedStripeErrorForLog(input));
+  scheduleHostedStripeOperationFailureAlert({
+    fields: describeHostedStripeError(input.error),
+    operationName: input.operationName,
+  });
 }
 
 /**
- * Logs any Stripe rejection and rethrows it untouched. Observability only: it
- * never changes control flow, retries or status codes.
+ * Observes any Stripe rejection and rethrows it untouched. It never changes
+ * control flow, retries or status codes.
  */
 export async function withHostedStripeFailureLog<T>(
   operationName: string,

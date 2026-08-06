@@ -1471,6 +1471,18 @@ purpose/version metadata, status, and Charge, and then calls the same grant,
 refund, and dispute owners. Browser state and synchronous PaymentIntent
 responses never grant credit.
 
+Stripe failure email is a best-effort observability projection at these shared
+Web-owned boundaries, not a billing owner. Caught provider-operation failures
+from website or assistant billing, a new verified canonical payment-failure
+event, and the first failed local event-reconciliation attempt schedule a
+plain-text Resend alert through the existing operational sender and recipient
+allowlist. Alert content is limited to bounded error tokens, operation/event
+type, opaque Stripe request/event correlation, HTTP status, and live/test mode;
+member identity, contact details, checkout contents, raw errors, and provider
+payloads are excluded. Stripe receipts retain retry authority, and alert
+configuration or delivery failure cannot alter checkout results, webhook
+acknowledgement, entitlement, or reconciliation state.
+
 Established Linq direct messages and established external-thread group messages
 resolve only a narrow blind-index/member-id preflight target and unwrap the
 mailbox-payload ingress root before the planner transaction opens. The direct

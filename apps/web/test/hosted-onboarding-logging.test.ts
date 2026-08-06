@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const stripeAlertMocks = vi.hoisted(() => ({
+  scheduleHostedStripeOperationFailureAlert: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/stripe-alert-email", () => ({
+  scheduleHostedStripeOperationFailureAlert:
+    stripeAlertMocks.scheduleHostedStripeOperationFailureAlert,
+}));
+
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
@@ -82,6 +91,10 @@ describe("hosted onboarding timing logging", () => {
 });
 
 describe("hosted Stripe failure logging", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -132,6 +145,21 @@ describe("hosted Stripe failure logging", () => {
       stripeRequestId: "req_abc123",
       stripeStatusCode: 400,
       stripeType: "StripeInvalidRequestError",
+    });
+    expect(
+      stripeAlertMocks.scheduleHostedStripeOperationFailureAlert,
+    ).toHaveBeenCalledWith({
+      fields: {
+        code: "subscription_paused",
+        declineCode: null,
+        message: "Cannot update a paused subscription.",
+        param: "pause_collection",
+        rawType: "invalid_request_error",
+        requestId: "req_abc123",
+        statusCode: 400,
+        type: "StripeInvalidRequestError",
+      },
+      operationName: "subscription.update.paused-pre-resume-cleanup",
     });
   });
 
