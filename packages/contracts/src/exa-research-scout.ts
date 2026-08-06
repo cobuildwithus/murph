@@ -154,7 +154,7 @@ const unsafePublicResearchQuestionPatterns = [
   /\b(?:https?:\/\/|www\.)\S+/iu,
   /[^\s@]+@[^\s@]+\.[^\s@]+/u,
   /\b(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+[a-z]{2,24}(?:\/\S*)?\b/iu,
-  /\b\+?\d[\d\s().-]{8,}\d\b/u,
+  /(?<!\d)\+?(?:\d[\s().-]*){9,}\d(?!\d)/u,
   /\b(?:dob|date of birth|birthdate|born on)\b/iu,
   /\b(?:my|mine|me|i'm|i've|i have|i am|i was|i take|i use|i weigh|i should|i can|i could|i would|should i|can i|could i|would i)\b/iu,
   /\b(?:member|patient|user)[-_ ]?id\b/iu,
