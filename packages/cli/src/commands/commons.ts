@@ -1,9 +1,11 @@
 import { Cli, z } from "incur";
 import {
   HEALTH_COMMONS_PAGE_STATUSES,
+  HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT,
   getGeneratedHealthCommonsProtocolFamilyGraphReader,
   getGeneratedHealthCommonsProtocolIndexReader,
   getGeneratedHealthCommonsProtocolRunSpecReader,
+  searchGeneratedHealthCommonsKnowledge,
   type HealthCommonsProtocolEntitySummary,
   type HealthCommonsProtocolFamilyGraphReader,
   type HealthCommonsProtocolIndexEntry,
@@ -102,6 +104,35 @@ export const commonsProtocolExploreResultSchema = z.object({
   })),
 });
 
+const commonsKnowledgeItemSchema = z.object({
+  caveat: z.string().min(1).nullable(),
+  entityKey: z.string().min(1),
+  entityTitle: z.string().min(1),
+  kind: z.enum(["appraisal", "claim", "overview", "safety", "source_finding"]),
+  strength: z.string().min(1).nullable(),
+  text: z.string().min(1),
+  sources: z.array(z.object({
+    authors: z.string().min(1).nullable(),
+    designKind: z.string().min(1).nullable(),
+    doi: z.string().min(1).nullable(),
+    participantCount: z.number().int().nonnegative().nullable(),
+    pmid: z.string().min(1).nullable(),
+    sourceKey: z.string().min(1),
+    title: z.string().min(1),
+    url: z.string().url().nullable(),
+    year: z.number().int().nullable(),
+  })),
+});
+
+export const commonsKnowledgeSearchResultSchema = z.object({
+  available: z.boolean(),
+  catalogHash: z.string(),
+  items: z.array(commonsKnowledgeItemSchema),
+  query: z.string().min(1),
+  safety: commonsKnowledgeItemSchema.nullable(),
+  warning: z.string().min(1).nullable(),
+});
+
 export function registerCommonsCommands(cli: Cli.Cli) {
   const commons = Cli.create("commons", {
     description:
@@ -111,6 +142,49 @@ export function registerCommonsCommands(cli: Cli.Cli) {
   const protocol = Cli.create("protocol", {
     description:
       "Read public Health Commons protocol variants. Private vault protocols stay under the top-level protocol command.",
+  });
+
+  const knowledge = Cli.create("knowledge", {
+    description:
+      "Search bounded source-backed Health Commons knowledge without starting an experiment.",
+  });
+
+  knowledge.command("search", {
+    description:
+      "Return a small evidence packet for a substantive health topic. Use a few English medical or health terms.",
+    args: z.object({
+      query: z.string().min(2).max(240),
+    }),
+    options: z.object({
+      limit: z.number().int().positive().max(HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT).default(3),
+    }),
+    examples: [{
+      description: "Find evidence and safety context about dry sauna.",
+      args: { query: "dry sauna evidence" },
+      options: { limit: 3 },
+    }],
+    output: commonsKnowledgeSearchResultSchema,
+    run({ args, options }) {
+      try {
+        return {
+          available: true,
+          ...searchGeneratedHealthCommonsKnowledge({
+            limit: options.limit,
+            query: args.query,
+          }),
+          warning: null,
+        };
+      } catch {
+        return {
+          available: false,
+          catalogHash: "",
+          items: [],
+          query: args.query,
+          safety: null,
+          warning: "Health Commons knowledge index is unavailable; continue without corpus context.",
+        };
+      }
+    },
   });
 
   protocol.command("list", {
@@ -283,6 +357,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
   });
 
   commons.command(protocol);
+  commons.command(knowledge);
   cli.command(commons);
 }
 
