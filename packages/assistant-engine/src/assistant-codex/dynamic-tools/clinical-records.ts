@@ -12,7 +12,7 @@ export const MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL = {
   name: 'create_clinical_records_connect_link',
   description: [
     'Create one short-lived Murph link for the current user to connect Epic or MyChart clinical records.',
-    'Use only in a private conversation after the current user asks to connect or import their provider records.',
+    'Use only in a private conversation after the current user asks to connect or import their provider records, or on an exact scheduled occurrence whose saved instructions request that link.',
     'This tool accepts no provider, member, recipient, portal credential, or account fields.',
     'Use the returned first-party connectUrl in the reply without changing it because its fragment carries the single-use browser claim.',
     'Never fabricate or reuse a Clinical Records connection URL.',

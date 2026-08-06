@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -192,6 +193,85 @@ describe("hosted assistant personalization tool owner adapter", () => {
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
     expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
+  });
+
+  it("applies an exact scheduled update without fabricating message authority", async () => {
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: {
+        automationId: "automation_daily_style",
+        occurrenceAt: "2026-08-06T14:30:00.000Z",
+      },
+      memberId: "member_personalization_1",
+      request: { action: "update", tone: "casual" },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
+    })).resolves.toMatchObject({
+      action: "update",
+      result: { status: "saved" },
+    });
+
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx)
+      .toHaveBeenCalledWith(
+        "member_personalization_1",
+        { prisma: expect.objectContaining({ tx: true }) },
+      );
+    expect(mocks.readHostedMailboxConversationWakeByAssistantInputId)
+      .not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx)
+      .not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+      causalOrigin: "turn",
+      memberId: "member_personalization_1",
+      occurredAt: "2026-08-06T14:30:00.000Z",
+      preferences: { tone: "casual" },
+      prisma: expect.objectContaining({ tx: true }),
+      updateId: buildScheduledPreferenceUpdateId("tone-voice"),
+    });
+  });
+
+  it("uses an independent stable identity for scheduled personality updates", async () => {
+    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
+      appliedFields: ["humor"],
+      assistantPersona: null,
+      assistantPersonality: {
+        detail: null,
+        humor: 8,
+        push: null,
+        unhinged: null,
+      },
+      assistantTone: "formal",
+      assistantVoice: "warm",
+      dispatch: { mailboxItemId: "mailbox_scheduled_personality" },
+      updated: true,
+    });
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: {
+        automationId: "automation_daily_style",
+        occurrenceAt: "2026-08-06T14:30:00.000Z",
+      },
+      memberId: "member_personalization_1",
+      request: {
+        action: "update_personality",
+        personality: { humor: 8 },
+      },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
+    })).resolves.toMatchObject({
+      action: "update_personality",
+      result: { outcomes: { humor: "saved" } },
+    });
+
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+      causalOrigin: "turn",
+      memberId: "member_personalization_1",
+      occurredAt: "2026-08-06T14:30:00.000Z",
+      preferences: { personality: { humor: 8 } },
+      prisma: expect.objectContaining({ tx: true }),
+      updateId: buildScheduledPreferenceUpdateId("personality"),
+    });
+    expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_personalization_1",
+      mailboxItemId: "mailbox_scheduled_personality",
+    });
   });
 
   it("checks runtime access before resolving causal input authority", async () => {
@@ -825,6 +905,19 @@ describe("hosted assistant personalization tool owner adapter", () => {
     expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
   });
 });
+
+function buildScheduledPreferenceUpdateId(
+  operation: "personality" | "tone-voice",
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      automationId: "automation_daily_style",
+      occurrenceAt: "2026-08-06T14:30:00.000Z",
+      operation,
+      schema: "murph.scheduled-assistant-preference-update.v1",
+    }))
+    .digest("hex");
+}
 
 function buildLinqStyleWake(input: {
   routeAuthority?: {

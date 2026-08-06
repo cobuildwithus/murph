@@ -45,5 +45,14 @@ export function createHostedRuntimeAssistantPersonalizationToolPort(input: {
 function buildAssistantPersonalizationAuthorityPath(
   authority: HostedRuntimeAssistantPersonalizationToolAuthority,
 ): string {
-  return `${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=${encodeURIComponent(authority.assistantInputId)}`;
+  if ('assistantInputId' in authority) {
+    return `${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=${
+      encodeURIComponent(authority.assistantInputId)
+    }`;
+  }
+  const search = new URLSearchParams({
+    automationId: authority.automationId,
+    occurrenceAt: authority.occurrenceAt,
+  });
+  return `${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?${search}`;
 }

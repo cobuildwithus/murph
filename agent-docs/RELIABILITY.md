@@ -924,3 +924,18 @@ Last verified: 2026-08-05
   consumed-event record written in the same transaction as acceptance; it is
   deliberately deferred until a real occurrence or a broader offer-state change
   justifies the table.
+
+## Scheduled tool parity and replay
+
+Canonical scheduled turns receive composable tools through one exact-occurrence
+resolver rather than per-tool cron exceptions. The derived effect anchor is stable
+across retries of the same occurrence and changes for the next occurrence, so
+product-feedback deduplication and generated-image/physical-note continuation keep
+deterministic identity without new persisted state. Existing Web owners still
+decide whether a write is saved, unchanged, unavailable, or ambiguous.
+
+Progress updates are the deliberate exception: queue-only cron work has no active
+reader and an ephemeral update could arrive after the final outbox reply. The
+planner therefore continues to omit `send_progress_update` while exposing the
+durable/final-result tools. Additive personalization query parameters preserve the
+existing accepted-input route during a Web-first deployment window.

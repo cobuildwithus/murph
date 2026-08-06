@@ -76,6 +76,7 @@ import {
   type AssistantProgressDelivery,
 } from '../turn-progress.js'
 import {
+  resolveAssistantHostedScheduledInvocationScope,
   resolveAssistantHostedScheduledPhoneCallScope,
   type AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
@@ -456,6 +457,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   }
   const privateInteractiveAudience = conversationScope === 'direct'
+  const scheduledInvocationScope =
+    resolveAssistantHostedScheduledInvocationScope({
+      conversationScope,
+      messageInput: input.input,
+      originSessionId: input.session.sessionId,
+    })
   const scheduledPhoneCallScope =
     resolveAssistantHostedScheduledPhoneCallScope({
       channel: input.input.channel,
@@ -503,8 +510,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   const responseCardsAvailable =
     privateInteractiveProviderTurn &&
-    ((ordinaryInboundTurn &&
-      input.input.scheduledInvocationAuthority == null) ||
+    (scheduledInvocationScope !== null ||
+      (ordinaryInboundTurn &&
+        input.input.scheduledInvocationAuthority == null) ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
   const shouldUseCommittedTranscriptHistory =
@@ -522,7 +530,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : []
   const assistantStyleSettingsAvailable =
     (
-      (
+      scheduledInvocationScope !== null
+      || (
         privateInteractiveAudience &&
         input.input.assistantStyleSettingsAuthorized !== false &&
         (
@@ -808,8 +817,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
       threadId: currentAudienceDeliveryFields.threadId,
       threadIsDirect: currentAudienceDeliveryFields.threadIsDirect,
     })
+  const hostedProductFeedbackAcceptedInputIds =
+    input.hostedToolContext?.currentProductFeedbackAcceptedInputIds?.() ?? []
   const productFeedbackAcceptedInputIds =
-    resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? [])
+    hostedProductFeedbackAcceptedInputIds.length > 0
+      ? hostedProductFeedbackAcceptedInputIds
+      : resolveAssistantProductFeedbackAcceptedInputIds(
+          input.acceptedInputItems ?? [],
+        )
   const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
     acceptedInputItems: input.acceptedInputItems ?? [],
     turnTrigger: input.input.turnTrigger ?? null,
@@ -851,7 +866,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
           input.hostedToolContext?.deviceTool != null,
         clinicalRecordsConnectLinkAvailable:
           privateInteractiveAudience &&
-          userActionAcceptedInputIds.length > 0 &&
+          (userActionAcceptedInputIds.length > 0 ||
+            scheduledInvocationScope !== null) &&
           input.hostedToolContext?.clinicalRecordsConnectLinkTool != null,
         familyPlanAvailable:
           privateInteractiveAudience &&

@@ -69,6 +69,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
   preferenceCausalSeq?: string;
   preferences: HostedMemberAssistantPreferencesUpdate;
   prisma: Prisma.TransactionClient;
+  updateId?: string;
 }): Promise<HostedMemberAssistantPreferencesResult> {
   await lockHostedMemberRow(input.prisma, input.memberId);
 
@@ -103,9 +104,39 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     });
   }
 
-  const requestedCausalSeq = input.preferenceCausalSeq === undefined
+  if (input.preferenceCausalSeq !== undefined && input.updateId !== undefined) {
+    throw new TypeError(
+      "Assistant preference update cannot provide both source sequence and update identity.",
+    );
+  }
+
+  let append: Awaited<ReturnType<typeof appendHostedMailboxEnvelopeTx>> | null =
+    null;
+  let requestedCausalSeq = input.preferenceCausalSeq === undefined
     ? null
     : BigInt(input.preferenceCausalSeq);
+  if (input.updateId !== undefined) {
+    const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      ...(input.causalOrigin ? { causalOrigin: input.causalOrigin } : {}),
+      eventId: buildHostedMemberPreferencesUpdatedEventId({
+        memberId: input.memberId,
+        updateId: input.updateId,
+      }),
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+      preferences: input.preferences,
+      requestedFields: resolveHostedAssistantPreferenceRequestedFields(
+        input.preferences,
+      ),
+    });
+    append = await appendHostedMailboxEnvelopeTx({
+      envelope: wake,
+      tx: input.prisma,
+    });
+    assertHostedMemberPreferenceWakeAppend(append);
+    requestedCausalSeq = BigInt(append.item.causalSeq!);
+  }
+
   const applicablePreferences = resolveApplicableAssistantPreferences({
     current: {
       persona: member.assistantPersona,
@@ -139,47 +170,40 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       assistantPersonality: normalizeStoredAssistantPersonality(member),
       assistantTone: normalizeStoredAssistantTone(member.assistantTone),
       assistantVoice: normalizeStoredAssistantVoice(member.assistantVoice),
-      dispatch: null,
+      dispatch: append ? { mailboxItemId: append.item.id } : null,
       updated: false,
     };
   }
 
   const preferences = applicablePreferences.preferences;
 
-  const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
-    ...(input.causalOrigin ? { causalOrigin: input.causalOrigin } : {}),
-    eventId: buildHostedMemberPreferencesUpdatedEventId({
+  if (!append) {
+    const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      ...(input.causalOrigin ? { causalOrigin: input.causalOrigin } : {}),
+      eventId: buildHostedMemberPreferencesUpdatedEventId({
+        memberId: input.memberId,
+        updateId: randomUUID(),
+      }),
       memberId: input.memberId,
-      updateId: randomUUID(),
-    }),
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    ...(input.preferenceCausalSeq
-      ? { preferenceCausalSeq: input.preferenceCausalSeq }
-      : {}),
-    preferences,
-    requestedFields: [
-      ...(preferences.persona === undefined ? [] : ["persona" as const]),
-      ...(preferences.tone === undefined ? [] : ["tone" as const]),
-      ...(preferences.voice === undefined ? [] : ["voice" as const]),
-    ],
-  });
-  const append = await appendHostedMailboxEnvelopeTx({
-    envelope: wake,
-    tx: input.prisma,
-  });
-  if (append.dedupeConflict) {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_PREFERENCES_WAKE_DEDUPE_CONFLICT",
-      httpStatus: 503,
-      message: "Assistant preference update conflicted with an existing wake identity.",
-      retryable: true,
+      occurredAt: input.occurredAt,
+      ...(input.preferenceCausalSeq
+        ? { preferenceCausalSeq: input.preferenceCausalSeq }
+        : {}),
+      preferences,
+      requestedFields: resolveHostedAssistantPreferenceRequestedFields(
+        preferences,
+      ),
     });
+    append = await appendHostedMailboxEnvelopeTx({
+      envelope: wake,
+      tx: input.prisma,
+    });
+    assertHostedMemberPreferenceWakeAppend(append);
   }
   const effectiveCausalSeq = requestedCausalSeq ?? BigInt(append.item.causalSeq!);
-  const projectedPersona = wake.preferences.persona;
-  const projectedTone = wake.preferences.tone;
-  const projectedVoice = wake.preferences.voice;
+  const projectedPersona = preferences.persona;
+  const projectedTone = preferences.tone;
+  const projectedVoice = preferences.voice;
   const visibleValueChanged = (
     preferences.persona !== undefined
     && preferences.persona !== member.assistantPersona
@@ -299,6 +323,30 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     },
     updated: visibleValueChanged,
   };
+}
+
+function assertHostedMemberPreferenceWakeAppend(
+  append: Awaited<ReturnType<typeof appendHostedMailboxEnvelopeTx>>,
+): void {
+  if (!append.dedupeConflict) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_MEMBER_PREFERENCES_WAKE_DEDUPE_CONFLICT",
+    httpStatus: 503,
+    message: "Assistant preference update conflicted with an existing wake identity.",
+    retryable: true,
+  });
+}
+
+function resolveHostedAssistantPreferenceRequestedFields(
+  preferences: HostedMemberAssistantPreferencesUpdate,
+): Array<"persona" | "tone" | "voice"> {
+  return [
+    ...(preferences.persona === undefined ? [] : ["persona" as const]),
+    ...(preferences.tone === undefined ? [] : ["tone" as const]),
+    ...(preferences.voice === undefined ? [] : ["voice" as const]),
+  ];
 }
 
 export async function readHostedMemberAssistantPreferences(input: {

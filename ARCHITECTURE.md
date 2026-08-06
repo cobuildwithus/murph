@@ -2359,3 +2359,23 @@ delivery. Nutrition cards keep their existing fixed HTTPS URL and
 provider-rendered summary layout. The Messages extension remains offline and
 read-only. This adds no card API, database, background synchronization owner,
 authentication surface, or mutable message state.
+
+## Scheduled assistant tool authority
+
+Ordinary canonical `automation-cron` turns reuse the hosted invocation authority
+already carried by the scheduler. Assistant Engine accepts that authority only
+when the automation id and occurrence timestamp exactly match
+`scheduledOccurrenceAt`, then derives one opaque `ain_`-shaped effect anchor from
+that immutable pair. The anchor is host-created metadata, never a model-supplied
+message reference and never evidence that a human sent a message.
+
+Response cards, private Clinical Records connect links, private scheduled
+physical-note image continuation, conversation style/personalization, and ordinary product-feedback
+candidates may use that exact occurrence authority. Their existing owners remain
+unchanged: Web owns Clinical Records intents and durable personalization writes,
+the image-completion and physical-note owners retain provider/idempotency checks,
+and the product-feedback sink retains de-identification and bounded delivery.
+Ephemeral progress updates remain unavailable because queue-only background turns
+have no waiting audience and cannot durably order a progress send before the final
+reply. No scheduler-specific service, persisted authority row, queue, or second
+continuation lifecycle is introduced.

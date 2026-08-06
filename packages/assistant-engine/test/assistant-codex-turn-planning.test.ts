@@ -3364,6 +3364,9 @@ describe('assistant Codex turn planning', () => {
         executionContext: {
           hosted: {
             memberId: 'member-scheduled-phone-call',
+            productFeedbackCandidateSink: {
+              acceptProductFeedbackCandidate: vi.fn(),
+            },
             progressDeliveryDependencies: {},
             providerFetch: null,
             userEnvKeys: [],
@@ -3371,7 +3374,11 @@ describe('assistant Codex turn planning', () => {
         },
         hostedToolContext: {
           ...createHostedToolContext(),
+          clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
+          personalizationTool: { request: vi.fn() },
           phoneCalls: { start: vi.fn() },
+          physicalNotes: { send: vi.fn() },
+          privateImageUrlPublisher: { publishPrivateImageUrl: vi.fn() },
         },
         input: {
           ...createMessageInput(),
@@ -3405,9 +3412,19 @@ describe('assistant Codex turn planning', () => {
         }),
       })
 
-      expect(plan.dynamicTools.map((tool) => tool.name).includes(
-        'create_phone_call',
-      )).toBe(expectedAvailable)
+      const toolNames = plan.dynamicTools.map((tool) => tool.name)
+      expect(toolNames.includes('create_phone_call')).toBe(expectedAvailable)
+      if (expectedAvailable) {
+        expect(toolNames).toEqual(expect.arrayContaining([
+          'assistant_style',
+          'attach_response_card',
+          'create_clinical_records_connect_link',
+          'personalization',
+          'send_physical_note',
+          'submit_product_feedback',
+        ]))
+        expect(toolNames).not.toContain('send_progress_update')
+      }
     },
   )
 

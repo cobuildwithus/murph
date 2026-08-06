@@ -148,7 +148,9 @@ registration-only until that bounded traversal owner lands.
 Assistant link creation reuses the same signed Web control boundary through
 `/api/internal/clinical-records/connect-link`. It accepts only an empty object,
 derives the member from the active runtime fence, and returns the existing
-short-lived first-party connect URL. Once an import is queued, the retrieval
+short-lived first-party connect URL. A verified private current request or exact
+scheduled automation occurrence may invoke that same owner; neither path can choose a
+member, provider, or destination in tool arguments. Once an import is queued, the retrieval
 runtime uses three signed POST operations:
 
 - `/api/internal/clinical-records/runtime/read-run`

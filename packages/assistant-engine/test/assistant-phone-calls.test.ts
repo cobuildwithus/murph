@@ -21,6 +21,7 @@ import type {
   AssistantHostedToolRequestKeyScope,
 } from "../src/assistant/hosted-tool-context.js";
 import {
+  resolveAssistantHostedScheduledInvocationScope,
   resolveAssistantHostedScheduledPhoneCallScope,
 } from "../src/assistant/hosted-tool-context.js";
 import type {
@@ -170,6 +171,40 @@ describe("assistant phone calls", () => {
         originSessionId: "session-scheduled-call",
       });
     }
+  });
+
+  it("keeps generic scheduled authority route-neutral while phone authority stays direct Linq", () => {
+    const messageInput = {
+      scheduledInvocationAuthority: {
+        automationId: "automation-scheduled-tools",
+        occurrenceAt: "2026-08-05T18:00:00.000Z",
+      },
+      scheduledOccurrenceAt: "2026-08-05T18:00:00.000Z",
+      turnTrigger: "automation-cron" as const,
+    };
+    const generic = resolveAssistantHostedScheduledInvocationScope({
+      conversationScope: "direct",
+      messageInput,
+      originSessionId: "session-scheduled-tools",
+    });
+    const emailPhone = resolveAssistantHostedScheduledPhoneCallScope({
+      channel: "email",
+      conversationScope: "direct",
+      messageInput,
+      originSessionId: "session-scheduled-tools",
+    });
+
+    expect(generic).toMatchObject({
+      conversationScope: "direct",
+      effectAnchorInputId: expect.stringMatching(/^ain_[0-9a-f]{32}$/u),
+      origin: {
+        automationId: "automation-scheduled-tools",
+        kind: "automation_occurrence",
+        occurrenceAt: "2026-08-05T18:00:00.000Z",
+      },
+      originSessionId: "session-scheduled-tools",
+    });
+    expect(emailPhone).toBeNull();
   });
 
   it("keys calls by accepted input and the exact bounded brief", () => {

@@ -64,7 +64,7 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
   name: 'send_physical_note',
   description: [
     'Before creating or mailing a physical note, read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md.',
-    'On a trusted hosted image-completion turn whose generation was launched with the exact authorizing message_ref, omit image_ref, image_sha256, and message_ref so runtime code binds the exact generated image and request automatically.',
+    'On a trusted hosted image-completion turn whose generation was launched with the exact authorizing message_ref or exact private scheduled automation occurrence, omit image_ref, image_sha256, and message_ref so runtime code binds the exact generated image and request automatically.',
     'When a generated note was intentionally shown first and a person later says to send it, provide the exact image_ref and image_sha256 from that trusted completion plus the exact message_ref approving the send in the current turn. Runtime code re-reads and verifies the private vault bytes and exact accepted input.',
     'Before treating omitted city, state, or ZIP fields as an incomplete address, follow the skill\'s narrow temporary address-resolution step. Lookup results complete a destination only; they never identify a recipient or authorize a send.',
     'When the originating user already explicitly asked Murph to mail the note and supplied a complete or reliably resolved US address, call this tool automatically after generation finishes; showing or attaching the image first is optional, not required.',

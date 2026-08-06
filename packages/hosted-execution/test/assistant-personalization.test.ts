@@ -9,20 +9,38 @@ import {
 } from "../src/assistant-personalization.ts";
 
 describe("hosted assistant personalization contract", () => {
-  it("accepts only canonical assistant input authority", () => {
+  it("accepts only canonical accepted-input or scheduled-occurrence authority", () => {
     expect(parseHostedRuntimeAssistantPersonalizationToolAuthority({
       assistantInputId: "ain_0123456789abcdef0123456789abcdef",
     })).toEqual({
       assistantInputId: "ain_0123456789abcdef0123456789abcdef",
     });
+    expect(parseHostedRuntimeAssistantPersonalizationToolAuthority({
+      automationId: "automation_daily_style",
+      occurrenceAt: "2026-08-06T14:30:00.000Z",
+    })).toEqual({
+      automationId: "automation_daily_style",
+      occurrenceAt: "2026-08-06T14:30:00.000Z",
+    });
 
     for (const authority of [
       { assistantInputId: "input_1" },
       { assistantInputId: "ain_0123456789ABCDEF0123456789ABCDEF" },
+      { automationId: "automation_daily_style" },
+      { occurrenceAt: "2026-08-06T14:30:00.000Z" },
+      {
+        automationId: "automation_daily_style",
+        occurrenceAt: "not-a-time",
+      },
       { preferenceCausalSeq: "42" },
       {
         assistantInputId: "ain_0123456789abcdef0123456789abcdef",
         preferenceCausalSeq: "42",
+      },
+      {
+        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+        automationId: "automation_daily_style",
+        occurrenceAt: "2026-08-06T14:30:00.000Z",
       },
     ]) {
       expect(() => parseHostedRuntimeAssistantPersonalizationToolAuthority(

@@ -104,9 +104,14 @@ export function createAssistantProductFeedbackRecorder(input: {
   productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
 }): AssistantTurnProductFeedbackRecorder | null {
   const productFeedbackCandidateSink = input.productFeedbackCandidateSink ?? null
-  const initialAcceptedInputIds = resolveAssistantProductFeedbackAcceptedInputIds(
-    input.acceptedInputItems ?? [],
-  )
+  const acceptedInputIdsFromItems =
+    resolveAssistantProductFeedbackAcceptedInputIds(
+      input.acceptedInputItems ?? [],
+    )
+  const acceptedInputIdsFromContext = input.getAcceptedInputIds?.() ?? []
+  const initialAcceptedInputIds = acceptedInputIdsFromContext.length > 0
+    ? acceptedInputIdsFromContext
+    : acceptedInputIdsFromItems
   if (!productFeedbackCandidateSink || initialAcceptedInputIds.length === 0) {
     return null
   }
@@ -138,7 +143,10 @@ export function createAssistantProductFeedbackRecorder(input: {
       ) {
         return { recorded: false }
       }
-      const acceptedInputIds = input.getAcceptedInputIds?.() ?? initialAcceptedInputIds
+      const currentAcceptedInputIds = input.getAcceptedInputIds?.() ?? []
+      const acceptedInputIds = currentAcceptedInputIds.length > 0
+        ? currentAcceptedInputIds
+        : initialAcceptedInputIds
       const candidate = {
         ...normalized,
         idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({

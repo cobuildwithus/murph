@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import {
   HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
   type HostedRuntimeAssistantPersonalitySettings,
@@ -57,6 +59,12 @@ interface HostedRuntimeAssistantPersonalityTransactionResult {
   response: HostedRuntimeAssistantPersonalityUpdateResponse;
 }
 
+interface HostedRuntimeAssistantPreferenceWriteAuthority {
+  occurredAt: string;
+  preferenceCausalSeq?: string;
+  updateId?: string;
+}
+
 export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   authority?: HostedRuntimeAssistantPersonalizationToolAuthority;
   memberId: string;
@@ -79,7 +87,7 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   const request = input.request;
   const authority = input.authority;
   if (!authority) {
-    throw new TypeError("Assistant personalization update requires assistant input authority.");
+    throw new TypeError("Assistant personalization update requires action authority.");
   }
   if (request.action === HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION) {
     return handleHostedRuntimeAssistantPersonalityUpdate({
@@ -93,23 +101,29 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   }
   const prisma = getPrisma();
   const transactionResult = await prisma.$transaction(async (tx) => {
-    const preferenceCausalSeq =
-      await requireHostedRuntimeAssistantPreferenceCausalSeq({
-        assistantInputId: authority.assistantInputId,
+    const writeAuthority =
+      await resolveHostedRuntimeAssistantPreferenceWriteAuthority({
+        authority,
         memberId: input.memberId,
+        operation: "tone-voice",
         prisma: tx,
       });
     const styleResult = request.tone !== undefined || request.voice !== undefined
       ? await upsertHostedMemberAssistantPreferencesTx({
           causalOrigin: "turn",
           memberId: input.memberId,
-          occurredAt: new Date().toISOString(),
-          preferenceCausalSeq,
+          occurredAt: writeAuthority.occurredAt,
+          ...(writeAuthority.preferenceCausalSeq === undefined
+            ? {}
+            : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
           preferences: {
             ...(request.tone === undefined ? {} : { tone: request.tone }),
             ...(request.voice === undefined ? {} : { voice: request.voice }),
           },
           prisma: tx,
+          ...(writeAuthority.updateId === undefined
+            ? {}
+            : { updateId: writeAuthority.updateId }),
         })
       : null;
     const model = await readHostedMemberAssistantModelPreference({
@@ -170,21 +184,27 @@ async function handleHostedRuntimeAssistantPersonalityUpdate(input: {
 }): Promise<HostedRuntimeAssistantPersonalityUpdateResponse> {
   const prisma = getPrisma();
   const transactionResult = await prisma.$transaction(async (tx) => {
-    const preferenceCausalSeq =
-      await requireHostedRuntimeAssistantPreferenceCausalSeq({
-        assistantInputId: input.authority.assistantInputId,
+    const writeAuthority =
+      await resolveHostedRuntimeAssistantPreferenceWriteAuthority({
+        authority: input.authority,
         memberId: input.memberId,
+        operation: "personality",
         prisma: tx,
       });
     const styleResult = await upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
       memberId: input.memberId,
-      occurredAt: new Date().toISOString(),
-      preferenceCausalSeq,
+      occurredAt: writeAuthority.occurredAt,
+      ...(writeAuthority.preferenceCausalSeq === undefined
+        ? {}
+        : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
       preferences: {
         personality: input.personality,
       },
       prisma: tx,
+      ...(writeAuthority.updateId === undefined
+        ? {}
+        : { updateId: writeAuthority.updateId }),
     });
     const outcomes = buildHostedAssistantPersonalityUpdateOutcomes({
       appliedFields: styleResult.appliedFields,
@@ -292,28 +312,45 @@ function buildHostedAssistantPersonalitySetting(input: {
     : { source: "custom", value: input.value };
 }
 
-async function requireHostedRuntimeAssistantPreferenceCausalSeq(input: {
-  assistantInputId: string;
+async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
+  authority: HostedRuntimeAssistantPersonalizationToolAuthority;
   memberId: string;
+  operation: "personality" | "tone-voice";
   prisma: HostedMailboxStoreClient;
-}): Promise<string> {
+}): Promise<HostedRuntimeAssistantPreferenceWriteAuthority> {
   await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, {
     prisma: input.prisma,
   });
+  if ("automationId" in input.authority) {
+    return {
+      occurredAt: input.authority.occurrenceAt,
+      updateId: createHash("sha256")
+        .update(JSON.stringify({
+          automationId: input.authority.automationId,
+          occurrenceAt: input.authority.occurrenceAt,
+          operation: input.operation,
+          schema: "murph.scheduled-assistant-preference-update.v1",
+        }))
+        .digest("hex"),
+    };
+  }
   await requireHostedAssistantStyleInputAuthority({
-    assistantInputId: input.assistantInputId,
+    assistantInputId: input.authority.assistantInputId,
     memberId: input.memberId,
     prisma: input.prisma,
   });
   const causalSeq = await readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
-    assistantInputId: input.assistantInputId,
+    assistantInputId: input.authority.assistantInputId,
     memberId: input.memberId,
     prisma: input.prisma,
   });
   if (causalSeq === null) {
     throw new TypeError("Assistant personalization input authority is invalid.");
   }
-  return causalSeq;
+  return {
+    occurredAt: new Date().toISOString(),
+    preferenceCausalSeq: causalSeq,
+  };
 }
 
 async function requireHostedAssistantStyleInputAuthority(input: {
