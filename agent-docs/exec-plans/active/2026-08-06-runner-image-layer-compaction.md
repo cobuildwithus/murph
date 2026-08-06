@@ -25,7 +25,9 @@ Updated: 2026-08-06
 ## Scope
 
 - In scope: `Dockerfile.cloudflare-hosted-runner`, its focused image-contract
-  tests, and directly matching Cloudflare deploy documentation.
+  tests, directly matching Cloudflare deploy documentation, and the one
+  ReviewGPT always-path entry needed to package the base Dockerfile consumed by
+  that contract test.
 - Out of scope: runner bundle contents, Node/module startup behavior, runtime
   imports, application code, dependencies, base-image contents, or deploy
   orchestration.
@@ -85,4 +87,9 @@ Updated: 2026-08-06
   directory under `/app` was group- or world-writable; Python 3.11.2 and Node
   24.14.1 resolved on the baked runtime path.
 - `git diff --check`: passed.
-- Pending: exact-head ReviewGPT and CI.
+- Final ReviewGPT round 1 on the first candidate: passed with no findings.
+- Preliminary specialists on the first candidate: invalid because the guarded
+  review ZIP omitted `Dockerfile.cloudflare-hosted-runner-base`, which the
+  changed contract test reads. The always-path list now includes that direct
+  dependency; pending exact-head packaged-content proof and retry.
+- Pending: corrected exact-head ReviewGPT and CI.

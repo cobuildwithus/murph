@@ -103,6 +103,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   ".dockerignore" \
   "AGENTS.md" \
   "ARCHITECTURE.md" \
+  "Dockerfile.cloudflare-hosted-runner-base" \
   "Dockerfile.cloudflare-hosted-runner" \
   "README.md" \
   "PRODUCT.md" \
