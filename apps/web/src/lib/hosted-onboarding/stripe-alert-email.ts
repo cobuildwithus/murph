@@ -311,20 +311,20 @@ function readHostedStripeAlertHttpStatus(value: number | null): number | null {
     : null;
 }
 
-function logHostedStripeAlertDeliveryFailure(input: {
+function logHostedStripeAlertDeliveryFailure(details: {
   alertKind: "operation" | "payment-event" | "reconciliation";
   error: unknown;
   stripeType: string | null;
 }): void {
-  const providerError = input.error instanceof HostedResendPlainTextEmailError
-    ? input.error
+  const providerError = details.error instanceof HostedResendPlainTextEmailError
+    ? details.error
     : null;
   console.warn("Hosted Stripe alert email failed.", {
-    alertKind: input.alertKind,
+    alertKind: details.alertKind,
     ...(providerError ? { errorCode: providerError.code } : {}),
     ...(providerError?.providerStatus === null || providerError === null
       ? {}
       : { providerStatus: providerError.providerStatus }),
-    ...(input.stripeType ? { stripeType: input.stripeType } : {}),
+    ...(details.stripeType ? { stripeType: details.stripeType } : {}),
   });
 }
