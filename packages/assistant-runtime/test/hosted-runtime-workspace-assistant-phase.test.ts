@@ -12821,6 +12821,60 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("passes a late active-turn Linq delivery context into hosted outbox delivery", async () => {
+    const lateLinqDeliveryContext = {
+      directRecipientPhoneNumber: "+15550000001",
+      fromPhoneNumber: "+15550000002",
+      replyToMessageId: "linq-message-late",
+      routeAuthority: null,
+      service: "imessage",
+      target: "linq-thread-late",
+      threadIsDirect: true,
+    };
+    const effect = createDeliveryEffect();
+    let latestAssistantInputBatch:
+      NonNullable<HostedWorkspaceRuntimeAssistantPhaseInput["initialAssistantInputBatch"]>
+      | null = null;
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      latestAssistantInputBatch = {
+        assistantInputIds: ["ain_00000000000000000000000000000002"],
+        assistantInputRecords: [{
+          assistantInputId: "ain_00000000000000000000000000000002",
+          linqDeliveryContext: lateLinqDeliveryContext,
+        }],
+        emailDeliveryContexts: [],
+        linqDeliveryContexts: [lateLinqDeliveryContext],
+      };
+      return {
+        activeTurnInputIngested: true,
+        assistantAutomationCurrentTurnDeliveryIntentIds: [effect.effectId],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([effect]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      latestAssistantInputBatch: () => latestAssistantInputBatch,
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(mocks.prepareHostedAssistantDeliveryEffectsForDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [effect],
+        linqDeliveryContexts: [lateLinqDeliveryContext],
+      }),
+    );
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [effect],
+        linqDeliveryContexts: [lateLinqDeliveryContext],
+      }),
+    );
+  });
+
   it("passes restored foreground assistant input ids through as fresh ids", async () => {
     const assistantInputIds = [
       "ain_00000000000000000000000000000001",
