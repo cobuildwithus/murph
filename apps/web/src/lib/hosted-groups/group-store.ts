@@ -2014,11 +2014,11 @@ async function acceptHostedGroupJoinTx(input: {
   const selected = normalizeHostedVaultShareProjectionScopes(
     input.selectedVaultShareProjectionScopes,
   );
+  const storedPolicy = readHostedGroupJoinPolicy(group.joinPolicyJson);
   const requestedProjectionScopes = input.policyProjectionScopes
     ? normalizeHostedVaultShareProjectionScopes(input.policyProjectionScopes)
     : normalizeHostedGroupAccessOfferProjectionScopes(
-        readHostedGroupJoinPolicy(group.joinPolicyJson)
-          .requestedVaultShareProjectionScopes,
+        storedPolicy.requestedVaultShareProjectionScopes,
       );
   const allowedSelectedSet = new Set(
     includeLegacyHostedGroupSleepProjectionScopes(requestedProjectionScopes)
@@ -2056,6 +2056,36 @@ async function acceptHostedGroupJoinTx(input: {
     await assertHostedHistoricalLaunchConsentGranted({ memberId: input.memberId, prisma: input.tx });
   } else {
     await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: input.tx });
+  }
+
+  const storedPolicyScopeKeys = new Set(
+    storedPolicy.requestedVaultShareProjectionScopes.map(
+      buildHostedVaultShareProjectionScopeKey,
+    ),
+  );
+  const selectedPolicyAdditions = input.policyProjectionScopes === null
+    ? selected.filter((projectionScope) => {
+        const legacyProjectionScope = legacyHostedGroupSleepProjectionScope(
+          projectionScope,
+        );
+        return legacyProjectionScope !== null
+          && storedPolicyScopeKeys.has(
+            buildHostedVaultShareProjectionScopeKey(legacyProjectionScope),
+          )
+          && !storedPolicyScopeKeys.has(
+            buildHostedVaultShareProjectionScopeKey(projectionScope),
+          );
+      })
+    : [];
+  if (selectedPolicyAdditions.length > 0) {
+    const mergedPolicy = mergeHostedGroupJoinPolicy({
+      existing: group.joinPolicyJson,
+      requestedVaultShareProjectionScopes: selectedPolicyAdditions,
+    });
+    await input.tx.hostedGroup.update({
+      where: { id: group.id },
+      data: { joinPolicyJson: toHostedGroupJoinPolicyJson(mergedPolicy) },
+    });
   }
 
   let membershipId: string;

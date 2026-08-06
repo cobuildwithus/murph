@@ -847,6 +847,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalledWith(
       expect.objectContaining({ projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE] }),
     );
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
   });
 
   it("atomically replaces a legacy Deep sleep grant on explicit v1 approval", async () => {
@@ -876,6 +877,66 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       now,
       projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
       tx,
+    });
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      tx,
+    });
+    expect(tx.hostedGroup.update).toHaveBeenCalledWith({
+      data: {
+        joinPolicyJson: {
+          requestedVaultShareProjectionKinds: [
+            "deep-sleep-days.v0",
+            "deep-sleep-sources-days.v1",
+          ],
+          requestedVaultShareProjectionScopes: [
+            LEGACY_DEEP_SLEEP_SCOPE,
+            DEEP_SLEEP_SOURCES_SCOPE,
+          ],
+          schema: "murph.hosted-group.join-policy.v1",
+        },
+      },
+      where: { id: "group_1" },
+    });
+  });
+
+  it("materializes a selected v1 request for a new member under a legacy policy", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      requestedProjectionKinds: ["deep-sleep-days.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: null,
+      joinCode: "join_1",
+      memberId: "member_grantor",
+      now,
+      selectedVaultShareProjectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      grantedVaultShareProjectionScopes: [PROFILE_SCOPE, DEEP_SLEEP_SOURCES_SCOPE],
+    });
+
+    expect(tx.hostedGroup.update).toHaveBeenCalledWith({
+      data: {
+        joinPolicyJson: {
+          requestedVaultShareProjectionKinds: [
+            "deep-sleep-days.v0",
+            "deep-sleep-sources-days.v1",
+          ],
+          requestedVaultShareProjectionScopes: [
+            LEGACY_DEEP_SLEEP_SCOPE,
+            DEEP_SLEEP_SOURCES_SCOPE,
+          ],
+          schema: "murph.hosted-group.join-policy.v1",
+        },
+      },
+      where: { id: "group_1" },
     });
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
       destinationMemberId: "member_group_runtime",
@@ -922,6 +983,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
       tx,
     });
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
   });
 
   it("keys a Telegram offer on chat and message so ids cannot collide across chats", async () => {
@@ -1303,6 +1365,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
       expect.objectContaining({ projectionScope: SLEEP_DURATION_SCOPE }),
     );
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
   });
 
   it("fails a join offer closed when launch consent was never granted", async () => {
