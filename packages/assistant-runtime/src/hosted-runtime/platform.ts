@@ -606,6 +606,8 @@ export interface HostedRuntimeWorkspaceSnapshotRestoreTimingDetails {
   dataKeyUnwrapMs?: number;
   presignGetMs?: number;
   objectFetchMs?: number;
+  objectFetchResponseHeadersMs?: number;
+  objectFetchBodyReadMs?: number;
   decryptMs?: number;
   archiveExtractMs?: number;
   durableRootReplaceMs?: number;
