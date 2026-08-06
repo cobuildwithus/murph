@@ -796,7 +796,10 @@ async function uploadLinqAttachmentBytes(
   const body = new Blob([copyUint8ArrayToArrayBuffer(bytes)], {
     type: headers['content-type'] ?? 'application/octet-stream',
   })
-  const uploadDeadlineMs = Date.now() + LINQ_HTTP_TIMEOUT_MS
+  const timeout = createTimeoutAbortController(
+    dependencies.signal,
+    LINQ_HTTP_TIMEOUT_MS,
+  )
   let lastRetryableFailure: VaultCliError | null = null
 
   try {
@@ -816,14 +819,15 @@ async function uploadLinqAttachmentBytes(
         return failure
       },
       fetchResponse: async () => {
-        const remainingBudgetMs = uploadDeadlineMs - Date.now()
-        if (remainingBudgetMs <= 0 && lastRetryableFailure) {
-          throw lastRetryableFailure
+        if (timeout.signal.aborted) {
+          if (dependencies.signal?.aborted) {
+            dependencies.signal.throwIfAborted()
+          }
+          if (lastRetryableFailure) {
+            throw lastRetryableFailure
+          }
+          timeout.signal.throwIfAborted()
         }
-        const timeout = createTimeoutAbortController(
-          dependencies.signal,
-          Math.max(1, remainingBudgetMs),
-        )
         try {
           return await fetchImplementation(uploadUrl, {
             body,
@@ -847,25 +851,15 @@ async function uploadLinqAttachmentBytes(
           })
           lastRetryableFailure = failure
           throw failure
-        } finally {
-          timeout.cleanup()
         }
       },
       isRetryableError: isRetryableLinqRequestError,
       maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
       parseResponse: () => undefined,
-      signal: dependencies.signal,
+      signal: timeout.signal,
       waitForRetryDelay: async (attempt, signal, responseHeaders) => {
-        const remainingBudgetMs = uploadDeadlineMs - Date.now()
-        if (remainingBudgetMs <= 0 && lastRetryableFailure) {
-          throw lastRetryableFailure
-        }
-        const timeout = createTimeoutAbortController(
-          signal,
-          Math.max(1, remainingBudgetMs),
-        )
         try {
-          await waitForLinqRetryDelay(attempt, timeout.signal, responseHeaders)
+          await waitForLinqRetryDelay(attempt, signal, responseHeaders)
         } catch (error) {
           if (dependencies.signal?.aborted) {
             throw error
@@ -874,8 +868,6 @@ async function uploadLinqAttachmentBytes(
             throw lastRetryableFailure
           }
           throw error
-        } finally {
-          timeout.cleanup()
         }
       },
     })
@@ -887,6 +879,8 @@ async function uploadLinqAttachmentBytes(
       ...error.context,
       retryable: false,
     })
+  } finally {
+    timeout.cleanup()
   }
 }
 

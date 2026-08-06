@@ -1641,10 +1641,14 @@ test('linq runtime retries only the presigned attachment PUT with stable reserva
       upload_url: 'https://uploads.example.test/upload/retry-report',
     }))
   const uploadBodies: Blob[] = []
+  const uploadHeaders: Array<Record<string, string> | undefined> = []
+  const uploadUrls: string[] = []
   let uploadAttempts = 0
-  const publicFetch = vi.fn(async (_url: string, init) => {
+  const publicFetch = vi.fn(async (url: string, init) => {
     assert.ok(init.body instanceof Blob)
     uploadBodies.push(init.body)
+    uploadHeaders.push(init.headers)
+    uploadUrls.push(url)
     uploadAttempts += 1
     if (uploadAttempts === 1) {
       throw new TypeError('socket closed')
@@ -1678,6 +1682,13 @@ test('linq runtime retries only the presigned attachment PUT with stable reserva
   expect(uploadBodies).toHaveLength(3)
   expect(uploadBodies[1]).toBe(uploadBodies[0])
   expect(uploadBodies[2]).toBe(uploadBodies[0])
+  expect(uploadHeaders[1]).toBe(uploadHeaders[0])
+  expect(uploadHeaders[2]).toBe(uploadHeaders[0])
+  expect(uploadUrls).toEqual([
+    'https://uploads.example.test/upload/retry-report',
+    'https://uploads.example.test/upload/retry-report',
+    'https://uploads.example.test/upload/retry-report',
+  ])
   for (const body of uploadBodies) {
     assert.deepEqual(new Uint8Array(await body.arrayBuffer()), bytes)
   }
@@ -1752,6 +1763,68 @@ test('linq runtime keeps presigned attachment retries inside one timeout budget'
       headers: { 'Retry-After': '30' },
       status: 503,
     }))
+  const startedAt = Date.now()
+
+  const rejection = assert.rejects(
+    uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.method === 'PUT' &&
+      error.context?.retryable === false &&
+      error.context?.status === 503,
+  )
+  await vi.advanceTimersByTimeAsync(30_000)
+  await rejection
+
+  expect(Date.now() - startedAt).toBe(30_000)
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(1)
+})
+
+test('linq runtime keeps the upload budget active through retryable response bodies', async () => {
+  vi.useFakeTimers()
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () =>
+    createJsonResponse({
+      attachment_id: 'attachment_pdf_body_deadline',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+      },
+      upload_url: 'https://uploads.example.test/upload/body-deadline-report',
+    }))
+  const publicFetch = vi.fn<LinqFetch>(async (_url, init) => ({
+    arrayBuffer: async () => new ArrayBuffer(0),
+    headers: { 'Retry-After': '0' },
+    json: async () => ({ error: 'temporarily unavailable' }),
+    ok: false,
+    status: 503,
+    text: () => new Promise<string>((_resolve, reject) => {
+      const rejectOnAbort = () => reject(new DOMException('aborted', 'AbortError'))
+      if (init.signal?.aborted) {
+        rejectOnAbort()
+        return
+      }
+      init.signal?.addEventListener('abort', rejectOnAbort, { once: true })
+    }),
+  }))
   const startedAt = Date.now()
 
   const rejection = assert.rejects(
