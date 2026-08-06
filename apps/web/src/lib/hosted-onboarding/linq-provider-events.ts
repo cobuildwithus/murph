@@ -47,6 +47,7 @@ export const HOSTED_LINQ_PROVIDER_EVENT_TYPES = [
 
 export type HostedLinqProviderEventType = typeof HOSTED_LINQ_PROVIDER_EVENT_TYPES[number];
 export type HostedLinqProviderEventPhoneRole = "line" | "participant" | "unknown";
+const HOSTED_LINQ_GROUP_ICON_FAILURE_CODES = new Set([3007, 5006, 5007]);
 type HostedLinqProviderWebhookEvent = HostedLinqWebhookEvent & {
   event_type: HostedLinqProviderEventType;
 };
@@ -268,13 +269,17 @@ function parseHostedLinqGroupIconProviderEvent(input: {
     ["chat", "id"],
   ] as const);
   const failed = input.event.event_type === "chat.group_icon_update_failed";
-  const failureCode = failed
-    ? readFirstStringAtPaths(data, [
+  const rawFailureCode = failed
+    ? readFirstIntegerAtPaths(data, [
         ["error_code"],
         ["errorCode"],
         ["error", "code"],
       ] as const)
     : null;
+  const failureCode = rawFailureCode !== null
+    && HOSTED_LINQ_GROUP_ICON_FAILURE_CODES.has(rawFailureCode)
+      ? String(rawFailureCode)
+      : null;
   const providerCreatedAt = parseProviderDate(readFirstStringAtPaths(data, [
     failed ? ["failed_at"] : ["updated_at"],
     failed ? ["failedAt"] : ["updatedAt"],
@@ -300,6 +305,7 @@ function parseHostedLinqGroupIconProviderEvent(input: {
     phoneNumber: null,
     phoneNumberRole: "unknown",
     providerCreatedAt,
+    providerHealth: { chat: null, line: null },
     providerReason: null,
     providerStatus: failed ? "failed" : "updated",
     rawBody: input.rawBody,
@@ -730,6 +736,7 @@ function buildParsedProviderEvent(input: {
   phoneNumber: string | null;
   phoneNumberRole: HostedLinqProviderEventPhoneRole;
   providerCreatedAt?: Date | null;
+  providerHealth?: HostedLinqProviderHealthEvent;
   providerReason: string | null;
   providerStatus: string | null;
   rawBody?: string | null;
@@ -785,7 +792,8 @@ function buildParsedProviderEvent(input: {
     phoneNumberLookupKey,
     phoneNumberRole: input.phoneNumberRole,
     providerCreatedAt,
-    providerHealth: parseHostedLinqProviderHealthEvent(input.event),
+    providerHealth:
+      input.providerHealth ?? parseHostedLinqProviderHealthEvent(input.event),
     providerReason: normalizeProviderFreeText(input.providerReason),
     providerStatus: normalizeSafeProviderToken(input.providerStatus),
     reactionCustomEmoji: normalizeSafeProviderToken(input.reactionCustomEmoji),

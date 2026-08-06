@@ -1897,7 +1897,7 @@ the terminal status, provider timestamp, bounded event/trace suffixes, payload
 shape/hash, and the documented numeric failure code when present. Icon URLs,
 actor handles, raw callback values, and provider prose are discarded. This is
 diagnostic evidence only: it adds no retry, mailbox work, user-facing state, or
-second avatar lifecycle owner.
+second avatar lifecycle owner, and it cannot project line or chat health.
 
 Hosted Exa egress is narrower than the path allowlist alone: before injecting
 the Worker-owned key, `apps/cloudflare` must validate the exact bounded

@@ -857,6 +857,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it.each([
     {
       data: {
+        chat: {
+          health_status: {
+            status: "CRITICAL",
+            updated_at: "2026-05-04T10:15:11.000Z",
+          },
+          id: "chat_icon_nested_ignored",
+          owner_handle: {
+            handle: "+15550999999",
+            service: "iMessage",
+          },
+        },
         chat_id: "chat_icon_123",
         new_value: "https://media.example.test/private/new-token",
         old_value: "https://media.example.test/private/old-token",
@@ -913,8 +924,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
       expect(createMany).toHaveBeenCalledWith({
         data: expect.objectContaining({
+          chatHealthStatus: null,
+          chatHealthUpdatedAt: null,
           eventType,
           failureCode: expectedFailureCode,
+          phoneNumberLookupKey: null,
           providerStatus: expectedProviderStatus,
         }),
         skipDuplicates: true,
@@ -922,6 +936,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       const persistedData = JSON.stringify(createMany.mock.calls);
       expect(persistedData).not.toContain("new-token");
       expect(persistedData).not.toContain("old-token");
+      expect(persistedData).not.toContain("+15550999999");
+      expect(prisma.hostedLinqAlert?.createMany).not.toHaveBeenCalled();
+      expect(prisma.hostedLinqLine?.update).not.toHaveBeenCalled();
+      expect(prisma.hostedLinqLine?.updateMany).not.toHaveBeenCalled();
+      expect(prisma.hostedLinqLine?.upsert).not.toHaveBeenCalled();
       expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
         expect.objectContaining({ step: "hosted-onboarding.webhook.linq" }),
         "completed",
@@ -932,6 +951,66 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           providerStatus: expectedProviderStatus,
         }),
       );
+      expect(JSON.stringify(mocks.finishHostedOnboardingTiming.mock.calls))
+        .not.toContain("+15550999999");
+    },
+  );
+
+  it.each([
+    {
+      data: {
+        chat_id: "chat_unrelated_failed",
+        error: { code: "4001" },
+        message_id: "provider_msg_unrelated_failed",
+      },
+      eventType: "message.failed",
+    },
+    {
+      data: {
+        changed_at: "2026-05-04T10:15:13.000Z",
+        new_status: "ACTIVE",
+        phone_number: "+15550000000",
+      },
+      eventType: "phone_number.status_updated",
+    },
+  ])(
+    "keeps group-icon timing fields off $eventType diagnostics",
+    async ({ data, eventType }) => {
+      const prisma = asPrismaTransactionClient({});
+      prisma.$transaction = vi.fn(async (
+        operation: (
+          transaction: HostedOnboardingLinqWebhookPrismaFixture,
+        ) => Promise<unknown>,
+      ) => operation(prisma));
+      const event = {
+        api_version: "v3",
+        created_at: "2026-05-04T10:15:10.000Z",
+        data,
+        event_id: `evt_${eventType}`,
+        event_type: eventType,
+        trace_id: "trace_unrelated_provider_event",
+        webhook_version: "2026-02-03",
+      } as HostedLinqWebhookEvent;
+
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: JSON.stringify(event),
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        ignored: true,
+        ok: true,
+      });
+
+      const completedTiming = mocks.finishHostedOnboardingTiming.mock.calls.find(
+        ([handle, outcome]) =>
+          handle.step === "hosted-onboarding.webhook.linq"
+          && outcome === "completed",
+      );
+      expect(completedTiming).toBeDefined();
+      expect(completedTiming?.[2]).not.toHaveProperty("chatIdSuffix");
+      expect(completedTiming?.[2]).not.toHaveProperty("failureCode");
+      expect(completedTiming?.[2]).not.toHaveProperty("providerStatus");
     },
   );
 

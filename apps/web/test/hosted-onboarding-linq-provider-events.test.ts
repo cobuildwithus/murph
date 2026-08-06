@@ -595,6 +595,17 @@ describe("parseHostedLinqProviderEvent", () => {
           id: "handle_icon_actor",
           service: "iMessage",
         },
+        chat: {
+          health_status: {
+            status: "CRITICAL",
+            updated_at: "2026-05-04T10:15:11.000Z",
+          },
+          id: "chat_icon_nested_ignored",
+          owner_handle: {
+            handle: "+15550999999",
+            service: "iMessage",
+          },
+        },
         chat_id: "chat_icon_123",
         new_value: "https://media.example.test/private/new-token",
         old_value: "https://media.example.test/private/old-token",
@@ -638,6 +649,7 @@ describe("parseHostedLinqProviderEvent", () => {
         phoneNumber: null,
         phoneNumberRole: "unknown",
         providerCreatedAt: expectedProviderCreatedAt,
+        providerHealth: { chat: null, line: null },
         providerStatus: expectedProviderStatus,
         service: null,
       });
@@ -654,6 +666,64 @@ describe("parseHostedLinqProviderEvent", () => {
       expect(persistedDiagnostics).not.toContain("old-token");
       expect(persistedDiagnostics).not.toContain("+15550123456");
       expect(persistedDiagnostics).not.toContain("handle_icon_actor");
+      expect(persistedDiagnostics).not.toContain("+15550999999");
+    },
+  );
+
+  it.each([
+    "provider-authored explanation",
+    "3007",
+    "https://media.example.test/private/error-token",
+    { code: 3007 },
+    -3007,
+    30.07,
+    9999,
+    10_000,
+  ])("rejects noncanonical group-icon failure code %j", (errorCode) => {
+    const event = buildGenericEvent({
+      data: {
+        chat_id: "chat_icon_123",
+        error_code: errorCode,
+        failed_at: "2026-05-04T10:15:13.000Z",
+      },
+      eventType: "chat.group_icon_update_failed",
+    });
+    const parsed = parseHostedLinqProviderEvent({
+      event,
+      rawBody: JSON.stringify(event),
+    });
+
+    expect(parsed).toMatchObject({
+      failureCode: null,
+      providerHealth: { chat: null, line: null },
+      providerStatus: "failed",
+    });
+    expect(JSON.stringify(parsed?.payloadSanitizedJson)).not.toContain(
+      String(errorCode),
+    );
+  });
+
+  it.each([3007, 5006, 5007])(
+    "retains documented group-icon failure code %i",
+    (errorCode) => {
+      const event = buildGenericEvent({
+        data: {
+          chat_id: "chat_icon_123",
+          error_code: errorCode,
+          failed_at: "2026-05-04T10:15:13.000Z",
+        },
+        eventType: "chat.group_icon_update_failed",
+      });
+      const parsed = parseHostedLinqProviderEvent({
+        event,
+        rawBody: JSON.stringify(event),
+      });
+
+      expect(parsed).toMatchObject({
+        failureCode: String(errorCode),
+        providerHealth: { chat: null, line: null },
+        providerStatus: "failed",
+      });
     },
   );
 

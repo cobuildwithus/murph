@@ -36,4 +36,7 @@ Success means:
 ## State
 
 Implementation and focused local proof complete. Exact-head PR review and CI in
-progress.
+progress. The preliminary coverage/privacy pass found that the generic event
+builder could still derive health projections and admit nonnumeric failure
+codes; the accepted narrow parser-boundary correction and unrelated-event
+telemetry regression coverage are complete and locally verified.
