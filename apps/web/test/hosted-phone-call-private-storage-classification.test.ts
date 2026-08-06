@@ -31,6 +31,9 @@ const HOSTED_PHONE_CALL_FIELD_CLASSIFICATION = {
   requestKey: operational("Opaque idempotency identity."),
   resultEncrypted: encrypted("Member-private bounded final call analysis."),
   resultJson: legacyDebt(),
+  resultNotificationChannel: operational(
+    "Bounded initiating direct-channel discriminator used to route asynchronous results.",
+  ),
   status: operational("Bounded call lifecycle enum."),
   updatedAt: operational("Row concurrency timestamp; contains no call content."),
 } satisfies Record<string, PrivateStorageClassification>;

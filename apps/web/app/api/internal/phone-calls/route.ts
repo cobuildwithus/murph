@@ -1,38 +1,26 @@
 import { hostedPhoneCallStartRequestSchema } from "@murphai/hosted-execution/phone-calls";
 
 import {
-  requireHostedCloudflareCallbackRequest,
-} from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { readRawBodyBuffer } from "@/src/lib/http";
+  withHostedInternalRouteErrorBoundary,
+} from "../../../../../src/lib/hosted-onboarding/internal-route";
 import {
-  createHostedPhoneCall,
-} from "@/src/lib/phone-calls/service";
+  authorizeHostedInternalRequest,
+} from "../../../../../src/lib/hosted-onboarding/internal-auth";
+import { createHostedPhoneCall } from "../../../../../src/lib/phone-calls/service";
 
-const HOSTED_PHONE_CALL_START_MAX_BODY_BYTES = 64 * 1024;
+export const runtime = "nodejs";
 
-export const POST = withJsonError(async (request: Request) => {
-  const rawBody = (await readRawBodyBuffer(request, {
-    limitBytes: HOSTED_PHONE_CALL_START_MAX_BODY_BYTES,
-  })).toString("utf8");
-  const memberId = await requireHostedCloudflareCallbackRequest(request, {
-    maxBodyBytes: HOSTED_PHONE_CALL_START_MAX_BODY_BYTES,
-    payloadText: rawBody,
+export const POST = withHostedInternalRouteErrorBoundary(async (request) => {
+  const auth = await authorizeHostedInternalRequest(request);
+  const body = hostedPhoneCallStartRequestSchema.parse(await request.json());
+  const result = await createHostedPhoneCall({
+    brief: body.brief,
+    groupRequester: body.groupRequester,
+    inboundMailboxItemIds: body.inboundMailboxItemIds,
+    memberId: auth.userId,
+    originSessionId: body.originSessionId,
+    requestKey: body.requestKey,
+    resultNotificationChannel: body.resultNotificationChannel,
   });
-  const payload = hostedPhoneCallStartRequestSchema.parse(JSON.parse(rawBody));
-  const response = await createHostedPhoneCall({
-    brief: payload.brief,
-    ...(payload.groupRequester
-      ? { groupRequester: payload.groupRequester }
-      : {}),
-    ...(payload.inboundMailboxItemIds
-      ? { inboundMailboxItemIds: payload.inboundMailboxItemIds }
-      : {}),
-    memberId,
-    originSessionId: payload.originSessionId,
-    requestKey: payload.requestKey,
-    signal: request.signal,
-  });
-
-  return jsonOk(response, 202);
+  return Response.json(result);
 });

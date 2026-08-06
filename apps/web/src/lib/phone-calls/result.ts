@@ -9,6 +9,9 @@ import {
   type HostedPhoneCallBrief,
   type HostedPhoneCallResult,
 } from "@murphai/hosted-execution";
+import {
+  parseHostedPhoneCallResultNotificationChannel,
+} from "@murphai/hosted-execution/phone-calls";
 
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS } from "../hosted-crypto/gcp-kms";
@@ -275,7 +278,14 @@ async function appendPhoneCallResultNotificationTx(input: {
     );
   }
 
+  const resultNotificationChannel =
+    parseHostedPhoneCallResultNotificationChannel(
+      call.resultNotificationChannel,
+    );
   const destination = await requireHostedAssistantNotificationDestination({
+    ...(resultNotificationChannel
+      ? { directChannel: resultNotificationChannel }
+      : {}),
     memberId: call.memberId,
     prisma: input.prisma,
   });

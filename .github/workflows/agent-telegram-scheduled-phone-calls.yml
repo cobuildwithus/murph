@@ -1,0 +1,134 @@
+name: Apply Telegram scheduled phone-call patch
+
+on:
+  push:
+    branches:
+      - agent/telegram-scheduled-phone-calls
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-telegram-scheduled-phone-calls
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Apply repository-wide patch
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f"expected one replacement anchor in {path!r}, found {text.count(old)}")
+              target.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "apps/web/prisma/schema.prisma",
+              '  originSessionId String?              @map("origin_session_id")\n  provider       String                @default("retell")\n',
+              '  originSessionId           String?                                    @map("origin_session_id")\n  resultNotificationChannel HostedPhoneCallResultNotificationChannel? @map("result_notification_channel")\n  provider                  String                                     @default("retell")\n',
+          )
+          replace_once(
+              "apps/web/prisma/schema.prisma",
+              "enum HostedPhoneCallStatus {\n",
+              "enum HostedPhoneCallResultNotificationChannel {\n  linq\n  telegram\n}\n\nenum HostedPhoneCallStatus {\n",
+          )
+
+          replace_once(
+              "packages/assistant-engine/test/assistant-codex-turn-planning.test.ts",
+              "    ['direct Telegram', 'telegram', true, false],\n",
+              "    ['direct Telegram', 'telegram', true, true],\n",
+          )
+          replace_once(
+              "packages/assistant-engine/test/assistant-phone-calls.test.ts",
+              '["direct Telegram occurrence", "telegram", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", false],\n',
+              '["direct Telegram occurrence", "telegram", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", true],\n',
+          )
+
+          fixture_paths = [
+              "apps/cloudflare/test/hosted-local-phone-call-group-roundtrip-e2e.test.ts",
+              "apps/cloudflare/test/hosted-local-retell-call-result-roundtrip-e2e.test.ts",
+              "apps/cloudflare/test/hosted-local-retell-group-call-result-roundtrip-e2e.test.ts",
+              "apps/web/test/phone-calls-service.test.ts",
+              "apps/web/test/phone-calls-webhook-target.test.ts",
+          ]
+          for fixture_path in fixture_paths:
+              target = Path(fixture_path)
+              text = target.read_text()
+              marker = "function buildHostedPhoneCall("
+              start = text.find(marker)
+              if start < 0:
+                  raise SystemExit(f"missing HostedPhoneCall fixture builder in {fixture_path}")
+              next_function = text.find("\nfunction ", start + len(marker))
+              end = next_function if next_function >= 0 else len(text)
+              block = text[start:end]
+              if "resultNotificationChannel:" in block:
+                  continue
+              match = re.search(
+                  r"(?m)^(\s*)originSessionId:\s*[^\n]+,\n",
+                  block,
+              )
+              if not match:
+                  raise SystemExit(f"missing originSessionId fixture field in {fixture_path}")
+              insertion = (
+                  match.group(0)
+                  + f"{match.group(1)}resultNotificationChannel: null,\n"
+              )
+              block = block[:match.start()] + insertion + block[match.end():]
+              target.write_text(text[:start] + block + text[end:])
+
+          replace_once(
+              "apps/cloudflare/DEPLOY.md",
+              "Direct Linq scheduled phone-call availability is an additive Web-first rollout.\nDeploy Web so it recognizes the reserved scheduled-occurrence request-key\nnamespace, then deploy the Cloudflare runner bundle with\n`container_rollout=immediate` so a warm old runner cannot consume a due\noccurrence without exposing the phone tool.\nThere is no database migration or new wire field. A new runner against old Web\ncan place the first call, but a resident-session retry fails closed instead of\nreconciling; brief drift still reuses the same occurrence key and cannot create\na second call. New Web remains compatible with old runners and attended calls.\nAfter deploy, require the exact runner-bundle fingerprint and run one consented\nprivate Linq scheduled-call canary that proves a single Web call row and\nsuccessful same-occurrence replay. A missed pre-deploy occurrence is rescheduled\nexplicitly; do not add replay or backfill machinery.\n\nScheduled email, Telegram, and group turns do not expose the phone tool. The\nexisting Web call-result owner cannot guarantee return to those initiating\nsurfaces without new durable route state, so they remain unavailable rather\nthan starting a call whose completion could fail or arrive elsewhere.\n",
+              "Direct Linq and Telegram scheduled phone-call availability is an additive\nWeb-first rollout. Apply the nullable result-notification-channel migration and\ndeploy Web before the Cloudflare runner, then deploy the runner bundle with\n`container_rollout=immediate` so warm old runners drain quickly. New Web accepts\nold runners that omit the optional channel; a new runner against old Web is not\ncompatible because the old strict request schema rejects the additive field.\n\nEach new direct call stores only the bounded initiating channel (`linq` or\n`telegram`). Web validates that channel's current durable route before provider\ndispatch and resolves the asynchronous result on the same channel after the\ncall ends. Existing rows with no channel retain the prior route fallback, group\ncalls retain their thread-container route owner, and the scheduled occurrence\nrequest key remains unchanged for Linq retry compatibility.\n\nAfter deploy, require the exact runner-bundle fingerprint and run one consented\nprivate Telegram scheduled-call canary for a member who has both Linq and\nTelegram routes. Prove a single Web call row, a stored `telegram` result channel,\nsuccessful same-occurrence replay, and final-result delivery only on Telegram.\nA missed pre-deploy occurrence is rescheduled explicitly; do not add replay or\nbackfill machinery. Scheduled email and group turns remain unavailable because\nemail lacks this proactive notification route and groups retain their separate\npreview and participant-confirmation contract.\n",
+          )
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format and validate Prisma schema
+        run: |
+          pnpm --dir apps/web exec prisma format --schema prisma/schema.prisma
+          pnpm --dir apps/web exec prisma validate --schema prisma/schema.prisma
+
+      - name: Commit final patch and remove bootstrap workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/agent-telegram-scheduled-phone-calls.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "enable Telegram scheduled phone calls"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Run focused contract and owner tests
+        run: |
+          pnpm --dir packages/hosted-execution exec vitest run test/phone-call-result-notification-channel.test.ts --no-coverage
+          pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-phone-call-result-channel.test.ts test/assistant-phone-calls.test.ts test/assistant-codex-turn-planning.test.ts --no-coverage
+          pnpm --dir apps/web exec vitest run test/phone-call-result-notification-channel.test.ts test/hosted-phone-call-private-storage-classification.test.ts --no-coverage
+          pnpm --dir packages/hosted-execution typecheck
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir apps/web typecheck

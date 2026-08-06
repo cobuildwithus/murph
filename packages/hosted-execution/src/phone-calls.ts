@@ -12,6 +12,10 @@ export const HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS = 45_000;
 export const HOSTED_PHONE_CALL_INBOUND_MAILBOX_ITEM_IDS_MAX = 32;
 export const HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX =
   "phone_call_scheduled_";
+export const HOSTED_PHONE_CALL_RESULT_NOTIFICATION_CHANNELS = [
+  "linq",
+  "telegram",
+] as const;
 
 // Murph must never dial emergency or crisis dispatch: it is an unattended
 // caller that cannot hold a line, give a location, or stay reachable, so an
@@ -34,6 +38,10 @@ const hostedPhoneCallBriefFactKeySchema = z
   .min(1)
   .max(80)
   .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/u);
+
+export const hostedPhoneCallResultNotificationChannelSchema = z.enum(
+  HOSTED_PHONE_CALL_RESULT_NOTIFICATION_CHANNELS,
+);
 
 export const hostedPhoneCallBriefSchema = z
   .object({
@@ -79,6 +87,12 @@ export const hostedPhoneCallStartRequestSchema = z
       .optional(),
     originSessionId: z.string().trim().min(1).max(200),
     requestKey: z.string().trim().min(1).max(200),
+    // Direct calls complete asynchronously after the initiating turn is gone.
+    // Persist only the bounded source channel so Web can resolve the current
+    // authorized destination on that same surface. Group calls omit this and
+    // continue to use their durable thread-container route authority.
+    resultNotificationChannel:
+      hostedPhoneCallResultNotificationChannelSchema.optional(),
   })
   .strict();
 
@@ -109,6 +123,9 @@ export const HOSTED_PHONE_CALLS_PATH = "/api/internal/phone-calls" as const;
 export type HostedPhoneCallBrief = z.infer<typeof hostedPhoneCallBriefSchema>;
 export type HostedPhoneCallGroupRequester =
   HostedExecutionAcceptedGroupMessageParticipant;
+export type HostedPhoneCallResultNotificationChannel = z.infer<
+  typeof hostedPhoneCallResultNotificationChannelSchema
+>;
 export type HostedPhoneCallStartRequest = z.infer<
   typeof hostedPhoneCallStartRequestSchema
 >;
@@ -120,6 +137,14 @@ export type HostedPhoneCallResult = z.infer<typeof hostedPhoneCallResultSchema>;
 
 export function parseHostedPhoneCallBrief(value: unknown): HostedPhoneCallBrief {
   return hostedPhoneCallBriefSchema.parse(value);
+}
+
+export function parseHostedPhoneCallResultNotificationChannel(
+  value: unknown,
+): HostedPhoneCallResultNotificationChannel | null {
+  return value === null || value === undefined
+    ? null
+    : hostedPhoneCallResultNotificationChannelSchema.parse(value);
 }
 
 export function parseHostedPhoneCallStartRequest(
