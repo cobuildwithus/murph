@@ -216,6 +216,7 @@ export async function readHostedOpsMemberUsage(
     const key = buildHostedUsageNoticeLookupKey({
       memberId: member.id,
       periodStart: decision.periodStart,
+      planResetAt: decision.planResetAt,
       usageCreditLedgerVersion: decision.usageCreditLedgerVersion,
     });
     return key ? [key] : [];
@@ -249,6 +250,7 @@ export async function readHostedOpsMemberUsage(
       ? buildHostedUsageNoticeLookupKey({
           memberId: member.id,
           periodStart: decision.periodStart,
+          planResetAt: decision.planResetAt,
           usageCreditLedgerVersion: decision.usageCreditLedgerVersion,
         })
       : null;
@@ -403,6 +405,7 @@ export async function resetHostedOpsMemberUsage(
     const noticeLookupKey = buildHostedUsageNoticeLookupKey({
       memberId: input.memberId,
       periodStart: input.periodStart,
+      planResetAt: canonicalGate.planResetAt,
       usageCreditLedgerVersion,
     });
     const deliveryRows = noticeLookupKey
@@ -492,6 +495,7 @@ export async function resetHostedOpsMemberUsage(
 function buildHostedUsageNoticeLookupKey(input: {
   memberId: string;
   periodStart: Date;
+  planResetAt: Date | null;
   usageCreditLedgerVersion: bigint;
 }): string | null {
   return createHostedLinqDeliveryIdempotencyLookupKey(

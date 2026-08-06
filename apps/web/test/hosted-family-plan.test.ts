@@ -3670,6 +3670,10 @@ describe("hosted Family plan", () => {
       data: {
         pendingPlanCode: null,
         planCode: "edge",
+        usagePlanTransitionAt: new Date("2026-07-15T12:30:00.000Z"),
+        usagePlanTransitionFromCode: "launch_monthly",
+        usagePlanTransitionKind: "plan_upgrade",
+        usagePlanTransitionToCode: "launch_edge_monthly",
       },
       where: {
         id: "hbagm_mom",

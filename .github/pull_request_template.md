@@ -14,6 +14,14 @@
 
 <!-- List the smallest correctness, privacy, security, and operational invariants this PR must preserve. -->
 
+## ReviewGPT later-round context
+
+<!-- Replace the placeholder below with exactly `routine` or `sensitive`. Use `sensitive` for any product-critical flow; auth, privacy, security, billing, health-safety, persisted-state, public API, runtime/deploy, ordering/retry/concurrency/idempotency, broad refactor, cross-owner, external-boundary, or other cross-cutting change. A cosmetic change or small bug fix is `routine` only when none of those conditions apply. Missing, malformed, or duplicate declarations default later ReviewGPT rounds to a full ZIP. -->
+
+ReviewGPT context sensitivity: <!-- routine OR sensitive -->
+
+- Classification reason: <!-- Briefly explain why this PR is routine or sensitive. -->
+
 ## Non-obvious affected surfaces
 
 <!-- Name each non-obvious production surface and its regression proof, or write "None". -->

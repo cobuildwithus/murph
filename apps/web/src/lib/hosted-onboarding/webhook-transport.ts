@@ -159,6 +159,7 @@ export type HostedLinqDailyQuotaPayload = {
 
 export type HostedLinqAiUsageQuotaClaimToken = {
   periodStart: string;
+  planResetAt?: string | null;
   sentAt: string;
   usageCreditLedgerVersion: string;
 };
@@ -444,6 +445,7 @@ function buildHostedWebhookLinqMessageEffectId(
     return buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: input.memberId,
       periodStart: input.claimToken.periodStart,
+      planResetAt: parseHostedAiUsagePlanResetAt(input.claimToken.planResetAt),
       usageCreditLedgerVersion: parseHostedAiUsageCreditLedgerVersion(
         input.claimToken.usageCreditLedgerVersion,
       ),
@@ -922,6 +924,9 @@ async function sendHostedLinqSideEffect(
           target: usageLimitPayload.chatId,
         },
         periodStart: new Date(usageLimitPayload.claimToken.periodStart),
+        planResetAt: parseHostedAiUsagePlanResetAt(
+          usageLimitPayload.claimToken.planResetAt,
+        ),
         prisma: requireHostedLinqTransportPrismaClient(options.prisma),
         source: "hosted_webhook_side_effect",
         sourceRef: usageLimitPayload.sourceEventId,
@@ -1082,6 +1087,24 @@ function parseHostedAiUsageCreditLedgerVersion(value: unknown): bigint {
     );
   }
   return BigInt(value);
+}
+
+function parseHostedAiUsagePlanResetAt(value: unknown): Date | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new TypeError(
+      "Hosted AI usage-limit claim plan reset must be an ISO timestamp.",
+    );
+  }
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new TypeError(
+      "Hosted AI usage-limit claim plan reset must be an ISO timestamp.",
+    );
+  }
+  return parsed;
 }
 
 /**

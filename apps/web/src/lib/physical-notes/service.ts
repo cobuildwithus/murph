@@ -414,7 +414,9 @@ async function recordPaidPhysicalNoteUsageTx(input: {
     trustedUserId: input.note.memberId,
     usage: [buildHostedLobPhysicalNoteUsageRecord({
       memberId: input.note.memberId,
-      occurredAt: input.note.acceptedAt,
+      // The reservation is committed before the Lob request. acceptedAt is
+      // provider completion and can fall on the other side of a plan reset.
+      occurredAt: input.note.createdAt,
       physicalNoteId: input.note.id,
       providerCostUsdMicros: cost,
       providerLetterId,

@@ -1340,6 +1340,9 @@ export async function sendAssistantMessageLocal(
           const usageRecordStartedAt = Date.now()
           await recordAssistantUsageEvent({
             executionContext,
+            ...(providerRequestStartedAtMs === null
+              ? {}
+              : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
             providerRequestAcceptedInputIds,
             providerRequestOrdinal,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
@@ -1578,6 +1581,9 @@ export async function sendAssistantMessageLocal(
         const usageRecordStartedAt = Date.now()
         await recordAssistantUsageEvent({
           executionContext,
+          ...(providerRequestStartedAtMs === null
+            ? {}
+            : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
           providerRequestAcceptedInputIds,
           providerRequestOrdinal,
           providerResult,

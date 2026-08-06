@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 
 export const ASSISTANT_USAGE_SCHEMA = "murph.assistant-usage.v1";
 export const ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH =
@@ -419,6 +419,7 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   featureKey: string;
   memberId: string;
   model: string;
+  occurredAt: string;
   providerName?: string | null;
   tokenPricingBasis?: AssistantUsageTokenPricingBasis;
   triggerKind: string;
@@ -440,7 +441,7 @@ export function buildAssistantMaintenanceUsageRecord(input: {
     featureKey: input.featureKey,
     inputTokens: input.usage.inputTokens,
     memberId: input.memberId,
-    occurredAt: new Date().toISOString(),
+    occurredAt: input.occurredAt,
     outputTokens: input.usage.outputTokens,
     provider: "codex-cli",
     ...(input.providerName === undefined ? {} : { providerName: input.providerName }),
@@ -477,6 +478,7 @@ export function buildHostedTranscriptionUsageRecord(input: {
   durationMs: number | null;
   memberId: string;
   model: string;
+  occurredAt: string;
 }): AssistantUsageRecord {
   const turnId = `turn_transcribe_${randomUUID().replaceAll("-", "")}`;
 
@@ -485,7 +487,7 @@ export function buildHostedTranscriptionUsageRecord(input: {
     credentialSource: "platform",
     featureKey: "audio-transcription",
     memberId: input.memberId,
-    occurredAt: new Date().toISOString(),
+    occurredAt: input.occurredAt,
     provider: "workers-ai",
     providerName: "Workers AI",
     rawUsageJson: {
@@ -515,6 +517,7 @@ export function buildHostedElevenLabsTtsUsageRecord(input: {
   characterCount: number;
   memberId: string;
   model: string;
+  occurredAt: string;
 }): AssistantUsageRecord {
   const turnId = `turn_elevenlabs_tts_${randomUUID().replaceAll("-", "")}`;
 
@@ -525,7 +528,7 @@ export function buildHostedElevenLabsTtsUsageRecord(input: {
     credentialSource: "platform",
     featureKey: "assistant-reply",
     memberId: input.memberId,
-    occurredAt: new Date().toISOString(),
+    occurredAt: input.occurredAt,
     provider: "elevenlabs",
     providerName: "ElevenLabs",
     rawUsageJson: {
@@ -550,6 +553,7 @@ export function buildHostedElevenLabsMusicUsageRecord(input: {
   durationMs: number;
   memberId: string;
   model: string;
+  occurredAt: string;
   providerRequestId?: string | null;
 }): AssistantUsageRecord {
   const turnId = `turn_elevenlabs_music_${randomUUID().replaceAll("-", "")}`;
@@ -561,7 +565,7 @@ export function buildHostedElevenLabsMusicUsageRecord(input: {
     credentialSource: "platform",
     featureKey: "music-generation",
     memberId: input.memberId,
-    occurredAt: new Date().toISOString(),
+    occurredAt: input.occurredAt,
     provider: "elevenlabs",
     providerName: "ElevenLabs",
     providerRequestId: input.providerRequestId ?? null,
@@ -580,6 +584,73 @@ export function buildHostedElevenLabsMusicUsageRecord(input: {
     }),
     usageExtractionSourcePath: "elevenlabs.music.compose",
     usageExtractionVersion: "elevenlabs-music-v1",
+  });
+}
+
+// Exact usage for Codex-native memory work intercepted outside the foreground
+// app-server turn. Provider response ids make re-observation idempotent while
+// the provider timestamp keeps the immutable record stable across retries.
+export function buildHostedCodexMemoryUsageRecord(input: {
+  apiKeyEnv: string;
+  baseUrl: string;
+  cacheWriteTokens: number | null;
+  cachedInputTokens: number | null;
+  inputTokens: number;
+  memberId: string;
+  occurredAt: string;
+  outputTokens: number;
+  providerName: string;
+  providerRequestId: string;
+  providerRequestOutcome: AssistantProviderRequestOutcome;
+  rawUsageJson: Record<string, unknown>;
+  reasoningTokens: number | null;
+  requestedModel: string;
+  servedModel?: string | null;
+  tokenPricingBasis?: AssistantUsageTokenPricingBasis;
+  totalTokens: number;
+}): AssistantUsageRecord {
+  const digest = createHash("sha256")
+    .update("murph.hosted-codex-memory-usage.v1")
+    .update("\0")
+    .update(input.memberId)
+    .update("\0")
+    .update(input.providerName)
+    .update("\0")
+    .update(input.providerRequestId)
+    .digest("hex")
+    .slice(0, 32);
+  const turnId = `turn_codex_memory_${digest}`;
+
+  return parseAssistantUsageRecord({
+    apiKeyEnv: input.apiKeyEnv,
+    attemptCount: 1,
+    baseUrl: input.baseUrl,
+    cacheWriteTokens: input.cacheWriteTokens,
+    cachedInputTokens: input.cachedInputTokens,
+    credentialSource: "platform",
+    featureKey: "codex-native-memory",
+    inputTokens: input.inputTokens,
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    outputTokens: input.outputTokens,
+    provider: "codex-cli",
+    providerName: input.providerName,
+    providerRequestId: input.providerRequestId,
+    providerRequestOutcome: input.providerRequestOutcome,
+    rawUsageJson: input.rawUsageJson,
+    reasoningTokens: input.reasoningTokens,
+    requestedModel: input.requestedModel,
+    schema: ASSISTANT_USAGE_SCHEMA,
+    servedModel: input.servedModel ?? null,
+    sessionId: turnId,
+    surface: "hosted-runner",
+    tokenPricingBasis: input.tokenPricingBasis ?? "standard",
+    totalTokens: input.totalTokens,
+    triggerKind: "codex-native-memory",
+    turnId,
+    usageId: createAssistantUsageId({ attemptCount: 1, turnId }),
+    usageExtractionSourcePath: "codex.responses.terminal",
+    usageExtractionVersion: "codex-native-memory-v1",
   });
 }
 
@@ -602,6 +673,7 @@ const HOSTED_XAI_SEARCH_RAW_USAGE_KEYS = [
 export function buildHostedXaiSearchUsageRecord(input: {
   memberId: string;
   model: string;
+  occurredAt: string;
   providerRequestId?: string | null;
   usage?: Record<string, unknown> | null;
 }): AssistantUsageRecord {
@@ -637,7 +709,7 @@ export function buildHostedXaiSearchUsageRecord(input: {
     credentialSource: "platform",
     featureKey: "x-search",
     memberId: input.memberId,
-    occurredAt: new Date().toISOString(),
+    occurredAt: input.occurredAt,
     provider: "xai",
     providerName: "xAI",
     providerRequestId: input.providerRequestId ?? null,

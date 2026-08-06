@@ -29,7 +29,7 @@ export interface HostedContactPrivacyKeyring {
 
 export type HostedLinqFirstContactAdmissionMode = "enforce" | "off";
 
-const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-5.6-terra";
+const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-5.6-luna";
 const DEFAULT_HOSTED_LINQ_INSTANT_START_PHONE_PREFIXES = [
   // North America. This is intentionally the full NANP, not US/Canada-only.
   "+1",
