@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
+  recoverPendingHostedSignupReferralRewards,
   settleHostedSignupReferralReward,
 } from "@/src/lib/hosted-growth/signup-referral-reward";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -23,7 +24,7 @@ if (
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted signup-referral PostgreSQL serialization",
   () => {
-    it("keeps delayed resumed attribution while creating one receipt and grant", async () => {
+    it("discovers delayed resumed attribution while creating one receipt and grant", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for this proof.");
       }
@@ -36,7 +37,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const now = new Date();
       const introducedAt = new Date(now.getTime() - 25 * 24 * 60 * 60_000);
       const attributedAt = new Date(now.getTime() - 24 * 24 * 60 * 60_000);
-      const activatedAt = new Date(now.getTime() - 2 * 24 * 60 * 60_000);
+      const activatedAt = new Date(now.getTime() - 2 * 60_000);
       const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
       const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -86,23 +87,31 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
 
         const firstPass = await Promise.all([
-          settleHostedSignupReferralReward({
-            activatedAt,
-            introducedMemberId,
+          recoverPendingHostedSignupReferralRewards({
+            enabled: true,
+            limit: 50,
+            now,
             prisma: firstClient,
-            referrerMemberId,
           }),
-          settleHostedSignupReferralReward({
-            activatedAt,
-            introducedMemberId,
+          recoverPendingHostedSignupReferralRewards({
+            enabled: true,
+            limit: 50,
+            now,
             prisma: secondClient,
-            referrerMemberId,
           }),
         ]);
-        expect(firstPass.map(({ outcome }) => outcome).sort()).toEqual([
-          "already_processed",
-          "rewarded",
-        ]);
+        expect(firstPass.reduce(
+          (total, result) => total + result.failed,
+          0,
+        )).toBe(0);
+        expect(firstPass.reduce(
+          (total, result) => total + result.rewarded,
+          0,
+        )).toBe(1);
+        expect(firstPass.reduce(
+          (total, result) => total + result.scanned,
+          0,
+        )).toBeGreaterThanOrEqual(1);
 
         const referral =
           await observer.hostedUsageReferral.findFirstOrThrow({
