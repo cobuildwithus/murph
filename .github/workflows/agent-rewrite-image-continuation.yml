@@ -1,0 +1,57 @@
+name: Agent image continuation rewrite
+
+on:
+  push:
+    branches:
+      - agent/physical-note-return-address-continuation
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-image-continuation-rewrite
+  cancel-in-progress: false
+
+jobs:
+  rewrite:
+    if: contains(github.event.head_commit.message, '[agent-rewrite-image-continuation]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Rewrite image continuation
+        run: node scripts/agent-rewrite-image-continuation.mjs
+
+      - name: Typecheck assistant engine
+        run: pnpm --filter @murphai/assistant-engine typecheck
+
+      - name: Verify diff
+        run: git diff --check
+
+      - name: Commit rewritten branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/agent-rewrite-image-continuation.yml
+          rm scripts/agent-rewrite-image-continuation.mjs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Keep image generation in the active assistant turn"
+          git push origin HEAD:agent/physical-note-return-address-continuation
