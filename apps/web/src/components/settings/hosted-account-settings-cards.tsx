@@ -64,6 +64,13 @@ export function HostedAccountSettingsCards({
   const emailVerified = Boolean(account.email.verifiedAt);
   const murphEmailAddress = account.email.murphEmailAddress;
   const murphSmsHref = phoneNumber && murphPhoneNumber ? `sms:${murphPhoneNumber}` : null;
+  // This key only invalidates browser-local referral state. The authenticated
+  // endpoint remains the sole authority for which member owns the returned URL.
+  const referralIdentityKey = expectedPrivyUserId ?? JSON.stringify([
+    phoneNumber,
+    emailAddress,
+    telegramUserId,
+  ]);
 
   return (
     <>
@@ -124,7 +131,11 @@ export function HostedAccountSettingsCards({
           }
         />
         <SettingsRow
-          action={<HostedSignupReferralLinkButton />}
+          action={(
+            <HostedSignupReferralLinkButton
+              identityKey={referralIdentityKey}
+            />
+          )}
           icon={<Link2 className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Referral link"
           value="Your reusable link for inviting friends"
