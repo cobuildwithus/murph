@@ -1,8 +1,10 @@
 import { isIP } from 'node:net'
 
 import {
+  buildLinqHostedRuntimeRequest,
   containsHttpUrlText,
   splitTrailingHttpsLink,
+  type LinqHostedRuntimeOperation,
 } from '@murphai/contracts'
 import type {
   AttachmentCreateParams,
@@ -357,8 +359,7 @@ export async function probeLinqApi(
     },
     env,
     fetchImplementation: dependencies.fetchImplementation,
-    method: 'GET',
-    path: '/phone_numbers',
+    route: hostedLinqRuntimeRoute('phone_numbers_list'),
     signal: dependencies.signal,
   })
 
@@ -627,8 +628,7 @@ async function sendLinqChatMessageBody(
     },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: `/chats/${encodeURIComponent(input.chatId)}/messages`,
+    route: hostedLinqRuntimeRoute('message_send', [input.chatId]),
     body: input.body,
     signal: dependencies.signal,
   })
@@ -658,8 +658,7 @@ export async function checkLinqIMessageCapability(
     },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: '/capability/check_imessage',
+    route: hostedLinqRuntimeRoute('imessage_capability_check'),
     body,
     signal: dependencies.signal,
   })
@@ -711,8 +710,7 @@ export async function sendLinqIMessageAppCard(
     },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: `/chats/${encodeURIComponent(chatId)}/messages`,
+    route: hostedLinqRuntimeRoute('message_send', [chatId]),
     body,
     signal: dependencies.signal,
   })
@@ -748,8 +746,7 @@ async function createLinqAttachmentUpload(
     },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: '/attachments',
+    route: hostedLinqRuntimeRoute('attachment_create'),
     body,
     signal: dependencies.signal,
   })
@@ -908,8 +905,7 @@ export async function sendLinqVoiceMemo(
     },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: `/chats/${encodeURIComponent(chatId)}/voicememo`,
+    route: hostedLinqRuntimeRoute('voice_memo_send', [chatId]),
     body,
     signal: dependencies.signal,
   })
@@ -942,8 +938,7 @@ export async function deleteLinqMessage(
       },
       env: dependencies.env ?? process.env,
       fetchImplementation: dependencies.fetchImplementation,
-      method: 'DELETE',
-      path: `/messages/${encodeURIComponent(messageId)}`,
+      route: hostedLinqRuntimeRoute('message_delete', [messageId]),
       signal: dependencies.signal,
     })
   } catch (error) {
@@ -983,8 +978,7 @@ export async function setLinqMessageReaction(
     },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: `/messages/${encodeURIComponent(targetMessageId)}/reactions`,
+    route: hostedLinqRuntimeRoute('reaction_create', [targetMessageId]),
     body,
     signal: dependencies.signal,
   })
@@ -1014,8 +1008,7 @@ export async function startLinqChatTypingIndicator(
     },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: `/chats/${encodeURIComponent(chatId)}/typing`,
+    route: hostedLinqRuntimeRoute('typing_start', [chatId]),
     signal: dependencies.signal,
   })
 }
@@ -1039,8 +1032,7 @@ export async function stopLinqChatTypingIndicator(
     },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
-    method: 'DELETE',
-    path: `/chats/${encodeURIComponent(chatId)}/typing`,
+    route: hostedLinqRuntimeRoute('typing_stop', [chatId]),
     signal: dependencies.signal,
   })
 }
@@ -1064,8 +1056,7 @@ export async function markLinqChatRead(
     },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: `/chats/${encodeURIComponent(chatId)}/read`,
+    route: hostedLinqRuntimeRoute('read_receipt_send', [chatId]),
     signal: dependencies.signal,
   })
 }
@@ -1201,8 +1192,7 @@ async function createLinqChatWithPrimaryMessage(
     },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: '/chats',
+    route: hostedLinqRuntimeRoute('chat_create'),
     body,
     signal: dependencies.signal,
   })
@@ -1347,8 +1337,11 @@ export async function createLinqWebhookSubscription(
     },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: '/webhook-subscriptions',
+    route: {
+      kind: 'control_plane',
+      method: 'POST',
+      path: '/webhook-subscriptions',
+    },
     body,
     signal: dependencies.signal,
   })
@@ -1365,18 +1358,42 @@ export async function createLinqWebhookSubscription(
   }
 }
 
+type LinqRequestRoute =
+  | {
+      kind: 'hosted_runtime'
+      operation: LinqHostedRuntimeOperation
+      pathParameters?: readonly string[]
+    }
+  | {
+      kind: 'control_plane'
+      method: 'POST'
+      path: '/webhook-subscriptions'
+    }
+
+function hostedLinqRuntimeRoute(
+  operation: LinqHostedRuntimeOperation,
+  pathParameters: readonly string[] = [],
+): LinqRequestRoute {
+  return {
+    kind: 'hosted_runtime',
+    operation,
+    ...(pathParameters.length > 0 ? { pathParameters } : {}),
+  }
+}
+
 async function requestLinqJson<T>(input: {
   allowRateLimitRetries?: boolean
   details: LinqSafeRequestDetails
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
-  method: LinqHttpMethod
-  path: string
+  route: LinqRequestRoute
   body?: LinqJsonRequestBody
   signal?: AbortSignal
 }): Promise<T> {
+  const { route, ...request } = input
   return requestLinq<T>({
-    ...input,
+    ...request,
+    ...resolveLinqRequestRoute(route),
     parseResponse: async (response) => (await response.json()) as T,
   })
 }
@@ -1387,14 +1404,30 @@ async function requestLinqNoContent(input: {
   details: LinqSafeRequestDetails
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
-  method: LinqHttpMethod
-  path: string
+  route: LinqRequestRoute
   signal?: AbortSignal
 }): Promise<void> {
+  const { route, ...request } = input
   await requestLinq<void>({
-    ...input,
+    ...request,
+    ...resolveLinqRequestRoute(route),
     parseResponse: async () => undefined,
   })
+}
+
+function resolveLinqRequestRoute(
+  route: LinqRequestRoute,
+): { method: LinqHttpMethod; path: string } {
+  if (route.kind === 'hosted_runtime') {
+    return buildLinqHostedRuntimeRequest(
+      route.operation,
+      route.pathParameters,
+    )
+  }
+  return {
+    method: route.method,
+    path: route.path,
+  }
 }
 
 type LinqHttpMethod = 'DELETE' | 'GET' | 'POST' | 'PUT'

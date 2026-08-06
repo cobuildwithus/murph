@@ -236,6 +236,12 @@ authority headers are absent. There is no tokenless active-user-fence provider
 authorization path. Runner container names remain lifecycle/routing handles,
 not provider-egress authority outside the explicit signed provider credential
 identity checked by UserRunner.
+Hosted Linq runtime callers and the Worker egress interceptor share the typed
+`LINQ_HOSTED_RUNTIME_ROUTE_DEFINITIONS` contract for exact methods, path shapes,
+and redacted diagnostic operation names. The interceptor-to-stub-upstream route
+matrix executes every declared entry. Linq webhook subscription management and
+unknown provider paths remain outside that contract and fail closed at the
+hosted egress boundary.
 Hosted-local may rewrite loopback provider bases to the configured
 `HOSTED_EXECUTION_RUNNER_HOST_ALIAS` so Linux runner containers can reach host
 stubs through the Docker bridge. The provider-fetch allowlist may accept HTTP

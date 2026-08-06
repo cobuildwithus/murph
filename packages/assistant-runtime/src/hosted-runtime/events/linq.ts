@@ -1,3 +1,4 @@
+import { buildLinqHostedRuntimeRequest } from "@murphai/contracts";
 import type { LinqAttachmentDownloadDriver as HostedConversationLinqAttachmentDownloadDriver } from "@murphai/inboxd/connectors/hosted-conversation";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -853,13 +854,16 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
   const releaseRelay = input.signal ? relayAbortSignal(input.signal, controller) : () => {};
 
   try {
+    const request = buildLinqHostedRuntimeRequest("attachment_read", [
+      input.attachmentId,
+    ]);
     const response = await input.fetchImplementation(
-      new URL(`attachments/${encodeURIComponent(input.attachmentId)}`, `${input.apiBaseUrl}/`),
+      new URL(request.path.slice(1), `${input.apiBaseUrl}/`),
       {
         headers: {
           authorization: `Bearer ${input.apiToken}`,
         },
-        method: "GET",
+        method: request.method,
         signal: controller.signal,
       },
     );

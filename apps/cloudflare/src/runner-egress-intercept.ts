@@ -5,9 +5,11 @@ import {
   clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_METHOD,
   EXA_RESEARCH_SCOUT_PATH,
+  matchLinqHostedRuntimeRoute,
   parseExaResearchScoutRequestBody,
   type ExaResearchScoutRequestBody,
   type ExaResearchScoutParsedRequest,
+  type LinqHostedRuntimeOperation,
 } from "@murphai/contracts";
 import {
   buildHostedExecutionSafeErrorDetails,
@@ -3761,7 +3763,7 @@ async function maybeHandleLinqRequest(input: {
     return null;
   }
 
-  const providerOperation = readAllowedLinqOperation(
+  const providerOperation = matchLinqHostedRuntimeRoute(
     input.request.method,
     pathMatch.pathnameSuffix,
   );
@@ -3972,58 +3974,7 @@ function hasHeaderCredentialSentinel(headers: Headers, name: string): boolean {
   return headers.get(name)?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 }
 
-type HostedLinqProviderOperation =
-  | "attachment_create"
-  | "attachment_read"
-  | "chat_create"
-  | "message_delete"
-  | "message_send"
-  | "phone_numbers_list"
-  | "reaction_create"
-  | "read_receipt_send"
-  | "typing_start"
-  | "typing_stop"
-  | "voice_memo_send";
-
-function readAllowedLinqOperation(
-  method: string,
-  pathnameSuffix: string,
-): HostedLinqProviderOperation | null {
-  if (method === "GET" && pathnameSuffix === "/phone_numbers") {
-    return "phone_numbers_list";
-  }
-  if (method === "GET" && /^\/attachments\/[^/]+$/u.test(pathnameSuffix)) {
-    return "attachment_read";
-  }
-  if (method === "POST" && pathnameSuffix === "/attachments") {
-    return "attachment_create";
-  }
-  if (method === "POST" && pathnameSuffix === "/chats") {
-    return "chat_create";
-  }
-  if (method === "POST" && /^\/messages\/[^/]+\/reactions$/u.test(pathnameSuffix)) {
-    return "reaction_create";
-  }
-  if (method === "POST" && /^\/chats\/[^/]+\/voicememo$/u.test(pathnameSuffix)) {
-    return "voice_memo_send";
-  }
-  if (method === "POST" && /^\/chats\/[^/]+\/messages$/u.test(pathnameSuffix)) {
-    return "message_send";
-  }
-  if (method === "POST" && /^\/chats\/[^/]+\/typing$/u.test(pathnameSuffix)) {
-    return "typing_start";
-  }
-  if (method === "POST" && /^\/chats\/[^/]+\/read$/u.test(pathnameSuffix)) {
-    return "read_receipt_send";
-  }
-  if (method === "DELETE" && /^\/chats\/[^/]+\/typing$/u.test(pathnameSuffix)) {
-    return "typing_stop";
-  }
-  if (method === "DELETE" && /^\/messages\/[^/]+$/u.test(pathnameSuffix)) {
-    return "message_delete";
-  }
-  return null;
-}
+type HostedLinqProviderOperation = LinqHostedRuntimeOperation;
 
 function readTelegramSentinelOperation(pathname: string): string | null {
   const prefix = `/bot${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}/`;

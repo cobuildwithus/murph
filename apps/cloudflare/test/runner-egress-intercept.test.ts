@@ -2,7 +2,10 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
   buildExaResearchScoutRequest,
+  buildLinqHostedRuntimeRequest,
+  LINQ_HOSTED_RUNTIME_ROUTE_DEFINITIONS,
   MAX_RESEARCH_SCOUT_CANDIDATES,
+  type LinqHostedRuntimeOperation,
 } from "@murphai/contracts";
 
 const mocks = vi.hoisted(() => ({
@@ -7100,145 +7103,162 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 
-  it.each([
-    {
+  type LinqRuntimeRouteTestInput = {
+    body?: Record<string, unknown>;
+    name: string;
+    pathParameters: readonly string[];
+    responseBody?: string;
+  };
+  type LinqRuntimeRouteTestCase = LinqRuntimeRouteTestInput & {
+    method: "DELETE" | "GET" | "POST";
+    operation: LinqHostedRuntimeOperation;
+    path: string;
+  };
+
+  const linqRuntimeRouteTestInputs = {
+    phone_numbers_list: {
       name: "phone number probe",
-      method: "GET",
-      operation: "phone_numbers_list",
-      path: "/phone_numbers",
+      pathParameters: [],
       responseBody: JSON.stringify({ phone_numbers: [] }),
     },
-    {
+    attachment_read: {
       name: "attachment metadata",
-      method: "GET",
-      operation: "attachment_read",
-      path: "/attachments/attachment_metadata_1",
+      pathParameters: ["attachment_metadata_1"],
       responseBody: "{}",
     },
-    {
+    imessage_capability_check: {
+      body: {
+        address: "+15550000001",
+      },
+      name: "iMessage capability check",
+      pathParameters: [],
+      responseBody: JSON.stringify({ available: true }),
+    },
+    attachment_create: {
       body: {
         content_type: "audio/mpeg",
         filename: "voice-memo.mp3",
         size_bytes: 128,
       },
-      method: "POST",
       name: "attachment upload creation",
-      operation: "attachment_create",
-      path: "/attachments",
+      pathParameters: [],
     },
-    {
+    chat_create: {
       body: {
         from: "+15550000000",
         message: { parts: [{ type: "text", value: "hello" }] },
         to: ["+15550000001"],
       },
-      method: "POST",
       name: "chat creation",
-      operation: "chat_create",
-      path: "/chats",
+      pathParameters: [],
     },
-    {
+    message_send: {
       body: {
         message: { parts: [{ type: "text", value: "hello" }] },
       },
-      method: "POST",
       name: "chat message send",
-      operation: "message_send",
-      path: "/chats/chat_1/messages",
+      pathParameters: ["chat_1"],
     },
-    {
+    voice_memo_send: {
       body: {
         attachment_id: "attachment_voice_1",
       },
-      method: "POST",
       name: "voice memo send",
-      operation: "voice_memo_send",
-      path: "/chats/chat_1/voicememo",
+      pathParameters: ["chat_1"],
     },
-    {
+    reaction_create: {
       body: {
         operation: "add",
         type: "love",
       },
-      method: "POST",
       name: "message reaction",
-      operation: "reaction_create",
-      path: "/messages/message_1/reactions",
+      pathParameters: ["message_1"],
     },
-    {
-      method: "POST",
+    typing_start: {
       name: "typing start",
-      operation: "typing_start",
-      path: "/chats/chat_1/typing",
+      pathParameters: ["chat_1"],
     },
-    {
-      method: "POST",
+    read_receipt_send: {
       name: "read receipt",
-      operation: "read_receipt_send",
-      path: "/chats/chat_1/read",
+      pathParameters: ["chat_1"],
     },
-    {
-      method: "DELETE",
+    typing_stop: {
       name: "typing stop",
-      operation: "typing_stop",
-      path: "/chats/chat_1/typing",
+      pathParameters: ["chat_1"],
     },
-    {
-      method: "DELETE",
+    message_delete: {
       name: "message cleanup",
-      operation: "message_delete",
-      path: "/messages/message_1",
+      pathParameters: ["message_1"],
     },
-  ] as const)("allows required Linq runtime route: $name", async (route) => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(route.responseBody ?? "ok", {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-    const body = "body" in route ? JSON.stringify(route.body) : undefined;
-
-    const response = await hostedRunnerIntercept(
-      new Request(`https://api.linqapp.com/api/partner/v3${route.path}`, {
-        ...(body ? { body } : {}),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
-          ...(body ? { "content-type": "application/json" } : {}),
-        },
-        method: route.method,
+  } as const satisfies Record<
+    LinqHostedRuntimeOperation,
+    LinqRuntimeRouteTestInput
+  >;
+  const linqRuntimeRouteTestCases: LinqRuntimeRouteTestCase[] =
+    LINQ_HOSTED_RUNTIME_ROUTE_DEFINITIONS.map(
+      (route) => ({
+        ...route,
+        ...linqRuntimeRouteTestInputs[route.operation],
+        ...buildLinqHostedRuntimeRequest(
+          route.operation,
+          linqRuntimeRouteTestInputs[route.operation].pathParameters,
+        ),
       }),
-      createInterceptEnv({
-        LINQ_API_TOKEN: "linq-worker-secret",
-        validateRuntimeWriteFence,
-      }),
-      { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "7",
-      userId: "member_123",
-    });
-    const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.method).toBe(route.method);
-    expect(forwarded.url).toBe(`https://api.linqapp.com/api/partner/v3${route.path}`);
-    expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
-    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
-    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          providerOperation: route.operation,
+  it.each(linqRuntimeRouteTestCases)(
+    "allows required Linq runtime route: $name",
+    async (route) => {
+      const fetchMock = vi.fn<typeof fetch>(async () =>
+        new Response(route.responseBody ?? "ok", {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        })
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const validateRuntimeWriteFence = vi.fn(async () => true);
+      const body = "body" in route ? JSON.stringify(route.body) : undefined;
+
+      const response = await hostedRunnerIntercept(
+        new Request(`https://api.linqapp.com/api/partner/v3${route.path}`, {
+          ...(body ? { body } : {}),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+            ...(body ? { "content-type": "application/json" } : {}),
+          },
+          method: route.method,
         }),
-      }),
-    );
-  });
+        createInterceptEnv({
+          LINQ_API_TOKEN: "linq-worker-secret",
+          validateRuntimeWriteFence,
+        }),
+        { containerId: "opaque-container-id" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+        attemptId: "attempt_1",
+        generation: "7",
+        userId: "member_123",
+      });
+      const forwarded = readForwardedRequest(fetchMock);
+      expect(forwarded.method).toBe(route.method);
+      expect(forwarded.url).toBe(`https://api.linqapp.com/api/partner/v3${route.path}`);
+      expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
+      expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+      expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            providerOperation: route.operation,
+          }),
+        }),
+      );
+    },
+  );
 
   it("honors configured Linq base URL pathname prefixes before validating allowed suffixes", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
