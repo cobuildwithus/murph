@@ -1391,6 +1391,76 @@ describe('assistant outbox runtime', () => {
     expect(sendLinq).toHaveBeenCalledTimes(1)
   })
 
+  it.each([
+    {
+      context: { failureStage: 'transport', timedOut: true },
+      label: 'timeout',
+    },
+    {
+      context: { failureStage: 'http', status: 408 },
+      label: 'HTTP 408',
+    },
+    {
+      context: { failureStage: 'http', status: 503 },
+      label: 'HTTP 503',
+    },
+  ])('abandons an ambiguous Linq attachment reservation after $label', async ({
+    context,
+    label,
+  }) => {
+    const { vaultRoot } = await createAssistantVault(
+      `assistant-outbox-linq-attachment-reservation-${label.replaceAll(' ', '-')}-`,
+    )
+    const intent = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'linq_chat_attachment_reservation_ambiguous',
+      message: 'Private image with ambiguous reservation',
+      threadId: 'linq_chat_attachment_reservation_ambiguous',
+    })
+    const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>(
+      async () => {
+        throw new VaultCliError(
+          'LINQ_API_REQUEST_FAILED',
+          'Linq attachment reservation ended without definitive no-effect proof.',
+          {
+            ...context,
+            method: 'POST',
+            operation: 'create_attachment_upload',
+            provider: 'linq',
+            retryable: false,
+          },
+        )
+      },
+    )
+
+    await useActualOutboundDeliveryImplementation()
+    const abandoned = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-08-06T20:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(abandoned.intent).toMatchObject({
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+      },
+      nextAttemptAt: null,
+      status: 'abandoned',
+    })
+
+    const later = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      intentId: intent.intentId,
+      now: new Date('2026-08-07T20:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(later.intent.status).toBe('abandoned')
+    expect(sendLinq).toHaveBeenCalledTimes(1)
+  })
+
   it('recovers a private Linq attachment inside one outbox dispatch and sends once', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-linq-attachment-recovered-',

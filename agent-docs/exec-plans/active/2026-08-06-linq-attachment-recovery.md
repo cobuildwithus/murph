@@ -90,6 +90,18 @@ Updated: 2026-08-06
   body must not outlive the upload deadline or allow a zero-delay retry to
   start after the deadline; one sequence-level abort owner is both simpler and
   stricter than per-attempt deadline bookkeeping.
+- Accept final round 2's repeated-owner finding. A required-send cron occurrence
+  must consume a terminal confirmed attachment `PUT` outcome instead of using
+  the failed outbox intent as permission to create a successor intent and a
+  fresh reservation. Preserve the complete existing delivery error through
+  cron reconciliation and reuse the existing fresh-intent prohibition policy.
+- Keep reservation `POST` outcomes fail-closed for transport loss, timeout,
+  HTTP 408, and HTTP 5xx. No provider evidence proves those responses imply
+  that the non-idempotent reservation effect did not begin.
+- The required anomaly retrospective chose justified continuation: this is the
+  same indivisible no-replay requirement, current source shape remains far
+  below the churn threshold, and the correction tightens existing owner
+  boundaries without adding state, a queue, or a lifecycle.
 
 ## Verification
 
@@ -108,3 +120,7 @@ Updated: 2026-08-06
   from `packages/assistant-engine`: 26 tests passed.
 - `pnpm exec vitest run --config vitest.config.ts --no-coverage test/assistant-channels-runtime.test.ts`
   from `packages/assistant-engine`: 60 tests passed.
+- `pnpm exec vitest run --config vitest.config.ts --no-coverage test/assistant-outbox-retry-policy.test.ts test/assistant-outbox-runtime.test.ts`
+  from `packages/assistant-engine`: 102 tests passed.
+- `pnpm exec vitest run --config vitest.config.ts --no-coverage test/assistant-cron-runtime.test.ts`
+  from `packages/assistant-engine`: 201 tests passed.
