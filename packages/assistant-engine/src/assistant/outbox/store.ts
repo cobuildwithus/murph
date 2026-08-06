@@ -29,6 +29,7 @@ import { readAssistantCronCanonicalRuntimeStore } from '../cron/runtime-state.js
 
 const ASSISTANT_TERMINAL_OUTBOX_RETENTION_LIMIT = 100
 const ASSISTANT_TERMINAL_OUTBOX_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
+const ASSISTANT_OUTBOX_INVENTORY_READ_CONCURRENCY = 16
 
 export async function readAssistantOutboxIntent(
   vault: string,
@@ -70,18 +71,31 @@ export async function listAssistantOutboxIntentsLocal(
     withFileTypes: true,
   })
   const intents: AssistantOutboxIntent[] = []
+  const intentPaths = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => path.join(paths.outboxDirectory, entry.name))
 
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.json')) {
-      continue
-    }
-
-    const intent = await readAssistantOutboxIntentInventoryEntry(
-      vault,
-      path.join(paths.outboxDirectory, entry.name),
+  for (
+    let offset = 0;
+    offset < intentPaths.length;
+    offset += ASSISTANT_OUTBOX_INVENTORY_READ_CONCURRENCY
+  ) {
+    const batch = intentPaths.slice(
+      offset,
+      offset + ASSISTANT_OUTBOX_INVENTORY_READ_CONCURRENCY,
     )
-    if (intent) {
-      intents.push(intent)
+    const batchResults = await Promise.allSettled(
+      batch.map((intentPath) =>
+        readAssistantOutboxIntentInventoryEntry(vault, intentPath),
+      ),
+    )
+    for (const result of batchResults) {
+      if (result.status === 'rejected') {
+        throw result.reason
+      }
+      if (result.value) {
+        intents.push(result.value)
+      }
     }
   }
 

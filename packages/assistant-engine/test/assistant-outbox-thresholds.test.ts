@@ -1,4 +1,4 @@
-import { rm, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -36,6 +36,64 @@ afterEach(async () => {
 })
 
 describe('assistant outbox thresholds', () => {
+  it('bounds concurrent outbox inventory reads without serializing every file', async () => {
+    const initial = await loadOutboxModule()
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-thresholds-inventory-concurrency-',
+    )
+    const intentCount = 17
+    const seeded = await createIntent(initial.outbox, vaultRoot, {
+      createdAt: '2026-04-08T10:00:00.000Z',
+      message: 'inventory message',
+      sessionId: 'session-inventory',
+      turnId: 'turn-inventory',
+    })
+    await Promise.all(
+      Array.from({ length: intentCount - 1 }, (_, index) =>
+        writeFile(
+          path.join(paths.outboxDirectory, `inventory-copy-${index}.json`),
+          JSON.stringify(seeded),
+          'utf8',
+        ),
+      ),
+    )
+
+    let activeReads = 0
+    let maximumActiveReads = 0
+    let releaseReads = (): void => undefined
+    const readsReleased = new Promise<void>((resolve) => {
+      releaseReads = resolve
+    })
+    const delayedReadFile = vi.fn(
+      async (filePath: string, encoding: BufferEncoding): Promise<string> => {
+        activeReads += 1
+        maximumActiveReads = Math.max(maximumActiveReads, activeReads)
+        await readsReleased
+        try {
+          return await readFile(filePath, encoding)
+        } finally {
+          activeReads -= 1
+        }
+      },
+    )
+    const { outbox } = await loadOutboxModule({
+      readFile: delayedReadFile,
+    })
+
+    const listing = outbox.listAssistantOutboxIntentsLocal(vaultRoot)
+    try {
+      await vi.waitFor(() => {
+        expect(maximumActiveReads).toBe(16)
+      })
+    } finally {
+      releaseReads()
+    }
+
+    await expect(listing).resolves.toHaveLength(intentCount)
+    expect(delayedReadFile).toHaveBeenCalledTimes(intentCount)
+    expect(maximumActiveReads).toBe(16)
+  })
+
   it('skips dispatch when a retryable intent is not due yet', async () => {
     const deliverAssistantMessageOverBinding = vi.fn()
     const { outbox } = await loadOutboxModule({
@@ -1012,6 +1070,7 @@ describe('assistant outbox thresholds', () => {
 
 async function loadOutboxModule(options: {
   deliverAssistantMessageOverBinding?: (...args: never[]) => Promise<unknown>
+  readFile?: (filePath: string, encoding: BufferEncoding) => Promise<string>
   rename?: (...args: never[]) => Promise<unknown>
   saveAssistantSession?: (...args: never[]) => Promise<unknown>
 } = {}) {
@@ -1021,14 +1080,15 @@ async function loadOutboxModule(options: {
       options.deliverAssistantMessageOverBinding ?? vi.fn(),
   }))
 
-  if (options.rename) {
+  if (options.readFile || options.rename) {
     vi.doMock('node:fs/promises', async () => {
       const actual = await vi.importActual<typeof import('node:fs/promises')>(
         'node:fs/promises',
       )
       return {
         ...actual,
-        rename: options.rename,
+        ...(options.readFile ? { readFile: options.readFile } : {}),
+        ...(options.rename ? { rename: options.rename } : {}),
       }
     })
   }
