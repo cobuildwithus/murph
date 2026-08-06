@@ -1,0 +1,48 @@
+{
+  "format": "murph.export-pack.v1",
+  "packId": "fixture-pack",
+  "generatedAt": "2026-08-06T18:00:00.000Z",
+  "filters": {
+    "from": null,
+    "to": null,
+    "experimentSlug": null
+  },
+  "manifest": {
+    "recordCount": 0,
+    "experimentCount": 0,
+    "journalCount": 0,
+    "sampleSummaryCount": 0,
+    "assessmentCount": 0,
+    "healthEventCount": 0,
+    "bankPageCount": 0,
+    "questionCount": 1,
+    "fileCount": 5
+  },
+  "files": [
+    {
+      "path": "exports/packs/fixture-pack/manifest.json",
+      "mediaType": "application/json",
+      "role": "manifest"
+    },
+    {
+      "path": "exports/packs/fixture-pack/question-pack.json",
+      "mediaType": "application/json",
+      "role": "question-pack"
+    },
+    {
+      "path": "exports/packs/fixture-pack/entities.json",
+      "mediaType": "application/json",
+      "role": "entities"
+    },
+    {
+      "path": "exports/packs/fixture-pack/daily-samples.json",
+      "mediaType": "application/json",
+      "role": "daily-samples"
+    },
+    {
+      "path": "exports/packs/fixture-pack/assistant-context.md",
+      "mediaType": "text/markdown",
+      "role": "assistant-context"
+    }
+  ]
+}

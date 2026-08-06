@@ -1,0 +1,12 @@
+{
+  "format": "murph.question-pack.v1",
+  "packId": "fixture-pack",
+  "generatedAt": "2026-08-06T18:00:00.000Z",
+  "questions": [
+    "What changed in the supplied synthetic record?"
+  ],
+  "context": {
+    "timeline": [],
+    "dailySampleSummaries": []
+  }
+}

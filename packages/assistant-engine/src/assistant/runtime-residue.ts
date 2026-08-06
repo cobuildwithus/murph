@@ -131,6 +131,43 @@ interface AssistantGeneratedDeliveryPrunePlan {
   skippedUntrustedOutbox: boolean
 }
 
+export interface AssistantGeneratedDeliveryResiduePruneResult {
+  bytesPruned: number
+  exportPackBytesPruned: number
+  exportPacksPruned: number
+  filesPruned: number
+}
+
+export async function pruneQuiescentAssistantGeneratedDeliveryResidue(input: {
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<AssistantGeneratedDeliveryResiduePruneResult> {
+  return await withAssistantRuntimeWriteLock(
+    input.vault,
+    async (paths) => {
+      await ensureAssistantState(paths)
+      input.signal?.throwIfAborted()
+      const outbox = await readOutboxInventory(
+        paths.outboxDirectory,
+        input.vault,
+        input.signal,
+      )
+      const plan = await planAssistantGeneratedDeliveryPrune({
+        outbox,
+        signal: input.signal,
+        vault: input.vault,
+      })
+      input.signal?.throwIfAborted()
+      return await applyAssistantGeneratedDeliveryPrunePlan({
+        plan,
+        signal: input.signal,
+        vault: input.vault,
+      })
+    },
+    input.signal,
+  )
+}
+
 export async function pruneAssistantRuntimeResidue(input: {
   generatedDeliveryFilesQuiescent?: boolean
   now?: Date
@@ -547,12 +584,7 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
   plan: AssistantGeneratedDeliveryPrunePlan
   signal?: AbortSignal | null
   vault: string
-}): Promise<{
-  bytesPruned: number
-  exportPackBytesPruned: number
-  exportPacksPruned: number
-  filesPruned: number
-}> {
+}): Promise<AssistantGeneratedDeliveryResiduePruneResult> {
   let bytesPruned = 0
   let filesPruned = 0
   for (const file of input.plan.inventoryFiles) {

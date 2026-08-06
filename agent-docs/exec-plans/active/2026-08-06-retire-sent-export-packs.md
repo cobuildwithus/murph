@@ -18,6 +18,8 @@ Updated: 2026-08-06
 - A terminal successful send removes only unchanged, manifest-valid derived
   pack directories and continues to use the existing generated-delivery
   cleanup lifecycle.
+- Hosted checkpointing and local assistant-daemon startup both recover a sent
+  export pack whose immediate best-effort retirement was interrupted.
 - Existing generated delivery retry, approval, checkpoint, and cleanup
   behavior remains unchanged for other files.
 - Focused proof, exact-head ReviewGPT passes, and required CI complete with no
@@ -55,8 +57,9 @@ Updated: 2026-08-06
    Mitigation: require a trusted outbox record with terminal `sent` state for
    the exact generated archive ref.
 4. Risk: retirement adds a competing lifecycle. Mitigation: derive proof from
-   the existing sent attachment and retry only inside the existing quiescent
-   residue pass; add no queue, receipt file, or schema version.
+   the existing sent attachment and retry only inside the existing hosted
+   checkpoint and local-daemon startup residue pass; add no queue, receipt
+   file, or schema version.
 
 ## Tasks
 
@@ -68,8 +71,8 @@ Updated: 2026-08-06
 4. [completed] Add focused success, retry, refusal, mutation, archive, and path
    safety proof; update durable contracts.
 5. [completed] Run focused verification and parent candidate review.
-6. [in progress] Commit, push, open the PR, and complete preliminary/final
-   ReviewGPT plus exact-head CI.
+6. [in progress] Resolve accepted preliminary ReviewGPT findings, push the
+   remediation, and complete final ReviewGPT plus exact-head CI.
 
 ## Verification
 

@@ -14,6 +14,12 @@ const mocks = vi.hoisted(() => {
       port: 50241,
       vaultRoot: '/tmp/bin-vault',
     })),
+    pruneQuiescentAssistantGeneratedDeliveryResidue: vi.fn(async () => ({
+      bytesPruned: 0,
+      exportPackBytesPruned: 0,
+      exportPacksPruned: 0,
+      filesPruned: 0,
+    })),
     startAssistantHttpServer: vi.fn(async () => ({
       address: {
         baseUrl: 'http://127.0.0.1:50241',
@@ -24,6 +30,11 @@ const mocks = vi.hoisted(() => {
     })),
   }
 })
+
+vi.mock('@murphai/assistant-engine/assistant-runtime-residue', () => ({
+  pruneQuiescentAssistantGeneratedDeliveryResidue:
+    mocks.pruneQuiescentAssistantGeneratedDeliveryResidue,
+}))
 
 vi.mock('../src/config.js', () => ({
   loadAssistantdEnvFiles: mocks.loadAssistantdEnvFiles,
@@ -77,6 +88,17 @@ test('assistantd bin loads env, starts the server, and announces the bound addre
   assert.equal(process.env[ASSISTANTD_DISABLE_CLIENT_ENV], '1')
   assert.deepEqual(mocks.loadAssistantdEnvFiles.mock.calls, [[]])
   assert.deepEqual(mocks.createAssistantLocalService.mock.calls, [['/tmp/bin-vault']])
+  assert.deepEqual(
+    mocks.pruneQuiescentAssistantGeneratedDeliveryResidue.mock.calls,
+    [[{
+      vault: '/tmp/bin-vault',
+    }]],
+  )
+  assert.ok(
+    mocks.pruneQuiescentAssistantGeneratedDeliveryResidue
+      .mock.invocationCallOrder[0]!
+      < mocks.startAssistantHttpServer.mock.invocationCallOrder[0]!,
+  )
   assert.deepEqual(mocks.startAssistantHttpServer.mock.calls, [[
     {
       controlToken: 'secret-token',
@@ -113,6 +135,19 @@ test('assistantd bin loads env, starts the server, and announces the bound addre
 
   assert.equal(mocks.handleClose.mock.calls.length, 2)
   assert.deepEqual(exitSpy.mock.calls, [[0], [0]])
+})
+
+test('assistantd startup continues when quiescent residue cleanup fails', async () => {
+  mocks.pruneQuiescentAssistantGeneratedDeliveryResidue.mockRejectedValueOnce(
+    new Error('cleanup unavailable'),
+  )
+  const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  vi.spyOn(process, 'once').mockImplementation(() => process)
+
+  await loadAssistantdBin('../src/bin.ts?cleanup-failure')
+
+  assert.equal(mocks.startAssistantHttpServer.mock.calls.length, 1)
+  assert.equal(logSpy.mock.calls.length, 1)
 })
 
 test('assistantd bin prints the startup error and exits non-zero on failure', async () => {

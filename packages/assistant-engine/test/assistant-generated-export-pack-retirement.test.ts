@@ -1,6 +1,15 @@
 import { createHash } from 'node:crypto'
-import { link, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  link,
+  mkdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it } from 'vitest'
 import type {
@@ -17,9 +26,17 @@ import {
 import {
   createAssistantOutboxIntent,
   markAssistantOutboxIntentSentById,
+  readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
-import { pruneAssistantRuntimeResidue } from '../src/assistant/runtime-residue.ts'
+import {
+  pruneAssistantRuntimeResidue,
+  pruneQuiescentAssistantGeneratedDeliveryResidue,
+} from '../src/assistant/runtime-residue.ts'
+import {
+  createAssistantTurnReceipt,
+  readAssistantTurnReceipt,
+} from '../src/assistant/turns.ts'
 import {
   resolveAssistantVaultFileResponseMedia,
 } from '../src/assistant/vault-file-send.ts'
@@ -28,6 +45,15 @@ import { createTestZip } from './zip-test-helpers.ts'
 
 const tempRoots: string[] = []
 const PRUNE_NOW = new Date('2026-08-06T20:00:00.000Z')
+const PRODUCTION_FIXTURE_ROOT = fileURLToPath(
+  new URL('./fixtures/generated-export-pack/source/', import.meta.url),
+)
+const PRODUCTION_FIXTURE_ARCHIVE = fileURLToPath(
+  new URL(
+    './fixtures/generated-export-pack/production-export-pack.zip.base64',
+    import.meta.url,
+  ),
+)
 
 afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, {
@@ -138,6 +164,121 @@ describe('assistant generated export-pack retirement', () => {
     })
   })
 
+  it('keeps provider success terminal when immediate cleanup refuses stale evidence', async () => {
+    const setup = await createExportPackDelivery('sent-stale-archive')
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      prompt: 'send the export pack',
+      provider: 'codex-cli',
+      providerModel: 'gpt-5.4',
+      sessionId: 'session-export-pack',
+      turnId: 'turn-export-pack',
+      vault: setup.vaultRoot,
+    })
+    const intent = await createDeliveryIntent({
+      media: setup.media,
+      status: 'pending',
+      vaultRoot: setup.vaultRoot,
+    })
+    await writeFile(setup.archivePath, 'stale archive bytes')
+
+    const sent = await markExportPackIntentSent(intent, setup.vaultRoot)
+    const persisted = await readAssistantOutboxIntent(
+      setup.vaultRoot,
+      intent.intentId,
+    )
+    const receipt = await readAssistantTurnReceipt(
+      setup.vaultRoot,
+      intent.turnId,
+    )
+
+    expect(sent).toMatchObject({
+      delivery: expect.objectContaining({ providerMessageId: 'provider-export-pack' }),
+      lastError: null,
+      nextAttemptAt: null,
+      status: 'sent',
+    })
+    expect(persisted).toEqual(sent)
+    expect(receipt).toMatchObject({
+      deliveryDisposition: 'sent',
+      deliveryIntentId: intent.intentId,
+      lastError: null,
+      status: 'completed',
+    })
+    await expect(stat(setup.packPath)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    })
+  })
+
+  it('refuses a sent archive whose manifest declares a nested pack path', async () => {
+    const setup = await createExportPackDelivery('nested-path')
+    const nestedFilePath = `${setup.packBasePath}/nested/payload.json`
+    const nestedAbsolutePath = path.join(
+      setup.vaultRoot,
+      ...nestedFilePath.split('/'),
+    )
+    const manifest = `${JSON.stringify({
+      files: [
+        { path: `${setup.packBasePath}/manifest.json` },
+        { path: nestedFilePath },
+      ],
+      format: 'murph.export-pack.v1',
+      packId: setup.packId,
+    }, null, 2)}\n`
+    await mkdir(path.dirname(nestedAbsolutePath), { recursive: true })
+    await writeFile(
+      path.join(setup.packPath, 'manifest.json'),
+      manifest,
+    )
+    await writeFile(nestedAbsolutePath, '{"private":"outside direct pack inventory"}\n')
+    const archive = createTestZip([
+      [`${setup.packBasePath}/manifest.json`, manifest],
+      [nestedFilePath, '{"private":"outside direct pack inventory"}\n'],
+    ])
+    await writeFile(setup.archivePath, archive)
+    const media = await resolveAssistantVaultFileResponseMedia({
+      ref: setup.media.ref,
+      vaultRoot: setup.vaultRoot,
+    })
+    const intent = await createDeliveryIntent({
+      media,
+      status: 'pending',
+      vaultRoot: setup.vaultRoot,
+    })
+
+    await expect(markExportPackIntentSent(intent, setup.vaultRoot)).resolves
+      .toMatchObject({ status: 'sent' })
+    await expect(readFile(nestedAbsolutePath, 'utf8')).resolves.toBe(
+      '{"private":"outside direct pack inventory"}\n',
+    )
+    await expect(stat(setup.packPath)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    })
+  })
+
+  it('refuses a sent pack containing a symlink and preserves its external target', async () => {
+    const setup = await createExportPackDelivery('symlink')
+    const externalPath = path.join(setup.vaultRoot, 'external-private.json')
+    const packFilePath = path.join(setup.packPath, 'entities.json')
+    await writeFile(externalPath, '{"external":"unchanged"}\n')
+    await rm(packFilePath)
+    await symlink(externalPath, packFilePath)
+    const intent = await createDeliveryIntent({
+      media: setup.media,
+      status: 'pending',
+      vaultRoot: setup.vaultRoot,
+    })
+
+    await expect(markExportPackIntentSent(intent, setup.vaultRoot)).resolves
+      .toMatchObject({ status: 'sent' })
+    await expect(readFile(externalPath, 'utf8')).resolves.toBe(
+      '{"external":"unchanged"}\n',
+    )
+    await expect(stat(setup.packPath)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    })
+  })
+
   it('recovers a missed terminal retirement during quiescent cleanup', async () => {
     const setup = await createExportPackDelivery('sent')
     await createDeliveryIntent({
@@ -167,6 +308,40 @@ describe('assistant generated export-pack retirement', () => {
     await expect(stat(setup.packPath)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(canonicalPath, 'utf8')).resolves.toBe('canonical data\n')
+  })
+
+  it('retires a production-shaped deflated export ZIP immediately and after local restart', async () => {
+    const immediate = await createProductionFixtureDelivery('fixture-immediate')
+    const pending = await createDeliveryIntent({
+      media: immediate.media,
+      status: 'pending',
+      vaultRoot: immediate.vaultRoot,
+    })
+
+    await expect(markExportPackIntentSent(pending, immediate.vaultRoot)).resolves
+      .toMatchObject({ status: 'sent' })
+    await expect(stat(immediate.packPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(immediate.archivePath)).resolves.toMatchObject({
+      size: immediate.archive.byteLength,
+    })
+
+    const restarted = await createProductionFixtureDelivery('fixture-restart')
+    await createDeliveryIntent({
+      media: restarted.media,
+      status: 'sent',
+      vaultRoot: restarted.vaultRoot,
+    })
+
+    const result = await pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: restarted.vaultRoot,
+    })
+
+    expect(result).toMatchObject({
+      exportPacksPruned: 1,
+      filesPruned: 1,
+    })
+    await expect(stat(restarted.packPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(restarted.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it.each([
@@ -223,13 +398,10 @@ describe('assistant generated export-pack retirement', () => {
     await writeFile(changedArchive.archivePath, 'replacement archive')
 
     for (const setup of [changedPack, changedArchive]) {
-      const result = await pruneAssistantRuntimeResidue({
-        generatedDeliveryFilesQuiescent: true,
-        now: PRUNE_NOW,
-        pendingInputIds: [],
+      const result = await pruneQuiescentAssistantGeneratedDeliveryResidue({
         vault: setup.vaultRoot,
       })
-      expect(result.generatedExportPacksPruned).toBe(0)
+      expect(result.exportPacksPruned).toBe(0)
       await expect(stat(setup.packPath)).resolves.toMatchObject({
         isDirectory: expect.any(Function),
       })
@@ -333,6 +505,60 @@ async function createDeliveryIntent(input: {
   })
 }
 
+async function createProductionFixtureDelivery(seed: string): Promise<{
+  archive: Buffer
+  archivePath: string
+  media: AssistantVaultFileResponseMedia
+  packPath: string
+  vaultRoot: string
+}> {
+  const context = await createTempVaultContext(`assistant-export-pack-${seed}-`)
+  tempRoots.push(context.parentRoot)
+  const packBasePath = 'exports/packs/fixture-pack'
+  const packPath = path.join(context.vaultRoot, ...packBasePath.split('/'))
+  const fixtureFiles = [
+    'manifest.json',
+    'question-pack.json',
+    'entities.json',
+    'daily-samples.json',
+    'assistant-context.md',
+  ]
+  await mkdir(packPath, { recursive: true })
+  for (const fileName of fixtureFiles) {
+    await writeFile(
+      path.join(packPath, fileName),
+      await readFile(path.join(
+        PRODUCTION_FIXTURE_ROOT,
+        ...packBasePath.split('/'),
+        fileName,
+      )),
+    )
+  }
+
+  // This committed fixture was produced once with the same ordinary Info-ZIP
+  // toolchain used by supported assistant ZIP creation (`zip -X -9 -r`). Tests
+  // consume the bytes directly and never depend on an ambient zip executable.
+  const archive = Buffer.from(
+    (await readFile(PRODUCTION_FIXTURE_ARCHIVE, 'utf8')).trim(),
+    'base64',
+  )
+  const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/production-${seed}.zip`
+  const archivePath = path.join(context.vaultRoot, ...ref.split('/'))
+  await mkdir(path.dirname(archivePath), { recursive: true })
+  await writeFile(archivePath, archive)
+  const media = await resolveAssistantVaultFileResponseMedia({
+    ref,
+    vaultRoot: context.vaultRoot,
+  })
+  return {
+    archive,
+    archivePath,
+    media,
+    packPath,
+    vaultRoot: context.vaultRoot,
+  }
+}
+
 function mediaForArchive(
   media: AssistantVaultFileResponseMedia,
   archive: Buffer,
@@ -342,6 +568,26 @@ function mediaForArchive(
     sha256: createSha256(archive),
     sizeBytes: archive.byteLength,
   }
+}
+
+async function markExportPackIntentSent(
+  intent: AssistantOutboxIntent,
+  vault: string,
+): Promise<AssistantOutboxIntent | null> {
+  return await markAssistantOutboxIntentSentById({
+    delivery: {
+      channel: 'linq',
+      idempotencyKey: null,
+      messageLength: intent.message.length,
+      providerMessageId: 'provider-export-pack',
+      providerThreadId: 'thread-export-pack',
+      sentAt: '2026-08-06T18:01:00.000Z',
+      target: 'thread-export-pack',
+      targetKind: 'thread',
+    },
+    intentId: intent.intentId,
+    vault,
+  })
 }
 
 function createSha256(value: Uint8Array): string {

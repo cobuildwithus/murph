@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pruneQuiescentAssistantGeneratedDeliveryResidue } from '@murphai/assistant-engine/assistant-runtime-residue'
 import { loadAssistantdEnvironment, loadAssistantdEnvFiles } from './config.js'
 import { startAssistantHttpServer } from './http.js'
 import { createAssistantLocalService } from './service.js'
@@ -8,6 +9,9 @@ async function main(): Promise<void> {
   loadAssistantdEnvFiles()
   const env = loadAssistantdEnvironment()
   const service = createAssistantLocalService(env.vaultRoot)
+  await pruneQuiescentAssistantGeneratedDeliveryResidue({
+    vault: env.vaultRoot,
+  }).catch(() => undefined)
   const handle = await startAssistantHttpServer({
     controlToken: env.controlToken,
     host: env.host,
