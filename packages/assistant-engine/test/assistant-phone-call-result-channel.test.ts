@@ -1,9 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import type {
+  HostedPhoneCallStartRequest,
+} from "@murphai/hosted-execution/phone-calls";
 
 import {
+  createAssistantHostedToolContext,
   resolveAssistantHostedPhoneCallResultNotificationChannel,
   resolveAssistantHostedScheduledPhoneCallScope,
 } from "../src/assistant/hosted-tool-context.js";
+
+const START_REQUEST: HostedPhoneCallStartRequest = {
+  brief: {
+    allowTransferToUser: false,
+    goal: "Confirm the reservation.",
+    instructions: [],
+    shareableFacts: {},
+    successCriteria: "The reservation status is known.",
+    timeZone: "America/New_York",
+    to: { phoneNumber: "+14045550123" },
+  },
+  originSessionId: "session_phone_call",
+  requestKey: "phone_call_request",
+};
 
 describe("assistant hosted phone-call result routing", () => {
   it.each([
@@ -18,6 +37,46 @@ describe("assistant hosted phone-call result routing", () => {
         channel,
         conversationScope,
       })).toBe(expected);
+    },
+  );
+
+  it.each([
+    ["linq", "direct", "linq"],
+    ["telegram", "direct", "telegram"],
+    ["telegram", "group", undefined],
+  ] as const)(
+    "injects only the bounded result channel for a %s %s call",
+    async (channel, conversationScope, expectedChannel) => {
+      const start = vi.fn(async () => ({
+        phoneCallId: "hpc_test",
+        status: "calling" as const,
+      }));
+      const context = createAssistantHostedToolContext({
+        executionContext: {
+          memberId: "member_phone_call",
+          phoneCalls: { start },
+          userEnvKeys: [],
+        },
+        getConversationScope: () => conversationScope,
+        messageInput: {
+          channel,
+        } as never,
+        session: {
+          binding: { channel },
+          sessionId: "session_phone_call",
+        } as never,
+      });
+
+      await expect(context.phoneCalls?.start(START_REQUEST)).resolves.toEqual({
+        phoneCallId: "hpc_test",
+        status: "calling",
+      });
+      expect(start).toHaveBeenCalledWith({
+        ...START_REQUEST,
+        ...(expectedChannel
+          ? { resultNotificationChannel: expectedChannel }
+          : {}),
+      }, undefined);
     },
   );
 
