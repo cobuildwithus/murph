@@ -15,43 +15,26 @@ concurrency:
 jobs:
   rewrite:
     if: contains(github.event.head_commit.message, '[agent-rewrite-image-continuation]')
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Check out branch
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Rewrite image continuation
-        run: node scripts/agent-rewrite-image-continuation.mjs
-
-      - name: Typecheck assistant engine
-        run: pnpm --filter @murphai/assistant-engine typecheck
-
-      - name: Verify diff
-        run: git diff --check
-
-      - name: Commit rewritten branch
+      - name: Rewrite and publish branch
         shell: bash
         run: |
           set -euo pipefail
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git clone --depth 1 --filter=blob:none --sparse --branch "${GITHUB_REF_NAME}" --single-branch https://github.com/cobuildwithus/murph.git work
+          cd work
+          git sparse-checkout set .github/workflows scripts packages/assistant-engine
+          node scripts/agent-rewrite-image-continuation.mjs
           rm .github/workflows/agent-rewrite-image-continuation.yml
           rm scripts/agent-rewrite-image-continuation.mjs
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
+          git diff --cached --check
           git commit -m "Keep image generation in the active assistant turn"
-          git push origin HEAD:agent/physical-note-return-address-continuation
+          git push origin "HEAD:${GITHUB_REF_NAME}"
