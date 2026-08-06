@@ -125,6 +125,11 @@ test("renders separate active and paused consent controls", async () => {
   expect(sourceReviewLink?.className).toContain("min-h-10");
   expect(sourceReviewLink?.parentElement?.className).toContain("mt-2");
   expect(active.container.firstElementChild?.className).toContain("items-start");
+  const withdrawButton = findButton(active.container, "Withdraw consent");
+  expect(withdrawButton.className).toContain("bg-destructive/10");
+  expect(withdrawButton.className).toContain("h-7");
+  expect(withdrawButton.className).toContain("ml-[18px]");
+  expect(withdrawButton.className).toContain("-mt-1");
 
   await cleanupRender();
   cleanupRender = null;

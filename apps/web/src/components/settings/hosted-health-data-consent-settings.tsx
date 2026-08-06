@@ -278,14 +278,14 @@ export function HostedHealthDataConsentControl({
           paused
             ? "w-full sm:col-span-2"
             : active
-              ? "ml-[30px] justify-self-start sm:ml-0 sm:justify-self-end"
+              ? "-mt-1 ml-[18px] justify-self-start sm:mt-0 sm:ml-0 sm:justify-self-end"
               : "w-full sm:w-auto sm:self-start"
         }
         disabled={pending}
         onClick={onAction}
-        size="default"
+        size={active ? "sm" : "default"}
         type="button"
-        variant={active ? "ghost" : "default"}
+        variant={active ? "destructive" : "default"}
       >
         {active
           ? "Withdraw consent"
