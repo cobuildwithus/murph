@@ -21,9 +21,10 @@ should start problem-solving before the foundation is understood.
 Experiments are one optional primitive. Do not turn onboarding into an upfront
 profile questionnaire, capability tour, wearable funnel, or experiment funnel.
 Do not create a second context-collection lifecycle. This skill may create only
-the scheduled early-stall check-in defined below. A separate managed owner may
-invoke this skill through the finite three-day recovery window defined below;
-never create, replace, extend, or reschedule that owner.
+the scheduled early-stall check-in and first-personal-read one-shot defined
+below. A separate managed owner may invoke this skill through the finite
+three-day recovery window defined below; never create, replace, extend, or
+reschedule that owner.
 
 ## Resume without repeating
 
@@ -865,17 +866,68 @@ specific positive health fact is not required. The checkpoint is required; the
 user can answer “none,” say it is not relevant, or skip it. “Later,” “tomorrow,”
 or “I don't have it handy” leaves onboarding open.
 
+#### Arm the first personal read
+
+On the ordinary foreground turn that satisfies every `user_answered` criterion,
+use `murph.automation` when available to save one private one-shot before
+marking onboarding complete. This handoff spends the complete foundation
+without keeping the user waiting; the user may keep chatting normally while the
+ordinary scheduled lane owns the later analysis and delivery. Never arm it from
+the finite scheduled recovery occurrence, before every foundation-critical
+minimum fact or raw source is durable or explicitly deferred, or for
+`user_declined`.
+
+Read the current clock first (for example
+`date -u +%Y-%m-%dT%H:%M:%SZ` in the workspace). Compute both timestamps from
+that returned clock rather than guessing: schedule the occurrence for two
+minutes later and set `activeUntil` to sixty-two minutes later. Saving the same
+slug converges on one automation, so a duplicate foreground completion attempt
+is harmless. Use:
+
+- `action: "save"`
+- `slug: "onboarding-first-personal-read"`
+- `title: "First personal health read"`
+- `summary: "One private first read across the context and health data collected during onboarding."`
+- `schedule: { "kind": "at", "at": "<now + 2 minutes, ISO with offset>" }`
+- `activeUntil: "<now + 62 minutes, ISO with offset>"`
+- `continuityPolicy: "fresh"`
+- `assistantTargetOverride: { "model": "gpt-5.6-sol", "reasoningEffort": "high" }`
+- `tags: ["assistant", "scheduled", "onboarding", "first-personal-read"]`
+- `instructions`: exactly the decision policy below.
+
+```text
+This is the single first personal read promised after answered onboarding. First run `vault-cli assistant onboarding status --format json`. Return skip unless onboarding is completed with reason `user_answered`.
+
+Read the newest committed private conversation and the currently available canonical evidence that could materially change the user's named open threads: the goal and what progress means, movement and training, current protocols or experiments, supplements, medical and safety context, recent labs or durable raw records, and connected wearable source health, freshness, and relevant history. Use targeted reads and existing owners instead of trawling unrelated health history. When `murph.device` is available, use `action: list_accounts`; read `vault-cli wearables sources list` before relying on wearable trends. Missing, stale, sparse, misclassified, contradictory, or still-importing data is not evidence of behavior or a health problem, and never infer absence from it.
+
+Find exactly one member-specific observation worth sending. Prefer a non-obvious pattern, mismatch, personal threshold, tradeoff, reassuring noise interpretation, or research-backed hypothesis that the member's own evidence supports or narrows. Vendor scores, generic advice, a recap of what the user told Murph, and a reminder to do more do not qualify. Test plausible alternatives and calibrate causal language. Use bounded public research only after a personal candidate exists, and only when one or two credible human studies, reviews, or guidelines materially improve its interpretation. Do not run an open-ended search and do not spawn a child; this scheduled turn owns the complete read, selection, and delivery.
+
+Read the newest committed conversation again immediately before composing. A newer urgent, acute, grieving, safety-sensitive, approval, booking, purchase, or otherwise unresolved task wins; return skip rather than interrupting it. Otherwise send one compact message, usually three to five sentences. Open naturally with `I took the deeper look I mentioned.` When the recent topic is unrelated, use a light bridge such as `Separate thing from the deeper look I mentioned:`. State the observation, the smallest recognizable evidence needed to trust it, calibrated uncertainty, and at most one optional low-burden next action or question. Do not diagnose, prescribe, dump metrics, stack findings, create a habit, plan, experiment, reminder, or other action, or imply causation beyond the evidence. Do not mention onboarding, automations, subagents, internal research process, records, or tools.
+
+If no surprising pattern clears the bar, do not fabricate one and do not send a sync or process note. Send an honest personal read when the available evidence still supports a useful interpretation, reassuring non-finding, or the single measurement or comparison most likely to clarify the user's stated goal without unnecessary homework. If even that would be generic or unsupported, return skip.
+```
+
+If the save fails or `murph.automation` is unavailable, do not retry, block
+completion, or mention the failure. Complete onboarding normally and do not
+promise a later read. If the save succeeds, retain that fact for the completion
+close below.
+
 When every criterion is satisfied, run:
 
 ```text
 vault-cli assistant onboarding complete --reason user_answered
 ```
 
-Verify the output reports `completed`. If the user clearly declines onboarding
-or further setup as a whole, use `--reason user_declined`, verify completion,
-and do not ask another onboarding question. Do not use `user_declined` for one
-skipped category, and do not require a plan or support loop merely to use
-`user_answered`.
+Verify the output reports `completed`. When the first-personal-read save
+succeeded, add one natural sentence or short paragraph to the ordinary
+completion or first-launch close with this meaning: “I'm going to take a proper
+look across what you shared and any data you connected, then send you the most
+useful thing I find. You can keep texting me normally in the meantime.” Do not
+mention exact timing, schedules, automations, agents, or promise a surprising
+finding. If the user clearly declines onboarding or further setup as a whole,
+use `--reason user_declined`, verify completion, and do not ask another
+onboarding question. Do not use `user_declined` for one skipped category, and
+do not require a plan or support loop merely to use `user_answered`.
 
 During a finite three-day recovery occurrence, do not run the completion
 command or otherwise mutate onboarding state. Return an ordinary scheduled
