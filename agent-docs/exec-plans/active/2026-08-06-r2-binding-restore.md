@@ -146,3 +146,8 @@ Updated: 2026-08-06
   runner issues two internal object POSTs with a newly read fence, no presign
   fallback occurs, the second stream restores atomically, and no partial root
   survives.
+- Final ReviewGPT round 2 passed the production correction and identified two
+  stale prepared-restore assertions outside the earlier selected Vitest
+  project. Running the owning platform bucket reproduced both failures. Their
+  expectations now prove the binding-specific 500 and two fresh internal
+  object reads, with no prepared URL use; all 19 preparation tests pass.

@@ -280,13 +280,16 @@ describe("workspace snapshot restore preparation", () => {
       await expect(port.restoreWorkspaceSnapshot({
         durableRoot: "/tmp/unused-prepared-snapshot-restore",
         ref: fixture.ref,
-      })).rejects.toThrow(/Hosted workspace snapshot fetch failed with HTTP 500/u);
-
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(readRequestUrl(fetchMock.mock.calls[0])).toBe(
-        `http://workspace-snapshots.worker/workspace-snapshots/${fixture.ref.snapshotId}/object`,
+      })).rejects.toThrow(
+        /Hosted workspace snapshot binding object read failed with HTTP 500/u,
       );
-      expect(readRequestUrl(fetchMock.mock.calls[0])).not.toBe(getUrl);
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls.map(readRequestUrl)).toEqual([
+        `http://workspace-snapshots.worker/workspace-snapshots/${fixture.ref.snapshotId}/object`,
+        `http://workspace-snapshots.worker/workspace-snapshots/${fixture.ref.snapshotId}/object`,
+      ]);
+      expect(fetchMock.mock.calls.map(readRequestUrl)).not.toContain(getUrl);
     } finally {
       fixture.dataKey.fill(0);
       fixture.rootKey.fill(0);
@@ -724,11 +727,14 @@ describe("workspace snapshot restore preparation", () => {
       await expect(port.restoreWorkspaceSnapshot({
         durableRoot: "/tmp/unused-expired-snapshot-restore",
         ref: fixture.ref,
-      })).rejects.toThrow(/Hosted workspace snapshot fetch failed with HTTP 500/u);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(readRequestUrl(fetchMock.mock.calls[0])).toBe(
-        `http://workspace-snapshots.worker/workspace-snapshots/${fixture.ref.snapshotId}/object`,
+      })).rejects.toThrow(
+        /Hosted workspace snapshot binding object read failed with HTTP 500/u,
       );
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls.map(readRequestUrl)).toEqual([
+        `http://workspace-snapshots.worker/workspace-snapshots/${fixture.ref.snapshotId}/object`,
+        `http://workspace-snapshots.worker/workspace-snapshots/${fixture.ref.snapshotId}/object`,
+      ]);
     } finally {
       fixture.dataKey.fill(0);
       fixture.rootKey.fill(0);
