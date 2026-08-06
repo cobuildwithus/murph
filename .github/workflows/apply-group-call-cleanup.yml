@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: apply-group-call-cleanup
-  cancel-in-progress: false
+  group: apply-group-call-cleanup-macos-v2
+  cancel-in-progress: true
 
 jobs:
   cleanup-and-verify:
@@ -61,6 +61,7 @@ jobs:
             .github/group-call-cleanup-trigger \
             .github/group-call-cleanup-merge-trigger \
             .github/group-call-cleanup-macos-trigger \
+            .github/group-call-cleanup-macos-trigger-2 \
             .github/workflows/apply-group-call-cleanup.yml \
             .github/workflows/apply-group-call-cleanup-macos.yml \
             scripts/apply-group-call-cleanup.py
