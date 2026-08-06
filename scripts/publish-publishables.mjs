@@ -6,6 +6,7 @@ import {
   parseReleaseArgs,
   validateReleaseContext,
 } from './release-helpers.mjs';
+import { verifyReleaseArtifacts } from './release-artifact-secret-guard.mjs';
 
 function isAlreadyPublished(output) {
   return /previously published|cannot publish over|version already exists/ui.test(
@@ -144,6 +145,7 @@ const options = parseReleaseArgs(process.argv.slice(2), {
 const context = await loadReleaseContext();
 const packOutputPath = path.resolve(context.repoRoot, options.packOutput);
 const packOutput = JSON.parse(await readFile(packOutputPath, 'utf8'));
+await verifyReleaseArtifacts(context.repoRoot, packOutput);
 const summary = validateReleaseContext(context, {
   expectVersion: packOutput.version,
 });

@@ -11,6 +11,7 @@ import {
   validateReleaseContext,
   writeJson,
 } from './release-helpers.mjs';
+import { verifyReleaseArtifacts } from './release-artifact-secret-guard.mjs';
 
 const execFileAsync = promisify(execFile);
 const npmPackMetadataMaxBufferBytes = 64 * 1024 * 1024;
@@ -472,5 +473,6 @@ const packOutput = {
   version: summary.version,
 };
 
+await verifyReleaseArtifacts(context.repoRoot, packOutput);
 await writeJson(packOutputPath, packOutput);
 console.log(`Wrote pack manifest: ${path.relative(context.repoRoot, packOutputPath)}`);

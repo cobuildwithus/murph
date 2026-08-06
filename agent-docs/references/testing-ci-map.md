@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-08-05
+Last verified: 2026-08-06
 
 ## Current Repo Checks
 
@@ -549,7 +549,7 @@ supported provider credential.
   checked-in detached direct-payment migration before creating fixtures, so
   its positive detachment and missing-proof rejections exercise migration-only
   constraints instead of silently testing the unconstrained Prisma schema.
-- `.github/workflows/release.yml` uses GitHub-hosted `ubuntu-24.04`, installs once, runs `pnpm release:check` with `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1` so the release verification lane uses the parallel package/smoke branches and parallel app substeps without enabling full app/package overlap unless `MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE=1` is set explicitly, while the same deterministic hosted-web build placeholders keep `apps/web verify` on its truthful build path without injecting production DB or production hosted device secrets, then packs the publishable tarballs once for upload/publication.
+- `.github/workflows/release.yml` uses GitHub-hosted `ubuntu-24.04`, installs once, runs `pnpm release:check` with `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1` so the release verification lane uses the parallel package/smoke branches and parallel app substeps without enabling full app/package overlap unless `MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE=1` is set explicitly, while the same deterministic hosted-web build placeholders keep `apps/web verify` on its truthful build path without injecting production DB or production hosted device secrets. It then packs the publishable tarballs once, scans that final inventory before the manifest is written, retains the upload/download handoff for one day, reruns the scan after download before GitHub Release upload, and scans again inside the npm publisher before its first provider request.
 - Vercel deploys of `apps/web` use the checked-in Vercel build command
   `pnpm release:production:migrate && pnpm build`, so the guarded migration
   wrapper still runs automatically on main-branch production deploys while
@@ -763,7 +763,7 @@ keep the one-second presentation-only deadline and late-result rejection.
   preview deployment still depends on an isolated Vercel preview
   data/crypto/control plane plus environment-scoped Cloudflare credentials and
   R2 resources.
-- The tag-driven release workflow is present, uses npm trusted publishing for package publication, runs a slimmer `release:check` guard path that now validates release metadata plus `pnpm build:workspace:clean` and `pnpm verify:acceptance` without re-installing/re-building/re-packing inside the script, and is only exercised on real `v*.*.*` tag pushes rather than during ordinary repo verification. npm trust is package-level rather than repo-level, so this monorepo also ships `pnpm release:trust:github` for the one-time bootstrap that binds every publishable `@murphai/*` package to `cobuildwithus/murph` and `.github/workflows/release.yml`; if a package already has the wrong trusted publisher entry, that npm-side state still needs manual revoke-and-recreate repair, which local repo checks cannot fully prove.
+- The tag-driven release workflow is present, uses npm trusted publishing for package publication, runs a slimmer `release:check` guard path that validates release metadata, syntax-checks and tests the final-tarball secret guard, then runs `pnpm build:workspace:clean` and `pnpm verify:acceptance` without re-installing/re-building/re-packing inside the script. The guard's focused Node tests cover accepted source literals, public header names, and placeholders plus rejected sensitive filenames, provider tokens, private key/JWK/wallet material, credentialed URLs, generic secret assignments, archive links, and tarball-inventory drift. The workflow is only exercised on real `v*.*.*` tag pushes rather than during ordinary repo verification. npm trust is package-level rather than repo-level, so this monorepo also ships `pnpm release:trust:github` for the one-time bootstrap that binds every publishable `@murphai/*` package to `cobuildwithus/murph` and `.github/workflows/release.yml`; if a package already has the wrong trusted publisher entry, that npm-side state still needs manual revoke-and-recreate repair, which local repo checks cannot fully prove.
 
 ## Update Rule
 
