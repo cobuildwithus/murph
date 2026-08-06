@@ -36,6 +36,14 @@ Updated: 2026-08-05
   target won delivery with kind `explicit`.
 - Native cards intentionally require kind `thread`, so this duplicated route
   representation skipped the app-card request and sent ordinary text.
+- After that route correction deployed, the physical reply still used the
+  deterministic text fallback. Runtime evidence showed the direct iMessage
+  input arrived after a device-sync invocation had started and joined its live
+  turn. The foreground importer retained the decoded direct-recipient context,
+  but the delivery phase read only its frozen startup context array. The native
+  card eligibility check therefore lacked the ephemeral recipient even though
+  the thread binding, directness, card intent, idempotency key, and provider
+  capability were all present.
 
 ## Success criteria
 
@@ -77,6 +85,8 @@ Updated: 2026-08-05
    admission, and move exact-message authorization to the existing thread
    binding beside the opaque conversation locator.
 8. [ ] Merge, deploy, and verify the real hosted reply on a physical device.
+9. [x] Carry the existing invocation-local Linq context from late active-turn
+   admission into the existing delivery owner and prove the regression.
 
 ## Verification log
 
@@ -126,3 +136,13 @@ Updated: 2026-08-05
   monolithic local-service file hit its existing 4 GB worker ceiling after 79
   passing tests when run whole; its three accepted-message authorization and
   second-pass authority tests pass in isolation.
+- The late-input correction adds no state or lookup path: the assistant phase
+  now combines its initial decoded Linq contexts with the foreground importer's
+  existing invocation-local batch before preparing and draining delivery.
+- The exact late-active-turn regression passes from an empty startup context to
+  outbox preparation and drain with the decoded direct iMessage context. The
+  existing matching-context resolver and native app-card capability branch each
+  pass independently, and the assistant-runtime suite passes with 2,049 tests
+  plus four skips across 81 files.
+- The assistant-runtime package typecheck, docs drift guard, and diff check pass
+  after the correction.
