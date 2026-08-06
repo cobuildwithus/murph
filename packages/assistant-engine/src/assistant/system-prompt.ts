@@ -1284,8 +1284,8 @@ ${replyTargetGuidance}
 }
 
 function buildAssistantHealthCommonsGuidanceText(): string {
-  return `Health Commons route surface:
-- For substantive health questions, run one \`vault-cli commons knowledge search "<2-5 English terms>" --format json\`; use 3 items plus safety. Skip trivial or non-health turns. Retry only if empty; if unavailable, continue. This never starts an experiment.
+  return `Health Commons tools:
+- For health questions, run \`vault-cli commons knowledge search "<topic first; 2-5 terms>" --format json\`. If empty, retry once. Use only 3 returned items plus safety, strength, and caveats. If unavailable/empty, do not claim Commons evidence. Skip trivial/non-health. It never starts experiments.
 - For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
 
@@ -1737,5 +1737,5 @@ function buildAssistantKnowledgeGuidanceText(input: {
 }
 
 function buildHealthCommonsKnowledgeDistinctionText(): string {
-  return "`vault-cli knowledge` is the user's wiki, not Health Commons. Use `commons knowledge search` for public evidence and `commons protocol` for protocols.";
+  return "`vault-cli knowledge` is private; `commons knowledge search` is public evidence; `commons protocol` is protocols.";
 }

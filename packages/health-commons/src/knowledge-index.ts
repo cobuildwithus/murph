@@ -6,7 +6,7 @@ import type {
 } from "@murphai/contracts";
 
 export const HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE = "knowledge.sqlite";
-export const HEALTH_COMMONS_KNOWLEDGE_INDEX_SCHEMA_VERSION = 1;
+export const HEALTH_COMMONS_KNOWLEDGE_INDEX_SCHEMA_VERSION = 2;
 export const HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT = 3;
 export const HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT = 6;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_SOURCES_PER_ITEM = 4;
@@ -59,6 +59,7 @@ interface KnowledgeChunk {
   sources: HealthCommonsKnowledgeSourceReference[];
   strength: string | null;
   text: string;
+  topicText: string;
 }
 
 export function writeHealthCommonsKnowledgeIndex(
@@ -84,6 +85,7 @@ export function writeHealthCommonsKnowledgeIndex(
         priority INTEGER NOT NULL
       );
       CREATE VIRTUAL TABLE chunks_fts USING fts5(
+        topic_text,
         search_text,
         content = '',
         tokenize = 'porter unicode61 remove_diacritics 2'
@@ -98,7 +100,7 @@ export function writeHealthCommonsKnowledgeIndex(
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertSearch = database.prepare(
-      "INSERT INTO chunks_fts (rowid, search_text) VALUES (?, ?)",
+      "INSERT INTO chunks_fts (rowid, topic_text, search_text) VALUES (?, ?, ?)",
     );
 
     database.exec("BEGIN");
@@ -114,7 +116,7 @@ export function writeHealthCommonsKnowledgeIndex(
         JSON.stringify(chunk.sources),
         chunk.priority,
       );
-      insertSearch.run(insertResult.lastInsertRowid, chunk.searchText);
+      insertSearch.run(insertResult.lastInsertRowid, chunk.topicText, chunk.searchText);
     }
     database.exec("COMMIT");
     database.exec("INSERT INTO chunks_fts(chunks_fts) VALUES('optimize'); VACUUM;");
@@ -152,7 +154,7 @@ export function searchHealthCommonsKnowledgeIndex(input: {
       FROM chunks_fts
       JOIN chunks c ON c.rowid = chunks_fts.rowid
       WHERE chunks_fts MATCH ? AND c.kind <> 'safety'
-      ORDER BY c.priority ASC, rank ASC, c.id ASC
+      ORDER BY rank ASC, c.priority ASC, c.id ASC
       LIMIT ?
     `).all(
       ftsQuery,
@@ -161,32 +163,16 @@ export function searchHealthCommonsKnowledgeIndex(input: {
     const rows = selectDiverseKnowledgeRows(candidateRows, limit);
 
     const items = rows.map(readKnowledgeRow);
-    const entityKeys = [...new Set(rows.map((row) => String(row["entity_key"])))];
-    let safety: HealthCommonsKnowledgeSearchItem | null = null;
-    if (entityKeys.length > 0) {
-      const placeholders = entityKeys.map(() => "?").join(", ");
-      const matchingSafetyRow = hasSpecificSafetyTerm(query)
-        ? database.prepare(`
-            SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
-                   c.strength, c.sources_json, c.priority
-            FROM chunks_fts
-            JOIN chunks c ON c.rowid = chunks_fts.rowid
-            WHERE chunks_fts MATCH ? AND c.kind = 'safety'
-              AND c.entity_key IN (${placeholders})
-            ORDER BY c.priority ASC, bm25(chunks_fts) ASC, c.id ASC
-            LIMIT 1
-          `).get(ftsQuery, ...entityKeys)
-        : undefined;
-      const safetyRow = matchingSafetyRow ?? database.prepare(`
-          SELECT id, entity_key, entity_title, kind, text, caveat, strength,
-                 sources_json, priority
-          FROM chunks
-          WHERE kind = 'safety' AND entity_key IN (${placeholders})
-          ORDER BY priority ASC, id ASC
-          LIMIT 1
-        `).get(...entityKeys);
-      safety = safetyRow ? readKnowledgeRow(safetyRow) : null;
-    }
+    const safetyRow = database.prepare(`
+      SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
+             c.strength, c.sources_json, c.priority
+      FROM chunks_fts
+      JOIN chunks c ON c.rowid = chunks_fts.rowid
+      WHERE chunks_fts MATCH ? AND c.kind = 'safety'
+      ORDER BY c.priority ASC, bm25(chunks_fts) ASC, c.id ASC
+      LIMIT 1
+    `).get(ftsQuery);
+    const safety = safetyRow ? readKnowledgeRow(safetyRow) : null;
 
     return {
       catalogHash: String(catalogHashRow?.["value"] ?? ""),
@@ -292,8 +278,9 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
   const chunks: KnowledgeChunk[] = [];
 
   for (const entity of catalog.entities) {
-    const commonSearchText = entitySearchText(entity);
+    const entityTitle = entitySearchText(entity);
     if (entity.summary && entity.entityType !== "source_artifact") {
+      const text = entity.researchLandscape?.bottomLine ?? entity.summary;
       chunks.push({
         caveat: entity.researchLandscape?.mainCaveat ?? null,
         entityKey: entity.key,
@@ -301,10 +288,11 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
         id: `overview:${entity.key}`,
         kind: "overview",
         priority: overviewPriority(entity),
-        searchText: `${commonSearchText} ${entity.summary}`,
+        searchText: `${entityTitle} ${text} ${entity.researchLandscape?.mainCaveat ?? ""}`,
         sources: [],
         strength: entity.researchLandscape?.confidenceLabel ?? null,
-        text: entity.researchLandscape?.bottomLine ?? entity.summary,
+        text,
+        topicText: entityTitle,
       });
     }
     for (const [claimIndex, claim] of (entity.claims ?? []).entries()) {
@@ -315,10 +303,11 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
         id: `claim:${entity.key}:${claim.claimId}:${claimIndex}`,
         kind: claim.type === "safety" ? "safety" : "claim",
         priority: claim.type === "safety" ? 5 : 20,
-        searchText: `${commonSearchText} ${claim.type} ${claim.text} ${(claim.caveats ?? []).join(" ")}`,
+        searchText: `${entityTitle} ${sourceTitles(claim.sourceKeys ?? [], entitiesByKey)} ${claim.text} ${(claim.caveats ?? []).join(" ")}`,
         sources: resolveSources(claim.sourceKeys ?? [], entitiesByKey),
         strength: claim.strength,
         text: claim.text,
+        topicText: `${entityTitle} ${sourceTitles(claim.sourceKeys ?? [], entitiesByKey)}`,
       });
     }
     for (const [findingIndex, finding] of (entity.sourceFindings ?? []).entries()) {
@@ -331,10 +320,11 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
         id: `finding:${entity.key}:${finding.findingId}:${findingIndex}`,
         kind: safetyFinding ? "safety" : "source_finding",
         priority: safetyFinding ? 10 : 25,
-        searchText: `${commonSearchText} ${finding.findingKind} ${finding.population ?? ""} ${finding.exposure ?? ""} ${finding.outcome ?? ""} ${finding.summary ?? ""}`,
+        searchText: `${entityTitle} ${finding.summary ?? finding.outcome ?? ""}`,
         sources: resolveSources([entity.key], entitiesByKey),
         strength: null,
         text: finding.summary ?? finding.outcome ?? "",
+        topicText: entityTitle,
       });
     }
     if (entity.safety) {
@@ -350,11 +340,12 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
           entityTitle: entity.title,
           id: `safety:${entity.key}`,
           kind: "safety",
-          priority: 10,
-          searchText: `${commonSearchText} safety contraindications stop ${safetyText}`,
+          priority: 5,
+          searchText: `${entityTitle} ${safetyText}`,
           sources: resolveSources(collectEntitySourceKeys(entity), entitiesByKey),
           strength: entity.safety.cautionLevel,
           text: safetyText,
+          topicText: entityTitle,
         });
       }
     }
@@ -363,6 +354,7 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
   for (const [appraisalIndex, appraisal] of catalog.evidenceAppraisals.entries()) {
     const target = entitiesByKey.get(appraisal.targetKey);
     const source = entitiesByKey.get(appraisal.sourceKey);
+    const topicText = [target?.title, source?.title].filter(Boolean).join(" ");
     const safetyAppraisal = appraisal.stance === "safety_boundary"
       || /\bsafety-only\b/iu.test(`${appraisal.headline} ${appraisal.implication}`);
     chunks.push({
@@ -372,10 +364,11 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
       id: `appraisal:${appraisal.key}:${appraisalIndex}`,
       kind: safetyAppraisal ? "safety" : "appraisal",
       priority: safetyAppraisal ? 10 : evidencePriority(source),
-      searchText: `${target ? entitySearchText(target) : ""} ${source ? entitySearchText(source) : ""} ${appraisal.stance} ${appraisal.headline} ${appraisal.implication} ${appraisal.caveat ?? ""}`,
+      searchText: `${topicText} ${appraisal.headline} ${appraisal.implication} ${appraisal.caveat ?? ""}`,
       sources: resolveSources([appraisal.sourceKey], entitiesByKey),
       strength: appraisal.result,
       text: `${appraisal.headline} ${appraisal.implication}`,
+      topicText,
     });
   }
 
@@ -423,6 +416,16 @@ function collectEntitySourceKeys(entity: HealthCommonsCatalogEntity): string[] {
   ])];
 }
 
+function sourceTitles(
+  sourceKeys: readonly string[],
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
+): string {
+  return [...new Set(sourceKeys)]
+    .map((sourceKey) => entitiesByKey.get(sourceKey)?.title)
+    .filter((title): title is string => Boolean(title))
+    .join(" ");
+}
+
 function evidencePriority(source: HealthCommonsCatalogEntity | undefined): number {
   switch (source?.researchEvidence?.designKind) {
     case "systematic_review":
@@ -449,11 +452,7 @@ function overviewPriority(entity: HealthCommonsCatalogEntity): number {
 }
 
 function entitySearchText(entity: HealthCommonsCatalogEntity): string {
-  return [
-    entity.title,
-    ...(entity.categories ?? []),
-    ...(entity.aliases ?? []).slice(0, 8),
-  ].join(" ");
+  return entity.title;
 }
 
 function toFtsQuery(query: string): string {
@@ -461,30 +460,28 @@ function toFtsQuery(query: string): string {
   if (tokens.length === 0) {
     throw new Error("Health Commons knowledge query needs at least one searchable term.");
   }
-  return tokens.map((token) => `"${token.replaceAll('"', '""')}"*`).join(" AND ");
+  const terms = tokens.map((token) => {
+    const quoted = `"${token.replaceAll('"', '""')}"`;
+    return token.length === 1 ? quoted : `${quoted}*`;
+  });
+  const qualifierPhrases = tokens.flatMap((token, index) => {
+    if (token.length !== 1 || index === 0) {
+      return [];
+    }
+    return [`"${tokens[index - 1]} ${token}"`];
+  });
+  return `topic_text : ${terms[0]} AND search_text : (${[
+    ...terms,
+    ...qualifierPhrases,
+  ].join(" AND ")})`;
 }
 
 function searchTokens(query: string): string[] {
   return [...new Set(query
     .normalize("NFKD")
     .toLowerCase()
-    .match(/[\p{L}\p{N}]{2,}/gu)
+    .match(/[\p{L}\p{N}]+/gu)
     ?.slice(0, 8) ?? [])];
-}
-
-function hasSpecificSafetyTerm(query: string): boolean {
-  const genericTerms = new Set([
-    "benefit",
-    "benefits",
-    "dry",
-    "evidence",
-    "finnish",
-    "health",
-    "heat",
-    "research",
-    "sauna",
-  ]);
-  return searchTokens(query).some((token) => !genericTerms.has(token));
 }
 
 function nullableString(value: unknown): string | null {

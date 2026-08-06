@@ -75,6 +75,13 @@ Updated: 2026-08-07
 - Preserve the July 2026 Bryan Johnson sauna post as research input only. Its
   claims and cited themes are already covered by stronger existing source pages,
   so the authored corpus does not gain a duplicate page.
+- The first PRO review found three retrieval risks. Safety now uses an
+  independent exact-topic lookup. Short qualifiers such as vitamin B and type 2
+  stay attached to the prior word. Ranking uses direct text relevance before
+  evidence design, and broad editorial categories are not search terms.
+- Full-catalog tests cover safety-only sauna results, nearby-topic rejection,
+  one-character qualifiers, and the direct sauna systematic review. A real
+  assistant harness also covers the lookup without experiment creation.
 
 ## Verification
 

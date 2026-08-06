@@ -113,10 +113,10 @@ describe("Health Commons knowledge SQLite projection", () => {
         query: "dry sauna cardiovascular",
       });
 
-      expect(result.items).toHaveLength(2);
+      expect(result.items).toHaveLength(1);
       expect(result.items[0]).toMatchObject({
         entityKey: "experiment_family:dry-sauna",
-        kind: "appraisal",
+        kind: "claim",
         sources: [{ pmid: "29849692", designKind: "systematic_review" }],
       });
       expect(result.safety).toMatchObject({

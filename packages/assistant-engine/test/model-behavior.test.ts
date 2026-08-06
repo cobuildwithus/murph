@@ -2333,15 +2333,21 @@ describe('assistant experiment onboarding guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).not.toContain('Supported experiment protocols:')
-    expect(prompt).toContain('Health Commons route surface:')
+    expect(prompt).toContain('Health Commons tools:')
     expect(prompt).toContain(
-      '`vault-cli commons knowledge search "<2-5 English terms>" --format json`',
+      '`vault-cli commons knowledge search "<topic first; 2-5 terms>" --format json`',
     )
     expect(prompt).toContain(
-      'Skip trivial or non-health turns.',
+      'Skip trivial/non-health.',
     )
     expect(prompt).toContain(
-      'This never starts an experiment.',
+      'It never starts experiments.',
+    )
+    expect(prompt).toContain(
+      'If empty, retry once.',
+    )
+    expect(prompt).toContain(
+      'If unavailable/empty, do not claim Commons evidence.',
     )
     expect(prompt).toContain(
       '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',
