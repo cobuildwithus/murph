@@ -88,6 +88,13 @@ export async function scanAssistantAutomationOnce(input: {
   const applyCanonicalWrites = input.applyCanonicalWrites ?? true
   const scanState = cloneAutomationScanState(input.state)
   let persistedState = cloneAutomationScanState(scanState)
+  let providerStartCriticalPath = input.providerStartCriticalPath ?? null
+  const onProviderRequestStarted: AssistantAutoReplyProviderRequestStartHook = (
+    event,
+  ) => {
+    providerStartCriticalPath = null
+    return input.onProviderRequestStarted?.(event)
+  }
   void input.vaultServices
   const replyChannels = applyCanonicalWrites
     ? scanState.autoReply.map((entry) => entry.channel)
@@ -184,8 +191,8 @@ export async function scanAssistantAutomationOnce(input: {
       ...(input.beforeProviderAcceptedInputs
         ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
         : {}),
-      ...(input.providerStartCriticalPath
-        ? { providerStartCriticalPath: input.providerStartCriticalPath }
+      ...(providerStartCriticalPath
+        ? { providerStartCriticalPath }
         : {}),
       context,
       deliveryDispatchMode: input.deliveryDispatchMode,
@@ -194,7 +201,10 @@ export async function scanAssistantAutomationOnce(input: {
       inboxServices: input.inboxServices,
       onEvent: input.onEvent,
       onProviderEvent: input.onProviderEvent ?? null,
-      onProviderRequestStarted: input.onProviderRequestStarted ?? null,
+      onProviderRequestStarted:
+        providerStartCriticalPath || input.onProviderRequestStarted
+          ? onProviderRequestStarted
+          : null,
       onTerminalNonReplyCommitted: input.onTerminalNonReplyCommitted ?? null,
       onTraceEvent: input.onTraceEvent,
       providerHeartbeatMs: input.providerHeartbeatMs,

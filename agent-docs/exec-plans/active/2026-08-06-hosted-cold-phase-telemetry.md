@@ -50,6 +50,20 @@ Updated: 2026-08-06
   provider-start p50 3,636 ms (`n=3`) and established 14.1 MB v2-R2
   provider-start p50 5,600 ms (`n=3`). The local R2 object-fetch p50 was
   206 ms, so this proves mechanics but is not production-latency-equivalent.
-- Pending: exercise the telemetry fields through the benchmark overlay, push an
-  exact review candidate, run both required ReviewGPT stages, and require green
-  exact-head CI.
+- PASS: the exact telemetry overlay completed first-contact and established-v2-R2
+  cohorts with one warmup and three measured samples each. The nine adjacent
+  spans closed at 730 ms p50 for first contact and 572 ms p50 for established
+  restore; local webhook-to-provider p50 was 3,667 ms and 5,791 ms respectively.
+- ACCEPTED/FIXED: preliminary ReviewGPT found that one scan could pass the same
+  invocation timing context to multiple provider-reaching groups because each
+  group starts at provider ordinal zero. The scanner now retains the context
+  across groups that exit before provider start and consumes it synchronously
+  on the first actual provider-start hook, even when completion validation omits
+  the timing. A three-group regression proves no-provider/first-provider/later-
+  provider ownership, and the App Server test now proves both positive ordinal
+  zero completion and nonzero omission.
+- PASS after remediation: assistant automation plus partition tests (178),
+  focused App Server production handoff (2), hosted-runtime maintenance (76),
+  assistant-engine typecheck, and `git diff --check`.
+- Pending: push the corrected candidate, resolve the final ReviewGPT gate, and
+  require green exact-head CI.

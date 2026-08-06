@@ -1058,7 +1058,9 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('executes Codex app-server turns, sanitizes env, and streams assistant output through JSON-RPC', async () => {
+  it.each([0, 3])(
+    'executes Codex app-server turns, sanitizes env, and streams assistant output through JSON-RPC at provider ordinal %i',
+    async (providerRequestOrdinal) => {
     const workingDirectory = await createTempDir('assistant-codex-workdir-')
     const codexHome = await createTempDir('assistant-codex-home-')
     const threadId = '00000000-0000-4000-8000-000000000001'
@@ -1367,7 +1369,7 @@ describe('assistant codex runtime', () => {
         model: 'gpt-5',
         modelProvider: 'vercel-ai-gateway',
         reasoningEffort: 'high',
-        providerRequestOrdinal: 3,
+        providerRequestOrdinal,
         providerStartCriticalPath: {
           assistantPhaseStartedAtMonotonicMs: 0,
           assistantServiceStartedAtMonotonicMs: 0,
@@ -1450,7 +1452,7 @@ describe('assistant codex runtime', () => {
         event.codexTimingStage === 'turn-completed'
       )
     expect(turnCompletedTiming).toEqual(expect.objectContaining({
-      codexTimingProviderRequestOrdinal: 3,
+      codexTimingProviderRequestOrdinal: providerRequestOrdinal,
       codexTimingTurnCompleteElapsedMs: expect.any(Number),
       codexTimingTurnCompletedNotificationElapsedMs: expect.any(Number),
       codexTimingTurnStartAckElapsedMs: expect.any(Number),
@@ -1461,7 +1463,9 @@ describe('assistant codex runtime', () => {
     expect(onTraceEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         rawEvent: expect.objectContaining({
-          codexTimingColdStartReason: 'node-process-first-use',
+          ...(providerRequestOrdinal === 0
+            ? { codexTimingColdStartReason: 'node-process-first-use' }
+            : {}),
           codexTimingStage: 'initialized',
         }),
         updates: [],
@@ -1476,9 +1480,26 @@ describe('assistant codex runtime', () => {
         startedAt: expect.any(String),
       }),
     )
-    expect(onProviderRequestStarted.mock.calls[0]?.[0])
-      .not.toHaveProperty('providerStartCriticalPath')
-  })
+    const providerStartEvent = onProviderRequestStarted.mock.calls[0]?.[0]
+    if (providerRequestOrdinal === 0) {
+      expect(providerStartEvent).toMatchObject({
+        providerStartCriticalPath: {
+          assistantServicePreLockMs: expect.any(Number),
+          automationLaneToAssistantServiceMs: expect.any(Number),
+          codexAppServerPreProviderMs: expect.any(Number),
+          codexProcessPreparationMs: expect.any(Number),
+          mailboxImportDoneToAssistantPhaseMs: expect.any(Number),
+          preProviderSetupMs: expect.any(Number),
+          providerPlanAndGateMs: expect.any(Number),
+          turnLockWaitMs: expect.any(Number),
+          workspaceAssistantPreAutomationMs: expect.any(Number),
+        },
+      })
+    } else {
+      expect(providerStartEvent).not.toHaveProperty('providerStartCriticalPath')
+    }
+    },
+  )
 
   it('starts cold and warm App Server turns before any lazy shared-data read', async () => {
     const workingDirectory = await createTempDir('assistant-codex-group-shared-work-')
