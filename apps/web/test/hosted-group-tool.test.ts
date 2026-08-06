@@ -3022,8 +3022,13 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
   });
 
-  it("reports group avatar provider failures as structured unavailability", async () => {
-    mocks.updateHostedLinqChatAvatar.mockRejectedValue(new Error("linq down"));
+  it("reports an unconfirmed group avatar request as structured unavailability", async () => {
+    mocks.updateHostedLinqChatAvatar.mockRejectedValue(hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq chat avatar update timed out.",
+      retryable: true,
+    }));
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -3042,9 +3047,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({ step: "hosted-groups.set-chat-avatar" }),
-      "provider-request-failed",
+      "provider-request-unconfirmed",
       {
-        errorName: "Error",
+        errorName: "HostedOnboardingError",
         providerErrorCode: undefined,
       },
     );

@@ -39,4 +39,7 @@ Implementation and focused local proof complete. Exact-head PR review and CI in
 progress. The preliminary coverage/privacy pass found that the generic event
 builder could still derive health projections and admit nonnumeric failure
 codes; the accepted narrow parser-boundary correction and unrelated-event
-telemetry regression coverage are complete and locally verified.
+telemetry regression coverage are complete and locally verified. Final review
+round 2 found that transport exceptions were labeled as confirmed request
+failures even though the provider may already have accepted the PUT; the
+accepted correction records that state as request-unconfirmed without retrying.

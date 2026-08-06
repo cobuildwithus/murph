@@ -1402,7 +1402,7 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
     });
   } catch (error) {
     const providerDiagnostics = readHostedLinqAvatarProviderDiagnostics(error);
-    finishHostedOnboardingTiming(timing, "provider-request-failed", {
+    finishHostedOnboardingTiming(timing, "provider-request-unconfirmed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
       providerErrorCode: providerDiagnostics?.providerErrorCode,
     });
