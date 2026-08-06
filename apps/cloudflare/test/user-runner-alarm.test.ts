@@ -36,6 +36,9 @@ import type {
 import {
   createHostedBundleStore,
 } from "../src/bundle-store.ts";
+import {
+  HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+} from "../src/browser-vault-store.ts";
 import { resolveHostedR2CutoverContext } from "../src/r2-cutover.ts";
 import {
   hostedArtifactUserPrefix,
@@ -55,6 +58,7 @@ import type {
   DurableObjectStorageLike,
 } from "../src/user-runner/types.ts";
 import {
+  browserVaultReplicaOrphanCandidateStorageKey,
   workspaceSnapshotUploadSessionCurrentStorageKey,
   workspaceSnapshotOrphanCandidateStorageKey,
   workspaceSnapshotOrphanCandidateStoragePrefix,
@@ -5268,6 +5272,120 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms.at(-1)).toBe("deleted");
   });
 
+  it("cleans stale browser vault replicas alongside snapshots after confirming current Web refs", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userPrefix = await hostedBrowserVaultReplicaUserPrefix({ userId: TEST_USER_ID });
+    const staleObjectKey = `${userPrefix}${"a".repeat(48)}.json`;
+    const currentObjectKey = `${userPrefix}${"b".repeat(48)}.json`;
+    const staleSnapshotObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_with_replica.snapshot.enc`;
+    await bucket.put(staleObjectKey, "stale-encrypted-replica");
+    await bucket.put(currentObjectKey, "current-encrypted-replica");
+    await bucket.put(staleSnapshotObjectKey, "stale-encrypted-snapshot");
+    const { alarms, runner, storageValues } = createRunnerHarness({
+      bucket,
+      workspace: createWorkspaceState({
+        browserVaultReplicaRef: createBrowserVaultReplicaRef({
+          objectKey: currentObjectKey,
+        }),
+      }),
+    });
+
+    for (const objectKey of [staleObjectKey, currentObjectKey]) {
+      await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+        createdAt: FIXED_NOW,
+        objectKey,
+        schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+        userId: TEST_USER_ID,
+      });
+    }
+    await runner.recordHostedWorkspaceSnapshotOrphanCandidate({
+      createdAt: FIXED_NOW,
+      objectKey: staleSnapshotObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: "snapshot_with_replica",
+      userId: TEST_USER_ID,
+    });
+    expect(alarms).toContain("2026-04-27T01:05:00.000Z");
+
+    vi.setSystemTime(new Date("2026-04-27T01:04:59.999Z"));
+    await runner.alarm();
+    expect(bucket.objects.has(staleObjectKey)).toBe(true);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(bucket.objects.has(staleSnapshotObjectKey)).toBe(true);
+
+    vi.setSystemTime(new Date("2026-04-27T01:05:00.000Z"));
+    await runner.alarm();
+
+    expect(bucket.deleted).toContain(staleObjectKey);
+    expect(bucket.deleted).toContain(staleSnapshotObjectKey);
+    expect(bucket.objects.has(staleObjectKey)).toBe(false);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(bucket.objects.has(staleSnapshotObjectKey)).toBe(false);
+    expect(storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(staleObjectKey),
+    )).toBeUndefined();
+    expect(storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(currentObjectKey),
+    )).toBeUndefined();
+    expect(alarms.at(-1)).toBe("deleted");
+  });
+
+  it("rejects browser vault replica cleanup obligations outside the bound user namespace", async () => {
+    const { runner } = createRunnerHarness();
+
+    await expect(runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+      createdAt: FIXED_NOW,
+      objectKey: "users/hsn_foreign/browser-vault-replicas/replica.json",
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: TEST_USER_ID,
+    })).rejects.toThrow(
+      "Hosted browser vault replica orphan candidate is outside the bound user namespace.",
+    );
+  });
+
+  it("keeps browser vault replica orphan cleanup retryable when R2 deletion fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const userPrefix = await hostedBrowserVaultReplicaUserPrefix({ userId: TEST_USER_ID });
+    const staleObjectKey = `${userPrefix}${"c".repeat(48)}.json`;
+    class BrowserVaultReplicaDeleteFailureBucket extends MemoryEncryptedR2Bucket {
+      failDelete = true;
+
+      override async delete(key: string | string[]): Promise<void> {
+        const keys = Array.isArray(key) ? key : [key];
+        if (this.failDelete && keys.includes(staleObjectKey)) {
+          throw new Error("browser vault replica delete failed");
+        }
+        await super.delete(key);
+      }
+    }
+    const bucket = new BrowserVaultReplicaDeleteFailureBucket();
+    await bucket.put(staleObjectKey, "stale-encrypted-replica");
+    const { runner, storageValues } = createRunnerHarness({ bucket });
+    await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+      createdAt: "2026-04-26T00:00:00.000Z",
+      objectKey: staleObjectKey,
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: TEST_USER_ID,
+    });
+
+    await expect(runner.alarm()).rejects.toThrow("browser vault replica delete failed");
+    expect(bucket.objects.has(staleObjectKey)).toBe(true);
+    expect(storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(staleObjectKey),
+    )).toBeDefined();
+
+    bucket.failDelete = false;
+    await runner.alarm();
+    expect(bucket.objects.has(staleObjectKey)).toBe(false);
+    expect(storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(staleObjectKey),
+    )).toBeUndefined();
+  });
+
   it("does not scan orphan candidates when deleting an upload session", async () => {
     const currentObjectKey =
       `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_delete_no_scan_session.snapshot.enc`;
@@ -6031,6 +6149,7 @@ function createWorkspaceState(
 
 function createBrowserVaultReplicaRef(input: {
   generatedAt?: string;
+  objectKey?: string;
   sourceBundleHash?: string;
 } = {}): NonNullable<HostedWorkspaceState["browserVaultReplicaRef"]> {
   const sourceBundleHash = input.sourceBundleHash ?? "a".repeat(64);
@@ -6039,7 +6158,7 @@ function createBrowserVaultReplicaRef(input: {
     dataVersion: "d".repeat(64),
     generatedAt: input.generatedAt ?? FIXED_NOW,
     keyId: "browser-vault-replica:d",
-    objectKey: "users/browser-vault-replicas/opaque/replica.json",
+    objectKey: input.objectKey ?? "users/browser-vault-replicas/opaque/replica.json",
     replicaSchema: "murph.browser-vault-replica",
     runtimeRootKeyId: "udrk:runtime:test-root",
     schema: "murph.hosted-browser-vault-replica-ref.v1",
