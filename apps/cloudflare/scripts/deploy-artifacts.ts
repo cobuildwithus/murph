@@ -52,6 +52,10 @@ const healthCommonsRuntimeGeneratedArtifacts = [
     relativePath: path.join("generated", "biomarker-desired-directions.json"),
   },
 ] as const;
+const healthCommonsKnowledgeIndexArtifact = {
+  label: "Health Commons knowledge index",
+  relativePath: path.join("generated", "knowledge.sqlite"),
+} as const;
 const healthCommonsRuntimeObsoleteGeneratedArtifacts = [
   {
     label: "Health Commons runtime catalog",
@@ -591,6 +595,12 @@ async function assertRunnerBundleHealthCommonsPackageFiles(bundleDir: string): P
         rootDir: bundleDir,
       });
     }
+    await resolveContainedRunnerDependencyFile({
+      filePath: path.join(packageDir, healthCommonsKnowledgeIndexArtifact.relativePath),
+      label: healthCommonsKnowledgeIndexArtifact.label,
+      packageName: healthCommonsPackageName,
+      rootDir: bundleDir,
+    });
     for (const artifact of healthCommonsRuntimeObsoleteGeneratedArtifacts) {
       await assertRunnerDependencyPathAbsent({
         filePath: path.join(packageDir, artifact.relativePath),

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Cli } from "incur";
 import { localParallelCliTest as test } from "./local-parallel-test.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
@@ -32,6 +34,61 @@ test("deleted generic Commons commands are no longer registered", async () => {
 
     assert.equal(result.exitCode, 1, command.join(" "));
     assert.equal(result.envelope.ok, false, command.join(" "));
+  }
+});
+
+test("commons knowledge search returns a bounded source-backed sauna packet", async () => {
+  const cli = createCommonsSliceCli();
+  const result = await runInProcessJsonCli<{
+    available: boolean;
+    items: Array<{
+      entityKey: string;
+      sources: Array<{ pmid: string | null; url: string | null }>;
+    }>;
+    safety: { kind: string } | null;
+  }>(cli, [
+    "commons",
+    "knowledge",
+    "search",
+    "dry sauna evidence",
+    "--limit",
+    "3",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.equal(data.available, true);
+  assert.ok(data.items.length > 0 && data.items.length <= 3);
+  assert.ok(data.items.some((item) =>
+    item.sources.some((source) => source.pmid === "29849692")
+  ));
+  assert.equal(data.safety?.kind, "safety");
+});
+
+test("commons knowledge search stays non-blocking when its generated index is missing", async () => {
+  const previousRoot = process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+  process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = path.join(
+    tmpdir(),
+    `missing-health-commons-${process.pid}`,
+  );
+  try {
+    const result = await runInProcessJsonCli<{
+      available: boolean;
+      items: unknown[];
+      warning: string | null;
+    }>(createCommonsSliceCli(), ["commons", "knowledge", "search", "dry sauna evidence"]);
+
+    assert.equal(result.envelope.ok, true);
+    const data = requireData(result.envelope);
+    assert.equal(data.available, false);
+    assert.deepEqual(data.items, []);
+    assert.match(data.warning ?? "", /continue without corpus context/u);
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+    } else {
+      process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = previousRoot;
+    }
   }
 });
 

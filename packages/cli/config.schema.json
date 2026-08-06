@@ -3583,6 +3583,36 @@
                       }
                     }
                   }
+                },
+                "knowledge": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "search": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "limit": {
+                                  "default": 3,
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 6
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }

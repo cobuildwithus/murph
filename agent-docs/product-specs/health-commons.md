@@ -197,10 +197,19 @@ Runtime surfaces should consume scoped generated artifacts instead of a monolith
 web route bundles/projections for public pages, compact protocol index/run-spec/
 family-graph artifacts for CLI and hosted protocol reads, the compact
 `biomarker-desired-directions.json` projection for progress-card sentiment, and
-separate source indexes only for tools that explicitly need source lookup.
-Hosted runner packaging must include that compact direction projection without
-shipping the web artifact tree. A missing direction projection is auxiliary
-availability loss: progress cards remain available with neutral mover sentiment
+separate source indexes only for tools that explicitly need source lookup. The
+generated `knowledge.sqlite` FTS projection gives the assistant a bounded
+claim-level read path for ordinary health questions. Authored Markdown and JSONL
+remain authoritative. The SQLite file is read-only build output, contains no
+user data, and returns at most a small evidence packet instead of loading the
+catalog or source files into a turn. The default packet contains three distinct
+evidence items, up to one relevant safety item, and at most four source locators
+per item. Multi-term searches require every term and use stemming, so related
+English word forms can match without broad semantic retrieval.
+Hosted runner packaging must include that compact direction projection and the
+knowledge index without shipping the web artifact tree. A missing direction
+projection is auxiliary availability loss: progress cards remain available with
+neutral mover sentiment
 and a visible caveat on the private card itself. Raster delivery preserves the
 same accessible description: when an image channel has no native alt-text
 field, its adapter appends the media description once to the existing reply or
