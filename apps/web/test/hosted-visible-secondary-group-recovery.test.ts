@@ -205,6 +205,75 @@ describe("Linq group-chat visible access recovery", () => {
     }
   });
 
+  it("retries private recovery with the same provider key after room completion", async () => {
+    const event = buildGroupLinqEvent(
+      "evt_group_setup_private_retry",
+      GROUP_SENDER_PHONE,
+      "2026-07-27T12:00:00.000Z",
+    );
+    const retryableError = hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq outbound reply failed with HTTP 503.",
+      retryable: true,
+    });
+    const sendHostedLinqChatMessage = vi.fn()
+      .mockRejectedValueOnce(retryableError)
+      .mockResolvedValueOnce({
+        chatId: "chat_private_member",
+        messageId: "msg_private_retry",
+      });
+    const dependencies = buildLinqDependencies({
+      event,
+      getHostedLinqChatSummary: vi.fn(async () => ({
+        handles: MATCHING_PRIVATE_HANDLES,
+        isGroup: false,
+      })),
+      readHostedMemberRoutingState: vi.fn(async () => ({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      }) as never),
+      resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
+        kind: "access_notice" as const,
+        message: TRIAL_CONVERSION_MESSAGE,
+        noticeCode: "trial_conversion_pending" as const,
+        responseReason: "sent-trial-conversion-notice",
+      })),
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      joinUrl: "https://withmurph.ai/groups/start",
+      ok: true as const,
+      reason: "sent-group-setup",
+    }));
+    const input = {
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    };
+
+    await expect(withHostedVisibleSecondaryLinqOutcomes(
+      handler,
+      dependencies,
+    )(input)).rejects.toBe(retryableError);
+    await expect(withHostedVisibleSecondaryLinqOutcomes(
+      handler,
+      dependencies,
+    )(input)).resolves.toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+
+    const providerKeys = sendHostedLinqChatMessage.mock.calls.map(
+      ([sendInput]) => sendInput.idempotencyKey,
+    );
+    expect(providerKeys).toHaveLength(2);
+    expect(providerKeys[1]).toBe(providerKeys[0]);
+    expect(providerKeys[0]).toMatch(
+      /^visible-secondary-private:[0-9a-f]{32}$/u,
+    );
+  });
+
   it("adds no disclosure when setup guidance has no safe private route", async () => {
     const event = buildGroupLinqEvent("evt_group_setup_no_private");
     const sendHostedLinqChatMessage = vi.fn();

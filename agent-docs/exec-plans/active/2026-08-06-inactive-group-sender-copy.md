@@ -86,9 +86,15 @@ Updated: 2026-08-06
 - The substantive round-3 review found that one group/day effect could render
   two different bodies after sender resolution changed. The redesign deleted
   the reason-bearing payload and dual-body branch, retained one canonical
-  50-variant renderer keyed only by the effect identity, and made terminally
-  unavailable room setup fail closed before private recovery. The same five
-  focused suites passed afterward: 397 tests.
+  50-variant renderer keyed only by the effect identity. The same five focused
+  suites passed afterward: 397 tests.
+- The substantive round-4 review proved the delivery store did not classify a
+  provider-correlated `group_setup` row as completed, so the service-level
+  in-flight guard could permanently block private recovery. The existing
+  delivery owner now pins group-setup target identity while allowing later
+  same-day source events to reuse the canonical effect. Real store coverage
+  proves completed versus concurrent outcomes, and private-retry coverage
+  proves the same provider key is reused. Six focused suites passed: 525 tests.
 - Hosted Web TypeScript check passed after generating the standard ignored
   Prisma and Health Commons build inputs in the fresh task worktree.
 - Scoped ESLint passed across all changed source and test files after the
