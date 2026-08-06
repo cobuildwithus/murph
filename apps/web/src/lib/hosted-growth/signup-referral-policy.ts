@@ -19,6 +19,7 @@ export const HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY = {
 export function isHostedSignupReferralPolicyVersion(
   policyVersion: string,
 ): boolean {
-  return (HOSTED_SIGNUP_REFERRAL_POLICY_VERSIONS as readonly string[])
-    .includes(policyVersion);
+  return HOSTED_SIGNUP_REFERRAL_POLICY_VERSIONS.some(
+    (knownVersion) => knownVersion === policyVersion,
+  );
 }
