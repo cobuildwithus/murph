@@ -1368,6 +1368,15 @@ describe('assistant codex runtime', () => {
         modelProvider: 'vercel-ai-gateway',
         reasoningEffort: 'high',
         providerRequestOrdinal: 3,
+        providerStartCriticalPath: {
+          assistantPhaseStartedAtMonotonicMs: 0,
+          assistantServiceStartedAtMonotonicMs: 0,
+          assistantTurnLockAcquiredAtMonotonicMs: 0,
+          assistantTurnLockWaitStartedAtMonotonicMs: 0,
+          automationLaneStartedAtMonotonicMs: 0,
+          mailboxImportDoneAtMonotonicMs: 0,
+          preProviderSetupDoneAtMonotonicMs: 0,
+        },
         prompt: 'Explain this',
         sandbox: 'workspace-write',
         workingDirectory,
@@ -1467,6 +1476,8 @@ describe('assistant codex runtime', () => {
         startedAt: expect.any(String),
       }),
     )
+    expect(onProviderRequestStarted.mock.calls[0]?.[0])
+      .not.toHaveProperty('providerStartCriticalPath')
   })
 
   it('starts cold and warm App Server turns before any lazy shared-data read', async () => {

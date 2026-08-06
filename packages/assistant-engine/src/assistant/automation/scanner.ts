@@ -10,6 +10,9 @@ import type {
   AssistantBeforeProviderAcceptedInputsHook,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
+import type {
+  AssistantProviderStartCriticalPathContext,
+} from '../provider-start-critical-path.js'
 import {
   type AssistantInputCandidate,
   type AssistantInputSource,
@@ -52,6 +55,7 @@ export async function scanAssistantAutomationOnce(input: {
   applyCanonicalWrites?: boolean
   allowSelfAuthored?: boolean
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
   operationScope?: AssistantAutomationOperationScope | null
@@ -179,6 +183,9 @@ export async function scanAssistantAutomationOnce(input: {
       allowSelfAuthored: input.allowSelfAuthored ?? false,
       ...(input.beforeProviderAcceptedInputs
         ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+        : {}),
+      ...(input.providerStartCriticalPath
+        ? { providerStartCriticalPath: input.providerStartCriticalPath }
         : {}),
       context,
       deliveryDispatchMode: input.deliveryDispatchMode,

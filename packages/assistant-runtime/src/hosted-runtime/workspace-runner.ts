@@ -37,6 +37,7 @@ import {
   resolveAssistantContextSnapshotPath,
   type AssistantGeneratedImageCapturePersistence,
   type AssistantInputEventRecord,
+  type AssistantProviderStartCriticalPathContext,
   warnAssistantBestEffortFailure,
 } from "@murphai/assistant-engine";
 import type {
@@ -241,6 +242,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   platform: HostedRuntimePlatform;
   persistGeneratedImageCapture?: AssistantGeneratedImageCapturePersistence | null;
   prepareAutoReplyDelivery?: (() => Promise<void>) | null;
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
   recordDeferredUsage?: ((
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
@@ -378,6 +380,7 @@ export interface HostedWorkspaceRunnerInput {
   withCanonicalWritePersistence?: (<T>(run: () => Promise<T>) => Promise<T>) | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   signal?: AbortSignal | null;
@@ -1059,6 +1062,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         await foregroundMailboxImportLoop?.drainPendingWake();
       }
     },
+    ...(input.providerStartCriticalPath
+      ? { providerStartCriticalPath: input.providerStartCriticalPath }
+      : {}),
     recordDeferredUsage(
       record: AssistantUsageRecord,
       providerRequestAcceptedInputIds?: readonly string[],
