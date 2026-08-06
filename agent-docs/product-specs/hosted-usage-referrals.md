@@ -15,7 +15,7 @@ There are two independent rollout gates:
 - `HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED=1` enables rewards for attributed
   signup-link activations.
 
-The stable referral link remains available to an active signed-in member when
+The stable referral link remains available to an eligible signed-in member when
 either reward gate is disabled.
 
 ## Product behavior
@@ -54,7 +54,7 @@ Trial rewards add usage capacity but never extend the trial end date.
 
 ## Stable signup referral links
 
-Every active member has one deterministic, signed referral URL:
+Every eligible signed-in member has one deterministic, signed referral URL:
 
 ```text
 /r/<versioned-signed-token>
@@ -71,12 +71,14 @@ attribution row, or reward state. The same issuance function serves:
   Murph for their link;
 - the authenticated Settings `Copy link` actions.
 
-Each mounted Settings action performs its own authenticated link read. This
-intentionally avoids any module-level or cross-component cache of an
-identity-bound URL, including during an in-app account switch. Once a URL is
-loaded, copying happens in the original click without another network request so
-browser clipboard gesture requirements remain intact. Success and load-versus-
-copy failures are announced accessibly, and a failed preload remains explicitly
+Each mounted Settings action performs its own authenticated link read. The
+server-owned Settings projection supplies a browser-local identity key; an
+identity change synchronously renders a safe loading state, aborts or ignores
+stale reads, and clears the prior URL before any retry. There is no module-level
+or cross-component cache of an identity-bound URL. Once a URL is loaded, copying
+happens in the original click without another network request so browser
+clipboard gesture requirements remain intact. Success and load-versus-copy
+failures are announced accessibly, and a failed preload remains explicitly
 retryable.
 
 A public `GET /r/<token>` only validates the token and renders a small landing
@@ -91,14 +93,15 @@ conversations or health information.
 
 Known unavailable links render a human-readable recovery state instead of a
 generic 404. A temporarily exhausted claim allowance renders `Try again soon`
-and tells the recipient to reopen the same link later. Invalid cross-origin
-submissions remain hard authorization failures and are never disguised as a link
-problem.
+with a same-origin `Try again` action that retries the claim without requiring
+the recipient to reconstruct a clean URL. Invalid cross-origin submissions
+remain hard authorization failures and are never disguised as a link problem.
 
 An explicit same-origin `POST /r/<token>/claim` creates a fresh ordinary
-`/join/<inviteCode>` invite and placeholder member. Every claimant receives
-isolated onboarding state, while `HostedInvite.referrerMemberId` remains attached
-to that invite throughout ordinary onboarding.
+`/join/<inviteCode>` invite and placeholder member. Every claimant—including a
+person who uses the reusable link much later—receives isolated onboarding state,
+while `HostedInvite.referrerMemberId` remains attached to that invite throughout
+ordinary onboarding.
 
 Claims reuse the referrer's existing member-row lock and the `HostedInvite`
 table. At most 50 `signup-referral` invites may be created for one referrer in a
@@ -116,6 +119,14 @@ never selects the referrer, reward, policy, destination, or accounting amount.
 requires exactly one distinct referrer on invites created no later than that
 activation. Attribution is re-read under the referrer lock before settlement.
 Ambiguous historical attribution fails closed.
+
+`HostedInvite.channel` and invite expiry are onboarding metadata, not referral
+authority. Ordinary authenticated onboarding resume may relabel a referral
+invite to `web`, and an invite may expire before a verified member's later
+activation completes; neither operation clears `referrerMemberId`. Legacy
+recipient-bound `/join/<inviteCode>` referrals and descendants created from the
+stable link therefore remain attributable when activation happens later, as
+long as the attributed invite existed before that activation.
 
 Conversational missions continue to use `HostedUsageReferral` as their durable
 multi-event lifecycle owner:
@@ -223,7 +234,8 @@ grant rolls back the receipt. Replays observe the existing receipt and cannot
 append another credit entry. The focused PostgreSQL concurrency proof runs two
 independent clients through concurrent settlement and replay and requires one
 receipt, one immutable entry, one remaining-capacity projection, and one member
-ledger increment.
+ledger increment. Its attribution fixture activates weeks after the invite was
+created, after invite expiry and a simulated ordinary-resume channel relabel.
 
 ## Recovery and completion notices
 
@@ -236,7 +248,8 @@ scheduler. Each bounded pass:
 3. reconciles up to 50 ordinary qualified missions, ordinary rewarded referrals
    awaiting their source celebration, or signup-link rewards awaiting their
    personal completion notice;
-4. re-signals up to 50 oldest unconsumed referral-notification mailbox items.
+4. re-signals up to 50 oldest unconsumed referral-notification mailbox items in
+   their actual `system` or `conversation` lane.
 
 No signup-specific queue, scheduler, outbox, grant worker, or runtime action
 exists. A small policy-aware presenter chooses between the existing ordinary
@@ -258,20 +271,21 @@ another step. A missing route delays only this notice; it never delays, reverses
 or duplicates the reward. Settings history remains the durable visible receipt.
 
 Once a notification mailbox item is durable, failed signaling leaves that same
-item eligible for the next bounded pass. A notification failure cannot duplicate
-or claw back its reward.
+item eligible for the next bounded pass regardless of its lane. A notification
+failure cannot duplicate or claw back its reward.
 
 ## Settings projection
 
 Settings keeps the combined AI usage meter as the aggregate balance owner.
 Referral access and history remain read-only projections:
 
-- Messaging always includes a compact `Referral link` row for an active signed-in
-  account, including first-run, email-only, and mission-disabled members;
+- Messaging always includes a compact `Referral link` row for an eligible signed-
+  in account, including first-run, email-only, and mission-disabled members;
 - the AI usage `Referrals` surface repeats the same deterministic Copy link when
   mission activity or usage history makes that contextual surface visible;
-- each Copy-link action performs its own authenticated read and never retains a
-  resolved identity-bound URL across another component, mount, or account;
+- each Copy-link action performs its own authenticated read, scopes all local
+  state to a server-projected member key, and cannot render or copy a prior
+  account's URL during an account transition;
 - `Ask Murph` appears only when conversational missions are enabled and a
   supported Murph conversation exists;
 - the empty referral explanation says qualifying rewards are added
@@ -321,7 +335,8 @@ Keep `HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED` unset during deployment. Before
 enabling it:
 
 1. confirm exact-head unit, typecheck, app, viewport, and design-proof checks;
-2. run the focused local-PostgreSQL concurrent settlement and replay proof;
+2. run the focused local-PostgreSQL concurrent settlement and replay proof,
+   including delayed activation after invite expiry and `web` relabeling;
 3. smoke one attributed activation and confirm one receipt, entry, grant, member
    balance increment, accurate Settings history, and one identity-safe
    completion notice;
@@ -330,7 +345,11 @@ enabling it:
 6. exercise the 50-claims-per-hour boundary and confirm the rejected claim
    creates no placeholder member or invite;
 7. verify invalid-origin claims remain 403 while known unavailable and busy
-   links render their human-readable landing states.
+   links render their human-readable landing states and the busy retry succeeds
+   after the rolling limit clears;
+8. switch between two authenticated Settings accounts without a full page
+   reload and confirm neither referral action can render or copy the prior
+   account's link.
 
 Disabling the signup-reward gate immediately stops new activation scans. It does
 not revoke stable links, hide prior history, claw back existing credit, or
