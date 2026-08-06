@@ -48,7 +48,7 @@ describe('assistant signup link guidance', () => {
     expect(lowUsage?.triggerHint).not.toContain('invite link')
   })
 
-  it('keeps group introductions as the default and separates attribution from rewards', async () => {
+  it('keeps group introductions as the default and explains automatic qualification', async () => {
     const skill = await readFile(
       path.join(resolveAssistantSkillsRoot(), 'signup-link', 'SKILL.md'),
       'utf8',
@@ -75,6 +75,12 @@ describe('assistant signup link guidance', () => {
     )
     expect(normalizedSkill).toContain(
       'does not earn usage, complete a mission, or guarantee a reward',
+    )
+    expect(normalizedSkill).toContain(
+      'If the recipient later finishes their own Murph setup and the referral qualifies under server policy, Murph adds any referral reward automatically',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not promise a fixed reward or amount that the tool did not return',
     )
   })
 })
