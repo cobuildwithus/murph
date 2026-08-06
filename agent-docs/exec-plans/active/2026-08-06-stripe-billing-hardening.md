@@ -119,9 +119,9 @@ Updated: 2026-08-06
   desktop and 700×1712 mobile native resolutions for pending-upgrade and
   Family-sponsored states; both uploaded evidence URLs pass the delivery
   check. The sponsored state has no self-service or disabled pseudo-action.
-- Production migration guard proof passes after narrowly documenting the
-  nullable provenance check as rolling-deploy compatible; the exception test
-  proves unrelated destructive DDL still fails closed.
+- Production migration guard proof passes on the rebased candidate, where the
+  nullable provenance constraint already uses its dedicated postdeploy
+  migration instead of a predeploy exception.
 - Remaining: push the candidate, run exact-head preliminary specialists and
   final ReviewGPT round 1 concurrently with GitHub Actions, resolve any accepted
   findings, then close this plan with final exact-head evidence.
