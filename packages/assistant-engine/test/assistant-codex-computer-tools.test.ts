@@ -102,10 +102,13 @@ describe("murph computer dynamic tools", () => {
     expect(actDescription).toContain("call computer_open before retrying or acting again");
 
     expect(openDescription.length).toBeLessThanOrEqual(250);
-    expect(openDescription).toContain("current authorized Kernel browser run");
-    expect(openDescription).toContain("return runId, URL, title, and visible text");
-    expect(openDescription).toContain("after user handoff or any unknown browser outcome");
-    expect(openDescription).toContain("does not prove a prior effect failed");
+    expect(openDescription).toContain("authorized browser");
+    expect(openDescription).toContain("Returns runId, URL, title, page text");
+    expect(openDescription).toContain("Before multi-step browsing each turn");
+    expect(openDescription).toContain("call send_progress_update");
+    expect(openDescription).toContain("prior-turn progress does not count");
+    expect(openDescription).toContain("reopen after handoff/unknown outcome");
+    expect(openDescription).toContain("cannot prove a prior effect failed");
 
     expect(osControlDescription.length).toBeLessThanOrEqual(310);
     expect(osControlDescription).toContain("only when Playwright cannot operate");

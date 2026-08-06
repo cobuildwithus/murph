@@ -277,7 +277,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send one brief user-visible progress update to the current conversation. Call only before a real reply-critical wait, then continue work immediately. Success means this milestone update was sent; do not repeat it. This is not a final answer.',
+    'Send a brief user-visible update to the current conversation before reply-critical work likely to keep the member waiting, then continue immediately. A successful call means this update was sent. This is not a final answer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -286,7 +286,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
         type: 'string',
         minLength: 1,
         description:
-          'One short natural sentence about verified current progress and the immediate next step; no final conclusions or unverified claims.',
+          'One short natural sentence orienting the member to the work and immediate next step; no final conclusions or unverified result claims.',
       },
     },
     required: ['text'],
@@ -1256,7 +1256,7 @@ export const MURPH_COMPUTER_OPEN_TOOL = {
   namespace: 'murph',
   name: 'computer_open',
   description:
-    'Open or reuse the current authorized Kernel browser run and return runId, URL, title, and visible text. Call before browser work and after user handoff or any unknown browser outcome. This read does not prove a prior effect failed.',
+    'Open or reuse the authorized browser; reopen after handoff/unknown outcome. Returns runId, URL, title, page text; cannot prove a prior effect failed. Before multi-step browsing each turn, call send_progress_update; prior-turn progress does not count.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
