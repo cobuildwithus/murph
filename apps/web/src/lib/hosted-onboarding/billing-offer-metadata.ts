@@ -4,15 +4,27 @@ import {
   HOSTED_PULSE_TRIAL_POLICY_VERSION,
   HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
   HOSTED_STANDARD_CHECKOUT_OFFER,
-  type HostedBillingCheckoutOffer,
   type HostedBillingPlanCode,
 } from "./billing-plans";
+import type { HostedPulseTrialStartSource } from "./pulse-trial-start-source";
 
-export function buildHostedBillingOfferMetadata(input: {
+type HostedBillingOfferMetadataInput = {
   billingPlanCode: HostedBillingPlanCode;
-  checkoutOffer: HostedBillingCheckoutOffer;
   memberId: string;
-}): Record<string, string> {
+} & (
+  | {
+      checkoutOffer: typeof HOSTED_PULSE_TRIAL_OFFER;
+      pulseTrialStartSource: HostedPulseTrialStartSource;
+    }
+  | {
+      checkoutOffer: typeof HOSTED_STANDARD_CHECKOUT_OFFER;
+      pulseTrialStartSource?: never;
+    }
+);
+
+export function buildHostedBillingOfferMetadata(
+  input: HostedBillingOfferMetadataInput,
+): Record<string, string> {
   if (input.checkoutOffer !== HOSTED_PULSE_TRIAL_OFFER) {
     return {
       billingPlanCode: input.billingPlanCode,
@@ -25,6 +37,7 @@ export function buildHostedBillingOfferMetadata(input: {
     billingPlanCode: "launch_monthly",
     checkoutOffer: HOSTED_PULSE_TRIAL_OFFER,
     memberId: input.memberId,
+    pulseTrialStartSource: input.pulseTrialStartSource,
     trialDurationDays: HOSTED_PULSE_TRIAL_DAYS.toString(),
     trialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
     trialUsageLimitUsdMicros: HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS.toString(),

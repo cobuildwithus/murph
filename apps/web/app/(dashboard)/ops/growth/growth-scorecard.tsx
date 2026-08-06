@@ -105,8 +105,8 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
           <div className="grid border-t border-border/60 md:grid-cols-3">
             <FunnelCheck
               detail={formatWindowChange(input.newMembers.wowPercent)}
-              label="Acquire"
-              unit="new members"
+              label="Records"
+              unit="member records created"
               value={formatInteger(input.newMembers.trailing7Days)}
             />
             <FunnelCheck

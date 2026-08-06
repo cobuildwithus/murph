@@ -8,7 +8,7 @@ const VIEWPORTS = [
 const CHART_NAMES = [
   "Total messages sent",
   "Messages sent per day",
-  "Acquisition",
+  "Intake and activation",
   "Revenue snapshots",
 ] as const;
 
