@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedUsageCreditGrantTx: vi.fn(),
   generateHostedRandomPrefixedId: vi.fn(),
   lockHostedUsageCreditBeneficiaryTx: vi.fn(),
   resolveHostedAssistantNotificationDestination: vi.fn(),
 }));
 
+vi.mock("@/src/lib/hosted-execution/usage-credit-grant", () => ({
+  appendHostedUsageCreditGrantTx:
+    mocks.appendHostedUsageCreditGrantTx,
+}));
 vi.mock("@/src/lib/hosted-execution/usage-credit-ledger", () => ({
   lockHostedUsageCreditBeneficiaryTx:
     mocks.lockHostedUsageCreditBeneficiaryTx,
@@ -20,9 +25,9 @@ vi.mock("@/src/lib/primitives", () => ({
 }));
 
 import {
-  admitHostedSignupReferralActivation,
-  admitPendingHostedSignupReferralActivations,
   isHostedSignupReferralRewardEnabled,
+  recoverPendingHostedSignupReferralRewards,
+  settleHostedSignupReferralReward,
 } from "@/src/lib/hosted-growth/signup-referral-reward";
 
 const ACTIVATED_AT = new Date("2026-08-06T12:05:00.000Z");
@@ -100,9 +105,10 @@ function createPrisma(input: {
   };
 }
 
-describe("hosted signup referral reward admission", () => {
+describe("hosted signup referral rewards", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.appendHostedUsageCreditGrantTx.mockResolvedValue({});
     mocks.generateHostedRandomPrefixedId.mockReturnValue("hur_signup_link");
     mocks.lockHostedUsageCreditBeneficiaryTx.mockResolvedValue({
       balanceUsdMicros: 0n,
@@ -133,14 +139,14 @@ describe("hosted signup referral reward admission", () => {
     })).toBe(true);
 
     const { prisma } = createPrisma();
-    await expect(admitPendingHostedSignupReferralActivations({
+    await expect(recoverPendingHostedSignupReferralRewards({
       enabled: false,
       prisma: prisma as never,
-    })).resolves.toEqual({ admitted: 0, failed: 0, scanned: 0 });
+    })).resolves.toEqual({ failed: 0, rewarded: 0, scanned: 0 });
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 
-  it("admits activation evidence into the existing referral state machine", async () => {
+  it("atomically writes the standard referral receipt and usage grant", async () => {
     const {
       created,
       introducedMemberId,
@@ -149,13 +155,13 @@ describe("hosted signup referral reward admission", () => {
       tx,
     } = createPrisma();
 
-    await expect(admitHostedSignupReferralActivation({
+    await expect(settleHostedSignupReferralReward({
       activatedAt: ACTIVATED_AT,
       introducedMemberId,
       prisma: prisma as never,
       referrerMemberId,
     })).resolves.toEqual({
-      outcome: "admitted",
+      outcome: "rewarded",
       referralId: "hur_signup_link",
     });
 
@@ -169,14 +175,16 @@ describe("hosted signup referral reward admission", () => {
           "hosted-signup-referral-activation-2026-08-v1",
         qualifiedAt: ACTIVATED_AT,
         referrerMemberId,
+        rewardedAt: ACTIVATED_AT,
         rewardUsdMicros: 2_000_000n,
         sourceConversationJson: {
           channel: "linq",
           threadId: SOURCE_THREAD_ID,
           threadIsDirect: true,
         },
-        status: "target_bound",
+        status: "rewarded",
         targetBoundAt: ATTRIBUTED_AT,
+        terminalAt: ACTIVATED_AT,
       }),
     ]);
     expect(mocks.generateHostedRandomPrefixedId).toHaveBeenCalledWith("hur");
@@ -184,16 +192,30 @@ describe("hosted signup referral reward admission", () => {
       beneficiaryMemberId: referrerMemberId,
       tx,
     });
+    expect(mocks.appendHostedUsageCreditGrantTx).toHaveBeenCalledWith({
+      effectiveAt: ACTIVATED_AT,
+      grantUsdMicros: 2_000_000n,
+      lockedBeneficiary: expect.objectContaining({
+        beneficiaryMemberId: REFERRER_MEMBER_ID,
+      }),
+      semanticSourceKey:
+        "hosted-usage-credit:referral:hur_signup_link:grant:v1",
+      source: {
+        kind: "referral",
+        referralId: "hur_signup_link",
+      },
+      tx,
+    });
     expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
     expect(tx.hostedUsageReferral.aggregate).toHaveBeenCalledTimes(2);
   });
 
-  it("does not create a second receipt when another referral path already owns the member", async () => {
+  it("does not create a second receipt when another referral path owns the member", async () => {
     const { introducedMemberId, prisma, referrerMemberId, tx } = createPrisma({
       existingReferralId: "hur_existing",
     });
 
-    await expect(admitHostedSignupReferralActivation({
+    await expect(settleHostedSignupReferralReward({
       activatedAt: ACTIVATED_AT,
       introducedMemberId,
       prisma: prisma as never,
@@ -204,13 +226,35 @@ describe("hosted signup referral reward admission", () => {
     });
     expect(tx.hostedUsageReferral.create).not.toHaveBeenCalled();
     expect(tx.hostedUsageReferral.aggregate).not.toHaveBeenCalled();
+    expect(mocks.appendHostedUsageCreditGrantTx).not.toHaveBeenCalled();
   });
 
-  it("records cap rejection without issuing a qualified receipt", async () => {
+  it("fails closed when attribution becomes ambiguous under lock", async () => {
+    const { introducedMemberId, prisma, referrerMemberId, tx } = createPrisma({
+      referrerRows: [
+        { referrerMemberId },
+        { referrerMemberId: "member_other_referrer" },
+      ],
+    });
+
+    await expect(settleHostedSignupReferralReward({
+      activatedAt: ACTIVATED_AT,
+      introducedMemberId,
+      prisma: prisma as never,
+      referrerMemberId,
+    })).resolves.toEqual({
+      outcome: "ambiguous_attribution",
+      referralId: null,
+    });
+    expect(tx.hostedUsageReferral.create).not.toHaveBeenCalled();
+    expect(mocks.appendHostedUsageCreditGrantTx).not.toHaveBeenCalled();
+  });
+
+  it("records cap rejection without granting usage", async () => {
     const { created, introducedMemberId, prisma, referrerMemberId } =
       createPrisma({ aggregateTotal: 10_000_000n });
 
-    await expect(admitHostedSignupReferralActivation({
+    await expect(settleHostedSignupReferralReward({
       activatedAt: ACTIVATED_AT,
       introducedMemberId,
       prisma: prisma as never,
@@ -224,6 +268,7 @@ describe("hosted signup referral reward admission", () => {
       status: "disqualified",
       terminalReason: "signup_referral_referrer_reward_cap_reached",
     });
+    expect(mocks.appendHostedUsageCreditGrantTx).not.toHaveBeenCalled();
   });
 
   it("does not reward a member for referring their own reconciled identity", async () => {
@@ -232,7 +277,7 @@ describe("hosted signup referral reward admission", () => {
       referrerMemberId: REFERRER_MEMBER_ID,
     });
 
-    await expect(admitHostedSignupReferralActivation({
+    await expect(settleHostedSignupReferralReward({
       activatedAt: ACTIVATED_AT,
       introducedMemberId: referrerMemberId,
       prisma: prisma as never,
@@ -242,27 +287,30 @@ describe("hosted signup referral reward admission", () => {
       status: "disqualified",
       terminalReason: "signup_referral_self_attribution",
     });
+    expect(mocks.appendHostedUsageCreditGrantTx).not.toHaveBeenCalled();
   });
 
-  it("admits credit evidence even when no direct celebration route exists", async () => {
+  it("rewards an email-only member without inventing a celebration route", async () => {
     mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(null);
     const { created, introducedMemberId, prisma, referrerMemberId } =
       createPrisma();
 
-    await expect(admitHostedSignupReferralActivation({
+    await expect(settleHostedSignupReferralReward({
       activatedAt: ACTIVATED_AT,
       introducedMemberId,
       prisma: prisma as never,
       referrerMemberId,
     })).resolves.toEqual({
-      outcome: "admitted",
+      outcome: "rewarded",
       referralId: "hur_signup_link",
     });
     expect(created[0]).toMatchObject({
       introducedMemberId,
-      status: "target_bound",
+      rewardedAt: ACTIVATED_AT,
+      status: "rewarded",
     });
     expect(created[0]).not.toHaveProperty("sourceConversationJson");
+    expect(mocks.appendHostedUsageCreditGrantTx).toHaveBeenCalledOnce();
     expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
 });

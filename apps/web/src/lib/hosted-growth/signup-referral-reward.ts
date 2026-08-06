@@ -3,6 +3,9 @@ import "server-only";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import {
+  appendHostedUsageCreditGrantTx,
+} from "../hosted-execution/usage-credit-grant";
+import {
   lockHostedUsageCreditBeneficiaryTx,
 } from "../hosted-execution/usage-credit-ledger";
 import {
@@ -38,22 +41,22 @@ type HostedSignupReferralActivationCandidate = {
   userId: string;
 };
 
-type HostedSignupReferralAdmissionOutcome =
-  | "admitted"
+type HostedSignupReferralRewardOutcome =
   | "already_processed"
   | "ambiguous_attribution"
   | "disqualified"
   | "not_activated"
-  | "not_attributed";
+  | "not_attributed"
+  | "rewarded";
 
-export interface HostedSignupReferralAdmissionResult {
-  outcome: HostedSignupReferralAdmissionOutcome;
+export interface HostedSignupReferralRewardResult {
+  outcome: HostedSignupReferralRewardOutcome;
   referralId: string | null;
 }
 
-export interface HostedSignupReferralAdmissionRecoveryResult {
-  admitted: number;
+export interface HostedSignupReferralRewardRecoveryResult {
   failed: number;
+  rewarded: number;
   scanned: number;
 }
 
@@ -64,18 +67,19 @@ export function isHostedSignupReferralRewardEnabled(
 }
 
 /**
- * Finds attributed activations and admits them into the existing usage-referral
- * state machine. This function does not grant credit or queue notifications;
- * the ordinary referral recovery reconciler remains the single owner of both.
+ * Finds attributed activations and settles them through the existing referral
+ * receipt and usage-credit ledger. Unlike a group mission, signup activation is
+ * already one durable qualification event, so receipt creation and the grant
+ * commit atomically instead of fabricating a target-bound group lifecycle.
  */
-export async function admitPendingHostedSignupReferralActivations(input: {
+export async function recoverPendingHostedSignupReferralRewards(input: {
   enabled?: boolean;
   limit?: number;
   now?: Date;
   prisma?: PrismaClient;
-} = {}): Promise<HostedSignupReferralAdmissionRecoveryResult> {
+} = {}): Promise<HostedSignupReferralRewardRecoveryResult> {
   if (!(input.enabled ?? isHostedSignupReferralRewardEnabled())) {
-    return { admitted: 0, failed: 0, scanned: 0 };
+    return { failed: 0, rewarded: 0, scanned: 0 };
   }
 
   const prisma = input.prisma ?? getPrisma();
@@ -132,18 +136,18 @@ export async function admitPendingHostedSignupReferralActivations(input: {
     LIMIT ${limit}
   `;
 
-  let admitted = 0;
   let failed = 0;
+  let rewarded = 0;
   for (const candidate of candidates) {
     try {
-      const result = await admitHostedSignupReferralActivation({
+      const result = await settleHostedSignupReferralReward({
         activatedAt: candidate.occurredAt,
         introducedMemberId: candidate.userId,
         prisma,
         referrerMemberId: candidate.referrerMemberId,
       });
-      if (result.outcome === "admitted") {
-        admitted += 1;
+      if (result.outcome === "rewarded") {
+        rewarded += 1;
       }
     } catch {
       failed += 1;
@@ -151,18 +155,18 @@ export async function admitPendingHostedSignupReferralActivations(input: {
   }
 
   return {
-    admitted,
     failed,
+    rewarded,
     scanned: candidates.length,
   };
 }
 
-export async function admitHostedSignupReferralActivation(input: {
+export async function settleHostedSignupReferralReward(input: {
   activatedAt: Date;
   introducedMemberId: string;
   prisma?: PrismaClient;
   referrerMemberId: string;
-}): Promise<HostedSignupReferralAdmissionResult> {
+}): Promise<HostedSignupReferralRewardResult> {
   const prisma = input.prisma ?? getPrisma();
   const sourceConversation =
     await resolveOptionalHostedSignupReferralSourceConversation({
@@ -192,7 +196,7 @@ export async function admitHostedSignupReferralActivation(input: {
       return { outcome: "ambiguous_attribution", referralId: null };
     }
 
-    await lockHostedUsageCreditBeneficiaryTx({
+    const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
       beneficiaryMemberId: input.referrerMemberId,
       tx,
     });
@@ -252,7 +256,7 @@ export async function admitHostedSignupReferralActivation(input: {
       select: { suspendedAt: true },
       where: { id: input.referrerMemberId },
     });
-    const capacityFailure =
+    const disqualificationReason =
       input.introducedMemberId === input.referrerMemberId
         ? "signup_referral_self_attribution"
         : !introducedMember || introducedMember.suspendedAt
@@ -266,14 +270,18 @@ export async function admitHostedSignupReferralActivation(input: {
                 tx,
               });
     const referralId = generateHostedRandomPrefixedId("hur");
+    const armedAt = introducedMember?.createdAt ?? attribution.createdAt;
     const expiresAt = new Date(
-      activation.occurredAt.getTime() + SIGNUP_REFERRAL_RECEIPT_WINDOW_MS,
+      Math.max(
+        activation.occurredAt.getTime() + SIGNUP_REFERRAL_RECEIPT_WINDOW_MS,
+        armedAt.getTime() + 1,
+      ),
     );
 
-    if (capacityFailure) {
+    if (disqualificationReason) {
       await tx.hostedUsageReferral.create({
         data: {
-          armedAt: introducedMember?.createdAt ?? attribution.createdAt,
+          armedAt,
           beneficiaryMemberId: input.referrerMemberId,
           expiresAt,
           id: referralId,
@@ -284,9 +292,8 @@ export async function admitHostedSignupReferralActivation(input: {
           rewardUsdMicros:
             HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
           status: "disqualified",
-          targetBoundAt: attribution.createdAt,
           terminalAt: activation.occurredAt,
-          terminalReason: capacityFailure,
+          terminalReason: disqualificationReason,
         },
       });
       return { outcome: "disqualified", referralId };
@@ -294,7 +301,7 @@ export async function admitHostedSignupReferralActivation(input: {
 
     await tx.hostedUsageReferral.create({
       data: {
-        armedAt: introducedMember!.createdAt,
+        armedAt,
         beneficiaryMemberId: input.referrerMemberId,
         expiresAt,
         id: referralId,
@@ -303,16 +310,32 @@ export async function admitHostedSignupReferralActivation(input: {
         policyVersion: HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
         qualifiedAt: activation.occurredAt,
         referrerMemberId: input.referrerMemberId,
+        rewardedAt: activation.occurredAt,
         rewardUsdMicros:
           HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
         ...(sourceConversation
           ? { sourceConversationJson: sourceConversation }
           : {}),
-        status: "target_bound",
+        status: "rewarded",
         targetBoundAt: attribution.createdAt,
+        terminalAt: activation.occurredAt,
       },
     });
-    return { outcome: "admitted", referralId };
+    await appendHostedUsageCreditGrantTx({
+      effectiveAt: activation.occurredAt,
+      grantUsdMicros:
+        HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+      lockedBeneficiary,
+      semanticSourceKey:
+        `hosted-usage-credit:referral:${referralId}:grant:v1`,
+      source: {
+        kind: "referral",
+        referralId,
+      },
+      tx,
+    });
+
+    return { outcome: "rewarded", referralId };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 

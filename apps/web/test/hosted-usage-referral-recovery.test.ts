@@ -1,14 +1,21 @@
+import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   reconcileHostedUsageReferralRewardAfterCommit: vi.fn(),
+  recoverPendingHostedSignupReferralRewards: vi.fn(),
   requireVercelCronRequest: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-growth/signup-referral-reward", () => ({
+  recoverPendingHostedSignupReferralRewards:
+    mocks.recoverPendingHostedSignupReferralRewards,
 }));
 
 vi.mock("@/src/lib/hosted-growth/usage-referral", () => ({
@@ -30,14 +37,22 @@ import {
   recoverPendingHostedUsageReferrals,
 } from "@/src/lib/hosted-growth/usage-referral-recovery";
 
+const SIGNUP_POLICY_VERSION =
+  "hosted-signup-referral-activation-2026-08-v1";
+
 describe("hosted usage-referral recovery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.recoverPendingHostedSignupReferralRewards.mockResolvedValue({
+      failed: 0,
+      rewarded: 0,
+      scanned: 0,
+    });
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   });
 
-  it("bounds retries and keeps a durable celebration when its wake fails", async () => {
+  it("settles signup rewards, bounds retries, and preserves durable wakes", async () => {
     const findReferrals = vi.fn().mockResolvedValue([
       { id: "referral_pending" },
       { id: "referral_queued" },
@@ -54,6 +69,11 @@ describe("hosted usage-referral recovery", () => {
       hostedMailboxItem: { findMany: findMailboxItems },
       hostedUsageReferral: { findMany: findReferrals },
     };
+    mocks.recoverPendingHostedSignupReferralRewards.mockResolvedValue({
+      failed: 1,
+      rewarded: 2,
+      scanned: 3,
+    });
     mocks.reconcileHostedUsageReferralRewardAfterCommit
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
@@ -74,13 +94,16 @@ describe("hosted usage-referral recovery", () => {
     await expect(recoverPendingHostedUsageReferrals({
       prisma: prisma as never,
     })).resolves.toEqual({
-      failed: 1,
+      failed: 2,
       pending: 1,
       queued: 1,
       resignaled: 1,
-      scanned: 4,
+      scanned: 7,
     });
 
+    expect(
+      mocks.recoverPendingHostedSignupReferralRewards,
+    ).toHaveBeenCalledExactlyOnceWith({ prisma });
     expect(findReferrals).toHaveBeenCalledExactlyOnceWith({
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       select: { id: true },
@@ -94,6 +117,17 @@ describe("hosted usage-referral recovery", () => {
           {
             celebrationQueuedAt: null,
             status: "rewarded",
+            OR: [
+              {
+                policyVersion: {
+                  not: SIGNUP_POLICY_VERSION,
+                },
+              },
+              {
+                policyVersion: SIGNUP_POLICY_VERSION,
+                sourceConversationJson: { not: Prisma.DbNull },
+              },
+            ],
           },
         ],
       },
