@@ -1285,7 +1285,8 @@ ${replyTargetGuidance}
 
 function buildAssistantHealthCommonsGuidanceText(): string {
   return `Health Commons route surface:
-- For protocol discovery, protocol setup, and experiment design, search Health Commons first. Do not require a protocol lookup for an ordinary health answer, task, plan, or habit when no experiment or protocol is being considered. ${buildHealthCommonsDiscoverySurfaceText()}`;
+- For substantive health questions, run one \`vault-cli commons knowledge search "<2-5 English terms>" --format json\`; use 3 items plus safety. Skip trivial or non-health turns. Retry only if empty; if unavailable, continue. This never starts an experiment.
+- For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
 
 function buildAssistantHealthCommonsCoreGuidanceText(): string {
@@ -1736,5 +1737,5 @@ function buildAssistantKnowledgeGuidanceText(input: {
 }
 
 function buildHealthCommonsKnowledgeDistinctionText(): string {
-  return "`vault-cli knowledge ...` is for the user's derived knowledge wiki. It is not the canonical Health Commons corpus; use `vault-cli commons protocol ...` for public Health Commons protocol discovery.";
+  return "`vault-cli knowledge` is the user's wiki, not Health Commons. Use `commons knowledge search` for public evidence and `commons protocol` for protocols.";
 }
