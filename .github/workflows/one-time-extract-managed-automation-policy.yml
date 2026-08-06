@@ -67,13 +67,10 @@ jobs:
             })
           })
           `
-          write(
-            'packages/assistant-engine/test/managed-automation-skill-assets.test.ts',
-            assetTest
-              .split('\n')
-              .map((line) => line.startsWith('          ') ? line.slice(10) : line)
-              .join('\n'),
-          )
+            .split('\n')
+            .map((line) => line.startsWith('          ') ? line.slice(10) : line)
+            .join('\n')
+          write('packages/assistant-engine/test/managed-automation-skill-assets.test.ts', assetTest);
 
           const python = process.platform === 'win32' ? 'python' : 'python3'
           const result = spawnSync(
