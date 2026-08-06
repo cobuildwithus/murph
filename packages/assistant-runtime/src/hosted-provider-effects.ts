@@ -145,6 +145,19 @@ export async function sendHostedProviderLinqMessage(
   request: HostedRuntimeLinqSendRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<HostedRuntimeLinqSendResponse> {
+  if (request.linqAppCardReplay === true) {
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        eventType: "assistant.delivery.linq_app_card_exact_replay",
+        providerKind: "linq",
+        retryMode: "provider_idempotency",
+      },
+      level: "info",
+      message: "Hosted Linq delivery is replaying the exact iMessage app card after an ambiguous provider outcome.",
+      phase: "outbox",
+    });
+  }
   let effectiveRequest = request;
   const context = createHostedProviderEffectContext(
     dependencies,
@@ -154,11 +167,13 @@ export async function sendHostedProviderLinqMessage(
   if (persistAppCardTextFallback) {
     context.persistAppCardTextFallback = async (input) => {
       await persistAppCardTextFallback(input);
-      effectiveRequest = {
+      const fallbackRequest: HostedRuntimeLinqSendRequest = {
         ...effectiveRequest,
         card: null,
         idempotencyKey: input.idempotencyKey,
       };
+      delete fallbackRequest.linqAppCardReplay;
+      effectiveRequest = fallbackRequest;
     };
   }
   if (shouldMaterializeHostedProviderLinqDirectThreadFirst(effectiveRequest)) {
@@ -316,6 +331,7 @@ async function sendHostedProviderLinqMessageDirect(
     directRecipientPhoneNumber: request.directRecipientPhoneNumber ?? null,
     fromPhoneNumber: request.fromPhoneNumber ?? null,
     idempotencyKey: request.idempotencyKey ?? null,
+    ...(request.linqAppCardReplay === true ? { linqAppCardReplay: true } : {}),
     media: request.media ?? null,
     message: request.message,
     ...(request.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),

@@ -281,6 +281,7 @@ export interface HostedRuntimeLinqSendRequest {
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
+  linqAppCardReplay?: true;
   media?: readonly AssistantResponseMedia[] | null;
   message: string;
   nativeReplyRequested?: true;

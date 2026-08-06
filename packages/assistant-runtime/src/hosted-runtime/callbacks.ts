@@ -3663,6 +3663,7 @@ function createHostedAssistantLinqSendDependency(input: {
         fromPhoneNumber,
         homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
         idempotencyKey,
+        ...(request.linqAppCardReplay === true ? { linqAppCardReplay: true } : {}),
         media: request.media ?? null,
         message: request.message,
         ...(request.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),

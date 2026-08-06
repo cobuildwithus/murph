@@ -505,6 +505,7 @@ export async function sendLinqMessage(
     directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
     idempotencyKey?: string | null
+    linqAppCardReplay?: true
     media?: readonly AssistantResponseMedia[] | null
     message: string
     nativeReplyRequested?: true
@@ -583,29 +584,38 @@ export async function sendLinqMessage(
     input.nativeReplyRequested !== true &&
     directRecipientPhoneNumber !== null &&
     idempotencyKey !== null
+  const replayNativeCard = input.linqAppCardReplay === true
+  if (replayNativeCard && !shouldAttemptNativeCard) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_APP_CARD_REPLAY_INVALID',
+      'An exact iMessage app-card replay requires the original direct-card delivery identity.',
+    )
+  }
   let appCardFallbackIdempotencyKey: string | null = null
   if (shouldAttemptNativeCard) {
-    let capabilityAvailable = false
-    try {
-      capabilityAvailable = await checkLinqIMessageCapability(
-        {
-          address: directRecipientPhoneNumber,
-          from: normalizeOptionalText(input.fromPhoneNumber),
-        },
-        {
-          env,
-          fetchImplementation: dependencies.fetchImplementation,
-          ...(dependencies.signal ? { signal: dependencies.signal } : {}),
-        },
-      )
-    } catch (error) {
-      if (dependencies.signal?.aborted) {
-        throw error
+    let capabilityAvailable = replayNativeCard
+    if (!replayNativeCard) {
+      try {
+        capabilityAvailable = await checkLinqIMessageCapability(
+          {
+            address: directRecipientPhoneNumber,
+            from: normalizeOptionalText(input.fromPhoneNumber),
+          },
+          {
+            env,
+            fetchImplementation: dependencies.fetchImplementation,
+            ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+          },
+        )
+      } catch (error) {
+        if (dependencies.signal?.aborted) {
+          throw error
+        }
+        dependencies.onAppCardFallbackError?.({
+          error,
+          reason: 'capability_check_failed',
+        })
       }
-      dependencies.onAppCardFallbackError?.({
-        error,
-        reason: 'capability_check_failed',
-      })
     }
     if (capabilityAvailable) {
       try {

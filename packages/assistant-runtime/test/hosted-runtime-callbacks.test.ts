@@ -10491,7 +10491,7 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("transfers the hosted provider fence before sending a promoted card fallback", async () => {
+  it("transfers the hosted provider fence before fallback from an exact card replay", async () => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",
       channel: "linq",
@@ -10518,7 +10518,11 @@ describe("hosted runtime callbacks", () => {
       ).pathname}`);
       return new Response(null, { status: 204 });
     });
-    mocks.sendLinqMessage.mockImplementationOnce(async (_request, dependencies) => {
+    mocks.sendLinqMessage.mockImplementationOnce(async (request, dependencies) => {
+      expect(request).toMatchObject({
+        idempotencyKey: "assistant-outbox:intent_123",
+        linqAppCardReplay: true,
+      });
       await dependencies.fetchImplementation(
         "https://linq.example.test/v1/messages/card",
         { method: "POST" },
@@ -10551,6 +10555,7 @@ describe("hosted runtime callbacks", () => {
         },
         directRecipientPhoneNumber: "+15550001",
         idempotencyKey: "assistant-outbox:intent_123",
+        linqAppCardReplay: true,
         message: "Nutrition summary",
         persistAppCardTextFallback,
         replyToMessageId: null,

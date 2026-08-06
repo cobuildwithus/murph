@@ -148,6 +148,7 @@ export interface AssistantOutboxDispatchMessage {
   dedupeToken?: string | null
   explicitTarget?: string | null
   identityId?: string | null
+  linqAppCardReplay?: true
   media?: readonly AssistantResponseMedia[] | null
   message: string
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
@@ -989,6 +990,9 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
             },
           },
       ...dispatchIntent,
+      ...(shouldReplayAssistantOutboxLinqAppCard(dispatchIntent)
+        ? { linqAppCardReplay: true }
+        : {}),
       vault: input.vault,
     })
     const delivery = assistantChannelDeliverySchema.parse({
@@ -1515,6 +1519,7 @@ export async function sendAssistantOutboxDispatchMessage(input: AssistantOutboxD
       deliverySource: input.deliverySource ?? null,
       idempotencyKey: input.deliveryIdempotencyKey,
       identityId: input.identityId,
+      ...(input.linqAppCardReplay === true ? { linqAppCardReplay: true } : {}),
       actorId: input.actorId,
       threadId: input.threadId,
       threadIsDirect: input.threadIsDirect,
@@ -1535,6 +1540,21 @@ export async function sendAssistantOutboxDispatchMessage(input: AssistantOutboxD
     dispatch: input,
     vault: input.vault,
   })
+}
+
+function shouldReplayAssistantOutboxLinqAppCard(
+  intent: Pick<
+    AssistantOutboxIntent,
+    | 'card'
+    | 'channel'
+    | 'deliveryConfirmationPending'
+    | 'deliveryTransportIdempotent'
+  >,
+): boolean {
+  return normalizeNullableString(intent.channel)?.toLowerCase() === 'linq' &&
+    intent.card !== null &&
+    intent.deliveryConfirmationPending === true &&
+    intent.deliveryTransportIdempotent === true
 }
 
 function normalizeAssistantOutboxDispatchSubject(

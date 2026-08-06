@@ -1617,6 +1617,95 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.createLinqChat).not.toHaveBeenCalled()
   })
 
+  it('replays the exact Linq response card without reselecting capability', async () => {
+    runtimeMocks.sendLinqIMessageAppCard.mockResolvedValue({
+      message: { id: 'native-card-message-replayed' },
+    })
+
+    await expect(sendLinqMessage({
+      card: NUTRITION_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      fromPhoneNumber: '+15550000',
+      idempotencyKey: 'card-delivery-replay',
+      linqAppCardReplay: true,
+      message: NUTRITION_CARD_TEXT,
+      target: 'private-thread-replay',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+    })).resolves.toEqual({
+      providerMessageId: 'native-card-message-replayed',
+      providerThreadId: null,
+      target: 'private-thread-replay',
+    })
+
+    expect(runtimeMocks.checkLinqIMessageCapability).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledWith({
+      card: NUTRITION_CARD,
+      chatId: 'private-thread-replay',
+      idempotencyKey: 'card-delivery-replay',
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: undefined,
+    })
+    expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+  })
+
+  it('promotes an exact card replay to text only after definitive rejection', async () => {
+    const onAppCardFallbackError = vi.fn()
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    const rejectionError = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq rejected the replayed iMessage app card.',
+      {
+        failureStage: 'http',
+        method: 'POST',
+        operation: 'send_imessage_app_card',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 422,
+      },
+    )
+    runtimeMocks.sendLinqIMessageAppCard.mockRejectedValue(rejectionError)
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'replayed-card-text-fallback' },
+    })
+
+    await expect(sendLinqMessage({
+      card: NUTRITION_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      idempotencyKey: 'card-replay-definitive-rejection',
+      linqAppCardReplay: true,
+      message: NUTRITION_CARD_TEXT,
+      target: 'private-thread-replay-rejected',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      onAppCardFallbackError,
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      idempotencyKey: 'card-replay-definitive-rejection:fallback',
+      providerMessageId: 'replayed-card-text-fallback',
+    })
+
+    expect(runtimeMocks.checkLinqIMessageCapability).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledOnce()
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: 'card-replay-definitive-rejection:fallback',
+    })
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledOnce()
+    expect(onAppCardFallbackError).toHaveBeenCalledWith({
+      error: rejectionError,
+      reason: 'app_card_rejected',
+    })
+    expect(persistAppCardTextFallback.mock.invocationCallOrder[0]).toBeLessThan(
+      runtimeMocks.sendLinqChatMessage.mock.invocationCallOrder[0]!,
+    )
+  })
+
   it('falls back to deterministic ordinary text when Linq card capability is unavailable', async () => {
     const onAppCardFallbackError = vi.fn()
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)

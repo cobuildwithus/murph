@@ -203,7 +203,7 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
-  it('abandons ambiguous Linq app-card sends without scheduling a changed-effect retry', async () => {
+  it('schedules ambiguous Linq app-card sends for exact idempotent replay', async () => {
     await withTempVault(async (vault) => {
       await createAssistantTurnReceipt({
         deliveryRequested: true,
@@ -262,12 +262,14 @@ describe('assistant outbox dispatch-state', () => {
         vault,
       })
 
-      expect(failed.status).toBe('abandoned')
+      expect(failed.status).toBe('retryable')
       expect(failed.card).not.toBeNull()
-      expect(failed.deliveryConfirmationPending).toBe(false)
-      expect(failed.deliveryTransportIdempotent).toBe(false)
-      expect(failed.nextAttemptAt).toBeNull()
-      expect(failed.lastError?.code).toBe('ASSISTANT_DELIVERY_AMBIGUOUS')
+      expect(failed.deliveryConfirmationPending).toBe(true)
+      expect(failed.deliveryTransportIdempotent).toBe(true)
+      expect(failed.nextAttemptAt).not.toBeNull()
+      expect(failed.lastError?.code).toBe(
+        'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      )
     })
   })
 

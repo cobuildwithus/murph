@@ -24,11 +24,9 @@ Updated: 2026-08-06
 - Existing hosted card tests stub provider fetch below the production
   interception boundary and therefore did not exercise the missing route.
 - Review of the recovered provider path exposed a second owner-boundary bug:
-  a card send marked as possibly accepted was classified as retryable. A later
-  drain could re-enter capability selection and attempt a changed text effect
-  under the original card delivery key. A focused state test failed with
-  `retryable` instead of the required terminal `abandoned` result before the
-  correction.
+  a card send marked as possibly accepted was classified as an ordinary retry.
+  A later drain could re-enter capability selection and attempt a changed text
+  effect under the original card delivery key.
 - Final ReviewGPT correction review exposed a third owner-boundary bug: the
   local outbox promoted a rejected card to its fallback key, but the Web
   provider-entry boundary memoized the original card claim for the send. A
@@ -36,6 +34,12 @@ Updated: 2026-08-06
   and a focused Web test first observed a fallback claim without predecessor
   terminalization. The original `provider_dispatch_started` row could therefore
   remain unresolved indefinitely and block later group routing for that chat.
+- Final ReviewGPT round 4 proved that terminally abandoning that ambiguous card
+  locally did not resolve the already-claimed Web dispatch fence. The focused
+  state and outbox regressions first observed `abandoned` with no retry. Exact
+  provider-idempotent replay is therefore required: it retains the card and
+  key, skips capability re-selection, and lets provider acceptance close the
+  original fence without changing the effect.
 
 ## Success criteria
 
@@ -51,9 +55,10 @@ Updated: 2026-08-06
   sanitized hosted warning before the existing persisted text fallback.
 - A normal `available: false` result remains an expected fallback and is not
   mislabeled as an error.
-- A card-bearing attempt that may already have succeeded is abandoned with the
-  card retained and no next attempt; it cannot later re-enter capability
-  selection or reuse the card delivery key for text.
+- A card-bearing attempt that may already have succeeded enters
+  delivery-confirmation-pending and replays only the identical card and key
+  without another capability check. It cannot reuse the card delivery key for
+  text; only a definitive rejection may promote the stable fallback.
 - Before promoted fallback text enters Linq, Web terminalizes the exact card
   dispatch and claims the fallback in one transaction. A retry from the
   already-persisted fallback repeats that exact transition, and completing the
@@ -72,7 +77,8 @@ Updated: 2026-08-06
   dependency; reuse the existing delivery rows and engagement transaction.
 - Keep provider request and response bodies, phone numbers, chat ids, member
   ids, idempotency keys, and raw error text out of durable diagnostics.
-- Preserve the current single-effect outbox transition and ambiguity rules.
+- Preserve the current single-effect outbox transition and use its existing
+  confirmation-pending state for exact provider-idempotent card replay.
 - Deploy Web first because it accepts the optional predecessor transition while
   remaining compatible with the old runner. Then ship the Cloudflare Worker
   and runner bundle together with immediate rollout; the new runner must not
@@ -110,15 +116,12 @@ Updated: 2026-08-06
   CI exposed four broader test assertions that did not include the new
   callback; those assertions are corrected and local proof passes.
 - Final ReviewGPT round 2 verified the earlier correction and found the
-  ambiguous card-attempt retry path. A regression first proved the outbox
-  returned `retryable`; the existing terminal ambiguity owner now classifies
-  card-bearing Linq attempts marked as possibly accepted as `abandoned`, with
-  the card retained and no next attempt.
+  ambiguous card-attempt changed-effect retry path. The first correction used
+  terminal abandonment to prevent capability re-selection and text promotion.
 - From `packages/assistant-engine`, `pnpm exec vitest run --config vitest.config.ts test/outbox-dispatch-state.test.ts`
   — 28 passed after the ambiguity correction.
 - From `packages/assistant-engine`, `pnpm exec vitest run --config vitest.config.ts test/assistant-outbox-runtime.test.ts`
-  — 90 passed; the production channel/outbox integration proves a forced later
-  drain does not call Linq or capability selection again.
+  — 90 passed before the round 4 correction.
 - `packages/assistant-engine` typecheck passed after the ambiguity correction.
 - Final ReviewGPT round 3 found that the fallback used the original memoized
   Web provider claim. The two failing-first regressions proved the stale-fence
@@ -135,3 +138,12 @@ Updated: 2026-08-06
   chat has no unresolved dispatch after fallback acceptance.
 - `packages/assistant-runtime` and prepared `apps/web` typechecks passed after
   the fence-transfer correction.
+- Final ReviewGPT round 4 proved terminal local abandonment stranded the Web
+  dispatch fence. Two focused regressions failed with `abandoned` before the
+  correction. Ambiguous native-card delivery now uses the existing
+  confirmation-pending state and replays the exact card/key without capability
+  selection; definitive rejection still transfers the fence before text.
+- Focused exact-replay proof passes in outbox state, outbox/channel integration,
+  channel runtime, hosted provider effects, and hosted callbacks. The local
+  PostgreSQL proof now also shows acceptance under the original replayed key
+  clears the unresolved chat fence; both PostgreSQL cases pass.

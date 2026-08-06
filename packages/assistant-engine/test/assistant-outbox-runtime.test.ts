@@ -1086,7 +1086,7 @@ describe('assistant outbox runtime', () => {
     })
   })
 
-  it('does not re-enter capability selection after an ambiguous app-card attempt', async () => {
+  it('replays the exact Linq app card after an ambiguous provider outcome', async () => {
     await useActualOutboundDeliveryImplementation()
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-card-ambiguous-',
@@ -1109,9 +1109,22 @@ describe('assistant outbox runtime', () => {
         card: NUTRITION_RESPONSE_CARD,
         idempotencyKey: `assistant-outbox:${intent.intentId}`,
       })
-      throw Object.assign(new Error('app-card acknowledgement was lost'), {
-        deliveryMayHaveSucceeded: true,
+      if (sendLinq.mock.calls.length === 1) {
+        expect(request).not.toHaveProperty('linqAppCardReplay')
+        throw Object.assign(new Error('app-card acknowledgement was lost'), {
+          deliveryMayHaveSucceeded: true,
+        })
+      }
+      expect(request).toMatchObject({
+        linqAppCardReplay: true,
       })
+      return {
+        idempotencyKey: `assistant-outbox:${intent.intentId}`,
+        providerMessageId: 'native-card-message-replayed',
+        providerThreadId: null,
+        target: 'thread-response-card-ambiguous',
+        targetKind: 'thread',
+      }
     })
 
     const ambiguous = await dispatchAssistantOutboxIntent({
@@ -1124,12 +1137,14 @@ describe('assistant outbox runtime', () => {
 
     expect(ambiguous.intent).toMatchObject({
       card: NUTRITION_RESPONSE_CARD,
-      deliveryConfirmationPending: false,
-      deliveryTransportIdempotent: false,
-      nextAttemptAt: null,
-      status: 'abandoned',
+      deliveryConfirmationPending: true,
+      deliveryTransportIdempotent: true,
+      status: 'retryable',
     })
-    expect(ambiguous.deliveryError?.code).toBe('ASSISTANT_DELIVERY_AMBIGUOUS')
+    expect(ambiguous.intent.nextAttemptAt).not.toBeNull()
+    expect(ambiguous.deliveryError?.code).toBe(
+      'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    )
 
     const laterDrain = await dispatchAssistantOutboxIntent({
       dependencies: { sendLinq },
@@ -1139,8 +1154,12 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
 
-    expect(laterDrain.intent.status).toBe('abandoned')
-    expect(sendLinq).toHaveBeenCalledOnce()
+    expect(laterDrain.intent.status).toBe('sent')
+    expect(laterDrain.intent.delivery).toMatchObject({
+      idempotencyKey: `assistant-outbox:${intent.intentId}`,
+      providerMessageId: 'native-card-message-replayed',
+    })
+    expect(sendLinq).toHaveBeenCalledTimes(2)
   })
 
   it('persists one text-only fallback identity before acceptance and reuses it after restart', async () => {

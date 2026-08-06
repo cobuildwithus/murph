@@ -1387,11 +1387,13 @@ new-chat workaround. Same-route inputs accepted during the live turn may update
 the reply message, reaction capability, and delivery idempotency inputs, but do
 not recreate the explicit-target override or replace the turn's thread binding.
 If a card-bearing Linq provider attempt may already have succeeded, the outbox
-retains that card and records the existing terminal abandoned-ambiguity state
-with no next attempt. A later capability result or text body therefore cannot
-reuse the original card delivery key. Text retries are safe only after the
-text-only transition has committed, cleared the card, and frozen its stable
-fallback identity.
+retains that card and enters delivery-confirmation-pending under the same
+provider-idempotent key. Its retry bypasses capability selection and replays
+only the identical card body and key; it cannot substitute text or another
+effect. Provider acceptance or deduplication closes the original Web dispatch
+fence. Only a definitive card rejection may commit the text-only transition,
+clear the card, freeze the stable fallback identity, and transfer that Web
+fence before text enters Linq.
 For a definitive card rejection, the runtime does not send fallback text until
 the existing Web engagement transaction has terminalized the exact original
 `provider_dispatch_started` delivery and claimed the promoted fallback key.

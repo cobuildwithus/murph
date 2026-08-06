@@ -167,6 +167,7 @@ export interface AssistantChannelDependencies {
     fromPhoneNumber?: string | null
     homeRouteFallbackAllowed?: boolean | null
     idempotencyKey?: string | null
+    linqAppCardReplay?: true
     media?: readonly AssistantResponseMedia[] | null
     message: string
     nativeReplyRequested?: true
@@ -272,6 +273,7 @@ export interface AssistantChannelAdapter {
       explicitTarget: string | null
       idempotencyKey?: string | null
       identityId: string | null
+      linqAppCardReplay?: true
       media?: readonly AssistantResponseMedia[] | null
       message: string
       nativeReplyRequested?: true
@@ -327,6 +329,7 @@ export interface AssistantChannelAdapterSpec {
     explicitTarget: string | null
     idempotencyKey?: string | null
     identityId: string | null
+    linqAppCardReplay?: true
     media: readonly AssistantResponseMedia[]
     message: string
     nativeReplyRequested?: true

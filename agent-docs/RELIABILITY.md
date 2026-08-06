@@ -23,12 +23,13 @@ Last verified: 2026-08-06
   reply and reaction authorization rechecks the accepted event against the same
   thread binding, so deleting the duplicate does not remove those tools or
   change the provider contract. Transport ambiguity, timeouts, rate limits,
-  and server failures remain failed delivery attempts and must not start a
-  second send. A card-bearing Linq attempt marked as possibly accepted becomes
-  terminal abandoned ambiguity with its card retained and no next attempt, so
-  a later capability check or text fallback cannot reuse the card's delivery
-  key. Only a committed text-only transition, with the card cleared and one
-  stable fallback identity, can retry that same text effect. A caught
+  and server failures remain ambiguous. A card-bearing Linq attempt marked as
+  possibly accepted becomes delivery-confirmation-pending with its card and
+  provider-idempotent key retained. Retry bypasses capability selection and
+  replays only that exact card effect; acceptance or provider deduplication
+  closes the original Web fence. Only a definitive rejection can commit the
+  text-only transition, clear the card, and retry under one stable fallback
+  identity. A caught
   capability-check failure or definitive
   app-card rejection emits one sanitized hosted warning before the existing
   text transition; an ordinary `available: false` result remains expected
@@ -860,11 +861,11 @@ Last verified: 2026-08-06
 - Automatic meal import is complete only after the stable 9pm managed automation exists. Capture enrollment and upload require a current active private route, including a verified email fallback, which Web includes in the private mailbox envelope. The import writes the canonical meal first, then idempotently ensures that automation from the envelope route; if the upsert fails, the mailbox item stays retryable. Direct email delivery replaces the saved address with the current verified address through the existing signed Web-control boundary before every provider call, and fails closed when Web no longer returns one. Reconciliation evaluates engagement and AI usage for runnable model work even when system lag is present, while blocked model work can still admit deterministic import-only processing. System-only import must checkpoint the generic cron projection from the mutated vault before running post-checkpoint staging cleanup; a projection read failure leaves the import uncheckpointed for retry. An accepted meal capture is member-wide engagement under the existing 28-day automation policy, so ordinary due automations may resume; it does not bypass AI-usage authorization. Authorized fresh conversation owns the ordinary foreground pass so a retryable system item cannot starve it. A same-workspace retry finds the existing meal, while a retry from the last checkpoint safely repeats the deterministic canonical write before ensuring the missing postcondition. The automation uses the ordinary cron planner and delivery path. `meal closeout-work` derives one bounded batch directly from canonical meals: same-occurrence removal revisions first, then the oldest retained automatic-capture photos. The photos remain the only pending-work queue, so old captures eventually drain without a cursor or another state store. If the provider fails after cleanup begins, a photo-removal revision recorded at or after the scheduled occurrence instant remains evidence only for that occurrence's retry; remaining photos and those revisions reconstruct partial work, while a later occurrence cannot resend the completed one. Photo cleanup is a canonical, idempotent meal mutation that fails closed on changed bytes, mismatched manifest ownership, ordinary meal photos, or partial writes.
 - Daily nutrition response cards remain one outbox-owned immutable effect. The runtime retains the V1 parser for existing outbox and checkpoint state, while V2 adds canonical fiber plus nullable goal snapshots. Ordinary private-direct interactive turns and the managed meal closeout use the same attachment tool; other scheduled turns do not receive it. Because a card replaces the whole final response, it is eligible only when the card alone completely satisfies the current request. New accepted input in the same live turn invalidates an earlier card-only decision, and attachment is rejected after the delivery context advances. Every card copies each total from the immediately preceding single-date canonical meal-totals read. It may copy a target only after a bounded active-goal read proves a complete result with exactly one qualifying record for that daily metric and unit; a saturated result, zero matches, or multiple matches leaves the target null. Missing or partial totals can carry only an `unavailable` status, and an assessed status must not point opposite the frozen total and target. The semantic target status is frozen presentation context for the one message, not durable goal progress and not a threshold recomputed by iOS. Linq always renders a noninteractive static layout containing the date, meal count, available totals, and an explicit partial marker when supporting meal counts are incomplete. For V2, the first non-null goal in canonical calories, protein, carbohydrates, fat, and fiber order contributes its exact target and frozen status. The provider URL is a fixed non-sensitive HTTPS product URL rather than encoded health state, and the value-free fallback names the truthful text-recovery action without triggering Apple data detectors. Provider acceptance and delivery therefore do not depend on the extension owning the transcript balloon. A future interactive transcript renderer requires production-device presentation proof before rollout. After the first V2 card-bearing state or effect, the V2-capable Worker and runner are the rollback floor.
 - A card-bearing Linq attempt marked as possibly accepted enters the existing
-  terminal abandoned-ambiguity state with the card retained and no next
-  attempt. A later drain cannot re-enter capability selection or replace the
-  original card effect with text under its delivery key. Text retry is safe
-  only after the text-only transition commits with `card: null` and a stable
-  fallback identity. Before the first fallback provider request, the existing
+  delivery-confirmation-pending state with the card and provider-idempotent key
+  retained. A later drain bypasses capability selection and replays only that
+  exact card effect. Text retry is safe only after a definitive rejection and
+  the text-only transition commits with `card: null` and a stable fallback
+  identity. Before the first fallback provider request, the existing
   Web delivery transaction must also terminalize the exact card dispatch and
   claim that fallback identity; a persisted-fallback retry idempotently
   reconciles the same predecessor before sending.

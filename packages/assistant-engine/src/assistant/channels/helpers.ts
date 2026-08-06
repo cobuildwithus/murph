@@ -110,6 +110,7 @@ export function createAssistantChannelAdapter(
         explicitTarget: normalizeOptionalText(input.explicitTarget),
         idempotencyKey,
         identityId: normalizeOptionalText(input.identityId),
+        ...(input.linqAppCardReplay === true ? { linqAppCardReplay: true } : {}),
         media,
         message: input.message,
         ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),

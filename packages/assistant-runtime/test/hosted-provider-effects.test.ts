@@ -464,6 +464,74 @@ describe("hosted provider effects", () => {
     );
   });
 
+  it("replays the exact hosted app card without another capability request", async () => {
+    vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({
+        message: { id: "replayed-native-card" },
+      }), {
+        headers: { "content-type": "application/json" },
+      })
+    );
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-07-31",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "hosted-card-exact-replay",
+      linqAppCardReplay: true,
+      message: "Nutrition summary",
+      target: "direct-chat-replay",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+    })).resolves.toMatchObject({
+      providerMessageId: "replayed-native-card",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [request, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(request)).not.toContain("/capability/check_imessage");
+    expect(String(request)).toContain("/chats/direct-chat-replay/messages");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      message: {
+        idempotency_key: "hosted-card-exact-replay",
+        parts: [{ type: "imessage_app" }],
+      },
+    });
+    expect(info).toHaveBeenCalledOnce();
+    const replayLog = JSON.parse(String(info.mock.calls[0]?.[0])) as {
+      details?: Record<string, unknown>;
+      level?: string;
+    };
+    expect(replayLog).toMatchObject({
+      details: {
+        eventType: "assistant.delivery.linq_app_card_exact_replay",
+        providerKind: "linq",
+        retryMode: "provider_idempotency",
+      },
+      level: "info",
+    });
+    const serializedLog = JSON.stringify(replayLog);
+    expect(serializedLog).not.toContain("+15550001");
+    expect(serializedLog).not.toContain("direct-chat-replay");
+    expect(serializedLog).not.toContain("hosted-card-exact-replay");
+    expect(serializedLog).not.toContain("linq-token");
+  });
+
   it("logs a sanitized warning when a hosted capability error selects text recovery", async () => {
     vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -643,16 +711,29 @@ describe("hosted provider effects", () => {
   it.each([
     {
       capabilityAvailable: false,
+      exactReplay: false,
+      expectedCapabilityRequests: 1,
       expectedIdempotencyKey: "hosted-stale-card",
       name: "capability fallback",
     },
     {
       capabilityAvailable: true,
+      exactReplay: false,
+      expectedCapabilityRequests: 1,
       expectedIdempotencyKey: "hosted-stale-card:fallback",
       name: "definitive app-card rejection",
     },
+    {
+      capabilityAvailable: true,
+      exactReplay: true,
+      expectedCapabilityRequests: 0,
+      expectedIdempotencyKey: "hosted-stale-card:fallback",
+      name: "definitively rejected exact replay",
+    },
   ])("recovers a stale Linq thread after $name using the persisted text identity", async ({
     capabilityAvailable,
+    exactReplay,
+    expectedCapabilityRequests,
     expectedIdempotencyKey,
   }) => {
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
@@ -718,6 +799,7 @@ describe("hosted provider effects", () => {
       fromPhoneNumber: "+15550000",
       homeRouteFallbackAllowed: true,
       idempotencyKey: "hosted-stale-card",
+      ...(exactReplay ? { linqAppCardReplay: true } : {}),
       message: "Nutrition summary",
       target: "stale-chat",
       targetKind: "thread",
@@ -750,6 +832,9 @@ describe("hosted provider effects", () => {
     expect(providerRequests.filter(({ url }) =>
       url.endsWith("/chats/stale-chat/messages")
     )).toHaveLength(capabilityAvailable ? 2 : 1);
+    expect(providerRequests.filter(({ url }) =>
+      url.endsWith("/capability/check_imessage")
+    )).toHaveLength(expectedCapabilityRequests);
   });
 
   it("does not re-home a stale Linq thread without fallback authority", async () => {

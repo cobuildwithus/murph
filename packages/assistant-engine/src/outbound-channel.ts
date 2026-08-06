@@ -310,6 +310,7 @@ export async function deliverAssistantMessageOverBinding(
     deliverySource?: AssistantDeliverySource | null
     idempotencyKey?: string | null
     identityId?: string | null
+    linqAppCardReplay?: true
     media?: readonly AssistantResponseMedia[] | null
     message: string
     nativeReplyRequested?: true
@@ -372,6 +373,7 @@ export async function deliverAssistantMessageOverBinding(
       explicitTarget,
       idempotencyKey: input.idempotencyKey ?? null,
       identityId: binding.identityId,
+      ...(input.linqAppCardReplay === true ? { linqAppCardReplay: true } : {}),
       media: input.media ?? [],
       message: input.message,
       ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),

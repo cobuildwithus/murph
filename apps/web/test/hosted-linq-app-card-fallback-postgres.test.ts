@@ -30,6 +30,59 @@ if (
 describe.skipIf(!runPostgresProof)(
   "Hosted Linq app-card fallback ownership with PostgreSQL",
   () => {
+    it("closes the original provider fence when an exact card replay is accepted", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const suffix = randomUUID();
+      const intentId = `intent-card-replay-${suffix}`;
+      const idempotencyKey = `assistant-outbox:${intentId}`;
+      const lookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+        idempotencyKey,
+      );
+      const linqChatId = `chat-card-replay-${suffix}`;
+      if (!lookupKey) {
+        await prisma.$disconnect();
+        throw new Error("Expected deterministic delivery lookup key.");
+      }
+
+      try {
+        await expect(recordHostedLinqRuntimeProviderDispatchFenceTx({
+          attemptedAt: new Date("2026-08-06T11:59:00.000Z"),
+          idempotencyKey,
+          linqChatId,
+          prisma,
+          sourceRef: intentId,
+          targetKind: "thread",
+        })).resolves.toMatchObject({ claimed: true });
+        await expect(hasUnresolvedHostedLinqProviderDispatchForChatTx({
+          linqChatId,
+          prisma,
+        })).resolves.toBe(true);
+
+        await recordHostedLinqRuntimeDeliveryOutcomeTx({
+          acceptedAt: new Date("2026-08-06T11:59:02.000Z"),
+          attemptedAt: new Date("2026-08-06T11:59:01.000Z"),
+          idempotencyKey,
+          linqChatId,
+          messageId: `message-card-replay-${suffix}`,
+          prisma,
+          sourceRef: intentId,
+          targetKind: "thread",
+          threadIsDirect: true,
+          userId: `member-card-replay-${suffix}`,
+        });
+
+        await expect(hasUnresolvedHostedLinqProviderDispatchForChatTx({
+          linqChatId,
+          prisma,
+        })).resolves.toBe(false);
+      } finally {
+        await prisma.hostedLinqDelivery.deleteMany({
+          where: { idempotencyKey: lookupKey },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
     it("closes the card fence before claiming and completing text fallback", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
       const suffix = randomUUID();
