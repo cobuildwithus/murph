@@ -44,6 +44,7 @@ import {
 } from "./orchestration-latency-diagnostics.ts";
 import type {
   WorkerActiveRuntimeUserFenceResult,
+  WorkerUserRunnerNamespaceLike,
 } from "./worker-contracts.ts";
 
 const RUNNER_PORT = 8080;
@@ -229,7 +230,9 @@ export interface HostedExecutionContainerNamespaceLike {
   idFromString?(id: string): unknown;
 }
 
-type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
+type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>> & {
+  USER_RUNNER?: WorkerUserRunnerNamespaceLike;
+};
 type RunnerContainerNameSource = HostedRunnerContainerIdentitySource;
 
 interface RunnerContainerLogContext {
@@ -550,7 +553,42 @@ export class RunnerContainer extends Container {
     });
     operation.result = result;
     this.workspaceInvocationOperations.push(operation);
-    return await result;
+    const completedResult = await result;
+    await this.recordRuntimeCompletionBestEffort({
+      attemptId: input.job.request.attemptId,
+      generation: input.job.request.leaseGeneration,
+      result: completedResult,
+      userId: routeUserId,
+    });
+    return completedResult;
+  }
+
+  private async recordRuntimeCompletionBestEffort(input: {
+    attemptId: string;
+    generation: string;
+    result: HostedExecutionRunnerJobResult;
+    userId: string;
+  }): Promise<void> {
+    try {
+      const userRunner = this.environment.USER_RUNNER?.getByName(input.userId);
+      if (!userRunner?.recordRuntimeCompletionFromContainer) {
+        return;
+      }
+      await userRunner.recordRuntimeCompletionFromContainer(input);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "runner.container",
+        details: {
+          ...buildHostedExecutionSafeErrorDiagnostics(error),
+          workspaceAttemptId: input.attemptId,
+        },
+        level: "warn",
+        message:
+          "Hosted runner container completion receipt failed; preserving completed result.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    }
   }
 
   async destroyInstance(): Promise<void> {

@@ -677,6 +677,99 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
+  it("records an exact container completion before the detached caller resumes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-container-completion-receipt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const invokeInput = invoke.mock.calls[0]?.[0];
+    if (!invokeInput) {
+      throw new Error("Expected a hosted runtime invocation.");
+    }
+    const result: HostedWorkspaceInvocationResult = {
+      nextWakeAt: null,
+      status: "idle",
+    };
+
+    await expect(runner.recordRuntimeCompletionFromContainer({
+      attemptId: invokeInput.job.request.attemptId,
+      generation: invokeInput.job.request.leaseGeneration,
+      result,
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({ completed: true });
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(1);
+
+    invocationResult.resolve(result);
+    await vi.waitFor(() =>
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Hosted runner runtime execution adapter completed.",
+        }),
+      )
+    );
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("rejects a stale container completion without clearing the active fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-stale-container-completion-receipt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const invokeInput = invoke.mock.calls[0]?.[0];
+    if (!invokeInput) {
+      throw new Error("Expected a hosted runtime invocation.");
+    }
+    const activeAttemptId = readRunnerMeta(sql).active_attempt_id;
+
+    await expect(runner.recordRuntimeCompletionFromContainer({
+      attemptId: invokeInput.job.request.attemptId,
+      generation: "999",
+      result: { nextWakeAt: null, status: "idle" },
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({ completed: false });
+    expect(readRunnerMeta(sql).active_attempt_id).toBe(activeAttemptId);
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(0);
+
+    invocationResult.resolve({ nextWakeAt: null, status: "idle" });
+  });
+
   it("does not send owner release after a stale completion loses the exact fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

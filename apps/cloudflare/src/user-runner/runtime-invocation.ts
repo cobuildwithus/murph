@@ -73,6 +73,9 @@ import {
   prepareHostedWorkspaceSnapshotRestore,
   type HostedWorkspaceSnapshotPreparedRestore,
 } from "../workspace-snapshot-restore-preparation.ts";
+import type {
+  WorkerRuntimeCompletionReceipt,
+} from "../worker-contracts.js";
 import {
   buildHostedRunnerMetadataOnlyErrorDetails,
   buildHostedRunnerRedactedErrorJson,
@@ -185,6 +188,28 @@ export class RuntimeInvocationService {
       ): Promise<HostedWorkspaceReadResponse>;
     },
   ) {}
+
+  async recordRuntimeCompletionFromContainer(
+    input: WorkerRuntimeCompletionReceipt,
+  ): Promise<{ completed: boolean }> {
+    const token = await this.input.stateStore.readWriteFenceToken();
+    if (
+      token?.kind !== "runtime"
+      || token.attemptId !== input.attemptId
+      || token.generation !== input.generation
+      || token.userId !== input.userId
+    ) {
+      return { completed: false };
+    }
+
+    return await this.recordRuntimeCompletionAfterInvoke({
+      orchestrationAttemptId: null,
+      result: input.result,
+      token,
+      userId: input.userId,
+      workspaceVersion: token.workspaceVersion,
+    });
+  }
 
   async prepareWithFence(input: {
     commandBudget?: RuntimeProcessingCommandBudget;
@@ -474,9 +499,10 @@ export class RuntimeInvocationService {
     }
 
     await this.recordRuntimeCompletionAfterInvoke({
-      input: executionInput,
+      orchestrationAttemptId: executionInput.orchestrationAttemptId,
       result,
       token,
+      userId: executionInput.userId,
       workspaceVersion,
     });
 
@@ -524,9 +550,10 @@ export class RuntimeInvocationService {
     }
 
     await this.recordRuntimeCompletionAfterInvoke({
-      input: input.executionInput,
+      orchestrationAttemptId: input.executionInput.orchestrationAttemptId,
       result: committedResult.result,
       token: input.token,
+      userId: input.executionInput.userId,
       workspaceVersion: input.workspaceVersion,
     });
     emitHostedExecutionStructuredLog({
@@ -635,57 +662,66 @@ export class RuntimeInvocationService {
   }
 
   private async recordRuntimeCompletionAfterInvoke(input: {
-    input: RuntimeInvocationInput;
+    orchestrationAttemptId: string | null;
     result: HostedWorkspaceInvocationResult;
     token: RunnerWriteFenceToken;
+    userId: string;
     workspaceVersion: string | null;
-  }): Promise<void> {
+  }): Promise<{ completed: boolean }> {
     try {
       const completed = await this.input.stateStore.clearWriteFenceAfterCompletion({
         finishedAt: new Date().toISOString(),
         token: input.token,
       });
       if (!completed.completed) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            orchestrationAttemptId: input.input.orchestrationAttemptId,
-            workspaceAttemptId: input.token.attemptId,
-            workspaceVersion: input.workspaceVersion,
-          },
-          level: "warn",
-          message: "Hosted runner runtime execution completed after its write fence changed; preserving completed result without transport retry.",
-          phase: "checkpoint",
-          userId: input.input.userId,
-        });
-        return;
+        if (completed.record.writeFence !== null) {
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            details: {
+              ...(input.orchestrationAttemptId === null
+                ? {}
+                : { orchestrationAttemptId: input.orchestrationAttemptId }),
+              workspaceAttemptId: input.token.attemptId,
+              workspaceVersion: input.workspaceVersion,
+            },
+            level: "warn",
+            message: "Hosted runner runtime execution completed after its write fence changed; preserving completed result without transport retry.",
+            phase: "checkpoint",
+            userId: input.userId,
+          });
+        }
+        return { completed: false };
       }
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          orchestrationAttemptId: input.input.orchestrationAttemptId,
+          ...(input.orchestrationAttemptId === null
+            ? {}
+            : { orchestrationAttemptId: input.orchestrationAttemptId }),
           workspaceAttemptId: input.token.attemptId,
           workspaceVersion: input.workspaceVersion,
         },
         level: "warn",
         message: "Hosted runner runtime execution completed but completion recording failed; preserving completed result without transport retry.",
         phase: "checkpoint",
-        userId: input.input.userId,
+        userId: input.userId,
       });
-      return;
+      return { completed: false };
     }
 
     if (!shouldDeferHostedRuntimeOwnerReleaseCallback(input.result)) {
       await this.notifyRuntimeOwnerReleasedBestEffort(input);
     }
+    return { completed: true };
   }
 
   private async notifyRuntimeOwnerReleasedBestEffort(input: {
-    input: RuntimeInvocationInput;
+    orchestrationAttemptId: string | null;
     result: HostedWorkspaceInvocationResult;
     token: RunnerWriteFenceToken;
+    userId: string;
     workspaceVersion: string | null;
   }): Promise<void> {
     try {
@@ -694,7 +730,7 @@ export class RuntimeInvocationService {
           ? { allowHttpHosts: this.input.env.hostedWebAllowHttpHosts }
           : {}),
         baseUrl: this.input.readHostedWebControlBaseUrl(),
-        boundUserId: input.input.userId,
+        boundUserId: input.userId,
         callbackSigning: this.input.env.webCallbackSigning,
         method: "POST",
         path: HOSTED_RUNTIME_OWNER_RELEASED_PATH,
@@ -720,7 +756,9 @@ export class RuntimeInvocationService {
         component: "hosted.runner",
         details: {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          orchestrationAttemptId: input.input.orchestrationAttemptId,
+          ...(input.orchestrationAttemptId === null
+            ? {}
+            : { orchestrationAttemptId: input.orchestrationAttemptId }),
           workspaceAttemptId: input.token.attemptId,
           workspaceVersion: input.workspaceVersion,
         },
@@ -728,7 +766,7 @@ export class RuntimeInvocationService {
         message:
           "Hosted runner runtime owner-release recheck callback failed; preserving completed result.",
         phase: "checkpoint",
-        userId: input.input.userId,
+        userId: input.userId,
       });
     }
   }

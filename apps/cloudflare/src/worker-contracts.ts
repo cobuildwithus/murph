@@ -1,3 +1,6 @@
+import type {
+  HostedWorkspaceInvocationResult,
+} from "@murphai/hosted-execution/runtime-control";
 import type { R2BucketLike } from "./bundle-store.ts";
 import type {
   HostedPrivateMediaPublishInput,
@@ -82,6 +85,13 @@ export type WorkerActiveRuntimeUserFenceResult =
       userId: string;
     };
 
+export interface WorkerRuntimeCompletionReceipt {
+  attemptId: string;
+  generation: string;
+  result: HostedWorkspaceInvocationResult;
+  userId: string;
+}
+
 export interface WorkerRunnerContainerStubLike {
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
 }
@@ -140,6 +150,9 @@ export interface WorkerUserRunnerStubLike {
     generation: string;
     userId: string;
   }): Promise<boolean>;
+  recordRuntimeCompletionFromContainer?(
+    input: WorkerRuntimeCompletionReceipt,
+  ): Promise<{ completed: boolean }>;
   validateRuntimeProviderEgressToken?(input: {
     providerEgressToken: string;
     userId: string;

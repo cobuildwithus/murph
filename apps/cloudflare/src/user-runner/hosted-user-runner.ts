@@ -346,6 +346,12 @@ export class HostedUserRunner {
     return validation.owns;
   }
 
+  async recordRuntimeCompletionFromContainer(
+    input: Parameters<RuntimeInvocationService["recordRuntimeCompletionFromContainer"]>[0],
+  ): ReturnType<RuntimeInvocationService["recordRuntimeCompletionFromContainer"]> {
+    return this.runtimeInvocation.recordRuntimeCompletionFromContainer(input);
+  }
+
   private async withPrivateMediaMutationLock<T>(
     run: () => Promise<T>,
   ): Promise<T> {
