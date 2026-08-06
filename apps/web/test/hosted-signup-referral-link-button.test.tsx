@@ -40,50 +40,68 @@ describe("HostedSignupReferralLinkButton", () => {
     await rendered.cleanup();
   });
 
-  it("deduplicates concurrent preload reads without caching across mounts", async () => {
-    let resolveFirstFetch!: (response: Response) => void;
-    const firstFetch = new Promise<Response>((resolve) => {
-      resolveFirstFetch = resolve;
-    });
+  it("loads identity-bound URLs independently for concurrent Settings actions", async () => {
     const fetchMock = vi.fn()
-      .mockReturnValueOnce(firstFetch)
-      .mockResolvedValueOnce(referralResponse("new_session_referral"));
+      .mockResolvedValueOnce(referralResponse("first_surface"))
+      .mockResolvedValueOnce(referralResponse("second_surface"));
     vi.stubGlobal("fetch", fetchMock);
 
-    const firstMount = await renderClientComponent(
+    const rendered = await renderClientComponent(
       React.createElement(
         React.Fragment,
         null,
         React.createElement(HostedSignupReferralLinkButton),
         React.createElement(HostedSignupReferralLinkButton),
       ),
+      { requireButton: false },
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
     await React.act(async () => {
-      resolveFirstFetch(referralResponse("shared_in_flight_referral"));
-      await firstFetch;
       await Promise.resolve();
       await Promise.resolve();
     });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(
-      [...firstMount.container.querySelectorAll("button")].map(
+      [...rendered.container.querySelectorAll("button")].map(
         (button) => button.textContent,
       ),
     ).toEqual(["Copy link", "Copy link"]);
-    await firstMount.cleanup();
 
-    const secondMount = await renderClientComponent(
+    await rendered.cleanup();
+  });
+
+  it("distinguishes reloading a link from retrying a clipboard write", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("offline"))
+      .mockResolvedValueOnce(referralResponse("reloaded"));
+    vi.stubGlobal("fetch", fetchMock);
+    const rendered = await renderClientComponent(
       React.createElement(HostedSignupReferralLinkButton),
     );
     await React.act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(secondMount.button.textContent).toBe("Copy link");
 
-    await secondMount.cleanup();
+    expect(rendered.button.textContent).toBe("Reload link");
+    expect(rendered.button.getAttribute("aria-label")).toBe(
+      "Reload your Murph referral link",
+    );
+    expect(rendered.container.textContent).toContain(
+      "Could not load the referral link.",
+    );
+
+    await React.act(async () => {
+      rendered.button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(rendered.button.textContent).toBe("Copy link");
+    expect(rendered.container.textContent).toContain(
+      "Referral link ready to copy.",
+    );
+
+    await rendered.cleanup();
   });
 
   it("keeps a failed clipboard write recoverable", async () => {
@@ -105,9 +123,9 @@ describe("HostedSignupReferralLinkButton", () => {
       rendered.button.click();
     });
 
-    expect(rendered.button.textContent).toBe("Try again");
+    expect(rendered.button.textContent).toBe("Try copy again");
     expect(rendered.container.textContent).toContain(
-      "Could not load or copy the referral link.",
+      "Could not copy the referral link.",
     );
 
     await rendered.cleanup();
