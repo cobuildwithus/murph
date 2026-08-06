@@ -109,49 +109,92 @@ Updated: 2026-08-06
 
 ## Implementation evidence
 
-- The top-level skill is 9,837 bytes, down from 56,295 bytes: the fresh-turn
-  skill read is 46,458 bytes (82.5%) smaller and remains below the executable
-  12-KiB ceiling.
+- The current top-level skill is 11,246 bytes, down from 56,295 bytes: the
+  fresh policy read is 45,049 bytes (80.0%) smaller and remains below the
+  executable 12-KiB ceiling. The complete four-file asset is 61,255 bytes; its
+  4,960-byte growth preserves explicit routing and every later-stage policy
+  rather than deleting behavior.
 - The three directly referenced owners are
   `aspiration-foundation-delegation.md`,
   `persistence-recovery-follow-up.md`, and
-  `return-launch-completion.md`. The complete asset is 59,832 bytes after
-  adding explicit routing and reference ownership headers; the latency win
-  comes from not loading irrelevant later-stage policy on the fresh greeting,
-  not from deleting that policy.
+  `return-launch-completion.md`. The latency win comes from not loading
+  irrelevant later-stage policy on the fresh greeting, not from deleting that
+  policy.
 - The asset regression failed before the split on the missing reference
   inventory, then passed after the compact router and references landed. It
   also checks direct reachability, exact inventory, early-stage ownership, and
   representative single-owner safety/product invariants.
-- A real Codex App Server turn against the scripted Responses provider reads
-  the compact root, executes the bounded onboarding resume command, returns the
-  exact welcome, and proves no aspiration/foundation, completion, or recovery
-  marker entered tool output. This uses no new production state or delivery
-  path.
-- That scripted provider selects the tool sequence; it proves App Server/tool
-  plumbing and the compact output boundary, not a real model's reference-read
-  choice or realized latency. Its one `sed -n 1,260p` call would have returned
-  only the first 13,589 bytes of the old skill, whose remaining pages still had
-  to be read under the full-skill contract. Treat the projected one-to-three-
-  second gain as measurement-pending until an authorized actual-model canary.
+- The preliminary specialist's material finding was accepted: the scripted
+  App Server scenario proves plumbing only because it preselects its actions.
+  An opt-in actual-model App Server E2E now uses the production assistant target
+  `gpt-5.6-terra` at low reasoning against the complete materialized production
+  skill tree.
+- The actual-model journey proves that a fresh greeting reads only the root,
+  parses one schema-valid bounded resume snapshot, and returns the exact
+  welcome; the short post-welcome acceptance reads no stage owner; a
+  minimal-identity answer reads aspiration plus persistence but not return;
+  and a fully resolved contextual return reads root plus return but not
+  aspiration. The exact-current fixture also distinguishes a fully populated
+  ordinary snapshot with no onboarding referent from a resumed flow missing a
+  progress signal. Every scenario rejects unrelated explicit asset reads and
+  broad, wildcard, or recursive skill reads.
+- Live evaluation exposed and corrected three real routing defects: continuing
+  minimal-identity answers could omit persistence, resolved later stages could
+  reread aspiration, and ordinary negative or none foundation answers could
+  omit persistence. The router now requires the correct owner in each case
+  without preloading every reference.
+- The current fresh local trace took 11.863 seconds; an earlier conforming trace
+  took 9.612 seconds. These are stochastic local routing traces, not a
+  base/head comparison, production latency measurement, or SLO claim. In an
+  earlier strict trace, eliminating the later-stage aspiration overread reduced
+  that turn's input from 40,122 to 34,513 tokens (5,609 / 14.0%).
+- The exact-current Terra/low retry reached the provider but hit its usage limit
+  before the first model action, so it produced no new routing or latency
+  sample. The two new resume-boundary scenarios therefore have deterministic
+  fixture and policy proof but are not claimed as exact-current live-model
+  evidence.
+- The structural production estimate remains a one-to-three-second fresh-reply
+  improvement. Realized production latency remains unmeasured because the
+  branch is intentionally unmerged and undeployed.
+- Subscription-backed proof is explicitly onboarding-scoped. The shared
+  resolver requires both a consumer option and the environment gate, while all
+  other real-Codex tests retain their prior provider selection. It derives a
+  seed with no refresh token or API key, requires at least 30 minutes of
+  access-token runway, writes credentials only to a mode-0600 temporary Codex
+  home, never logs credential values, and awaits retrying cleanup while
+  surfacing only sanitized failure.
+- Final audit also restored injury history to the owning medical/safety
+  checkpoint and its complete synthetic resume evidence so an unresolved
+  safety fact cannot qualify a flow for contextual return.
 
 ## Verification
 
 - Completed local proof:
   - assistant skill assets: 27 passed, 6 existing skips;
   - real App Server scripted fresh greeting: 1 passed;
+  - provider-free subscription isolation and policy detectors: 3 passed, 36
+    gated skips;
+  - prior-head exact Terra/low full-tree routing: 1 passed, 37 skipped;
+  - exact-current Terra/low retry: blocked by provider usage limit before the
+    first action and therefore not counted as a routing or latency result;
+  - scripted runtime, food-journal owner, and proactive-support regressions: 32
+    passed;
   - onboarding route planning: 1 passed;
   - onboarding injection: 3 passed;
-  - assistant-engine typecheck, docs drift, and `git diff --check`: passed.
+  - assistant-engine typecheck, docs drift, `git diff --check`, and focused
+    privacy scan: passed.
 - Exact-head assistant coverage exposed three proof-only portability/ownership
   regressions: Linux bubblewrap could not configure loopback for the scripted
   exec calls, and two legacy tests still read only the old monolithic root for
   rules now owned by references. The App Server proof now reuses the existing
   `danger-full-access` scripted-exec lane, and the two assertions read their
   explicit stage owners. All three focused files pass (five tests total).
-- Remaining parent-owned gates: candidate commit/push, preliminary combined
-  product/prompt/coverage review, exact-head CI, and final parent review. The
-  PR must remain unmerged and undeployed.
+- The behavior-bearing candidate is committed and pushed at
+  `5b85a07198521b77ccd9ffd1c8b9261c284e9635`. Preliminary combined review and
+  final ReviewGPT round 1 passed. Round 2 found an over-broad contextual-return
+  predicate and an undisclosed file-wide subscription-auth switch; both are
+  corrected, independent prompt/auth re-audits pass, and final ReviewGPT round
+  3 remains pending. Exact-head CI is pending for the corrected candidate.
 - Commands to run:
   - focused assistant-engine turn-planning and model-behavior Vitest files;
   - focused hosted-local Linq first-contact scenario when locally runnable;
