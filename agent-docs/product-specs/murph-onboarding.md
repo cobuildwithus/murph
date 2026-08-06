@@ -1,6 +1,6 @@
 # Murph New-Member Onboarding
 
-Last verified: 2026-07-22
+Last verified: 2026-08-06
 
 ## Product Decision
 
@@ -14,6 +14,14 @@ does not infer it; if the member does not know or declines, the motivation
 remains explicitly unknown and onboarding continues. Murph gathers a
 finite health-context foundation over separate turns, returns to the earlier
 thread with that context, and collaborates on the first step.
+
+After answered completion, Murph starts one private first personal read without
+holding the foreground conversation open. The read spends the completed
+foundation and currently available connected evidence on one specific,
+personally useful interpretation. It may offer one lightweight optional next
+action, but it does not automatically create a habit, plan, experiment, or
+reminder. The member can keep chatting normally while the existing scheduled
+runtime owns the later analysis and delivery.
 
 The first health topic is an anchor, not a launch button. Answering Murph's
 discovery question is not a request for a plan, diagnosis, or intervention. An
@@ -36,6 +44,9 @@ By the end of onboarding, the member should understand:
 3. Murph remembers relevant context so later help can become more personal.
 4. Murph keeps important health outcomes open, learns enough context for the
    help to fit, and chooses the first step with the member rather than for them.
+5. After answered completion, Murph will take one bounded first look across the
+   context and connected evidence and return with the most useful personal read
+   it can honestly support.
 
 Do not promise that Murph can perform an action, connect a source, or access a
 record unless that path exists. Broad entry points do not weaken clinical,
@@ -47,8 +58,9 @@ privacy, authorization, or provider boundaries.
   not gate ordinary Murph use.
 - Keep the existing `finish-onboarding-followup` managed automation as the one
   finite three-day recovery and continuation mechanism. Do not add a second
-  automation for context collection or split onboarding into competing
-  lifecycle owners.
+  automation for unfinished context collection or split open onboarding into
+  competing lifecycle owners. The first personal read below is post-completion
+  value delivery, not another collection or recovery lifecycle.
   Reconciliation recognizes only the exact current seed, its immediate
   predecessor, or the bounded original legacy seed; execution remains ordinary
   scheduled send-or-skip work. One exact recognition predicate is shared by
@@ -61,9 +73,21 @@ privacy, authorization, or provider boundaries.
   queued intent remains attached, so hosted idle ordering cannot replace the
   predecessor identity before outbox settlement observes it. Editable slug,
   tags, title, and instructions confer no onboarding-state authority.
-- Keep the post-onboarding choice point separate from unfinished-onboarding
-  recovery. It is one finite managed one-shot for members who answered
-  onboarding, not another collection flow, recurring cadence, or profile.
+- Keep the 21-day post-onboarding choice point separate from unfinished-
+  onboarding recovery and from the immediate first personal read. It remains
+  one finite managed one-shot for members who answered onboarding, not another
+  collection flow, recurring cadence, or profile.
+- Create the immediate first personal read only through the structured
+  `save_onboarding_first_personal_read` action after every answered-completion
+  prerequisite is durable. The action accepts no prompt, schedule, model,
+  route, or other fields. Code owns its fixed automation identity, current-
+  conversation route binding, two-minute delay, sixty-minute execution window,
+  fresh Sol/high target, and complete selection-and-presentation prompt.
+  Generic automation save or patch cannot replace that fixed definition.
+- Reuse the ordinary automation, cron, foreground-priority, and outbox owners.
+  Do not add a callback, child-result handoff, result queue, scheduler, database
+  table, onboarding step, or second delivery lifecycle. The scheduled root owns
+  the complete analysis and final send-or-skip result; it does not spawn a child.
 - Do not add persisted step state, branch state, profile completion, context
   maturity, or a data-point score. Infer progress from visible conversation,
   the existing resume snapshot, and a targeted canonical read only when the
@@ -536,6 +560,50 @@ decline for one skipped category.
 Onboarding may remain open indefinitely without blocking ordinary help. Do not
 claim completion until the command reports it.
 
+## First Personal Read
+
+On the ordinary foreground turn that satisfies every `user_answered` completion
+criterion, Murph asks the existing automation tool to create the fixed first
+personal read, then records completion and gives one truthful expectation-setting
+line only when that save succeeded. Failure to save never blocks or rolls back
+onboarding and never produces a promise Murph cannot keep. Saving the fixed
+identity again is idempotent and explicitly reactivates the bounded one-shot.
+
+The occurrence becomes due two minutes after creation and expires sixty minutes
+later. Foreground member messages retain priority through the existing runtime;
+there is no parallel resident model writer or child callback. The scheduled
+turn runs in a fresh Sol/high context, revalidates answered completion, reads
+the latest committed conversation before analysis and composition, and skips
+rather than interrupting a newer urgent or unresolved task or stacking another
+unanswered proactive health question.
+
+The complete prompt is code-owned. Murph supplies only the zero-argument
+structured action and cannot supply or replace instructions, timing, model, or
+route. The prompt applies the same type of interestingness bar used by the
+weekly health insight:
+
+- zero or one member-specific finding;
+- concrete recognizable evidence and exact goal congruence;
+- source-health, freshness, coverage, and sync checks before wearable use;
+- no vendor-score tautologies, proxy inferences, generic advice, data-quality
+  complaints, behavioral grading, or causality beyond the evidence;
+- bounded public research only after a personal candidate exists;
+- a useful personal interpretation, reassuring non-finding, or low-burden
+  measurement target as the only fallback; and
+- silence when nothing specific and decision-relevant clears the bar.
+
+A send is three to five natural sentences with the useful point first, the
+smallest evidence needed to trust it, calibrated uncertainty, and at most one
+optional low-burden next action or question. It never automatically creates a
+habit, plan, experiment, reminder, purchase, booking, or other effect.
+
+The turn reads the existing `weekly-health-insights` knowledge page before
+selection and best-effort records the exact outbound read there under a distinct
+first-read heading. That reuses the weekly insight dedupe owner instead of
+creating another insight table, page family, or lifecycle. Failure to update the
+ledger does not suppress an otherwise sound first read; the automation and
+outbox remain the delivery and replay owners.
+
 ## Finite Scheduled Continuation
 
 The onboarding follow-up automation is one finite three-day recovery window,
@@ -689,9 +757,16 @@ or replaced completion state blocks a pending occurrence before delivery.
    celebration that names the next scheduled touchpoint and invites one other
    health request. The close is text-only; onboarding does not automatically
    generate, offer, or mention a song.
-10. Context continues compounding after onboarding without a second profile
-   system, automation, or completion score.
-11. A dense foundation memo starts one child for each supplied independent
+10. Answered completion creates one bounded private first personal read through
+    a code-owned action without blocking ordinary conversation or allowing the
+    model to author or replace its prompt, timing, model, or route.
+11. The first read sends at most one non-obvious, evidence-backed personal
+    interpretation with calibrated uncertainty and one optional lightweight
+    action; it suppresses generic, repetitive, data-quality, vendor-tautological,
+    or unsupported findings and never creates an action automatically.
+12. Context continues compounding after onboarding without a second profile
+    system, context-collection lifecycle, or completion score.
+13. A dense foundation memo starts one child for each supplied independent
     movement/protocol, supplement, and medical/safety family, up to three,
     from the durable accepted source. Murph replies after the spawns without
     claiming completion and confirms child-owned writes only after canonical
