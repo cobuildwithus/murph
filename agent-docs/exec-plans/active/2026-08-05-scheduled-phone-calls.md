@@ -62,3 +62,12 @@ call it requested through the existing hosted phone-call port.
   profile passed: `NODE_OPTIONS=--max-old-space-size=6144
   MURPH_VITEST_MAX_WORKERS=1 pnpm --dir packages/assistant-engine test` ran
   203 files with 3,167 passing and 38 skipped tests.
+- After merging the latest `origin/main`, the focused 94-test command and
+  Assistant Engine typecheck passed again on the exact candidate.
+- A real pinned Codex App Server request capture with synthetic direct and
+  group scheduled turns measured the complete selected provider fields
+  (`include`, `input`, `parallel_tool_calls`, `text`, `tool_choice`, and
+  `tools`) using `gpt-tokenizer` 3.4.0 `o200k_harmony`. The direct request grew
+  from 20,594 to 21,052 tokens (+458, +2.2239%) and from 95,165 to 97,373
+  UTF-8 bytes (+2,208) because it gained the phone tool. The scheduled group
+  request remained exactly unchanged at 16,902 tokens and 78,987 bytes.
