@@ -15,8 +15,8 @@
 <text x="224" y="430" font-size="13" font-weight="700" fill="#506646">Copy link</text>
 <text x="304" y="430" font-size="13" font-weight="700" fill="#506646">Ask Murph</text>
 <line x1="18" y1="462" x2="372" y2="462" stroke="#D9D4CC"/>
-<text x="22" y="505" font-size="14" fill="#716C65">Earn usage by inviting friends or</text>
-<text x="22" y="529" font-size="14" fill="#716C65">adding Murph to a groupchat</text>
+<text x="22" y="505" font-size="14" fill="#716C65">Invite friends to Murph or ask</text>
+<text x="22" y="529" font-size="14" fill="#716C65">about referral missions.</text>
 <line x1="18" y1="570" x2="372" y2="570" stroke="#D9D4CC"/>
 <text x="22" y="610" font-size="15" font-weight="700" fill="#22201D">History</text>
 <text x="345" y="610" font-size="20" fill="#716C65">⌄</text>
