@@ -28,6 +28,4 @@ export interface HostedAiUsageActivitySnapshot {
   credits: readonly HostedAiUsageCreditActivityRow[];
   missions: readonly HostedAiUsageMissionActivityRow[];
   missionsEnabled: boolean;
-  /** Browser-local invalidation only; never referral or routing authority. */
-  referralIdentityKey?: string;
 }
