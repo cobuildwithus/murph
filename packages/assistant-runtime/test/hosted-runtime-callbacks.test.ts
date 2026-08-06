@@ -306,7 +306,7 @@ function createDelivery(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function buildClaimedLinqEngagementResult(request: {
+function buildClaimedLinqEngagementResult(request: {
   authorityCheckOnly: boolean;
 }) {
   return request.authorityCheckOnly === true
@@ -9003,7 +9003,9 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_123",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(buildClaimedLinqEngagementResult);
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+    }) => buildClaimedLinqEngagementResult(request));
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
     const providerFetch = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);

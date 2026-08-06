@@ -191,8 +191,8 @@ Updated: 2026-08-06
   drift checks pass.
 - Round 6 failing-first proof reproduced all three findings through the actual
   channel and hosted provider boundary. After correction, focused Linq HTTP,
-  channel, hosted provider/callback, and Web authority tests pass 48, 63, 241,
-  and 47 assertions respectively.
+  channel, hosted provider, hosted callback, and Web authority tests pass 48,
+  63, 26, 216, and 47 assertions respectively.
 - The local PostgreSQL lifecycle proof passes both cases, including
   terminalizing the rejected predecessor on a stale chat, claiming fallback on
   a different current chat, and closing that current-chat fence on acceptance.
