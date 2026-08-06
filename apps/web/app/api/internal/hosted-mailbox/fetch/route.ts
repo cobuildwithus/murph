@@ -60,20 +60,39 @@ export const POST = withJsonError(async (request: Request) => {
     now: fetchedAt,
     userId,
   });
-  const usageRunningLow = await requireHostedRuntimeMailboxAiUsageAccess({
+  const requiresAiUsageAccess = hostedMailboxItemsRequireAiUsageAccess({
     consumedSeqByLane: projection.consumedSeqByLane,
-    items: projection.items,
+    items: projection.items.map((item) => ({
+      consumedAt: item.consumedAt ?? null,
+      lane: item.lane,
+      laneSeq: item.laneSeq,
+      payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
+      payloadRef: item.payloadRef ?? null,
+    })),
     lanes: body.lanes,
-    maxSeqByLane: projection.maxSeqByLane,
-    prisma,
-    userId,
   });
-  // Sponsorship color is optional; it must never block ordinary mailbox work.
-  const groupRunningBit = await readHostedActiveGroupRunningBit({
-    now: fetchedAt,
-    prisma,
-    runtimeMemberId: userId,
-  }).catch(() => null);
+  let usageRunningLow = false;
+  let groupRunningBit: Awaited<
+    ReturnType<typeof readHostedActiveGroupRunningBit>
+  > = null;
+  if (requiresAiUsageAccess) {
+    // Start the fail-soft sponsorship read beside the required usage gate. If
+    // usage is denied, preserve that failure without waiting for optional data.
+    const groupRunningBitPromise = readHostedActiveGroupRunningBit({
+      now: fetchedAt,
+      prisma,
+      runtimeMemberId: userId,
+    }).catch(() => null);
+    usageRunningLow = await requireHostedRuntimeMailboxAiUsageAccess({
+      consumedSeqByLane: projection.consumedSeqByLane,
+      items: projection.items,
+      lanes: body.lanes,
+      maxSeqByLane: projection.maxSeqByLane,
+      prisma,
+      userId,
+    });
+    groupRunningBit = await groupRunningBitPromise;
+  }
 
   return jsonOk(parseHostedMailboxFetchResponse({
     ...(usageRunningLow ? { conversationUsageStatus: "low" as const } : {}),
@@ -98,20 +117,6 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
 }): Promise<boolean> {
   // Gate the whole fetch batch: runtime imports lanes together, and all-or-nothing
   // watermarks are simpler than returning partial lane output around denied AI work.
-  if (!hostedMailboxItemsRequireAiUsageAccess({
-    consumedSeqByLane: input.consumedSeqByLane,
-    items: input.items.map((item) => ({
-      consumedAt: item.consumedAt ?? null,
-      lane: item.lane,
-      laneSeq: item.laneSeq,
-      payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
-      payloadRef: item.payloadRef ?? null,
-    })),
-    lanes: input.lanes,
-  })) {
-    return false;
-  }
-
   const gate = await resolveHostedRuntimeAiUsageGate({
     mode: "read_first",
     userId: input.userId,

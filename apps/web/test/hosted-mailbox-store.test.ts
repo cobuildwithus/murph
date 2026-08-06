@@ -2763,7 +2763,6 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
   it("keeps runtime mailbox projection read-only when a Linq route changed", async () => {
     restoreDefaultHostedSecureBoxTestCodec();
     const sourceUserId = "member_personal";
-    const containerUserId = "member_container";
     const sourceWake = {
       eventId: "evt_group_transition",
       kind: "conversation.message",
@@ -2809,131 +2808,10 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       maxUpdatedAt: new Date("2026-04-26T00:00:02.000Z"),
       requestedLane: "conversation",
     };
-    const emptySourceProjection = {
-      consumedSeq: 0n,
-      itemConsumedAt: null,
-      itemCreatedAt: null,
-      itemDedupeKey: null,
-      itemExpiresAt: null,
-      itemId: null,
-      itemKind: null,
-      itemLane: null,
-      itemLaneSeq: null,
-      itemOccurredAt: null,
-      itemPayloadBytes: null,
-      itemPayloadHash: null,
-      itemPayloadInlineCiphertext: null,
-      itemPayloadRef: null,
-      itemPayloadSchema: null,
-      itemUpdatedAt: null,
-      itemUserId: null,
-      maxSeq: 0n,
-      maxUpdatedAt: null,
-      requestedLane: "conversation",
-    };
-    const queryRaw = vi.fn(async (...args: unknown[]) => {
-      switch (queryRaw.mock.calls.length) {
-        case 1:
-          return [sourceRow];
-        case 2:
-          return [{ seq: 1n }];
-        case 3: {
-          const values = args.slice(1);
-          return [buildHostedMailboxItemRow({
-            createdAt: FIXED_NOW,
-            dedupeKey: String(values[4]),
-            expiresAt: values[12] as Date | null,
-            id: String(values[0]),
-            kind: String(values[5]),
-            lane: String(values[2]),
-            laneSeq: values[3] as bigint,
-            occurredAt: values[6] as Date,
-            payloadBytes: values[10] as number,
-            payloadHash: values[11] as string,
-            payloadInlineCiphertext: values[8] as string,
-            payloadRef: values[9] as string | null,
-            payloadSchema: String(values[7]),
-            updatedAt: FIXED_NOW,
-            userId: String(values[1]),
-          })];
-        }
-        case 4:
-          return [emptySourceProjection];
-        default:
-          throw new Error("Unexpected hosted mailbox rehome query.");
-      }
-    });
-    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
-    const routeTimestamp = new Date("2026-04-01T00:00:00.000Z");
-    const tx = Object.assign(Object.create(null), {
-      $executeRaw: vi.fn().mockResolvedValue(1),
-      $queryRaw: queryRaw,
-      hostedMailboxItem: {
-        deleteMany,
-        findUnique: vi.fn().mockResolvedValue(null),
-        updateMany,
-      },
-      hostedMailboxPayload: {
-        create: vi.fn(),
-        findUnique: vi.fn().mockResolvedValue(null),
-      },
-      hostedRuntimeLog: {
-        create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
-          at: args.data.at as Date,
-          attemptId: args.data.attemptId as string | null,
-          checkpointVersion: args.data.checkpointVersion as bigint | null,
-          component: String(args.data.component),
-          createdAt: FIXED_NOW,
-          errorCode: args.data.errorCode as string | null,
-          eventCode: String(args.data.eventCode),
-          id: String(args.data.id),
-          leaseGeneration: args.data.leaseGeneration as bigint | null,
-          level: String(args.data.level),
-          mailboxLane: args.data.mailboxLane as string | null,
-          mailboxSeqEnd: args.data.mailboxSeqEnd as bigint | null,
-          mailboxSeqStart: args.data.mailboxSeqStart as bigint | null,
-          outboxIntentRef: args.data.outboxIntentRef as string | null,
-          phase: String(args.data.phase),
-          redactedJson: args.data.redactedJson,
-          userId: String(args.data.userId),
-          workspaceVersion: args.data.workspaceVersion as bigint | null,
-        })),
-      },
-      hostedThreadRoute: {
-        findFirst: vi.fn().mockResolvedValue({
-          containerMemberId: containerUserId,
-        }),
-        findMany: vi.fn().mockResolvedValue([{
-          channel: "linq",
-          container: {
-            member: {
-              billingStatus: "inactive",
-              createdAt: routeTimestamp,
-              id: containerUserId,
-              suspendedAt: null,
-              updatedAt: routeTimestamp,
-            },
-            owner: {
-              accountGroupMemberships: [],
-              billingStatus: "active",
-              createdAt: routeTimestamp,
-              id: "member_owner",
-              suspendedAt: null,
-              updatedAt: routeTimestamp,
-            },
-          },
-          containerMemberId: containerUserId,
-        }]),
-      },
-      hostedWorkspace: {
-        upsert: vi.fn().mockResolvedValue(null),
-      },
-    });
-    const transaction = vi.fn(async (
-      operation: (transactionClient: typeof tx) => Promise<unknown>,
-    ) => operation(tx));
+    const queryRaw = vi.fn(async () => [sourceRow]);
+    const transaction = vi.fn();
     const prisma = Object.assign(Object.create(null), {
+      $queryRaw: queryRaw,
       $transaction: transaction,
     }) as never;
 
@@ -2945,7 +2823,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       userId: sourceUserId,
     });
 
-    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(transaction).not.toHaveBeenCalled();
     expect(queryRaw).toHaveBeenCalledTimes(1);
     expect(result.items).toMatchObject([{
       consumedAt: sourceRow.itemConsumedAt.toISOString(),
@@ -2953,11 +2831,6 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       payloadInlineCiphertext: sourceCiphertext,
       userId: sourceUserId,
     }]);
-    expect(deleteMany).not.toHaveBeenCalled();
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(tx.hostedMailboxPayload.findUnique).not.toHaveBeenCalled();
-    expect(tx.hostedThreadRoute.findFirst).not.toHaveBeenCalled();
-    expect(tx.hostedThreadRoute.findMany).not.toHaveBeenCalled();
   });
 
   it("returns lane sentinels and rejects duplicate lane projections before querying", async () => {

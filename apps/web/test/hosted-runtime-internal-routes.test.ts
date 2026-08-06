@@ -617,6 +617,7 @@ describe("hosted runtime internal web routes", () => {
       },
     ]);
     expect(payload.items).toHaveLength(0);
+    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
   });
 
   it("anchors legacy conversation fetches at the consumed floor without rewinding system", async () => {
@@ -776,6 +777,7 @@ describe("hosted runtime internal web routes", () => {
       "mailbox_browser_vault_denied_replay",
     ]);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
   });
 
   it("fetches the fresh tail when local import is ahead of consume", async () => {
@@ -928,6 +930,7 @@ describe("hosted runtime internal web routes", () => {
       "mailbox_item_consumed_context_001",
     ]);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
   });
 
   it("does not AI-gate fresh conversation tombstones when access is denied", async () => {
@@ -1073,6 +1076,14 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("projects low usage only with an allowed conversation mailbox batch", async () => {
+    let resolveUsageStarted: (() => void) | null = null;
+    const usageStarted = new Promise<void>((resolve) => {
+      resolveUsageStarted = resolve;
+    });
+    let resolveGroupReadStarted: (() => void) | null = null;
+    const groupReadStarted = new Promise<void>((resolve) => {
+      resolveGroupReadStarted = resolve;
+    });
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
         consumedSeq: "11",
@@ -1105,9 +1116,20 @@ describe("hosted runtime internal web routes", () => {
         maxSeq: "12",
       },
     ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
-      status: "allowed",
-      usageRunningLow: true,
+    mocks.resolveHostedRuntimeAiUsageGate.mockImplementationOnce(async () => {
+      resolveUsageStarted?.();
+      resolveUsageStarted = null;
+      await groupReadStarted;
+      return {
+        status: "allowed",
+        usageRunningLow: true,
+      };
+    });
+    mocks.readHostedActiveGroupRunningBit.mockImplementationOnce(async () => {
+      resolveGroupReadStarted?.();
+      resolveGroupReadStarted = null;
+      await usageStarted;
+      return null;
     });
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
@@ -1132,6 +1154,7 @@ describe("hosted runtime internal web routes", () => {
     expect(
       mocks.tryMarkHostedMailboxConversationAiUsageDenied,
     ).not.toHaveBeenCalled();
+    expect(mocks.readHostedActiveGroupRunningBit).toHaveBeenCalledTimes(1);
   });
 
   it("rejects conversation mailbox items when the AI usage gate denies runtime consumption", async () => {
@@ -1170,6 +1193,9 @@ describe("hosted runtime internal web routes", () => {
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
       status: "denied",
     });
+    mocks.readHostedActiveGroupRunningBit.mockImplementationOnce(
+      () => new Promise(() => {}),
+    );
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
@@ -1190,6 +1216,7 @@ describe("hosted runtime internal web routes", () => {
       mode: "read_first",
       userId: "member_routes_1",
     });
+    expect(mocks.readHostedActiveGroupRunningBit).toHaveBeenCalledTimes(1);
     expect(
       mocks.tryMarkHostedMailboxConversationAiUsageDenied,
     ).toHaveBeenCalledWith({
@@ -1243,6 +1270,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
   });
 
   it("does not AI-gate non-manual system mailbox consumption", async () => {
@@ -1289,6 +1317,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
   });
 
   it("gates the whole mixed mailbox fetch batch when any item needs the AI usage gate", async () => {

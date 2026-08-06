@@ -844,37 +844,10 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
 }): Promise<FetchHostedRuntimeMailboxProjectionResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-
-  if (isHostedMailboxRootClient(prisma)) {
-    return prisma.$transaction((tx) =>
-      fetchHostedRuntimeMailboxProjectionTx({
-        ...input,
-        now,
-        tx,
-      })
-    );
-  }
-
-  return fetchHostedRuntimeMailboxProjectionTx({
-    ...input,
-    now,
-    tx: prisma,
-  });
-}
-
-async function fetchHostedRuntimeMailboxProjectionTx(input: {
-  cursorMode?: HostedMailboxFetchCursorMode | null;
-  lanes: readonly HostedMailboxRuntimeFetchLaneCursor[];
-  limitPerLane: number;
-  now: Date | string;
-  tx: HostedMailboxMutationTx;
-  userId: string;
-}): Promise<FetchHostedRuntimeMailboxProjectionResult> {
-  const prisma = input.tx;
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
   const limitPerLane = normalizeHostedMailboxFetchLimit(input.limitPerLane);
   const fetchedAt = normalizeHostedMailboxDate(
-    input.now ?? new Date(),
+    now,
     "Hosted mailbox fetch date",
   );
   const retainedAt = new Date(fetchedAt.getTime() - HOSTED_MAILBOX_RETENTION_MS);
