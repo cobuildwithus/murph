@@ -116,7 +116,7 @@ describe("hosted usage-referral recovery", () => {
           {
             celebrationQueuedAt: null,
             policyVersion: {
-              not: SIGNUP_POLICY_VERSION,
+              notIn: [SIGNUP_POLICY_VERSION],
             },
             status: "rewarded",
           },
