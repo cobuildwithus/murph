@@ -1055,6 +1055,164 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
+  it("terminalizes the exact app-card predecessor before claiming its fallback", async () => {
+    const observedOrder: string[] = [];
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+    const predecessorIdempotencyKey = "assistant-outbox:intent_123";
+    const fallbackIdempotencyKey = `${predecessorIdempotencyKey}:fallback`;
+    const predecessorLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+      predecessorIdempotencyKey,
+    );
+    const fallbackLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+      fallbackIdempotencyKey,
+    );
+    prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) =>
+      where.idempotencyKey === predecessorLookupKey
+        ? buildHostedRuntimeProviderDispatchRow()
+        : null
+    );
+    prisma.hostedLinqDelivery.updateMany.mockImplementationOnce(async () => {
+      observedOrder.push("terminalize-card");
+      return { count: 1 };
+    });
+    prisma.hostedLinqDelivery.createMany.mockImplementationOnce(async () => {
+      observedOrder.push("claim-fallback");
+      return { count: 1 };
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: false,
+          idempotencyKey: fallbackIdempotencyKey,
+          intentId: "intent_123",
+          providerDispatchPredecessorIdempotencyKey:
+            predecessorIdempotencyKey,
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      providerDispatchClaimed: true,
+      threadIsDirect: true,
+    });
+    expect(observedOrder).toEqual([
+      "terminalize-card",
+      "claim-fallback",
+    ]);
+    expect(prisma.hostedLinqDelivery.updateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        failedAt: expect.any(Date),
+        failureCode: "ASSISTANT_LINQ_APP_CARD_REJECTED",
+        status: "failed",
+      }),
+      where: expect.objectContaining({
+        id: "delivery-card",
+        status: "provider_dispatch_started",
+      }),
+    });
+    expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({
+        idempotencyKey: fallbackLookupKey,
+        sourceRef: createHostedLinqDeliverySourceRefLookupKey("intent_123"),
+        status: "provider_dispatch_started",
+      })],
+      skipDuplicates: true,
+    });
+  });
+
+  it("rejects an app-card fallback that does not derive from its predecessor", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: false,
+          idempotencyKey: "assistant-outbox:intent_other:fallback",
+          intentId: "intent_123",
+          providerDispatchPredecessorIdempotencyKey:
+            "assistant-outbox:intent_123",
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_LINQ_APP_CARD_FALLBACK_TRANSITION_INVALID",
+      },
+    });
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects an app-card predecessor owned by another runtime intent", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+    const predecessorIdempotencyKey = "assistant-outbox:intent_123";
+    const predecessorLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+      predecessorIdempotencyKey,
+    );
+    prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) =>
+      where.idempotencyKey === predecessorLookupKey
+        ? buildHostedRuntimeProviderDispatchRow({
+            sourceRef: createHostedLinqDeliverySourceRefLookupKey(
+              "intent_other",
+            ),
+          })
+        : null
+    );
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: false,
+          idempotencyKey: `${predecessorIdempotencyKey}:fallback`,
+          intentId: "intent_123",
+          providerDispatchPredecessorIdempotencyKey:
+            predecessorIdempotencyKey,
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_LINQ_APP_CARD_FALLBACK_PREDECESSOR_INVALID",
+      },
+    });
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+  });
+
   it("revalidates Assistant Ask authority before claiming provider dispatch", async () => {
     const observedOrder: string[] = [];
     const prisma = createPrismaStub({
@@ -1572,6 +1730,34 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
   });
 });
+
+function buildHostedRuntimeProviderDispatchRow(
+  overrides: { sourceRef?: string | null } = {},
+) {
+  return {
+    acceptedAt: null,
+    attemptedAt: new Date("2026-08-06T12:00:00.000Z"),
+    deliveredAt: null,
+    failureCode: null,
+    failedAt: null,
+    groupJoinOutreachId: null,
+    groupJoinReplyOccurredAt: null,
+    id: "delivery-card",
+    lastReceiptAt: null,
+    linqChatLookupKey: createHostedLinqChatLookupKey("chat-home"),
+    messageLookupKey: null,
+    phoneNumberLookupKey: null,
+    retryAfterAt: null,
+    skippedAt: null,
+    source: "hosted_runtime_linq_delivery",
+    sourceRef: createHostedLinqDeliverySourceRefLookupKey("intent_123"),
+    status: "provider_dispatch_started",
+    targetKind: "thread",
+    template: null,
+    updatedAt: new Date("2026-08-06T12:00:00.000Z"),
+    ...overrides,
+  };
+}
 
 function createPrismaStub(input: {
   activeMemberAccess?: boolean;

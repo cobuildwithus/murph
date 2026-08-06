@@ -10491,6 +10491,194 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it("transfers the hosted provider fence before sending a promoted card fallback", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      transportIdempotent: true,
+    });
+    const observedOrder: string[] = [];
+    const persistAppCardTextFallback = vi.fn(async () => {
+      observedOrder.push("persist-fallback");
+    });
+    const assertRecentInbound = vi.fn(async (request: {
+      idempotencyKey?: string | null;
+    }) => {
+      observedOrder.push(`claim:${request.idempotencyKey ?? "missing"}`);
+      return { providerDispatchClaimed: true };
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (request) => {
+      observedOrder.push(`provider:${new URL(
+        typeof request === "string"
+          ? request
+          : request instanceof URL
+            ? request.href
+            : request.url,
+      ).pathname}`);
+      return new Response(null, { status: 204 });
+    });
+    mocks.sendLinqMessage.mockImplementationOnce(async (_request, dependencies) => {
+      await dependencies.fetchImplementation(
+        "https://linq.example.test/v1/messages/card",
+        { method: "POST" },
+      );
+      await dependencies.persistAppCardTextFallback?.({
+        idempotencyKey: "assistant-outbox:intent_123:fallback",
+      });
+      await dependencies.fetchImplementation(
+        "https://linq.example.test/v1/messages/text",
+        { method: "POST" },
+      );
+      return {
+        providerMessageId: "linq_fallback_message",
+        providerThreadId: "linq_chat_123",
+        target: "linq_chat_123",
+      };
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        card: {
+          kind: "daily_nutrition",
+          localDate: "2026-07-31",
+          mealCount: 1,
+          totals: {
+            calories: { mealCount: 1, total: 500 },
+            carbsGrams: { mealCount: 1, total: 55 },
+            fatGrams: { mealCount: 1, total: 18 },
+            proteinGrams: { mealCount: 1, total: 35 },
+          },
+        },
+        directRecipientPhoneNumber: "+15550001",
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "Nutrition summary",
+        persistAppCardTextFallback,
+        replyToMessageId: null,
+        target: "linq_chat_123",
+        targetKind: "thread",
+        threadIsDirect: true,
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: "thread",
+        }),
+        status: "sent",
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+    });
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(assertRecentInbound).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      authorityCheckOnly: false,
+      idempotencyKey: "assistant-outbox:intent_123",
+    }), { signal: null });
+    expect(assertRecentInbound).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      authorityCheckOnly: false,
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      providerDispatchPredecessorIdempotencyKey:
+        "assistant-outbox:intent_123",
+    }), { signal: null });
+    const deliveryOrder = observedOrder.filter((entry) =>
+      !entry.startsWith("provider:")
+      || entry.startsWith("provider:/v1/messages/")
+    );
+    expect(deliveryOrder).toEqual([
+      "claim:assistant-outbox:intent_123",
+      "provider:/v1/messages/card",
+      "persist-fallback",
+      "claim:assistant-outbox:intent_123:fallback",
+      "provider:/v1/messages/text",
+    ]);
+  });
+
+  it("reconciles the predecessor when a persisted card fallback retries", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn().mockResolvedValue({
+      providerDispatchClaimed: false,
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 204 })
+    );
+    mocks.sendLinqMessage.mockImplementationOnce(async (_request, dependencies) => {
+      await dependencies.fetchImplementation(
+        "https://linq.example.test/v1/messages/text",
+        { method: "POST" },
+      );
+      return {
+        providerMessageId: "linq_fallback_message",
+        providerThreadId: "linq_chat_123",
+        target: "linq_chat_123",
+      };
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: "+15550001",
+        idempotencyKey: "assistant-outbox:intent_123:fallback",
+        message: "Nutrition summary",
+        replyToMessageId: null,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: "thread",
+        }),
+        status: "sent",
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledWith(expect.objectContaining({
+      authorityCheckOnly: false,
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      providerDispatchPredecessorIdempotencyKey:
+        "assistant-outbox:intent_123",
+    }), { signal: null });
+    expect(providerFetch).toHaveBeenCalledWith(
+      "https://linq.example.test/v1/messages/text",
+      { method: "POST" },
+    );
+  });
+
   it("persists a recoverable Linq rich-link checkpoint before the retry settles", async () => {
     const answeredMailboxItemIds = ["mailbox_item_answered_1"];
     const effect = createEffect({

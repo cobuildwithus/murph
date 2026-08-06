@@ -309,6 +309,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
+  providerDispatchPredecessorIdempotencyKey?: string | null;
   replyToMessageId?: string | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;

@@ -10,6 +10,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
   recordHostedLinqRuntimeProviderDispatchFenceTx,
+  transitionHostedLinqRuntimeAppCardFallbackFenceTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   hostedOnboardingError,
@@ -54,9 +55,18 @@ export const POST = withJsonError(async (request: Request) => {
   const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
   const idempotencyKey = readOptionalBodyString(body.idempotencyKey);
   const intentId = readOptionalBodyString(body.intentId);
+  const providerDispatchPredecessorIdempotencyKey = readOptionalBodyString(
+    body.providerDispatchPredecessorIdempotencyKey,
+  );
   const replyToMessageId = readOptionalBodyString(body.replyToMessageId);
   const target = readOptionalBodyString(body.target);
   const targetKind = readOptionalBodyString(body.targetKind);
+  assertHostedLinqAppCardFallbackTransitionRequest({
+    authorityCheckOnly,
+    idempotencyKey,
+    intentId,
+    providerDispatchPredecessorIdempotencyKey,
+  });
   const prisma = getPrisma();
 
   const assertion = await prisma.$transaction(async (tx) => {
@@ -155,14 +165,33 @@ export const POST = withJsonError(async (request: Request) => {
           retryable: false,
         });
       }
-      const claim = await recordHostedLinqRuntimeProviderDispatchFenceTx({
-        idempotencyKey,
-        linqChatId: providerTargetKind === "participant" ? null : providerTarget,
-        phoneNumber: fromPhoneNumber,
-        prisma: tx,
-        sourceRef: intentId ?? idempotencyKey,
-        targetKind: providerTargetKind,
-      });
+      const claim = providerDispatchPredecessorIdempotencyKey
+        ? await transitionHostedLinqRuntimeAppCardFallbackFenceTx({
+            fallbackIdempotencyKey: idempotencyKey,
+            linqChatId: providerTarget ?? "",
+            phoneNumber: fromPhoneNumber,
+            predecessorIdempotencyKey:
+              providerDispatchPredecessorIdempotencyKey,
+            prisma: tx,
+            sourceRef: intentId ?? "",
+            targetKind: "thread",
+          })
+        : await recordHostedLinqRuntimeProviderDispatchFenceTx({
+            idempotencyKey,
+            linqChatId: providerTargetKind === "participant" ? null : providerTarget,
+            phoneNumber: fromPhoneNumber,
+            prisma: tx,
+            sourceRef: intentId ?? idempotencyKey,
+            targetKind: providerTargetKind,
+          });
+      if (!claim) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_APP_CARD_FALLBACK_PREDECESSOR_INVALID",
+          httpStatus: 409,
+          message: "Hosted Linq app-card fallback predecessor is invalid.",
+          retryable: false,
+        });
+      }
       if (!claim.claimed) {
         throw hostedOnboardingError({
           code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
@@ -221,6 +250,30 @@ function parseRequiredAuthorityCheckOnly(value: unknown): boolean {
     message: "Hosted Linq egress authorityCheckOnly must be a boolean.",
     retryable: false,
   });
+}
+
+function assertHostedLinqAppCardFallbackTransitionRequest(input: {
+  authorityCheckOnly: boolean;
+  idempotencyKey: string | null;
+  intentId: string | null;
+  providerDispatchPredecessorIdempotencyKey: string | null;
+}): void {
+  const predecessor = input.providerDispatchPredecessorIdempotencyKey;
+  if (!predecessor) {
+    return;
+  }
+  if (
+    input.authorityCheckOnly
+    || !input.intentId
+    || input.idempotencyKey !== `${predecessor}:fallback`
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_APP_CARD_FALLBACK_TRANSITION_INVALID",
+      httpStatus: 400,
+      message: "Hosted Linq app-card fallback transition is invalid.",
+      retryable: false,
+    });
+  }
 }
 
 function parseOptionalAssistantAskFallback(

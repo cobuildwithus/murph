@@ -29,6 +29,13 @@ Updated: 2026-08-06
   under the original card delivery key. A focused state test failed with
   `retryable` instead of the required terminal `abandoned` result before the
   correction.
+- Final ReviewGPT correction review exposed a third owner-boundary bug: the
+  local outbox promoted a rejected card to its fallback key, but the Web
+  provider-entry boundary memoized the original card claim for the send. A
+  focused runtime test first observed one engagement assertion instead of two,
+  and a focused Web test first observed a fallback claim without predecessor
+  terminalization. The original `provider_dispatch_started` row could therefore
+  remain unresolved indefinitely and block later group routing for that chat.
 
 ## Success criteria
 
@@ -47,21 +54,29 @@ Updated: 2026-08-06
 - A card-bearing attempt that may already have succeeded is abandoned with the
   card retained and no next attempt; it cannot later re-enter capability
   selection or reuse the card delivery key for text.
+- Before promoted fallback text enters Linq, Web terminalizes the exact card
+  dispatch and claims the fallback in one transaction. A retry from the
+  already-persisted fallback repeats that exact transition, and completing the
+  fallback leaves no unresolved dispatch fence for the chat.
 
 ## Scope
 
 - Cloudflare Linq egress operation classification and focused tests.
 - Assistant channel fallback diagnostics and hosted provider-effect coverage.
+- Hosted runtime-to-Web provider-fence transition and delivery-store coverage.
 - Current provider-egress and response-card reliability documentation.
 
 ## Constraints
 
-- No new state, queue, retry owner, provider call, credential, or dependency.
+- No new row, queue, retry owner, external provider call, credential, or
+  dependency; reuse the existing delivery rows and engagement transaction.
 - Keep provider request and response bodies, phone numbers, chat ids, member
   ids, idempotency keys, and raw error text out of durable diagnostics.
 - Preserve the current single-effect outbox transition and ambiguity rules.
-- Cloudflare Worker and runner bundle ship together with immediate rollout;
-  there is no Web or database dependency.
+- Deploy Web first because it accepts the optional predecessor transition while
+  remaining compatible with the old runner. Then ship the Cloudflare Worker
+  and runner bundle together with immediate rollout; the new runner must not
+  precede the Web endpoint that understands the transition.
 
 ## Tasks
 
@@ -105,3 +120,18 @@ Updated: 2026-08-06
   — 90 passed; the production channel/outbox integration proves a forced later
   drain does not call Linq or capability selection again.
 - `packages/assistant-engine` typecheck passed after the ambiguity correction.
+- Final ReviewGPT round 3 found that the fallback used the original memoized
+  Web provider claim. The two failing-first regressions proved the stale-fence
+  mechanism before the correction. The runtime now re-enters Web with the
+  predecessor identity after local fallback persistence, and Web atomically
+  terminalizes that exact predecessor before claiming the fallback.
+- From `packages/assistant-runtime`, `pnpm exec vitest run --config vitest.config.ts test/hosted-runtime-callbacks.test.ts`
+  — 212 passed after the fence-transfer correction.
+- From the repository root, `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-egress-engagement.test.ts`
+  — 47 passed, including exact predecessor, derivation, and intent-ownership
+  validation.
+- The opt-in local PostgreSQL fence lifecycle proof passed: the original row is
+  terminalized, the fallback is the only unresolved row while active, and the
+  chat has no unresolved dispatch after fallback acceptance.
+- `packages/assistant-runtime` and prepared `apps/web` typechecks passed after
+  the fence-transfer correction.

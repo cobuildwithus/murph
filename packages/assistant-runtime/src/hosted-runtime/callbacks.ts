@@ -3526,6 +3526,8 @@ function createHostedAssistantLinqSendDependency(input: {
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     const idempotencyKey = request.idempotencyKey?.trim() || null;
     let effectiveIdempotencyKey = idempotencyKey;
+    let providerDispatchPredecessorIdempotencyKey =
+      readHostedLinqAppCardFallbackPredecessorIdempotencyKey(idempotencyKey);
     const persistAppCardTextFallback = request.persistAppCardTextFallback;
     const reviewedAssistantAskCompletion = idempotencyKey?.startsWith(
       HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
@@ -3587,66 +3589,68 @@ function createHostedAssistantLinqSendDependency(input: {
       vaultRoot: input.vaultRoot ?? null,
     });
     let attemptedAt: Date | null = null;
+    const enterHostedLinqProviderDispatch = async (): Promise<void> => {
+      const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
+        ? await prepareHostedReviewedAssistantAskProviderEntry({
+            intentId: input.intentId ?? null,
+            media: request.media ?? [],
+            message: request.message,
+            now: new Date(),
+            vaultRoot: input.vaultRoot ?? null,
+          })
+        : undefined;
+      const providerEntry =
+        await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+          answeredMailboxItemIds: request.answeredMailboxItemIds,
+          assistantAskCompletionExpiresAt: reviewedCompletionExpiresAt,
+          assistantAskFallback:
+            reviewedAssistantAskCompletion
+              ? isHostedReviewedAssistantAskFallbackPayload({
+                  media: request.media,
+                  message: request.message,
+                })
+              : undefined,
+          authorityCheckOnly: false,
+          directRecipientPhoneNumber,
+          effectsPort: input.effectsPort ?? null,
+          fromPhoneNumber,
+          homeRouteFallbackAllowed: currentHomeRouteOnly,
+          idempotencyKey: effectiveIdempotencyKey,
+          intentId: input.intentId ?? null,
+          providerDispatchPredecessorIdempotencyKey,
+          replyToMessageId: request.replyToMessageId ?? null,
+          providerDispatchRetrySafe: true,
+          signal: signal ?? null,
+          target: providerTarget,
+          targetKind: providerTargetKind,
+        });
+      if (providerEntry.assistantAskFallbackRequired === true) {
+        if (!input.intentId || !input.vaultRoot) {
+          throw new VaultCliError(
+            "ASSISTANT_ASK_COMPLETION_OUTBOX_MISSING",
+            "Reviewed Assistant Ask completion outbox state is unavailable.",
+            { retryable: true },
+          );
+        }
+        await persistHostedAssistantAskFallbackSupersession({
+          intentId: input.intentId,
+          now: new Date(),
+          vaultRoot: input.vaultRoot,
+        });
+        throw new VaultCliError(
+          "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
+          "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
+          { retryable: true },
+        );
+      }
+      attemptedAt = new Date();
+      input.onProviderDispatchEntered?.();
+    };
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
       fetchImplementation: createHostedProviderFetchBoundary({
         assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
-        onProviderDispatchEntered: async () => {
-          const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
-            ? await prepareHostedReviewedAssistantAskProviderEntry({
-                intentId: input.intentId ?? null,
-                media: request.media ?? [],
-                message: request.message,
-                now: new Date(),
-                vaultRoot: input.vaultRoot ?? null,
-              })
-            : undefined;
-          const providerEntry =
-            await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-              answeredMailboxItemIds: request.answeredMailboxItemIds,
-              assistantAskCompletionExpiresAt: reviewedCompletionExpiresAt,
-              assistantAskFallback:
-                reviewedAssistantAskCompletion
-                  ? isHostedReviewedAssistantAskFallbackPayload({
-                      media: request.media,
-                      message: request.message,
-                    })
-                  : undefined,
-              authorityCheckOnly: false,
-              directRecipientPhoneNumber,
-              effectsPort: input.effectsPort ?? null,
-              fromPhoneNumber,
-              homeRouteFallbackAllowed: currentHomeRouteOnly,
-              idempotencyKey: effectiveIdempotencyKey,
-              intentId: input.intentId ?? null,
-              replyToMessageId: request.replyToMessageId ?? null,
-              providerDispatchRetrySafe: true,
-              signal: signal ?? null,
-              target: providerTarget,
-              targetKind: providerTargetKind,
-            });
-          if (providerEntry.assistantAskFallbackRequired === true) {
-            if (!input.intentId || !input.vaultRoot) {
-              throw new VaultCliError(
-                "ASSISTANT_ASK_COMPLETION_OUTBOX_MISSING",
-                "Reviewed Assistant Ask completion outbox state is unavailable.",
-                { retryable: true },
-              );
-            }
-            await persistHostedAssistantAskFallbackSupersession({
-              intentId: input.intentId,
-              now: new Date(),
-              vaultRoot: input.vaultRoot,
-            });
-            throw new VaultCliError(
-              "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-              "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-              { retryable: true },
-            );
-          }
-          attemptedAt = new Date();
-          input.onProviderDispatchEntered?.();
-        },
+        onProviderDispatchEntered: enterHostedLinqProviderDispatch,
         operation: "Hosted assistant Linq delivery",
         providerFetch: input.providerFetch,
       }),
@@ -3716,7 +3720,23 @@ function createHostedAssistantLinqSendDependency(input: {
           ? {
               persistAppCardTextFallback: async (fallback) => {
                 await persistAppCardTextFallback(fallback);
+                const predecessorIdempotencyKey = effectiveIdempotencyKey;
                 effectiveIdempotencyKey = fallback.idempotencyKey;
+                if (
+                  fallback.idempotencyKey !== predecessorIdempotencyKey
+                ) {
+                  if (!predecessorIdempotencyKey) {
+                    throw new VaultCliError(
+                      "ASSISTANT_LINQ_APP_CARD_FALLBACK_IDENTITY_INVALID",
+                      "Hosted iMessage app-card recovery lost its predecessor identity.",
+                    );
+                  }
+                  providerDispatchPredecessorIdempotencyKey =
+                    predecessorIdempotencyKey;
+                  attemptedAt = null;
+                  await assertHostedDeliveryCanEnterProvider(input);
+                  await enterHostedLinqProviderDispatch();
+                }
               },
             }
           : {}),
@@ -4526,6 +4546,17 @@ function readTrustedHostedAssistantLinqDeliveryFailureReason(
   return message ? message.slice(0, 500) : null;
 }
 
+function readHostedLinqAppCardFallbackPredecessorIdempotencyKey(
+  value: string | null,
+): string | null {
+  const idempotencyKey = value?.trim() ?? "";
+  const suffix = ":fallback";
+  return idempotencyKey.length > suffix.length
+      && idempotencyKey.endsWith(suffix)
+    ? idempotencyKey.slice(0, -suffix.length)
+    : null;
+}
+
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   assistantAskCompletionExpiresAt?: string;
@@ -4537,6 +4568,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   homeRouteFallbackAllowed: boolean;
   idempotencyKey: string | null;
   intentId: string | null;
+  providerDispatchPredecessorIdempotencyKey?: string | null;
   providerDispatchRetrySafe?: boolean;
   replyToMessageId: string | null;
   signal: AbortSignal | null;
@@ -4573,6 +4605,12 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
       homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
       idempotencyKey: input.idempotencyKey,
       intentId: input.intentId,
+      ...(input.providerDispatchPredecessorIdempotencyKey
+        ? {
+            providerDispatchPredecessorIdempotencyKey:
+              input.providerDispatchPredecessorIdempotencyKey,
+          }
+        : {}),
       replyToMessageId: input.replyToMessageId,
       target: input.target,
       targetKind,

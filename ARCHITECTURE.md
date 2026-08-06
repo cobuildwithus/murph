@@ -1392,6 +1392,14 @@ with no next attempt. A later capability result or text body therefore cannot
 reuse the original card delivery key. Text retries are safe only after the
 text-only transition has committed, cleared the card, and frozen its stable
 fallback identity.
+For a definitive card rejection, the runtime does not send fallback text until
+the existing Web engagement transaction has terminalized the exact original
+`provider_dispatch_started` delivery and claimed the promoted fallback key.
+That transaction verifies the same runtime intent, Linq chat, source, and
+thread target, so the obsolete card fence cannot permanently block later group
+routing. If the transaction response is lost after local fallback persistence,
+the next ordinary outbox retry derives the predecessor from the stable fallback
+key and repeats the same idempotent transition before entering Linq.
 Linq owns the
 noninteractive static transcript layout, which carries the date, meal count,
 available totals, an explicit partial marker, and the first available exact V2

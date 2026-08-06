@@ -32,7 +32,14 @@ Last verified: 2026-08-06
   capability-check failure or definitive
   app-card rejection emits one sanitized hosted warning before the existing
   text transition; an ordinary `available: false` result remains expected
-  fallback rather than an error.
+  fallback rather than an error. Before promoted fallback text enters Linq,
+  Web atomically terminalizes the exact original provider-dispatch fence with
+  the bounded app-card rejection code and claims the fallback fence under the
+  same runtime intent, chat, source, and thread target. A retry whose local
+  outbox already contains the fallback repeats that exact transition, so a
+  lost control response cannot strand the original card fence or bypass
+  provider-entry authority. Once the fallback outcome is terminal, no
+  unresolved card fence remains to block later canonical group routing.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
 - Health-data withdrawal commits its revocation boundary, then waits for the
@@ -857,7 +864,10 @@ Last verified: 2026-08-06
   attempt. A later drain cannot re-enter capability selection or replace the
   original card effect with text under its delivery key. Text retry is safe
   only after the text-only transition commits with `card: null` and a stable
-  fallback identity.
+  fallback identity. Before the first fallback provider request, the existing
+  Web delivery transaction must also terminalize the exact card dispatch and
+  claim that fallback identity; a persisted-fallback retry idempotently
+  reconciles the same predecessor before sending.
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
 - Assistant product-feedback capture accepts at most one in-memory candidate during a successful provider turn. The assistant execution context can only hand that candidate to its hosted invocation synchronously; the existing web-control write remains at the foreground delivery owner and starts only after a current-turn member-channel send succeeds. Failed provider attempts discard their candidate, invocations without a successful foreground send may abandon it, feedback never counts as a provider side effect for transport retry safety, and persistence remains best-effort with a two-second maximum deadline, no retry queue, and no user-visible delivery state. The accepted-input-derived idempotency key remains the ambiguity fence when a timed-out post-reply write may already have reached Web.
 - Exact private support escalation remains the bounded in-turn exception to ordinary post-reply feedback persistence. Under the same member-scoped advisory lock, Web writes the fixed member marker plus the anonymous bounded and sanitized issue Murph wrote in its own words, reads and validates both rows, and ranks the member marker for the three-per-UTC-day alert cap. An eligible provider attempt formats from the first stored issue rather than callback memory and uses the feedback-derived Resend idempotency key, so replay has one stable body even when a later callback supplies different wording; missing, member-linked, unsanitized, still-prefixed, or malformed stored detail fails before email. Later records remain durable without another alert; missing email configuration or provider failure remains visible to the current turn without adding a retry queue or second delivery owner.

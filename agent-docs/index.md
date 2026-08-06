@@ -25,7 +25,8 @@ contract are jointly specified by `ARCHITECTURE.md`,
 
 Hosted inbound reply-thread binding, active-turn route preservation, ephemeral
 delivery-context preservation, and provider-rendered iMessage response-card
-fallback are jointly specified by
+fallback, including the atomic Web provider-fence transfer, are jointly
+specified by
 `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/operations/imessage-deliverability.md`.
 

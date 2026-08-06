@@ -51,6 +51,8 @@ const HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS =
   "provider_dispatch_started";
 export const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
   "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
+export const HOSTED_LINQ_APP_CARD_REJECTED_FAILURE_CODE =
+  "ASSISTANT_LINQ_APP_CARD_REJECTED";
 type HostedLinqDeliveryProviderDispatchData = {
   attemptedAt: Date;
   failedAt: null;
@@ -655,6 +657,147 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
     status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
     targetKind: input.targetKind,
   });
+}
+
+export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
+  attemptedAt?: Date;
+  fallbackIdempotencyKey: string;
+  linqChatId: string;
+  phoneNumber?: string | null;
+  predecessorIdempotencyKey: string;
+  prisma: HostedLinqDeliveryClient;
+  sourceRef: string;
+  targetKind: "thread";
+}): Promise<HostedLinqDeliveryProviderDispatchClaim | null> {
+  const predecessorIdempotencyKey = normalizeNullable(
+    input.predecessorIdempotencyKey,
+  );
+  const fallbackIdempotencyKey = normalizeNullable(
+    input.fallbackIdempotencyKey,
+  );
+  const sourceRef = normalizeNullable(input.sourceRef);
+  const linqChatLookupKey = createHostedLinqChatLookupKey(input.linqChatId);
+  if (
+    !predecessorIdempotencyKey
+    || fallbackIdempotencyKey !== `${predecessorIdempotencyKey}:fallback`
+    || !sourceRef
+    || !linqChatLookupKey
+  ) {
+    return null;
+  }
+  const predecessorLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+    predecessorIdempotencyKey,
+  );
+  const sourceRefLookupKey = createHostedLinqDeliverySourceRefLookupKey(
+    sourceRef,
+  );
+  if (!predecessorLookupKey || !sourceRefLookupKey) {
+    return null;
+  }
+
+  return await runHostedLinqDeliveryStoreTransaction(
+    input.prisma,
+    async (prisma) => {
+      const predecessor = await prisma.hostedLinqDelivery.findUnique({
+        where: { idempotencyKey: predecessorLookupKey },
+        select: hostedLinqDeliveryLifecycleSelect,
+      });
+      if (!predecessor || !hostedLinqAppCardPredecessorMatches({
+        delivery: predecessor,
+        linqChatLookupKey,
+        sourceRefLookupKey,
+        targetKind: input.targetKind,
+      })) {
+        return null;
+      }
+
+      if (!isHostedLinqTerminalAppCardRejection(predecessor)) {
+        const failedAt = input.attemptedAt ?? new Date();
+        const terminalized = await prisma.hostedLinqDelivery.updateMany({
+          where: {
+            acceptedAt: null,
+            deliveredAt: null,
+            failedAt: null,
+            failureCode: null,
+            failureReason: null,
+            id: predecessor.id,
+            lastReceiptAt: null,
+            linqChatLookupKey,
+            messageLookupKey: null,
+            skippedAt: null,
+            source: "hosted_runtime_linq_delivery",
+            sourceRef: sourceRefLookupKey,
+            status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+            targetKind: input.targetKind,
+          },
+          data: {
+            failedAt,
+            failureCode: HOSTED_LINQ_APP_CARD_REJECTED_FAILURE_CODE,
+            failureReason: null,
+            retryAfterAt: null,
+            status: "failed",
+          },
+        });
+        if (terminalized.count !== 1) {
+          const concurrent = await prisma.hostedLinqDelivery.findUnique({
+            where: { idempotencyKey: predecessorLookupKey },
+            select: hostedLinqDeliveryLifecycleSelect,
+          });
+          if (
+            !concurrent
+            || !hostedLinqAppCardPredecessorMatches({
+              delivery: concurrent,
+              linqChatLookupKey,
+              sourceRefLookupKey,
+              targetKind: input.targetKind,
+            })
+            || !isHostedLinqTerminalAppCardRejection(concurrent)
+          ) {
+            return null;
+          }
+        }
+      }
+
+      return await recordHostedLinqRuntimeProviderDispatchFenceTx({
+        attemptedAt: input.attemptedAt,
+        idempotencyKey: fallbackIdempotencyKey,
+        linqChatId: input.linqChatId,
+        phoneNumber: input.phoneNumber,
+        prisma,
+        sourceRef,
+        targetKind: input.targetKind,
+      });
+    },
+  );
+}
+
+function hostedLinqAppCardPredecessorMatches(input: {
+  delivery: Prisma.HostedLinqDeliveryGetPayload<{
+    select: typeof hostedLinqDeliveryLifecycleSelect;
+  }>;
+  linqChatLookupKey: string;
+  sourceRefLookupKey: string;
+  targetKind: "thread";
+}): boolean {
+  return input.delivery.acceptedAt === null
+    && input.delivery.deliveredAt === null
+    && input.delivery.lastReceiptAt === null
+    && input.delivery.linqChatLookupKey === input.linqChatLookupKey
+    && input.delivery.messageLookupKey === null
+    && input.delivery.skippedAt === null
+    && input.delivery.source === "hosted_runtime_linq_delivery"
+    && input.delivery.sourceRef === input.sourceRefLookupKey
+    && input.delivery.targetKind === input.targetKind;
+}
+
+function isHostedLinqTerminalAppCardRejection(
+  delivery: Prisma.HostedLinqDeliveryGetPayload<{
+    select: typeof hostedLinqDeliveryLifecycleSelect;
+  }>,
+): boolean {
+  return delivery.failedAt !== null
+    && delivery.failureCode === HOSTED_LINQ_APP_CARD_REJECTED_FAILURE_CODE
+    && delivery.status === "failed";
 }
 
 export async function hasUnresolvedHostedLinqProviderDispatchForChatTx(input: {
