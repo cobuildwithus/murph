@@ -94,6 +94,7 @@ export interface HostedAutoPulseTrialEnrollmentInput {
   member: HostedAutoPulseTrialAuthenticatedMember;
   now?: Date;
   prisma?: PrismaClient;
+  suppressSignupWelcome?: boolean;
 }
 
 export interface HostedLinqInstantStartPulseTrialEnrollmentInput {
@@ -245,7 +246,7 @@ export async function ensureHostedAutoPulseTrialEnrollment(
     provisionUnderMemberLock: false,
     requireLaunchConsent: true,
     requireUnboundStripeCustomer: false,
-    suppressSignupWelcome: false,
+    suppressSignupWelcome: input.suppressSignupWelcome ?? false,
   });
   return enrollment.result;
 }

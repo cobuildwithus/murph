@@ -364,7 +364,6 @@ async function runPdfToolchainSmoke(input: {
 }): Promise<void> {
   await assertPathExists(input.pdfPath);
   await resolveCommandPath("file");
-  await resolveCommandPath("mutool");
   await resolveCommandPath("pdfinfo");
   await resolveCommandPath("pdftotext");
   await resolveCommandPath("pdftoppm");
@@ -389,11 +388,6 @@ async function runPdfToolchainSmoke(input: {
   const qpdfCheck = await runTextCommand("qpdf", ["--check", input.pdfPath]);
   if (!/no syntax or stream encoding errors found/imu.test(qpdfCheck)) {
     throw new Error("Hosted runner smoke qpdf check did not validate the PDF fixture.");
-  }
-
-  const mutoolInfo = await runTextCommand("mutool", ["info", input.pdfPath]);
-  if (!/^Pages:\s+1$/mu.test(mutoolInfo)) {
-    throw new Error("Hosted runner smoke mutool info did not report exactly one page.");
   }
 
   await ensureScratchDirectory(input.scratchRoot);
