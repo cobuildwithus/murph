@@ -154,7 +154,7 @@ export async function sendHostedProviderLinqMessage(
         retryMode: "provider_idempotency",
       },
       level: "info",
-      message: "Hosted Linq delivery is replaying the exact iMessage app card after an ambiguous provider outcome.",
+      message: "Hosted Linq delivery selected exact iMessage app-card replay after an ambiguous provider outcome.",
       phase: "outbox",
     });
   }

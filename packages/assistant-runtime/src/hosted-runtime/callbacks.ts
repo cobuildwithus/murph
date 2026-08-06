@@ -3619,7 +3619,8 @@ function createHostedAssistantLinqSendDependency(input: {
           intentId: input.intentId ?? null,
           providerDispatchPredecessorIdempotencyKey,
           replyToMessageId: request.replyToMessageId ?? null,
-          providerDispatchRetrySafe: true,
+          providerDispatchRetrySafe:
+            request.card == null || request.linqAppCardReplay === true,
           signal: signal ?? null,
           target: providerTarget,
           targetKind: providerTargetKind,

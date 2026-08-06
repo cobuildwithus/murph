@@ -1389,11 +1389,15 @@ not recreate the explicit-target override or replace the turn's thread binding.
 If a card-bearing Linq provider attempt may already have succeeded, the outbox
 retains that card and enters delivery-confirmation-pending under the same
 provider-idempotent key. Its retry bypasses capability selection and replays
-only the identical card body and key; it cannot substitute text or another
-effect. Provider acceptance or deduplication closes the original Web dispatch
-fence. Only a definitive card rejection may commit the text-only transition,
-clear the card, freeze the stable fallback identity, and transfer that Web
-fence before text enters Linq.
+only the identical card body and key; it does not require a rehydrated raw
+recipient phone number and cannot substitute text or another effect. A resumed
+non-replay card that finds its Web provider-dispatch claim already started is
+first converted to that confirmation-pending exact-replay state, before
+another capability or provider message request can run. Provider acceptance
+or deduplication closes the original Web dispatch fence. Only a definitive
+card rejection, including a structurally classified stale-chat `404`, may
+commit the text-only transition, clear the card, freeze the stable fallback
+identity, and transfer that Web fence before text enters Linq.
 For a definitive card rejection, the runtime does not send fallback text until
 the existing Web engagement transaction has terminalized the exact original
 `provider_dispatch_started` delivery and claimed the promoted fallback key.

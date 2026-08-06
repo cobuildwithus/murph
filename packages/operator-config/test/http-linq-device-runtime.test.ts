@@ -503,6 +503,7 @@ test('linq app-card rejection classification permits only definitive pre-accepta
   const createError = (
     status: number,
     retryable: boolean,
+    linqFailureKind?: 'chat_not_found',
   ): VaultCliError => new VaultCliError(
     'LINQ_API_REQUEST_FAILED',
     'Linq rejected the iMessage app card.',
@@ -512,6 +513,7 @@ test('linq app-card rejection classification permits only definitive pre-accepta
       operation: 'send_imessage_app_card',
       path: '/chats/[chat]/messages',
       provider: 'linq',
+      ...(linqFailureKind ? { linqFailureKind } : {}),
       retryable,
       status,
     },
@@ -527,6 +529,9 @@ test('linq app-card rejection classification permits only definitive pre-accepta
       createError(status, status !== 404),
     )).toBe(false)
   }
+  expect(isDefinitiveLinqIMessageAppCardRejection(
+    createError(404, false, 'chat_not_found'),
+  )).toBe(true)
 })
 
 test('linq runtime serializes reply targets only for marked native replies', async () => {

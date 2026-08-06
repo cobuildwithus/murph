@@ -396,7 +396,15 @@ export function isDefinitiveLinqIMessageAppCardRejection(
     && error.context?.path === '/chats/[chat]/messages'
     && error.context?.failureStage === 'http'
     && error.context?.retryable === false
-    && (status === 400 || status === 415 || status === 422)
+    && (
+      status === 400
+      || status === 415
+      || status === 422
+      || (
+        status === 404
+        && error.context?.linqFailureKind === 'chat_not_found'
+      )
+    )
 }
 
 export async function sendLinqChatMessage(

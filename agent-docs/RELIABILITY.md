@@ -26,10 +26,13 @@ Last verified: 2026-08-06
   and server failures remain ambiguous. A card-bearing Linq attempt marked as
   possibly accepted becomes delivery-confirmation-pending with its card and
   provider-idempotent key retained. Retry bypasses capability selection and
-  replays only that exact card effect; acceptance or provider deduplication
-  closes the original Web fence. Only a definitive rejection can commit the
-  text-only transition, clear the card, and retry under one stable fallback
-  identity. A caught
+  replays only that exact card effect without depending on a rehydrated raw
+  recipient phone; acceptance or provider deduplication closes the original
+  Web fence. A resumed non-replay card that encounters an already-started Web
+  claim becomes confirmation-pending before another capability or message
+  request. Only a definitive rejection, including a structurally classified
+  stale-chat `404`, can commit the text-only transition, clear the card, and
+  retry under one stable fallback identity. A caught
   capability-check failure or definitive
   app-card rejection emits one sanitized hosted warning before the existing
   text transition; an ordinary `available: false` result remains expected
@@ -863,9 +866,13 @@ Last verified: 2026-08-06
 - A card-bearing Linq attempt marked as possibly accepted enters the existing
   delivery-confirmation-pending state with the card and provider-idempotent key
   retained. A later drain bypasses capability selection and replays only that
-  exact card effect. Text retry is safe only after a definitive rejection and
-  the text-only transition commits with `card: null` and a stable fallback
-  identity. Before the first fallback provider request, the existing
+  exact card effect, even when detached execution cannot rehydrate a raw
+  recipient phone. A resumed non-replay card that finds an existing Web claim
+  must enter the same confirmation-pending state before capability or provider
+  message I/O. Text retry is safe only after a definitive rejection, including
+  a structured stale-chat app-card `404`, and the text-only transition commits
+  with `card: null` and a stable fallback identity. Before the first fallback
+  provider request, the existing
   Web delivery transaction must also terminalize the exact card dispatch and
   claim that fallback identity; a persisted-fallback retry idempotently
   reconciles the same predecessor before sending.

@@ -577,24 +577,26 @@ export async function sendLinqMessage(
     input.directRecipientPhoneNumber,
   )
   const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
-  const shouldAttemptNativeCard =
+  const nativeCardDeliveryIdentityAvailable =
     card !== null &&
     input.targetKind === 'thread' &&
     input.threadIsDirect === true &&
     input.nativeReplyRequested !== true &&
-    directRecipientPhoneNumber !== null &&
     idempotencyKey !== null
   const replayNativeCard = input.linqAppCardReplay === true
-  if (replayNativeCard && !shouldAttemptNativeCard) {
+  if (replayNativeCard && !nativeCardDeliveryIdentityAvailable) {
     throw new VaultCliError(
       'ASSISTANT_LINQ_APP_CARD_REPLAY_INVALID',
       'An exact iMessage app-card replay requires the original direct-card delivery identity.',
     )
   }
+  const shouldAttemptNativeCard =
+    nativeCardDeliveryIdentityAvailable &&
+    (replayNativeCard || directRecipientPhoneNumber !== null)
   let appCardFallbackIdempotencyKey: string | null = null
   if (shouldAttemptNativeCard) {
     let capabilityAvailable = replayNativeCard
-    if (!replayNativeCard) {
+    if (!replayNativeCard && directRecipientPhoneNumber !== null) {
       try {
         capabilityAvailable = await checkLinqIMessageCapability(
           {

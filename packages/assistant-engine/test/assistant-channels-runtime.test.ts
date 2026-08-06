@@ -1624,7 +1624,7 @@ describe('assistant channels runtime seam', () => {
 
     await expect(sendLinqMessage({
       card: NUTRITION_CARD,
-      directRecipientPhoneNumber: '+15550001',
+      directRecipientPhoneNumber: null,
       fromPhoneNumber: '+15550000',
       idempotencyKey: 'card-delivery-replay',
       linqAppCardReplay: true,

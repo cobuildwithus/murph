@@ -8932,6 +8932,66 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it("marks a resumed native card with an existing provider claim as confirmation-pending", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
+    const providerFetch = vi.fn<typeof fetch>();
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "unexpected-card-message",
+      providerThreadId: null,
+      target: "linq_chat_123",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendLinq({
+        card: {
+          kind: "daily_nutrition",
+          localDate: "2026-07-31",
+          mealCount: 1,
+          totals: {
+            calories: { mealCount: 1, total: 500 },
+            carbsGrams: { mealCount: 1, total: 55 },
+            fatGrams: { mealCount: 1, total: 18 },
+            proteinGrams: { mealCount: 1, total: 35 },
+          },
+        },
+        directRecipientPhoneNumber: "+15550001",
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "Nutrition summary",
+        target: "linq_chat_123",
+        targetKind: "thread",
+        threadIsDirect: true,
+      });
+      throw new Error("unreachable after an existing native-card provider claim");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+      deliveryMayHaveSucceeded: true,
+    });
+
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(providerFetch.mock.calls).toEqual([
+      [expect.stringMatching(/\/typing$/u), expect.objectContaining({
+        method: "DELETE",
+      })],
+    ]);
+  });
+
   it("durably supersedes a revoked reviewed answer and sends the fixed fallback once after retry", async () => {
     const completionId = "aask_done_revoked_before_dispatch";
     const idempotencyKey =

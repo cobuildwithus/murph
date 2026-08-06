@@ -40,6 +40,14 @@ Updated: 2026-08-06
   provider-idempotent replay is therefore required: it retains the card and
   key, skips capability re-selection, and lets provider acceptance close the
   original fence without changing the effect.
+- Final ReviewGPT round 5 exposed two replay gaps: detached timer retries do
+  not retain a raw recipient phone even though exact replay needs no capability
+  lookup, and a structured app-card stale-chat `404` was excluded from both
+  definitive rejection and the existing text re-home path.
+- Parent review exposed the adjacent process-restart window: Web can persist
+  the provider-dispatch claim before the runtime persists its ambiguous local
+  result. Re-entering ordinary card selection from that state could change the
+  effect instead of first deriving exact replay.
 
 ## Success criteria
 
@@ -59,6 +67,12 @@ Updated: 2026-08-06
   delivery-confirmation-pending and replays only the identical card and key
   without another capability check. It cannot reuse the card delivery key for
   text; only a definitive rejection may promote the stable fallback.
+- Exact replay remains valid without a rehydrated raw recipient phone because
+  it performs no capability lookup. A structured stale-chat app-card `404` is
+  definitive and may promote fallback; unclassified `404` responses may not.
+- A resumed non-replay card that encounters an existing Web provider claim
+  becomes confirmation-pending before another capability or provider message
+  request, so the next outbox drain can derive exact replay.
 - Before promoted fallback text enters Linq, Web terminalizes the exact card
   dispatch and claims the fallback in one transaction. A retry from the
   already-persisted fallback repeats that exact transition, and completing the
@@ -147,3 +161,15 @@ Updated: 2026-08-06
   channel runtime, hosted provider effects, and hosted callbacks. The local
   PostgreSQL proof now also shows acceptance under the original replayed key
   clears the unresolved chat fence; both PostgreSQL cases pass.
+- Round 5 failing-first proof showed exact replay rejected a detached request
+  with no raw recipient phone, structured stale-chat `404` was not classified,
+  and an existing Web claim allowed ordinary card selection to continue. The
+  corrected focused channel, provider, callback, and classifier regressions
+  pass; exact replay now needs only its persisted direct-card identity, the
+  structured stale-chat rejection reaches persisted fallback/re-home, and the
+  restart window records confirmation-pending before provider message I/O.
+- On the round 5 remediation head, the three assistant-engine card/outbox
+  files pass 180 tests, the hosted provider/callback files pass 237 tests, and
+  the Linq HTTP runtime file passes 47 tests. Assistant engine, assistant
+  runtime, and operator config typechecks pass; documentation gardening and
+  drift checks pass.

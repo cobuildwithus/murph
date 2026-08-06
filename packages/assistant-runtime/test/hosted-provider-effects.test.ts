@@ -487,7 +487,7 @@ describe("hosted provider effects", () => {
           proteinGrams: { mealCount: 1, total: 35 },
         },
       },
-      directRecipientPhoneNumber: "+15550001",
+      directRecipientPhoneNumber: null,
       idempotencyKey: "hosted-card-exact-replay",
       linqAppCardReplay: true,
       message: "Nutrition summary",
@@ -526,7 +526,6 @@ describe("hosted provider effects", () => {
       level: "info",
     });
     const serializedLog = JSON.stringify(replayLog);
-    expect(serializedLog).not.toContain("+15550001");
     expect(serializedLog).not.toContain("direct-chat-replay");
     expect(serializedLog).not.toContain("hosted-card-exact-replay");
     expect(serializedLog).not.toContain("linq-token");
@@ -710,6 +709,7 @@ describe("hosted provider effects", () => {
 
   it.each([
     {
+      appCardChatNotFound: false,
       capabilityAvailable: false,
       exactReplay: false,
       expectedCapabilityRequests: 1,
@@ -717,6 +717,7 @@ describe("hosted provider effects", () => {
       name: "capability fallback",
     },
     {
+      appCardChatNotFound: false,
       capabilityAvailable: true,
       exactReplay: false,
       expectedCapabilityRequests: 1,
@@ -724,13 +725,23 @@ describe("hosted provider effects", () => {
       name: "definitive app-card rejection",
     },
     {
+      appCardChatNotFound: false,
       capabilityAvailable: true,
       exactReplay: true,
       expectedCapabilityRequests: 0,
       expectedIdempotencyKey: "hosted-stale-card:fallback",
       name: "definitively rejected exact replay",
     },
+    {
+      appCardChatNotFound: true,
+      capabilityAvailable: true,
+      exactReplay: false,
+      expectedCapabilityRequests: 1,
+      expectedIdempotencyKey: "hosted-stale-card:fallback",
+      name: "structured app-card chat-not-found rejection",
+    },
   ])("recovers a stale Linq thread after $name using the persisted text identity", async ({
+    appCardChatNotFound,
     capabilityAvailable,
     exactReplay,
     expectedCapabilityRequests,
@@ -757,9 +768,14 @@ describe("hosted provider effects", () => {
           parts?: Array<{ type?: string }>;
         } | undefined;
         if (message?.parts?.[0]?.type === "imessage_app") {
-          return new Response(JSON.stringify({ error: "unsupported app card" }), {
+          return new Response(JSON.stringify(appCardChatNotFound
+            ? {
+              code: "CHAT_NOT_FOUND",
+              message: "redacted provider detail",
+            }
+            : { error: "unsupported app card" }), {
             headers: { "content-type": "application/json" },
-            status: 400,
+            status: appCardChatNotFound ? 404 : 400,
           });
         }
         return new Response(JSON.stringify({
