@@ -133,9 +133,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // tool path without adding a forbidden boot input. After merging the native-
 // memory relay restoration, macOS measured 10,276,559B total on 2026-08-06;
 // retain the established allowance above that combined measurement.
+//
+// Lazy-loading the rare hosted wake handlers reduced the exact macOS entry
+// from 1,729,632B to 1,636,957B and its static boot closure from 8,596,243B to
+// 8,453,351B on 2026-08-06. Total output measured 10,291,322B, so retain the
+// existing total ceiling while ratcheting both startup-path baselines.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_276_559 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_699_250;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_540_082;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_636_957;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_453_351;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
@@ -158,6 +163,10 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/contracts/dist/examples.js",
   "/query/dist/murph-age.js",
   "/query/dist/browser-replica/murph-age.js",
+  "/assistant-runtime/dist/hosted-runtime/events/assistant-notification.js",
+  "/assistant-runtime/dist/hosted-runtime/events/assistant-ask-completion.js",
+  "/assistant-runtime/dist/hosted-runtime/events/environment-voice.js",
+  "/assistant-runtime/dist/hosted-runtime/events/codex-auth.js",
 ] as const;
 
 const RUNNER_ENTRYPOINT_ALLOWED_BOOT_INPUT_MARKERS = [
