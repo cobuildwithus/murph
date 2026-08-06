@@ -12,37 +12,53 @@ type CopyState =
   | "loading"
   | "ready";
 
+interface ReferralLinkState {
+  identityKey: string;
+  signupUrl: string | null;
+  status: CopyState;
+}
+
 export function HostedSignupReferralLinkButton(props: {
   identityKey: string;
   signupUrl?: string | null;
 }) {
   const requestGeneration = useRef(0);
-  const [signupUrl, setSignupUrl] = useState(props.signupUrl ?? null);
-  const [state, setState] = useState<CopyState>(
-    props.signupUrl ? "ready" : "loading",
+  const [storedState, setStoredState] = useState<ReferralLinkState>(() =>
+    createReferralLinkState(props.identityKey, props.signupUrl)
   );
+  // Effects run after paint. Deriving a safe identity-scoped view here prevents
+  // the prior account's ready URL from surviving even one transition frame.
+  const state = storedState.identityKey === props.identityKey
+    ? storedState
+    : createReferralLinkState(props.identityKey, props.signupUrl);
 
   useEffect(() => {
+    const identityKey = props.identityKey;
     const generation = ++requestGeneration.current;
     if (props.signupUrl) {
-      setSignupUrl(props.signupUrl);
-      setState("ready");
+      setStoredState(createReferralLinkState(identityKey, props.signupUrl));
       return;
     }
 
-    setSignupUrl(null);
-    setState("loading");
+    setStoredState({
+      identityKey,
+      signupUrl: null,
+      status: "loading",
+    });
     const controller = new AbortController();
     void loadHostedSettingsSignupReferralLink(controller.signal)
-      .then((url) => {
+      .then((signupUrl) => {
         if (
           controller.signal.aborted
           || generation !== requestGeneration.current
         ) {
           return;
         }
-        setSignupUrl(url);
-        setState("ready");
+        setStoredState({
+          identityKey,
+          signupUrl,
+          status: "ready",
+        });
       })
       .catch(() => {
         if (
@@ -51,62 +67,88 @@ export function HostedSignupReferralLinkButton(props: {
         ) {
           return;
         }
-        setSignupUrl(null);
-        setState("load_error");
+        setStoredState({
+          identityKey,
+          signupUrl: null,
+          status: "load_error",
+        });
       });
     return () => controller.abort();
   }, [props.identityKey, props.signupUrl]);
 
   async function handleAction() {
-    if (state === "loading" || state === "copying") {
+    if (state.status === "loading" || state.status === "copying") {
       return;
     }
 
-    if (!signupUrl) {
+    const identityKey = props.identityKey;
+    if (!state.signupUrl) {
       const generation = ++requestGeneration.current;
-      setSignupUrl(null);
-      setState("loading");
+      setStoredState({
+        identityKey,
+        signupUrl: null,
+        status: "loading",
+      });
       try {
-        const url = await loadHostedSettingsSignupReferralLink();
+        const signupUrl = await loadHostedSettingsSignupReferralLink();
         if (generation !== requestGeneration.current) {
           return;
         }
-        setSignupUrl(url);
-        setState("ready");
+        setStoredState({
+          identityKey,
+          signupUrl,
+          status: "ready",
+        });
       } catch {
         if (generation !== requestGeneration.current) {
           return;
         }
-        setSignupUrl(null);
-        setState("load_error");
+        setStoredState({
+          identityKey,
+          signupUrl: null,
+          status: "load_error",
+        });
       }
       return;
     }
 
     const generation = requestGeneration.current;
-    setState("copying");
+    const signupUrl = state.signupUrl;
+    setStoredState({
+      identityKey,
+      signupUrl,
+      status: "copying",
+    });
     try {
       await navigator.clipboard.writeText(signupUrl);
       if (generation === requestGeneration.current) {
-        setState("copied");
+        setStoredState({
+          identityKey,
+          signupUrl,
+          status: "copied",
+        });
       }
     } catch {
       if (generation === requestGeneration.current) {
-        setState("copy_error");
+        setStoredState({
+          identityKey,
+          signupUrl,
+          status: "copy_error",
+        });
       }
     }
   }
 
   const label =
-    state === "loading"
+    state.status === "loading"
       ? "Loading..."
-      : state === "copying"
+      : state.status === "copying"
         ? "Copying..."
-        : state === "copied"
+        : state.status === "copied"
           ? "Copied"
-          : state === "load_error"
+          : state.status === "load_error"
             ? "Reload link"
-            : state === "copy_error"
+            : state.status === "copy_error"
               ? "Try copy again"
               : "Copy link";
 
@@ -114,12 +156,12 @@ export function HostedSignupReferralLinkButton(props: {
     <>
       <Button
         aria-label={
-          state === "load_error"
+          state.status === "load_error"
             ? "Reload your Murph referral link"
             : "Copy your Murph referral link"
         }
         className="h-auto px-0"
-        disabled={state === "loading" || state === "copying"}
+        disabled={state.status === "loading" || state.status === "copying"}
         onClick={handleAction}
         size="sm"
         type="button"
@@ -128,18 +170,29 @@ export function HostedSignupReferralLinkButton(props: {
         {label}
       </Button>
       <span aria-live="polite" className="sr-only">
-        {state === "copied"
+        {state.status === "copied"
           ? "Referral link copied."
-          : state === "load_error"
+          : state.status === "load_error"
             ? "Could not load the referral link."
-            : state === "copy_error"
+            : state.status === "copy_error"
               ? "Could not copy the referral link."
-              : state === "ready"
+              : state.status === "ready"
                 ? "Referral link ready to copy."
                 : ""}
       </span>
     </>
   );
+}
+
+function createReferralLinkState(
+  identityKey: string,
+  signupUrl?: string | null,
+): ReferralLinkState {
+  return {
+    identityKey,
+    signupUrl: signupUrl ?? null,
+    status: signupUrl ? "ready" : "loading",
+  };
 }
 
 async function loadHostedSettingsSignupReferralLink(
