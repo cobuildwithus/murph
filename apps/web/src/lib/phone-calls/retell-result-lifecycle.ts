@@ -11,7 +11,7 @@ const TRANSFERRED_CALL_CONTEXT_PREFIX =
 const TRANSFERRED_CALL_FOLLOW_UP =
   "Ask the user what happened after the handoff and whether the call goal was completed. Do not claim it was or was not completed. After the user confirms the details, offer a relevant next step such as a reminder when useful.";
 
-export type RetellResultWebhookEvent = "call_analyzed" | "transfer_ended";
+type RetellResultWebhookEvent = "call_analyzed" | "transfer_ended";
 
 /**
  * Returns the provider payload that may safely finalize Murph's call result.

@@ -77,6 +77,44 @@ describe("Retell phone-call result lifecycle", () => {
     })).toBeNull();
   });
 
+  it("builds a generic follow-up when transfer_ended has no analysis", () => {
+    const result = prepareRetellCallResult({
+      call: {
+        call_id: "retell_call_transfer",
+        transfer_end_timestamp: 1_782_408_600_000,
+      },
+      event: "transfer_ended",
+    });
+
+    expect(result.call_analysis?.custom_analysis_data).toMatchObject({
+      follow_up: expect.stringContaining("Ask the user what happened after the handoff"),
+      outcome: "needs_user",
+      result: expect.stringContaining("post-handoff outcome is unknown"),
+    });
+    expect(result.call_analysis?.custom_analysis_data?.result).not.toContain(
+      "Before the handoff",
+    );
+  });
+
+  it("ignores blank automated-leg context", () => {
+    const result = prepareRetellCallResult({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            result: "   ",
+          },
+        },
+        call_id: "retell_call_transfer",
+        transfer_end_timestamp: 1_782_408_600_000,
+      },
+      event: "transfer_ended",
+    });
+
+    expect(result.call_analysis?.custom_analysis_data?.result).not.toContain(
+      "Before the handoff",
+    );
+  });
+
   it("keeps useful pre-handoff context while making the final outcome uncertain", () => {
     const result = prepareRetellCallResult({
       call: {
