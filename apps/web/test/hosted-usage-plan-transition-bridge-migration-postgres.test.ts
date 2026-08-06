@@ -25,15 +25,16 @@ if (
 }
 
 describe("hosted usage-transition bridge corrective migration", () => {
-  it("keeps the rolling bridge identity and clears only impossible same-plan upgrades", () => {
+  it("keeps the rolling bridge identity and clears every impossible plan-upgrade shape", () => {
     expect(migrationSql).toContain(
       "CREATE OR REPLACE FUNCTION capture_hosted_member_usage_plan_transition()",
     );
     expect(migrationSql).toContain(
       'WHERE "usage_plan_transition_kind" = \'plan_upgrade\'',
     );
+    expect(migrationSql).toContain(") IS NOT TRUE;");
     expect(migrationSql).toContain(
-      '"usage_plan_transition_from_code" = "usage_plan_transition_to_code"',
+      '"usage_plan_transition_from_code" = \'launch_group_monthly\'',
     );
     expect(migrationSql.match(/\) IS TRUE;/gu)).toHaveLength(2);
     expect(migrationSql).toContain(
@@ -117,6 +118,16 @@ describe.skipIf(!runPostgresMigrationProof)(
               NULL,
               NULL,
               NULL
+            ),
+            (
+              'invalid_partial_marker',
+              NULL,
+              'launch_monthly',
+              '2026-08-05T16:00:00.000Z',
+              '2026-08-05T16:00:00.000Z',
+              NULL,
+              'plan_upgrade',
+              'launch_edge_monthly'
             );
         `);
 
@@ -142,6 +153,13 @@ describe.skipIf(!runPostgresMigrationProof)(
             transitionKind: null,
             transitionTo: null,
           }],
+        });
+
+        await expect(readTransition(client, "invalid_partial_marker")).resolves.toEqual({
+          transitionAt: null,
+          transitionFrom: null,
+          transitionKind: null,
+          transitionTo: null,
         });
 
         await client.query(`

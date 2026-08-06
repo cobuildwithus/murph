@@ -312,11 +312,13 @@ Last verified: 2026-08-05
   Pulse Trial loser cleanup validates exact provider targets before one short
   member-owner revalidation transaction and cancels them only after that
   transaction releases; no Stripe request is made while that lock is held.
-- Stripe receipts poison only after the normal attempt cap for failures that
-  remain proven permanent before the owning billing transaction commits.
-  Concrete Stripe/Prisma/network timeouts and every replay-safe post-commit
-  wake, cleanup, notification, or completion failure stay in the existing
-  bounded-backoff receipt lane. No second queue owns redrive.
+- Stripe receipts poison after the normal attempt cap when a failure remains
+  permanent, regardless of whether the owning billing transaction already
+  committed. Concrete Stripe/Prisma/network failures remain retryable, and a
+  committed entitlement's required runtime recheck is wrapped as an explicit
+  retryable obligation. Replay-safe cleanup or notification work does not gain
+  blanket retry authority merely because it runs post-commit. No second queue
+  owns redrive.
 - Immediate paid-plan upgrades use a one-item Customer Portal
   `subscription_update_confirm` session rather than a Murph-owned Subscription
   mutation or pending-invoice retry loop. Web takes the member lock only to

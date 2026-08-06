@@ -380,6 +380,7 @@ function assertHostedStripeSubscriptionLiveBillable(
 ): void {
   if (
     subscription.status === "active"
+    && subscription.cancel_at == null
     && subscription.cancel_at_period_end !== true
     && subscription.pause_collection == null
     && subscription.collection_method === "charge_automatically"

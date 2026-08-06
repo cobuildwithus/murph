@@ -194,6 +194,15 @@ class HostedStripeEventRetrieveRetryableError extends Error {
   }
 }
 
+class HostedStripeRuntimeRecheckPendingError extends Error {
+  readonly code = "HOSTED_STRIPE_RUNTIME_RECHECK_PENDING";
+
+  constructor(cause: unknown) {
+    super("Hosted runtime recheck remains pending.", { cause });
+    this.name = "HostedStripeRuntimeRecheckPendingError";
+  }
+}
+
 export type HostedStripeEventReconcileResult = {
   activatedMemberId: string | null;
   activatedMembers?: HostedStripeActivatedMemberOutcome[];
@@ -830,7 +839,6 @@ async function processClaimedHostedStripeEvent(
     eventType: claimed.type,
   });
   let usageCreditEventHandled = false;
-  let postCommitRecoveryRequired = false;
 
   try {
     const stripeEvent = await fetchHostedStripeEventForReconciliation(claimed.eventId);
@@ -889,13 +897,6 @@ async function processClaimedHostedStripeEvent(
         subscriptionId: legacyFamilySubscriptionId,
       });
     }
-    // Everything below this point is replay-safe post-commit work. Once the
-    // billing transaction has committed, operational failures must keep the
-    // receipt claimable even after the normal poison threshold so that the
-    // existing receipt workflow can finish the wake/cleanup side effects.
-    // Legacy Family cleanup stays above this boundary because its explicit
-    // terminal provider invariants must still poison at the shared cap.
-    postCommitRecoveryRequired = true;
     const runtimeRecheckMemberIds = new Set(result.runtimeRecheckMemberIds);
     if (usageCreditReconciliation.handled && usageCreditReconciliation.wakeRequired) {
       runtimeRecheckMemberIds.add(usageCreditReconciliation.beneficiaryMemberId);
@@ -1017,7 +1018,7 @@ async function processClaimedHostedStripeEvent(
       !(error instanceof HostedStripeCheckoutLoserCleanupPendingError) &&
       !(error instanceof HostedStripeSubscriptionIdentityPendingError) &&
       !(error instanceof HostedStripeEventRetrieveRetryableError) &&
-      !postCommitRecoveryRequired &&
+      !(error instanceof HostedStripeRuntimeRecheckPendingError) &&
       !usageCreditEventHandled &&
       !isHostedUsageCreditStripeRetryableError(error) &&
       !isHostedStripeEventOperationallyRetryableError(error);
@@ -1070,7 +1071,8 @@ function isHostedStripeEventOperationallyRetryableError(
     return true;
   }
   if (error instanceof Prisma.PrismaClientInitializationError) {
-    return true;
+    return typeof error.errorCode === "string" &&
+      STRIPE_EVENT_RETRYABLE_PRISMA_CODES.has(error.errorCode);
   }
   if (
     error instanceof Prisma.PrismaClientKnownRequestError
@@ -1083,7 +1085,6 @@ function isHostedStripeEventOperationallyRetryableError(
     && (
       error.name === "AbortError"
       || error.name === "TimeoutError"
-      || error.name === "PrismaClientUnknownRequestError"
       || error.name === "PrismaClientRustPanicError"
     )
   ) {
@@ -1615,11 +1616,12 @@ async function signalHostedBillingRuntimeRecheckIgnoringInactive(input: {
     });
   } catch (error) {
     if (
-      !isHostedOnboardingError(error)
-      || error.code !== "HOSTED_RUNTIME_USER_INACTIVE"
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_RUNTIME_USER_INACTIVE"
     ) {
-      throw error;
+      return;
     }
+    throw new HostedStripeRuntimeRecheckPendingError(error);
   }
 }
 

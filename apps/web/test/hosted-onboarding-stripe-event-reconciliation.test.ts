@@ -641,6 +641,44 @@ describe("hosted Stripe event reconciliation", () => {
     errorSpy.mockRestore();
   });
 
+  it("poisons a permanent post-commit cleanup failure at the shared cap", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutCompletedEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeCheckoutCompleted.mockResolvedValue({
+      activatedMemberId: null,
+      cleanupStandardCheckoutStripeSubscriptionId: "sub_loser",
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+    mocks.cleanupHostedStandardCheckoutLoser.mockRejectedValue(
+      Object.assign(new Error("Stripe rejected cleanup"), {
+        statusCode: 400,
+        type: "StripeInvalidRequestError",
+      }),
+    );
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 6,
+      processedAt: null,
+      status: HostedStripeEventStatus.poisoned,
+    }));
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted Stripe event reconciliation failed.",
+      expect.objectContaining({ poisoned: true }),
+    );
+    errorSpy.mockRestore();
+  });
+
   it("reconciles usage-credit Checkout before subscription-shaped handling", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeCheckoutCompletedEvent();
@@ -875,6 +913,69 @@ describe("hosted Stripe event reconciliation", () => {
     errorSpy.mockRestore();
   });
 
+  it("keeps a concrete transient Prisma initialization failure claimable", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeInvoicePaid.mockRejectedValueOnce(
+      new Prisma.PrismaClientInitializationError(
+        "database unavailable",
+        "7.8.0",
+        "P1001",
+      ),
+    );
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 6,
+      status: HostedStripeEventStatus.failed,
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it.each([
+    [
+      "a permanent Prisma initialization failure",
+      new Prisma.PrismaClientInitializationError(
+        "database authentication failed",
+        "7.8.0",
+        "P1000",
+      ),
+    ],
+    [
+      "an unclassified Prisma request failure",
+      Object.assign(new Error("unknown database request failure"), {
+        name: "PrismaClientUnknownRequestError",
+      }),
+    ],
+  ])("poisons %s at the shared cap", async (_label, failure) => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeInvoicePaid.mockRejectedValueOnce(failure);
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 6,
+      status: HostedStripeEventStatus.poisoned,
+    }));
+    errorSpy.mockRestore();
+  });
+
   it("keeps a committed billing wake claimable after a generic sixth-attempt post-commit failure", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeInvoicePaidEvent();
@@ -902,6 +1003,7 @@ describe("hosted Stripe event reconciliation", () => {
     })).resolves.toMatchObject({ status: "failed" });
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       attemptCount: 6,
+      lastErrorCode: "HOSTED_STRIPE_RUNTIME_RECHECK_PENDING",
       processedAt: null,
       status: HostedStripeEventStatus.failed,
     }));

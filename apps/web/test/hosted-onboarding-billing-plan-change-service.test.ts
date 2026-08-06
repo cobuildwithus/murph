@@ -227,6 +227,7 @@ describe("upgradeHostedBillingPlan", () => {
   test.each([
     ["trialing status", { status: "trialing" as const }],
     ["past-due status", { status: "past_due" as const }],
+    ["scheduled cancellation", { cancelAt: 1_800_000_000 }],
     ["period-end cancellation", { cancelAtPeriodEnd: true }],
     ["collection pause", { pauseCollection: true }],
     ["manual invoices", { collectionMethod: "send_invoice" as const }],
@@ -397,6 +398,7 @@ function makeBillingRef(input: {
 }
 
 function makeSubscription(input: {
+  cancelAt?: number;
   cancelAtPeriodEnd?: boolean;
   collectionMethod?: Stripe.Subscription.CollectionMethod;
   customer?: string;
@@ -448,6 +450,7 @@ function makeSubscription(input: {
     });
   }
   return {
+    cancel_at: input.cancelAt ?? null,
     cancel_at_period_end: input.cancelAtPeriodEnd ?? false,
     collection_method: input.collectionMethod ?? "charge_automatically",
     customer: input.customer ?? "cus_fixture",

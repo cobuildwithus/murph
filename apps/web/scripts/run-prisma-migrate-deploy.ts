@@ -127,6 +127,12 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     // removing it only permits independent automatic refill purchases.
     new Set(["ADD CONSTRAINT CHECK", "DROP INDEX"]),
   ],
+  [
+    "20260806170000_hosted_pulse_trial_start_source",
+    // The new provenance column is nullable and the check accepts null, so
+    // old writers remain valid throughout the Vercel deploy window.
+    new Set(["ADD CONSTRAINT CHECK"]),
+  ],
 ]);
 
 const incompatiblePredeploySqlPatterns = [

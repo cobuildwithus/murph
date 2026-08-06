@@ -1179,7 +1179,7 @@ describe("HostedBillingSettings", () => {
     assert.match(unavailableMarkup, /Finishing your Pulse update/);
   });
 
-  test("does not render Pulse trial affordances for a non-Pulse trial-shaped phase", async () => {
+  test("uses the canonical billing-phase rule for an active Pulse trial", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
@@ -1194,8 +1194,25 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Pulse/);
-    assert.match(markup, /Pulse is not active/);
-    assert.doesNotMatch(markup, /Current plan|Free trial|Start Pulse plan/);
+    assert.match(markup, /Free trial/);
+    assert.doesNotMatch(markup, /Pulse is not active|Start Pulse plan/);
+  });
+
+  test("does not show contradictory plan-choice copy while an update is syncing", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "past_due",
+      currentBillingPlanCode: "launch_monthly",
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      planChangePending: true,
+    }));
+
+    assert.doesNotMatch(markup, /Choose a plan below/);
+    assert.match(markup, /Manage billing/);
   });
 
   test("renders retained inactive billing as lapsed with a recovery path", async () => {
@@ -1262,6 +1279,7 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /Sponsored/);
     assert.match(markup, /Billing is managed by your Family plan owner/);
+    assert.doesNotMatch(markup, /Current plan/);
     assert.doesNotMatch(
       markup,
       />Choose (?:Pulse|Edge)<\/button>|>Manage (?:Family )?billing<\/(?:a|button)>/,

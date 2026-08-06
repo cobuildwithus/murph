@@ -10,10 +10,9 @@ import { Progress } from "@/src/components/ui/progress";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import {
   HOSTED_FAMILY_PLAN_DISPLAY,
-  HOSTED_PULSE_TRIAL_OFFER,
   formatHostedBillingPrice,
   getHostedBillingPlanDefinition,
-  parseHostedBillingCheckoutOffer,
+  isHostedPulseTrialBillingState,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
@@ -118,7 +117,6 @@ export function HostedBillingSettings(props: {
 
   const currentPlanCode = parseHostedBillingPlanCode(props.currentBillingPlanCode);
   const currentPhase = parseHostedBillingPhase(props.currentBillingPhase);
-  const currentOffer = parseHostedBillingCheckoutOffer(props.currentCheckoutOffer);
   const scheduledPlanCode = parseHostedBillingPlanCode(props.scheduledBillingPlanCode);
   const scheduledBillingEffectiveAt =
     props.scheduledBillingEffectiveAt instanceof Date ? props.scheduledBillingEffectiveAt : null;
@@ -133,8 +131,10 @@ export function HostedBillingSettings(props: {
   const pulseTrialActive =
     ownBillingActive &&
     currentPlanCode === "launch_monthly" &&
-    currentPhase === "trial" &&
-    currentOffer === HOSTED_PULSE_TRIAL_OFFER;
+    isHostedPulseTrialBillingState({
+      currentBillingPhase: props.currentBillingPhase,
+      currentCheckoutOffer: props.currentCheckoutOffer,
+    });
   const groupCurrent =
     ownPaidBillingActive && currentPlanCode === "launch_group_monthly";
   const pulseCurrent =
@@ -316,11 +316,13 @@ export function HostedBillingSettings(props: {
       ),
     },
     {
-      action: familyCurrent
-        ? <CurrentPlanButton />
-        : props.canStartFamily === true
-          ? <HostedFamilyStartButton block label="Choose Family" />
-          : null,
+      action: sponsoredMember
+        ? null
+        : familyOwner
+          ? <CurrentPlanButton />
+          : props.canStartFamily === true
+            ? <HostedFamilyStartButton block label="Choose Family" />
+            : null,
       current: familyCurrent,
       currentLabel: familyState === "sponsored" ? "Sponsored" : "Current plan",
       features: FAMILY_FEATURES,
@@ -338,7 +340,7 @@ export function HostedBillingSettings(props: {
     ? getHostedBillingPlanDefinition(currentPlanCode)
     : null;
   const noPlanText = retainedPlan
-    ? `${retainedPlan.displayName} is not active. Choose a plan below or use Manage billing to recover it.`
+    ? `${retainedPlan.displayName} is not active. Choose a plan below or use Manage billing.`
     : props.billingStatus === "active"
       ? "Your billing status is still syncing. Use Manage billing if it does not resolve."
       : "You're not on a paid plan yet. Choose one below.";
@@ -362,7 +364,7 @@ export function HostedBillingSettings(props: {
           </div>
         </div>
       ) : null}
-      {!planResolved ? (
+      {!planResolved && !props.planChangePending && !props.groupPaymentMethodSaved ? (
         <p className="text-sm text-pretty text-muted-foreground">{noPlanText}</p>
       ) : null}
       <PlanUsageBand

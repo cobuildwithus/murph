@@ -1134,16 +1134,6 @@ export async function readHostedMemberFamilyBillingClaim(input: {
       status: "active",
     },
   });
-  if (
-    memberships.length > 0
-    && memberships.every(({ group }) => group.ownerMemberId === input.memberId)
-    && await hasHostedFamilyMemberLiveDirectSubscription({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    })
-  ) {
-    return null;
-  }
   const claims: HostedMemberFamilyBillingClaim[] = [];
   for (const { group } of memberships) {
     if (

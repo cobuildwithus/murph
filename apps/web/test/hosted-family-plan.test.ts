@@ -477,14 +477,8 @@ describe("hosted Family plan", () => {
     expect(tx.hostedMember.findUnique).not.toHaveBeenCalled();
   });
 
-  it("keeps the Family owner's live direct subscription as the canonical Family handoff", async () => {
+  it("retains the Family owner's claim until the event proves the exact handoff subscription", async () => {
     const tx = createTxMock();
-    tx.hostedMember.findUnique.mockResolvedValueOnce({
-      billingRef: {
-        stripeSubscriptionIdEncrypted: "encrypted:sub_family",
-      },
-      billingStatus: HostedBillingStatus.active,
-    });
     tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([{
       group: {
         billingRef: {
@@ -502,7 +496,12 @@ describe("hosted Family plan", () => {
     await expect(readHostedMemberFamilyBillingClaim({
       memberId: "member_owner",
       prisma: tx,
-    })).resolves.toBeNull();
+    })).resolves.toEqual({
+      groupId: "hbag_family",
+      kind: "active_sponsorship",
+      ownerMemberId: "member_owner",
+    });
+    expect(tx.hostedMember.findUnique).not.toHaveBeenCalled();
   });
 
   it("clears only the exact expired Family Checkout attempt", async () => {

@@ -5,9 +5,9 @@ BEGIN;
 -- continue to use the same compatibility bridge.
 LOCK TABLE "hosted_member_billing_ref" IN ACCESS EXCLUSIVE MODE;
 
--- A plan upgrade can never have the same source and target plan. The nullable
--- boolean bug in the original bridge is the only path that stamped these
--- markers, so this predicate does not erase a valid transition.
+-- Keep only the three directed plan upgrades recognized by the bridge. The
+-- original nullable boolean branch could stamp arbitrary or partial marker
+-- shapes, so equality alone is not a complete repair.
 UPDATE "hosted_member_billing_ref"
 SET
   "usage_plan_transition_at" = NULL,
@@ -15,8 +15,16 @@ SET
   "usage_plan_transition_kind" = NULL,
   "usage_plan_transition_to_code" = NULL
 WHERE "usage_plan_transition_kind" = 'plan_upgrade'
-  AND "usage_plan_transition_from_code" IS NOT NULL
-  AND "usage_plan_transition_from_code" = "usage_plan_transition_to_code";
+  AND (
+    (
+      "usage_plan_transition_from_code" = 'launch_group_monthly'
+      AND "usage_plan_transition_to_code" IN ('launch_monthly', 'launch_edge_monthly')
+    )
+    OR (
+      "usage_plan_transition_from_code" = 'launch_monthly'
+      AND "usage_plan_transition_to_code" = 'launch_edge_monthly'
+    )
+  ) IS NOT TRUE;
 
 CREATE OR REPLACE FUNCTION capture_hosted_member_usage_plan_transition()
 RETURNS TRIGGER

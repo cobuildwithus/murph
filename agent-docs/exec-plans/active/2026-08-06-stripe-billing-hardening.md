@@ -96,30 +96,32 @@ Updated: 2026-08-06
 
 - Prefer deletion and narrow extensions of current owners over a new billing
   orchestration layer.
+- Keep the Family-owner exception at the event classifier, where the exact
+  Stripe subscription and Family group identity are both available. The
+  general Family-claim read remains fail-closed.
+- Keep only explicit retry authority: concrete transient provider/database
+  errors and the typed committed runtime-recheck obligation may pass the poison
+  cap; post-commit placement alone is not retry evidence.
 - Treat the current sponsored personal-trial row as an operational follow-up;
   this code task will not mutate production Stripe state.
 
 ## Verification
 
-- Focused Vitest proof: 241 core billing/event tests, 113 Settings tests, 326
-  store/service tests, and the individually rerun Family, usage, reconciliation,
-  checkout, policy, status, and billing-event owners all pass.
+- Focused Vitest proof after parent remediation: 246 core billing/event tests,
+  114 Settings tests, and 371 store/service/migration tests pass.
 - PostgreSQL proof: all 165 migrations, including the transition-bridge repair,
   deploy into the isolated worktree database; the new migration proof and
   Stripe webhook entitlement suite pass 5/5 with serial Postgres execution.
 - Static proof: `pnpm --dir apps/web typecheck`, `pnpm --dir apps/web lint`
   (zero errors; 38 unchanged warnings), `pnpm test:frontend-design-proof`, and
   `git diff --check` pass.
-- Rendered proof: the real catalog components were inspected at desktop and
-  mobile native resolutions for pending-upgrade and Family-sponsored states;
-  both uploaded evidence URLs return HTTP 200 PNG responses. A fresh Claude
-  Fable review returned PASS for pending recovery context, sponsored ownership,
-  and lapsed-plan truthfulness.
-- Unrelated blocker: `production-migration-guard.test.ts` currently fails two
-  assertions because the pre-existing committed
-  `20260806170000_hosted_pulse_trial_start_source` migration contains
-  `ADD CONSTRAINT CHECK` without the guard's frozen exemption. This candidate
-  neither changes that migration nor introduces the flagged pattern.
+- Rendered proof: the real catalog components were inspected at 2368×1222
+  desktop and 700×1712 mobile native resolutions for pending-upgrade and
+  Family-sponsored states; both uploaded evidence URLs pass the delivery
+  check. The sponsored state has no self-service or disabled pseudo-action.
+- Production migration guard proof passes after narrowly documenting the
+  nullable provenance check as rolling-deploy compatible; the exception test
+  proves unrelated destructive DDL still fails closed.
 - Remaining: push the candidate, run exact-head preliminary specialists and
   final ReviewGPT round 1 concurrently with GitHub Actions, resolve any accepted
   findings, then close this plan with final exact-head evidence.
