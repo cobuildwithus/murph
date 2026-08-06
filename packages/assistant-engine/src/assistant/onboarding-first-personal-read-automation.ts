@@ -20,7 +20,7 @@ export const MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS = [
   'Authority and current context:',
   '- First run `vault-cli assistant onboarding status --format json`. Return skip unless onboarding is completed with reason `user_answered`.',
   '- Read the current committed private conversation before analysis and again immediately before composing. A newer urgent, acute, grieving, safety-sensitive, approval, booking, purchase, or otherwise unresolved task wins; return skip rather than interrupting it.',
-  '- Return skip when a recent proactive health question from Murph is still unanswered. Do not stack another unsolicited question merely because this one-shot became due.',
+  '- Return skip when a substantive proactive health question, decision, or requested action from Murph is still waiting for the member. A generic closing invitation such as `anything else?` is not an unresolved task and does not block this promised first read.',
   '- Read `vault-cli knowledge show weekly-health-insights`. If the page is missing, treat that as no prior personal insights. Do not repeat a finding already captured there.',
   '',
   'Targeted evidence pass:',
