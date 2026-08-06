@@ -32,6 +32,18 @@ describe("hosted signup referral UX", () => {
     });
   });
 
+  it("keeps stable links out of indexes and referrer headers", async () => {
+    const page = await import("../app/r/[referralCode]/page");
+
+    expect(page.metadata).toMatchObject({
+      referrer: "no-referrer",
+      robots: {
+        follow: false,
+        index: false,
+      },
+    });
+  });
+
   it("explains attribution without implying shared health access", async () => {
     const page = await import("../app/r/[referralCode]/page");
     const markup = renderToStaticMarkup(await page.default({
