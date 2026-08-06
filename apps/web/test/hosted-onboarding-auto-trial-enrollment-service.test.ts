@@ -429,6 +429,48 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     });
   });
 
+  it("preserves trial activation while suppressing companion-admission welcome effects", async () => {
+    const prisma = makePrisma();
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+        suppressSignupWelcome: true,
+      }),
+    ).resolves.toEqual({
+      redirectPath: "/home",
+      status: "enrolled",
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        billingStatus: HostedBillingStatus.active,
+        currentBillingPhase: "trial",
+      }),
+    );
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_123",
+        suppressSignupWelcome: true,
+      }),
+    );
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalledWith({
+        hostedExecutionEventId: "member.activated:auto-trial",
+        memberId: "member_123",
+        prisma,
+        source: "auto-pulse-trial.activation",
+      });
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+      .not.toHaveBeenCalled();
+  });
+
   it("keeps Stripe recovery and creation outside transactions but serializes the final authority read", async () => {
     const prisma = makePrisma();
     mocks.stripe.subscriptions.list.mockImplementationOnce(async () => {
