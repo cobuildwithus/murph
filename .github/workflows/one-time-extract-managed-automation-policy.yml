@@ -1,0 +1,50 @@
+name: One-time managed automation test repair source
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-only:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+          const { spawnSync } = require('node:child_process')
+
+          const workflow = fs
+            .readFileSync(
+              '.github/workflows/one-time-repair-managed-automation-tests.yml',
+              'utf8',
+            )
+            .replaceAll('\r\n', '\n')
+          const startMarker = "          @'\n"
+          const endMarker = "\n          '@ | python -"
+          const start = workflow.indexOf(startMarker)
+          if (start < 0) {
+            throw new Error('Repair script start marker not found.')
+          }
+          const bodyStart = start + startMarker.length
+          const end = workflow.indexOf(endMarker, bodyStart)
+          if (end < 0) {
+            throw new Error('Repair script end marker not found.')
+          }
+          const script = workflow
+            .slice(bodyStart, end)
+            .split('\n')
+            .map((line) => line.startsWith('          ') ? line.slice(10) : line)
+            .join('\n')
+          const python = process.platform === 'win32' ? 'python' : 'python3'
+          const result = spawnSync(python, ['-c', script], {
+            stdio: 'inherit',
+          })
+          if (result.error) {
+            throw result.error
+          }
+          if (result.status !== 0) {
+            process.exit(result.status ?? 1)
+          }
+          NODE
