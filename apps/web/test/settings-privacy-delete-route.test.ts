@@ -93,7 +93,8 @@ describe("settings privacy delete route", () => {
     expect(settingsPrivacyDeleteRoute.maxDuration).toBe(300);
   });
 
-  it("uses member auth, not active-member auth, before deleting account data", async () => {
+  it("uses member auth and a valid challenge despite the retired maintenance flag", async () => {
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
     const request = new Request("https://join.example.test/api/settings/privacy/delete", {
       body: JSON.stringify({
         authorization: {

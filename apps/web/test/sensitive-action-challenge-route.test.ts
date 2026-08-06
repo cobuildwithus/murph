@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
@@ -45,11 +45,16 @@ describe("settings sensitive-action challenge route", () => {
     });
   });
 
-  it("derives the binding from the authenticated member and session", async () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("derives the account-delete binding when the retired maintenance flag remains set", async () => {
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
     const response = await route.POST(new Request(
       "https://join.example.test/api/settings/sensitive-action-challenge",
       {
-        body: JSON.stringify({ kind: "vault.export" }),
+        body: JSON.stringify({ kind: "account.delete" }),
         headers: {
           "content-type": "application/json",
           origin: "https://join.example.test",
@@ -61,13 +66,13 @@ describe("settings sensitive-action challenge route", () => {
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.buildSettingsSensitiveActionBinding).toHaveBeenCalledWith({
-      kind: "vault.export",
+      kind: "account.delete",
       memberId: "member_123",
       sessionId: "session_123",
     });
     expect(mocks.createSensitiveActionChallenge).toHaveBeenCalledWith({
       bindingHash: "a".repeat(64),
-      kind: "vault.export",
+      kind: "account.delete",
       memberId: "member_123",
       prisma: mocks.prisma,
     });

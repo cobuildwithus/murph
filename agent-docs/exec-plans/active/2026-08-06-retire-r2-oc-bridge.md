@@ -70,3 +70,7 @@ Updated: 2026-08-06
   ignored Health Commons catalog artifacts.
 - The hosted-execution suite passed 44 files and 484 tests. Workspace package
   incremental build, docs drift, and `git diff --check` also passed.
+- Preliminary specialist review found that the account-deletion success tests
+  did not prove behavior while the retired maintenance environment value still
+  existed during rollout. The existing success checks now run with that stale
+  value set; the focused two-file Web route run passed all seven checks.
