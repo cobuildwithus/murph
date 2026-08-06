@@ -9,41 +9,182 @@ permissions:
   contents: write
 
 concurrency:
-  group: agent-telegram-scheduled-phone-calls
+  group: agent-telegram-scheduled-phone-calls-v2
   cancel-in-progress: false
 
 jobs:
   apply:
-    if: ${{ github.actor != 'github-actions[bot]' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    if: contains(github.event.head_commit.message, '[agent-bootstrap]')
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
+          persist-credentials: true
 
-      - name: Apply repository-wide patch
+      - name: Apply the reviewed routing correction
         shell: python
         run: |
+          from __future__ import annotations
+
           from pathlib import Path
           import re
 
           def replace_once(path: str, old: str, new: str) -> None:
               target = Path(path)
-              text = target.read_text()
-              if text.count(old) != 1:
-                  raise SystemExit(f"expected one replacement anchor in {path!r}, found {text.count(old)}")
-              target.write_text(text.replace(old, new, 1))
+              text = target.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"expected one replacement anchor in {path!r}, found {count}: {old[:120]!r}"
+                  )
+              target.write_text(text.replace(old, new, 1), encoding="utf-8")
 
+          def insert_before(path: str, marker: str, addition: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              count = text.count(marker)
+              if count != 1:
+                  raise SystemExit(
+                      f"expected one insertion anchor in {path!r}, found {count}: {marker[:120]!r}"
+                  )
+              target.write_text(text.replace(marker, addition + marker, 1), encoding="utf-8")
+
+          Path("apps/web/app/api/internal/phone-calls/route.ts").write_text(
+              '''import { hostedPhoneCallStartRequestSchema } from "@murphai/hosted-execution/phone-calls";
+
+          import {
+            requireHostedCloudflareCallbackRequest,
+          } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+          import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+          import { readRawBodyBuffer } from "@/src/lib/http";
+          import {
+            createHostedPhoneCall,
+          } from "@/src/lib/phone-calls/service";
+
+          const HOSTED_PHONE_CALL_START_MAX_BODY_BYTES = 64 * 1024;
+
+          export const POST = withJsonError(async (request: Request) => {
+            const rawBody = (await readRawBodyBuffer(request, {
+              limitBytes: HOSTED_PHONE_CALL_START_MAX_BODY_BYTES,
+            })).toString("utf8");
+            const memberId = await requireHostedCloudflareCallbackRequest(request, {
+              maxBodyBytes: HOSTED_PHONE_CALL_START_MAX_BODY_BYTES,
+              payloadText: rawBody,
+            });
+            const payload = hostedPhoneCallStartRequestSchema.parse(JSON.parse(rawBody));
+            const response = await createHostedPhoneCall({
+              brief: payload.brief,
+              ...(payload.groupRequester
+                ? { groupRequester: payload.groupRequester }
+                : {}),
+              ...(payload.inboundMailboxItemIds
+                ? { inboundMailboxItemIds: payload.inboundMailboxItemIds }
+                : {}),
+              memberId,
+              originSessionId: payload.originSessionId,
+              requestKey: payload.requestKey,
+              ...(payload.resultNotificationChannel
+                ? { resultNotificationChannel: payload.resultNotificationChannel }
+                : {}),
+              signal: request.signal,
+            });
+
+            return jsonOk(response, 202);
+          });
+          '''.replace("          ", ""),
+              encoding="utf-8",
+          )
+
+          schema_path = Path("apps/web/prisma/schema.prisma")
+          schema = schema_path.read_text(encoding="utf-8")
+          if "enum HostedPhoneCallResultNotificationChannel" not in schema:
+              schema = schema.replace(
+                  "enum HostedPhoneCallStatus {\n",
+                  "enum HostedPhoneCallResultNotificationChannel {\n  linq\n  telegram\n}\n\nenum HostedPhoneCallStatus {\n",
+                  1,
+              )
+          if "resultNotificationChannel" not in schema:
+              schema = schema.replace(
+                  '  originSessionId String?              @map("origin_session_id")\n',
+                  '  originSessionId String?              @map("origin_session_id")\n  resultNotificationChannel HostedPhoneCallResultNotificationChannel? @map("result_notification_channel")\n',
+                  1,
+              )
+          schema_path.write_text(schema, encoding="utf-8")
+
+          Path(
+              "apps/web/prisma/migrations/20260806150000_hosted_phone_call_result_notification_channel/migration.sql"
+          ).write_text(
+              '''-- Freeze only the bounded direct surface needed to route an asynchronous
+          -- phone-call result. No phone number, chat id, or call content is stored here.
+          BEGIN;
+          SET LOCAL lock_timeout = '5s';
+
+          CREATE TYPE "HostedPhoneCallResultNotificationChannel"
+            AS ENUM ('linq', 'telegram');
+
+          ALTER TABLE "hosted_phone_call"
+            ADD COLUMN "result_notification_channel"
+              "HostedPhoneCallResultNotificationChannel";
+
+          COMMIT;
+          '''.replace("          ", ""),
+              encoding="utf-8",
+          )
+
+          service_path = "apps/web/src/lib/phone-calls/service.ts"
           replace_once(
-              "apps/web/prisma/schema.prisma",
-              '  originSessionId String?              @map("origin_session_id")\n  provider       String                @default("retell")\n',
-              '  originSessionId           String?                                    @map("origin_session_id")\n  resultNotificationChannel HostedPhoneCallResultNotificationChannel? @map("result_notification_channel")\n  provider                  String                                     @default("retell")\n',
+              service_path,
+              '''  const notificationDestination = await resolveNotificationDestination({
+            ...(input.resultNotificationChannel
+              ? { directChannel: input.resultNotificationChannel }
+              : {}),
+            memberId: input.memberId,
+            signal: input.signal,
+          });
+          input.signal.throwIfAborted();
+          let reassertGroupRequesterAuthority: (() => Promise<void>) | null = null;
+          if (isHostedThreadContainerNotificationDestination(notificationDestination)) {'''.replace("          ", ""),
+              '''  const notificationDestination = await resolveNotificationDestination({
+            ...(input.resultNotificationChannel
+              ? { directChannel: input.resultNotificationChannel }
+              : {}),
+            memberId: input.memberId,
+            signal: input.signal,
+          });
+          input.signal.throwIfAborted();
+          const threadContainerDestination =
+            isHostedThreadContainerNotificationDestination(notificationDestination);
+          if (
+            input.resultNotificationChannel
+            && (
+              threadContainerDestination
+              || notificationDestination.route.channel
+                !== input.resultNotificationChannel
+            )
+          ) {
+            throw new Error(
+              "Hosted phone call result notification channel does not match the direct route.",
+            );
+          }
+          let reassertGroupRequesterAuthority: (() => Promise<void>) | null = null;
+          if (threadContainerDestination) {'''.replace("          ", ""),
           )
           replace_once(
-              "apps/web/prisma/schema.prisma",
-              "enum HostedPhoneCallStatus {\n",
-              "enum HostedPhoneCallResultNotificationChannel {\n  linq\n  telegram\n}\n\nenum HostedPhoneCallStatus {\n",
+              service_path,
+              '''  if (
+            input.call.resultNotificationChannel !== null
+            && input.resultNotificationChannel !== null
+            && input.call.resultNotificationChannel !== input.resultNotificationChannel
+          ) {
+            throw new Error("Hosted phone call request key collision.");
+          }'''.replace("          ", ""),
+              '''  if (
+            input.call.resultNotificationChannel !== input.resultNotificationChannel
+          ) {
+            throw new Error("Hosted phone call request key collision.");
+          }'''.replace("          ", ""),
           )
 
           replace_once(
@@ -57,78 +198,545 @@ jobs:
               '["direct Telegram occurrence", "telegram", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", true],\n',
           )
 
-          fixture_paths = [
-              "apps/cloudflare/test/hosted-local-phone-call-group-roundtrip-e2e.test.ts",
-              "apps/cloudflare/test/hosted-local-retell-call-result-roundtrip-e2e.test.ts",
-              "apps/cloudflare/test/hosted-local-retell-group-call-result-roundtrip-e2e.test.ts",
-              "apps/web/test/phone-calls-service.test.ts",
-              "apps/web/test/phone-calls-webhook-target.test.ts",
-          ]
-          for fixture_path in fixture_paths:
-              target = Path(fixture_path)
-              text = target.read_text()
-              marker = "function buildHostedPhoneCall("
-              start = text.find(marker)
-              if start < 0:
-                  raise SystemExit(f"missing HostedPhoneCall fixture builder in {fixture_path}")
-              next_function = text.find("\nfunction ", start + len(marker))
-              end = next_function if next_function >= 0 else len(text)
-              block = text[start:end]
-              if "resultNotificationChannel:" in block:
+          for fixture_path in Path("apps").rglob("*.ts"):
+              text = fixture_path.read_text(encoding="utf-8")
+              if "HostedPhoneCall" not in text or "function buildHostedPhoneCall(" not in text:
                   continue
-              match = re.search(
-                  r"(?m)^(\s*)originSessionId:\s*[^\n]+,\n",
-                  block,
+              cursor = 0
+              changed = False
+              while True:
+                  start = text.find("function buildHostedPhoneCall(", cursor)
+                  if start < 0:
+                      break
+                  next_function = text.find("\nfunction ", start + 1)
+                  end = next_function if next_function >= 0 else len(text)
+                  block = text[start:end]
+                  if "resultNotificationChannel:" not in block:
+                      match = re.search(
+                          r"(?m)^(\s*)originSessionId:\s*[^\n]+,\n",
+                          block,
+                      )
+                      if not match:
+                          raise SystemExit(
+                              f"missing originSessionId fixture field in {fixture_path}"
+                          )
+                      insertion = (
+                          match.group(0)
+                          + f"{match.group(1)}resultNotificationChannel: null,\n"
+                      )
+                      block = block[:match.start()] + insertion + block[match.end():]
+                      text = text[:start] + block + text[end:]
+                      end = start + len(block)
+                      changed = True
+                  cursor = end
+              if changed:
+                  fixture_path.write_text(text, encoding="utf-8")
+
+          replace_once(
+              "apps/web/test/hosted-assistant-notification-destination.test.ts",
+              '''  assertHostedAssistantNotificationRouteAuthority,
+            isHostedThreadContainerNotificationDestination,
+            resolveHostedAssistantNotificationDestination,
+          } from "../src/lib/hosted-routing/assistant-notification-destination";'''.replace("          ", ""),
+              '''  assertHostedAssistantNotificationRouteAuthority,
+            isHostedThreadContainerNotificationDestination,
+            requireHostedAssistantNotificationDestination,
+            resolveHostedAssistantNotificationDestination,
+          } from "../src/lib/hosted-routing/assistant-notification-destination";'''.replace("          ", ""),
+          )
+          replace_once(
+              "apps/web/test/hosted-assistant-notification-destination.test.ts",
+              '''    const frozen = await resolveHostedAssistantNotificationDestination({
+              directChannel: "telegram",'''.replace("          ", ""),
+              '''    const frozen = await requireHostedAssistantNotificationDestination({
+              directChannel: "telegram",'''.replace("          ", ""),
+          )
+
+          Path("apps/web/test/phone-call-result-notification-channel.test.ts").write_text(
+              '''import type { HostedPhoneCall } from "@prisma/client";
+          import type { HostedPhoneCallBrief } from "@murphai/hosted-execution/phone-calls";
+          import { describe, expect, it, vi } from "vitest";
+
+          import { createHostedPhoneCall } from "../src/lib/phone-calls/service";
+
+          const BRIEF: HostedPhoneCallBrief = {
+            allowTransferToUser: false,
+            goal: "Confirm the reservation.",
+            instructions: [],
+            shareableFacts: {},
+            successCriteria: "The reservation status is known.",
+            timeZone: "America/New_York",
+            to: { phoneNumber: "+14045550123" },
+          };
+          const SCHEDULED_REQUEST_KEY = `phone_call_scheduled_${"a".repeat(64)}`;
+
+          const LINQ_DESTINATION = directDestination("linq");
+          const TELEGRAM_DESTINATION = directDestination("telegram");
+          const GROUP_DESTINATION = {
+            conversationShape: "thread-container" as const,
+            externalThreadRouteAuthority: {
+              accountLookupKey: "group-account",
+              channel: "linq" as const,
+              containerMemberId: "member_call",
+              threadId: "group-thread",
+            },
+            route: {
+              actorId: null,
+              channel: "linq" as const,
+              delivery: { kind: "thread" as const, target: "group-thread" },
+              identityId: "group-identity",
+              threadId: "group-thread-hash",
+              threadIsDirect: false as const,
+            },
+          };
+
+          type CreatePhoneCallInput = Parameters<typeof createHostedPhoneCall>[0];
+          type PhoneCallStore = NonNullable<CreatePhoneCallInput["prisma"]>;
+          type PhoneCallRuntime = NonNullable<CreatePhoneCallInput["runtime"]>;
+
+          describe("hosted phone-call direct result routing", () => {
+            it("validates and persists Telegram before provider dispatch", async () => {
+              const harness = createHarness();
+
+              await expect(createHostedPhoneCall({
+                ...baseInput(harness),
+                notificationDestinationResolver: vi.fn(async () =>
+                  TELEGRAM_DESTINATION),
+                requestKey: "phone_call_telegram_request",
+                resultNotificationChannel: "telegram",
+              })).resolves.toMatchObject({ status: "calling" });
+
+              expect(harness.reserve).toHaveBeenCalledWith({
+                data: expect.objectContaining({
+                  resultNotificationChannel: "telegram",
+                }),
+              });
+              expect(harness.runtime.start).toHaveBeenCalledTimes(1);
+            });
+
+            it("rejects a direct result channel on a group destination", async () => {
+              const harness = createHarness();
+
+              await expect(createHostedPhoneCall({
+                ...baseInput(harness),
+                notificationDestinationResolver: async () => GROUP_DESTINATION,
+                requestKey: "phone_call_group_channel_mismatch",
+                resultNotificationChannel: "telegram",
+              })).rejects.toThrow("does not match the direct route");
+
+              expect(harness.reserve).not.toHaveBeenCalled();
+              expect(harness.runtime.start).not.toHaveBeenCalled();
+            });
+
+            it.each([
+              ["legacy null to Telegram", null, "telegram", TELEGRAM_DESTINATION],
+              ["Telegram to Linq", "telegram", "linq", LINQ_DESTINATION],
+            ] as const)(
+              "fails closed on scheduled replay channel drift: %s",
+              async (_case, storedChannel, requestedChannel, destination) => {
+                const existing = buildCall({
+                  providerCallId: "retell_existing",
+                  requestKey: SCHEDULED_REQUEST_KEY,
+                  resultNotificationChannel: storedChannel,
+                  status: "calling",
+                });
+                const harness = createHarness(existing);
+
+                await expect(createHostedPhoneCall({
+                  ...baseInput(harness),
+                  notificationDestinationResolver: async () => destination,
+                  originSessionId: "session_scheduled_retry",
+                  requestKey: SCHEDULED_REQUEST_KEY,
+                  resultNotificationChannel: requestedChannel,
+                })).rejects.toThrow("request key collision");
+
+                expect(harness.reserve).not.toHaveBeenCalled();
+                expect(harness.runtime.start).not.toHaveBeenCalled();
+              },
+            );
+
+            it("replays one scheduled Telegram occurrence without another call", async () => {
+              const existing = buildCall({
+                providerCallId: "retell_existing",
+                requestKey: SCHEDULED_REQUEST_KEY,
+                resultNotificationChannel: "telegram",
+                status: "calling",
+              });
+              const harness = createHarness(existing);
+
+              await expect(createHostedPhoneCall({
+                ...baseInput(harness),
+                notificationDestinationResolver: async () =>
+                  TELEGRAM_DESTINATION,
+                originSessionId: "session_scheduled_retry",
+                requestKey: SCHEDULED_REQUEST_KEY,
+                resultNotificationChannel: "telegram",
+              })).resolves.toEqual({
+                phoneCallId: existing.id,
+                status: "calling",
+              });
+
+              expect(harness.reserve).not.toHaveBeenCalled();
+              expect(harness.runtime.start).not.toHaveBeenCalled();
+            });
+          });
+
+          function directDestination(channel: "linq" | "telegram") {
+            return {
+              conversationShape: "direct-member" as const,
+              externalThreadRouteAuthority: null,
+              route: {
+                actorId: null,
+                channel,
+                delivery: {
+                  kind: "thread" as const,
+                  target: `${channel}-thread`,
+                },
+                identityId: `${channel}-identity`,
+                threadId: `${channel}-thread-hash`,
+                threadIsDirect: true as const,
+              },
+            };
+          }
+
+          function baseInput(harness: ReturnType<typeof createHarness>) {
+            return {
+              brief: BRIEF,
+              crypto: harness.crypto,
+              memberId: "member_call",
+              originSessionId: "session_call",
+              prisma: harness.store,
+              reconciliationWorkflowStarter: vi.fn(async () => undefined),
+              runtime: harness.runtime,
+              transferNumberResolver: vi.fn(async () => null),
+            };
+          }
+
+          function createHarness(existing: HostedPhoneCall | null = null) {
+            let current = existing;
+            const reserve = vi.fn<PhoneCallStore["reserve"]>(async (input) => {
+              current = buildCall({
+                briefEncrypted: input.data.briefEncrypted,
+                id: input.data.id,
+                memberId: input.data.memberId,
+                originSessionId: input.data.originSessionId,
+                provider: input.data.provider,
+                requestKey: input.data.requestKey,
+                resultNotificationChannel: input.data.resultNotificationChannel,
+                status: input.data.status,
+              });
+              return { call: current, created: true };
+            });
+            const store: PhoneCallStore = {
+              hostedPhoneCall: {
+                findFirst: vi.fn(async () => null),
+                findUnique: vi.fn(async ({ where }) => {
+                  if (!current) return null;
+                  if ("id" in where) return where.id === current.id ? current : null;
+                  return where.memberId_requestKey.memberId === current.memberId
+                    && where.memberId_requestKey.requestKey === current.requestKey
+                    ? current
+                    : null;
+                }),
+                findUniqueOrThrow: vi.fn(async () => {
+                  if (!current) throw new Error("Expected a phone call.");
+                  return current;
+                }),
+                updateMany: vi.fn(async () => ({ count: 1 })),
+              },
+              markCleanupEnded: vi.fn(async () => ({ count: 1 })),
+              refreshDispatchAuthority: vi.fn(async () => ({ count: 1 })),
+              reserve,
+            };
+            const runtime: PhoneCallRuntime = {
+              resolveProviderCall: vi.fn(async () => ({ state: "not_found" })),
+              start: vi.fn(async () => ({ providerCallId: "retell_call" })),
+              stopIfActive: vi.fn(async () => undefined),
+            };
+            return {
+              crypto: {
+                decryptBrief: vi.fn(async () => BRIEF),
+                decryptResult: vi.fn(),
+                encryptBrief: vi.fn(async () => "encrypted-brief"),
+                encryptResult: vi.fn(),
+              } as NonNullable<CreatePhoneCallInput["crypto"]>,
+              reserve,
+              runtime,
+              store,
+            };
+          }
+
+          function buildCall(overrides: Partial<HostedPhoneCall> = {}): HostedPhoneCall {
+            const now = new Date("2026-08-06T12:00:00.000Z");
+            return {
+              analyzedAt: null,
+              briefEncrypted: "encrypted-brief",
+              briefJson: null,
+              createdAt: now,
+              endedAt: null,
+              id: "hpc_existing",
+              memberId: "member_call",
+              originSessionId: "session_call",
+              provider: "retell",
+              providerCallId: null,
+              requestKey: "phone_call_request",
+              resultEncrypted: null,
+              resultJson: null,
+              resultNotificationChannel: null,
+              status: "starting",
+              updatedAt: now,
+              ...overrides,
+            };
+          }
+          '''.replace("          ", ""),
+              encoding="utf-8",
+          )
+
+          classification_path = "apps/web/test/hosted-phone-call-private-storage-classification.test.ts"
+          classification = Path(classification_path).read_text(encoding="utf-8")
+          if "resultNotificationChannel: operational" not in classification:
+              classification = classification.replace(
+                  '  requestKey: operational("Opaque idempotency identity."),\n',
+                  '  requestKey: operational("Opaque idempotency identity."),\n  resultNotificationChannel: operational("Bounded direct result surface; contains no address or call content."),\n',
+                  1,
               )
-              if not match:
-                  raise SystemExit(f"missing originSessionId fixture field in {fixture_path}")
-              insertion = (
-                  match.group(0)
-                  + f"{match.group(1)}resultNotificationChannel: null,\n"
+          if "keeps the result notification channel additive" not in classification:
+              classification = classification.replace(
+                  "\n});\n\nfunction operational",
+                  '''
+
+            it("keeps the result notification channel additive and database-bounded", () => {
+              const migration = readFileSync(
+                new URL(
+                  "../prisma/migrations/20260806150000_hosted_phone_call_result_notification_channel/migration.sql",
+                  import.meta.url,
+                ),
+                "utf8",
+              );
+
+              expect(migration).toContain(
+                'CREATE TYPE "HostedPhoneCallResultNotificationChannel"',
+              );
+              expect(migration).toContain("AS ENUM ('linq', 'telegram')");
+              expect(migration).toContain(
+                'ADD COLUMN "result_notification_channel"',
+              );
+              expect(migration).not.toMatch(/DROP COLUMN/iu);
+              expect(migration).not.toMatch(/SET NOT NULL/iu);
+            });
+          });
+
+          function operational'''.replace("          ", ""),
+                  1,
               )
-              block = block[:match.start()] + insertion + block[match.end():]
-              target.write_text(text[:start] + block + text[end:])
+          Path(classification_path).write_text(classification, encoding="utf-8")
 
           replace_once(
               "apps/cloudflare/DEPLOY.md",
-              "Direct Linq scheduled phone-call availability is an additive Web-first rollout.\nDeploy Web so it recognizes the reserved scheduled-occurrence request-key\nnamespace, then deploy the Cloudflare runner bundle with\n`container_rollout=immediate` so a warm old runner cannot consume a due\noccurrence without exposing the phone tool.\nThere is no database migration or new wire field. A new runner against old Web\ncan place the first call, but a resident-session retry fails closed instead of\nreconciling; brief drift still reuses the same occurrence key and cannot create\na second call. New Web remains compatible with old runners and attended calls.\nAfter deploy, require the exact runner-bundle fingerprint and run one consented\nprivate Linq scheduled-call canary that proves a single Web call row and\nsuccessful same-occurrence replay. A missed pre-deploy occurrence is rescheduled\nexplicitly; do not add replay or backfill machinery.\n\nScheduled email, Telegram, and group turns do not expose the phone tool. The\nexisting Web call-result owner cannot guarantee return to those initiating\nsurfaces without new durable route state, so they remain unavailable rather\nthan starting a call whose completion could fail or arrive elsewhere.\n",
-              "Direct Linq and Telegram scheduled phone-call availability is an additive\nWeb-first rollout. Apply the nullable result-notification-channel migration and\ndeploy Web before the Cloudflare runner, then deploy the runner bundle with\n`container_rollout=immediate` so warm old runners drain quickly. New Web accepts\nold runners that omit the optional channel; a new runner against old Web is not\ncompatible because the old strict request schema rejects the additive field.\n\nEach new direct call stores only the bounded initiating channel (`linq` or\n`telegram`). Web validates that channel's current durable route before provider\ndispatch and resolves the asynchronous result on the same channel after the\ncall ends. Existing rows with no channel retain the prior route fallback, group\ncalls retain their thread-container route owner, and the scheduled occurrence\nrequest key remains unchanged for Linq retry compatibility.\n\nAfter deploy, require the exact runner-bundle fingerprint and run one consented\nprivate Telegram scheduled-call canary for a member who has both Linq and\nTelegram routes. Prove a single Web call row, a stored `telegram` result channel,\nsuccessful same-occurrence replay, and final-result delivery only on Telegram.\nA missed pre-deploy occurrence is rescheduled explicitly; do not add replay or\nbackfill machinery. Scheduled email and group turns remain unavailable because\nemail lacks this proactive notification route and groups retain their separate\npreview and participant-confirmation contract.\n",
+              '''Direct Linq scheduled phone-call availability is an additive Web-first rollout.
+          Deploy Web so it recognizes the reserved scheduled-occurrence request-key
+          namespace, then deploy the Cloudflare runner bundle with
+          `container_rollout=immediate` so a warm old runner cannot consume a due
+          occurrence without exposing the phone tool.
+          There is no database migration or new wire field. A new runner against old Web
+          can place the first call, but a resident-session retry fails closed instead of
+          reconciling; brief drift still reuses the same occurrence key and cannot create
+          a second call. New Web remains compatible with old runners and attended calls.
+          After deploy, require the exact runner-bundle fingerprint and run one consented
+          private Linq scheduled-call canary that proves a single Web call row and
+          successful same-occurrence replay. A missed pre-deploy occurrence is rescheduled
+          explicitly; do not add replay or backfill machinery.
+
+          Scheduled email, Telegram, and group turns do not expose the phone tool. The
+          existing Web call-result owner cannot guarantee return to those initiating
+          surfaces without new durable route state, so they remain unavailable rather
+          than starting a call whose completion could fail or arrive elsewhere.
+          '''.replace("          ", ""),
+              '''Direct Linq and Telegram scheduled phone-call availability adds one
+          nullable, database-bounded result surface to each new direct call. Apply the
+          `HostedPhoneCall.result_notification_channel` migration, deploy Web so it
+          accepts and persists the optional wire field, then deploy the Cloudflare runner
+          with `container_rollout=immediate`.
+
+          Old runners omit the optional field and remain accepted by new Web. A new runner
+          against old strict Web is rejected before provider dispatch, so Web must precede
+          the runner. The scheduled occurrence key remains channel-independent: Web
+          requires exact stored/requested channel equality, including null, so changing
+          Linq to Telegram cannot create a second call or silently retrofit a legacy row.
+
+          Run one consented private Telegram scheduled-call canary for a member with both
+          surfaces. Prove one Web row, one provider call, a stored `telegram` result
+          channel, same-occurrence replay, and final delivery only on Telegram. The new
+          Web build is the rollback floor while a non-null in-flight call remains; roll
+          back the runner, stop new starts, and drain those rows before Web rollback.
+          Scheduled email and group calls remain unavailable because email has no supported
+          phone-result surface and groups retain their separate preview, participant
+          confirmation, and durable thread authority.
+          '''.replace("          ", ""),
           )
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+          replace_once(
+              "apps/web/README.md",
+              '''  cannot create a second call for the same occurrence. Final analysis appends an
+            `assistant.notification.requested` system-mailbox event: Murph composes the
+            result in its own voice and proactively messages the member's resolved
+            messaging route, and may skip a non-meaningful result (allow-send-or-skip).''',
+              '''  cannot create a second call for the same occurrence. New direct Linq and
+            Telegram calls persist only their bounded result-notification channel, never
+            an address or phone number. Web resolves that exact surface before provider
+            dispatch and re-resolves only it when the asynchronous result arrives.
+            Replay requires exact stored/requested channel equality, including null, so
+            route drift cannot create another call or silently retrofit a legacy row.
+            Final analysis appends an `assistant.notification.requested` system-mailbox
+            event: Murph composes the result in its own voice and proactively messages the
+            frozen direct surface or durable group thread, and may skip a non-meaningful
+            direct result (allow-send-or-skip).''',
+          )
+
+          replace_once("ARCHITECTURE.md", "Last verified: 2026-08-05", "Last verified: 2026-08-06")
+          replace_once(
+              "ARCHITECTURE.md",
+              "only provider/status/timestamp identifiers remain operational\nmetadata.",
+              "only provider/status/timestamp identifiers and the bounded direct result\nsurface remain operational metadata.",
+          )
+          insert_before(
+              "ARCHITECTURE.md",
+              "\n## Hosted Account Deletion",
+              '''
+          Direct calls freeze only the bounded `linq` or `telegram` result surface on the
+          existing `HostedPhoneCall` row before Retell dispatch; no phone number, chat id,
+          or second route record is copied onto the call. Completion re-resolves only that
+          surface through the current member-routing owner. The scheduled key remains one
+          exact occurrence independent of channel, while replay requires exact channel
+          equality including null, so route drift cannot create another provider call.
+          Missing or no-longer-authorized completion routing remains retryable instead of
+          changing surfaces.
+          '''.replace("          ", ""),
+          )
+
+          replace_once("agent-docs/SECURITY.md", "Last verified: 2026-08-05", "Last verified: 2026-08-06")
+          replace_once(
+              "agent-docs/SECURITY.md",
+              "Store only the bounded call brief, exact initiating resident-session id, provider call id, status, and final analysis result needed for member-bound retry/audit.",
+              "Store only the bounded call brief, exact initiating resident-session id, optional `linq`/`telegram` result-surface discriminator, provider call id, status, and final analysis result needed for member-bound retry/audit; never store a phone number or provider chat id as result routing on the call row.",
+          )
+          replace_once(
+              "agent-docs/SECURITY.md",
+              "The persisted initiating-session id is used only for phone-call request-key idempotency, never as a delivery route.",
+              "The persisted initiating-session id is used only for phone-call request-key idempotency, never as a delivery route. A non-null direct result surface is resolved before provider dispatch and re-resolved exactly at completion; it cannot fall back to another surface, and replay must match the stored surface including null. The scheduled occurrence key stays channel-independent so route drift conflicts instead of creating another provider call.",
+          )
+
+          replace_once("agent-docs/RELIABILITY.md", "Last verified: 2026-08-05", "Last verified: 2026-08-06")
+          replace_once(
+              "agent-docs/RELIABILITY.md",
+              "- Prefer explicit failure paths and actionable errors over silent fallback behavior.\n",
+              '''- Prefer explicit failure paths and actionable errors over silent fallback behavior.
+          - A direct hosted phone call freezes only `linq` or `telegram` as bounded
+            operational result routing on its existing `HostedPhoneCall` row before
+            Retell dispatch. Completion re-resolves only that surface through the current
+            member-routing owner; an unavailable route remains retryable and never falls
+            back to another surface. Exact replay must match the stored surface including
+            null. The scheduled key stays occurrence-only, so route drift cannot create a
+            second provider call.
+          '''.replace("          ", ""),
+          )
+
+          Path("agent-docs/exec-plans/completed/2026-08-06-telegram-scheduled-phone-calls.md").write_text(
+              '''# Enable scheduled Telegram phone calls
+
+          Status: completed
+          Created: 2026-08-06
+          Updated: 2026-08-06
+
+          ## Goal
+
+          Let one canonical direct Telegram scheduled occurrence use the existing
+          phone-call primitive while ensuring its asynchronous result returns through
+          Telegram and retry cannot create another provider call.
+
+          ## Root cause
+
+          The provider and Telegram turn already supported calling. PR #1336 withheld
+          scheduled Telegram because the retained call row did not identify the initiating
+          direct surface; completion therefore used the generic member resolver, which can
+          prefer Linq for members connected to both.
+
+          ## Smallest durable correction
+
+          Reuse the existing `HostedPhoneCall` effect row, scheduled occurrence key,
+          member-routing resolver, and Retell reconciliation workflow. Persist only a
+          nullable database enum (`linq | telegram`), resolve it before dispatch, and
+          re-resolve the same surface at completion. Do not persist an address or add a
+          route record, queue, service, workflow, or second lifecycle. The same primitive
+          covers attended direct calls because they share the asynchronous result path.
+
+          Exact replay requires the stored and requested channel—including null—to match.
+          The occurrence key itself remains channel-independent, so changing the route
+          conflicts without another Retell create. Scheduled email and group calls remain
+          outside this change.
+
+          ## Verification
+
+          Focused Hosted Execution, Assistant Engine, Web owner, migration, privacy, and
+          route tests plus all three affected typechecks and docs drift run before the
+          candidate commit. Exact-head CI and the required ReviewGPT stages own the final
+          completion gate.
+          '''.replace("          ", ""),
+              encoding="utf-8",
+          )
 
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: 24.14.1
-          cache: pnpm
+          node-version-file: .nvmrc
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Format and validate Prisma schema
+      - name: Install pinned workspace dependencies
+        shell: bash
         run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Format and verify the exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
           pnpm --dir apps/web exec prisma format --schema prisma/schema.prisma
           pnpm --dir apps/web exec prisma validate --schema prisma/schema.prisma
+          pnpm --dir packages/hosted-execution exec vitest run \
+            --config vitest.config.ts \
+            test/phone-calls.test.ts \
+            test/phone-call-result-notification-channel.test.ts \
+            --no-coverage
+          pnpm --dir packages/assistant-engine exec vitest run \
+            --config vitest.config.ts \
+            test/assistant-phone-call-result-channel.test.ts \
+            test/assistant-phone-calls.test.ts \
+            test/assistant-codex-turn-planning.test.ts \
+            --no-coverage
+          pnpm exec vitest run \
+            --config apps/web/vitest.workspace.ts \
+            --no-coverage \
+            apps/web/test/phone-call-result-notification-channel.test.ts \
+            apps/web/test/hosted-assistant-notification-destination.test.ts \
+            apps/web/test/hosted-phone-call-private-storage-classification.test.ts \
+            apps/web/test/phone-calls-retell.test.ts \
+            apps/web/test/phone-calls-service.test.ts \
+            apps/web/test/production-migration-guard.test.ts
+          pnpm --dir packages/hosted-execution typecheck
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir apps/web typecheck
+          pnpm docs:drift
+          git diff --check
 
-      - name: Commit final patch and remove bootstrap workflow
+      - name: Publish the verified candidate
         shell: bash
         run: |
           set -euo pipefail
           rm .github/workflows/agent-telegram-scheduled-phone-calls.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git diff --cached --check
-          git commit -m "enable Telegram scheduled phone calls"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
-
-      - name: Run focused contract and owner tests
-        run: |
-          pnpm --dir packages/hosted-execution exec vitest run test/phone-call-result-notification-channel.test.ts --no-coverage
-          pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-phone-call-result-channel.test.ts test/assistant-phone-calls.test.ts test/assistant-codex-turn-planning.test.ts --no-coverage
-          pnpm --dir apps/web exec vitest run test/phone-call-result-notification-channel.test.ts test/hosted-phone-call-private-storage-classification.test.ts --no-coverage
-          pnpm --dir packages/hosted-execution typecheck
-          pnpm --dir packages/assistant-engine typecheck
-          pnpm --dir apps/web typecheck
+          git commit -m 'Enable scheduled Telegram phone calls'
+          git push origin HEAD:agent/telegram-scheduled-phone-calls
