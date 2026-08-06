@@ -26,6 +26,7 @@ const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     description:
       "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
     label: "Deep sleep",
+    legacyProjectionScope: { projectionKind: "deep-sleep-days.v0" },
     projectionScope: { projectionKind: "deep-sleep-sources-days.v1" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
       projectionKind: "deep-sleep-sources-days.v1",
@@ -35,6 +36,7 @@ const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     description:
       "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
     label: "REM sleep",
+    legacyProjectionScope: { projectionKind: "rem-sleep-days.v0" },
     projectionScope: { projectionKind: "rem-sleep-sources-days.v1" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
       projectionKind: "rem-sleep-sources-days.v1",
@@ -124,6 +126,27 @@ export function GroupJoinStudy() {
             activeVaultShareProjectionScopes={[]}
             alreadyActiveMember={false}
             expectedMembershipId={null}
+            groupName={DESIGN_GROUP_NAME}
+            joinCode={DESIGN_JOIN_CODE}
+            permissions={DESIGN_SLEEP_SOURCE_PERMISSIONS}
+            postJoinContactOption={null}
+            postJoinDestination="/home"
+          />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="An existing narrow grant remains visible as the same single sleep permission. Saving keeps it narrow, Include source details explicitly upgrades it, and unchecking stops all versions of that sleep share."
+        title="Sleep sources · legacy sharing active"
+      >
+        <GroupJoinPageMock alreadyActiveMember>
+          <GroupJoinAcceptForm
+            activeVaultShareProjectionScopes={[
+              { projectionKind: "deep-sleep-days.v0" },
+              { projectionKind: "rem-sleep-days.v0" },
+            ]}
+            alreadyActiveMember
+            expectedMembershipId="membership_design"
             groupName={DESIGN_GROUP_NAME}
             joinCode={DESIGN_JOIN_CODE}
             permissions={DESIGN_SLEEP_SOURCE_PERMISSIONS}

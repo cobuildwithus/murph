@@ -2646,6 +2646,7 @@ describe("hosted group join policy", () => {
         description:
           "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
         label: "Deep sleep",
+        legacyProjectionScope: DEEP_SLEEP_SCOPE,
         projectionKind: "deep-sleep-sources-days.v1",
         projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
         projectionScopeKey: "deep-sleep-sources-days.v1",
@@ -2654,6 +2655,7 @@ describe("hosted group join policy", () => {
         description:
           "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
         label: "REM sleep",
+        legacyProjectionScope: REM_SLEEP_SCOPE,
         projectionKind: "rem-sleep-sources-days.v1",
         projectionScope: REM_SLEEP_SOURCES_SCOPE,
         projectionScopeKey: "rem-sleep-sources-days.v1",

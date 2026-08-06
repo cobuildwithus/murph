@@ -184,6 +184,7 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
           description:
             "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
           label: "Deep sleep",
+          legacyProjectionScope: { projectionKind: "deep-sleep-days.v0" as const },
           projectionScope: { projectionKind: "deep-sleep-sources-days.v1" as const },
           projectionScopeKey: "deep-sleep-sources-days.v1",
         },
@@ -191,6 +192,7 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
           description:
             "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
           label: "REM sleep",
+          legacyProjectionScope: { projectionKind: "rem-sleep-days.v0" as const },
           projectionScope: { projectionKind: "rem-sleep-sources-days.v1" as const },
           projectionScopeKey: "rem-sleep-sources-days.v1",
         },
@@ -232,6 +234,84 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
     url: "/api/groups/join/JOIN123/accept",
   });
 });
+
+test.each([
+  ["preserves", "preserve", [{ projectionKind: "deep-sleep-days.v0" }]],
+  ["explicitly upgrades", "upgrade", [{ projectionKind: "deep-sleep-sources-days.v1" }]],
+  ["fully revokes", "off", []],
+] as const)(
+  "%s a visible legacy Deep sleep grant from the single permission row",
+  async (_label, action, expectedScopes) => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+    const { GroupJoinAcceptForm } = await import(
+      "@/src/components/hosted-groups/group-join-client"
+    );
+    const { cleanup, container, window } = await renderClientComponent(
+      createElement(GroupJoinAcceptForm, {
+        activeVaultShareProjectionScopes: [
+          { projectionKind: "deep-sleep-days.v0" as const },
+        ],
+        alreadyActiveMember: true,
+        expectedMembershipId: "membership_existing",
+        groupName: "Sunday Sleep Crew",
+        joinCode: "JOIN123",
+        permissions: [{
+          description:
+            "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+          label: "Deep sleep",
+          legacyProjectionScope: { projectionKind: "deep-sleep-days.v0" as const },
+          projectionScope: { projectionKind: "deep-sleep-sources-days.v1" as const },
+          projectionScopeKey: "deep-sleep-sources-days.v1",
+        }],
+        postJoinContactOption: null,
+        postJoinDestination: "/home",
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!checkbox) throw new Error("Expected the Deep sleep checkbox.");
+    expect(checkbox.checked).toBe(true);
+    expect(container.textContent).toContain(
+      "Currently shares one daily value only. Source names and recorded times are not shared.",
+    );
+
+    if (action === "upgrade") {
+      const upgradeButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent === "Include source details",
+      );
+      if (!upgradeButton) throw new Error("Expected the legacy upgrade action.");
+      await act(async () => {
+        upgradeButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+      });
+      expect(container.textContent).not.toContain("Currently shares one daily value only.");
+      expect(checkbox.checked).toBe(true);
+    } else if (action === "off") {
+      await act(async () => {
+        checkbox.dispatchEvent(new window.Event("click", { bubbles: true }));
+      });
+      expect(checkbox.checked).toBe(false);
+    }
+
+    const saveButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === "Save changes",
+    );
+    if (!saveButton) throw new Error("Expected the sharing save action.");
+    await act(async () => {
+      saveButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        expectedMembershipId: "membership_existing",
+        selectedVaultShareProjectionScopes: expectedScopes,
+      },
+      url: "/api/groups/join/JOIN123/accept",
+    });
+  },
+);
 
 test("groups the four macro nutrients into one Daily macros card, calories separate", async () => {
   const { groupJoinPermissionsForDisplay } = await import(
@@ -276,6 +356,7 @@ test("groups the four macro nutrients into one Daily macros card, calories separ
       description: "Shares your last 7 days of steps.",
       key: "steps-days.v0",
       label: "Steps",
+      legacyScopeKeys: [],
       scopeKeys: ["steps-days.v0"],
     },
     {
@@ -283,6 +364,7 @@ test("groups the four macro nutrients into one Daily macros card, calories separ
         "Shares your last 7 days of daily protein, carbs, fat, and fiber totals from meals in Murph, including meals imported from connected apps.",
       key: "group:daily-macros",
       label: "Daily macros",
+      legacyScopeKeys: [],
       scopeKeys: [
         "protein-days.v0",
         "carbs-days.v0",
@@ -295,6 +377,7 @@ test("groups the four macro nutrients into one Daily macros card, calories separ
         "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
       key: "calories-days.v0",
       label: "Daily calories",
+      legacyScopeKeys: [],
       scopeKeys: ["calories-days.v0"],
     },
   ]);

@@ -70,12 +70,16 @@ import {
 import { parseHostedVaultShareRowProjectionScope } from "../hosted-vault-share/row-projection-scope";
 import {
   emptyHostedGroupJoinPolicy,
+  includeLegacyHostedGroupSleepProjectionScopes,
+  includeSourceAwareHostedGroupSleepProjectionScopes,
+  legacyHostedGroupSleepProjectionScope,
   mergeHostedGroupJoinPolicy,
   normalizeHostedGroupAccessOfferProjectionScopes,
   normalizeHostedVaultShareProjectionKinds,
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
   readHostedGroupJoinPolicy,
+  sourceAwareHostedGroupSleepProjectionScope,
   type HostedVaultShareProjectionDisplay,
 } from "./join-policy";
 import {
@@ -367,8 +371,11 @@ const HOSTED_GROUP_SHARED_READ_SELECTABLE_SCOPE_KEYS = new Set(
     buildHostedVaultShareProjectionScopeKey,
   ),
 );
+// Three requested scopes plus profile name, with at most two additional v1
+// sleep counterparts needed to let frozen v0 workflows consume a v1 grant's
+// narrower canonical value.
 const HOSTED_GROUP_SHARED_READ_MAX_GRANTS =
-  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS * 4;
+  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS * 6;
 const HOSTED_GROUP_SHARED_READ_MAX_DEVICE_CONNECTIONS =
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS
   * HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES;
@@ -683,8 +690,11 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
   const requestedProjectionScopeKeys = projectionScopes.map(
     buildHostedVaultShareProjectionScopeKey,
   );
+  const authorityProjectionScopeKeys = includeSourceAwareHostedGroupSleepProjectionScopes(
+    projectionScopes,
+  ).map(buildHostedVaultShareProjectionScopeKey);
   const authorityScopeKeys = [
-    ...requestedProjectionScopeKeys,
+    ...authorityProjectionScopeKeys,
     HOSTED_GROUP_SHARED_READ_PROFILE_NAME_SCOPE_KEY,
   ];
   const now = new Date();
@@ -988,7 +998,16 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
           if (!projectionScopeKey) {
             throw new Error("Hosted group shared requested scope key is missing.");
           }
-          const grant = memberGrants?.get(projectionScopeKey);
+          const exactGrant = memberGrants?.get(projectionScopeKey);
+          const sourceAwareFallbackScope = sourceAwareHostedGroupSleepProjectionScope(
+            projectionScope,
+          );
+          const sourceAwareFallbackScopeKey = sourceAwareFallbackScope
+            ? buildHostedVaultShareProjectionScopeKey(sourceAwareFallbackScope)
+            : null;
+          const grant = exactGrant ?? (sourceAwareFallbackScopeKey
+            ? memberGrants?.get(sourceAwareFallbackScopeKey)
+            : undefined);
           if (!grant) {
             return {
               dataStatus: "missing" as const,
@@ -1000,6 +1019,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
             };
           }
 
+          const grantScopeKey = grant.projectionScopeKey;
           const records = projectionScopeKey === HOSTED_GROUP_SHARED_READ_DEVICE_SCOPE_KEY
             ? readableGrantIds.has(grant.id)
               ? [buildHostedGroupSharedDeviceSyncRecord({
@@ -1008,8 +1028,13 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
                   projectionScope,
                 })]
               : null
-            : storedRecords?.get(projectionScopeKey) ?? null;
-          const normalizedRecords = records ?? [];
+            : storedRecords?.get(grantScopeKey) ?? null;
+          const normalizedRecords = !exactGrant && sourceAwareFallbackScope
+            ? projectHostedGroupSourceAwareSleepRecordsToLegacy(
+                records ?? [],
+                projectionScope,
+              )
+            : records ?? [];
           return {
             dataStatus: normalizedRecords.length > 0
               ? "available" as const
@@ -1051,6 +1076,40 @@ function parseHostedGroupSharedReadProjectionScopes(
     }
     seen.add(key);
     return scope;
+  });
+}
+
+function projectHostedGroupSourceAwareSleepRecordsToLegacy(
+  records: readonly HostedRuntimeGroupSharedRecord[],
+  projectionScope: HostedVaultShareSelectableProjectionScope,
+): HostedRuntimeGroupSharedRecord[] {
+  return records.map((record) => {
+    if (
+      !("date" in record.data)
+      || !("metricKey" in record.data)
+      || !("unit" in record.data)
+      || !("value" in record.data)
+    ) {
+      throw new TypeError("Source-aware sleep fallback record is invalid.");
+    }
+    const parsed = parseHostedVaultShareDeliveryRecord({
+      data: {
+        date: record.data.date,
+        metricKey: record.data.metricKey,
+        ...("provisional" in record.data && record.data.provisional === true
+          ? { provisional: true }
+          : {}),
+        unit: record.data.unit,
+        value: record.data.value,
+      },
+      occurredAt: record.occurredAt,
+      recordKey: record.recordKey,
+    }, projectionScope);
+    return {
+      data: parsed.data,
+      occurredAt: parsed.occurredAt,
+      recordKey: parsed.recordKey,
+    };
   });
 }
 
@@ -1503,7 +1562,9 @@ export async function readHostedGroupJoinView(input: {
         destinationMemberId: group.runtimeMemberId,
         grantorMemberId: input.memberId,
         prisma,
-        projectionScopes: policy.requestedVaultShareProjectionScopes,
+        projectionScopes: includeLegacyHostedGroupSleepProjectionScopes(
+          policy.requestedVaultShareProjectionScopes,
+        ),
       })
     : [];
 
@@ -1953,14 +2014,15 @@ async function acceptHostedGroupJoinTx(input: {
   const requestedProjectionScopes = input.policyProjectionScopes
     ? normalizeHostedVaultShareProjectionScopes(input.policyProjectionScopes)
     : readHostedGroupJoinPolicy(group.joinPolicyJson).requestedVaultShareProjectionScopes;
-  const requestedSet = new Set(
-    requestedProjectionScopes.map((scope) => buildHostedVaultShareProjectionScopeKey(scope)),
+  const allowedSelectedSet = new Set(
+    includeLegacyHostedGroupSleepProjectionScopes(requestedProjectionScopes)
+      .map((scope) => buildHostedVaultShareProjectionScopeKey(scope)),
   );
   const selectedSet = new Set(
     selected.map((scope) => buildHostedVaultShareProjectionScopeKey(scope)),
   );
   for (const projectionScope of selected) {
-    if (!requestedSet.has(buildHostedVaultShareProjectionScopeKey(projectionScope))) {
+    if (!allowedSelectedSet.has(buildHostedVaultShareProjectionScopeKey(projectionScope))) {
       throw hostedOnboardingError({
         code: "HOSTED_GROUP_PERMISSION_NOT_REQUESTED",
         httpStatus: 400,
@@ -2025,7 +2087,24 @@ async function acceptHostedGroupJoinTx(input: {
   if (requestedProjectionScopes.length > 0) {
     for (const projectionScope of requestedProjectionScopes) {
       const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+      const legacyProjectionScope = legacyHostedGroupSleepProjectionScope(projectionScope);
+      const legacyProjectionScopeKey = legacyProjectionScope
+        ? buildHostedVaultShareProjectionScopeKey(legacyProjectionScope)
+        : null;
       if (selectedSet.has(projectionScopeKey)) {
+        if (legacyProjectionScope) {
+          const revokedCount = await revokeHostedVaultSharesTx({
+            destinationMemberId: group.runtimeMemberId,
+            grantorMemberId: input.memberId,
+            now: input.now,
+            projectionScopes: [legacyProjectionScope],
+            tx: input.tx,
+          });
+          if (revokedCount > 0) {
+            revokedVaultShareProjectionKinds.push(legacyProjectionScope.projectionKind);
+            revokedVaultShareProjectionScopes.push(legacyProjectionScope);
+          }
+        }
         await assertHostedGroupVaultShareGrantLimitTx(input.tx, {
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
@@ -2051,6 +2130,23 @@ async function acceptHostedGroupJoinTx(input: {
         if (revokedCount > 0) {
           revokedVaultShareProjectionKinds.push(projectionScope.projectionKind);
           revokedVaultShareProjectionScopes.push(projectionScope);
+        }
+        if (
+          legacyProjectionScope
+          && legacyProjectionScopeKey
+          && !selectedSet.has(legacyProjectionScopeKey)
+        ) {
+          const legacyRevokedCount = await revokeHostedVaultSharesTx({
+            destinationMemberId: group.runtimeMemberId,
+            grantorMemberId: input.memberId,
+            now: input.now,
+            projectionScopes: [legacyProjectionScope],
+            tx: input.tx,
+          });
+          if (legacyRevokedCount > 0) {
+            revokedVaultShareProjectionKinds.push(legacyProjectionScope.projectionKind);
+            revokedVaultShareProjectionScopes.push(legacyProjectionScope);
+          }
         }
       }
     }

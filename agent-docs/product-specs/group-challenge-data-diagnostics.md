@@ -147,6 +147,22 @@ owner reconfiguration step. This never upgrades or broadens an existing grant
 in place; each member's v1 grant still requires its own server-owned access
 approval.
 
+The authenticated sharing controls keep a legacy-active sleep grant visible
+under that same single Deep sleep or REM sleep row. Saving without changing it
+preserves the narrower v0 grant. The member can explicitly include source
+details, which grants v1 and revokes the matching v0 row in the same
+transaction, or turn the row off, which revokes both versions. A native reaction
+to a new v1 offer uses the same replacement semantics. No legacy grant is hidden
+or broadened by policy normalization.
+
+A persisted reader that still requests a legacy v0 sleep scope may use the
+canonical top-level value from the matching v1 grant when no exact v0 grant is
+active. That compatibility projection keeps the requested v0 scope identity and
+removes every source name, source value, recorded time, projection time, and
+disagreement field. When both grants exist, the exact v0 grant wins. This lets a
+frozen workflow converge after an explicit v1 approval without silently giving
+that workflow the broader source-aware contract.
+
 `projectedAt` is snapshot generation time, not proof of a provider fetch or a
 fresh sync. A source entry's `recordedAt` is canonical source-record evidence,
 not proof of a live fetch. A group response may describe the stored source

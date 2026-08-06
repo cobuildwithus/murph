@@ -814,6 +814,116 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
+  it("preserves a selected legacy Deep sleep grant without silently granting v1", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      requestedProjectionKinds: ["deep-sleep-days.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: "membership_existing",
+      joinCode: "join_1",
+      memberId: "member_grantor",
+      now,
+      selectedVaultShareProjectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
+      tx,
+    })).resolves.toMatchObject({
+      revokedVaultShareProjectionScopes: [],
+    });
+
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
+      expect.objectContaining({ projectionScope: DEEP_SLEEP_SOURCES_SCOPE }),
+    );
+    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledTimes(1);
+    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
+      tx,
+    });
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalledWith(
+      expect.objectContaining({ projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE] }),
+    );
+  });
+
+  it("atomically replaces a legacy Deep sleep grant on explicit v1 approval", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      requestedProjectionKinds: ["deep-sleep-days.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.revokeHostedVaultSharesTx.mockResolvedValueOnce(1);
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: "membership_existing",
+      joinCode: "join_1",
+      memberId: "member_grantor",
+      now,
+      selectedVaultShareProjectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
+      tx,
+    })).resolves.toMatchObject({
+      grantedVaultShareProjectionScopes: [PROFILE_SCOPE, DEEP_SLEEP_SOURCES_SCOPE],
+      revokedVaultShareProjectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
+    });
+
+    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
+      tx,
+    });
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      tx,
+    });
+  });
+
+  it("revokes both Deep sleep grant versions when the single permission is off", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      requestedProjectionKinds: ["deep-sleep-days.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.revokeHostedVaultSharesTx
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1);
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: "membership_existing",
+      joinCode: "join_1",
+      memberId: "member_grantor",
+      now,
+      selectedVaultShareProjectionScopes: [],
+      tx,
+    })).resolves.toMatchObject({
+      revokedVaultShareProjectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
+    });
+
+    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenNthCalledWith(1, {
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
+      tx,
+    });
+    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenNthCalledWith(2, {
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
+      tx,
+    });
+  });
+
   it("keys a Telegram offer on chat and message so ids cannot collide across chats", async () => {
     const tx = buildTx();
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
@@ -1158,6 +1268,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       offerProjectionKinds: ["deep-sleep-sources-days.v1"],
     });
     const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.revokeHostedVaultSharesTx.mockResolvedValueOnce(1);
 
     await expect(acceptHostedGroupJoinOfferTx({
       channel: "linq",
@@ -1168,9 +1279,17 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     })).resolves.toMatchObject({
       grantedVaultShareProjectionScopes: [PROFILE_SCOPE, DEEP_SLEEP_SOURCES_SCOPE],
+      revokedVaultShareProjectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
       selectedVaultShareProjectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
     });
 
+    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
+      tx,
+    });
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_grantor",
@@ -2398,6 +2517,48 @@ describe("readHostedGroupJoinView leave affordance", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValue([]);
+  });
+
+  it("loads the actual legacy sleep grant behind a canonical v1 policy", async () => {
+    mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValueOnce([
+      LEGACY_DEEP_SLEEP_SCOPE,
+    ]);
+    const prisma = createPrismaStub({
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          _count: { members: 2 },
+          displayName: "Sunday Sleep Crew",
+          id: "group_1",
+          joinPolicyJson: {
+            requestedVaultShareProjectionKinds: ["deep-sleep-days.v0"],
+            schema: "murph.hosted-group.join-policy.v1",
+          },
+          kind: "friends",
+          members: [{ id: "membership_1" }],
+          ownerMemberId: "member_owner",
+          runtimeMemberId: "member_group_runtime",
+        })),
+      },
+    });
+
+    await expect(readHostedGroupJoinView({
+      joinCode: "join_1",
+      memberId: "member_self",
+      prisma,
+    })).resolves.toMatchObject({
+      activeVaultShareProjectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
+      requestedVaultShareProjections: [{
+        label: "Deep sleep",
+        legacyProjectionScope: LEGACY_DEEP_SLEEP_SCOPE,
+        projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      }],
+    });
+    expect(mocks.readActiveHostedVaultShareProjectionScopes).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_self",
+      prisma,
+      projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE, DEEP_SLEEP_SOURCES_SCOPE],
+    });
   });
 
   it.each([

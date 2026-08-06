@@ -28,11 +28,17 @@ provider-neutral and by-source choices.
 2. Treat legacy v0 grants as read-only compatibility contracts. Read every
    legacy requested policy as v1 so existing groups immediately have one
    complete choice; existing v0 share rows remain narrow compatibility
-   evidence until that member explicitly approves v1.
+   evidence until that member explicitly approves v1. Keep a legacy-active
+   grant visible in the same checked permission row: saving preserves it,
+   opting into source details atomically replaces it with v1, and turning the
+   row off revokes both versions.
 3. Remove the model-facing source-neutral opt-down and default every new sleep
    stage access offer/read request to v1.
-4. Update focused contract, consent, group-store, prompt, and end-to-end proof.
-5. Update the durable group-data specification and design-catalog study.
+4. Let a frozen v0 shared-read request fall back to the matching v1 grant's
+   canonical top-level value only. Preserve the requested v0 scope shape,
+   remove all source metadata, and prefer an exact v0 grant when present.
+5. Update focused contract, consent, group-store, prompt, and end-to-end proof.
+6. Update the durable group-data specification and design-catalog study.
 
 ## Verification
 
@@ -48,21 +54,29 @@ provider-neutral and by-source choices.
 
 ## Evidence
 
-- Focused Web group-policy, group-store, consent-client, and acceptance-route
-  tests: 225 passing.
-- Focused assistant capability-offer prompt tests: 17 passing.
+- Focused Web group-policy, group-store, consent-client, acceptance-route,
+  reaction-offer, and shared-read tests: 289 passing.
+- Focused assistant capability-offer and prompt-budget tests: 90 passing.
 - Prepared Web and assistant-engine typechecks: passing.
+- Exact v0 shared-read tests prove v1 canonical-value fallback strips every
+  source-detail field and that an exact v0 grant wins when both grants exist.
 - Desktop and mobile design-catalog studies render exactly `Deep sleep` and
   `REM sleep`, with no source-specific duplicate choice.
 - Complete first provider-input requests measured through the pinned Codex App
   Server with `gpt-5.6-terra`, low reasoning, representative dynamic tools,
   and `gpt-tokenizer` 3.4.0 `o200k_harmony`: direct 152,837 bytes / 33,201
-  tokens at base and 152,874 / 33,204 at head; group 128,560 bytes / 27,754
-  tokens at base and 128,597 / 27,757 at head. Both deltas are +37 bytes and
-  +3 tokens; repeat captures were byte-identical after normalization.
+  tokens at base and 152,817 / 33,191 at head; group 128,560 bytes / 27,754
+  tokens at base and 128,540 / 27,744 at head. Both deltas are -20 bytes and
+  -10 tokens; repeat captures were byte-identical after normalization.
 - Claude Fable 5 visual review could not run because the configured account had
   no remaining usage credits; Playwright and native-resolution inspection
   supplied the required rendered proof.
+- Preliminary specialist ReviewGPT and final ReviewGPT round 1 both found that
+  canonicalized policy display hid active v0 grants. Final round 1 additionally
+  found that frozen v0 reads did not converge after v1 approval. Both findings
+  are accepted and covered by the corrected one-row legacy state, atomic grant
+  replacement/revocation, and narrow v1-to-v0 read fallback. The immutable
+  first-reviewed head is `dc5b970118325d99e933355105633f446c48766c`.
 
 Status: active
 Updated: 2026-08-05

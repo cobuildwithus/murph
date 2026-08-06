@@ -38,6 +38,7 @@ export interface HostedGroupJoinPolicy {
 export interface HostedVaultShareProjectionDisplay {
   description: string;
   label: string;
+  legacyProjectionScope?: HostedVaultShareProjectionScope;
   projectionKind: HostedVaultShareProjectionKind;
   projectionScope: HostedVaultShareProjectionScope;
   projectionScopeKey: string;
@@ -283,6 +284,48 @@ export function normalizeHostedGroupAccessOfferProjectionScopes(
   return normalizeHostedVaultShareProjectionScopes(offered);
 }
 
+export function legacyHostedGroupSleepProjectionScope(
+  projectionScope: HostedVaultShareProjectionScope,
+): HostedVaultShareProjectionScope | null {
+  if (projectionScope.projectionKind === "deep-sleep-sources-days.v1") {
+    return { projectionKind: "deep-sleep-days.v0" };
+  }
+  if (projectionScope.projectionKind === "rem-sleep-sources-days.v1") {
+    return { projectionKind: "rem-sleep-days.v0" };
+  }
+  return null;
+}
+
+export function sourceAwareHostedGroupSleepProjectionScope(
+  projectionScope: HostedVaultShareProjectionScope,
+): HostedVaultShareProjectionScope | null {
+  if (projectionScope.projectionKind === "deep-sleep-days.v0") {
+    return { projectionKind: "deep-sleep-sources-days.v1" };
+  }
+  if (projectionScope.projectionKind === "rem-sleep-days.v0") {
+    return { projectionKind: "rem-sleep-sources-days.v1" };
+  }
+  return null;
+}
+
+export function includeLegacyHostedGroupSleepProjectionScopes(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
+): HostedVaultShareProjectionScope[] {
+  return normalizeHostedVaultShareProjectionScopes(projectionScopes.flatMap((scope) => {
+    const legacyScope = legacyHostedGroupSleepProjectionScope(scope);
+    return legacyScope ? [scope, legacyScope] : [scope];
+  }));
+}
+
+export function includeSourceAwareHostedGroupSleepProjectionScopes(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
+): HostedVaultShareProjectionScope[] {
+  return normalizeHostedVaultShareProjectionScopes(projectionScopes.flatMap((scope) => {
+    const sourceAwareScope = sourceAwareHostedGroupSleepProjectionScope(scope);
+    return sourceAwareScope ? [scope, sourceAwareScope] : [scope];
+  }));
+}
+
 export function mergeHostedGroupJoinPolicy(input: {
   existing: unknown;
   requestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
@@ -307,7 +350,9 @@ export function projectHostedVaultShareProjectionDisplays(
   )
     .map((projectionScope) => {
       const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+      const legacyProjectionScope = legacyHostedGroupSleepProjectionScope(projectionScope);
       return {
+        ...(legacyProjectionScope ? { legacyProjectionScope } : {}),
         projectionKind: projectionScope.projectionKind,
         projectionScope,
         projectionScopeKey,

@@ -176,11 +176,10 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('For running-challenge standings')
     expect(section).toContain('`not_granted`, `granted` plus `missing`, and `available`')
     expect(prompt).toContain('Deep/REM is stored, not rechecked')
-    expect(prompt).toContain('offer v1 only for new access')
+    expect(prompt).toContain('New access uses v1')
     expect(prompt).toContain(
-      'Read v0 only when an existing workflow already requests/grants it',
+      'read v0 only for existing requests/grants',
     )
-    expect(prompt).toContain('never newly offer v0')
     expect(prompt).toContain('projection/source times/conflicts')
     expect(prompt).toContain('`selected` score')
     expect(section).toContain('Use `read_current` for membership and permission configuration only')
