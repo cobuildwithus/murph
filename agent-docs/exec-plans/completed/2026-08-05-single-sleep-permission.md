@@ -92,6 +92,18 @@ provider-neutral and by-source choices.
   locked Web-acceptance transaction as the grant replacement. Focused tests
   cover existing-member upgrade, new-member approval, unchanged v0
   preservation, full revoke, and native-offer policy non-mutation.
+- Final ReviewGPT round 4 verified every prior implementation correction. Its
+  sole Purpose Drift finding was body-only: disclose that a member's explicit
+  v1 approval performs the necessary same-transaction group-policy expansion
+  for rollback visibility. The corrected intent contract passed the permitted
+  disclosure-only retry on the same reviewed head with verified
+  `gpt-5-6-pro` metadata and `ROUND_OUTCOME: PASS`.
+- Exact-head GitHub Actions on `ec625b5dfc2b731d96e1ddfa0a9d8b051fdc9944`
+  passed both CLI hosts, build/typecheck, app verification, assistant/CLI/
+  platform package coverage, fixtures, design proof, overflow, tracked
+  artifact checks, and the aggregate release gate. The merge tree against the
+  current `origin/main` is clean.
 
-Status: active
-Updated: 2026-08-05
+Status: completed
+Updated: 2026-08-06
+Completed: 2026-08-06
