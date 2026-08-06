@@ -78,3 +78,8 @@ Updated: 2026-08-06
   retained by a fresh conversation: serial p50 207 ms, overlapped p50 102 ms,
   modeled p50 reduction 105 ms. This is a protocol sensitivity model, not
   production or loopback endpoint evidence.
+- PASS: preliminary specialist remediation restored the transaction boundary
+  and strengthened the non-null optional group-bit concurrency assertion.
+- PASS: final ReviewGPT round 2 found no qualifying findings on the substantive
+  candidate. A clean base-only rebase onto current `main` followed; the exact
+  rebased candidate again passed 131 focused tests and Web prepared typecheck.
