@@ -930,6 +930,22 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   anonymous detail row; the paired detailed-email behavior reads that row back
   before provider entry. This adds no second consent or state owner.
 
+  Web persists that call as two deterministic rows under its existing owner:
+  one member-linked row with a fixed server-authored marker and one anonymous
+  row containing Murph's bounded, sanitized, de-identified product issue in its
+  own words. The first three distinct member escalations per UTC day may send an
+  immediate plain-text support alert that pairs that stored issue with the
+  internal feedback and member ids. Web reads back and validates both rows
+  before provider entry and formats from the first stored issue, so replay
+  reuses one body and Resend idempotency key even if a later callback supplies
+  different wording. Missing, linked, unsanitized, still-prefixed, or malformed
+  detail fails closed. The alert has no raw-message, transcript, or provider-
+  payload input and formats only the stored model-authored issue. The model
+  contract forbids copied wording and private categories, while the deterministic
+  sanitizer remains best-effort rather than semantic proof; the explicit request
+  accepts that documented residual risk for the dedicated internal recipient.
+  The path adds no table, queue, cursor, approval state, or delivery owner.
+
   A separate authenticated ten-minute Vercel cron performs work only during the
   6pm Eastern hour and sends one daily internal product-feedback digest through
   that existing Resend transport. Web reads its owned
