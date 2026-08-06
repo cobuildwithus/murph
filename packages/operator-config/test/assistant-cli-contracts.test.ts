@@ -30,6 +30,7 @@ import {
   assistantCronScheduleSchema,
   assistantCronTargetSchema,
   assistantCronRunRecordSchema,
+  assistantGeneratedDeliveryRetirementSchema,
   assistantBindingDeliveryKindValues,
   assistantChannelNameSchema,
   assistantChannelNameValues,
@@ -56,6 +57,62 @@ const NUTRITION_RESPONSE_CARD = {
 } as const
 
 describe('assistant CLI delivery contracts', () => {
+  it('accepts only bounded exact generated export-pack retirement receipts', () => {
+    const archiveRef = '.runtime/operations/assistant/generated-deliveries/export-owned.zip'
+    const packId = 'pack-2026-08-06-all'
+    const basePath = `exports/packs/${packId}`
+    const receipt = {
+      archiveRef,
+      archiveSha256: 'a'.repeat(64),
+      kind: 'sent_export_packs_v1',
+      packs: [{
+        basePath,
+        files: [{
+          path: `${basePath}/manifest.json`,
+          sha256: 'b'.repeat(64),
+          sizeBytes: 100,
+        }],
+        packId,
+      }],
+    } as const
+
+    expect(assistantGeneratedDeliveryRetirementSchema.parse(receipt)).toEqual(receipt)
+    for (const invalidReceipt of [
+      {
+        ...receipt,
+        archiveRef: 'exports/user-files/export.zip',
+      },
+      {
+        ...receipt,
+        packs: [{
+          ...receipt.packs[0],
+          files: [{
+            ...receipt.packs[0].files[0],
+            path: `${basePath}/../canonical.json`,
+          }],
+        }],
+      },
+      {
+        ...receipt,
+        packs: [{
+          ...receipt.packs[0],
+          files: [{
+            ...receipt.packs[0].files[0],
+            path: `${basePath}/entities.json`,
+          }],
+        }],
+      },
+      {
+        ...receipt,
+        packs: [receipt.packs[0], receipt.packs[0]],
+      },
+    ]) {
+      expect(() => assistantGeneratedDeliveryRetirementSchema.parse(
+        invalidReceipt,
+      )).toThrow()
+    }
+  })
+
   it('accepts hash-bound private vault images without a public URL', () => {
     const media = {
       alt: 'Generated mobility setup',

@@ -1083,6 +1083,7 @@ function countAssistantRuntimeResiduePrunedFiles(
     result.autoReplyEvidenceFilesPruned +
     result.autoReplyIntentProvenancePruned +
     result.generatedDeliveryFilesPruned +
+    result.generatedExportPacksPruned +
     result.hostedMailboxInputItemMappingsPruned +
     result.inputEventsPruned +
     result.receiptsPruned
@@ -1114,6 +1115,10 @@ function createAssistantRuntimeResiduePruneLogDetails(
       result.generatedDeliveryBytesPruned,
     prunedAssistantRuntimeGeneratedDeliveryFileCount:
       result.generatedDeliveryFilesPruned,
+    prunedAssistantRuntimeGeneratedExportPackBytes:
+      result.generatedExportPackBytesPruned,
+    prunedAssistantRuntimeGeneratedExportPackCount:
+      result.generatedExportPacksPruned,
     assistantRuntimeGeneratedDeliveryCleanupSkippedUntrustedOutbox:
       result.generatedDeliveryCleanupSkippedUntrustedOutbox,
     prunedAssistantRuntimeHostedMailboxInputItemMappingCount:

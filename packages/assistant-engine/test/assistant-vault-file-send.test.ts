@@ -39,6 +39,7 @@ import {
   resolveAssistantVaultFileResponseMedia,
 } from '../src/assistant/vault-file-send.ts'
 import { createTempVaultContext } from './test-helpers.ts'
+import { createTestZip } from './zip-test-helpers.ts'
 
 const tempRoots: string[] = []
 
@@ -541,6 +542,77 @@ describe('assistant vault-file send', () => {
         code: 'ASSISTANT_VAULT_FILE_REF_INVALID',
       })
     }
+  })
+
+  it('persists exact export-pack retirement proof with a pending generated ZIP send', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-export-pack-retirement-',
+    )
+    tempRoots.push(parentRoot)
+    const packId = 'pack-generated-send'
+    const packBasePath = `exports/packs/${packId}`
+    const manifestPath = `${packBasePath}/manifest.json`
+    const entitiesPath = `${packBasePath}/entities.json`
+    const manifest = `${JSON.stringify({
+      files: [{ path: manifestPath }, { path: entitiesPath }],
+      format: 'murph.export-pack.v1',
+      packId,
+    }, null, 2)}\n`
+    const entities = '{"records":[]}\n'
+    for (const [ref, contents] of [
+      [manifestPath, manifest],
+      [entitiesPath, entities],
+    ] as const) {
+      const filePath = path.join(vaultRoot, ...ref.split('/'))
+      await mkdir(path.dirname(filePath), { recursive: true })
+      await writeFile(filePath, contents)
+    }
+    const stagingRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/vault-export.zip`
+    const stagingPath = path.join(vaultRoot, ...stagingRef.split('/'))
+    await mkdir(path.dirname(stagingPath), { recursive: true })
+    await writeFile(stagingPath, createTestZip([
+      [manifestPath, manifest],
+      [entitiesPath, entities],
+      ['journal/daily.md', 'canonical data\n'],
+    ]))
+
+    await requestAssistantVaultFileSend({
+      actionApprovalPort: {
+        read: vi.fn(),
+        request: vi.fn().mockResolvedValue({
+          approvalId: `haa_${'e'.repeat(32)}`,
+          approvalUrl: 'https://murph.test/approve/export-pack-retirement',
+          expiresAt: '2026-06-24T12:15:00.000Z',
+          status: 'pending' as const,
+        }),
+      },
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'chat-export-pack-retirement',
+      },
+      channel: 'linq',
+      identityId: 'identity-export-pack-retirement',
+      ref: stagingRef,
+      sessionId: 'session-export-pack-retirement',
+      threadId: 'thread-export-pack-retirement',
+      threadIsDirect: true,
+      toolCallId: 'call-export-pack-retirement',
+      turnId: 'turn-export-pack-retirement',
+      vault: vaultRoot,
+    })
+
+    const [intent] = await listAssistantOutboxIntents(vaultRoot)
+    const [media] = intent?.media ?? []
+    expect(media?.kind).toBe('vault_file')
+    expect(intent?.generatedDeliveryRetirement).toMatchObject({
+      archiveRef: media?.kind === 'vault_file' ? media.ref : null,
+      archiveSha256: media?.kind === 'vault_file' ? media.sha256 : null,
+      kind: 'sent_export_packs_v1',
+      packs: [{
+        basePath: packBasePath,
+        packId,
+      }],
+    })
   })
 
   it('rejects generated delivery staging without a provider call identity before adoption', async () => {

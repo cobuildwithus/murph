@@ -262,6 +262,7 @@ export type AssistantOutboxCreateIntentInput = {
   emailHtml?: string | null
   externalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
   explicitTarget?: string | null
+  generatedDeliveryRetirement?: AssistantOutboxIntent['generatedDeliveryRetirement']
   identityId?: string | null
   initialState?:
     | { status: 'pending' }
@@ -450,6 +451,7 @@ export async function createAssistantOutboxIntent(
       message,
       emailHtml: input.emailHtml ?? null,
       media,
+      generatedDeliveryRetirement: input.generatedDeliveryRetirement ?? null,
       card,
       subject,
       operation,

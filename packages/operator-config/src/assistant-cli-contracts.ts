@@ -13,6 +13,7 @@ import {
   type AutomationTimeScheduleKind,
 } from '@murphai/contracts'
 import {
+  isAssistantGeneratedDeliveryRef,
   isNormalizedAssistantVaultFileRef,
 } from '@murphai/runtime-state/assistant-generated-deliveries'
 import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
@@ -486,6 +487,89 @@ const assistantVaultFileResponseMediaSchema = z
     'Assistant vault file approval id and generation must be present together.',
   )
 
+const assistantGeneratedExportPackRetirementFileSchema = z
+  .object({
+    path: z.string().trim().min(1).max(1024),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    sizeBytes: z.number().int().nonnegative().max(assistantVaultFileMaxBytes),
+  })
+  .strict()
+
+const assistantGeneratedExportPackRetirementPackSchema = z
+  .object({
+    basePath: z.string().trim().min(1).max(1024),
+    files: z.array(assistantGeneratedExportPackRetirementFileSchema).min(1).max(32),
+    packId: z.string().regex(/^[A-Za-z0-9_-]+$/u),
+  })
+  .strict()
+  .superRefine((pack, context) => {
+    const expectedBasePath = `exports/packs/${pack.packId}`
+    if (pack.basePath !== expectedBasePath) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Generated export-pack retirement paths must match the pack id.',
+        path: ['basePath'],
+      })
+    }
+    const seen = new Set<string>()
+    for (const [index, file] of pack.files.entries()) {
+      const fileName = file.path.slice(expectedBasePath.length + 1)
+      if (
+        !file.path.startsWith(`${expectedBasePath}/`)
+        || fileName.includes('/')
+        || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(fileName)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Generated export-pack retirement files must be direct pack files.',
+          path: ['files', index, 'path'],
+        })
+      }
+      if (seen.has(file.path)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Generated export-pack retirement files must be unique.',
+          path: ['files', index, 'path'],
+        })
+      }
+      seen.add(file.path)
+    }
+    if (!seen.has(`${expectedBasePath}/manifest.json`)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Generated export-pack retirement must include its manifest.',
+        path: ['files'],
+      })
+    }
+  })
+
+export const assistantGeneratedDeliveryRetirementSchema = z
+  .object({
+    archiveRef: z
+      .string()
+      .trim()
+      .min(1)
+      .max(1024)
+      .refine(
+        (value) => isAssistantGeneratedDeliveryRef(value) && value.toLowerCase().endsWith('.zip'),
+        'Generated export-pack retirement requires an owned ZIP ref.',
+      ),
+    archiveSha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    kind: z.literal('sent_export_packs_v1'),
+    packs: z.array(assistantGeneratedExportPackRetirementPackSchema).min(1).max(20),
+  })
+  .strict()
+  .superRefine((retirement, context) => {
+    const packIds = retirement.packs.map((pack) => pack.packId)
+    if (new Set(packIds).size !== packIds.length) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Generated export-pack retirements must contain unique packs.',
+        path: ['packs'],
+      })
+    }
+  })
+
 export const assistantResponseMediaSchema = z.union([
   assistantImageResponseMediaSchema,
   assistantVaultImageResponseMediaSchema,
@@ -893,6 +977,9 @@ export const assistantOutboxIntentSchema = z
     reviewedAssistantAskCompletionExpiresAt: isoTimestampSchema.optional(),
     emailHtml: z.string().max(500_000).nullable().optional(),
     media: z.array(assistantResponseMediaSchema).max(40).default([]),
+    generatedDeliveryRetirement: assistantGeneratedDeliveryRetirementSchema
+      .nullable()
+      .optional(),
     card: assistantResponseCardSchema.nullable().default(null),
     subject: z.string().trim().min(1).nullable().default(null),
     operation: assistantOutboxOperationSchema.nullable().default(null),
@@ -932,6 +1019,23 @@ export const assistantOutboxIntentSchema = z
   })
   .strict()
   .superRefine((intent, context) => {
+    const generatedDeliveryRetirement = intent.generatedDeliveryRetirement
+    if (generatedDeliveryRetirement) {
+      const matchingMedia = intent.media.filter(
+        (media) => media.kind === 'vault_file'
+          && media.contentType === 'application/zip'
+          && media.ref === generatedDeliveryRetirement.archiveRef
+          && media.sha256 === generatedDeliveryRetirement.archiveSha256,
+      )
+      if (matchingMedia.length !== 1) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Generated delivery retirement must match one ZIP attachment.',
+          path: ['generatedDeliveryRetirement'],
+        })
+      }
+    }
+
     if (intent.card !== null && intent.media.length > 0) {
       context.addIssue({
         code: 'custom',

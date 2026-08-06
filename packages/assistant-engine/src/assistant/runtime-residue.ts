@@ -40,6 +40,10 @@ import {
   resolveSupportedAssistantVaultFileContentType,
 } from './generated-delivery-files.js'
 import {
+  retireSentAssistantExportPacks,
+  type SentAssistantGeneratedDeliveryRetirement,
+} from './generated-export-pack-retirement.js'
+import {
   readAssistantInputEvent,
   resolveAssistantInputEventsDirectory,
   type AssistantInputEventRecord,
@@ -64,6 +68,8 @@ export interface AssistantRuntimeResiduePruneResult {
   generatedDeliveryCleanupSkippedUntrustedOutbox: boolean
   generatedDeliveryBytesPruned: number
   generatedDeliveryFilesPruned: number
+  generatedExportPackBytesPruned: number
+  generatedExportPacksPruned: number
   hostedMailboxInputItemMappingsPruned: number
   inputEventsPruned: number
   receiptsPruned: number
@@ -118,6 +124,7 @@ interface AssistantGeneratedDeliveryFileSnapshot {
 }
 
 interface AssistantGeneratedDeliveryPrunePlan {
+  exportPackRetirements: SentAssistantGeneratedDeliveryRetirement[]
   files: AssistantGeneratedDeliveryFileSnapshot[]
   inventoryFiles: AssistantGeneratedDeliveryFileSnapshot[]
   root: string | null
@@ -187,7 +194,8 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
         signal: input.signal,
         vault: input.vault,
       })
-    : {
+      : {
+        exportPackRetirements: [],
         files: [],
         inventoryFiles: [],
         root: null,
@@ -248,6 +256,10 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
       generatedDeliveryPruneResult.bytesPruned,
     generatedDeliveryFilesPruned:
       generatedDeliveryPruneResult.filesPruned,
+    generatedExportPackBytesPruned:
+      generatedDeliveryPruneResult.exportPackBytesPruned,
+    generatedExportPacksPruned:
+      generatedDeliveryPruneResult.exportPacksPruned,
     hostedMailboxInputItemMappingsPruned:
       plan.hostedMailboxInputItemPaths.length,
     inputEventsPruned: plan.inputEventPaths.length,
@@ -262,6 +274,7 @@ async function planAssistantGeneratedDeliveryPrune(input: {
 }): Promise<AssistantGeneratedDeliveryPrunePlan> {
   if (!input.outbox.trusted) {
     return {
+      exportPackRetirements: [],
       files: [],
       inventoryFiles: [],
       root: null,
@@ -273,7 +286,45 @@ async function planAssistantGeneratedDeliveryPrune(input: {
     string,
     AssistantVaultFileResponseMedia[]
   >()
+  const sentRetirementByRef = new Map<string, {
+    retirement: NonNullable<AssistantOutboxIntent['generatedDeliveryRetirement']>
+    sizeBytes: number
+  }>()
+  const conflictedSentRetirementRefs = new Set<string>()
   for (const { record } of input.outbox.records) {
+    const retirement = record.generatedDeliveryRetirement
+    if (record.status === 'sent' && retirement) {
+      if (conflictedSentRetirementRefs.has(retirement.archiveRef)) {
+        continue
+      }
+      const matchingMedia = record.media.filter(
+        (media): media is AssistantVaultFileResponseMedia =>
+          media.kind === 'vault_file'
+          && media.ref === retirement.archiveRef
+          && media.sha256 === retirement.archiveSha256,
+      )
+      if (matchingMedia.length === 1 && matchingMedia[0]) {
+        const existing = sentRetirementByRef.get(retirement.archiveRef)
+        if (
+          !existing
+          || (
+            existing.sizeBytes === matchingMedia[0].sizeBytes
+            && JSON.stringify(existing.retirement) === JSON.stringify(retirement)
+          )
+        ) {
+          sentRetirementByRef.set(retirement.archiveRef, {
+            retirement,
+            sizeBytes: matchingMedia[0].sizeBytes,
+          })
+        } else {
+          sentRetirementByRef.delete(retirement.archiveRef)
+          conflictedSentRetirementRefs.add(retirement.archiveRef)
+        }
+      } else {
+        sentRetirementByRef.delete(retirement.archiveRef)
+        conflictedSentRetirementRefs.add(retirement.archiveRef)
+      }
+    }
     if (!isActiveAssistantOutboxIntent(record)) {
       continue
     }
@@ -306,6 +357,7 @@ async function planAssistantGeneratedDeliveryPrune(input: {
         || media.sha256 !== first.sha256)
     ) {
       return {
+        exportPackRetirements: [],
         files: [],
         inventoryFiles: [],
         root: null,
@@ -331,6 +383,7 @@ async function planAssistantGeneratedDeliveryPrune(input: {
         )
       }
       return {
+        exportPackRetirements: [],
         files: [],
         inventoryFiles: [],
         root: null,
@@ -418,6 +471,17 @@ async function planAssistantGeneratedDeliveryPrune(input: {
   }
 
   return {
+    exportPackRetirements: [...sentRetirementByRef.entries()].flatMap(
+      ([archiveRef, entry]) => {
+        const archive = inventoryFiles.find((file) => file.ref === archiveRef)
+        return archive && archive.stats.size === entry.sizeBytes
+          ? [{
+              archivePath: archive.absolutePath,
+              retirement: entry.retirement,
+            }]
+          : []
+      },
+    ),
     files,
     inventoryFiles,
     root,
@@ -487,6 +551,8 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
   vault: string
 }): Promise<{
   bytesPruned: number
+  exportPackBytesPruned: number
+  exportPacksPruned: number
   filesPruned: number
 }> {
   let bytesPruned = 0
@@ -499,6 +565,11 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
       vault: input.vault,
     })
   }
+
+  const exportPackPruneResult = await retireSentAssistantExportPacks({
+    retirements: input.plan.exportPackRetirements,
+    vault: input.vault,
+  })
 
   for (const file of input.plan.files) {
     input.signal?.throwIfAborted()
@@ -541,7 +612,12 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
         isMissingFileError(error) ||
         readNodeErrorCode(error) === 'ENOTEMPTY'
       ) {
-        return { bytesPruned, filesPruned }
+        return {
+          bytesPruned,
+          exportPackBytesPruned: exportPackPruneResult.bytesPruned,
+          exportPacksPruned: exportPackPruneResult.packsPruned,
+          filesPruned,
+        }
       }
       throw error
     }
@@ -549,6 +625,8 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
 
   return {
     bytesPruned,
+    exportPackBytesPruned: exportPackPruneResult.bytesPruned,
+    exportPacksPruned: exportPackPruneResult.packsPruned,
     filesPruned,
   }
 }
