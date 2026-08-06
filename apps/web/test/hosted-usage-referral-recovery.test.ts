@@ -1,4 +1,3 @@
-import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -52,7 +51,7 @@ describe("hosted usage-referral recovery", () => {
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   });
 
-  it("settles signup rewards, bounds retries, and preserves durable wakes", async () => {
+  it("settles signup rewards, bounds conversational retries, and preserves durable wakes", async () => {
     const findReferrals = vi.fn().mockResolvedValue([
       { id: "referral_pending" },
       { id: "referral_queued" },
@@ -116,18 +115,10 @@ describe("hosted usage-referral recovery", () => {
           },
           {
             celebrationQueuedAt: null,
+            policyVersion: {
+              not: SIGNUP_POLICY_VERSION,
+            },
             status: "rewarded",
-            OR: [
-              {
-                policyVersion: {
-                  not: SIGNUP_POLICY_VERSION,
-                },
-              },
-              {
-                policyVersion: SIGNUP_POLICY_VERSION,
-                sourceConversationJson: { not: Prisma.DbNull },
-              },
-            ],
           },
         ],
       },

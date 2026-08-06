@@ -4,7 +4,6 @@ const mocks = vi.hoisted(() => ({
   appendHostedUsageCreditGrantTx: vi.fn(),
   generateHostedRandomPrefixedId: vi.fn(),
   lockHostedUsageCreditBeneficiaryTx: vi.fn(),
-  resolveHostedAssistantNotificationDestination: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-credit-grant", () => ({
@@ -14,10 +13,6 @@ vi.mock("@/src/lib/hosted-execution/usage-credit-grant", () => ({
 vi.mock("@/src/lib/hosted-execution/usage-credit-ledger", () => ({
   lockHostedUsageCreditBeneficiaryTx:
     mocks.lockHostedUsageCreditBeneficiaryTx,
-}));
-vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
-  resolveHostedAssistantNotificationDestination:
-    mocks.resolveHostedAssistantNotificationDestination,
 }));
 vi.mock("@/src/lib/primitives", () => ({
   generateHostedRandomPrefixedId:
@@ -35,7 +30,6 @@ const ATTRIBUTED_AT = new Date("2026-08-06T12:00:00.000Z");
 const INTRODUCED_AT = new Date("2026-08-06T12:00:00.000Z");
 const REFERRER_MEMBER_ID = "member_referrer";
 const INTRODUCED_MEMBER_ID = "member_introduced";
-const SOURCE_THREAD_ID = `hid_${"1".repeat(32)}`;
 
 function createPrisma(input: {
   aggregateTotal?: bigint;
@@ -115,18 +109,6 @@ describe("hosted signup referral rewards", () => {
       beneficiaryMemberId: REFERRER_MEMBER_ID,
       ledgerVersion: 0n,
     });
-    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue({
-      conversationShape: "direct-member",
-      externalThreadRouteAuthority: null,
-      route: {
-        actorId: null,
-        channel: "linq",
-        delivery: { kind: "thread", target: "provider-thread" },
-        identityId: null,
-        threadId: SOURCE_THREAD_ID,
-        threadIsDirect: true,
-      },
-    });
   });
 
   it("is disabled unless the exact rollout gate is set", async () => {
@@ -177,16 +159,13 @@ describe("hosted signup referral rewards", () => {
         referrerMemberId,
         rewardedAt: ACTIVATED_AT,
         rewardUsdMicros: 2_000_000n,
-        sourceConversationJson: {
-          channel: "linq",
-          threadId: SOURCE_THREAD_ID,
-          threadIsDirect: true,
-        },
         status: "rewarded",
         targetBoundAt: ATTRIBUTED_AT,
         terminalAt: ACTIVATED_AT,
       }),
     ]);
+    expect(created[0]).not.toHaveProperty("sourceConversationJson");
+    expect(created[0]).not.toHaveProperty("celebrationQueuedAt");
     expect(mocks.generateHostedRandomPrefixedId).toHaveBeenCalledWith("hur");
     expect(mocks.lockHostedUsageCreditBeneficiaryTx).toHaveBeenCalledWith({
       beneficiaryMemberId: referrerMemberId,
@@ -288,29 +267,5 @@ describe("hosted signup referral rewards", () => {
       terminalReason: "signup_referral_self_attribution",
     });
     expect(mocks.appendHostedUsageCreditGrantTx).not.toHaveBeenCalled();
-  });
-
-  it("rewards an email-only member without inventing a celebration route", async () => {
-    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(null);
-    const { created, introducedMemberId, prisma, referrerMemberId } =
-      createPrisma();
-
-    await expect(settleHostedSignupReferralReward({
-      activatedAt: ACTIVATED_AT,
-      introducedMemberId,
-      prisma: prisma as never,
-      referrerMemberId,
-    })).resolves.toEqual({
-      outcome: "rewarded",
-      referralId: "hur_signup_link",
-    });
-    expect(created[0]).toMatchObject({
-      introducedMemberId,
-      rewardedAt: ACTIVATED_AT,
-      status: "rewarded",
-    });
-    expect(created[0]).not.toHaveProperty("sourceConversationJson");
-    expect(mocks.appendHostedUsageCreditGrantTx).toHaveBeenCalledOnce();
-    expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
 });

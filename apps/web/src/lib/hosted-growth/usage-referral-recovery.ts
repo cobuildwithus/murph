@@ -1,6 +1,6 @@
 import "server-only";
 
-import { Prisma, type PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 
 import {
   signalHostedMailboxAppendRuntime,
@@ -27,11 +27,11 @@ export interface HostedUsageReferralRecoveryResult {
 }
 
 /**
- * Bounded recovery for referrals whose qualifying ingress committed before
- * reward reconciliation, or whose final credit committed before the source
- * celebration reached the durable mailbox. Signup-link activations settle
- * through the same referral receipt and usage-credit ledger before this pass
- * retries eligible celebrations.
+ * Bounded recovery for conversational referrals whose qualifying ingress
+ * committed before reward reconciliation, or whose credit committed before the
+ * source celebration reached the durable mailbox. Signup-link activations use
+ * this cron only as a bounded trigger; they settle atomically and do not emit a
+ * challenge-style celebration in the first version.
  */
 export async function recoverPendingHostedUsageReferrals(input: {
   prisma?: PrismaClient;
@@ -53,18 +53,10 @@ export async function recoverPendingHostedUsageReferrals(input: {
           },
           {
             celebrationQueuedAt: null,
+            policyVersion: {
+              not: HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
+            },
             status: "rewarded",
-            OR: [
-              {
-                policyVersion: {
-                  not: HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
-                },
-              },
-              {
-                policyVersion: HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
-                sourceConversationJson: { not: Prisma.DbNull },
-              },
-            ],
           },
         ],
       },

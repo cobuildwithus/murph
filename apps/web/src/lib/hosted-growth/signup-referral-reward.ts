@@ -11,9 +11,6 @@ import {
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
-import {
-  resolveHostedAssistantNotificationDestination,
-} from "../hosted-routing/assistant-notification-destination";
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
@@ -168,11 +165,6 @@ export async function settleHostedSignupReferralReward(input: {
   referrerMemberId: string;
 }): Promise<HostedSignupReferralRewardResult> {
   const prisma = input.prisma ?? getPrisma();
-  const sourceConversation =
-    await resolveOptionalHostedSignupReferralSourceConversation({
-      prisma,
-      referrerMemberId: input.referrerMemberId,
-    });
 
   return prisma.$transaction(async (tx) => {
     await acquireHostedSignupReferralReferrerLockTx({
@@ -313,9 +305,6 @@ export async function settleHostedSignupReferralReward(input: {
         rewardedAt: activation.occurredAt,
         rewardUsdMicros:
           HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
-        ...(sourceConversation
-          ? { sourceConversationJson: sourceConversation }
-          : {}),
         status: "rewarded",
         targetBoundAt: attribution.createdAt,
         terminalAt: activation.occurredAt,
@@ -337,33 +326,6 @@ export async function settleHostedSignupReferralReward(input: {
 
     return { outcome: "rewarded", referralId };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-}
-
-async function resolveOptionalHostedSignupReferralSourceConversation(input: {
-  prisma: PrismaClient;
-  referrerMemberId: string;
-}): Promise<Prisma.InputJsonObject | null> {
-  const destination = await resolveHostedAssistantNotificationDestination({
-    memberId: input.referrerMemberId,
-    prisma: input.prisma,
-  });
-  const route = destination?.route;
-  if (
-    !destination
-    || destination.conversationShape !== "direct-member"
-    || destination.externalThreadRouteAuthority !== null
-    || route?.threadIsDirect !== true
-    || (route.channel !== "linq" && route.channel !== "telegram")
-    || typeof route.threadId !== "string"
-    || !/^hid_[a-f0-9]{32}$/u.test(route.threadId)
-  ) {
-    return null;
-  }
-  return {
-    channel: route.channel,
-    threadId: route.threadId,
-    threadIsDirect: true,
-  };
 }
 
 async function readHostedSignupReferralReferrerMemberIdsTx(input: {
