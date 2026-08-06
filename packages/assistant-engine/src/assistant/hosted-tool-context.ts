@@ -296,21 +296,11 @@ export function createAssistantHostedToolContext(input: {
     imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
     imageGenerationLauncher: imageGenerationLauncher
-      ? {
-          launch(request) {
-            return imageGenerationLauncher.launch({
-              ...request,
-              scopeId: readDeliveryContext().session.sessionId,
-            })
-          },
-          ...(imageGenerationLauncher.readStatus
-            ? {
-                readStatus(scopeId: string) {
-                  return imageGenerationLauncher.readStatus?.(scopeId) ?? null
-                },
-              }
-            : {}),
-        }
+      ? bindAssistantHostedImageGenerationContinuation({
+          launcher: imageGenerationLauncher,
+          readContinuationSessionId: () =>
+            readDeliveryContext().session.sessionId,
+        })
       : null,
     persistGeneratedImageCapture:
       executionContext?.persistGeneratedImageCapture ?? null,
@@ -474,6 +464,24 @@ export function createAssistantHostedToolContext(input: {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
     vaultFileSendAvailable: typeof input.sendVaultFile === 'function',
+  }
+}
+
+// The host, not the model or tool arguments, owns which durable session an
+// asynchronous image completion resumes. Binding it here keeps the caller's
+// `scopeId` (pending/queued coordination) and `readStatus` untouched.
+function bindAssistantHostedImageGenerationContinuation(input: {
+  launcher: AssistantHostedImageGenerationLauncher
+  readContinuationSessionId: () => string
+}): AssistantHostedImageGenerationLauncher {
+  return {
+    ...input.launcher,
+    launch(request) {
+      return input.launcher.launch({
+        ...request,
+        continuationSessionId: input.readContinuationSessionId(),
+      })
+    },
   }
 }
 

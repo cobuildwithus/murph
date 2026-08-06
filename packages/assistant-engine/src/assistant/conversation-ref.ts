@@ -196,7 +196,7 @@ export function conversationRefFromCapture(input: {
 export function conversationRefFromAssistantInputConversation(
   input: AssistantInputConversationRef,
 ): ConversationRef {
-  const conversation = normalizeConversationRef({
+  return normalizeConversationRef({
     sessionId: input.sessionId,
     channel: input.source,
     identityId:
@@ -207,12 +207,6 @@ export function conversationRefFromAssistantInputConversation(
     threadId: input.threadId,
     directness: conversationDirectnessFromThreadIsDirect(input.threadIsDirect),
   })
-  if (conversation.sessionId) {
-    // The exact durable session owns continuity. A runtime-authored input actor
-    // describes the input itself and must not rebind that session's participant.
-    delete conversation.participantId
-  }
-  return conversation
 }
 
 export function assistantInputConversationRefFromCapture(input: {

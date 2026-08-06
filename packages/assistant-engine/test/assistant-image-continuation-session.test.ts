@@ -1,10 +1,14 @@
+import { rm } from 'node:fs/promises'
+
 import {
+  createAssistantModelTarget,
   createDefaultLocalAssistantModelTarget,
+  type AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type {
   AssistantHostedImageGenerationLauncher,
@@ -27,11 +31,30 @@ import {
 import type {
   AssistantAutomationInputSummary,
 } from '../src/assistant/automation/input-summary.js'
+import {
+  getAssistantSession,
+  resolveAssistantSession,
+} from '../src/assistant/store.js'
+import { createTempVaultContext } from './test-helpers.js'
 
 const ORIGIN_SESSION_ID = `asst_${'a'.repeat(32)}`
+const OTHER_SESSION_ID = `asst_${'b'.repeat(32)}`
+
+const cleanupPaths: string[] = []
+
+afterEach(async () => {
+  await Promise.all(
+    cleanupPaths.splice(0).map((target) =>
+      rm(target, {
+        force: true,
+        recursive: true,
+      }),
+    ),
+  )
+})
 
 describe('exact asynchronous image session continuation', () => {
-  it('keeps a runtime-authored actor separate from the exact session binding', () => {
+  it('carries the exact session locator only on runtime-authored input', () => {
     const conversation = conversationRefFromAssistantInputConversation({
       accountId: 'identity_1',
       actorId: null,
@@ -46,10 +69,10 @@ describe('exact asynchronous image session continuation', () => {
       channel: 'linq',
       directness: 'direct',
       identityId: 'identity_1',
+      participantId: null,
       sessionId: ORIGIN_SESSION_ID,
       threadId: 'thread_1',
     })
-    expect(conversation).not.toHaveProperty('participantId')
 
     const ordinaryConversation = conversationRefFromAssistantInputConversation({
       accountId: 'identity_1',
@@ -59,7 +82,6 @@ describe('exact asynchronous image session continuation', () => {
       threadId: 'thread_1',
       threadIsDirect: true,
     })
-    expect(ordinaryConversation.participantId).toBe('actor_1')
     expect(ordinaryConversation.sessionId).toBeNull()
 
     const resolution = buildResolveAssistantSessionInput(
@@ -71,36 +93,169 @@ describe('exact asynchronous image session continuation', () => {
       createDefaultLocalAssistantModelTarget(),
     )
     expect(resolution).toMatchObject({
+      actorId: null,
       channel: 'linq',
       identityId: 'identity_1',
       sessionId: ORIGIN_SESSION_ID,
       threadId: 'thread_1',
       threadIsDirect: true,
     })
-    expect(resolution).not.toHaveProperty('actorId')
+  })
+
+  it('resumes the exact session without clearing or rebinding its participant', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-image-continuation-session-',
+    )
+    cleanupPaths.push(parentRoot)
+
+    const created = await resolveAssistantSession({
+      actorId: 'linq-participant',
+      channel: 'linq',
+      identityId: 'linq-identity',
+      target: createCodexTarget(),
+      threadId: 'linq-thread',
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+    expect(created.session.binding.actorId).toBe('linq-participant')
+
+    // The trusted completion is system-authored, so its conversation carries
+    // `actorId: null` next to the exact originating session id.
+    const completionConversation = conversationRefFromAssistantInputConversation({
+      accountId: 'linq-identity',
+      actorId: null,
+      actorIsSelf: false,
+      sessionId: created.session.sessionId,
+      source: 'linq',
+      threadId: 'linq-thread',
+      threadIsDirect: true,
+    })
+
+    const resumed = await resolveAssistantSession({
+      conversation: completionConversation,
+      createIfMissing: false,
+      vault: vaultRoot,
+    })
+    expect(resumed.created).toBe(false)
+    expect(resumed.session.sessionId).toBe(created.session.sessionId)
+    expect(resumed.resolutionDiagnostics).toMatchObject({
+      sessionResolutionLookupSource: 'session-id',
+    })
+    expect(resumed.session.binding.actorId).toBe('linq-participant')
+
+    // Only the system-authored no-actor case is exempt. A differing non-null
+    // actor on an explicit session is a retarget, so it still fails closed.
+    await expect(
+      resolveAssistantSession({
+        conversation: conversationRefFromAssistantInputConversation({
+          accountId: 'linq-identity',
+          actorId: 'linq-other-participant',
+          actorIsSelf: false,
+          sessionId: created.session.sessionId,
+          source: 'linq',
+          threadId: 'linq-thread',
+          threadIsDirect: true,
+        }),
+        createIfMissing: false,
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_ROUTING_CONFLICT',
+    })
+
+    const persisted = await getAssistantSession(
+      vaultRoot,
+      created.session.sessionId,
+    )
+    expect(persisted.binding.actorId).toBe('linq-participant')
+
+    // Channel, identity, thread, and directness isolation still fails closed.
+    await expect(
+      resolveAssistantSession({
+        conversation: conversationRefFromAssistantInputConversation({
+          accountId: 'linq-identity',
+          actorId: null,
+          actorIsSelf: false,
+          sessionId: created.session.sessionId,
+          source: 'linq',
+          threadId: 'other-thread',
+          threadIsDirect: true,
+        }),
+        createIfMissing: false,
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_ROUTING_CONFLICT',
+    })
+
+    // An explicit opt-in retarget still rebinds the participant.
+    const rebound = await resolveAssistantSession({
+      actorId: 'linq-other-participant',
+      allowBindingRebind: true,
+      channel: 'linq',
+      createIfMissing: false,
+      identityId: 'linq-identity',
+      sessionId: created.session.sessionId,
+      threadId: 'linq-thread',
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+    expect(rebound.session.binding.actorId).toBe('linq-other-participant')
   })
 
   it('does not coalesce completion inputs from different session owners', () => {
-    const first = createSummary(ORIGIN_SESSION_ID)
+    const first = createSummary({ sessionId: ORIGIN_SESSION_ID })
 
     expect(
-      shouldGroupAdjacentConversationInput(first, createSummary(null)),
+      shouldGroupAdjacentConversationInput(first, createSummary({ sessionId: null })),
     ).toBe(false)
     expect(
       shouldGroupAdjacentConversationInput(
         first,
-        createSummary(`asst_${'b'.repeat(32)}`),
+        createSummary({ sessionId: OTHER_SESSION_ID }),
       ),
     ).toBe(false)
     expect(
       shouldGroupAdjacentConversationInput(
         first,
-        createSummary(ORIGIN_SESSION_ID),
+        createSummary({ sessionId: ORIGIN_SESSION_ID }),
       ),
     ).toBe(true)
   })
 
-  it('binds image launches while preserving the launcher status API', () => {
+  it('does not coalesce different session owners in the authenticated group-room fast path', () => {
+    // The group-room fast path intentionally ignores the input actor, so exact
+    // session ownership is the only boundary left between a system-authored
+    // continuation and adjacent group messages.
+    const first = createGroupRoomSummary({ sessionId: ORIGIN_SESSION_ID })
+
+    expect(
+      shouldGroupAdjacentConversationInput(
+        first,
+        createGroupRoomSummary({ sessionId: null }),
+      ),
+    ).toBe(false)
+    expect(
+      shouldGroupAdjacentConversationInput(
+        first,
+        createGroupRoomSummary({ sessionId: OTHER_SESSION_ID }),
+      ),
+    ).toBe(false)
+    expect(
+      shouldGroupAdjacentConversationInput(
+        first,
+        createGroupRoomSummary({ sessionId: ORIGIN_SESSION_ID }),
+      ),
+    ).toBe(true)
+    expect(
+      shouldGroupAdjacentConversationInput(
+        createGroupRoomSummary({ sessionId: null }),
+        createGroupRoomSummary({ sessionId: null }),
+      ),
+    ).toBe(true)
+  })
+
+  it('binds the continuation session without disturbing the launch scope', () => {
     const launch = vi.fn<AssistantHostedImageGenerationLauncher['launch']>(
       () => 'started',
     )
@@ -135,7 +290,8 @@ describe('exact asynchronous image session continuation', () => {
 
     expect(launch).toHaveBeenCalledOnce()
     expect(launch).toHaveBeenCalledWith(expect.objectContaining({
-      scopeId: ORIGIN_SESSION_ID,
+      continuationSessionId: ORIGIN_SESSION_ID,
+      scopeId: 'caller_selected_scope',
     }))
     expect(
       context.imageGenerationLauncher?.readStatus?.('caller_selected_scope'),
@@ -145,7 +301,9 @@ describe('exact asynchronous image session continuation', () => {
   })
 })
 
-function createSummary(sessionId: string | null): AssistantAutomationInputSummary {
+function createSummary(input: {
+  sessionId: string | null
+}): AssistantAutomationInputSummary {
   return {
     actorIsSelf: false,
     attachmentCount: 0,
@@ -153,7 +311,7 @@ function createSummary(sessionId: string | null): AssistantAutomationInputSummar
       accountId: 'identity_1',
       actorId: null,
       actorIsSelf: false,
-      ...(sessionId ? { sessionId } : {}),
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       source: 'linq',
       threadId: 'thread_1',
       threadIsDirect: true,
@@ -169,4 +327,31 @@ function createSummary(sessionId: string | null): AssistantAutomationInputSummar
     source: 'hosted-mailbox',
     text: 'trusted image completion',
   }
+}
+
+function createGroupRoomSummary(input: {
+  sessionId: string | null
+}): AssistantAutomationInputSummary {
+  const summary = createSummary(input)
+  return {
+    ...summary,
+    conversation: {
+      ...summary.conversation,
+      threadIsDirect: false,
+    },
+    groupRoomBatchingEligible: true,
+    source: 'linq',
+  }
+}
+
+function createCodexTarget(): AssistantModelTarget {
+  const target = createAssistantModelTarget({
+    model: 'gpt-5-codex',
+    provider: 'codex-cli',
+  })
+  if (!target) {
+    throw new Error('Expected assistant model target.')
+  }
+
+  return target
 }
