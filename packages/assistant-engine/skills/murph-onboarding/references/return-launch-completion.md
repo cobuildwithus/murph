@@ -210,4 +210,3 @@ notification skip when the evidence already answers the checkpoint, declines
 onboarding, defers it, or makes another question untimely or unhelpful. Only a
 later foreground user reply may advance or complete onboarding through the
 canonical state owner.
-
