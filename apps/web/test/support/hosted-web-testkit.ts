@@ -675,6 +675,7 @@ export interface HostedAiUsageForTestRow {
 
 interface HostedRuntimeLogForTestPrismaRow {
   at: Date;
+  attemptId: string | null;
   component: string;
   eventCode: string;
   level: string;
@@ -684,6 +685,7 @@ interface HostedRuntimeLogForTestPrismaRow {
 
 export interface HostedRuntimeLogForTestRow {
   at: string;
+  attemptId: string | null;
   component: string;
   eventCode: string;
   level: string;
@@ -1512,6 +1514,7 @@ export async function listHostedRuntimeLogsForTest(input: {
 
     return rows.map((row) => ({
       at: row.at.toISOString(),
+      attemptId: row.attemptId,
       component: row.component,
       eventCode: row.eventCode,
       level: row.level,
