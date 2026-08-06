@@ -3,12 +3,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildHostedLinqGroupEmailRecoveryEffectId,
   buildHostedLinqGroupEmailRecoveryMessage,
-  buildHostedLinqGroupInactiveSenderMessage,
+  buildHostedLinqGroupInactiveSenderRoomMessage,
   buildHostedLinqGroupSetupEffectId,
-  HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANT_COUNT,
+  HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_VARIANT_COUNT,
   issueHostedLinqGroupEmailRecoveryToken,
   openHostedLinqGroupEmailRecoveryToken,
-  readHostedLinqGroupInactiveSenderVariantTemplates,
+  readHostedLinqGroupInactiveSenderRoomVariantTemplates,
 } from "../src/lib/hosted-onboarding/linq-group-setup";
 
 const TEST_SESSION_KEY = Buffer.alloc(32, 7).toString("base64url");
@@ -35,43 +35,41 @@ describe("Hosted Linq group setup", () => {
     }
   });
 
-  it("keeps 50 reviewed inactive-sender variants on one privacy-safe action contract", () => {
-    const variants = readHostedLinqGroupInactiveSenderVariantTemplates();
+  it("keeps 50 reviewed inactive-sender room variants on one privacy-safe action contract", () => {
+    const variants = readHostedLinqGroupInactiveSenderRoomVariantTemplates();
 
-    expect(HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANT_COUNT).toBe(50);
+    expect(HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_VARIANT_COUNT).toBe(50);
     expect(variants).toHaveLength(50);
     expect(new Set(variants).size).toBe(50);
     for (const variant of variants) {
       expect(countOccurrences(variant, "{groupSetupUrl}")).toBe(1);
-      expect(variant).toMatch(/\b(?:you|your)\b/iu);
       expect(variant).toMatch(
-        /\b(?:inactive|isn't active)\b/iu,
-      );
-      expect(variant).toMatch(
-        /\b(?:active Murph|Murph access is active)\b/iu,
+        /\b(?:active on Murph|active Murph member)\b/iu,
       );
       expect(variant).toContain("message");
       expect(variant).toMatch(
         /activate or finish setting up Murph, then message me here again:/u,
       );
-      expect(variant).not.toMatch(/\b(?:billing|payment|subscription|trial)\b/iu);
+      expect(variant).not.toMatch(
+        /\b(?:account|access|billing|payment|subscription|trial|you|your)\b/iu,
+      );
       expect(variant).not.toMatch(/https?:\/\//iu);
     }
   });
 
-  it("selects inactive-sender copy deterministically with broad rotation", () => {
-    const first = buildHostedLinqGroupInactiveSenderMessage({
+  it("selects inactive-sender room copy deterministically with broad rotation", () => {
+    const first = buildHostedLinqGroupInactiveSenderRoomMessage({
       seed: "linq-group-setup:stable-seed",
     });
     const rotated = new Set(
       Array.from({ length: 500 }, (_, index) =>
-        buildHostedLinqGroupInactiveSenderMessage({
+        buildHostedLinqGroupInactiveSenderRoomMessage({
           seed: `linq-group-setup:seed-${index}`,
         })
       ),
     );
 
-    expect(buildHostedLinqGroupInactiveSenderMessage({
+    expect(buildHostedLinqGroupInactiveSenderRoomMessage({
       seed: "linq-group-setup:stable-seed",
     })).toBe(first);
     expect(rotated.size).toBe(50);

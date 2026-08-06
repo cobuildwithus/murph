@@ -153,7 +153,10 @@ export function withHostedVisibleSecondaryLinqOutcomes(
   return async (input) => {
     const response = await handler(input);
     const reason = response.reason ?? "";
-    if (!response.ignored || !HOSTED_LINQ_VISIBLE_SECONDARY_REASONS.has(reason)) {
+    const groupSetupAlreadySent = !response.ignored && reason === "sent-group-setup";
+    const needsVisibleSecondary = response.ignored
+      && HOSTED_LINQ_VISIBLE_SECONDARY_REASONS.has(reason);
+    if (!groupSetupAlreadySent && !needsVisibleSecondary) {
       return response;
     }
 
@@ -170,22 +173,27 @@ export function withHostedVisibleSecondaryLinqOutcomes(
     }
 
     const prisma = input.prisma ?? dependencies.getPrisma();
-    const recognizedSender = HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER.has(reason)
+    const recognizedSender = (
+      groupSetupAlreadySent
+      || HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER.has(reason)
+    )
       ? await readHostedLinqSender({
           participantContact: context.participantContact,
           prisma,
           dependencies,
         })
       : null;
+    const privateRecoveryReason = groupSetupAlreadySent ? "group-chat" : reason;
     const privateRecovery =
-      recognizedSender && HOSTED_LINQ_PRIVATE_GROUP_RECOVERY_REASONS.has(reason)
+      recognizedSender
+      && HOSTED_LINQ_PRIVATE_GROUP_RECOVERY_REASONS.has(privateRecoveryReason)
         ? await resolveHostedLinqPrivateGroupRecovery({
             currentChatId: context.summary.chatId,
             eventId: event.event_id,
             incomingRecipientPhone: context.recipientPhoneNumber,
             participantContact: context.participantContact,
             prisma,
-            reason,
+            reason: privateRecoveryReason,
             sender: recognizedSender,
             dependencies,
             ...(input.signal ? { signal: input.signal } : {}),
@@ -201,7 +209,9 @@ export function withHostedVisibleSecondaryLinqOutcomes(
           ...(input.signal ? { signal: input.signal } : {}),
         });
 
-        return buildVisibleSecondaryResponse(response, reason);
+        return groupSetupAlreadySent
+          ? response
+          : buildVisibleSecondaryResponse(response, reason);
       } catch (error) {
         if (!isHostedOnboardingError(error) || error.retryable) {
           throw error;
@@ -210,6 +220,13 @@ export function withHostedVisibleSecondaryLinqOutcomes(
         // did not land. Continue to the neutral room response instead of
         // retrying a stale private route forever.
       }
+    }
+
+    // The primary handler already sent the account-neutral setup guidance to
+    // the room. If private re-attestation is unavailable, do not add another
+    // room message or reveal why the sender could not start the group.
+    if (groupSetupAlreadySent) {
+      return response;
     }
 
     const message = resolveHostedLinqVisibleSecondaryReply({

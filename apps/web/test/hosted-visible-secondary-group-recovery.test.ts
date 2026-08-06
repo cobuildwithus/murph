@@ -50,6 +50,83 @@ function requireTestLinqParticipantContact(
 }
 
 describe("Linq group-chat visible access recovery", () => {
+  it("privately explains inactive access after neutral setup guidance is sent", async () => {
+    const event = buildGroupLinqEvent("evt_group_setup_private");
+    const sendHostedLinqChatMessage = vi.fn(async () => ({
+      chatId: "chat_private_member",
+      messageId: "msg_private_recovery",
+    }));
+    const dependencies = buildLinqDependencies({
+      event,
+      getHostedLinqChatSummary: vi.fn(async () => ({
+        handles: MATCHING_PRIVATE_HANDLES,
+        isGroup: false,
+      })),
+      readHostedMemberRoutingState: vi.fn(async () => ({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      }) as never),
+      resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
+        kind: "access_notice" as const,
+        message: TRIAL_CONVERSION_MESSAGE,
+        noticeCode: "trial_conversion_pending" as const,
+        responseReason: "sent-trial-conversion-notice",
+      })),
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      joinUrl: "https://withmurph.ai/groups/start",
+      ok: true as const,
+      reason: "sent-group-setup",
+    }));
+
+    const response = await withHostedVisibleSecondaryLinqOutcomes(
+      handler,
+      dependencies,
+    )({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    });
+
+    expect(response).toEqual({
+      joinUrl: "https://withmurph.ai/groups/start",
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_private_member",
+      idempotencyKey: "visible-secondary-private:evt_group_setup_private",
+      message: `${TRIAL_CONVERSION_MESSAGE}\n\nOnce that's sorted, send me another message in the group and I'll try again.`,
+      replyToMessageId: null,
+    }));
+  });
+
+  it("adds no disclosure when setup guidance has no safe private route", async () => {
+    const event = buildGroupLinqEvent("evt_group_setup_no_private");
+    const sendHostedLinqChatMessage = vi.fn();
+    const dependencies = buildLinqDependencies({
+      event,
+      readHostedMemberRoutingState: vi.fn(async () => null),
+      resolveHostedRecognizedInboundAccess: vi.fn(),
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      joinUrl: "https://withmurph.ai/groups/start",
+      ok: true as const,
+      reason: "sent-group-setup",
+    }));
+
+    await withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    });
+
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it.each([
     "group-chat",
     "thread-container-inactive",

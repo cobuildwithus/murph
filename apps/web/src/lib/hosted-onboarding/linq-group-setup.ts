@@ -16,43 +16,45 @@ export const HOSTED_LINQ_GROUP_SETUP_TEMPLATE = "group_setup";
 export const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE =
   "group_email_recovery";
 
-const HOSTED_LINQ_GROUP_INACTIVE_SENDER_URL_PLACEHOLDER =
+const HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_URL_PLACEHOLDER =
   "{groupSetupUrl}";
 
-const HOSTED_LINQ_GROUP_INACTIVE_SENDER_STATUS_VARIANTS = [
-  "Your Murph access isn't active right now.",
-  "Your Murph access is currently inactive.",
-  "Murph isn't active for you right now.",
-  "It looks like your Murph access is inactive right now.",
-  "Your Murph account is already set up, but its access isn't active right now.",
-  "I found your Murph account, but its access is inactive right now.",
-  "Murph is inactive for your account at the moment.",
-  "Your existing Murph setup is recognized, but access is inactive.",
-  "I recognize your Murph account, but its access isn't active right now.",
-  "Your Murph access is inactive, so I can't start the group from your message yet.",
+// This copy is posted in the shared room. Keep it neutral about the sender's
+// account; the re-attested private recovery path owns account-specific detail.
+const HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_STATUS_VARIANTS = [
+  "I can't start this group from that message yet.",
+  "That message can't start this Murph group yet.",
+  "I need a different next step before I can start this group.",
+  "This group isn't ready to start from that message.",
+  "I couldn't start the group from that message.",
+  "I can't connect this group from that message yet.",
+  "Murph can't start this group from that message yet.",
+  "That message isn't enough to start this group yet.",
+  "I need one more step before I can start this group.",
+  "I can't get this group going from that message yet.",
 ] as const;
 
-const HOSTED_LINQ_GROUP_INACTIVE_SENDER_ACTION_VARIANTS = [
-  "Someone in this chat with active Murph access can message me here next.",
-  "A person here with active Murph access can send me the next message.",
-  "This group can start when someone here with active Murph access messages me.",
+const HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_ACTION_VARIANTS = [
+  "Someone in this chat who's active on Murph can message me here next.",
+  "A person here who's active on Murph can send me the next message.",
+  "This group can start when someone here who's active on Murph messages me.",
   "An active Murph member in this chat can message me to continue.",
-  "Have someone in this group with active Murph access message me here.",
+  "Have someone in this group who's active on Murph message me here.",
 ] as const;
 
-const HOSTED_LINQ_GROUP_INACTIVE_SENDER_RECOVERY =
+const HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_RECOVERY =
   "Otherwise, use this link to activate or finish setting up Murph, "
-  + `then message me here again: ${HOSTED_LINQ_GROUP_INACTIVE_SENDER_URL_PLACEHOLDER}`;
+  + `then message me here again: ${HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_URL_PLACEHOLDER}`;
 
-const HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANTS =
-  HOSTED_LINQ_GROUP_INACTIVE_SENDER_STATUS_VARIANTS.flatMap((status) =>
-    HOSTED_LINQ_GROUP_INACTIVE_SENDER_ACTION_VARIANTS.map((action) =>
-      `${status} ${action} ${HOSTED_LINQ_GROUP_INACTIVE_SENDER_RECOVERY}`
+const HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_VARIANTS =
+  HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_STATUS_VARIANTS.flatMap((status) =>
+    HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_ACTION_VARIANTS.map((action) =>
+      `${status} ${action} ${HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_RECOVERY}`
     )
   );
 
-export const HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANT_COUNT =
-  HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANTS.length;
+export const HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_VARIANT_COUNT =
+  HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_VARIANTS.length;
 
 const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_PREFIX =
   "murph_linq_group_email_v1.";
@@ -160,21 +162,21 @@ export function buildHostedLinqGroupSetupMessage(): string {
   ].join(" ");
 }
 
-export function readHostedLinqGroupInactiveSenderVariantTemplates():
+export function readHostedLinqGroupInactiveSenderRoomVariantTemplates():
   readonly string[] {
-  return HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANTS;
+  return HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_VARIANTS;
 }
 
-export function buildHostedLinqGroupInactiveSenderMessage(input: {
+export function buildHostedLinqGroupInactiveSenderRoomMessage(input: {
   seed: string;
 }): string {
-  const digest = sha256Hex(`group-inactive-sender-message:${input.seed}`);
+  const digest = sha256Hex(`group-inactive-sender-room-message:${input.seed}`);
   const variantIndex = Number.parseInt(digest.slice(0, 8), 16)
-    % HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANTS.length;
-  const template = HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANTS[variantIndex];
+    % HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_VARIANTS.length;
+  const template = HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_VARIANTS[variantIndex];
 
   return template.replace(
-    HOSTED_LINQ_GROUP_INACTIVE_SENDER_URL_PLACEHOLDER,
+    HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_URL_PLACEHOLDER,
     buildHostedLinqGroupSetupUrl(),
   );
 }

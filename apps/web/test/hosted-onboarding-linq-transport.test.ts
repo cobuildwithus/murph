@@ -4073,7 +4073,7 @@ describe("hosted Linq webhook transport", () => {
       }
     });
 
-    it("renders reason-specific rotating copy for a known inactive group sender", async () => {
+    it("renders privacy-safe rotating room copy for a known inactive group sender", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(dispatchNow);
       const lookupKey = arrangeAssignableRecoveryLine();
@@ -4103,7 +4103,7 @@ describe("hosted Linq webhook transport", () => {
             chatId: "chat-group-inactive-sender",
             idempotencyKey: effect.effectId,
             message: expect.stringMatching(
-              /(?:inactive|isn't active|isn't live|isn't available|paused)/iu,
+              /(?:active on Murph|active Murph member)/iu,
             ),
             replyToMessageId: "message-group-inactive-sender",
           }),
@@ -4113,6 +4113,9 @@ describe("hosted Linq webhook transport", () => {
         expect(sentMessage).toContain("https://join.test/groups/start");
         expect(sentMessage).not.toContain(
           "someone in this chat needs to finish setting up Murph",
+        );
+        expect(sentMessage).not.toMatch(
+          /\b(?:account|access|billing|payment|subscription|trial|you|your)\b/iu,
         );
       } finally {
         vi.useRealTimers();

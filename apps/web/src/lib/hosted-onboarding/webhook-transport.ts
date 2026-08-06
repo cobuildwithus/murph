@@ -64,7 +64,7 @@ import {
 import {
   buildHostedLinqGroupEmailRecoveryEffectId,
   buildHostedLinqGroupEmailRecoveryMessage,
-  buildHostedLinqGroupInactiveSenderMessage,
+  buildHostedLinqGroupInactiveSenderRoomMessage,
   buildHostedLinqGroupSetupEffectId,
   buildHostedLinqGroupSetupMessage,
   HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE,
@@ -2146,7 +2146,7 @@ async function buildHostedLinqSideEffectMessage(
   switch (effect.payload.template) {
     case HOSTED_LINQ_GROUP_SETUP_TEMPLATE:
       return effect.payload.groupSetupReason === "sender-inactive"
-        ? buildHostedLinqGroupInactiveSenderMessage({ seed: effect.effectId })
+        ? buildHostedLinqGroupInactiveSenderRoomMessage({ seed: effect.effectId })
         : buildHostedLinqGroupSetupMessage();
     case HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE:
       return buildHostedLinqGroupEmailRecoveryMessage({
