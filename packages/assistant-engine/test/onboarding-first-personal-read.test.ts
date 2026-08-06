@@ -31,6 +31,12 @@ async function readOnboardingSkill(): Promise<string> {
   return raw.replace(/\s+/gu, ' ')
 }
 
+function expectContainsAll(actual: string, expected: readonly string[]): void {
+  for (const value of expected) {
+    expect(actual).toContain(value)
+  }
+}
+
 afterEach(() => {
   vi.useRealTimers()
 })
@@ -69,7 +75,7 @@ describe('onboarding first personal read', () => {
     })
   })
 
-  it('turns the zero-argument action into the code-owned request', () => {
+  it('turns the fieldless action into the code-owned request', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-06T21:00:00.000Z'))
 
@@ -79,7 +85,6 @@ describe('onboarding first personal read', () => {
       },
       tool: 'automation',
     })
-
     expect(parsed?.kind).toBe('automation')
     if (parsed?.kind !== 'automation') {
       throw new TypeError('Expected a parsed automation request.')
@@ -90,16 +95,15 @@ describe('onboarding first personal read', () => {
       }),
     )
 
-    const modelAuthoredOverride = readAutomationDynamicToolRequest({
-      arguments: {
-        action: MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
-        instructions: 'Use a weaker model-authored prompt instead.',
-      },
-      tool: 'automation',
-    })
-    expect(modelAuthoredOverride?.kind).toBe(
-      'invalid-automation-arguments',
-    )
+    expect(
+      readAutomationDynamicToolRequest({
+        arguments: {
+          action: MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
+          instructions: 'Use a model-authored prompt instead.',
+        },
+        tool: 'automation',
+      })?.kind,
+    ).toBe('invalid-automation-arguments')
   })
 
   it('passes only the code-owned request through the hosted tool boundary', async () => {
@@ -147,9 +151,9 @@ describe('onboarding first personal read', () => {
     )
   })
 
-  it('blocks generic save and patch from replacing the fixed prompt', () => {
-    const genericSave = readAutomationDynamicToolRequest({
-      arguments: {
+  it('protects the fixed definition while allowing explicit cancellation', () => {
+    const invalidRequests = [
+      {
         action: 'save',
         instructions: 'Replace the fixed policy.',
         schedule: {
@@ -159,12 +163,7 @@ describe('onboarding first personal read', () => {
         slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
         title: 'Replacement',
       },
-      tool: 'automation',
-    })
-    expect(genericSave?.kind).toBe('invalid-automation-arguments')
-
-    const derivedSlugSave = readAutomationDynamicToolRequest({
-      arguments: {
+      {
         action: 'save',
         instructions: 'Replace the fixed policy through a derived slug.',
         schedule: {
@@ -173,81 +172,71 @@ describe('onboarding first personal read', () => {
         },
         title: 'Onboarding first personal read',
       },
-      tool: 'automation',
-    })
-    expect(derivedSlugSave?.kind).toBe('invalid-automation-arguments')
-
-    const genericPatch = readAutomationDynamicToolRequest({
-      arguments: {
+      {
         action: 'patch',
         instructions: 'Replace the fixed policy.',
         lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
       },
+      {
+        action: 'patch',
+        lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+        status: 'paused',
+      },
+    ]
+
+    for (const request of invalidRequests) {
+      expect(
+        readAutomationDynamicToolRequest({
+          arguments: request,
+          tool: 'automation',
+        })?.kind,
+      ).toBe('invalid-automation-arguments')
+    }
+
+    const cancellation = readAutomationDynamicToolRequest({
+      arguments: {
+        action: 'patch',
+        lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+        status: 'archived',
+      },
       tool: 'automation',
     })
-    expect(genericPatch?.kind).toBe('invalid-automation-arguments')
+    expect(cancellation).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'patch',
+        lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+        status: 'archived',
+      },
+    })
   })
 
-  it('keeps the full evidence and interestingness policy in source code', () => {
+  it('keeps the complete evidence and interestingness policy in source code', () => {
     const prompt = MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS
 
     expect(new TextEncoder().encode(prompt).byteLength).toBeLessThanOrEqual(
       40_000,
     )
-    expect(prompt).toContain(
+    expectContainsAll(prompt, [
       'It is better to send nothing than to manufacture a weak insight.',
-    )
-    expect(prompt).toContain(
       'I did not know that about me, that is interesting',
-    )
-    expect(prompt).toContain(
       'Suppress true-but-boring findings.',
-    )
-    expect(prompt).toContain(
       'Treat proprietary readiness, recovery, sleep, or strain scores as summaries, not independent evidence.',
-    )
-    expect(prompt).toContain(
       'Missing, stale, sparse, misclassified, contradictory, or still-importing data is not evidence',
-    )
-    expect(prompt).toContain(
       'Never infer alcohol use, medication changes, illness, adherence, or another sensitive explanation from a proxy pattern.',
-    )
-    expect(prompt).toContain(
       'Return skip unless the scheduled occurrence context and current route are for one private member conversation.',
-    )
-    expect(prompt).toContain(
-      'Return skip when a substantive proactive health question, decision, or requested action from Murph is still waiting for the member.',
-    )
-    expect(prompt).toContain(
+      'Return skip if the member asked not to receive this read, requested no follow-up, or otherwise revoked this proactive outreach.',
       'A generic closing invitation such as `anything else?` is not an unresolved task',
-    )
-    expect(prompt).toContain(
       'return skip if the page is malformed or unreadable',
-    )
-    expect(prompt).toContain(
       'If a `First read <Occurrence local date>` section already exists, reuse only its exact stored outbound text for retry or replay of this occurrence',
-    )
-    expect(prompt).toContain(
       'If any other section heading begins `First read `, return skip; this one-shot never sends a second first personal read.',
-    )
-    expect(prompt).toContain(
       'vault-cli knowledge append-section weekly-health-insights',
-    )
-    expect(prompt).toContain(
       'A failed dedupe write must not make the member lose an otherwise sound first read.',
-    )
-    expect(prompt).toContain(
       'I took a deeper look across what you shared.',
-    )
-    expect(prompt).toContain(
       'at most one optional low-burden next action or question',
-    )
-    expect(prompt).toContain(
       'Do not diagnose, prescribe, alarm, shame, dump metrics, stack findings, create a habit, plan, experiment, reminder, or other action',
-    )
-    expect(prompt).toContain(
       'do not spawn a child; this scheduled turn owns the complete read, selection, and delivery',
-    )
+    ])
   })
 
   it('keeps onboarding responsible only for invoking the fixed action', async () => {
@@ -266,18 +255,12 @@ describe('onboarding first personal read', () => {
         new RegExp(MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION, 'gu'),
       ),
     ).toHaveLength(1)
-    expect(onboarding).toContain(
+    expectContainsAll(onboarding, [
       'The host owns the immutable automation identity, current-conversation route binding, two-minute delay, bounded active window, fresh continuity, Sol/high target, and complete first-read prompt.',
-    )
-    expect(onboarding).toContain(
       'Do not call generic `save`, provide instructions, calculate timestamps, choose a model, or add fields.',
-    )
-    expect(onboarding).toContain(
       'do not retry, block completion, or mention the failure',
-    )
-    expect(onboarding).toContain(
       'whether that\'s a pattern, a clearer interpretation, or what seems worth watching next',
-    )
+    ])
     expect(onboarding).not.toContain(
       'slug: "onboarding-first-personal-read"',
     )
@@ -289,16 +272,13 @@ describe('onboarding first personal read', () => {
     )
   })
 
-  it('documents the structured action as fixed and fieldless', () => {
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot after answered onboarding',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+  it('documents the fixed action and cancellation boundary', () => {
+    expectContainsAll(MURPH_AUTOMATION_TOOL.description, [
+      'save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn',
       'it accepts no prompt, timing, model, route, or other fields',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'generic save or patch cannot replace it',
-    )
+      'Generic save cannot replace it',
+      'generic patch may only archive it when the member cancels',
+    ])
   })
 
   it('rejects invalid builder dates', () => {
