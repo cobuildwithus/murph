@@ -1,4 +1,8 @@
 import {
+  buildHostedGrowthActivitySeries,
+  type HostedGrowthActivitySnapshot,
+} from "@/src/lib/hosted-ops/growth-activity-series";
+import {
   buildHostedGrowthMessageSeries,
   type HostedGrowthMessageSnapshot,
 } from "@/src/lib/hosted-ops/growth-message-series";
@@ -47,6 +51,24 @@ const MESSAGE_SERIES = buildHostedGrowthMessageSeries({
   windowEnd: new Date("2026-07-31T12:00:00.000Z"),
 });
 
+const ACTIVITY_SNAPSHOTS = GROWTH_DATES.slice(10).flatMap((activityDate, index) => {
+  if (index === 13) {
+    return [];
+  }
+  const snapshotDate = new Date(`${activityDate}T00:00:00.000Z`);
+  snapshotDate.setUTCDate(snapshotDate.getUTCDate() + 1);
+
+  return [{
+    activeUsersPriorDay: 12 + ((index * 5) % 17),
+    activeUsersTrailing7Days: 68 + index * 2,
+    snapshotDate,
+  } satisfies HostedGrowthActivitySnapshot];
+});
+const ACTIVITY_SERIES = buildHostedGrowthActivitySeries({
+  snapshots: ACTIVITY_SNAPSHOTS,
+  windowEnd: new Date("2026-07-31T12:00:00.000Z"),
+});
+
 const DAILY_SERIES = GROWTH_DATES.map((date, index) => ({
   date,
   newMembers: 2 + ((index * 3) % 8),
@@ -63,6 +85,8 @@ const SNAPSHOT_SERIES = GROWTH_DATES.map((date, index) => ({
 
 const STUDY_INPUT = {
   activeUsers: {
+    today: 22,
+    todayComplete: true,
     trailing30Days: 143,
     trailing30DaysComplete: true,
     trailing7Days: 87,
@@ -94,6 +118,8 @@ const STUDY_INPUT = {
 const NO_SUPPORTING_BASELINES_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
+    today: 0,
+    todayComplete: true,
     trailing30Days: 0,
     trailing30DaysComplete: true,
     trailing7Days: 0,
@@ -122,6 +148,8 @@ const NO_SUPPORTING_BASELINES_INPUT = {
 const PARTIAL_MAU_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
+    today: 22,
+    todayComplete: true,
     trailing30Days: 119,
     trailing30DaysComplete: false,
     trailing7Days: 87,
@@ -134,6 +162,8 @@ const PARTIAL_MAU_INPUT = {
 const PARTIAL_WEEKLY_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
+    today: 19,
+    todayComplete: false,
     trailing30Days: 119,
     trailing30DaysComplete: false,
     trailing7Days: 82,
@@ -150,11 +180,12 @@ export function GrowthScorecardStudy() {
       data-design-study="ops-weekly-growth-compass"
       id="ops-weekly-growth-compass"
     >
-      <div id="growth-message-volume-charts">
+      <div id="growth-charts">
         <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Thirty-day movement
         </div>
         <GrowthCharts
+          activitySeries={ACTIVITY_SERIES}
           dailySeries={DAILY_SERIES}
           messageSeries={MESSAGE_SERIES}
           snapshotSeries={SNAPSHOT_SERIES}

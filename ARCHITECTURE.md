@@ -415,7 +415,13 @@ remains authoritative over analytics: the projection never decrypts a row after
 its content-retirement marker is set, reports any affected rolling count as a
 lower bound, and withholds a week-over-week comparison when either weekly
 window has incomplete group-sender evidence. Missing unretired content remains
-an integrity failure.
+an integrity failure. The existing authenticated daily growth snapshot is the
+only durable history owner for these anonymous aggregates: at each UTC date it
+stores the completed prior-day and completed trailing-seven-day distinct-sender
+counts only when their group evidence is complete. The date-keyed upsert makes
+same-day cron and ops-page retries idempotent. Legacy or incomplete windows stay
+null, and the 30-day activity projection shifts each snapshot onto the completed
+day its windows ended instead of reconstructing identities after mailbox expiry.
 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 

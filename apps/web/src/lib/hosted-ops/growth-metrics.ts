@@ -39,6 +39,10 @@ import {
   type HostedLinqParticipantContactKind,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
+  buildHostedGrowthActivitySeries,
+  type HostedGrowthActivityPoint,
+} from "@/src/lib/hosted-ops/growth-activity-series";
+import {
   buildHostedGrowthMessageSeries,
   type HostedGrowthMessagePoint,
 } from "@/src/lib/hosted-ops/growth-message-series";
@@ -47,6 +51,8 @@ import { getPrisma } from "@/src/lib/prisma";
 
 export { buildHostedGrowthMessageSeries } from "@/src/lib/hosted-ops/growth-message-series";
 export type { HostedGrowthMessagePoint } from "@/src/lib/hosted-ops/growth-message-series";
+export { buildHostedGrowthActivitySeries } from "@/src/lib/hosted-ops/growth-activity-series";
+export type { HostedGrowthActivityPoint } from "@/src/lib/hosted-ops/growth-activity-series";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAILY_SERIES_DAYS = 30;
@@ -147,6 +153,8 @@ export interface HostedGrowthTrialStartRow {
 }
 
 export interface HostedGrowthSnapshotRow {
+  activeUsersPriorDay: number | null;
+  activeUsersTrailing7Days: number | null;
   capturedAt: Date;
   coveredMembers: number;
   inboundMessagesPriorDay: number | null;
@@ -220,7 +228,10 @@ export interface HostedGrowthTrialCohortRow {
 }
 
 export interface HostedGrowthDashboard {
+  activitySeries: HostedGrowthActivityPoint[];
   activeUsers: {
+    today: number;
+    todayComplete: boolean;
     trailing30Days: number;
     trailing30DaysComplete: boolean;
     trailing7Days: number;
@@ -624,6 +635,25 @@ interface HostedGrowthGroupMailboxRow {
   userId: string;
 }
 
+const hostedGrowthGroupMailboxSelect = {
+  contentRetiredAt: true,
+  dedupeKey: true,
+  id: true,
+  kind: true,
+  lane: true,
+  laneSeq: true,
+  occurredAt: true,
+  payload: {
+    select: {
+      payloadCiphertext: true,
+    },
+  },
+  payloadInlineCiphertext: true,
+  payloadRef: true,
+  payloadSchema: true,
+  userId: true,
+} satisfies Prisma.HostedMailboxItemSelect;
+
 interface HostedGrowthLinqSenderEvidence {
   contactKind: HostedLinqParticipantContactKind;
   fallbackIdentity: string;
@@ -658,6 +688,8 @@ interface HostedGrowthDecodedGroupMessages {
 interface HostedGrowthActiveUserCounts {
   previous7Days: number;
   previous7DaysComplete: boolean;
+  today: number;
+  todayComplete: boolean;
   trailing30Days: number;
   trailing30DaysComplete: boolean;
   trailing7Days: number;
@@ -673,6 +705,8 @@ async function calculateHostedGrowthActiveUsers(input: {
   previousDirectRows: ReadonlyArray<{ userId: string }>;
   previousStart: Date;
   prisma: HostedGrowthPrisma;
+  todayDirectRows: ReadonlyArray<{ userId: string }>;
+  todayStart: Date;
   trailing7DayStart: Date;
 }): Promise<HostedGrowthActiveUserCounts> {
   const decodedGroupMessages = await decodeHostedGrowthGroupMessages(
@@ -693,11 +727,20 @@ async function calculateHostedGrowthActiveUsers(input: {
   const trailing30DayIdentities = new Set(
     input.monthlyDirectRows.map((row) => hostedGrowthMemberIdentity(row.userId)),
   );
+  const todayIdentities = new Set(
+    input.todayDirectRows.map((row) => hostedGrowthMemberIdentity(row.userId)),
+  );
 
   for (const message of groupMessages) {
     const identity = senderIdentities.get(message.evidence.identityKey);
     if (!identity) {
       throw new Error("Hosted growth group sender identity was not resolved.");
+    }
+    if (
+      message.occurredAt.getTime() >= input.todayStart.getTime()
+      && message.occurredAt.getTime() < input.now.getTime()
+    ) {
+      todayIdentities.add(identity);
     }
     if (
       message.occurredAt.getTime() >= input.monthlyStart.getTime()
@@ -724,6 +767,12 @@ async function calculateHostedGrowthActiveUsers(input: {
       end: input.trailing7DayStart,
       retiredMessageOccurredAt: decodedGroupMessages.retiredMessageOccurredAt,
       start: input.previousStart,
+    }),
+    today: todayIdentities.size,
+    todayComplete: !hasHostedGrowthRetiredMessageInWindow({
+      end: input.now,
+      retiredMessageOccurredAt: decodedGroupMessages.retiredMessageOccurredAt,
+      start: input.todayStart,
     }),
     trailing30Days: trailing30DayIdentities.size,
     trailing30DaysComplete: !hasHostedGrowthRetiredMessageInWindow({
@@ -1068,6 +1117,7 @@ export async function readHostedGrowthDashboard(
     activeUsersPrevious7DayDirectRows,
     activeUsersTrailing30DayDirectRows,
     activeUsersGroupRows,
+    activeUsersTodayDirectRows,
   ] = await Promise.all([
     readCurrentHostedGrowthMetrics(now, prisma),
     prisma.hostedMember.findMany({
@@ -1209,24 +1259,7 @@ export async function readHostedGrowthDashboard(
       orderBy: {
         occurredAt: "asc",
       },
-      select: {
-        contentRetiredAt: true,
-        dedupeKey: true,
-        id: true,
-        kind: true,
-        lane: true,
-        laneSeq: true,
-        occurredAt: true,
-        payload: {
-          select: {
-            payloadCiphertext: true,
-          },
-        },
-        payloadInlineCiphertext: true,
-        payloadRef: true,
-        payloadSchema: true,
-        userId: true,
-      },
+      select: hostedGrowthGroupMailboxSelect,
       where: {
         kind: INBOUND_MESSAGE_MAILBOX_KIND,
         member: {
@@ -1236,6 +1269,17 @@ export async function readHostedGrowthDashboard(
         },
         occurredAt: {
           gte: activeUsersMonthlyStart,
+          lt: now,
+        },
+      },
+    }),
+    prisma.hostedMailboxItem.groupBy({
+      by: ["userId"],
+      where: {
+        kind: INBOUND_MESSAGE_MAILBOX_KIND,
+        member: realHostedMemberWhere,
+        occurredAt: {
+          gte: todayStart,
           lt: now,
         },
       },
@@ -1250,6 +1294,8 @@ export async function readHostedGrowthDashboard(
     previousDirectRows: activeUsersPrevious7DayDirectRows,
     previousStart: activeUsersPreviousStart,
     prisma,
+    todayDirectRows: activeUsersTodayDirectRows,
+    todayStart,
     trailing7DayStart: activeUsersCurrentStart,
   });
   const trialStartRows = rawTrialStartRows.map((row): HostedGrowthTrialStartRow => ({
@@ -1301,7 +1347,13 @@ export async function readHostedGrowthDashboard(
   );
 
   return {
+    activitySeries: buildHostedGrowthActivitySeries({
+      snapshots,
+      windowEnd: now,
+    }),
     activeUsers: {
+      today: activeUsers.today,
+      todayComplete: activeUsers.todayComplete,
       trailing30Days: activeUsers.trailing30Days,
       trailing30DaysComplete: activeUsers.trailing30DaysComplete,
       trailing7Days: activeUsers.trailing7Days,
@@ -1375,7 +1427,9 @@ export async function readHostedGrowthDashboard(
  * the same date are deterministic. Inbound counts `conversation.message`
  * mailbox items across all channels; those rows expire, so the snapshot is
  * the durable record. Outbound counts sent rows in the Linq delivery ledger,
- * currently the only channel with a delivery ledger.
+ * currently the only channel with a delivery ledger. Unique-sender counts
+ * cover that completed day and the seven completed days ending at the
+ * snapshot date. Incomplete sender evidence is stored as null.
  */
 export async function captureHostedGrowthDailySnapshot(
   now: Date,
@@ -1383,7 +1437,15 @@ export async function captureHostedGrowthDailySnapshot(
 ): Promise<HostedGrowthSnapshotRow> {
   const snapshotDate = startOfUtcDay(now);
   const priorDayStart = addUtcDays(snapshotDate, -1);
-  const [current, inboundMessagesPriorDay, outboundMessagesPriorDay] =
+  const trailing7DayStart = addUtcDays(snapshotDate, -7);
+  const [
+    current,
+    inboundMessagesPriorDay,
+    outboundMessagesPriorDay,
+    activeUsersPriorDayDirectRows,
+    activeUsersTrailing7DayDirectRows,
+    activeUsersGroupRows,
+  ] =
     await Promise.all([
       readCurrentHostedGrowthMetrics(now, prisma),
       prisma.hostedMailboxItem.count({
@@ -1406,10 +1468,71 @@ export async function captureHostedGrowthDailySnapshot(
           },
         },
       }),
+      prisma.hostedMailboxItem.groupBy({
+        by: ["userId"],
+        where: {
+          kind: INBOUND_MESSAGE_MAILBOX_KIND,
+          member: realHostedMemberWhere,
+          occurredAt: {
+            gte: priorDayStart,
+            lt: snapshotDate,
+          },
+        },
+      }),
+      prisma.hostedMailboxItem.groupBy({
+        by: ["userId"],
+        where: {
+          kind: INBOUND_MESSAGE_MAILBOX_KIND,
+          member: realHostedMemberWhere,
+          occurredAt: {
+            gte: trailing7DayStart,
+            lt: snapshotDate,
+          },
+        },
+      }),
+      prisma.hostedMailboxItem.findMany({
+        orderBy: {
+          occurredAt: "asc",
+        },
+        select: hostedGrowthGroupMailboxSelect,
+        where: {
+          kind: INBOUND_MESSAGE_MAILBOX_KIND,
+          member: {
+            threadContainer: {
+              isNot: null,
+            },
+          },
+          occurredAt: {
+            gte: trailing7DayStart,
+            lt: snapshotDate,
+          },
+        },
+      }),
     ]);
+  const activeUsers = await calculateHostedGrowthActiveUsers({
+    currentDirectRows: activeUsersTrailing7DayDirectRows,
+    groupRows: activeUsersGroupRows,
+    monthlyDirectRows: activeUsersTrailing7DayDirectRows,
+    monthlyStart: trailing7DayStart,
+    now: snapshotDate,
+    previousDirectRows: [],
+    previousStart: trailing7DayStart,
+    prisma,
+    todayDirectRows: activeUsersPriorDayDirectRows,
+    todayStart: priorDayStart,
+    trailing7DayStart,
+  });
+  const activeUsersPriorDay = activeUsers.todayComplete
+    ? activeUsers.today
+    : null;
+  const activeUsersTrailing7Days = activeUsers.trailing7DaysComplete
+    ? activeUsers.trailing7Days
+    : null;
 
   return prisma.hostedGrowthDailySnapshot.upsert({
     create: {
+      activeUsersPriorDay,
+      activeUsersTrailing7Days,
       capturedAt: now,
       coveredMembers: current.coveredMembers,
       inboundMessagesPriorDay,
@@ -1425,6 +1548,8 @@ export async function captureHostedGrowthDailySnapshot(
     },
     select: growthSnapshotSelect,
     update: {
+      activeUsersPriorDay,
+      activeUsersTrailing7Days,
       capturedAt: now,
       coveredMembers: current.coveredMembers,
       inboundMessagesPriorDay,
@@ -1668,6 +1793,8 @@ function keyIfInWindow(
 }
 
 const growthSnapshotSelect = {
+  activeUsersPriorDay: true,
+  activeUsersTrailing7Days: true,
   capturedAt: true,
   coveredMembers: true,
   inboundMessagesPriorDay: true,

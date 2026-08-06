@@ -6,6 +6,7 @@ const VIEWPORTS = [
 ] as const;
 
 const CHART_NAMES = [
+  "People who messaged Murph",
   "Total messages sent",
   "Messages sent per day",
   "Acquisition",
@@ -65,22 +66,22 @@ for (const viewport of VIEWPORTS) {
     );
 
     const chartCards = study.locator(
-      "#growth-message-volume-charts > div.grid > div",
+      "#growth-charts > div.grid > div",
     );
     const chartSurfaces = chartCards.locator(
       '.recharts-surface[role="application"][tabindex="0"]',
     );
-    await expect(chartCards).toHaveCount(4);
-    await expect(chartSurfaces).toHaveCount(4);
+    await expect(chartCards).toHaveCount(5);
+    await expect(chartSurfaces).toHaveCount(5);
 
     for (const [index, name] of CHART_NAMES.entries()) {
       await expect(chartSurfaces.nth(index)).toHaveAccessibleName(name);
     }
 
-    const dailyTooltip = chartCards.nth(1).locator(
+    const dailyTooltip = chartCards.nth(2).locator(
       ".recharts-tooltip-wrapper",
     );
-    await chartSurfaces.nth(1).focus();
+    await chartSurfaces.nth(2).focus();
     await expect(dailyTooltip).toBeHidden();
 
     await chartSurfaces.nth(1).focus();
@@ -104,7 +105,7 @@ for (const viewport of VIEWPORTS) {
     }
     await expect(chartSurfaces.last()).not.toBeFocused();
 
-    await chartSurfaces.nth(1).focus();
+    await chartSurfaces.nth(2).focus();
     for (let index = 0; index < 14; index += 1) {
       await page.keyboard.press("ArrowRight");
     }

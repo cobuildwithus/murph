@@ -23,6 +23,7 @@ import {
 } from "../src/lib/hosted-onboarding/linq-participant-contact";
 import {
   addUtcDays,
+  buildHostedGrowthActivitySeries,
   buildHostedGrowthMessageSeries,
   buildTrialCohortRows,
   calculateHostedGrowthCurrentMetrics,
@@ -547,9 +548,12 @@ describe("hosted ops growth metrics", () => {
     queueCurrentMetricMocks();
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce(activeUserRows(6))
       .mockResolvedValueOnce(activeUserRows(3))
-      .mockResolvedValueOnce(activeUserRows(9));
+      .mockResolvedValueOnce(activeUserRows(9))
+      .mockResolvedValueOnce(activeUserRows(4));
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
       trackedFulfilledUsageTopUps: 12,
     });
@@ -569,7 +573,10 @@ describe("hosted ops growth metrics", () => {
     expect(markup).toContain("Total messages sent");
     expect(markup).toContain("Messages sent per day");
     expect(markup).toMatch(
-      /Weekly active users<\/div><div[^>]*>6 WAU<\/div><div[^>]*>9 MAU across personal \+ group chats<\/div>/u,
+      /Messaged Murph today<\/div><div[^>]*>4<\/div>/u,
+    );
+    expect(markup).toMatch(
+      /Messaged Murph · last 7 days<\/div><div[^>]*>6<\/div><div[^>]*>9 MAU across personal \+ group chats<\/div>/u,
     );
     expect(markup).toMatch(
       /Tracked fulfilled top-ups<\/span><span[^>]*>12<\/span>/u,
@@ -754,6 +761,51 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
+  it("preserves completed-day activity history without inventing legacy zeroes", () => {
+    const points = buildHostedGrowthActivitySeries({
+      snapshots: [
+        {
+          ...snapshotRow("2026-07-10", 2_900),
+          activeUsersPriorDay: 4,
+          activeUsersTrailing7Days: 18,
+        },
+        {
+          ...snapshotRow("2026-07-11", 2_900),
+          activeUsersPriorDay: 0,
+          activeUsersTrailing7Days: 15,
+        },
+        {
+          ...snapshotRow("2026-07-13", 2_900),
+          activeUsersPriorDay: null,
+          activeUsersTrailing7Days: null,
+        },
+      ],
+      windowEnd: new Date("2026-07-31T12:00:00.000Z"),
+    });
+
+    expect(points).toHaveLength(30);
+    expect(points[8]).toEqual({
+      activeUsersPerDay: 4,
+      activeUsersTrailing7Days: 18,
+      date: "2026-07-09",
+    });
+    expect(points[9]).toEqual({
+      activeUsersPerDay: 0,
+      activeUsersTrailing7Days: 15,
+      date: "2026-07-10",
+    });
+    expect(points[10]).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
+      date: "2026-07-11",
+    });
+    expect(points[11]).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
+      date: "2026-07-12",
+    });
+  });
+
   it("seeds the dashboard message series from earlier snapshot history", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     queueCurrentMetricMocks();
@@ -841,8 +893,17 @@ describe("hosted ops growth metrics", () => {
         { userId: "member_direct_only" },
         { userId: "member_previous" },
         { userId: "member_monthly" },
+      ])
+      .mockResolvedValueOnce([
+        { userId: "member_direct" },
+        { userId: "member_today" },
       ]);
     mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: registeredPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-06T08:00:00.000Z"),
+      }),
       buildLinqGroupMailboxRow({
         contact: registeredPhone,
         containerMemberId: "thread_container_one",
@@ -909,6 +970,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 2,
+      todayComplete: true,
       trailing30Days: 6,
       trailing30DaysComplete: true,
       trailing7Days: 4,
@@ -983,7 +1046,15 @@ describe("hosted ops growth metrics", () => {
         },
       },
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(6);
+    expect(mocks.hostedMailboxItem.groupBy.mock.calls[3]?.[0]).toMatchObject({
+      where: {
+        occurredAt: {
+          gte: new Date("2026-07-06T00:00:00.000Z"),
+          lt: now,
+        },
+      },
+    });
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(7);
   });
 
   it("marks MAU incomplete without discarding an exact weekly comparison", async () => {
@@ -1024,6 +1095,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 0,
+      todayComplete: true,
       trailing30Days: 4,
       trailing30DaysComplete: false,
       trailing7Days: 2,
@@ -1070,6 +1143,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 0,
+      todayComplete: true,
       trailing30Days: 2,
       trailing30DaysComplete: false,
       trailing7Days: 1,
@@ -1111,6 +1186,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 0,
+      todayComplete: true,
       trailing30Days: 2,
       trailing30DaysComplete: false,
       trailing7Days: 1,
@@ -1196,6 +1273,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 0,
+      todayComplete: true,
       trailing30Days: 3,
       trailing30DaysComplete: true,
       trailing7Days: 3,
@@ -1243,6 +1322,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 0,
+      todayComplete: true,
       trailing30Days: 1,
       trailing30DaysComplete: true,
       trailing7Days: 1,
@@ -1298,6 +1379,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 0,
+      todayComplete: true,
       trailing30Days: 1,
       trailing30DaysComplete: true,
       trailing7Days: 1,
@@ -1456,6 +1539,8 @@ describe("hosted ops growth metrics", () => {
       const dashboard = await readHostedGrowthDashboard(now);
 
       expect(dashboard.activeUsers).toEqual({
+        today: 0,
+        todayComplete: true,
         trailing30Days: 21,
         trailing30DaysComplete: true,
         trailing7Days: 7,
@@ -1493,6 +1578,8 @@ describe("hosted ops growth metrics", () => {
   it("leads the scorecard with weekly revenue growth and keeps usage context honest", () => {
     const scorecardProps = {
       activeUsers: {
+        today: 9,
+        todayComplete: true,
         trailing30Days: 61,
         trailing30DaysComplete: true,
         trailing7Days: 24,
@@ -1521,7 +1608,10 @@ describe("hosted ops growth metrics", () => {
     expect(markup).toContain("+9.9%");
     expect(markup).toMatch(/text-red-700[^>]*>\+9\.9%/u);
     expect(markup).toContain("Below 10% target");
-    expect(markup).toContain("24 WAU");
+    expect(markup).toContain("Messaged Murph today");
+    expect(markup).toContain("Unique senders since 00:00 UTC");
+    expect(markup).toContain("Messaged Murph · last 7 days");
+    expect(markup).toContain(">24<");
     expect(markup).toContain("61 MAU across personal + group chats");
     expect(markup).toContain("+9.1% WAU versus the prior seven days");
     expect(markup).toContain(
@@ -1575,6 +1665,8 @@ describe("hosted ops growth metrics", () => {
       createElement(GrowthScorecard, {
         ...scorecardProps,
         activeUsers: {
+          today: 9,
+          todayComplete: true,
           trailing30Days: 48,
           trailing30DaysComplete: false,
           trailing7Days: 24,
@@ -1594,7 +1686,7 @@ describe("hosted ops growth metrics", () => {
     expect(partialMonthlyHistoryMarkup).toContain(
       "MAU is a lower bound because older group sender evidence was intentionally retired",
     );
-    expect(partialMonthlyHistoryMarkup).toContain(">24 WAU<");
+    expect(partialMonthlyHistoryMarkup).toContain(">24<");
     expect(partialMonthlyHistoryMarkup).not.toContain(
       "Prior-week comparison unavailable",
     );
@@ -1603,6 +1695,8 @@ describe("hosted ops growth metrics", () => {
       createElement(GrowthScorecard, {
         ...scorecardProps,
         activeUsers: {
+          today: 7,
+          todayComplete: false,
           trailing30Days: 48,
           trailing30DaysComplete: false,
           trailing7Days: 21,
@@ -1614,7 +1708,11 @@ describe("hosted ops growth metrics", () => {
       }),
     );
     expect(partialWeeklyHistoryMarkup).toContain(
-      "At least 21 WAU",
+      "At least 21",
+    );
+    expect(partialWeeklyHistoryMarkup).toContain("At least 7");
+    expect(partialWeeklyHistoryMarkup).toContain(
+      "Today is a lower bound because group sender evidence was intentionally retired",
     );
     expect(partialWeeklyHistoryMarkup).toContain(
       "Prior-week comparison unavailable because older group sender evidence was intentionally retired",
@@ -1694,6 +1792,77 @@ describe("hosted ops growth metrics", () => {
     expect(upsertArg?.update).toMatchObject({
       inboundMessagesPriorDay: 42,
       outboundMessagesPriorDay: 57,
+    });
+  });
+
+  it("records exact prior-day and trailing-seven-day unique senders", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const registeredPhone = requireLinqContact("phone", "+15550000001");
+    const unregisteredPhone = requireLinqContact("phone", "+15550000002");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([{ userId: "member_direct" }])
+      .mockResolvedValueOnce([
+        { userId: "member_direct" },
+        { userId: "member_weekly" },
+      ]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: registeredPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+      }),
+      buildLinqGroupMailboxRow({
+        contact: unregisteredPhone,
+        containerMemberId: "thread_container_two",
+        occurredAt: new Date("2026-07-05T09:00:00.000Z"),
+      }),
+    ]);
+    mocks.hostedMemberIdentity.findMany.mockResolvedValueOnce([{
+      memberId: "member_direct",
+      phoneLookupKey: registeredPhone.lookupKey,
+    }]);
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    await captureHostedGrowthDailySnapshot(now);
+
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      activeUsersPriorDay: 2,
+      activeUsersTrailing7Days: 3,
+    });
+    expect(upsertArg?.update).toMatchObject({
+      activeUsersPriorDay: 2,
+      activeUsersTrailing7Days: 3,
+    });
+  });
+
+  it("stores unknown activity when retired group evidence affects a window", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const retiredPhone = requireLinqContact("phone", "+15550000001");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([{ userId: "member_direct" }])
+      .mockResolvedValueOnce([{ userId: "member_direct" }]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      retireGroupMailboxRow(buildLinqGroupMailboxRow({
+        contact: retiredPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+      })),
+    ]);
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    await captureHostedGrowthDailySnapshot(now);
+
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      activeUsersPriorDay: null,
+      activeUsersTrailing7Days: null,
     });
   });
 
@@ -2188,6 +2357,8 @@ function retireGroupMailboxRow(
 
 function snapshotRow(date: string, mrrUsdCents: number) {
   return {
+    activeUsersPriorDay: null,
+    activeUsersTrailing7Days: null,
     capturedAt: new Date(`${date}T00:05:00.000Z`),
     coveredMembers: 3,
     inboundMessagesPriorDay: 0,

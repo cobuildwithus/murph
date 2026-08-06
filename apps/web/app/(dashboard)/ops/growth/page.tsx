@@ -74,6 +74,7 @@ export default async function HostedOpsGrowthPage() {
       />
 
       <GrowthCharts
+        activitySeries={dashboard.activitySeries}
         dailySeries={dashboard.dailySeries}
         messageSeries={dashboard.messageSeries}
         snapshotSeries={dashboard.snapshotSeries}
