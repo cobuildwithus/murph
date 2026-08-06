@@ -126,7 +126,9 @@ export function HostedAccountSettingsCards({
         <SettingsRow
           action={(
             <HostedSignupReferralLinkButton
-              identityKey={account.referralIdentityKey}
+              identityKey={
+                account.referralIdentityKey ?? "referral-settings-preview"
+              }
             />
           )}
           icon={<Link2 className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
