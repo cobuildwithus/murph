@@ -278,6 +278,7 @@ describe("hosted image generation", () => {
     assert.deepEqual(completion.conversation, {
       ...origin.conversation,
       actorId: null,
+      sessionId: "session_1",
     });
     assert.deepEqual(completion.replyTarget, origin.replyTarget);
     assert.equal(completion.sourceRef.kind, "hosted-mailbox");
@@ -356,6 +357,11 @@ describe("hosted image generation", () => {
       vault: vaultRoot,
     });
     assert.ok(failureCompletion);
+    assert.deepEqual(failureCompletion.conversation, {
+      ...origin.conversation,
+      actorId: null,
+      sessionId: "session_1",
+    });
     const failureText = failureCompletion.content.text ?? "";
     const failureDiagnosticLine = failureText.split("\n").find((line) =>
       line.startsWith(
@@ -426,6 +432,11 @@ describe("hosted image generation", () => {
       vault: vaultRoot,
     });
     assert.ok(completion);
+    assert.deepEqual(completion.conversation, {
+      ...origin.conversation,
+      actorId: null,
+      sessionId: "session_shutdown",
+    });
     assert.match(
       completion.content.text ?? "",
       /"originAssistantInputIdExact":true/u,
