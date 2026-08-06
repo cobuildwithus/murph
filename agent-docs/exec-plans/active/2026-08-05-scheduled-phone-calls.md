@@ -27,8 +27,11 @@ call it requested through the existing hosted phone-call port.
   owner, lifecycle, and pre-tool revalidation.
 - Scheduled group calls remain unavailable; their separate delivered-preview
   and later participant-confirmation gate is unchanged.
-- Scheduled retries reuse a deterministic request key derived from the exact
-  automation occurrence and bounded call brief.
+- Scheduled retries reuse one deterministic request key derived from the exact
+  automation occurrence, independent of resident-session or model-brief drift.
+- Web replays that exact scheduled occurrence across resident sessions only
+  when the new brief exactly matches the first persisted brief; live calls keep
+  their existing different-session collision rule.
 - Live user calls preserve their existing request-key and requester authority.
 - Focused tests, Assistant Engine typecheck, exact-head CI, and required
   ReviewGPT gates pass without private production evidence entering artifacts.
@@ -71,3 +74,19 @@ call it requested through the existing hosted phone-call port.
   from 20,594 to 21,052 tokens (+458, +2.2239%) and from 95,165 to 97,373
   UTF-8 bytes (+2,208) because it gained the phone tool. The scheduled group
   request remained exactly unchanged at 16,902 tokens and 78,987 bytes.
+- The preliminary specialist pass found one accepted high-severity retry gap:
+  the initial scheduled key survived a resident-session change but Web rejected
+  that replay, while brief drift created a different key and could admit a
+  second call. The correction gives each occurrence one exact scheduled key,
+  lets Web replay that key across resident sessions, and still requires the
+  first encrypted brief to match exactly.
+- The corrected focused suites passed: Assistant Engine 94 tests, Hosted
+  Execution phone-call contracts 12 tests, Web phone-call service 51 tests,
+  and runner bundle budget policy 34 tests. Assistant Engine, Hosted Execution,
+  and Web typechecks passed.
+- Exact-head CI on the first-reviewed head passed every job except runner bundle
+  assembly, where the intended graph grew 4,465 bytes beyond the prior total
+  ceiling. The documented baseline was ratcheted to the higher measured macOS
+  total while preserving the 32 KiB allowance and forbidden-import guards; a
+  production runner bundle rebuild then passed at 10,275,648 bytes against the
+  10,308,229-byte budget.

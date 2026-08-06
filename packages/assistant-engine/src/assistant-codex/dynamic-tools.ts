@@ -3572,9 +3572,8 @@ export async function executeMurphDynamicToolRequest(input: {
         : scheduledScope
           ? {
               originSessionId: scheduledScope.originSessionId,
-              requestKey: (brief: HostedPhoneCallBrief) =>
+              requestKey: (_brief: HostedPhoneCallBrief) =>
                 createScheduledPhoneCallRequestKey({
-                  brief,
                   scope: scheduledScope,
                 }),
             }

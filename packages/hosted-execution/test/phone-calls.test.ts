@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import {
+  HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX,
   hostedPhoneCallBriefSchema,
   hostedPhoneCallStartRequestSchema,
   hostedPhoneCallStartResponseSchema,
+  isHostedScheduledPhoneCallRequestKey,
 } from "../src/phone-calls.js";
 
 const VALID_BRIEF = {
@@ -112,6 +114,18 @@ describe("hosted phone call contracts", () => {
       phoneCallId: "hpc_123",
       status: "calling",
     }).status).toBe("calling");
+  });
+
+  it("recognizes only exact scheduled occurrence request keys", () => {
+    expect(isHostedScheduledPhoneCallRequestKey(
+      `${HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX}${"a".repeat(64)}`,
+    )).toBe(true);
+    expect(isHostedScheduledPhoneCallRequestKey(
+      `phone_call_${"a".repeat(64)}`,
+    )).toBe(false);
+    expect(isHostedScheduledPhoneCallRequestKey(
+      `${HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX}${"g".repeat(64)}`,
+    )).toBe(false);
   });
 });
 

@@ -263,38 +263,28 @@ describe("assistant phone calls", () => {
     })).toThrow("accepted user input");
   });
 
-  it("keys scheduled calls by the exact automation occurrence and bounded brief", () => {
+  it("keys scheduled calls only by the exact automation occurrence", () => {
     const scope: AssistantHostedScheduledPhoneCallScope = {
       automationId: "automation-scheduled-call",
       occurrenceAt: "2026-08-05T18:00:00.000Z",
       originSessionId: "session-scheduled-call",
     };
     const first = createScheduledPhoneCallRequestKey({
-      brief: BASE_BRIEF,
       scope,
     });
 
-    expect(first).toMatch(/^phone_call_[a-f0-9]{64}$/u);
+    expect(first).toMatch(/^phone_call_scheduled_[a-f0-9]{64}$/u);
     expect(createScheduledPhoneCallRequestKey({
-      brief: BASE_BRIEF,
       scope: {
         ...scope,
         originSessionId: "session-scheduled-call-retry",
       },
     })).toBe(first);
     expect(createScheduledPhoneCallRequestKey({
-      brief: BASE_BRIEF,
       scope: {
         ...scope,
         occurrenceAt: "2026-08-05T18:01:00.000Z",
       },
-    })).not.toBe(first);
-    expect(createScheduledPhoneCallRequestKey({
-      brief: {
-        ...BASE_BRIEF,
-        goal: "Ask about availability without booking.",
-      },
-      scope,
     })).not.toBe(first);
   });
 
@@ -390,7 +380,6 @@ describe("assistant phone calls", () => {
       originSessionId: "session-scheduled-call",
     };
     const expectedRequestKey = createScheduledPhoneCallRequestKey({
-      brief: BASE_BRIEF,
       scope: scheduledScope,
     });
     const start = vi.fn(async () => ({

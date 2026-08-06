@@ -299,6 +299,19 @@ that rejects it) — deploy Web and the runner together, or keep the window shor
 Delivery requires a resolvable member messaging route, exactly like every other
 proactive notification.
 
+Scheduled phone-call availability is an additive Web-first rollout. Deploy Web
+so it recognizes the reserved scheduled-occurrence request-key namespace, then
+deploy the Cloudflare runner bundle with `container_rollout=immediate` so a warm
+old runner cannot consume a due occurrence without exposing the phone tool.
+There is no database migration or new wire field. A new runner against old Web
+can place the first call, but a resident-session retry fails closed instead of
+reconciling; brief drift still reuses the same occurrence key and cannot create
+a second call. New Web remains compatible with old runners and attended calls.
+After deploy, require the exact runner-bundle fingerprint and run one consented
+private scheduled-call canary that proves a single Web call row and successful
+same-occurrence replay. A missed pre-deploy occurrence is rescheduled explicitly;
+do not add replay or backfill machinery.
+
 ## Consented Group Disclosure Rollout
 
 The group-to-member adapter reuses Assistant Ask and adds no Cloudflare binding,
