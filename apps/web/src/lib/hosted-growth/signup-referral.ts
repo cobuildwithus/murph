@@ -297,9 +297,10 @@ async function claimHostedSignupReferralLinkTx(input: {
     referrerMemberId: input.referrerMemberId,
   });
 
+  // Channel is ordinary onboarding metadata and may later be relabeled during
+  // authenticated resume. Referrer attribution is the durable claim evidence.
   const recentClaimCount = await input.prisma.hostedInvite.count({
     where: {
-      channel: HOSTED_SIGNUP_REFERRAL_INVITE_CHANNEL,
       createdAt: {
         gte: new Date(input.now.getTime() - ONE_HOUR_MS),
       },
