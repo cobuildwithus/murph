@@ -203,6 +203,74 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
+  it('abandons ambiguous Linq app-card sends without scheduling a changed-effect retry', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'send the nutrition card',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'session_linq_card_ambiguity',
+        turnId: 'turn_linq_card_ambiguity',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        actorId: '+15550001',
+        card: {
+          kind: 'daily_nutrition',
+          localDate: '2030-04-12',
+          mealCount: 1,
+          totals: {
+            calories: { mealCount: 1, total: 500 },
+            carbsGrams: { mealCount: 1, total: 55 },
+            fatGrams: { mealCount: 1, total: 18 },
+            proteinGrams: { mealCount: 1, total: 35 },
+          },
+        },
+        channel: 'linq',
+        message: 'nutrition summary',
+        sessionId: 'session_linq_card_ambiguity',
+        threadId: 'thread_linq_card_ambiguity',
+        threadIsDirect: true,
+        turnId: 'turn_linq_card_ambiguity',
+        vault,
+      })
+      const sending = await saveAssistantOutboxIntent(vault, {
+        ...created,
+        attemptCount: 1,
+        deliveryConfirmationPending: false,
+        deliveryTransportIdempotent: true,
+        lastAttemptAt: '2030-04-13T00:01:00.000Z',
+        nextAttemptAt: null,
+        status: 'sending',
+        updatedAt: '2030-04-13T00:01:00.000Z',
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const failed = await updateAssistantOutboxAfterDispatchFailure({
+        deliveryMayHaveSucceeded: true,
+        deliveryTransportIdempotent: true,
+        error: Object.assign(new Error('app-card response was lost'), {
+          deliveryMayHaveSucceeded: true,
+        }),
+        failedAt: new Date('2030-04-13T00:01:05.000Z'),
+        intentPath: resolveAssistantOutboxIntentPath(
+          paths.outboxDirectory,
+          sending.intentId,
+        ),
+        sending,
+        vault,
+      })
+
+      expect(failed.status).toBe('abandoned')
+      expect(failed.card).not.toBeNull()
+      expect(failed.deliveryConfirmationPending).toBe(false)
+      expect(failed.deliveryTransportIdempotent).toBe(false)
+      expect(failed.nextAttemptAt).toBeNull()
+      expect(failed.lastError?.code).toBe('ASSISTANT_DELIVERY_AMBIGUOUS')
+    })
+  })
+
   it('abandons a superseded email group recipient without claiming provider ambiguity', async () => {
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({

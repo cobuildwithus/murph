@@ -23,6 +23,12 @@ Updated: 2026-08-06
   appeared successful without recording why the card path was skipped.
 - Existing hosted card tests stub provider fetch below the production
   interception boundary and therefore did not exercise the missing route.
+- Review of the recovered provider path exposed a second owner-boundary bug:
+  a card send marked as possibly accepted was classified as retryable. A later
+  drain could re-enter capability selection and attempt a changed text effect
+  under the original card delivery key. A focused state test failed with
+  `retryable` instead of the required terminal `abandoned` result before the
+  correction.
 
 ## Success criteria
 
@@ -38,6 +44,9 @@ Updated: 2026-08-06
   sanitized hosted warning before the existing persisted text fallback.
 - A normal `available: false` result remains an expected fallback and is not
   mislabeled as an error.
+- A card-bearing attempt that may already have succeeded is abandoned with the
+  card retained and no next attempt; it cannot later re-enter capability
+  selection or reuse the card delivery key for text.
 
 ## Scope
 
@@ -82,7 +91,17 @@ Updated: 2026-08-06
   text recovery was selected, and a focused persistence-failure regression
   proves the operation rejects without a text send.
 - Final ReviewGPT round 1 passed the original candidate with no findings. The
-  accepted specialist correction requires a final correction-delta round after
-  push. Exact-head CI initially exposed four broader test assertions that did
-  not include the new callback; those assertions are corrected and local proof
-  passes, with the replacement CI run pending.
+  accepted specialist correction required a correction-delta round. Exact-head
+  CI exposed four broader test assertions that did not include the new
+  callback; those assertions are corrected and local proof passes.
+- Final ReviewGPT round 2 verified the earlier correction and found the
+  ambiguous card-attempt retry path. A regression first proved the outbox
+  returned `retryable`; the existing terminal ambiguity owner now classifies
+  card-bearing Linq attempts marked as possibly accepted as `abandoned`, with
+  the card retained and no next attempt.
+- From `packages/assistant-engine`, `pnpm exec vitest run --config vitest.config.ts test/outbox-dispatch-state.test.ts`
+  — 28 passed after the ambiguity correction.
+- From `packages/assistant-engine`, `pnpm exec vitest run --config vitest.config.ts test/assistant-outbox-runtime.test.ts`
+  — 90 passed; the production channel/outbox integration proves a forced later
+  drain does not call Linq or capability selection again.
+- `packages/assistant-engine` typecheck passed after the ambiguity correction.

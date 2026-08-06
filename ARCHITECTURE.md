@@ -1386,6 +1386,12 @@ existing direct Linq chat owns native-card delivery without a reverse map or a
 new-chat workaround. Same-route inputs accepted during the live turn may update
 the reply message, reaction capability, and delivery idempotency inputs, but do
 not recreate the explicit-target override or replace the turn's thread binding.
+If a card-bearing Linq provider attempt may already have succeeded, the outbox
+retains that card and records the existing terminal abandoned-ambiguity state
+with no next attempt. A later capability result or text body therefore cannot
+reuse the original card delivery key. Text retries are safe only after the
+text-only transition has committed, cleared the card, and frozen its stable
+fallback identity.
 Linq owns the
 noninteractive static transcript layout, which carries the date, meal count,
 available totals, an explicit partial marker, and the first available exact V2

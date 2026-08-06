@@ -515,9 +515,19 @@ function isAmbiguousDeliveryWithoutProviderIds(input: {
   sending: AssistantOutboxIntent
 }): boolean {
   return isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
+    isLinqAppCardDeliveryAmbiguous(input) ||
     isLinqMessageReactionAmbiguityWithoutProviderIds(input) ||
     isLinqPartialDeliveryWithoutProviderIds(input) ||
     isEmailGroupFanoutAmbiguityWithoutProviderIds(input)
+}
+
+function isLinqAppCardDeliveryAmbiguous(input: {
+  deliveryMayHaveSucceeded: boolean
+  sending: AssistantOutboxIntent
+}): boolean {
+  return input.deliveryMayHaveSucceeded &&
+    input.sending.channel === 'linq' &&
+    input.sending.card != null
 }
 
 function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {

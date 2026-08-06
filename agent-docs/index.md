@@ -42,7 +42,9 @@ Response-card request eligibility, multi-input live-turn invalidation,
 whole-response semantics, delivery ownership, provider-rendered static
 transcript layout with explicit partial labeling, one trusted provider
 reply-thread binding, bounded offline V3 compact-table fragments, and
-privacy-safe diagnostics for caught native-card failures before text recovery
+privacy-safe diagnostics for caught native-card failures before text recovery,
+plus terminal abandonment of possibly accepted card sends so later drains
+cannot replace the original card effect with text under the same delivery key
 are specified by
 `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`,

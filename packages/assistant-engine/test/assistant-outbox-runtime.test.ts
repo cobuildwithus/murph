@@ -1086,6 +1086,63 @@ describe('assistant outbox runtime', () => {
     })
   })
 
+  it('does not re-enter capability selection after an ambiguous app-card attempt', async () => {
+    await useActualOutboundDeliveryImplementation()
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-card-ambiguous-',
+    )
+    const intent = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      message: 'ignored model prose',
+      sessionId: 'session-response-card-ambiguous',
+      threadId: 'thread-response-card-ambiguous',
+      threadIsDirect: true,
+      turnId: 'turn-response-card-ambiguous',
+      vault: vaultRoot,
+    })
+    const sendLinq = vi.fn<
+      NonNullable<AssistantChannelDependencies['sendLinq']>
+    >(async (request) => {
+      expect(request).toMatchObject({
+        card: NUTRITION_RESPONSE_CARD,
+        idempotencyKey: `assistant-outbox:${intent.intentId}`,
+      })
+      throw Object.assign(new Error('app-card acknowledgement was lost'), {
+        deliveryMayHaveSucceeded: true,
+      })
+    })
+
+    const ambiguous = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-07-31T01:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(ambiguous.intent).toMatchObject({
+      card: NUTRITION_RESPONSE_CARD,
+      deliveryConfirmationPending: false,
+      deliveryTransportIdempotent: false,
+      nextAttemptAt: null,
+      status: 'abandoned',
+    })
+    expect(ambiguous.deliveryError?.code).toBe('ASSISTANT_DELIVERY_AMBIGUOUS')
+
+    const laterDrain = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-07-31T01:30:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(laterDrain.intent.status).toBe('abandoned')
+    expect(sendLinq).toHaveBeenCalledOnce()
+  })
+
   it('persists one text-only fallback identity before acceptance and reuses it after restart', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-card-fallback-restart-',
