@@ -64,11 +64,12 @@ const automationTagsSchema = z
 function deriveAutomationSlugFromTitle(title: string): string {
   // Mirrors the canonical automation title fallback without importing the
   // filesystem-heavy core package into deferred tool schema assembly.
-  return title
+  const normalized = title
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/gu, '-')
     .replace(/^-+|-+$/gu, '')
+  return normalized || 'item'
 }
 
 const saveAutomationArgumentsSchema = z.object({
@@ -149,12 +150,17 @@ const patchAutomationArgumentsSchema = z.object({
     requestedPatchKeys.length === 1
     && requestedPatchKeys[0] === 'status'
     && value.status === 'archived'
+  const claimsOnboardingFirstReadSlug =
+    value.slug === MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
 
-  if (targetsOnboardingFirstRead && !archivesOnboardingFirstReadOnly) {
+  if (
+    claimsOnboardingFirstReadSlug
+    || (targetsOnboardingFirstRead && !archivesOnboardingFirstReadOnly)
+  ) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       message:
-        'The onboarding first personal read can only be archived through generic patch.',
+        'The onboarding first personal read slug is reserved, and its existing record can only be archived through generic patch.',
       path: ['lookup'],
     })
   }
@@ -219,7 +225,7 @@ export const MURPH_AUTOMATION_TOOL = {
   name: 'automation',
   deferLoading: true,
   description:
-    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, and generic patch may only archive it when the member cancels. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
+    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, the fixed slug is reserved, and generic patch may only archive the existing record when the member cancels. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
