@@ -54,9 +54,13 @@ Updated: 2026-08-06
   the foreground host saves it durably and performs an exact bodyless
   scoped-token `PUT`. The `PUT` is idempotent for the current token.
 - Activation and scoped `DELETE` lock the same member and reread the exact
-  token. Activation first followed by deletion ends revoked; deletion first
-  makes activation fail authorization. A delayed prepare or lost response is
-  harmless because prepared credentials never authorize upload.
+  token. Activation also locks the member's active Family membership and group
+  access rows before authority reads. Family billing locks its owner and active
+  roster members in stable order before changing those rows, so access loss and
+  activation cannot deadlock or commit from stale sponsorship state. Activation
+  first followed by deletion ends revoked; deletion first makes activation fail
+  authorization. A delayed prepare or lost response is harmless because
+  prepared credentials never authorize upload.
 - Before activation or idempotent activation replay can succeed, Web rechecks
   historical launch consent and active hosted access inside that same locked
   transaction. A consent withdrawal or access loss therefore remains
@@ -88,7 +92,8 @@ Updated: 2026-08-06
 - `apps/web/prisma/schema.prisma`, one backward-compatible expand migration,
   and one post-drain contract migration for revision, activation, and
   credential-shape constraints.
-- `apps/web/src/lib/device-sync/meal-photo-capture.ts`.
+- `apps/web/src/lib/device-sync/meal-photo-capture.ts` and the existing Family
+  billing lock owner in `apps/web/src/lib/hosted-onboarding/family-plan.ts`.
 - `apps/web/app/api/device-sync/companion/meal-photo-capture/enrollment/route.ts`
   for the bodyless scoped activation route.
 - Focused meal-photo enrollment, route, validation, and migration tests.
@@ -111,6 +116,10 @@ Updated: 2026-08-06
   idempotent, and scoped activation/deletion are proven in both orders.
 - Prepared and already-activated tokens both reject activation after consent
   withdrawal or hosted-access loss; a denied prepared token remains inactive.
+- Real PostgreSQL concurrency proof covers sponsored-member removal and group
+  billing loss in both commit orders, plus loss-first direct access, consent,
+  and scoped-token deletion. Every committed loss rejects activation replay and
+  the Family cases prove there is no member-to-group deadlock.
 - Schema-v1 behavior remains unchanged at revision zero and cannot cross a
   positive fence.
 - Active upload lookup rejects prepared state, tombstones, expiry, and
@@ -126,6 +135,13 @@ Updated: 2026-08-06
 - Final ReviewGPT round 1 found that scoped activation did not recheck consent
   or active access, and that the backend documentation accidentally expanded
   automatic meal capture beyond the iOS-only product boundary. Both findings
-  are accepted and corrected without adding state or a second owner.
-- Update PR #1343 with the focused corrected candidate after local proof, then
-  run final ReviewGPT round 2 and exact-head CI before closing this plan.
+  were accepted and corrected without adding state or a second owner.
+- Round 2 confirmed the consent correction but found that the access guard was
+  serialized only by the member row even though Family sponsorship has separate
+  mutable membership and group owners. The required retrospective recorded an
+  explicit continuation: reuse the existing sponsorship lock and normalize
+  Family billing's existing member lock order, with no new state, queue, or
+  lifecycle.
+- Push the corrected candidate with the real PostgreSQL authority-ordering
+  proof, then run final ReviewGPT round 3 and exact-head CI before closing this
+  plan.

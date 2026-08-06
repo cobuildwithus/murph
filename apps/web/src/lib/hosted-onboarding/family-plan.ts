@@ -1451,7 +1451,11 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
     return null;
   }
 
-  await lockHostedMemberRow(input.tx, group.ownerMemberId);
+  await lockHostedFamilyAccessMemberRowsTx({
+    groupId: group.id,
+    ownerMemberId: group.ownerMemberId,
+    tx: input.tx,
+  });
   const currentGroup = await input.tx.hostedAccountGroup.findUnique({
     select: {
       owner: {
@@ -5794,7 +5798,11 @@ async function lockHostedFamilyBillingReconciliationTx(input: {
   group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
-  await lockHostedMemberRow(input.tx, input.group.ownerMemberId);
+  await lockHostedFamilyAccessMemberRowsTx({
+    groupId: input.group.id,
+    ownerMemberId: input.group.ownerMemberId,
+    tx: input.tx,
+  });
   const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
     select: {
       lastStripeEventCreatedAt: true,
@@ -5808,6 +5816,28 @@ async function lockHostedFamilyBillingReconciliationTx(input: {
     billingRef,
     eventCreatedAt: input.eventCreatedAt,
   });
+}
+
+async function lockHostedFamilyAccessMemberRowsTx(input: {
+  groupId: string;
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await lockHostedMemberRow(input.tx, input.ownerMemberId);
+  const memberships = await input.tx.hostedAccountGroupMembership.findMany({
+    orderBy: { memberId: "asc" },
+    select: { memberId: true },
+    where: {
+      groupId: input.groupId,
+      status: "active",
+    },
+  });
+  const memberIds = [...new Set(memberships.map(({ memberId }) => memberId))]
+    .filter((memberId) => memberId !== input.ownerMemberId)
+    .sort();
+  for (const memberId of memberIds) {
+    await lockHostedMemberRow(input.tx, memberId);
+  }
 }
 
 function isHostedFamilyStripeEventStale(input: {

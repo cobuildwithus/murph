@@ -16,6 +16,7 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 Automatic meal-photo schema-v2 enrollment ordering, including the one-row
 per-installation revision fence, credential-free revocation tombstone,
 prepared-before-active iOS credential handoff, bodyless scoped activation,
+member-plus-Family-sponsorship authority serialization,
 schema-v1 revision-zero compatibility, expand/contract migration sequence, and
 focused static, PostgreSQL, and physical-iPhone proof matrix, is jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,

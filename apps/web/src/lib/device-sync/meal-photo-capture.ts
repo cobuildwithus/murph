@@ -490,6 +490,7 @@ export async function activateMealPhotoCaptureEnrollmentForScopedToken(input: {
 
   return input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, enrollment.memberId);
+    await lockHostedMemberSponsoredAccessRows(tx, enrollment.memberId);
     const current = await tx.hostedMealPhotoCaptureEnrollment.findUnique({
       where: { id: enrollment.id },
     });

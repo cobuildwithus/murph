@@ -322,11 +322,26 @@ describe("meal photo capture enrollment credentials", () => {
       request: uploadRequest(issued.uploadToken),
     })).rejects.toMatchObject({ code: "AUTH_REQUIRED", httpStatus: 401 });
 
+    mocks.lockHostedMemberRow.mockClear();
+    mocks.lockHostedMemberSponsoredAccessRows.mockClear();
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockClear();
+    mocks.assertActiveHostedMemberAccessAllowed.mockClear();
     await expect(activateMealPhotoCaptureEnrollmentForScopedToken({
       now: activatedAt,
       prisma: prisma.client,
       token: issued.uploadToken,
     })).resolves.toEqual({ activated: true });
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(prisma.tx, MEMBER_ID);
+    expect(mocks.lockHostedMemberSponsoredAccessRows).toHaveBeenCalledWith(
+      prisma.tx,
+      MEMBER_ID,
+    );
+    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.assertHostedHistoricalLaunchConsentGranted.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.assertActiveHostedMemberAccessAllowed.mock.invocationCallOrder[0] ?? 0);
     expect(prisma.getRecord()?.activatedAt).toEqual(activatedAt);
     await expect(requireActiveMealPhotoCaptureEnrollment({
       now: activatedAt,
