@@ -1622,7 +1622,197 @@ test('linq runtime uploads attachment bytes with public fetch for the presigned 
   expect(publicFetch).toHaveBeenCalledTimes(1)
 })
 
+test('linq runtime retries only the presigned attachment PUT with stable reservation bytes', async () => {
+  vi.useFakeTimers()
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const bytes = new Uint8Array([7, 8, 9, 10])
+  const providerFetch = vi.fn(async () =>
+    createJsonResponse({
+      attachment_id: 'attachment_pdf_retry',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+        'x-upload-token': 'stable-upload-token',
+      },
+      upload_url: 'https://uploads.example.test/upload/retry-report',
+    }))
+  const uploadBodies: Blob[] = []
+  let uploadAttempts = 0
+  const publicFetch = vi.fn(async (_url: string, init) => {
+    assert.ok(init.body instanceof Blob)
+    uploadBodies.push(init.body)
+    uploadAttempts += 1
+    if (uploadAttempts === 1) {
+      throw new TypeError('socket closed')
+    }
+    if (uploadAttempts === 2) {
+      return createJsonResponse({ error: 'temporarily unavailable' }, {
+        headers: { 'Retry-After': '0' },
+        status: 503,
+      })
+    }
+    return new Response(null, { status: 204 })
+  })
+
+  const upload = uploadLinqAttachment(
+    {
+      bytes,
+      contentType: 'application/pdf',
+      filename: 'report.pdf',
+    },
+    {
+      env,
+      fetchImplementation: providerFetch,
+      publicFetchImplementation: publicFetch,
+    },
+  )
+  await vi.runAllTimersAsync()
+
+  await expect(upload).resolves.toEqual({ attachmentId: 'attachment_pdf_retry' })
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(3)
+  expect(uploadBodies).toHaveLength(3)
+  expect(uploadBodies[1]).toBe(uploadBodies[0])
+  expect(uploadBodies[2]).toBe(uploadBodies[0])
+  for (const body of uploadBodies) {
+    assert.deepEqual(new Uint8Array(await body.arrayBuffer()), bytes)
+  }
+})
+
+test('linq runtime bounds retryable presigned attachment PUT failures', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () =>
+    createJsonResponse({
+      attachment_id: 'attachment_pdf_bounded',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+      },
+      upload_url: 'https://uploads.example.test/upload/bounded-report',
+    }))
+  const publicFetch = vi.fn(async () =>
+    createJsonResponse({ error: 'temporarily unavailable' }, {
+      headers: { 'Retry-After': '0' },
+      status: 503,
+    }))
+
+  await assert.rejects(
+    () => uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.method === 'PUT' &&
+      error.context?.path === '[presigned-upload]' &&
+      error.context?.retryable === true &&
+      error.context?.status === 503,
+  )
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(3)
+})
+
+test('linq runtime aborts a presigned attachment PUT retry without another attempt', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const signalController = new AbortController()
+  const providerFetch = vi.fn(async () =>
+    createJsonResponse({
+      attachment_id: 'attachment_pdf_abort',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+      },
+      upload_url: 'https://uploads.example.test/upload/abort-report',
+    }))
+  const publicFetch = vi.fn(async () => {
+    queueMicrotask(() => signalController.abort())
+    return createJsonResponse({ error: 'temporarily unavailable' }, {
+      status: 503,
+    })
+  })
+
+  await assert.rejects(
+    () => uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+        signal: signalController.signal,
+      },
+    ),
+    (error) => error instanceof Error && error.name === 'AbortError',
+  )
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(1)
+})
+
+test('linq runtime does not retry an ambiguous attachment reservation failure', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () => {
+    throw new TypeError('connection ended before a response')
+  })
+  const publicFetch = vi.fn(async () => new Response(null, { status: 204 }))
+
+  await assert.rejects(
+    () => uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'transport' &&
+      error.context?.method === 'POST' &&
+      error.context?.path === '/attachments' &&
+      error.context?.retryable === false,
+  )
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).not.toHaveBeenCalled()
+})
+
 test('linq runtime fails closed when a presigned attachment PUT redirects', async () => {
+  vi.useFakeTimers()
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
     LINQ_API_TOKEN: 'linq-token',
@@ -1650,20 +1840,20 @@ test('linq runtime fails closed when a presigned attachment PUT redirects', asyn
     throw new TypeError('fetch failed: redirected')
   })
 
-  await assert.rejects(
-    () =>
-      uploadLinqAttachment(
-        {
-          bytes,
-          contentType: 'application/pdf',
-          filename: 'report.pdf',
-        },
-        {
-          env,
-          fetchImplementation: providerFetch,
-          publicFetchImplementation: publicFetch,
-        },
-      ),
+  const upload = uploadLinqAttachment(
+    {
+      bytes,
+      contentType: 'application/pdf',
+      filename: 'report.pdf',
+    },
+    {
+      env,
+      fetchImplementation: providerFetch,
+      publicFetchImplementation: publicFetch,
+    },
+  )
+  const rejection = assert.rejects(
+    upload,
     (error) =>
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
@@ -1673,12 +1863,14 @@ test('linq runtime fails closed when a presigned attachment PUT redirects', asyn
       error.context?.method === 'PUT' &&
       error.context?.path === '[presigned-upload]' &&
       error.context?.requestOrigin === 'https://uploads.example.test' &&
-      error.context?.retryable === false &&
+      error.context?.retryable === true &&
       error.context?.timedOut === false,
   )
+  await vi.runAllTimersAsync()
+  await rejection
 
   expect(providerFetch).toHaveBeenCalledTimes(1)
-  expect(publicFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(3)
 })
 
 test('linq runtime falls back to provider fetch for attachment PUT when public fetch is absent', async () => {

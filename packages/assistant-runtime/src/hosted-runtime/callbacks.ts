@@ -5410,7 +5410,15 @@ function buildHostedAssistantDeliveryErrorDetailLogFields(
     details,
     ["operation", "action"],
   ));
+  appendHostedAssistantDeliveryErrorLogValue(output, "FailureStage", details.failureStage);
+  appendHostedAssistantDeliveryErrorLogValue(output, "Method", details.method);
   appendHostedAssistantDeliveryErrorLogValue(output, "Retryable", details.retryable);
+  appendHostedAssistantDeliveryErrorLogValue(output, "TimedOut", details.timedOut);
+  appendHostedAssistantDeliveryErrorLogValue(
+    output,
+    "TransportErrorName",
+    details.transportErrorName,
+  );
   appendHostedAssistantDeliveryErrorLogValue(output, "ErrorName", readFirstHostedAssistantDeliveryErrorDetail(
     details,
     ["name", "errorName"],

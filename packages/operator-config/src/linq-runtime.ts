@@ -787,58 +787,62 @@ async function uploadLinqAttachmentBytes(
     )
   }
 
-  const timeout = createTimeoutAbortController(
-    dependencies.signal,
-    LINQ_HTTP_TIMEOUT_MS,
-  )
-  let response: LinqFetchResponse
-  try {
-    response = await fetchImplementation(uploadUrl, {
-      body: new Blob([copyUint8ArrayToArrayBuffer(bytes)], {
-        type: headers['content-type'] ?? 'application/octet-stream',
-      }),
-      headers,
-      method: 'PUT',
-      redirect: 'error',
-      signal: timeout.signal,
-    })
-  } catch (error) {
-    if (dependencies.signal?.aborted) {
-      throw error
-    }
-    throw createLinqRequestError({
-      details: {
-        operation: 'create_attachment_upload',
-        provider: 'linq',
-        requestAttachmentBytes: bytes.byteLength,
-        requestAttachmentHeaderCount: Object.keys(headers).length,
-      },
-      error,
-      method: 'PUT',
-      path: '[presigned-upload]',
-      requestOrigin: readRequestOrigin(uploadUrl),
-      retryable: false,
-      timedOut: timeout.timedOut(),
-    })
-  } finally {
-    timeout.cleanup()
+  const details: LinqSafeRequestDetails = {
+    operation: 'create_attachment_upload',
+    provider: 'linq',
+    requestAttachmentBytes: bytes.byteLength,
+    requestAttachmentHeaderCount: Object.keys(headers).length,
   }
+  const body = new Blob([copyUint8ArrayToArrayBuffer(bytes)], {
+    type: headers['content-type'] ?? 'application/octet-stream',
+  })
 
-  if (!response.ok) {
-    throw await createLinqHttpError(
-      response,
-      {
-        operation: 'create_attachment_upload',
-        provider: 'linq',
-        requestAttachmentBytes: bytes.byteLength,
-        requestAttachmentHeaderCount: Object.keys(headers).length,
-      },
-      'PUT',
-      '[presigned-upload]',
-      false,
-      false,
-    )
-  }
+  await requestJsonWithRetry<void, LinqFetchResponse>({
+    createHttpError: (response) =>
+      createLinqHttpError(
+        response,
+        details,
+        'PUT',
+        '[presigned-upload]',
+        false,
+        true,
+      ),
+    fetchResponse: async () => {
+      const timeout = createTimeoutAbortController(
+        dependencies.signal,
+        LINQ_HTTP_TIMEOUT_MS,
+      )
+      try {
+        return await fetchImplementation(uploadUrl, {
+          body,
+          headers,
+          method: 'PUT',
+          redirect: 'error',
+          signal: timeout.signal,
+        })
+      } catch (error) {
+        if (dependencies.signal?.aborted) {
+          throw error
+        }
+        throw createLinqRequestError({
+          details,
+          error,
+          method: 'PUT',
+          path: '[presigned-upload]',
+          requestOrigin: readRequestOrigin(uploadUrl),
+          retryable: true,
+          timedOut: timeout.timedOut(),
+        })
+      } finally {
+        timeout.cleanup()
+      }
+    },
+    isRetryableError: isRetryableLinqRequestError,
+    maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
+    parseResponse: () => undefined,
+    signal: dependencies.signal,
+    waitForRetryDelay: waitForLinqRetryDelay,
+  })
 }
 
 export async function uploadLinqAttachment(
@@ -1783,6 +1787,7 @@ function shouldRetryLinqHttpStatus(
   return (
     (
       method === 'GET' ||
+      method === 'PUT' ||
       (method === 'POST' && hasIdempotencyKey) ||
       (method === 'DELETE' && allowDeleteRetries)
     ) &&
@@ -1968,6 +1973,7 @@ function shouldRetryLinqTransportFailure(
   hasIdempotencyKey = false,
 ): boolean {
   return method === 'GET' ||
+    method === 'PUT' ||
     (method === 'POST' && hasIdempotencyKey) ||
     (method === 'DELETE' && allowDeleteRetries)
 }
