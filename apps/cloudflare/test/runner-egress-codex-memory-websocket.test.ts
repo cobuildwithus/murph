@@ -263,7 +263,7 @@ test("meters a failed response before accepting the next request", async () => {
   expect(downstream.sent).toContain(failed);
 });
 
-test("fails closed when persistence rejects", async () => {
+test("delivers the provider completion when persistence rejects", async () => {
   const { controller, downstream, reportFailure, upstream } = setup({
     persistUsage: vi.fn(async () => {
       throw new Error("sensitive database error");
@@ -275,15 +275,9 @@ test("fails closed when persistence rejects", async () => {
   upstream.emitMessage(completed);
   await controller.drain();
 
-  expect(downstream.sent).not.toContain(completed);
-  expect(downstream.closes).toContainEqual({
-    code: 1_011,
-    reason: "Memory usage recording failed",
-  });
-  expect(upstream.closes).toContainEqual({
-    code: 1_011,
-    reason: "Memory usage recording failed",
-  });
+  expect(downstream.sent).toContain(completed);
+  expect(downstream.closes).toHaveLength(0);
+  expect(upstream.closes).toHaveLength(0);
   expect(reportFailure).toHaveBeenCalledWith({
     phase: "persistence",
   });

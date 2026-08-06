@@ -1797,9 +1797,8 @@ async function handleHostedCodexMemoryUsageResponse(input: {
         providerName: input.providerName,
         reason: "persistence_failed",
       });
-      return new Response("Hosted Codex memory usage recording failed.", {
-        status: 502,
-      });
+      // The provider work has already completed. Preserve its terminal
+      // response so Codex does not retry an irreversible, billable request.
     }
   }
 
@@ -1885,18 +1884,24 @@ function reportHostedCodexMemoryUsageFailure(input: {
   providerName: "hosted-openai" | "venice";
   reason: string;
 }): void {
+  const errorName = input.error === undefined
+    ? null
+    : readHostedExecutionSafeErrorName(input.error);
   emitHostedExecutionStructuredLog({
     component: "runner",
     details: {
       ...(input.error === undefined
         ? {}
-        : buildHostedExecutionSafeErrorDetails(input.error)),
+        : {
+            errorCode: deriveHostedExecutionErrorCode(input.error),
+            ...(errorName ? { errorName } : {}),
+          }),
       memoryKind: input.memoryKind,
       providerKind: input.providerName + "_codex_memory",
       reason: input.reason,
     },
     level: "warn",
-    message: "Hosted Codex memory usage accounting failed closed.",
+    message: "Hosted Codex memory usage accounting failed.",
     phase: "wake.running",
   });
 }

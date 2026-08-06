@@ -5444,7 +5444,222 @@ describe("hostedRunnerIntercept", () => {
     });
   });
 
-  it("fails native memory completion closed when durable usage recording fails", async () => {
+  it("records Venice native-memory usage with provider-specific accounting metadata", async () => {
+    const providerCreatedAt = 1_775_000_000;
+    const completedEvent = `data: ${JSON.stringify({
+      response: {
+        created_at: providerCreatedAt,
+        id: "resp_venice_memory_123",
+        model: "openai-gpt-56-terra",
+        service_tier: "flex",
+        usage: {
+          input_tokens: 900,
+          input_tokens_details: {
+            cache_write_tokens: 30,
+            cached_tokens: 400,
+          },
+          output_tokens: 110,
+          output_tokens_details: { reasoning_tokens: 25 },
+          total_tokens: 1_010,
+        },
+      },
+      type: "response.completed",
+    })}\n\n`;
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = request instanceof Request ? request.url : String(request);
+      if (url.startsWith("https://api.venice.ai/")) {
+        return new Response(completedEvent, {
+          headers: { "content-type": "text/event-stream" },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/api/internal/hosted-execution/usage/record")) {
+        return Response.json({ recorded: true, usageId: "usage_venice_memory_1" });
+      }
+      return Response.json({ loggedCount: 1 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: JSON.stringify({
+          generate: true,
+          input: "extract durable operator memories",
+          model: "gpt-5.6-terra",
+          service_tier: "flex",
+          stream: true,
+        }),
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        VENICE_API_KEY: "venice-worker-secret",
+        validateRuntimeProviderEgressCredential: async (input) =>
+          createProviderEgressCredentialValidationResult(input),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    await expect(response.text()).resolves.toBe(completedEvent);
+    const usageCall = fetchMock.mock.calls.find(([request]) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return url.endsWith("/api/internal/hosted-execution/usage/record");
+    });
+    expect(usageCall).toBeDefined();
+    const payload = JSON.parse(String(usageCall?.[1]?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    expect(payload.usage).toEqual(expect.objectContaining({
+      apiKeyEnv: "VENICE_API_KEY",
+      baseUrl: "https://api.venice.ai/api/v1",
+      cacheWriteTokens: 30,
+      cachedInputTokens: 400,
+      credentialSource: "platform",
+      featureKey: "codex-native-memory",
+      inputTokens: 900,
+      memberId: "member_123",
+      occurredAt: new Date(providerCreatedAt * 1_000).toISOString(),
+      outputTokens: 110,
+      provider: "codex-cli",
+      providerName: "venice",
+      providerRequestId: "resp_venice_memory_123",
+      providerRequestOutcome: "succeeded",
+      reasoningTokens: 25,
+      requestedModel: "gpt-5.6-terra",
+      servedModel: null,
+      tokenPricingBasis: "standard",
+      totalTokens: 1_010,
+      triggerKind: "codex-native-memory",
+    }));
+    expect(payload.usage.rawUsageJson).toEqual({
+      input_tokens: 900,
+      input_tokens_details: {
+        cache_write_tokens: 30,
+        cached_tokens: 400,
+      },
+      output_tokens: 110,
+      output_tokens_details: { reasoning_tokens: 25 },
+      total_tokens: 1_010,
+    });
+  });
+
+  it.each([
+    {
+      name: "absent terminal usage",
+      usage: undefined,
+    },
+    {
+      name: "malformed terminal usage",
+      usage: {
+        input_tokens: "10",
+        output_tokens: 2,
+        total_tokens: 12,
+      },
+    },
+  ])("fails native-memory HTTP completion closed for $name", async ({ usage }) => {
+    const completedEvent = `data: ${JSON.stringify({
+      response: {
+        created_at: 1_775_000_000,
+        id: "resp_memory_unmetered",
+        model: "gpt-5.6-luna",
+        ...(usage === undefined ? {} : { usage }),
+      },
+      type: "response.completed",
+    })}\n\n`;
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return url.startsWith("https://api.openai.com/")
+        ? new Response(completedEvent, { status: 200 })
+        : Response.json({ recorded: true, usageId: "unexpected_usage" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          generate: true,
+          model: "gpt-5.6-luna",
+          stream: true,
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.text()).resolves.not.toContain("resp_memory_unmetered");
+    expect(fetchMock.mock.calls.some(([request]) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return url.endsWith("/api/internal/hosted-execution/usage/record");
+    })).toBe(false);
+  });
+
+  it("passes through explicitly usage-free native-memory HTTP completion", async () => {
+    const completedEvent = `data: ${JSON.stringify({
+      response: {
+        created_at: 1_775_000_000,
+        id: "resp_memory_usage_free",
+        model: "gpt-5.6-luna",
+      },
+      type: "response.completed",
+    })}\n\n`;
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return url.startsWith("https://api.openai.com/")
+        ? new Response(completedEvent, { status: 200 })
+        : Response.json({ recorded: true, usageId: "unexpected_usage" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          generate: false,
+          model: "gpt-5.6-luna",
+          stream: true,
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe(completedEvent);
+    expect(fetchMock.mock.calls.some(([request]) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return url.endsWith("/api/internal/hosted-execution/usage/record");
+    })).toBe(false);
+  });
+
+  it("preserves native-memory completion when durable usage recording fails", async () => {
     const providerCompletion = `data: ${JSON.stringify({
       response: {
         created_at: 1_775_000_000,
@@ -5488,10 +5703,22 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(502);
-    await expect(response.text()).resolves.not.toContain(
-      "resp_memory_failed_record",
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe(providerCompletion);
+    const accountingLogCall = mocks.emitHostedExecutionStructuredLog.mock.calls.find(
+      ([entry]) => entry.message === "Hosted Codex memory usage accounting failed.",
     );
+    expect(accountingLogCall?.[0]).toEqual(expect.objectContaining({
+      details: expect.objectContaining({
+        errorCode: expect.any(String),
+        memoryKind: "extraction",
+        providerKind: "hosted-openai_codex_memory",
+        reason: "persistence_failed",
+      }),
+      level: "warn",
+      message: "Hosted Codex memory usage accounting failed.",
+    }));
+    expect(JSON.stringify(accountingLogCall)).not.toContain("unavailable");
   });
 
   it("does not double-record ordinary OpenAI turns at egress", async () => {

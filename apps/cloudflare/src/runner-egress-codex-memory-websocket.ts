@@ -38,7 +38,6 @@ const CODEX_MEMORY_PROTOCOL_CLOSE_CODE = 1002;
 const CODEX_MEMORY_INTERNAL_CLOSE_CODE = 1011;
 const CODEX_MEMORY_TOO_LARGE_CLOSE_CODE = 1009;
 const CODEX_MEMORY_PROTOCOL_CLOSE_REASON = "Memory WebSocket protocol error";
-const CODEX_MEMORY_PERSISTENCE_CLOSE_REASON = "Memory usage recording failed";
 const CODEX_MEMORY_RELAY_CLOSE_REASON = "Memory WebSocket relay failed";
 const CODEX_MEMORY_TOO_LARGE_CLOSE_REASON = "Memory WebSocket frame too large";
 
@@ -236,16 +235,10 @@ export function startHostedCodexMemoryWebSocketRelay(input: {
         try {
           await persistence;
         } catch {
-          if (stopped) {
-            reportFailure("persistence");
-          } else {
-            fail(
-              "persistence",
-              CODEX_MEMORY_INTERNAL_CLOSE_CODE,
-              CODEX_MEMORY_PERSISTENCE_CLOSE_REASON,
-            );
-          }
-          return;
+          // The provider generation has already completed and may have been
+          // billed. Turning an accounting-write failure into a retryable
+          // provider failure would replay that irreversible work.
+          reportFailure("persistence");
         }
       }
       if (!stopped) {

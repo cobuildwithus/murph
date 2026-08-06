@@ -44,7 +44,10 @@ Reverse only the infrastructure-deletion commit from PR #1322 against current
 `main`. Retain its earlier config-disable commit and later disabled-state
 regressions. Resolve any overlap by preserving later provider changes while
 reinstating the dormant memory path. Add no new feature flag, abstraction,
-state owner, dependency, migration, or compatibility layer.
+state owner, dependency, migration, or compatibility layer. Preserve an
+already-completed provider terminal when its one bounded usage-recording
+attempt fails; converting that callback failure into a retryable provider
+failure could replay irreversible billable work.
 
 ## Failure, rollback, and deploy skew
 
