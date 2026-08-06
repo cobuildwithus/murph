@@ -213,7 +213,10 @@ describe('onboarding first personal read', () => {
       'Never infer alcohol use, medication changes, illness, adherence, or another sensitive explanation from a proxy pattern.',
     )
     expect(prompt).toContain(
-      'Return skip when a recent proactive health question from Murph is still unanswered.',
+      'Return skip when a substantive proactive health question, decision, or requested action from Murph is still waiting for the member.',
+    )
+    expect(prompt).toContain(
+      'A generic closing invitation such as `anything else?` is not an unresolved task',
     )
     expect(prompt).toContain(
       'Read `vault-cli knowledge show weekly-health-insights`.',
