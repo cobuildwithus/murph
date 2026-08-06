@@ -25,7 +25,7 @@ export function assertSingleSuccessfulColdStartAttempt(
   successfulAttemptId: string,
 ): void {
   const failedLog = runtimeLogs.find((entry) =>
-    entry.level === "error" || entry.phase === "failed"
+    entry.level === "error" || entry.phase === "error"
   );
   if (failedLog) {
     throw new Error("Cold-start benchmark observed a failed runtime phase.");

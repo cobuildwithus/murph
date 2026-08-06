@@ -20,17 +20,17 @@ const validMeasuredRuntimeLogs = [
     attemptId: "attempt-success",
     component: "mailbox",
     level: "info",
-    phase: "wake.running",
+    phase: "import",
     redactedJson: null,
   },
-];
+] as const;
 
 describe("hosted local cold-start benchmark integrity", () => {
   it("accepts one failure-free runtime attempt", () => {
     expect(() =>
       assertSingleSuccessfulColdStartAttempt([
-        { attemptId: "attempt-success", level: "info", phase: "started" },
-        { attemptId: "attempt-success", level: "info", phase: "completed" },
+        { attemptId: "attempt-success", level: "info", phase: "invoke" },
+        { attemptId: "attempt-success", level: "info", phase: "idle" },
       ], "attempt-success")
     ).not.toThrow();
   });
@@ -38,8 +38,17 @@ describe("hosted local cold-start benchmark integrity", () => {
   it("rejects a failed attempt followed by a successful retry", () => {
     expect(() =>
       assertSingleSuccessfulColdStartAttempt([
-        { attemptId: "attempt-failed", level: "error", phase: "failed" },
-        { attemptId: "attempt-success", level: "info", phase: "completed" },
+        { attemptId: "attempt-failed", level: "error", phase: "invoke" },
+        { attemptId: "attempt-success", level: "info", phase: "idle" },
+      ], "attempt-success")
+    ).toThrow("failed runtime phase");
+  });
+
+  it("rejects a warning-level runtime error phase", () => {
+    expect(() =>
+      assertSingleSuccessfulColdStartAttempt([
+        { attemptId: "attempt-success", level: "warn", phase: "error" },
+        { attemptId: "attempt-success", level: "info", phase: "idle" },
       ], "attempt-success")
     ).toThrow("failed runtime phase");
   });
@@ -47,8 +56,8 @@ describe("hosted local cold-start benchmark integrity", () => {
   it("rejects multiple attempts even when failure logs are unavailable", () => {
     expect(() =>
       assertSingleSuccessfulColdStartAttempt([
-        { attemptId: "attempt-retried", level: "warn", phase: "started" },
-        { attemptId: "attempt-success", level: "info", phase: "completed" },
+        { attemptId: "attempt-retried", level: "warn", phase: "invoke" },
+        { attemptId: "attempt-success", level: "info", phase: "idle" },
       ], "attempt-success")
     ).toThrow("more than one runtime attempt");
   });
@@ -102,7 +111,7 @@ describe("hosted local cold-start benchmark integrity", () => {
           attemptId: "attempt-retry",
           component: "runtime",
           level: "info",
-          phase: "wake.running",
+          phase: "invoke",
           redactedJson: null,
         },
       ],
