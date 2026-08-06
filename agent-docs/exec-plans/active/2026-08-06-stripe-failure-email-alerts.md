@@ -90,9 +90,9 @@ Updated: 2026-08-06
   local Stripe-event reconciliation.
 - Treat `checkout.session.expired` and canceled PaymentIntents as ordinary
   abandonment/cancellation rather than errors.
-- Apply the preliminary coverage lens. Product-experience, prompt, and
-  frontend lenses are not applicable because the change is internal
-  operational observability only.
+- Apply the preliminary product-experience and coverage lenses because the
+  requested operator email is an asynchronous delivery and recovery workflow.
+  Prompt and frontend lenses are not applicable.
 - Run the final PR-lane ReviewGPT gate because this touches billing, provider
   egress, webhook processing, and failure semantics; do not also run local
   `deep-review`.
