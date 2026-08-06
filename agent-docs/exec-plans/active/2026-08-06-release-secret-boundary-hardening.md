@@ -90,9 +90,10 @@ Updated: 2026-08-06
 - Use a dependency-free Node guard over final tarballs rather than adding a
   third-party scanner dependency to the release trust path.
 - Keep generic assignment detection syntax-scoped and value-authoritative.
-  Allow only exact public metadata/placeholders and the three known bundled
-  `incur` test-fixture paths; provider and complete credential rules still scan
-  those files.
+  Allow only exact public metadata/placeholders and explicit source
+  interpolation syntax. Preserve the required patched `incur` bundle, but allow
+  its three source-test fixtures only when their exact paths and complete
+  content digests match the pinned inventory; strong rules remain active.
 
 ## Verification
 
@@ -115,8 +116,8 @@ Updated: 2026-08-06
 - The sole synthetic webhook alert reads back resolved as `used_in_tests`.
 - Focused scanner coverage passes with 14 accepted/rejected fixture cases,
   including Basic auth, unquoted assignments, external outputs, secret-safe
-  path/tarball reporting, archive-link rejection, and the narrow bundled-fixture
-  exception with provider-token rejection preserved.
+  path/tarball reporting, archive-link rejection, shell terminators/comments,
+  JWT-shaped values, and declaration-only `.d.ts` syntax.
 - The clean workspace build and diff-scoped tooling lane pass; the latter ran
   31 repo-tool files and 469 tests.
 - All five real 1.3.0 npm tarballs pass both the pack-owner scan and a separate
@@ -131,5 +132,21 @@ Updated: 2026-08-06
   ordering coverage. Final ReviewGPT round 1 accepted three findings: preserve
   external output support, replace broad shape/placeholder exemptions with
   syntax-scoped authoritative checks, and redact tarball/path diagnostics.
-  Each accepted finding is implemented and awaits final round 2 on the pushed
+  Each accepted finding was implemented for final round 2 on the pushed
   remediation head.
+- Final ReviewGPT round 2 required a retrospective after production-shaped
+  reproductions proved shell terminators/comments, JWT-shaped values, and a
+  credential-bearing archive segment still reached repeated mechanisms. The
+  recorded decision redesigns the same shared guard: opaque values are
+  authoritative, public exceptions are exact, all artifact names are hidden by
+  default, and path segments are scanned individually. The first attempt to
+  remove bundled `incur` failed the existing package-shape invariant proving its
+  patched runtime requirement; the corrected design preserves the bundle but
+  replaces a path-only exception with exact full-file digests and changed-file
+  rejection. The correction still deletes conditional redaction and broad
+  dotted-reference concepts.
+- The corrected design passes fresh five-package packing/scanning, standalone
+  five-tarball scanning, CLI package-shape verification, the external-output
+  installed-contract test, the publication-owner test, and the complete
+  diff-scoped lane again (31 repo-tool files / 469 tests, CLI typecheck, and 118
+  CLI files / 1,112 passing tests with one skip).

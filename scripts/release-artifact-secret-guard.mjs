@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -67,8 +68,10 @@ const structuredSecretAssignmentPattern =
   /(?:^|[,{][ \t\r\n]*|\n[ \t]*)["'`]?\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b["'`]?\s*:\s*(["'`])([^"'`\r\n]{1,4096})\2/gimu;
 const declaredSecretAssignmentPattern =
   /(?:^|[;\n][ \t]*)(?:export[ \t]+)?(?:const|let|var)[ \t]+\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b[ \t]*=[ \t]*(["'`])([^"'`\r\n]{1,4096})\2/gimu;
-const lineSecretAssignmentPattern =
-  /^[ \t]*(?:export[ \t]+)?["'`]?\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b["'`]?[ \t]*[:=][ \t]*(["'`]?)([^"'`\s,;]{1,4096})\2[ \t]*$/gimu;
+const quotedLineSecretAssignmentPattern =
+  /^[ \t]*(?:export[ \t]+)?["'`]?\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b["'`]?[ \t]*[:=][ \t]*(["'`])([^"'`\r\n]{1,4096})\2[ \t]*(?:;[ \t]*)?(?:#[^\r\n]*)?$/gimu;
+const unquotedLineSecretAssignmentPattern =
+  /^[ \t]*(?:export[ \t]+)?["'`]?\b((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|private[_-]?key|password|secret|token)(?:[_-][A-Za-z0-9]+)*)\b["'`]?[ \t]*[:=][ \t]*([^"'`\s,;#]{1,4096})[ \t]*(?:;[ \t]*)?(?:#[^\r\n]*)?$/gimu;
 const walletPrivateKeyPattern =
   /["'`]?\b(?:eth(?:ereum)?[_-]?)?(?:wallet[_-]?)?private[_-]?key\b["'`]?\s*[:=]\s*["'`]?(0x[0-9a-f]{64})["'`]?/iu;
 const mnemonicPattern =
@@ -82,10 +85,62 @@ const exactPlaceholderValues = new Set([
   'replace-me',
   'test-only',
 ]);
-const vendoredGenericAssignmentFixturePaths = new Set([
-  'package/node_modules/incur/src/Cli.test.ts',
-  'package/node_modules/incur/src/Mcp.test.ts',
-  'package/node_modules/incur/src/e2e.test.ts',
+// These are reviewed public literals from the real release inventory. Do not
+// replace them with key-suffix or value-shape exemptions.
+const allowedPublicCredentialAssignments = new Set(
+  [
+    ['DEVICE_SYNC_CONTROL_TOKEN_ENV', 'DEVICE_SYNC_CONTROL_TOKEN'],
+    ['DEVICE_SYNC_SECRET_ENV', 'DEVICE_SYNC_SECRET'],
+    ['ENCRYPTED_SECRET_PREFIX', 'mdss'],
+    ['ENCRYPTED_SECRET_VERSION', 'v1'],
+    ['EXA_API_KEY_ENV', 'EXA_API_KEY'],
+    ['GATEWAY_ROUTE_TOKEN_PREFIX', 'gwrt1_'],
+    ['HOSTED_AI_USAGE_REPORTING_SECRET_ENV', 'HOSTED_AI_USAGE_REPORTING_SECRET'],
+    ['HOSTED_ASSISTANT_API_KEY_ENV', 'HOSTED_ASSISTANT_API_KEY_ENV'],
+    ['HOSTED_CHECKPOINT_DEBUG_LOG_HASH_SECRET_ENV', 'HOSTED_LOG_FINGERPRINT_SECRET'],
+    ['HOSTED_CUSTOM_INFERENCE_API_KEY_ENV', 'MURPH_CUSTOM_INFERENCE_API_KEY'],
+    ['HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN', '[redacted]'],
+    ['HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER', 'x-hosted-runtime-ensure-processing-token-acquired-at-ms'],
+    ['HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER', 'x-hosted-runtime-ensure-processing-token-acquire-started-at-ms'],
+    ['MANAGED_CONTROL_TOKEN_FILE_NAME', 'control-token'],
+    ['MANAGED_ENCRYPTION_SECRET_FILE_NAME', 'encryption-secret'],
+    ['OURA_OAUTH_TOKEN_ENDPOINT_KIND', 'oura_oauth_token'],
+    ['OURA_TOKEN_PATH', '/oauth/token'],
+    ['REDACTED_SECRET', '<REDACTED_SECRET>'],
+    ['REDACTED_SECRET_TEXT', '[REDACTED]'],
+    ['STRAVA_OAUTH_TOKEN_ENDPOINT_KIND', 'strava_oauth_token'],
+    ['STRAVA_TOKEN_PATH', '/oauth/token'],
+    ['TELEGRAM_SECRET_TOKEN_HEADER', 'x-telegram-bot-api-secret-token'],
+    ['WHOOP_OAUTH_TOKEN_ENDPOINT_KIND', 'whoop_oauth_token'],
+    ['WHOOP_TOKEN_PATH', '/oauth/oauth2/token'],
+    ['access_token_expires_at', 'null'],
+    [
+      'apiKey',
+      'is a provider-owned API secret and is not supported in serialized runtime config.',
+    ],
+    ['claim_token', '?'],
+    ['claim_token', 'null'],
+    ['clientSecret', 'string'],
+    ['clinical-records-token', 'device'],
+    ['device-sync-token', 'device'],
+    ['token', '-${suffix}'],
+  ].map(([key, value]) => `${key}\0${value}`),
+);
+// The CLI must bundle patched incur@0.4.5. Only the pinned upstream test files
+// may skip generic assignment matching; every stronger rule still scans them.
+const allowedVendoredFixtureDigests = new Map([
+  [
+    'package/node_modules/incur/src/Cli.test.ts',
+    'c33b3cdd0609475674a995a9d4e0f32fd54bc2c83082b96c307f5f7d60ec402c',
+  ],
+  [
+    'package/node_modules/incur/src/Mcp.test.ts',
+    '7332e0e53c37da5fe510a226038f2cd08917dd4ed40d4568451e2b2259e51795',
+  ],
+  [
+    'package/node_modules/incur/src/e2e.test.ts',
+    '3f6d1c5e32414aa2d01bad1467585818b15b6499b15d18f5d344664f41cfb9cc',
+  ],
 ]);
 
 function normalizedArchivePath(value) {
@@ -155,7 +210,6 @@ function isCredentialReference(value) {
   );
   return (
     /^\$\{?[A-Z][A-Z0-9_]*\}?$/u.test(trimmed)
-    || /^(?:[A-Za-z_$][A-Za-z0-9_$]*\.)+[A-Za-z_$][A-Za-z0-9_$]*$/u.test(trimmed)
     || (
       withoutTemplateReferences !== trimmed
       && /^[A-Za-z0-9._/-]*$/u.test(withoutTemplateReferences)
@@ -163,39 +217,11 @@ function isCredentialReference(value) {
   );
 }
 
-function isCredentialLiteral(value) {
+function isCredentialLiteral(key, value) {
   return (
-    !/\s/u.test(value)
-    && !isExactPlaceholder(value)
+    !isExactPlaceholder(value)
     && !isCredentialReference(value)
-  );
-}
-
-function isPublicHeaderNameAssignment(key, value) {
-  return (
-    /_HEADER$/iu.test(key)
-    && /^x-[a-z0-9]+(?:-[a-z0-9]+)+$/u.test(value)
-  );
-}
-
-function isPublicCredentialMetadataAssignment(key, value) {
-  return (
-    isPublicHeaderNameAssignment(key, value)
-    || (/_REDACTION_TOKEN$/u.test(key) && value === '[redacted]')
-    || (
-      /^REDACTED_[A-Z0-9_]+$/u.test(key)
-      && (value === `<${key}>` || value === '[REDACTED]')
-    )
-    || (/_ENV$/iu.test(key) && /^[A-Z][A-Z0-9_]*$/u.test(value))
-    || (
-      /_(?:ENDPOINT_KIND|FILE_NAME|PATH|PREFIX|VERSION)$/iu.test(key)
-      && /^[A-Za-z0-9._/-]+$/u.test(value)
-    )
-    || (
-      (key === 'clinical-records-token' && value === 'device')
-      || (key === 'device-sync-token' && value === 'device')
-    )
-    || ['?', '[', '{', 'boolean', 'null', 'number', 'string', 'string[]', 'undefined'].includes(value)
+    && !allowedPublicCredentialAssignments.has(`${key}\0${value}`)
   );
 }
 
@@ -218,10 +244,7 @@ function secretAssignmentHasCredential(pattern, text, valueIndex) {
   for (const match of text.matchAll(pattern)) {
     const key = match[1] ?? '';
     const value = match[valueIndex] ?? '';
-    if (
-      !isPublicCredentialMetadataAssignment(key, value)
-      && isCredentialLiteral(value)
-    ) {
+    if (isCredentialLiteral(key, value)) {
       return true;
     }
   }
@@ -230,6 +253,8 @@ function secretAssignmentHasCredential(pattern, text, valueIndex) {
 
 function contentRuleIds(text, options = {}) {
   const includeGenericAssignments = options.includeGenericAssignments ?? true;
+  const includeUnquotedLineAssignments =
+    options.includeUnquotedLineAssignments ?? true;
   const ruleIds = new Set();
 
   for (const { pattern, ruleId } of providerPatterns) {
@@ -265,7 +290,7 @@ function contentRuleIds(text, options = {}) {
   credentialQueryPattern.lastIndex = 0;
   for (const match of text.matchAll(credentialQueryPattern)) {
     const credential = match[1] ?? '';
-    if (isCredentialLiteral(credential)) {
+    if (isCredentialLiteral('url-query', credential)) {
       ruleIds.add('credential:url-query');
       break;
     }
@@ -276,7 +301,11 @@ function contentRuleIds(text, options = {}) {
     && (
       secretAssignmentHasCredential(structuredSecretAssignmentPattern, text, 3)
       || secretAssignmentHasCredential(declaredSecretAssignmentPattern, text, 3)
-      || secretAssignmentHasCredential(lineSecretAssignmentPattern, text, 3)
+      || secretAssignmentHasCredential(quotedLineSecretAssignmentPattern, text, 3)
+      || (
+        includeUnquotedLineAssignments
+        && secretAssignmentHasCredential(unquotedLineSecretAssignmentPattern, text, 2)
+      )
     )
   ) {
     ruleIds.add('credential:generic-assignment');
@@ -336,11 +365,16 @@ async function scanExtractedTarball(rootPath) {
       return;
     }
 
-    const text = (await readFile(file.absolutePath)).toString('utf8');
+    const contents = await readFile(file.absolutePath);
+    const text = contents.toString('utf8');
+    const expectedFixtureDigest = allowedVendoredFixtureDigests.get(
+      file.relativePath,
+    );
+    const hasExactAllowedFixtureContents = expectedFixtureDigest !== undefined
+      && createHash('sha256').update(contents).digest('hex') === expectedFixtureDigest;
     for (const ruleId of contentRuleIds(text, {
-      includeGenericAssignments: !vendoredGenericAssignmentFixturePaths.has(
-        file.relativePath,
-      ),
+      includeGenericAssignments: !hasExactAllowedFixtureContents,
+      includeUnquotedLineAssignments: !file.relativePath.endsWith('.d.ts'),
     })) {
       findings.push({ path: file.relativePath, ruleId });
     }
@@ -382,15 +416,14 @@ async function scanTarball(tarballPath) {
     throw new Error('Release tarball is empty.');
   }
   const archivePathFindings = [];
-  const redactedArchivePaths = new Set();
   for (const entry of entries) {
-    for (const ruleId of contentRuleIds(entry)) {
-      redactedArchivePaths.add(entry);
-      archivePathFindings.push({
-        path: entry,
-        redactPath: true,
-        ruleId: `archive-path:${ruleId}`,
-      });
+    for (const segment of normalizedArchivePath(entry).split('/')) {
+      for (const ruleId of contentRuleIds(segment)) {
+        archivePathFindings.push({
+          path: entry,
+          ruleId: `archive-path:${ruleId}`,
+        });
+      }
     }
   }
 
@@ -406,13 +439,7 @@ async function scanTarball(tarballPath) {
       throw new Error('Release tarball could not be extracted for scanning.');
     }
     const extractedFindings = await scanExtractedTarball(extractionRoot);
-    return [
-      ...archivePathFindings,
-      ...extractedFindings.map((finding) =>
-        redactedArchivePaths.has(finding.path)
-          ? { ...finding, redactPath: true }
-          : finding),
-    ];
+    return [...archivePathFindings, ...extractedFindings];
   } finally {
     await rm(extractionRoot, { force: true, recursive: true });
   }
@@ -468,39 +495,33 @@ async function verifyReleaseArtifacts(repoRoot, packOutput) {
   await verifyTarballInventory(tarballPaths);
 
   const findings = [];
-  for (const tarballPath of tarballPaths) {
+  for (const [tarballIndex, tarballPath] of tarballPaths.entries()) {
     const tarballName = path.basename(tarballPath);
     const tarballPathRuleIds = contentRuleIds(tarballName);
-    const reportedTarballName = tarballPathRuleIds.length > 0
-      ? '<redacted-tarball>'
-      : tarballName;
     for (const ruleId of tarballPathRuleIds) {
       findings.push({
         path: '<tarball-name>',
-        redactPath: true,
         ruleId: `tarball-path:${ruleId}`,
-        tarball: reportedTarballName,
+        tarballIndex,
       });
     }
     for (const finding of await scanTarball(tarballPath)) {
       findings.push({
         ...finding,
-        tarball: reportedTarballName,
+        tarballIndex,
       });
     }
   }
 
   findings.sort((left, right) =>
-    `${left.tarball}:${left.path}:${left.ruleId}`.localeCompare(
-      `${right.tarball}:${right.path}:${right.ruleId}`,
+    `${left.tarballIndex}:${left.path}:${left.ruleId}`.localeCompare(
+      `${right.tarballIndex}:${right.path}:${right.ruleId}`,
     ));
   if (findings.length > 0) {
     const displayed = findings.slice(0, 50);
     const lines = displayed.map(
       (finding) =>
-        `- ${finding.ruleId} in ${finding.tarball}:${
-          finding.redactPath ? '<redacted-archive-path>' : finding.path
-        }`,
+        `- ${finding.ruleId} in tarball ${finding.tarballIndex + 1}:<archive-entry>`,
     );
     if (findings.length > displayed.length) {
       lines.push(`- ${findings.length - displayed.length} additional finding(s) omitted`);

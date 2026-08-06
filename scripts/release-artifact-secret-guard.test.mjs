@@ -13,6 +13,14 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+function syntheticJwtCredential() {
+  return [
+    'eyJhbGciOiJIUzI1NiIs' + 'InR5cCI6IkpXVCJ9',
+    'eyJzdWIiOiIxMjM0NTY3' + 'ODkwIiwiaWF0IjoxNTE2MjM5MDIyfQ',
+    'SflKxwRJSMeKKF2QT4fwp' + 'MeJf36POk6yJV_adQssw5c',
+  ].join('.');
+}
+
 async function createTarball(files, options = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'murph-release-secret-guard-'));
   const packageRoot = path.join(root, 'package');
@@ -73,6 +81,12 @@ test('accepts ordinary package code and obvious local placeholders', async () =>
       'const configShape = { "api-key": "api-key", "AUTH_TOKEN": { type: "string" } };',
       'export { configShape, HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN, laneDomains, localDatabase, metricKey, privateKeyHeader, REDACTED_SECRET, REDACTED_SECRET_TEXT, TELEGRAM_SECRET_TOKEN_HEADER, token };',
     ].join('\n'),
+    'dist/index.d.ts': [
+      'export interface CredentialShape {',
+      '  API_TOKEN: string;',
+      '  clientSecret: string;',
+      '}',
+    ].join('\n'),
     'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
   });
   try {
@@ -82,43 +96,14 @@ test('accepts ordinary package code and obvious local placeholders', async () =>
   }
 });
 
-test('limits generic fixture exemptions to known vendored incur test paths', async () => {
-  const genericFixtureSecret = ['secret', '123'].join('-');
-  const providerCredential = ['sk', 'live', 'A1b2C3d4E5f6G7h8I9j0K1l2'].join('_');
-  const acceptedFixture = await createTarball({
-    'node_modules/incur/src/Cli.test.ts': `const fixture = { API_TOKEN: "${genericFixtureSecret}" };`,
-    'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
-  });
-  try {
-    await verifyReleaseArtifacts(acceptedFixture.root, acceptedFixture.packOutput);
-  } finally {
-    await acceptedFixture.cleanup();
-  }
-
-  const rejectedFixture = await createTarball({
-    'node_modules/incur/src/Cli.test.ts': `const fixture = { API_TOKEN: "${providerCredential}" };`,
-    'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
-  });
-  try {
-    await assert.rejects(
-      verifyReleaseArtifacts(rejectedFixture.root, rejectedFixture.packOutput),
-      (error) => {
-        assert.match(error.message, /provider-token:stripe/u);
-        assert.equal(error.message.includes(providerCredential), false);
-        return true;
-      },
-    );
-  } finally {
-    await rejectedFixture.cleanup();
-  }
-});
-
 test('detects quoted and unquoted generic secret assignments', () => {
   const secret = ['uY7nQ2pL9vR4', 'xT8mW3cD6fH1'].join('');
   for (const assignment of [
     `{"CLOUDFLARE_API_TOKEN":"${secret}"}`,
     `CLOUDFLARE_API_TOKEN=${secret}`,
     `export AUTH_TOKEN=${secret}`,
+    `export AUTH_TOKEN=${secret};`,
+    `AUTH_TOKEN=${secret} # production`,
     `client_secret: ${secret}`,
     `client_secret = '${secret}'`,
   ]) {
@@ -131,7 +116,7 @@ test('detects quoted and unquoted generic secret assignments', () => {
   for (const assignment of [
     'CLOUDFLARE_API_TOKEN=placeholder',
     'client_secret: ${CLIENT_SECRET}',
-    'token=input.token',
+    'token=$TOKEN',
     'const TELEGRAM_SECRET_TOKEN_HEADER = "x-telegram-bot-api-secret-token";',
   ]) {
     assert.equal(
@@ -141,10 +126,31 @@ test('detects quoted and unquoted generic secret assignments', () => {
   }
 });
 
+test('does not trust a modified vendored fixture at an allowed path', async () => {
+  const credential = ['uY7nQ2pL9vR4', 'xT8mW3cD6fH1'].join('');
+  const fixture = await createTarball({
+    'node_modules/incur/src/Cli.test.ts': `const fixture = { API_TOKEN: "${credential}" };`,
+    'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+  });
+  try {
+    await assert.rejects(
+      verifyReleaseArtifacts(fixture.root, fixture.packOutput),
+      (error) => {
+        assert.match(error.message, /credential:generic-assignment/u);
+        assert.equal(error.message.includes(credential), false);
+        return true;
+      },
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test('does not exempt complete credentials based on value shape', () => {
   const uppercaseToken = ['ABCDEFGHJKLMNPQR', 'STUVWXYZ23456789'].join('');
   const symbolPassword = ['correct-horse!', '#battery-staple'].join('');
   const basicCredential = ['c2VydmljZTp', 'wYXNzd29yZA=='].join('');
+  const jwtCredential = syntheticJwtCredential();
   const cases = [
     {
       ruleId: 'credential:connection-url',
@@ -161,6 +167,14 @@ test('does not exempt complete credentials based on value shape', () => {
     {
       ruleId: 'credential:generic-assignment',
       text: `password: "${symbolPassword}"`,
+    },
+    {
+      ruleId: 'credential:generic-assignment',
+      text: `ACCESS_TOKEN=${jwtCredential}`,
+    },
+    {
+      ruleId: 'credential:url-query',
+      text: `https://api.example.invalid/deploy?token=${jwtCredential}`,
     },
     {
       ruleId: 'credential:authorization-header',
@@ -181,7 +195,12 @@ test('rejects sensitive credential filenames', async () => {
   try {
     await assert.rejects(
       verifyReleaseArtifacts(fixture.root, fixture.packOutput),
-      /sensitive-filename:dotenv in fixture-package-1\.0\.0\.tgz:package\/\.env\.production/u,
+      (error) => {
+        assert.match(error.message, /sensitive-filename:dotenv/u);
+        assert.match(error.message, /tarball 1:<archive-entry>/u);
+        assert.equal(error.message.includes('.env.production'), false);
+        return true;
+      },
     );
   } finally {
     await fixture.cleanup();
@@ -247,12 +266,15 @@ test('rejects credential URLs, JSON secret assignments, and wallet keys', async 
   const password = ['vN7mP2qR8sT4', 'uW9xY3zA6bC1'].join('');
   const deployHookKey = ['dH8kP3mR7tV2', 'wX9zB4cF6gJ1'].join('');
   const genericSecret = ['uY7nQ2pL9vR4', 'xT8mW3cD6fH1'].join('');
+  const jwtCredential = syntheticJwtCredential();
   const walletKey = `0x${'a1'.repeat(32)}`;
   const fixture = await createTarball({
     'dist/config.js': [
       `const database = "postgresql://service:${password}@db.example.invalid/app";`,
       `const deployHook = "https://api.example.invalid/deploy/service?key=${deployHookKey}";`,
-      `CLOUDFLARE_API_TOKEN=${genericSecret}`,
+      `const tokenUrl = "https://api.example.invalid/deploy?token=${jwtCredential}";`,
+      `CLOUDFLARE_API_TOKEN=${genericSecret} # production`,
+      `export ACCESS_TOKEN=${jwtCredential};`,
       `const wallet = {"ETH_WALLET_PRIVATE_KEY":"${walletKey}"};`,
     ].join('\n'),
     'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
@@ -268,6 +290,7 @@ test('rejects credential URLs, JSON secret assignments, and wallet keys', async 
         assert.equal(error.message.includes(password), false);
         assert.equal(error.message.includes(deployHookKey), false);
         assert.equal(error.message.includes(genericSecret), false);
+        assert.equal(error.message.includes(jwtCredential), false);
         assert.equal(error.message.includes(walletKey), false);
         return true;
       },
@@ -278,20 +301,20 @@ test('rejects credential URLs, JSON secret assignments, and wallet keys', async 
 });
 
 test('rejects credential-bearing paths without printing credential material', async () => {
-  const credential = ['sk', 'live', 'A1b2C3d4E5f6G7h8I9j0K1l2'].join('_');
+  const credential = ['uY7nQ2pL9vR4', 'xT8mW3cD6fH1'].join('');
   const fixture = await createTarball({
-    [`.env.${credential}`]: 'public fixture content',
-    [`dist/${credential}.txt`]: 'public fixture content',
+    [`dist/token=${credential}/.env.production`]: 'public fixture content',
     'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
   });
   try {
     await assert.rejects(
       verifyReleaseArtifacts(fixture.root, fixture.packOutput),
       (error) => {
-        assert.match(error.message, /archive-path:provider-token:stripe/u);
+        assert.match(error.message, /archive-path:credential:generic-assignment/u);
         assert.match(error.message, /sensitive-filename:dotenv/u);
-        assert.match(error.message, /<redacted-archive-path>/u);
+        assert.match(error.message, /tarball 1:<archive-entry>/u);
         assert.equal(error.message.includes(credential), false);
+        assert.equal(error.message.includes('.env.production'), false);
         return true;
       },
     );
@@ -315,7 +338,7 @@ test('redacts credential material in the tarball filename', async () => {
       verifyReleaseArtifacts(fixture.root, fixture.packOutput),
       (error) => {
         assert.match(error.message, /tarball-path:provider-token:stripe/u);
-        assert.match(error.message, /<redacted-tarball>/u);
+        assert.match(error.message, /tarball 1:<archive-entry>/u);
         assert.equal(error.message.includes(credential), false);
         return true;
       },
