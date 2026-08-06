@@ -1,6 +1,6 @@
 # Android Companion Admission Without Device Connection
 
-Status: active
+Status: completed
 Owner: Codex
 Started: 2026-08-05
 Updated: 2026-08-06
@@ -75,7 +75,7 @@ No public device-sync ingress or Junction boundary is reachable.
 - [x] Record the required round-3 change-shape retrospective and explicitly
       continue the current owner-bound design without a new access owner,
       route split, or lifecycle mechanism.
-- [ ] Complete required exact-head review and CI after parent integration.
+- [x] Complete required exact-head review and CI after parent integration.
 
 ## Review Retrospective
 
@@ -119,7 +119,9 @@ new lifecycle belongs in this PR.
   signup-welcome routing. The admission caller now uses the existing
   suppression policy while preserving trial activation and access. Round 3
   verified both correction sets and required the change-shape retrospective
-  recorded above; another exact-head review and CI remain pending.
+  recorded above. Round 4 passed that continuation decision, and round 5 passed
+  the full sensitive re-audit after the manual preserve-both base resolution.
+  All required exact-head CI passes and GitHub reports a clean merge state.
 
 ## Rollout
 
@@ -127,3 +129,4 @@ Deploy Web before an Android build begins calling the new endpoint. Existing
 sign-in-token clients remain compatible because their route and contract do not
 change. The new endpoint is additive and has no Cloudflare or Junction deploy
 dependency.
+Completed: 2026-08-06
