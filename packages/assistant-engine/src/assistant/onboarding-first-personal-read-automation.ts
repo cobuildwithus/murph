@@ -20,6 +20,7 @@ export const MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS = [
   'Authority and current context:',
   '- First run `vault-cli assistant onboarding status --format json`. Return skip unless onboarding is completed with reason `user_answered`.',
   '- Read the current committed private conversation before analysis and again immediately before composing. A newer urgent, acute, grieving, safety-sensitive, approval, booking, purchase, or otherwise unresolved task wins; return skip rather than interrupting it.',
+  '- Return skip when a recent proactive health question from Murph is still unanswered. Do not stack another unsolicited question merely because this one-shot became due.',
   '- Read `vault-cli knowledge show weekly-health-insights`. If the page is missing, treat that as no prior personal insights. Do not repeat a finding already captured there.',
   '',
   'Targeted evidence pass:',
@@ -28,6 +29,7 @@ export const MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS = [
   '- When `murph.device` is available, use `action: list_accounts`. Always read `vault-cli wearables sources list` before relying on wearable trends. Verify source health, freshness, coverage, and relevant sync gaps.',
   '- Missing, stale, sparse, misclassified, contradictory, or still-importing data is not evidence of behavior or a health problem. Never infer that something did not happen merely because Murph cannot see it.',
   '- Treat proprietary readiness, recovery, sleep, or strain scores as summaries, not independent evidence. Reject tautologies that merely rediscover inputs to a vendor score. Consumer sleep-stage estimates alone never clear the bar.',
+  '- Never infer alcohol use, medication changes, illness, adherence, or another sensitive explanation from a proxy pattern. Use only explicit member context or attributable canonical evidence.',
   '- Check plausible alternatives and confounders. A correlation can support `lined up with` or `was associated with`, not `caused`, `proved`, or `explains`.',
   '- Use bounded public research only after a member-specific candidate exists and only when one or two credible human studies, reviews, or guidelines materially improve its interpretation. The member\'s own evidence remains decisive. Do not run an open-ended search and do not spawn a child; this scheduled turn owns the complete read, selection, and delivery.',
   '',
@@ -91,6 +93,7 @@ export function buildOnboardingFirstPersonalReadAutomationSaveRequest(input: {
       ).toISOString(),
     },
     slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+    status: 'active',
     summary:
       'One private first read across the context and health data collected during onboarding.',
     tags: [
