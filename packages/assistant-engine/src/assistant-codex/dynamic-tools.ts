@@ -3651,9 +3651,15 @@ export async function executeMurphDynamicToolRequest(input: {
           )
         }
         if (scheduledScope) {
+          if (isHostedPhoneCallReconciliationWorkflowStartRetryRequiredError(error)) {
+            return toolTextResult(
+              false,
+              'no phone call was started for this scheduled occurrence because start reconciliation was temporarily unavailable. Do not retry automatically; ask the requester to reschedule the call.',
+            )
+          }
           return toolTextResult(
             false,
-            'phone call start could not be confirmed for this scheduled occurrence; it may already own a provider attempt under the first accepted brief. Do not retry automatically or claim that no call occurred; wait for the existing attempt\'s result.',
+            'phone call start could not be confirmed for this scheduled occurrence. Do not retry automatically or claim that a call did or did not occur; a later result may arrive, but it is not guaranteed.',
           )
         }
         return toolTextResult(false, 'phone call could not be started')
@@ -6292,6 +6298,8 @@ function safeToolPayloadText(payload: unknown): string {
 // than importing across the boundary.
 const HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED_CODE =
   'HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED'
+const HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED_CODE =
+  'HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED'
 
 function isHostedGroupPhoneCallRequesterActivationRequiredError(
   error: unknown,
@@ -6301,6 +6309,16 @@ function isHostedGroupPhoneCallRequesterActivationRequiredError(
   }
   const code = (error as { code?: unknown }).code
   return code === HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED_CODE
+}
+
+function isHostedPhoneCallReconciliationWorkflowStartRetryRequiredError(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const code = (error as { code?: unknown }).code
+  return code === HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED_CODE
 }
 
 function toolTextResult(

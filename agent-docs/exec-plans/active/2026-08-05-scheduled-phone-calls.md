@@ -59,6 +59,10 @@ phone call it requested through the existing hosted phone-call port.
 7. Keep scheduled start errors uncertainty-safe when a retry's regenerated
    brief conflicts with the first accepted brief, without weakening equality or
    adding another error transport.
+8. Distinguish the existing structured pre-provider reconciliation failure
+   from ambiguous scheduled start failures: report the proven no-start case
+   with a rescheduling next step, and never promise that an uncertain start will
+   produce a later result.
 
 ## Verification log
 
@@ -122,3 +126,13 @@ phone call it requested through the existing hosted phone-call port.
   10,276,559 bytes with a 10,309,327-byte budget. The 34-test bundle policy
   suite, 100 focused Assistant tests, Assistant Engine typecheck, docs drift,
   and cached merge diff check passed after reconciliation.
+- Final ReviewGPT round 4 confirmed the earlier findings resolved and found a
+  second review-induced feedback gap: the round-3 uncertainty correction told
+  every failure to await a result even when Web had proven that reconciliation
+  arming failed before Retell dispatch. The scheduled tool now recognizes that
+  existing structured error code, reports that no call started, and asks for
+  rescheduling. All other scheduled errors forbid automatic retry without
+  claiming whether a call occurred or promising a later result. The two new
+  regressions failed before the correction; afterward the two focused Assistant
+  suites passed 101 tests, the Web phone-call owner suites passed 57 tests, and
+  Assistant Engine and Web typechecks passed.

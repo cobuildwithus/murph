@@ -454,13 +454,69 @@ describe("assistant phone calls", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "may already own a provider attempt",
+      "phone call start could not be confirmed",
     );
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       "Do not retry automatically",
     );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "a later result may arrive, but it is not guaranteed",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      "wait for the existing attempt's result",
+    );
     expect(result.rpcResult.contentItems[0]?.text).not.toBe(
       "phone call could not be started",
+    );
+  });
+
+  it("reports a known pre-provider scheduled failure and asks for rescheduling", async () => {
+    const scheduledScope: AssistantHostedScheduledPhoneCallScope = {
+      automationId: "automation-scheduled-call",
+      occurrenceAt: "2026-08-05T18:00:00.000Z",
+      originSessionId: "session-scheduled-call-reconciliation-failure",
+    };
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentScheduledPhoneCallScope: () => scheduledScope,
+        currentUserActionScope: () => null,
+        phoneCalls: {
+          start: vi.fn(async () => {
+            throw Object.assign(
+              new Error("Phone call start reconciliation is temporarily unavailable."),
+              {
+                code: "HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED",
+                retryable: true,
+                status: 503,
+              },
+            );
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "no phone call was started",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "ask the requester to reschedule",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      "a later result",
     );
   });
 
