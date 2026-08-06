@@ -534,10 +534,14 @@ For the one-time single-region retirement release, update
 `HOSTED_R2_PRESIGN_BUCKET_NAME` to their existing ENAM bucket names as one
 candidate-deploy operation. Changing GitHub Environment values does not mutate
 the already deployed Worker, so do not run an older phase/fallback deploy after
-that change. Deploy Cloudflare first and require the ordinary direct-R2,
-runtime, and account-deletion smokes, then deploy Web without the retired
-maintenance guard. The former OC buckets must be independently reconciled,
-emptied, and deleted; they are not Worker bindings or rollback targets.
+that change. Keep the Web account-deletion maintenance guard enabled. Deploy
+Cloudflare first and require 100 percent rollout, the ordinary direct-R2 and
+runtime smokes, and an API check proving that the live Worker has only the
+canonical `BUNDLES` R2 binding. Then rerun the final current-owner check, empty
+and delete only the exact retired production and preview OC buckets, and verify
+that both bucket APIs report them absent. Only after physical absence is proven
+may the post-retirement Web cleanup remove the maintenance guard. The former OC
+buckets are not Worker bindings or rollback targets.
 For production deploys, `HOSTED_WEB_BASE_URL` must exactly match the normalized
 origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and
@@ -1108,7 +1112,7 @@ Before the first preview Worker deploy:
    `staging`. Keep production database, crypto, persistent computer profile,
    messaging routes, and provider credentials out of this target.
 2. Configure the GitHub `Preview` Environment with the vars and secrets in this
-   document. Use a Worker name and all four configured R2 bucket names containing
+   document. Use a Worker name and both configured R2 bucket names containing
    a `preview` or `staging` segment. `HOSTED_CRYPTO_ENV` must be `preview`.
    `HOSTED_WEB_BASE_URL` must be the isolated preview origin and
    `HOSTED_WEB_PRODUCTION_BASE_URL` must be the production origin used only for
@@ -1116,10 +1120,9 @@ Before the first preview Worker deploy:
    sync is enabled, `DEVICE_SYNC_PUBLIC_BASE_URL` must be a public staging HTTPS
    URL on the same hostname as preview `HOSTED_WEB_BASE_URL`; its callback path
    is allowed, but a separate callback hostname is not.
-3. Use ENAM for the canonical staging buckets and the existing OC staging
-   buckets for the deletion-only retirement bindings. Issue the direct-R2 key
-   against the canonical buckets only. Apply the checked-in lifecycle rules to
-   the canonical buckets before stateful use.
+3. Use ENAM for both staging buckets. Issue the direct-R2 key against the
+   canonical buckets and apply the checked-in lifecycle rules before stateful
+   use. Preview has no OC binding or retirement role.
 4. Dispatch from protected `main`:
 
    ```bash

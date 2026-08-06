@@ -113,3 +113,10 @@ Updated: 2026-08-06
   The Web maintenance guard was therefore restored exactly to the current base
   for the no-OC rollout. Its two focused route files passed all 12 checks. The
   guard will be removed only after both old buckets are physically absent.
+- Final ReviewGPT round 3 accepted the staged executable architecture but found
+  three stale operator/source-comment surfaces that still removed the Web guard
+  before physical OC retirement or described deleted OC bindings. The runbook,
+  docs index, and guard comment now require no-OC Worker proof, final ownership
+  reconciliation, both exact bucket deletions, and API absence before the Web
+  cleanup. A deploy-surface regression check plus the retained Web guard tests
+  passed 26 and 12 checks respectively.
