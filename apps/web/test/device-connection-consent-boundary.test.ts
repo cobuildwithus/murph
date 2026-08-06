@@ -28,22 +28,27 @@ test("stale launch-document versions do not stop historically authorized device 
     );
   }
 
-  // The companion sign-in-token route delegates admission — including the
-  // historical launch-consent assert — to the shared companion member-access
-  // owner, so the tripwire holds on both the delegation and the owner.
-  const signInTokenSource = readSource(
+  // The companion admission and sign-in-token routes delegate admission —
+  // including the historical launch-consent assert — to the shared companion
+  // member-access owner, so the tripwire holds on each delegation and the
+  // owner.
+  const companionAdmissionPaths = [
+    "app/api/device-sync/companion/admission/route.ts",
     "app/api/device-sync/companion/sign-in-token/route.ts",
-  );
-  assert.doesNotMatch(
-    signInTokenSource,
-    /assertHostedLaunchRequiredConsentGranted/u,
-    "sign-in-token route must remain available when launch-document acceptance is stale",
-  );
-  assert.match(
-    signInTokenSource,
-    /requireHostedCompanionMemberIdFromRequest/u,
-    "sign-in-token route must admit members through the companion member-access owner",
-  );
+  ];
+  for (const relativePath of companionAdmissionPaths) {
+    const source = readSource(relativePath);
+    assert.doesNotMatch(
+      source,
+      /assertHostedLaunchRequiredConsentGranted/u,
+      `${relativePath} must remain available when launch-document acceptance is stale`,
+    );
+    assert.match(
+      source,
+      /requireHostedCompanionMemberIdFromRequest/u,
+      `${relativePath} must admit members through the companion member-access owner`,
+    );
+  }
   const companionAccessSource = readSource(
     "src/lib/hosted-onboarding/companion-member-access.ts",
   );

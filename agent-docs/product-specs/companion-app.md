@@ -1,6 +1,6 @@
 # Native Companion Apps (Health Sync)
 
-Last verified: 2026-07-25
+Last verified: 2026-08-06
 
 Current iOS distribution status: approved for the App Store. The canonical
 public listing is `https://apps.apple.com/us/app/murph-ai/id6786145859`.
@@ -141,10 +141,42 @@ It uses one manual composition root, Privy phone/email OTP, Junction/Vital with
 **Connect Health Connect** action requests `connectionIntent: "connect"`;
 known same-member passive restoration requests `"resume"`. Sign-in alone never
 creates a hosted health connection, and sign-out or member switching tears down
-the local Junction session before Privy logout. Before health setup is shown, a
-read-only source-scoped status request confirms that the verified Privy identity
-maps to an active Murph member with the required legal consent; missing account
-and missing-consent states render distinct recovery guidance.
+the local Junction session before Privy logout.
+
+Every newly authenticated signup must complete this canonical account flow
+before status, token exchange, or any health setup:
+
+1. `POST /api/device-sync/companion/admission` with the Privy identity bearer
+   and only the optional device-local IANA `timeZone`.
+2. The route normalizes a rejected non-empty Privy bearer to `AUTH_REQUIRED`;
+   discard that stale authentication state and return to login. Preserve typed
+   `PRIVY_USER_MISMATCH` and `PRIVY_IDENTITY_CONFLICT` for the existing safe
+   alternate-sign-in recovery. On typed `HOSTED_CONSENT_REQUIRED`, use the
+   existing bearer-only legal-consent `GET` and `POST` boundary to render and
+   record the required launch grants, then retry admission. On typed
+   `HOSTED_ACCESS_REQUIRED`—including normalized unavailable, blocked, or
+   already-used automatic-trial outcomes—enter the existing billing/activation
+   access recovery instead of falling through to health setup. Typed
+   `HOSTED_MEMBER_SUSPENDED` enters suspended-account support recovery.
+   `COMPANION_ADMISSION_RETRYABLE` keeps the account gate visible with an
+   explicit retry, while `COMPANION_ADMISSION_SUPPORT_REQUIRED` enters support
+   without repeating a terminal request.
+3. Advance only when the admission response is exactly `{ "ok": true }`.
+   Transport failures, malformed success bodies, unrecognized typed errors,
+   and failed recovery remain on the account gate.
+4. After successful admission, read source-scoped status as sync truth and show
+   health setup. Status is not account admission and must never replace step 1.
+
+Admission grants no Junction or device authority. A newly authenticated signup
+must not request a sign-in token, sign in to the Junction SDK, or create or
+resume a hosted connection before the member explicitly chooses **Connect
+Health Connect**. Account-only admission also suppresses the ordinary hosted
+signup welcome: it must not assign a Linq home line, queue a signup-welcome
+notification, or send a welcome email. Canonical Pulse trial activation,
+active-access proof, and the internal `member.activated` fact remain intact.
+Existing established-member session restoration retains its separate
+documented `resume` path and cannot turn admission itself into health
+connection authority.
 
 The Android home screen treats
 `GET /api/device-sync/companion/status?sourceProviderSlug=health_connect` as
