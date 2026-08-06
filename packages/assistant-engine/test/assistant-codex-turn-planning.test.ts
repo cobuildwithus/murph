@@ -3344,11 +3344,13 @@ describe('assistant Codex turn planning', () => {
   })
 
   it.each([
-    ['direct', true],
-    ['group', false],
+    ['direct Linq', 'linq', true, true],
+    ['group Linq', 'linq', false, false],
+    ['direct email', 'email', true, false],
+    ['direct Telegram', 'telegram', true, false],
   ] as const)(
     'gates phone calls on a canonical scheduled %s turn',
-    async (_scope, threadIsDirect) => {
+    async (_scope, channel, threadIsDirect, expectedAvailable) => {
       planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
         null,
       )
@@ -3373,7 +3375,7 @@ describe('assistant Codex turn planning', () => {
         },
         input: {
           ...createMessageInput(),
-          channel: 'linq',
+          channel,
           scheduledInvocationAuthority: {
             automationId: 'automation-scheduled-phone-call',
             occurrenceAt,
@@ -3405,7 +3407,7 @@ describe('assistant Codex turn planning', () => {
 
       expect(plan.dynamicTools.map((tool) => tool.name).includes(
         'create_phone_call',
-      )).toBe(threadIsDirect)
+      )).toBe(expectedAvailable)
     },
   )
 

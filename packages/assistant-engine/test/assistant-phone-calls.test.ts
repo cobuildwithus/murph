@@ -134,18 +134,22 @@ describe("assistant phone calls", () => {
   });
 
   it.each([
-    ["exact direct occurrence", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", true],
-    ["group occurrence", "group", "automation-cron", "2026-08-05T18:00:00.000Z", false],
-    ["mismatched occurrence", "direct", "automation-cron", "2026-08-05T18:01:00.000Z", false],
-    ["manual trigger", "direct", "manual-ask", "2026-08-05T18:00:00.000Z", false],
+    ["exact direct Linq occurrence", "linq", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", true],
+    ["direct email occurrence", "email", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", false],
+    ["direct Telegram occurrence", "telegram", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", false],
+    ["group occurrence", "linq", "group", "automation-cron", "2026-08-05T18:00:00.000Z", false],
+    ["mismatched occurrence", "linq", "direct", "automation-cron", "2026-08-05T18:01:00.000Z", false],
+    ["manual trigger", "linq", "direct", "manual-ask", "2026-08-05T18:00:00.000Z", false],
   ] as const)("grants scheduled phone-call authority only for an %s", (
     _case,
+    channel,
     conversationScope,
     turnTrigger,
     scheduledOccurrenceAt,
     expectedAuthorized,
   ) => {
     const scope = resolveAssistantHostedScheduledPhoneCallScope({
+      channel,
       conversationScope,
       messageInput: {
         scheduledInvocationAuthority: {

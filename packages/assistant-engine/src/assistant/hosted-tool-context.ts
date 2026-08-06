@@ -257,6 +257,7 @@ export function createAssistantHostedToolContext(input: {
   const readCurrentScheduledPhoneCallScope = () => {
     const deliveryContext = readDeliveryContext()
     return resolveAssistantHostedScheduledPhoneCallScope({
+      channel: deliveryContext.messageInput.channel,
       conversationScope:
         input.getConversationScope?.() ?? 'unverified-external',
       messageInput: deliveryContext.messageInput,
@@ -459,6 +460,7 @@ export function createAssistantHostedToolContext(input: {
 }
 
 export function resolveAssistantHostedScheduledPhoneCallScope(input: {
+  channel: AssistantMessageInput['channel']
   conversationScope: AssistantConversationScope
   messageInput: Pick<
     AssistantMessageInput,
@@ -468,7 +470,8 @@ export function resolveAssistantHostedScheduledPhoneCallScope(input: {
 }): AssistantHostedScheduledPhoneCallScope | null {
   const authority = input.messageInput.scheduledInvocationAuthority ?? null
   if (
-    input.conversationScope !== 'direct'
+    input.channel?.trim().toLowerCase() !== 'linq'
+    || input.conversationScope !== 'direct'
     || input.messageInput.turnTrigger !== 'automation-cron'
     || authority === null
     || authority.occurrenceAt !== input.messageInput.scheduledOccurrenceAt

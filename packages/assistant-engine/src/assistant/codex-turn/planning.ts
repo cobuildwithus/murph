@@ -458,6 +458,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const privateInteractiveAudience = conversationScope === 'direct'
   const scheduledPhoneCallScope =
     resolveAssistantHostedScheduledPhoneCallScope({
+      channel: input.input.channel,
       conversationScope,
       messageInput: input.input,
       originSessionId: input.session.sessionId,

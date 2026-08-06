@@ -6,8 +6,8 @@ Updated: 2026-08-05
 
 ## Goal
 
-Allow a canonical private scheduled automation to place the outbound phone
-call it requested through the existing hosted phone-call port.
+Allow a canonical private Linq scheduled automation to place the outbound
+phone call it requested through the existing hosted phone-call port.
 
 ## Proven symptom and root cause
 
@@ -21,8 +21,12 @@ call it requested through the existing hosted phone-call port.
 
 ## Success criteria
 
-- A direct `automation-cron` turn with an exact canonical occurrence authority
-  can see and invoke `murph.create_phone_call` through the existing port.
+- A direct Linq `automation-cron` turn with an exact canonical occurrence
+  authority can see and invoke `murph.create_phone_call` through the existing
+  port.
+- Scheduled email, Telegram, and group turns remain unavailable because the
+  existing Web result owner cannot guarantee completion on their initiating
+  route without new persisted routing state.
 - The call start remains behind the cron owner's canonical automation, route,
   owner, lifecycle, and pre-tool revalidation.
 - Scheduled group calls remain unavailable; their separate delivered-preview
@@ -49,6 +53,9 @@ call it requested through the existing hosted phone-call port.
    privacy, ownership, and unnecessary complexity.
 5. Push the exact candidate, run required CI and both ReviewGPT stages, resolve
    accepted findings, and close this plan with the final scoped commit.
+6. Restrict scheduled authority to direct Linq after final review proved that
+   email can fail before provider start and Telegram can close the result loop
+   on Linq; keep those channels unavailable instead of adding new route state.
 
 ## Verification log
 
@@ -90,3 +97,13 @@ call it requested through the existing hosted phone-call port.
   total while preserving the 32 KiB allowance and forbidden-import guards; a
   production runner bundle rebuild then passed at 10,275,648 bytes against the
   10,308,229-byte budget.
+- Final ReviewGPT round 2 accepted the occurrence-idempotency correction and
+  found one separate completion-route gap: scheduled email can lack a Web
+  notification destination, while a Telegram occurrence can resolve its final
+  call result to Linq. Regression-first Assistant tests failed in all four new
+  email/Telegram cases before the channel gate, then the focused planning and
+  authority suites passed 98 tests after exact direct-Linq scoping; Assistant
+  Engine typecheck also passed.
+- The corrected production runner bundle passed at 10,275,785 bytes against the
+  10,308,229-byte total budget, and the 34-test bundle policy suite plus agent
+  docs drift and diff checks passed.
