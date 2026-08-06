@@ -114,6 +114,16 @@ export interface HostedAutoPulseTrialEnrollmentResult {
   status: HostedAutoPulseTrialEnrollmentStatus;
 }
 
+export interface HostedLinqInstantStartDeferredActivationWake {
+  hostedExecutionEventId: string;
+  memberId: string;
+}
+
+export interface HostedLinqInstantStartPulseTrialEnrollmentResult
+  extends HostedAutoPulseTrialEnrollmentResult {
+  deferredActivationWake: HostedLinqInstantStartDeferredActivationWake | null;
+}
+
 type HostedAutoPulseTrialEnrollmentPolicy = {
   instantStartAdmission?: {
     eventId: string;
@@ -217,6 +227,11 @@ type HostedAutoPulseTrialFinalizationOutcome =
       error: Error;
     };
 
+type HostedAutoPulseTrialEnrollmentWithPolicyResult = {
+  deferredActivationWake: HostedLinqInstantStartDeferredActivationWake | null;
+  result: HostedAutoPulseTrialEnrollmentResult;
+};
+
 const EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS: HostedAutoPulseTrialPostCommitEffects = {
   activatedMemberId: null,
   hostedExecutionEventId: null,
@@ -226,24 +241,27 @@ const EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS: HostedAutoPulseTrialPostCommitEffect
 export async function ensureHostedAutoPulseTrialEnrollment(
   input: HostedAutoPulseTrialEnrollmentInput,
 ): Promise<HostedAutoPulseTrialEnrollmentResult> {
-  return ensureHostedAutoPulseTrialEnrollmentWithPolicy(input, {
+  const enrollment = await ensureHostedAutoPulseTrialEnrollmentWithPolicy(input, {
     provisionUnderMemberLock: false,
     requireLaunchConsent: true,
     requireUnboundStripeCustomer: false,
     suppressSignupWelcome: false,
   });
+  return enrollment.result;
 }
 
 /**
  * Trusted inbound iMessage already proves a reachable direct channel. Reuse
  * the ordinary no-card Pulse trial without routing through browser onboarding;
  * the current inbound privacy boundary stays unchanged and the original
- * message becomes the welcome turn.
+ * message becomes the welcome turn. A newly committed activation is returned
+ * as an explicit wake continuation so the webhook can stage and signal that
+ * conversation first, then run the existing activation post-commit work.
  */
 export async function ensureHostedLinqInstantStartPulseTrialEnrollment(
   input: HostedLinqInstantStartPulseTrialEnrollmentInput,
-): Promise<HostedAutoPulseTrialEnrollmentResult> {
-  return ensureHostedAutoPulseTrialEnrollmentWithPolicy({
+): Promise<HostedLinqInstantStartPulseTrialEnrollmentResult> {
+  const enrollment = await ensureHostedAutoPulseTrialEnrollmentWithPolicy({
     inviteCode: input.inviteCode,
     member: {
       id: input.memberId,
@@ -268,12 +286,30 @@ export async function ensureHostedLinqInstantStartPulseTrialEnrollment(
     requireUnboundStripeCustomer: true,
     suppressSignupWelcome: true,
   });
+  return {
+    ...enrollment.result,
+    deferredActivationWake: enrollment.deferredActivationWake,
+  };
+}
+
+export async function runHostedLinqInstantStartDeferredActivationWakeBestEffort(
+  input: {
+    continuation: HostedLinqInstantStartDeferredActivationWake;
+    prisma?: PrismaClient;
+  },
+): Promise<void> {
+  await signalHostedMemberActivationRuntimeWakeBestEffortResult({
+    hostedExecutionEventId: input.continuation.hostedExecutionEventId,
+    memberId: input.continuation.memberId,
+    ...(input.prisma ? { prisma: input.prisma } : {}),
+    source: "auto-pulse-trial.activation",
+  });
 }
 
 async function ensureHostedAutoPulseTrialEnrollmentWithPolicy(
   input: HostedAutoPulseTrialEnrollmentInput,
   policy: HostedAutoPulseTrialEnrollmentPolicy,
-): Promise<HostedAutoPulseTrialEnrollmentResult> {
+): Promise<HostedAutoPulseTrialEnrollmentWithPolicyResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
 
@@ -339,7 +375,10 @@ async function ensureHostedAutoPulseTrialEnrollmentWithPolicy(
       prisma,
       stripe,
     });
-    return buildHostedAutoPulseTrialEnrollmentResult(initialStatus);
+    return {
+      deferredActivationWake: null,
+      result: buildHostedAutoPulseTrialEnrollmentResult(initialStatus),
+    };
   }
 
   assertHostedAutoPulseTrialEligible(initialMember);
@@ -434,7 +473,10 @@ async function ensureHostedAutoPulseTrialEnrollmentWithPolicy(
       prisma,
       stripe,
     });
-    return reservation.result;
+    return {
+      deferredActivationWake: null,
+      result: reservation.result,
+    };
   }
 
   const subscription = await resolveHostedAutoPulseTrialStripeSubscription({
@@ -444,16 +486,19 @@ async function ensureHostedAutoPulseTrialEnrollmentWithPolicy(
     stripe,
     stripeCustomerId: reservation.stripeCustomerId,
   });
-  return finalizeHostedAutoPulseTrialEnrollment({
-    memberId: invite.member.id,
-    now,
-    priceId,
-    prisma,
-    suppressSignupWelcome: policy.suppressSignupWelcome,
-    stripe,
-    stripeCustomerId: reservation.stripeCustomerId,
-    subscriptionId: subscription.id,
-  });
+  return {
+    deferredActivationWake: null,
+    result: await finalizeHostedAutoPulseTrialEnrollment({
+      memberId: invite.member.id,
+      now,
+      priceId,
+      prisma,
+      suppressSignupWelcome: policy.suppressSignupWelcome,
+      stripe,
+      stripeCustomerId: reservation.stripeCustomerId,
+      subscriptionId: subscription.id,
+    }),
+  };
 }
 
 async function ensureHostedAutoPulseTrialEnrollmentUnderMemberLock(input: {
@@ -464,7 +509,7 @@ async function ensureHostedAutoPulseTrialEnrollmentUnderMemberLock(input: {
   priceId: string;
   prisma: PrismaClient;
   stripe: Stripe;
-}): Promise<HostedAutoPulseTrialEnrollmentResult> {
+}): Promise<HostedAutoPulseTrialEnrollmentWithPolicyResult> {
   const preparedCryptoDomainRoots =
     await prepareHostedCryptoDomainRootCandidates({
       prisma: input.prisma,
@@ -488,11 +533,25 @@ async function ensureHostedAutoPulseTrialEnrollmentUnderMemberLock(input: {
     throw outcome.error;
   }
 
+  const deferredActivationWake = input.policy.instantStartAdmission
+    ? buildHostedLinqInstantStartDeferredActivationWake(
+        outcome.postCommitEffects,
+      )
+    : null;
   await runHostedAutoPulseTrialPostCommitEffects({
     ...outcome.postCommitEffects,
+    ...(deferredActivationWake
+      ? {
+          activatedMemberId: null,
+          hostedExecutionEventId: null,
+        }
+      : {}),
     prisma: input.prisma,
   });
-  return outcome.result;
+  return {
+    deferredActivationWake,
+    result: outcome.result,
+  };
 }
 
 async function runHostedAutoPulseTrialProvisioningWithMemberLockRetry(input: {
@@ -1930,6 +1989,18 @@ async function runHostedAutoPulseTrialPostCommitEffects(
       prisma: input.prisma,
     });
   }
+}
+
+function buildHostedLinqInstantStartDeferredActivationWake(
+  effects: HostedAutoPulseTrialPostCommitEffects,
+): HostedLinqInstantStartDeferredActivationWake | null {
+  if (!effects.activatedMemberId || !effects.hostedExecutionEventId) {
+    return null;
+  }
+  return {
+    hostedExecutionEventId: effects.hostedExecutionEventId,
+    memberId: effects.activatedMemberId,
+  };
 }
 
 function buildHostedAutoPulseTrialEnrollmentResult(

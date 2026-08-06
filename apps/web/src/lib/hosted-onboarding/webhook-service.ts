@@ -84,6 +84,8 @@ import {
 } from "./linq-first-contact-admission";
 import {
   ensureHostedLinqInstantStartPulseTrialEnrollment,
+  runHostedLinqInstantStartDeferredActivationWakeBestEffort,
+  type HostedLinqInstantStartDeferredActivationWake,
 } from "./auto-trial-enrollment-service";
 import {
   isHostedLinqInstantStartEventCandidate,
@@ -179,6 +181,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   let eventType: string | null = null;
   let responseReason: string | null = null;
   let instantStartTypingHint: HostedLinqInstantStartTypingHint | null = null;
+  let pendingInstantStartActivationWake: {
+    continuation: HostedLinqInstantStartDeferredActivationWake;
+    prisma: PrismaClient;
+  } | null = null;
+  const runPendingInstantStartActivationWake = async (): Promise<void> => {
+    const pending = pendingInstantStartActivationWake;
+    pendingInstantStartActivationWake = null;
+    if (!pending) {
+      return;
+    }
+    await runHostedLinqInstantStartDeferredActivationWakeBestEffort(pending);
+  };
 
   try {
     const verifyTiming = startHostedOnboardingTiming(
@@ -593,12 +607,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         });
         let enrollmentFailed = false;
         try {
-          await ensureHostedLinqInstantStartPulseTrialEnrollment({
+          const enrollment = await ensureHostedLinqInstantStartPulseTrialEnrollment({
             admissionEventId: instantStartEnrollment.admissionEventId,
             inviteCode: instantStartEnrollment.inviteCode,
             memberId: instantStartEnrollment.memberId,
             prisma,
           });
+          if (enrollment.deferredActivationWake) {
+            pendingInstantStartActivationWake = {
+              continuation: enrollment.deferredActivationWake,
+              prisma,
+            };
+          }
         } catch (error) {
           if (
             input.signal?.aborted
@@ -790,6 +810,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         });
       }
     })();
+    // The ordinary conversation signal, when present, reconciles both its
+    // foreground lane and the activation item committed by enrollment. After
+    // that handoff settles, run the original activation continuation, which
+    // also owns pending group-join confirmation reconciliation.
+    await runPendingInstantStartActivationWake();
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       currentInboundReply,
       plan,
@@ -816,6 +841,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     return plan.response;
   } catch (error) {
+    // Activation is already durable even if replanning, delivery, or the
+    // conversation wake failed. Fall back to its original best-effort signal
+    // before propagating the error and asking the provider to retry.
+    await runPendingInstantStartActivationWake();
     // A failing webhook is retried later with no visible continuation until
     // then, so clear any started typing hint instead of letting its promise
     // decay into silence.
