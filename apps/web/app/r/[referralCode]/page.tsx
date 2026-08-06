@@ -16,6 +16,11 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   description: "Join Murph, your private health assistant.",
+  referrer: "no-referrer",
+  robots: {
+    follow: false,
+    index: false,
+  },
   title: "Join Murph",
 };
 
