@@ -3,19 +3,19 @@ name: Publish Telegram scheduled phone-call candidate
 on:
   push:
     branches:
-      - agent/telegram-scheduled-phone-calls-blacksmith
+      - agent/telegram-scheduled-phone-calls-github
 
 permissions:
   contents: write
 
 concurrency:
-  group: agent-telegram-scheduled-phone-calls-blacksmith-node-pin
+  group: agent-telegram-scheduled-phone-calls-github
   cancel-in-progress: true
 
 jobs:
   publish:
-    if: contains(github.event.head_commit.message, '[agent-blacksmith]')
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    if: contains(github.event.head_commit.message, '[agent-github]')
+    runs-on: ubuntu-24.04
     timeout-minutes: 50
     env:
       GITHUB_TOKEN: ${{ github.token }}
