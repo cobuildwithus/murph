@@ -91,7 +91,7 @@ describe.skipIf(!runPostgresProof)(
           coldStartReportPath,
         ]);
 
-        expect(stdout).toContain("temporal_only,1,4.000,4.000,4.000");
+        expect(stdout).toContain("temporal_only,2,4.000,4.000,4.000");
         expect(stdout).toContain("temporal_recovery,1,30.000,30.000,30.000");
         expect(stdout).toContain("legacy_unclassified,1,5.000,5.000,5.000");
         expect(stdout).toContain("web_direct_cold,2,6.000,6.900,7.000");
@@ -372,13 +372,28 @@ function createFixtureSql(schemaName: string): string {
     FROM fixture
     UNION ALL
     SELECT
+      'temporal-owned-with-direct-wake',
+      t0 + INTERVAL '12 seconds',
+      t0 + INTERVAL '16 seconds',
+      'attempt-temporal-owned-with-direct-wake',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'temporalActivityStartedAtEpochMs', base_ms + 12000,
+        'triggeredByWebDirect', false,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 12100,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 12300,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-temporal-wake',
+        'cloudflareRouteReceivedAtEpochMs', base_ms + 12200,
+        'freshStartRequestedAtEpochMs', base_ms + 12400
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
       'temporal-legacy-unclassified',
       t0 + INTERVAL '12 seconds',
       t0 + INTERVAL '17 seconds',
       'attempt-temporal-legacy-unclassified',
       jsonb_build_object('orchestration', jsonb_build_object(
         'temporalActivityStartedAtEpochMs', base_ms + 12000,
-        'triggeredByWebDirect', true,
         'directEnsureRequestStartedAtEpochMs', base_ms + 12100
       ))
     FROM fixture

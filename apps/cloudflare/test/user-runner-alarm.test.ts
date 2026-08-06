@@ -170,9 +170,11 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestration: {
         cloudflareRouteReceivedAtEpochMs: fixedNowMs - 2,
+        triggeredByWebDirect: true,
         userRunnerRpcStartedAtEpochMs: fixedNowMs - 1,
       },
-      orchestrationAttemptId: "control-plane-timing-attempt",
+      orchestrationAttemptId:
+        "web-ingress-11111111-1111-4111-8111-111111111111",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -191,6 +193,9 @@ describe("HostedUserRunner execution coordination", () => {
       runnerStateBindFinishedAtEpochMs: fixedNowMs + 20,
       runnerStateReadStartedAtEpochMs: fixedNowMs + 20,
       runnerStateReadFinishedAtEpochMs: fixedNowMs + 30,
+      runtimeInvocationOrchestrationAttemptId:
+        "web-ingress-11111111-1111-4111-8111-111111111111",
+      triggeredByWebDirect: true,
     });
     expect(writeDataPoint).not.toHaveBeenCalled();
   });
@@ -3602,7 +3607,9 @@ describe("HostedUserRunner execution coordination", () => {
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-replace",
+      orchestration: { triggeredByWebDirect: true },
+      orchestrationAttemptId:
+        "web-ingress-22222222-2222-4222-8222-222222222222",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "replaced",
@@ -3613,6 +3620,11 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+      runtimeInvocationOrchestrationAttemptId:
+        "web-ingress-22222222-2222-4222-8222-222222222222",
+      triggeredByWebDirect: true,
+    });
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,

@@ -5,8 +5,9 @@ import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
-import type {
-  HostedRuntimeLatencyPhaseBreakdown,
+import {
+  type HostedRuntimeLatencyPhaseBreakdown,
+  isHostedRuntimeDirectEnsureOrchestrationAttemptId,
 } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedExecutionEnvironment } from "../env.js";
@@ -788,8 +789,23 @@ export class RuntimeProcessingController {
         runnerContainerName,
         userId: processingInput.userId,
       });
+      // Launch identity belongs to the request that acquired this fresh fence.
+      // Active wakes never reach this point and therefore cannot claim it.
+      const triggeredByWebDirect =
+        processingInput.orchestration?.triggeredByWebDirect === true;
+      const runtimeInvocationOrchestrationAttemptId =
+        triggeredByWebDirect
+          && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
+            processingInput.orchestrationAttemptId,
+          )
+          ? processingInput.orchestrationAttemptId
+          : null;
       processingInput = withRuntimeProcessingOrchestration(processingInput, {
         freshStartFenceBoundAtEpochMs: Date.now(),
+        triggeredByWebDirect,
+        ...(runtimeInvocationOrchestrationAttemptId === null
+          ? {}
+          : { runtimeInvocationOrchestrationAttemptId }),
       });
     } catch (error) {
       if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {

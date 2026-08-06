@@ -294,14 +294,18 @@ Pass `-v window_hours=6` (or another integer) before `-f` to change the UTC
 window. The report deduplicates causal rows by runtime attempt and keeps direct
 cold starts separate from Temporal recovery. A direct sample must be the only
 row in its runtime attempt whose Web direct-ensure orchestration id exactly
-matches the id carried by the launched runtime invocation. Ambiguous races,
-mismatches, backlog rows, and missing ids are omitted. Exact direct samples
+matches the id attached only after that request acquires the fresh runtime
+fence. Active or warm wakes never receive launch identity. Ambiguous races,
+mismatches, backlog rows, and missing ids are omitted. Temporal-owned launches
+retain an explicit false direct-launch marker even if a later direct wake is
+merged into them. Exact direct samples
 begin only after the compatible Web and Cloudflare builds are deployed;
 historical rows are intentionally not inferred from timestamp proximity. The
 first table reports accepted-to-runner-job time only for those causal direct
 cold starts. The second reports Temporal-activity-to-runner-job time by exact
-recovery versus Temporal-only attempt; pre-deploy rows with legacy direct
-markers are labeled `legacy_unclassified` instead of being guessed. Warm direct
+recovery versus Temporal-only attempt; current Temporal-owned launches remain
+Temporal-only when a direct wake overlaps, while pre-deploy rows with legacy
+direct markers are labeled `legacy_unclassified` instead of being guessed. Warm direct
 wakes are omitted because they create no new runner job. The final table splits
 the same causal direct samples across Durable Object dispatch,
 consent locking, the existing health-data admission callback, runner-state

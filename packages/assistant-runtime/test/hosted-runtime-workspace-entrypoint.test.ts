@@ -8422,8 +8422,6 @@ describe("hosted workspace runtime entrypoint", () => {
         activeWakeAccepted: true,
         activeWakeFinishedAtEpochMs: 1_777_000_000_075,
         activeWakeStartedAtEpochMs: 1_777_000_000_065,
-        directEnsureOrchestrationAttemptId:
-          "web-ingress-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         triggeredByWebDirect: true,
       },
     });
@@ -8487,8 +8485,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 replacementFenceClearElapsedMs: 5,
                 replacementFenceClearedAtEpochMs: 1_776_999_999_950,
                 replacementFenceClearStartedAtEpochMs: 1_776_999_999_945,
-                runtimeInvocationOrchestrationAttemptId:
-                  "web-ingress-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                triggeredByWebDirect: false,
               },
               dispatch: {
                 invokeReceivedAtEpochMs: 1_777_000_000_000,
@@ -8536,11 +8533,7 @@ describe("hosted workspace runtime entrypoint", () => {
               replacementFenceClearElapsedMs: 5,
               replacementFenceClearedAtEpochMs: 1_776_999_999_950,
               replacementFenceClearStartedAtEpochMs: 1_776_999_999_945,
-              directEnsureOrchestrationAttemptId:
-                "web-ingress-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-              runtimeInvocationOrchestrationAttemptId:
-                "web-ingress-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-              triggeredByWebDirect: true,
+              triggeredByWebDirect: false,
             },
             dispatch: {
               invokeReceivedAtEpochMs: 1_777_000_000_000,

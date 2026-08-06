@@ -128,6 +128,16 @@ Updated: 2026-08-06
   timestamp tolerance, queue, state owner, awaited call, or recovery path; if
   the exact identity cannot be preserved at the existing trace boundary, delete
   the accepted-to-runner headline instead.
+- Round 3 found that the first exact-id correction attached launch identity at
+  route entry, before the UserRunner knew whether the direct request launched
+  or merely woke a Temporal-owned runtime. Continue within the same
+  retrospective decision: move the existing id to the successful fresh-fence
+  ownership boundary. Active/warm wakes receive no launch id, stale-fence
+  replacements receive it only after winning the replacement fence, and a
+  Temporal-owned invocation carries an explicit false direct-launch marker so
+  a later pending direct wake cannot change its owner during trace merging.
+  This adds no mechanism or operation beyond the already-selected in-memory
+  field propagation.
 
 ## Verification
 
@@ -154,6 +164,15 @@ Updated: 2026-08-06
   skipped in the default lane; the opt-in PostgreSQL lane passed all 3 report
   tests.
 - Corrected Cloudflare typecheck: passed.
+- ReviewGPT final round 3: launch-identity ownership finding accepted and
+  resolved by moving the id from route entry to successful fresh-fence
+  acquisition. Focused proof covers genuine direct fresh starts, active wakes,
+  stale-fence replacement, Temporal-owned/direct-wake overlap, and the runtime
+  merge boundary.
+- Fence-owner correction: 217 focused Cloudflare tests passed with 1 opt-in
+  PostgreSQL test skipped in the default lane; the assistant-runtime merge
+  regression passed; the opt-in PostgreSQL report lane passed all 3 tests; and
+  Cloudflare typecheck passed.
 - `git diff --check`: passed.
-- Pending: corrected-head ReviewGPT, exact-head CI, parent final review, plan
+- Pending: corrected-head ReviewGPT round 4, exact-head CI, parent final review, plan
   closure, and mergeability proof.
