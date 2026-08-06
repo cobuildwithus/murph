@@ -11,7 +11,7 @@ type CopyState =
   | "loading"
   | "success";
 
-let referralLinkPromise: Promise<string> | null = null;
+let inFlightReferralLinkPromise: Promise<string> | null = null;
 
 export function HostedSignupReferralLinkButton(props: {
   signupUrl?: string | null;
@@ -108,28 +108,32 @@ export function HostedSignupReferralLinkButton(props: {
 }
 
 function readHostedSettingsSignupReferralLink(): Promise<string> {
-  referralLinkPromise ??= fetch("/api/settings/signup-referral-link", {
-    cache: "no-store",
-    method: "GET",
-  })
-    .then(async (response) => {
-      if (!response.ok) {
-        throw new Error("Referral link unavailable");
-      }
-      const payload = await response.json() as {
-        signupUrl?: unknown;
-      };
-      if (
-        typeof payload.signupUrl !== "string"
-        || payload.signupUrl.length === 0
-      ) {
-        throw new Error("Referral link missing");
-      }
-      return payload.signupUrl;
-    })
-    .catch((error) => {
-      referralLinkPromise = null;
-      throw error;
-    });
-  return referralLinkPromise;
+  if (!inFlightReferralLinkPromise) {
+    inFlightReferralLinkPromise = fetch(
+      "/api/settings/signup-referral-link",
+      {
+        cache: "no-store",
+        method: "GET",
+      },
+    )
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Referral link unavailable");
+        }
+        const payload = await response.json() as {
+          signupUrl?: unknown;
+        };
+        if (
+          typeof payload.signupUrl !== "string"
+          || payload.signupUrl.length === 0
+        ) {
+          throw new Error("Referral link missing");
+        }
+        return payload.signupUrl;
+      })
+      .finally(() => {
+        inFlightReferralLinkPromise = null;
+      });
+  }
+  return inFlightReferralLinkPromise;
 }
