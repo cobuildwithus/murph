@@ -15,7 +15,7 @@ concurrency:
 jobs:
   rewrite:
     if: contains(github.event.head_commit.message, '[agent-rewrite-image-continuation]')
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - name: Check out branch
