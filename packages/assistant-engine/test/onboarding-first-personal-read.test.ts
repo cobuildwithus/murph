@@ -56,7 +56,6 @@ describe('onboarding first personal read', () => {
         at: '2026-08-06T21:02:00.000Z',
       },
       slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
-      status: 'active',
       summary:
         'One private first read across the context and health data collected during onboarding.',
       tags: [
@@ -213,13 +212,16 @@ describe('onboarding first personal read', () => {
       'Never infer alcohol use, medication changes, illness, adherence, or another sensitive explanation from a proxy pattern.',
     )
     expect(prompt).toContain(
+      'Return skip unless the scheduled occurrence context and current route are for one private member conversation.',
+    )
+    expect(prompt).toContain(
       'Return skip when a substantive proactive health question, decision, or requested action from Murph is still waiting for the member.',
     )
     expect(prompt).toContain(
       'A generic closing invitation such as `anything else?` is not an unresolved task',
     )
     expect(prompt).toContain(
-      'Read `vault-cli knowledge show weekly-health-insights`.',
+      'If any existing section heading begins `First read `, return skip; this one-shot never sends a second first personal read.',
     )
     expect(prompt).toContain(
       'vault-cli knowledge append-section weekly-health-insights',
