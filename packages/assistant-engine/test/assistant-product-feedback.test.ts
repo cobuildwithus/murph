@@ -129,14 +129,25 @@ describe("assistant product feedback", () => {
     expect(description).toContain("current accepted request");
     expect(description).toContain("optional related changelog item ids");
     expect(description).toContain("accepted, already accepted, or unavailable");
-    expect(description).toContain("persistence is best-effort after the reply");
+    expect(description).toContain("Provide the feedback kind, a concise product-only summary");
+    expect(description).toContain(
+      'Explicit verified-private human support uses kind "frustration", empty changelog ids',
+    );
+    expect(description).toContain('beginning exactly "Support escalation:"');
+    expect(description).toContain("waits for the durable callback");
     expect(description).toContain("do not retry after any result");
     expect(schema).toContain('"minItems":0');
     expect(schema).toContain('"feature_interest"');
     expect(schema).toContain('"summary"');
     expect(schema).toContain('Use feature_request for a missing or unsupported Murph path');
+    expect(schema).toContain('Reserved support escalation always uses frustration');
     expect(schema).toContain('Make it actionable without the conversation');
     expect(schema).toContain('Concise de-identified, product-only summary');
+    expect(schema).toContain('begin exactly \\"Support escalation:\\"');
+    expect(schema).toContain("Murph's concise de-identified explanation in its own words");
+    expect(schema).toContain("never copy or quote the member's message");
+    expect(schema).not.toContain('"supportArea"');
+    expect(schema).not.toContain('"supportProblem"');
     expect(schema).toContain('generic actor');
     expect(schema).toContain('expected versus observed result');
     expect(schema).toContain('concrete product constraint the source established');
@@ -305,15 +316,24 @@ describe("assistant product feedback", () => {
     }
 
     for (const malformedArguments of [
+      { kind: "frustration", summary: "Support escalation" },
       { kind: "frustration", summary: "Support escalation:" },
       {
         kind: "feature_request",
-        summary: "Support escalation: the connection flow does not finish.",
+        summary:
+          "Support escalation: a connected source reports success but Murph does not finish the connection.",
       },
       {
         kind: "frustration",
         relatedChangelogItemIds: ["native-message-formatting"],
-        summary: "Support escalation: the connection flow does not finish.",
+        summary:
+          "Support escalation: a connected source reports success but Murph does not finish the connection.",
+      },
+      {
+        kind: "frustration",
+        summary:
+          "Support escalation: a connected source reports success but Murph does not finish the connection.",
+        supportArea: "connected_source",
       },
     ]) {
       const request = readMurphDynamicToolRequest({
@@ -340,7 +360,7 @@ describe("assistant product feedback", () => {
         success: false,
         contentItems: [{
           type: "inputText",
-          text: expect.stringContaining("support escalation rejected"),
+          text: "invalid product feedback arguments",
         }],
       });
     }
@@ -367,7 +387,8 @@ describe("assistant product feedback", () => {
       params: {
         arguments: {
           kind: "frustration",
-          summary: "Support escalation: the connection flow does not finish.",
+          summary:
+            "Support escalation: a connected source reports success but Murph does not finish the connection.",
         },
         namespace: "murph",
         tool: "submit_product_feedback",
@@ -377,7 +398,11 @@ describe("assistant product feedback", () => {
       throw new Error("Expected a parsed support escalation request.");
     }
 
-    for (const conversationScope of ["group", "unverified-external"] as const) {
+    for (const conversationScope of [
+      null,
+      "group",
+      "unverified-external",
+    ] as const) {
       const result = await executeMurphDynamicToolRequest({
         env: {},
         fetchImpl: fetch,
@@ -385,14 +410,16 @@ describe("assistant product feedback", () => {
           computerToolsAvailable: false,
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
-          currentUserActionScope: () => ({
-            acceptedInputIds: ["assistant_input_1"],
-            conversationId: null,
-            conversationScope,
-            inboundMailboxItemIds: [],
-            originSessionId: "session-scope-check",
-            recipientKey: null,
-          }),
+          currentUserActionScope: () => conversationScope === null
+            ? null
+            : {
+                acceptedInputIds: ["assistant_input_1"],
+                conversationId: null,
+                conversationScope,
+                inboundMailboxItemIds: [],
+                originSessionId: "session-scope-check",
+                recipientKey: null,
+              },
           sendVaultFile: async () => {
             throw new Error("Vault-file sending is unavailable for this turn.");
           },
@@ -436,7 +463,8 @@ describe("assistant product feedback", () => {
       params: {
         arguments: {
           kind: "frustration",
-          summary: "Support escalation: the connection flow does not finish.",
+          summary:
+            "Support escalation: a connected source reports success but Murph does not finish the connection.",
         },
         namespace: "murph",
         tool: "submit_product_feedback",
@@ -445,10 +473,28 @@ describe("assistant product feedback", () => {
     if (!request) {
       throw new Error("Expected a parsed support escalation request.");
     }
+    const hostedToolContext = {
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => ({
+        acceptedInputIds: ["assistant_input_1"],
+        conversationId: null,
+        conversationScope: "direct" as const,
+        inboundMailboxItemIds: [],
+        originSessionId: "session-scope-check",
+        recipientKey: null,
+      }),
+      sendVaultFile: async () => {
+        throw new Error("Vault-file sending is unavailable for this turn.");
+      },
+      vaultFileSendAvailable: false,
+    };
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
+      hostedToolContext,
       nextUsageOrdinal: () => 0,
       productFeedbackRecorder,
       progressDelivery: null,
@@ -462,13 +508,14 @@ describe("assistant product feedback", () => {
     });
     expect(productFeedbackRecorder.readProductFeedback()).toBeNull();
 
+    const failingDelivery = vi
+      .fn()
+      .mockRejectedValue(new Error("callback timed out"));
     const failingRecorder = createAssistantProductFeedbackRecorder({
       acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
       productFeedbackCandidateSink: {
         acceptProductFeedbackCandidate: vi.fn(),
-        deliverProductSupportEscalation: vi
-          .fn()
-          .mockRejectedValue(new Error("callback timed out")),
+        deliverProductSupportEscalation: failingDelivery,
       },
     });
     if (!failingRecorder) {
@@ -477,6 +524,7 @@ describe("assistant product feedback", () => {
     const failedResult = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
+      hostedToolContext,
       nextUsageOrdinal: () => 0,
       productFeedbackRecorder: failingRecorder,
       progressDelivery: null,
@@ -490,6 +538,24 @@ describe("assistant product feedback", () => {
         text: "product feedback candidate unavailable",
       }],
     });
+    const repeatedFailedResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      productFeedbackRecorder: failingRecorder,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(repeatedFailedResult.rpcResult).toEqual({
+      success: false,
+      contentItems: [{
+        type: "inputText",
+        text: "product feedback candidate unavailable",
+      }],
+    });
+    expect(failingDelivery).toHaveBeenCalledOnce();
   });
 
   it("parses generalized feature-request feedback without changelog ids", () => {

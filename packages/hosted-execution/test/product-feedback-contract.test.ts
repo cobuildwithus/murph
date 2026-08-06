@@ -1,11 +1,29 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isHostedProductSupportEscalationSummary,
+} from "../src/runtime-control.js";
+import {
   parseHostedRuntimeProductFeedbackRecordRequest,
   parseHostedRuntimeProductFeedbackRecordResponse,
 } from "../src/parsers.js";
 
 describe("hosted product feedback contracts", () => {
+  it("requires a written issue after the reserved support prefix", () => {
+    expect(isHostedProductSupportEscalationSummary(
+      "Support escalation: a connected source reports success but Murph does not finish the connection.",
+    )).toBe(true);
+    expect(isHostedProductSupportEscalationSummary(
+      "Support escalation:",
+    )).toBe(false);
+    expect(isHostedProductSupportEscalationSummary(
+      "Support escalation:   ",
+    )).toBe(false);
+    expect(isHostedProductSupportEscalationSummary(
+      "A connected source reports success but Murph does not finish the connection.",
+    )).toBe(false);
+  });
+
   it("parses the bounded record contract", () => {
     const feedback = {
       idempotencyKey: "a".repeat(64),

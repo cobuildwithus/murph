@@ -1128,8 +1128,10 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'select the single most material gap and call the tool at most once for the accepted request',
     )
-    expect(prompt).toContain('Never retry after any tool result')
+    expect(prompt).toContain('Do not mention ordinary acceptance')
     expect(prompt).toContain('persistence is best-effort after the reply')
+    expect(prompt).toContain('Reserved support bypasses discovery/classification; follow Support')
+    expect(prompt).toContain('Never retry after any tool result')
     expect(prompt).toContain('external/transient failures')
     expect(prompt).toContain('Use `feature_request` for a missing path')
     expect(prompt).toContain(
@@ -1144,6 +1146,7 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('structured kind/topic')
     expect(prompt).not.toContain('feedback tags')
     expect(prompt).not.toContain('feedbackTags')
+    expect(prompt).not.toContain('flagged for the product team')
   })
 
   it('keeps only Murph-specific behavior outside the Codex base kernel', () => {

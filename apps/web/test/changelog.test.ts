@@ -37,6 +37,24 @@ describe("changelog registry", () => {
     expect(invalidItems).toEqual([]);
   });
 
+  it("keeps support escalation private and contact disclosure opt-in", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "direct-product-support-escalation",
+    );
+
+    expect(item).toMatchObject({
+      details: expect.stringContaining(
+        "shares the support address in conversation only when asked for it",
+      ),
+    });
+    expect(item?.details).toContain(
+      "Group or unverified support requests move to private Murph",
+    );
+    expect(item?.details).not.toContain(
+      "Group conversations receive the support email",
+    );
+  });
+
   it("bounds direct-chat access recovery to shared billing states", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "recognized-members-always-get-an-answer",

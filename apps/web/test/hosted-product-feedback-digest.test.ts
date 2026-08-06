@@ -23,6 +23,10 @@ import {
   resolveHostedProductFeedbackDigestWindow,
   runHostedProductFeedbackDigest,
 } from "@/src/lib/hosted-execution/product-feedback-digest";
+import {
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
+} from "@/src/lib/hosted-execution/product-feedback";
 
 const feedbackDigestEnv = {
   HOSTED_LINQ_ALERT_EMAIL_FROM: "Murph Alerts <alerts@example.test>",
@@ -230,6 +234,60 @@ describe("hosted product feedback digest", () => {
       ].join("\n"),
     }));
     expect(JSON.stringify(sendEmail.mock.calls)).not.toContain("Must never render");
+  });
+
+  it("sends only the anonymous written issue from a stored support pair", async () => {
+    const memberId = "member_support_digest";
+    const writtenIssue =
+      "a connected source reports success but Murph does not finish the connection.";
+    const storedRows = [
+      {
+        kind: "frustration",
+        memberId,
+        summary: HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
+      },
+      {
+        kind: "frustration",
+        memberId: null,
+        summary: writtenIssue,
+      },
+    ];
+    const digestRows = storedRows.filter(
+      (row) => !row.summary.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX),
+    );
+    mocks.groupBy.mockResolvedValue([
+      { _count: { _all: digestRows.length }, kind: "frustration" },
+    ]);
+    mocks.findMany.mockResolvedValue(digestRows.map(({ kind, summary }) => ({
+      kind,
+      summary,
+    })));
+
+    const batch = await readHostedProductFeedbackDigestBatch({
+      endAt: new Date("2026-07-30T22:00:00.000Z"),
+      startAt: new Date("2026-07-29T22:00:00.000Z"),
+    });
+    const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
+    await runHostedProductFeedbackDigest({
+      env: feedbackDigestEnv,
+      now: new Date("2026-07-30T22:00:30.000Z"),
+      readFeedback: async () => batch,
+      sendEmail,
+    });
+
+    expect(batch.counts.frustration).toBe(1);
+    expect(batch.summariesByKind.frustration).toEqual([writtenIssue]);
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+      text: [
+        "Product frustrations (1)",
+        `- ${writtenIssue}`,
+      ].join("\n"),
+      to: ["product@example.test", "founder@example.test"],
+    }));
+    expect(JSON.stringify(sendEmail.mock.calls)).not.toContain(memberId);
+    expect(JSON.stringify(sendEmail.mock.calls)).not.toContain(
+      HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
+    );
   });
 
   it("keeps per-kind counts truthful past the display cap", async () => {
