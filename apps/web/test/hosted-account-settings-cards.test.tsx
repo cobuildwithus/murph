@@ -213,6 +213,7 @@ function makeAccountSnapshot(input: {
       number: input.phoneNumber,
       verifiedAt: input.phoneNumber ? "2026-05-02T00:00:00.000Z" : null,
     },
+    referralIdentityKey: "member_settings_test",
     telegram: {
       telegramUserId: null,
     },
