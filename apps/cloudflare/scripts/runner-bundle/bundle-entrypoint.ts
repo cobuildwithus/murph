@@ -128,7 +128,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // boot input. Protected Linux predeploy assembly measured 10,222,098B total
 // and macOS measured 10,273,401B total on 2026-08-06. Ratchet to the higher
 // cross-platform measurement and retain the same allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_273_401 + 32_768;
+//
+// Scheduled phone-call authority extends the existing Assistant Engine dynamic
+// tool path without adding a forbidden boot input. After merging the native-
+// memory relay restoration, macOS measured 10,276,559B total on 2026-08-06;
+// retain the established allowance above that combined measurement.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_276_559 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_699_250;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_540_082;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

@@ -7,6 +7,7 @@ import type {
 import {
   MURPH_CREATE_PHONE_CALL_TOOL,
   createPhoneCallRequestKey,
+  createScheduledPhoneCallRequestKey,
   resolveAssistantUserActionAcceptedInputIds,
 } from "../src/assistant-codex/dynamic-tools/phone-calls.js";
 import {
@@ -16,7 +17,11 @@ import {
 } from "../src/assistant-codex/dynamic-tools.js";
 import type {
   AssistantHostedToolContext,
+  AssistantHostedScheduledPhoneCallScope,
   AssistantHostedToolRequestKeyScope,
+} from "../src/assistant/hosted-tool-context.js";
+import {
+  resolveAssistantHostedScheduledPhoneCallScope,
 } from "../src/assistant/hosted-tool-context.js";
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
@@ -128,6 +133,45 @@ describe("assistant phone calls", () => {
     })).toEqual(["assistant_input", "manual_input"]);
   });
 
+  it.each([
+    ["exact direct Linq occurrence", "linq", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", true],
+    ["direct email occurrence", "email", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", false],
+    ["direct Telegram occurrence", "telegram", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", false],
+    ["group occurrence", "linq", "group", "automation-cron", "2026-08-05T18:00:00.000Z", false],
+    ["mismatched occurrence", "linq", "direct", "automation-cron", "2026-08-05T18:01:00.000Z", false],
+    ["manual trigger", "linq", "direct", "manual-ask", "2026-08-05T18:00:00.000Z", false],
+  ] as const)("grants scheduled phone-call authority only for an %s", (
+    _case,
+    channel,
+    conversationScope,
+    turnTrigger,
+    scheduledOccurrenceAt,
+    expectedAuthorized,
+  ) => {
+    const scope = resolveAssistantHostedScheduledPhoneCallScope({
+      channel,
+      conversationScope,
+      messageInput: {
+        scheduledInvocationAuthority: {
+          automationId: "automation-scheduled-call",
+          occurrenceAt: "2026-08-05T18:00:00.000Z",
+        },
+        scheduledOccurrenceAt,
+        turnTrigger,
+      },
+      originSessionId: "session-scheduled-call",
+    });
+
+    expect(scope !== null).toBe(expectedAuthorized);
+    if (expectedAuthorized) {
+      expect(scope).toEqual({
+        automationId: "automation-scheduled-call",
+        occurrenceAt: "2026-08-05T18:00:00.000Z",
+        originSessionId: "session-scheduled-call",
+      });
+    }
+  });
+
   it("keys calls by accepted input and the exact bounded brief", () => {
     const first = createPhoneCallRequestKey({
       brief: BASE_BRIEF,
@@ -223,6 +267,31 @@ describe("assistant phone calls", () => {
     })).toThrow("accepted user input");
   });
 
+  it("keys scheduled calls only by the exact automation occurrence", () => {
+    const scope: AssistantHostedScheduledPhoneCallScope = {
+      automationId: "automation-scheduled-call",
+      occurrenceAt: "2026-08-05T18:00:00.000Z",
+      originSessionId: "session-scheduled-call",
+    };
+    const first = createScheduledPhoneCallRequestKey({
+      scope,
+    });
+
+    expect(first).toMatch(/^phone_call_scheduled_[a-f0-9]{64}$/u);
+    expect(createScheduledPhoneCallRequestKey({
+      scope: {
+        ...scope,
+        originSessionId: "session-scheduled-call-retry",
+      },
+    })).toBe(first);
+    expect(createScheduledPhoneCallRequestKey({
+      scope: {
+        ...scope,
+        occurrenceAt: "2026-08-05T18:01:00.000Z",
+      },
+    })).not.toBe(first);
+  });
+
   it("fails closed when a hidden phone-call request has transport but no execution authority", async () => {
     const start = vi.fn();
     const request = readMurphDynamicToolRequest(dynamicToolCall({
@@ -250,7 +319,7 @@ describe("assistant phone calls", () => {
       success: false,
     });
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "user-sourced input",
+      "user-sourced input or direct scheduled automation authority",
     );
   });
 
@@ -305,6 +374,184 @@ describe("assistant phone calls", () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain("phone call accepted or placed: hpc_123");
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       "When the call finishes, Murph reports the result back in this conversation if it is worth sharing; you may tell them you will follow up once you hear back.",
+    );
+  });
+
+  it("starts a direct scheduled call with deterministic occurrence authority", async () => {
+    const scheduledScope: AssistantHostedScheduledPhoneCallScope = {
+      automationId: "automation-scheduled-call",
+      occurrenceAt: "2026-08-05T18:00:00.000Z",
+      originSessionId: "session-scheduled-call",
+    };
+    const expectedRequestKey = createScheduledPhoneCallRequestKey({
+      scope: scheduledScope,
+    });
+    const start = vi.fn(async () => ({
+      phoneCallId: "hpc_scheduled",
+      status: "calling" as const,
+    }));
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentScheduledPhoneCallScope: () => scheduledScope,
+        currentUserActionScope: () => null,
+        phoneCalls: { start },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(start).toHaveBeenCalledWith({
+      brief: BASE_BRIEF,
+      originSessionId: "session-scheduled-call",
+      requestKey: expectedRequestKey,
+    }, {
+      signal: null,
+    });
+    expect(result.rpcResult.success).toBe(true);
+  });
+
+  it("keeps scheduled start errors uncertainty-safe", async () => {
+    const scheduledScope: AssistantHostedScheduledPhoneCallScope = {
+      automationId: "automation-scheduled-call",
+      occurrenceAt: "2026-08-05T18:00:00.000Z",
+      originSessionId: "session-scheduled-call-retry",
+    };
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentScheduledPhoneCallScope: () => scheduledScope,
+        currentUserActionScope: () => null,
+        phoneCalls: {
+          start: vi.fn(async () => {
+            throw new Error("Hosted phone call request key collision.");
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "phone call start could not be confirmed",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "Do not retry automatically",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "a later result may arrive, but it is not guaranteed",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      "wait for the existing attempt's result",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toBe(
+      "phone call could not be started",
+    );
+  });
+
+  it("reports a known pre-provider scheduled failure and asks for rescheduling", async () => {
+    const scheduledScope: AssistantHostedScheduledPhoneCallScope = {
+      automationId: "automation-scheduled-call",
+      occurrenceAt: "2026-08-05T18:00:00.000Z",
+      originSessionId: "session-scheduled-call-reconciliation-failure",
+    };
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentScheduledPhoneCallScope: () => scheduledScope,
+        currentUserActionScope: () => null,
+        phoneCalls: {
+          start: vi.fn(async () => {
+            throw Object.assign(
+              new Error("Phone call start reconciliation is temporarily unavailable."),
+              {
+                code: "HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED",
+                retryable: true,
+                status: 503,
+              },
+            );
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "no phone call was started",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "ask the requester to reschedule",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      "a later result",
+    );
+  });
+
+  it("keeps attended start errors on the existing result", async () => {
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentUserActionScope: () => ({
+          ...BASE_SCOPE,
+          acceptedInputIds: ["manual_phone_call_input"],
+          conversationScope: "direct",
+          originSessionId: "session_phone_call",
+        }),
+        phoneCalls: {
+          start: vi.fn(async () => {
+            throw new Error("Hosted phone call request failed.");
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(result.rpcResult.contentItems[0]?.text).toBe(
+      "phone call could not be started",
     );
   });
 
@@ -630,6 +877,7 @@ function dynamicToolCall(input: {
 
 function createHostedToolContext(input: {
   currentGroupPhoneCallPreviewAuthority?: AssistantHostedToolContext["currentGroupPhoneCallPreviewAuthority"];
+  currentScheduledPhoneCallScope?: AssistantHostedToolContext["currentScheduledPhoneCallScope"];
   currentUserActionScope?: AssistantHostedToolContext["currentUserActionScope"];
   phoneCalls?: AssistantHostedToolContext["phoneCalls"];
 }): AssistantHostedToolContext {
@@ -639,6 +887,7 @@ function createHostedToolContext(input: {
     currentHostedMailboxItemIds: () => [],
     currentGroupPhoneCallPreviewAuthority:
       input.currentGroupPhoneCallPreviewAuthority,
+    currentScheduledPhoneCallScope: input.currentScheduledPhoneCallScope,
     currentUserActionScope: input.currentUserActionScope,
     phoneCalls: input.phoneCalls ?? null,
     sendVaultFile: vi.fn(async () => {

@@ -38,6 +38,7 @@ const GROUP_JOIN_SETUP_LABEL = "Finish setting up Murph";
 export interface GroupJoinPermissionDisplay {
   description: string;
   label: string;
+  legacyProjectionScope?: HostedVaultShareProjectionScope;
   projectionScope: HostedVaultShareProjectionScope;
   projectionScopeKey: string;
 }
@@ -182,9 +183,21 @@ export function GroupJoinAcceptForm(props: {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [inviteMismatch, setInviteMismatch] = useState(false);
   const selectedVaultShareProjectionScopes = useMemo(
-    () => props.permissions
-      .filter((permission) => selected.has(permission.projectionScopeKey))
-      .map((permission) => permission.projectionScope),
+    () => props.permissions.flatMap((permission) => {
+      const selectedScopes: HostedVaultShareProjectionScope[] = [];
+      if (selected.has(permission.projectionScopeKey)) {
+        selectedScopes.push(permission.projectionScope);
+      }
+      if (
+        permission.legacyProjectionScope
+        && selected.has(buildHostedVaultShareProjectionScopeKey(
+          permission.legacyProjectionScope,
+        ))
+      ) {
+        selectedScopes.push(permission.legacyProjectionScope);
+      }
+      return selectedScopes;
+    }),
     [props.permissions, selected],
   );
 
@@ -201,16 +214,37 @@ export function GroupJoinAcceptForm(props: {
       ? "Go home"
       : "Not now";
 
-  function togglePermissionGroup(scopeKeys: readonly string[]) {
+  function togglePermissionGroup(
+    scopeKeys: readonly string[],
+    legacyScopeKeys: readonly string[],
+  ) {
     setSelected((current) => {
       const next = new Set(current);
-      const allSelected = scopeKeys.every((scopeKey) => next.has(scopeKey));
-      for (const scopeKey of scopeKeys) {
-        if (allSelected) {
-          next.delete(scopeKey);
-        } else {
+      const active = scopeKeys.every((scopeKey) => next.has(scopeKey))
+        || legacyScopeKeys.some((scopeKey) => next.has(scopeKey));
+      for (const scopeKey of [...scopeKeys, ...legacyScopeKeys]) {
+        next.delete(scopeKey);
+      }
+      if (!active) {
+        for (const scopeKey of scopeKeys) {
           next.add(scopeKey);
         }
+      }
+      return next;
+    });
+  }
+
+  function upgradeLegacyPermissionGroup(
+    scopeKeys: readonly string[],
+    legacyScopeKeys: readonly string[],
+  ) {
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const scopeKey of legacyScopeKeys) {
+        next.delete(scopeKey);
+      }
+      for (const scopeKey of scopeKeys) {
+        next.add(scopeKey);
       }
       return next;
     });
@@ -275,41 +309,73 @@ export function GroupJoinAcceptForm(props: {
           </div>
           <div className="flex flex-col gap-2.5">
             {permissionGroups.map((group) => {
-              const checked = group.scopeKeys.every((scopeKey) => selected.has(scopeKey));
+              const currentSelected = group.scopeKeys.every((scopeKey) =>
+                selected.has(scopeKey)
+              );
+              const legacySelected = !currentSelected && group.legacyScopeKeys.some(
+                (scopeKey) => selected.has(scopeKey),
+              );
+              const checked = currentSelected || legacySelected;
               return (
-                <label
+                <div
                   key={group.key}
                   className={cn(
-                    "flex cursor-pointer gap-3 rounded-xl border p-3.5 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
+                    "overflow-hidden rounded-xl border transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
                     checked
                       ? "border-primary bg-primary/[0.06]"
                       : "border-border bg-card hover:border-primary/40",
                   )}
                 >
-                  <input
-                    type="checkbox"
-                    className="sr-only"
-                    checked={checked}
-                    onChange={() => togglePermissionGroup(group.scopeKeys)}
-                  />
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
-                      checked
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-muted-foreground/50",
-                    )}
-                  >
-                    {checked ? <Check className="size-3.5" strokeWidth={3} /> : null}
-                  </span>
-                  <span className="flex flex-col gap-0.5">
-                    <span className="text-sm font-semibold text-foreground">{group.label}</span>
-                    <span className="text-[13px] leading-5 text-muted-foreground">
-                      {group.description}
+                  <label className="flex cursor-pointer gap-3 p-3.5">
+                    <input
+                      type="checkbox"
+                      className="sr-only"
+                      checked={checked}
+                      onChange={() => togglePermissionGroup(
+                        group.scopeKeys,
+                        group.legacyScopeKeys,
+                      )}
+                    />
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                        checked
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-muted-foreground/50",
+                      )}
+                    >
+                      {checked ? <Check className="size-3.5" strokeWidth={3} /> : null}
                     </span>
-                  </span>
-                </label>
+                    <span className="flex flex-col gap-0.5">
+                      <span className="text-sm font-semibold text-foreground">{group.label}</span>
+                      <span className="text-[13px] leading-5 text-muted-foreground">
+                        {legacySelected
+                          ? "Currently shares one daily value only. Source names and recorded times are not shared."
+                          : group.description}
+                      </span>
+                    </span>
+                  </label>
+                  {legacySelected ? (
+                    <div className="flex flex-col items-stretch gap-2 border-t border-primary/15 px-3.5 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                      <span className="text-xs leading-4 text-muted-foreground">
+                        Add source names and recorded times.
+                      </span>
+                      <Button
+                        className="w-full shrink-0 sm:w-auto"
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => upgradeLegacyPermissionGroup(
+                          group.scopeKeys,
+                          group.legacyScopeKeys,
+                        )}
+                      >
+                        Include source details
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
               );
             })}
           </div>

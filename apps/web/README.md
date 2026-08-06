@@ -347,7 +347,12 @@ The hosted Prisma schema keeps ownership sharp and nested:
   columns. Retell credentials stay in web env, transfer destinations are resolved
   from verified member identity, and raw transcripts/audio are not stored in
   Murph. The call row persists the exact initiating resident-session id for
-  request-key idempotency. Final analysis appends an
+  request-key idempotency. The reserved `phone_call_scheduled_` request-key
+  namespace identifies one canonical direct automation occurrence: Web permits
+  that exact member-scoped row to replay across resident-session changes only
+  after the encrypted first brief matches exactly. Attended calls retain the
+  stricter different-session collision rule, and a changed scheduled brief
+  cannot create a second call for the same occurrence. Final analysis appends an
   `assistant.notification.requested` system-mailbox event: Murph composes the
   result in its own voice and proactively messages the member's resolved
   messaging route, and may skip a non-meaningful result (allow-send-or-skip).

@@ -118,6 +118,7 @@ import {
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
 import {
+  normalizeHostedGroupAccessOfferProjectionScopes,
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
 } from "./join-policy";
@@ -1008,7 +1009,7 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
       return { kind: ownerAccess.unavailableReason };
     }
     const requestedVaultShareProjectionScopes =
-      normalizeHostedVaultShareProjectionScopes(
+      normalizeHostedGroupAccessOfferProjectionScopes(
         input.joinLink?.requestedVaultShareProjectionScopes
           ?? input.joinLink?.requestedVaultShareProjectionKinds
           ?? [],
@@ -1214,7 +1215,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const projectionScopes = normalizeHostedVaultShareProjectionScopes(
+  const projectionScopes = normalizeHostedGroupAccessOfferProjectionScopes(
     input.joinOffer?.projectionScopes
       ?? input.joinOffer?.projectionKinds
       ?? [],

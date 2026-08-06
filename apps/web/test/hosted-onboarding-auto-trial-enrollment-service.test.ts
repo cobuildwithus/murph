@@ -154,6 +154,7 @@ import {
   ensureHostedAutoPulseTrialEnrollment,
   ensureHostedLinqInstantStartPulseTrialEnrollment,
   inspectHostedAutoPulseTrialCampaignDisposition,
+  runHostedLinqInstantStartDeferredActivationWakeBestEffort,
   runHostedAutoPulseTrialCampaignPostCommitEffects,
 } from "@/src/lib/hosted-onboarding/auto-trial-enrollment-service";
 
@@ -2852,15 +2853,19 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
   });
 
   it("reuses the ordinary Pulse trial for trusted Linq instant start without a canned welcome", async () => {
-    await expect(
-      ensureHostedLinqInstantStartPulseTrialEnrollment({
-        admissionEventId: "evt_instant_start_123",
-        inviteCode: "invite-code",
+    const prisma = makePrisma();
+    const enrollment = await ensureHostedLinqInstantStartPulseTrialEnrollment({
+      admissionEventId: "evt_instant_start_123",
+      inviteCode: "invite-code",
+      memberId: "member_123",
+      now: new Date("2026-06-14T12:00:05.000Z"),
+      prisma: prisma as never,
+    });
+    expect(enrollment).toEqual({
+      deferredActivationWake: {
+        hostedExecutionEventId: "member.activated:auto-trial",
         memberId: "member_123",
-        now: new Date("2026-06-14T12:00:05.000Z"),
-        prisma: makePrisma() as never,
-      }),
-    ).resolves.toEqual({
+      },
       redirectPath: "/home",
       status: "enrolled",
     });
@@ -2873,9 +2878,24 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       }),
     );
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
-      .toHaveBeenCalled();
+      .not.toHaveBeenCalled();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
       .not.toHaveBeenCalled();
+
+    if (!enrollment.deferredActivationWake) {
+      throw new Error("Expected the committed activation wake continuation.");
+    }
+    await runHostedLinqInstantStartDeferredActivationWakeBestEffort({
+      continuation: enrollment.deferredActivationWake,
+      prisma: prisma as never,
+    });
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalledWith({
+        hostedExecutionEventId: "member.activated:auto-trial",
+        memberId: "member_123",
+        prisma,
+        source: "auto-pulse-trial.activation",
+      });
   });
 
   it("keeps instant-start Stripe provisioning and activation under one member lock", async () => {
@@ -2898,6 +2918,10 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         prisma: prisma as never,
       }),
     ).resolves.toEqual({
+      deferredActivationWake: {
+        hostedExecutionEventId: "member.activated:auto-trial",
+        memberId: "member_123",
+      },
       redirectPath: "/home",
       status: "enrolled",
     });
