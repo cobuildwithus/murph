@@ -449,7 +449,7 @@ Immediately split a supplied memo into these independent child tasks:
    context.
 3. **Medical and safety:** save every supported medication, condition, injury
    history, allergy/intolerance, pregnancy/nursing fact, and negative clinical
-   assertion through the named medical owners. Do not write movement memories
+   assertion through the named clinical owners. Do not write movement memories
    or supplement records.
 
 When all three families are present, start all three before the visible reply.
@@ -543,7 +543,7 @@ the supplied facts before replying and leaves optional label details unknown.
    it open, once as one checkpoint, not as four separate turns. When a V2 spawn
    tool is available, always start the medical-and-safety child immediately
    from the user's exact words. It owns every supported fact and negative
-   clinical assertion across the named medical owners, schema-correct record
+   clinical assertion across the named clinical owners, schema-correct record
    shape, detail fields, and cross-owner consistency. This applies to every
    medical answer, including an all-negative one such as "no meds, no
    conditions." The parent does not
@@ -897,9 +897,9 @@ vault-cli assistant onboarding complete --reason user_answered
 Verify the output reports `completed`. When the first-personal-read save
 succeeded, add one natural sentence or short paragraph to the ordinary
 completion or first-launch close with this meaning: “I'm going to take a proper
-look across what you shared and any data you connected. I'll come back with the
-most useful thing I can support, whether that's a pattern, a clearer
-interpretation, or what seems worth watching next. You can keep texting me
+look across what you shared and any data you connected. If I find something
+genuinely useful—whether that's a pattern, a clearer interpretation, or
+something worth watching next—I'll send it over. You can keep texting me
 normally in the meantime.” Do not mention exact timing, schedules, automations,
 agents, or promise a surprising finding. If the user clearly declines
 onboarding or further setup as a whole, use `--reason user_declined`, verify
