@@ -17,7 +17,12 @@ describe('assistant research guidance', () => {
     expect(prompt).toContain('`--input -` on stdin')
     expect(prompt).toContain('`--input @file.json`')
     expect(prompt).toContain('Let me pull the latest research on that.')
-    expect(prompt).toContain('Strip names, contact details')
+    expect(prompt).toContain(
+      'Strip names or details that identify the member or another private person',
+    )
+    expect(prompt).toContain(
+      'Preserve public study titles, researcher names, institutions, and other public entities',
+    )
     expect(prompt).toContain('Distinguish established evidence from early or conflicting evidence')
     expect(prompt).not.toContain('always run research')
   })
