@@ -198,6 +198,10 @@ export async function handleRuntimeEnsureProcessingRoute(
       // caller-supplied body fields.
       authorizationKind === "vercel-oidc",
     );
+    if (authorizationKind === "vercel-oidc") {
+      orchestration.runtimeInvocationOrchestrationAttemptId =
+        ensureRequest.orchestrationAttemptId;
+    }
     const writeAdmission = readHostedR2WriteAdmission(context.env);
     const admitPausedCanary = authorizationKind === "web-callback-signature"
       && await isHostedR2PausedCanaryUser(context.env, userId);

@@ -47,9 +47,11 @@ type DirectEnsureInput = {
   onTiming: (timing: {
     directEnsureRequestStartedAtEpochMs: number;
     directEnsureResponseReceivedAtEpochMs: number;
+    orchestrationAttemptId: string;
     tokenAcquiredAtEpochMs: number;
     tokenAcquireStartedAtEpochMs: number;
   }) => void;
+  orchestrationAttemptId: string;
 };
 
 function buildWakeHandoff(
@@ -106,6 +108,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         tokenAcquiredAtEpochMs: 1_777_000_000_010,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+        orchestrationAttemptId: input.orchestrationAttemptId,
       });
       return {
         action: "woken",
@@ -180,6 +183,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
           directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+          directEnsureOrchestrationAttemptId: expect.stringMatching(
+            /^web-ingress-[0-9a-f-]{36}$/u,
+          ),
         },
       },
       source: "linq",
@@ -195,6 +201,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         tokenAcquiredAtEpochMs: 1_777_000_000_010,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_025,
+        orchestrationAttemptId: input.orchestrationAttemptId,
       });
       return {
         accepted: true,
@@ -230,6 +237,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
           directEnsureResponseReceivedAtEpochMs: 1_777_000_000_025,
+          directEnsureOrchestrationAttemptId: expect.stringMatching(
+            /^web-ingress-[0-9a-f-]{36}$/u,
+          ),
         },
       },
       source: "linq",

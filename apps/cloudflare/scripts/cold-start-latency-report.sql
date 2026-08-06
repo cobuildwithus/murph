@@ -16,7 +16,9 @@ WITH direct_rows AS (
     EXTRACT(EPOCH FROM (accepted_at - TIMESTAMP '1970-01-01')) * 1000 AS accepted_ms,
     (phase_breakdown_json #>> '{orchestration,directEnsureRequestStartedAtEpochMs}')::double precision AS direct_start_ms,
     (phase_breakdown_json #>> '{orchestration,directEnsureResponseReceivedAtEpochMs}')::double precision AS direct_response_ms,
-    (phase_breakdown_json #>> '{orchestration,cloudflareRouteReceivedAtEpochMs}')::double precision AS route_received_ms
+    (phase_breakdown_json #>> '{orchestration,cloudflareRouteReceivedAtEpochMs}')::double precision AS route_received_ms,
+    phase_breakdown_json #>> '{orchestration,directEnsureOrchestrationAttemptId}' AS direct_orchestration_attempt_id,
+    phase_breakdown_json #>> '{orchestration,runtimeInvocationOrchestrationAttemptId}' AS runtime_orchestration_attempt_id
   FROM hosted_ingress_latency_trace
   WHERE accepted_at >=
       (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - make_interval(hours => :window_hours)
@@ -30,11 +32,10 @@ WITH direct_rows AS (
     direct_rows.*,
     count(*) OVER (PARTITION BY runtime_attempt_id) AS causal_candidate_count
   FROM direct_rows
-  WHERE direct_start_ms >= accepted_ms
-    AND direct_start_ms - accepted_ms <= 5000
+  WHERE direct_orchestration_attempt_id = runtime_orchestration_attempt_id
+    AND direct_orchestration_attempt_id IS NOT NULL
+    AND direct_start_ms >= accepted_ms
     AND direct_response_ms >= direct_start_ms
-    AND abs(route_received_ms - direct_start_ms) <= 5000
-    AND abs(route_received_ms - direct_response_ms) <= 5000
 ), samples AS (
   SELECT
     EXTRACT(EPOCH FROM (runner_job_accepted_at - accepted_at)) AS duration_seconds
@@ -58,7 +59,10 @@ WITH attempt_stamps AS (
       runner_job_accepted_at - TIMESTAMP '1970-01-01'
     )) * 1000 AS runner_job_accepted_ms,
     (phase_breakdown_json #>> '{orchestration,temporalActivityStartedAtEpochMs}')::double precision AS activity_started_ms,
-    phase_breakdown_json #> '{orchestration,directEnsureRequestStartedAtEpochMs}' IS NOT NULL AS used_direct_recovery
+    phase_breakdown_json #> '{orchestration,runtimeInvocationOrchestrationAttemptId}' IS NOT NULL AS used_direct_recovery,
+    phase_breakdown_json #>> '{orchestration,triggeredByWebDirect}' = 'true'
+      OR phase_breakdown_json #> '{orchestration,directEnsureRequestStartedAtEpochMs}' IS NOT NULL
+      AS has_legacy_direct_marker
   FROM hosted_ingress_latency_trace
   WHERE runner_job_accepted_at >=
       (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - make_interval(hours => :window_hours)
@@ -74,6 +78,7 @@ WITH attempt_stamps AS (
   SELECT
     CASE
       WHEN used_direct_recovery THEN 'temporal_recovery'
+      WHEN has_legacy_direct_marker THEN 'legacy_unclassified'
       ELSE 'temporal_only'
     END AS cohort,
     (runner_job_accepted_ms - activity_started_ms) / 1000 AS duration_seconds
@@ -101,7 +106,9 @@ WITH direct_rows AS (
     EXTRACT(EPOCH FROM (accepted_at - TIMESTAMP '1970-01-01')) * 1000 AS accepted_ms,
     (phase_breakdown_json #>> '{orchestration,directEnsureRequestStartedAtEpochMs}')::double precision AS direct_start_ms,
     (phase_breakdown_json #>> '{orchestration,directEnsureResponseReceivedAtEpochMs}')::double precision AS direct_response_ms,
-    (phase_breakdown_json #>> '{orchestration,cloudflareRouteReceivedAtEpochMs}')::double precision AS route_received_ms
+    (phase_breakdown_json #>> '{orchestration,cloudflareRouteReceivedAtEpochMs}')::double precision AS route_received_ms,
+    phase_breakdown_json #>> '{orchestration,directEnsureOrchestrationAttemptId}' AS direct_orchestration_attempt_id,
+    phase_breakdown_json #>> '{orchestration,runtimeInvocationOrchestrationAttemptId}' AS runtime_orchestration_attempt_id
   FROM hosted_ingress_latency_trace
   WHERE accepted_at >=
       (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - make_interval(hours => :window_hours)
@@ -115,11 +122,10 @@ WITH direct_rows AS (
     direct_rows.*,
     count(*) OVER (PARTITION BY runtime_attempt_id) AS causal_candidate_count
   FROM direct_rows
-  WHERE direct_start_ms >= accepted_ms
-    AND direct_start_ms - accepted_ms <= 5000
+  WHERE direct_orchestration_attempt_id = runtime_orchestration_attempt_id
+    AND direct_orchestration_attempt_id IS NOT NULL
+    AND direct_start_ms >= accepted_ms
     AND direct_response_ms >= direct_start_ms
-    AND abs(route_received_ms - direct_start_ms) <= 5000
-    AND abs(route_received_ms - direct_response_ms) <= 5000
 ), stamps AS (
   SELECT
     accepted_ms,

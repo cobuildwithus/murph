@@ -2057,9 +2057,10 @@ export type HostedRuntimeLatencyTraceMilestone =
 
 export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
-  // Control-plane orchestration stamps before the runner-container DO starts
-  // dispatch. These are epoch-ms values from different hosts, so they are for
-  // coarse span splitting only, not strict clock-order assertions.
+  // Control-plane orchestration diagnostics before the runner-container DO
+  // starts dispatch. Timestamps come from different hosts and are for coarse
+  // span splitting only. The two bounded ids correlate one Web direct ensure
+  // with the runtime invocation it launched.
   orchestration?: {
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
@@ -2067,9 +2068,11 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     tokenAcquiredAtEpochMs?: number;
     directEnsureRequestStartedAtEpochMs?: number;
     directEnsureResponseReceivedAtEpochMs?: number;
+    directEnsureOrchestrationAttemptId?: string;
     runtimeControlAuthStartedAtEpochMs?: number;
     runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
+    runtimeInvocationOrchestrationAttemptId?: string;
     triggeredByWebDirect?: boolean;
     userRunnerRpcStartedAtEpochMs?: number;
     runtimeConsentLockAcquiredAtEpochMs?: number;
@@ -2227,9 +2230,11 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "tokenAcquiredAtEpochMs",
     "directEnsureRequestStartedAtEpochMs",
     "directEnsureResponseReceivedAtEpochMs",
+    "directEnsureOrchestrationAttemptId",
     "runtimeControlAuthStartedAtEpochMs",
     "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
+    "runtimeInvocationOrchestrationAttemptId",
     "triggeredByWebDirect",
     "userRunnerRpcStartedAtEpochMs",
     "runtimeConsentLockAcquiredAtEpochMs",
@@ -2592,6 +2597,15 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   leafKey: string,
   value: unknown,
 ): value is HostedRuntimeLatencyPhaseBreakdownJsonLeaf {
+  if (
+    phase === "orchestration"
+    && (
+      leafKey === "directEnsureOrchestrationAttemptId"
+      || leafKey === "runtimeInvocationOrchestrationAttemptId"
+    )
+  ) {
+    return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+  }
   if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
     return typeof value === "string"
       && value.length <= 20
@@ -2602,6 +2616,13 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   }
 
   return isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value);
+}
+
+export function isHostedRuntimeDirectEnsureOrchestrationAttemptId(
+  value: unknown,
+): value is string {
+  return typeof value === "string"
+    && /^web-ingress-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
 }
 
 function isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value: unknown): value is number {
