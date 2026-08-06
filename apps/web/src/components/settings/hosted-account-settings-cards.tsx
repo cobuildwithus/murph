@@ -31,12 +31,15 @@ export function HostedAccountSettingsCards({
   murphPhoneNumber,
   openEmailLink = false,
   privySessionMatchesAppSession,
+  referralIdentityKey,
 }: {
   account: HostedAccountSettingsSnapshot;
   expectedPrivyUserId?: string | null;
   murphPhoneNumber?: string | null;
   openEmailLink?: boolean;
   privySessionMatchesAppSession?: boolean;
+  /** Browser-local invalidation only; the authenticated endpoint owns the URL. */
+  referralIdentityKey: string;
 }) {
   const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(
     openEmailLink ? "email" : null,
@@ -64,13 +67,6 @@ export function HostedAccountSettingsCards({
   const emailVerified = Boolean(account.email.verifiedAt);
   const murphEmailAddress = account.email.murphEmailAddress;
   const murphSmsHref = phoneNumber && murphPhoneNumber ? `sms:${murphPhoneNumber}` : null;
-  // This key only invalidates browser-local referral state. The authenticated
-  // endpoint remains the sole authority for which member owns the returned URL.
-  const referralIdentityKey = expectedPrivyUserId ?? JSON.stringify([
-    phoneNumber,
-    emailAddress,
-    telegramUserId,
-  ]);
 
   return (
     <>
