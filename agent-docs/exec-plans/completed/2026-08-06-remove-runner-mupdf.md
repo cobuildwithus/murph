@@ -11,7 +11,7 @@ reducing the compressed image pulled for cold containers.
 
 - Production code and the assistant PDF skill do not invoke `mutool`.
 - The current MuPDF install and its exclusive dependencies account for
-  60,673,166 compressed image bytes in an exact rebuilt base layer.
+  61,592,280 image bytes in an exact rebuilt comparison.
 - Keep qpdf, Poppler, Typst, `file`, and all parser behavior unchanged.
 - Update the image smoke and durable deployment documentation to match the
   supported toolchain.
@@ -26,12 +26,12 @@ reducing the compressed image pulled for cold containers.
 4. [x] Run paired hosted-local cold samples and report image-size and endpoint
    results separately, without treating local cached-image timing as a
    production image-pull measurement.
-5. [ ] Complete the required specialist and final ReviewGPT gates before handoff.
+5. [x] Complete the required specialist and final ReviewGPT gates before handoff.
 
 ## Results
 
 - The exact rebuilt compressed image shrank from 547,637,182 bytes to
-  486,044,902 bytes: 60,673,166 bytes, or 11.08 percent.
+  486,044,902 bytes: 61,592,280 bytes, or 11.25 percent.
 - The candidate image no longer contains `mupdf-tools` or its exclusive
   `libmujs2`, `libgumbo1`, and `libjbig2dec0` packages.
 - Direct container proof created a PDF and validated, extracted text from, and
@@ -47,6 +47,12 @@ reducing the compressed image pulled for cold containers.
   cold-start latency credit.
 - `container-image-contract.test.ts` passed 11 tests, Cloudflare typecheck
   passed, `pnpm docs:drift` passed, and `git diff --check` passed.
+- The preliminary specialist pass found one reporting-only arithmetic mismatch.
+  Re-inspecting the exact local images confirmed the raw totals above; direct
+  subtraction yields 61,592,280 bytes and 11.2469 percent, rounded to 11.25
+  percent. The completed plan and PR evidence now use those consistent values.
+- Final ReviewGPT round 1 passed with no qualifying code findings. Repository-
+  wide inspection also confirmed no production `mutool` invocation remains.
 
 Status: completed
 Updated: 2026-08-06
