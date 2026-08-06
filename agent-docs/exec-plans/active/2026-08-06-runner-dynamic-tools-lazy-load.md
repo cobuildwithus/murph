@@ -72,6 +72,12 @@ Updated: 2026-08-06
   lets it register its execution and then aborts/drains the work. The existing
   immediate turn-failure image-generation regression caught and now proves this
   ordering boundary.
+- Keep malformed computer requests in the serialized command queue. They are
+  still computer actions from the provider's perspective, even though parsing
+  produces an error request rather than an executable action.
+- Convert a failed runtime import into a request-level RPC error, while routing
+  unexpected asynchronous handler failures through the turn's existing
+  rejection owner so they cannot become unhandled promise rejections.
 - Keep individual tool definition modules eager for now because the provider
   catalog needs their descriptors. This PR defers the 187,998 B combined
   parser/executor chunk without duplicating schemas or splitting every handler.
@@ -79,21 +85,21 @@ Updated: 2026-08-06
 ## Verification
 
 - Production runner assembly passed: entry 1,729,822 B; static closure
-  8,423,496 B; total output 10,298,233 B. Against the exact clean-main baseline,
-  the static closure is 172,747 B smaller while the lazy split adds 15,679 B to
+  8,423,625 B; total output 10,298,362 B. Against the exact clean-main baseline,
+  the static closure is 172,618 B smaller while the lazy split adds 15,808 B to
   total output. The static byte budget is ratcheted to the new measurement and
   rejects `dynamic-tools.js` if it re-enters the boot closure.
 - Twenty alternating Docker amd64-emulation samples per arm measured baseline
   versus candidate p50 1,126.0/1,079.5 ms and p90 1,202.1/1,195.0 ms; paired
   median delta was -27.3 ms. Excluding the candidate image's first layer-cold
   sample, the paired median was -32.4 ms. Treat the timing as directional under
-  emulation; the deterministic result is the 172,747 B closure reduction.
+  emulation; the deterministic result is the 172,618 B closure reduction.
 - Ten fresh candidate containers measured the deferred chunk import at a 10.4
   ms median after entrypoint readiness.
 - Production assembly's lazy-chunk boot probe passed, and a normal container
   health smoke returned healthy as the non-root `runner` user.
 - Assistant Engine and Cloudflare typechecks passed. Focused Assistant Engine
-  catalog/planning/runtime tests passed (166 tests), the failure/abort ordering
+  catalog/planning/runtime tests passed (191 tests), the failure/abort ordering
   regression passed, and Cloudflare bundle tests passed (35 tests).
 - The package-wide Assistant Engine suite reached the existing roughly 4 GiB
   fork memory ceiling and its Vitest parent did not terminate after the worker

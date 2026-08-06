@@ -355,6 +355,68 @@ describe('Codex dynamic tool runtime routing', () => {
     expect(orderWhileFirstWasPending).toEqual([2])
     expect(executionOrder).toEqual([2, 8])
   })
+
+  it('keeps invalid computer calls in the serialized provider command order', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-invalid-computer-order-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-invalid-computer-order-home-',
+    )
+    const invalidStarted = createDeferred<void>()
+    const releaseInvalid = createDeferred<void>()
+    const executionOrder: string[] = []
+    codexMocks.onDynamicToolCall = async ({ kind }) => {
+      executionOrder.push(kind)
+      if (kind === 'invalid-computer-arguments') {
+        invalidStarted.resolve()
+        await releaseInvalid.promise
+      }
+    }
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void runScriptedInvalidComputerThenStyleTurn(child)
+      })
+      return child
+    })
+
+    const turn = executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      dynamicTools: resolveMurphDynamicTools({
+        assistantStyleSettingsAvailable: true,
+        computerToolsAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      env: {
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      prompt: 'Try the computer, then set humor.',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    await invalidStarted.promise
+    await Promise.resolve()
+    const orderWhileInvalidWasPending = [...executionOrder]
+    releaseInvalid.resolve()
+
+    await expect(turn).resolves.toMatchObject({
+      finalMessage: 'invalid computer ordered',
+      threadId: 'thread-invalid-computer-order',
+      turnId: 'turn-invalid-computer-order',
+    })
+    expect(orderWhileInvalidWasPending).toEqual([
+      'invalid-computer-arguments',
+    ])
+    expect(executionOrder).toEqual([
+      'invalid-computer-arguments',
+      'assistant-style',
+    ])
+  })
 })
 
 async function runScriptedOverlappingProgressTurn(
@@ -476,6 +538,66 @@ async function runScriptedOverlappingStyleTurn(
     method: 'turn/completed',
     params: {
       turn: { id: 'turn-style-order', status: 'completed' },
+    },
+  }))
+}
+
+async function runScriptedInvalidComputerThenStyleTurn(
+  child: MockChildProcess,
+): Promise<void> {
+  const initialize = await child.waitForRpcMethod('initialize')
+  child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  const threadStart = await child.waitForRpcMethod('thread/start')
+  child.stdout.write(jsonLine({
+    id: threadStart.id,
+    result: { thread: { id: 'thread-invalid-computer-order' } },
+  }))
+  const turnStart = await child.waitForRpcMethod('turn/start')
+  child.stdout.write(jsonLine({
+    id: turnStart.id,
+    result: { turn: { id: 'turn-invalid-computer-order' } },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/started',
+    params: { turn: { id: 'turn-invalid-computer-order' } },
+  }))
+
+  child.stdout.write(jsonLine({
+    id: 13,
+    method: 'item/tool/call',
+    params: {
+      arguments: { runId: 'run_123' },
+      namespace: 'murph',
+      tool: 'computer_act',
+      turnId: 'turn-invalid-computer-order',
+    },
+  }))
+  child.stdout.write(jsonLine({
+    id: 14,
+    method: 'item/tool/call',
+    params: {
+      arguments: { action: 'set', setting: 'humor', value: 6 },
+      namespace: 'murph',
+      tool: 'assistant_style',
+      turnId: 'turn-invalid-computer-order',
+    },
+  }))
+  await child.waitForRpcId(13)
+  await child.waitForRpcId(14)
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        id: 'assistant-invalid-computer-order',
+        message: 'invalid computer ordered',
+        type: 'assistant_message',
+      },
+    },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      turn: { id: 'turn-invalid-computer-order', status: 'completed' },
     },
   }))
 }

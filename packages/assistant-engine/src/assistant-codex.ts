@@ -3805,9 +3805,13 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const trackDynamicToolRequest = (promise: Promise<void>): void => {
-    const tracked = promise.finally(() => {
-      pendingDynamicToolRequests.delete(tracked)
-    })
+    const tracked = promise
+      .catch((error: unknown) => {
+        rejectOnce(error)
+      })
+      .finally(() => {
+        pendingDynamicToolRequests.delete(tracked)
+      })
     pendingDynamicToolRequests.add(tracked)
   }
 
@@ -4091,11 +4095,24 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    let dynamicToolRuntime: MurphDynamicToolRuntime
+    try {
+      dynamicToolRuntime = await loadMurphDynamicToolRuntime()
+    } catch {
+      void tryWriteRpcMessage({
+        id: requestId,
+        error: {
+          code: -32000,
+          message: 'Dynamic tool runtime is unavailable.',
+        },
+      })
+      return
+    }
     const {
       executeMurphDynamicToolRequest,
       isComputerDynamicToolRequest,
       readMurphDynamicToolRequest,
-    } = await loadMurphDynamicToolRuntime()
+    } = dynamicToolRuntime
 
     const dynamicToolRequest = readMurphDynamicToolRequest(message)
     if (!dynamicToolRequest) {
@@ -5012,19 +5029,9 @@ async function runCodexAppServerTurnOnProcess(
         rejectPreStartParentTurnRequest(requestId)
         return
       }
-      const dynamicToolRequest = handleAcceptedServerRequest(
-        message,
-        requestId,
-      ).catch(() => {
-        void tryWriteRpcMessage({
-          id: requestId,
-          error: {
-            code: -32000,
-            message: 'Dynamic tool runtime is unavailable.',
-          },
-        })
-      })
-      trackDynamicToolRequest(dynamicToolRequest)
+      trackDynamicToolRequest(
+        handleAcceptedServerRequest(message, requestId),
+      )
       return
     }
 
@@ -5680,7 +5687,8 @@ function isSerializedDynamicToolRequest(
     request.kind === 'computer-act' ||
     request.kind === 'computer-os-control' ||
     request.kind === 'computer-pause-for-user' ||
-    request.kind === 'computer-finish-run'
+    request.kind === 'computer-finish-run' ||
+    request.kind === 'invalid-computer-arguments'
 }
 
 function isResponseAttachmentDynamicToolRequest(
