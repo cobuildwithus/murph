@@ -162,6 +162,7 @@ export async function readHostedAiUsageActivity(input: {
     missions,
     missionsEnabled:
       input.missionsEnabled ?? isHostedUsageReferralEnabled(),
+    referralIdentityKey: input.memberId,
   };
 }
 
