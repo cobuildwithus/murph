@@ -83,5 +83,15 @@ Updated: 2026-08-06
   before taking any fallback tick, so a later `turn/started` notification adds
   no unused read. The 249-test App Server suite and assistant-engine typecheck
   passed.
-- Pending: push the corrected candidate, resolve the final ReviewGPT delta
-  review, and require green exact-head CI.
+- PASS: final ReviewGPT round 2 found no qualifying findings. Its explanatory
+  follow-up clarified that a speculative App Server failure can cause eleven
+  raw monotonic reads while still producing the same ten final boundaries.
+- PASS after the clean base-only rebase: the changed provider-start tests pass
+  independently (six assistant-engine and four assistant-runtime cases), the
+  hosted runtime-control suite passes 32 tests, and assistant-engine,
+  assistant-runtime, and hosted-execution typechecks pass.
+- NON-BLOCKING HARNESS LIMIT: broad shared-host runs exhausted the Vitest worker
+  heap or timed out two unrelated long-running entrypoint cases under heavy
+  parallel load. The exact changed tests pass in isolated fresh processes, and
+  GitHub Actions owns the broad exact-head suite.
+- Pending: push the rebased candidate and require green exact-head CI.
