@@ -20,9 +20,9 @@ export const POST = withJsonError(async (
     context.params,
     "referralCode",
   );
+  assertHostedOnboardingMutationOrigin(request);
 
   try {
-    assertHostedOnboardingMutationOrigin(request);
     const response = NextResponse.redirect(
       (await claimHostedSignupReferralLink({ referralCode })).signupUrl,
       303,
