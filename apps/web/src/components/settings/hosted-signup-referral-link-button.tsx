@@ -6,7 +6,9 @@ import { Button } from "@/src/components/ui/button";
 
 type CopyState = "copying" | "error" | "idle" | "success";
 
-export function HostedSignupReferralLinkButton() {
+export function HostedSignupReferralLinkButton(props: {
+  signupUrl: string;
+}) {
   const [state, setState] = useState<CopyState>("idle");
 
   async function copyReferralLink() {
@@ -15,22 +17,7 @@ export function HostedSignupReferralLinkButton() {
     }
     setState("copying");
     try {
-      const response = await fetch("/api/settings/signup-referral-link", {
-        cache: "no-store",
-        credentials: "same-origin",
-      });
-      const payload: unknown = await response.json();
-      if (
-        !response.ok
-        || !payload
-        || typeof payload !== "object"
-        || typeof (payload as Record<string, unknown>).signupUrl !== "string"
-      ) {
-        throw new TypeError("Murph referral link response was invalid.");
-      }
-      await navigator.clipboard.writeText(
-        (payload as { signupUrl: string }).signupUrl,
-      );
+      await navigator.clipboard.writeText(props.signupUrl);
       setState("success");
     } catch {
       setState("error");
