@@ -796,53 +796,98 @@ async function uploadLinqAttachmentBytes(
   const body = new Blob([copyUint8ArrayToArrayBuffer(bytes)], {
     type: headers['content-type'] ?? 'application/octet-stream',
   })
+  const uploadDeadlineMs = Date.now() + LINQ_HTTP_TIMEOUT_MS
+  let lastRetryableFailure: VaultCliError | null = null
 
-  await requestJsonWithRetry<void, LinqFetchResponse>({
-    createHttpError: (response) =>
-      createLinqHttpError(
-        response,
-        details,
-        'PUT',
-        '[presigned-upload]',
-        false,
-        true,
-      ),
-    fetchResponse: async () => {
-      const timeout = createTimeoutAbortController(
-        dependencies.signal,
-        LINQ_HTTP_TIMEOUT_MS,
-      )
-      try {
-        return await fetchImplementation(uploadUrl, {
-          body,
-          headers,
-          method: 'PUT',
-          redirect: 'error',
-          signal: timeout.signal,
-        })
-      } catch (error) {
-        if (dependencies.signal?.aborted) {
-          throw error
-        }
-        throw createLinqRequestError({
+  try {
+    await requestJsonWithRetry<void, LinqFetchResponse>({
+      createHttpError: async (response) => {
+        const failure = await createLinqHttpError(
+          response,
           details,
-          error,
-          method: 'PUT',
-          path: '[presigned-upload]',
-          requestOrigin: readRequestOrigin(uploadUrl),
-          retryable: true,
-          timedOut: timeout.timedOut(),
-        })
-      } finally {
-        timeout.cleanup()
-      }
-    },
-    isRetryableError: isRetryableLinqRequestError,
-    maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
-    parseResponse: () => undefined,
-    signal: dependencies.signal,
-    waitForRetryDelay: waitForLinqRetryDelay,
-  })
+          'PUT',
+          '[presigned-upload]',
+          false,
+          true,
+        )
+        if (isRetryableLinqRequestError(failure)) {
+          lastRetryableFailure = failure
+        }
+        return failure
+      },
+      fetchResponse: async () => {
+        const remainingBudgetMs = uploadDeadlineMs - Date.now()
+        if (remainingBudgetMs <= 0 && lastRetryableFailure) {
+          throw lastRetryableFailure
+        }
+        const timeout = createTimeoutAbortController(
+          dependencies.signal,
+          Math.max(1, remainingBudgetMs),
+        )
+        try {
+          return await fetchImplementation(uploadUrl, {
+            body,
+            headers,
+            method: 'PUT',
+            redirect: 'error',
+            signal: timeout.signal,
+          })
+        } catch (error) {
+          if (dependencies.signal?.aborted) {
+            throw error
+          }
+          const failure = createLinqRequestError({
+            details,
+            error,
+            method: 'PUT',
+            path: '[presigned-upload]',
+            requestOrigin: readRequestOrigin(uploadUrl),
+            retryable: true,
+            timedOut: timeout.timedOut(),
+          })
+          lastRetryableFailure = failure
+          throw failure
+        } finally {
+          timeout.cleanup()
+        }
+      },
+      isRetryableError: isRetryableLinqRequestError,
+      maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
+      parseResponse: () => undefined,
+      signal: dependencies.signal,
+      waitForRetryDelay: async (attempt, signal, responseHeaders) => {
+        const remainingBudgetMs = uploadDeadlineMs - Date.now()
+        if (remainingBudgetMs <= 0 && lastRetryableFailure) {
+          throw lastRetryableFailure
+        }
+        const timeout = createTimeoutAbortController(
+          signal,
+          Math.max(1, remainingBudgetMs),
+        )
+        try {
+          await waitForLinqRetryDelay(attempt, timeout.signal, responseHeaders)
+        } catch (error) {
+          if (dependencies.signal?.aborted) {
+            throw error
+          }
+          if (timeout.timedOut() && lastRetryableFailure) {
+            throw lastRetryableFailure
+          }
+          throw error
+        } finally {
+          timeout.cleanup()
+        }
+      },
+    })
+  } catch (error) {
+    if (!isRetryableLinqRequestError(error)) {
+      throw error
+    }
+    throw new VaultCliError(error.code, error.message, {
+      ...error.context,
+      retryable: false,
+    })
+  }
 }
 
 export async function uploadLinqAttachment(

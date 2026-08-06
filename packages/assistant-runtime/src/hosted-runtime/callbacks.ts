@@ -2236,6 +2236,13 @@ function isHostedLinqProviderOutcomeAmbiguous(error: unknown): boolean {
     return false;
   }
   if (
+    error instanceof VaultCliError
+    && error.code === "LINQ_API_REQUEST_FAILED"
+    && error.context?.operation === "create_attachment_upload"
+  ) {
+    return false;
+  }
+  if (
     "deliveryMayHaveSucceeded" in error
     && error.deliveryMayHaveSucceeded === true
   ) {

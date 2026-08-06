@@ -6,16 +6,18 @@ Updated: 2026-08-06
 
 ## Goal
 
-- Make private generated-image delivery recover automatically from transient
-  Linq attachment-reservation and byte-upload failures without regenerating the
-  canonical image, widening retry policy for unrelated POST operations, or
-  introducing another queue or state owner.
+- Make private generated-image delivery recover automatically from safely
+  replayable Linq byte-upload failures while failing closed on ambiguous
+  attachment reservation, without regenerating the canonical image, widening
+  retry policy for unrelated POST operations, or introducing another queue or
+  state owner.
 
 ## Success criteria
 
-- A retryable attachment-stage failure leaves the existing outbox intent
-  eligible for bounded automatic retry with the same canonical `vault_image`
-  artifact and delivery identity.
+- A retryable confirmed presigned-upload failure is retried only inside the
+  current dispatch with the same canonical `vault_image`, reservation, URL,
+  headers, and byte snapshot; exhaustion cannot restart reservation through a
+  later outbox dispatch.
 - An ambiguous attachment-reservation failure never blindly repeats a
   potentially completed non-idempotent provider effect unless the provider
   contract or a narrower reconciliation proof makes that safe.
@@ -62,8 +64,9 @@ Updated: 2026-08-06
    provider ambiguity contracts.
 3. [complete] Run focused recovery, logging, typecheck, and direct call-path
    proof.
-4. [in progress] Commit, push, open a PR, and complete preliminary specialist,
-   final ReviewGPT, and exact-head CI gates.
+4. [in progress] Resolve the accepted preliminary and final-round findings,
+   push the corrected candidate, and complete final ReviewGPT and exact-head CI
+   gates.
 5. [pending] Close the plan through the scoped final commit path.
 
 ## Decisions
@@ -75,12 +78,25 @@ Updated: 2026-08-06
 - Treat provider documentation as insufficient evidence for blindly retrying
   a lost-response attachment-creation POST; ReviewGPT must either find a safe
   existing retry seam or preserve confirmation-pending behavior for that case.
+- Accept the preliminary specialist finding that local retryability escaped
+  into the persisted outbox. Keep retryability inside the confirmed `PUT`
+  loop, terminalize exhaustion to the outer dispatch, and classify attachment
+  preparation before the final message-send ambiguity boundary.
+- Accept final round 1's foreground-latency finding. Keep the whole presigned
+  `PUT` sequence inside the existing 30-second operation budget so retries are
+  available only after fast failures and cannot add minutes of head-of-line
+  blocking for newer accepted input.
 
 ## Verification
 
 - `pnpm exec vitest run --config vitest.config.ts --no-coverage test/http-linq-device-runtime.test.ts`
-  from `packages/operator-config`: 51 tests passed.
+  from `packages/operator-config`: 52 tests passed.
 - `pnpm exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-workspace-assistant-phase.test.ts`
   from `packages/assistant-runtime`: 276 tests passed.
 - `pnpm --dir packages/operator-config typecheck`: passed.
 - `pnpm --dir packages/assistant-runtime typecheck`: passed.
+- `pnpm exec vitest run --config vitest.config.ts --no-coverage test/assistant-outbox-runtime.test.ts`
+  from `packages/assistant-engine`: 92 tests passed.
+- `pnpm exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-callbacks.test.ts`
+  from `packages/assistant-runtime`: 213 tests passed.
+- `pnpm --dir packages/assistant-engine typecheck`: passed.

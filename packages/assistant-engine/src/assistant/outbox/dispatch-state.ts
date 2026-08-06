@@ -514,10 +514,27 @@ function isAmbiguousDeliveryWithoutProviderIds(input: {
   error: unknown
   sending: AssistantOutboxIntent
 }): boolean {
-  return isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
+  return isLinqAttachmentReservationAmbiguity(input) ||
+    isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
     isLinqMessageReactionAmbiguityWithoutProviderIds(input) ||
     isLinqPartialDeliveryWithoutProviderIds(input) ||
     isEmailGroupFanoutAmbiguityWithoutProviderIds(input)
+}
+
+function isLinqAttachmentReservationAmbiguity(input: {
+  error: unknown
+  sending: AssistantOutboxIntent
+}): boolean {
+  if (input.sending.channel !== 'linq') {
+    return false
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  return readNonEmptyString(errorRecord?.code) === 'LINQ_API_REQUEST_FAILED' &&
+    readNonEmptyString(context?.failureStage) === 'transport' &&
+    readNonEmptyString(context?.method) === 'POST' &&
+    readNonEmptyString(context?.operation) === 'create_attachment_upload'
 }
 
 function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {

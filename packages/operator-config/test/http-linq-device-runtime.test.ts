@@ -1723,12 +1723,64 @@ test('linq runtime bounds retryable presigned attachment PUT failures', async ()
       error.context?.failureStage === 'http' &&
       error.context?.method === 'PUT' &&
       error.context?.path === '[presigned-upload]' &&
-      error.context?.retryable === true &&
+      error.context?.retryable === false &&
       error.context?.status === 503,
   )
 
   expect(providerFetch).toHaveBeenCalledTimes(1)
   expect(publicFetch).toHaveBeenCalledTimes(3)
+})
+
+test('linq runtime keeps presigned attachment retries inside one timeout budget', async () => {
+  vi.useFakeTimers()
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () =>
+    createJsonResponse({
+      attachment_id: 'attachment_pdf_deadline',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+      },
+      upload_url: 'https://uploads.example.test/upload/deadline-report',
+    }))
+  const publicFetch = vi.fn(async () =>
+    createJsonResponse({ error: 'temporarily unavailable' }, {
+      headers: { 'Retry-After': '30' },
+      status: 503,
+    }))
+  const startedAt = Date.now()
+
+  const rejection = assert.rejects(
+    uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.method === 'PUT' &&
+      error.context?.retryable === false &&
+      error.context?.status === 503,
+  )
+  await vi.advanceTimersByTimeAsync(30_000)
+  await rejection
+
+  expect(Date.now() - startedAt).toBe(30_000)
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(1)
 })
 
 test('linq runtime aborts a presigned attachment PUT retry without another attempt', async () => {
@@ -1863,7 +1915,7 @@ test('linq runtime fails closed when a presigned attachment PUT redirects', asyn
       error.context?.method === 'PUT' &&
       error.context?.path === '[presigned-upload]' &&
       error.context?.requestOrigin === 'https://uploads.example.test' &&
-      error.context?.retryable === true &&
+      error.context?.retryable === false &&
       error.context?.timedOut === false,
   )
   await vi.runAllTimersAsync()
