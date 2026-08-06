@@ -9,12 +9,16 @@ async function main(): Promise<void> {
   loadAssistantdEnvFiles()
   const env = loadAssistantdEnvironment()
   const service = createAssistantLocalService(env.vaultRoot)
-  await pruneQuiescentAssistantGeneratedDeliveryResidue({
-    vault: env.vaultRoot,
-  }).catch(() => undefined)
+  const startupMaintenanceController = new AbortController()
   const handle = await startAssistantHttpServer({
     controlToken: env.controlToken,
     host: env.host,
+    onRequestStarted: () => {
+      startupMaintenanceController.abort(new DOMException(
+        'Assistant request preempted startup maintenance.',
+        'AbortError',
+      ))
+    },
     port: env.port,
     service,
   })
@@ -41,6 +45,11 @@ async function main(): Promise<void> {
   process.once('SIGTERM', () => {
     void shutdown()
   })
+
+  await pruneQuiescentAssistantGeneratedDeliveryResidue({
+    signal: startupMaintenanceController.signal,
+    vault: env.vaultRoot,
+  }).catch(() => undefined)
 }
 
 void main().catch((error) => {

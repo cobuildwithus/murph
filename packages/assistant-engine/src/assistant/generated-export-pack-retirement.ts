@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { type Stats } from 'node:fs'
+import { createReadStream, type Stats } from 'node:fs'
 import { lstat, readFile, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -63,11 +63,32 @@ interface GeneratedExportPackCandidate {
   packId: string
 }
 
+interface GeneratedExportPackInspectionBudget {
+  archivedBytes: number
+  liveBytes: number
+}
+
+class GeneratedExportPackInspectionDeferredError extends Error {
+  constructor() {
+    super('Generated export-pack inspection exhausted its bounded unit.')
+    this.name = 'GeneratedExportPackInspectionDeferredError'
+  }
+}
+
+type GeneratedExportArchiveSnapshotRead =
+  | { kind: 'invalid' }
+  | { kind: 'missing' }
+  | { kind: 'snapshot'; snapshot: GeneratedExportArchiveSnapshot }
+
+type GeneratedExportPackCandidateInspection =
+  | { kind: 'candidate'; liveSnapshot: LiveExportPackSnapshot }
+  | { kind: 'deferred' }
+  | { kind: 'ineligible' }
+
 type GeneratedExportArchiveInspection =
   | { kind: 'complete' }
   | { kind: 'deferred' }
   | {
-      candidateBasePaths: string[]
       kind: 'candidate'
       liveSnapshot: LiveExportPackSnapshot
       retirement: AssistantGeneratedDeliveryRetirement
@@ -98,7 +119,6 @@ const exportPackManifestSchema = z
 const ZIP_MAX_ENTRY_COUNT = 20_000
 const ZIP_MAX_MANIFEST_BYTES = 1024 * 1024
 const HASH_CHUNK_BYTES = 1024 * 1024
-const IMMEDIATE_RETIREMENT_ARCHIVE_MAX_BYTES = 8 * 1024 * 1024
 const EXPORT_PACK_ID_PATTERN = /^[A-Za-z0-9_-]+$/u
 const EXPORT_PACK_FILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u
 const EXPORT_PACK_MANIFEST_PATTERN = /^exports\/packs\/([A-Za-z0-9_-]+)\/manifest\.json$/u
@@ -124,39 +144,46 @@ export async function buildAssistantGeneratedDeliveryRetirement(input: {
 
 export async function retireSentAssistantExportPacks(input: {
   archives: readonly SentAssistantGeneratedExportArchive[]
-  maxArchiveBytes?: number
   signal?: AbortSignal | null
   vault: string
 }): Promise<SentAssistantExportPackRetirementResult> {
   input.signal?.throwIfAborted()
-  const [archive] = input.archives
   const result: SentAssistantExportPackRetirementResult = {
     bytesPruned: 0,
     completedArchives: [],
     inventoryTrusted: true,
     packsPruned: 0,
   }
-  if (!archive) {
-    return result
-  }
-  if (
-    archive.file.sizeBytes > (
-      input.maxArchiveBytes ?? assistantVaultFileMaxBytes
-    )
-  ) {
-    return result
-  }
-
   try {
-    const snapshot = await readMatchingGeneratedArchiveSnapshot(
-      archive.archivePath,
-      archive.file,
-      input.signal,
-    )
-    if (!snapshot) {
-      result.completedArchives.push(archive)
+    let selected: {
+      archive: SentAssistantGeneratedExportArchive
+      snapshot: GeneratedExportArchiveSnapshot
+    } | null = null
+    for (const archive of input.archives) {
+      input.signal?.throwIfAborted()
+      if (archive.file.sizeBytes > assistantVaultFileMaxBytes) {
+        result.completedArchives.push(archive)
+        continue
+      }
+      const archiveRead = await readMatchingGeneratedArchiveSnapshot(
+        archive.archivePath,
+        archive.file,
+        input.signal,
+      )
+      if (archiveRead.kind === 'missing') {
+        result.completedArchives.push(archive)
+        continue
+      }
+      if (archiveRead.kind === 'invalid') {
+        return result
+      }
+      selected = { archive, snapshot: archiveRead.snapshot }
+      break
+    }
+    if (!selected) {
       return result
     }
+    const { archive, snapshot } = selected
     const inspection = await inspectAssistantGeneratedExportArchive({
       archive: snapshot.bytes,
       deferForActiveOutboxOwner: true,
@@ -189,63 +216,10 @@ export async function retireSentAssistantExportPacks(input: {
       )
       result.packsPruned += 1
     }
-
-    const hasRemainingPack = await hasRemainingAssistantExportPackRoot({
-      basePaths: inspection.candidateBasePaths,
-      signal: input.signal,
-      vault: input.vault,
-    })
-    if (hasRemainingPack) {
-      return result
-    }
-    result.completedArchives.push(archive)
     return result
   } catch (error) {
     input.signal?.throwIfAborted()
     return result
-  }
-}
-
-export async function retireAssistantExportPacksForSentIntent(input: {
-  intent: AssistantOutboxIntent
-  vault: string
-}): Promise<{ bytesPruned: number; packsPruned: number }> {
-  if (input.intent.status !== 'sent') {
-    return { bytesPruned: 0, packsPruned: 0 }
-  }
-  const matchingMedia = input.intent.media.filter(
-    (media): media is AssistantVaultFileResponseMedia =>
-      media.kind === 'vault_file'
-      && media.contentType === 'application/zip'
-      && isAssistantGeneratedDeliveryRef(media.ref)
-      && media.ref.toLowerCase().endsWith('.zip'),
-  )
-  if (input.intent.media.length !== 1 || matchingMedia.length !== 1) {
-    return { bytesPruned: 0, packsPruned: 0 }
-  }
-  const file = matchingMedia[0]
-  if (!file) {
-    return { bytesPruned: 0, packsPruned: 0 }
-  }
-  try {
-    const archivePath = await resolveAssistantVaultPath(
-      input.vault,
-      file.ref,
-      'file path',
-    )
-    const result = await retireSentAssistantExportPacks({
-      archives: [{ archivePath, file }],
-      maxArchiveBytes: IMMEDIATE_RETIREMENT_ARCHIVE_MAX_BYTES,
-      vault: input.vault,
-    })
-    return {
-      bytesPruned: result.bytesPruned,
-      packsPruned: result.packsPruned,
-    }
-  } catch {
-    // Sent is authoritative. Quiescent recovery will retry any cleanup whose
-    // proof could not be completed after provider success was persisted.
-    return { bytesPruned: 0, packsPruned: 0 }
   }
 }
 
@@ -281,8 +255,11 @@ async function inspectAssistantGeneratedExportArchive(input: {
   }
 
   const candidates = buildGeneratedExportPackCandidates(entries)
-  const candidateBasePaths = candidates.map(({ basePath }) => basePath)
-  let candidate: GeneratedExportPackCandidate | null = null
+  const budget: GeneratedExportPackInspectionBudget = {
+    archivedBytes: 0,
+    liveBytes: 0,
+  }
+  let hasDeferredCandidate = false
   for (const possible of candidates) {
     input.signal?.throwIfAborted()
     const rootState = await readAssistantExportPackRootState({
@@ -290,48 +267,46 @@ async function inspectAssistantGeneratedExportArchive(input: {
       signal: input.signal,
       vault: input.vault,
     })
-    if (rootState === 'invalid') {
-      return { kind: 'complete' }
+    if (rootState !== 'present') {
+      continue
     }
-    if (rootState === 'present') {
-      candidate = possible
-      break
+    if (
+      input.deferForActiveOutboxOwner
+      && await assistantExportPackHasActiveOutboxOwner({
+        basePath: possible.basePath,
+        signal: input.signal,
+        vault: input.vault,
+      })
+    ) {
+      hasDeferredCandidate = true
+      continue
     }
-  }
-  if (!candidate) {
-    return { kind: 'complete' }
-  }
-  if (
-    input.deferForActiveOutboxOwner
-    && await assistantExportPackHasActiveOutboxOwner({
-      basePath: candidate.basePath,
+
+    const candidateInspection = await inspectGeneratedExportPackCandidate({
+      archive: input.archive,
+      budget,
+      candidate: possible,
       signal: input.signal,
       vault: input.vault,
     })
-  ) {
-    return { kind: 'deferred' }
+    if (candidateInspection.kind === 'deferred') {
+      return { kind: 'deferred' }
+    }
+    if (candidateInspection.kind === 'ineligible') {
+      continue
+    }
+    return {
+      kind: 'candidate',
+      liveSnapshot: candidateInspection.liveSnapshot,
+      retirement: {
+        archiveRef: input.file.ref,
+        archiveSha256: input.file.sha256,
+        kind: 'sent_export_packs_v1',
+        packs: [candidateInspection.liveSnapshot.receipt],
+      },
+    }
   }
-
-  const liveSnapshot = await inspectGeneratedExportPackCandidate({
-    archive: input.archive,
-    candidate,
-    signal: input.signal,
-    vault: input.vault,
-  })
-  if (!liveSnapshot) {
-    return { kind: 'complete' }
-  }
-  return {
-    candidateBasePaths,
-    kind: 'candidate',
-    liveSnapshot,
-    retirement: {
-      archiveRef: input.file.ref,
-      archiveSha256: input.file.sha256,
-      kind: 'sent_export_packs_v1',
-      packs: [liveSnapshot.receipt],
-    },
-  }
+  return { kind: hasDeferredCandidate ? 'deferred' : 'complete' }
 }
 
 function buildGeneratedExportPackCandidates(
@@ -366,12 +341,18 @@ function buildGeneratedExportPackCandidates(
 
 async function inspectGeneratedExportPackCandidate(input: {
   archive: Buffer
+  budget: GeneratedExportPackInspectionBudget
   candidate: GeneratedExportPackCandidate
   signal?: AbortSignal | null
   vault: string
-}): Promise<LiveExportPackSnapshot | null> {
+}): Promise<GeneratedExportPackCandidateInspection> {
   let archivedFiles: AssistantGeneratedExportPackRetirementFile[]
   try {
+    consumeGeneratedExportPackInspectionBudget(
+      input.budget,
+      'archivedBytes',
+      input.candidate.manifestEntry.uncompressedSize,
+    )
     const manifestBytes = (await readBoundedZipEntry(
       input.archive,
       input.candidate.manifestEntry,
@@ -380,13 +361,11 @@ async function inspectGeneratedExportPackCandidate(input: {
         signal: input.signal,
       },
     )).bytes
-    let extractedBytes = manifestBytes.byteLength
-    assertRetirementExtractionWithinLimit(extractedBytes)
     const manifest = exportPackManifestSchema.parse(
       JSON.parse(manifestBytes.toString('utf8')),
     )
     if (manifest.packId !== input.candidate.packId) {
-      return null
+      return { kind: 'ineligible' }
     }
 
     const declaredPaths = manifest.files.map((file) => file.path)
@@ -394,7 +373,7 @@ async function inspectGeneratedExportPackCandidate(input: {
       input.candidate.basePath,
       declaredPaths,
     )) {
-      return null
+      return { kind: 'ineligible' }
     }
     const archivedPackPaths = input.candidate.entries
       .map((entry) => entry.name)
@@ -402,7 +381,7 @@ async function inspectGeneratedExportPackCandidate(input: {
     const sortedDeclaredPaths = [...declaredPaths]
       .sort((left, right) => left.localeCompare(right))
     if (!sameStrings(archivedPackPaths, sortedDeclaredPaths)) {
-      return null
+      return { kind: 'ineligible' }
     }
 
     const entriesByPath = new Map(
@@ -413,18 +392,16 @@ async function inspectGeneratedExportPackCandidate(input: {
       input.signal?.throwIfAborted()
       const entry = entriesByPath.get(filePath)
       if (!entry) {
-        return null
+        return { kind: 'ineligible' }
       }
       const contents = filePath === input.candidate.manifestPath
         ? manifestBytes
-        : (await readBoundedZipEntry(input.archive, entry, {
-            maxOutputBytes: assistantVaultFileMaxBytes - extractedBytes,
+        : await readGeneratedExportPackArchiveEntry({
+            archive: input.archive,
+            budget: input.budget,
+            entry,
             signal: input.signal,
-          })).bytes
-      if (filePath !== input.candidate.manifestPath) {
-        extractedBytes += contents.byteLength
-        assertRetirementExtractionWithinLimit(extractedBytes)
-      }
+          })
       archivedFiles.push({
         path: filePath,
         sha256: await sha256HexInterruptible(contents, input.signal),
@@ -433,15 +410,46 @@ async function inspectGeneratedExportPackCandidate(input: {
     }
   } catch (error) {
     input.signal?.throwIfAborted()
-    return null
+    return error instanceof GeneratedExportPackInspectionDeferredError
+      ? { kind: 'deferred' }
+      : { kind: 'ineligible' }
   }
-  return await readLiveExportPackSnapshot({
-    basePath: input.candidate.basePath,
-    expectedFiles: archivedFiles,
-    packId: input.candidate.packId,
+  try {
+    const liveSnapshot = await readLiveExportPackSnapshot({
+      basePath: input.candidate.basePath,
+      budget: input.budget,
+      expectedFiles: archivedFiles,
+      packId: input.candidate.packId,
+      signal: input.signal,
+      vault: input.vault,
+    })
+    return liveSnapshot
+      ? { kind: 'candidate', liveSnapshot }
+      : { kind: 'ineligible' }
+  } catch (error) {
+    input.signal?.throwIfAborted()
+    if (error instanceof GeneratedExportPackInspectionDeferredError) {
+      return { kind: 'deferred' }
+    }
+    throw error
+  }
+}
+
+async function readGeneratedExportPackArchiveEntry(input: {
+  archive: Buffer
+  budget: GeneratedExportPackInspectionBudget
+  entry: BoundedZipEntry
+  signal?: AbortSignal | null
+}): Promise<Buffer> {
+  consumeGeneratedExportPackInspectionBudget(
+    input.budget,
+    'archivedBytes',
+    input.entry.uncompressedSize,
+  )
+  return (await readBoundedZipEntry(input.archive, input.entry, {
+    maxOutputBytes: input.entry.uncompressedSize,
     signal: input.signal,
-    vault: input.vault,
-  })
+  })).bytes
 }
 
 async function assistantExportPackHasActiveOutboxOwner(input: {
@@ -528,7 +536,7 @@ async function readMatchingGeneratedArchiveSnapshot(
   archivePath: string,
   file: AssistantVaultFileResponseMedia,
   signal?: AbortSignal | null,
-): Promise<GeneratedExportArchiveSnapshot | null> {
+): Promise<GeneratedExportArchiveSnapshotRead> {
   signal?.throwIfAborted()
   try {
     const before = await lstat(archivePath)
@@ -539,17 +547,22 @@ async function readMatchingGeneratedArchiveSnapshot(
       || before.nlink !== 1
       || before.size !== file.sizeBytes
     ) {
-      return null
+      return { kind: 'invalid' }
     }
-    const bytes = await readFile(archivePath)
+    const bytes = await readFile(
+      archivePath,
+      signal ? { signal } : undefined,
+    )
     signal?.throwIfAborted()
     const after = await lstat(archivePath)
     signal?.throwIfAborted()
-    return fileStatsMatch(before, after) ? { bytes, stats: after } : null
+    return fileStatsMatch(before, after)
+      ? { kind: 'snapshot', snapshot: { bytes, stats: after } }
+      : { kind: 'invalid' }
   } catch (error) {
     signal?.throwIfAborted()
     if (isMissingFileError(error)) {
-      return null
+      return { kind: 'missing' }
     }
     throw error
   }
@@ -607,26 +620,9 @@ async function readAssistantExportPackRootState(input: {
   }
 }
 
-async function hasRemainingAssistantExportPackRoot(input: {
-  basePaths: readonly string[]
-  signal?: AbortSignal | null
-  vault: string
-}): Promise<boolean> {
-  for (const basePath of input.basePaths) {
-    const state = await readAssistantExportPackRootState({
-      basePath,
-      signal: input.signal,
-      vault: input.vault,
-    })
-    if (state !== 'missing') {
-      return true
-    }
-  }
-  return false
-}
-
 async function readLiveExportPackSnapshot(input: {
   basePath: string
+  budget: GeneratedExportPackInspectionBudget
   expectedFiles: readonly AssistantGeneratedExportPackRetirementFile[]
   packId: string
   signal?: AbortSignal | null
@@ -699,13 +695,23 @@ async function readLiveExportPackSnapshot(input: {
     if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
       return null
     }
-    const contents = await readFile(absoluteFilePath)
+    if (before.size !== expected.sizeBytes) {
+      return null
+    }
+    consumeGeneratedExportPackInspectionBudget(
+      input.budget,
+      'liveBytes',
+      before.size,
+    )
+    const sha256 = await sha256FileInterruptible(
+      absoluteFilePath,
+      input.signal,
+    )
     input.signal?.throwIfAborted()
     const after = await lstat(absoluteFilePath)
     if (
       !fileStatsMatch(before, after)
-      || contents.byteLength !== expected.sizeBytes
-      || await sha256HexInterruptible(contents, input.signal) !== expected.sha256
+      || sha256 !== expected.sha256
     ) {
       return null
     }
@@ -821,10 +827,19 @@ function outboxProvesExactSentArchiveClaim(
   return exactClaims > 0
 }
 
-function assertRetirementExtractionWithinLimit(extractedBytes: number): void {
-  if (extractedBytes > assistantVaultFileMaxBytes) {
-    throw new Error('Generated ZIP export pack exceeds the inspection limit.')
+function consumeGeneratedExportPackInspectionBudget(
+  budget: GeneratedExportPackInspectionBudget,
+  key: keyof GeneratedExportPackInspectionBudget,
+  bytes: number,
+): void {
+  if (
+    !Number.isSafeInteger(bytes)
+    || bytes < 0
+    || budget[key] + bytes > assistantVaultFileMaxBytes
+  ) {
+    throw new GeneratedExportPackInspectionDeferredError()
   }
+  budget[key] += bytes
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
@@ -854,6 +869,28 @@ async function sha256HexInterruptible(
       Math.min(value.byteLength, offset + HASH_CHUNK_BYTES),
     ))
     await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  signal?.throwIfAborted()
+  return hash.digest('hex')
+}
+
+async function sha256FileInterruptible(
+  filePath: string,
+  signal?: AbortSignal | null,
+): Promise<string> {
+  signal?.throwIfAborted()
+  const hash = createHash('sha256')
+  const stream = createReadStream(filePath, {
+    ...(signal ? { signal } : {}),
+  })
+  try {
+    for await (const chunk of stream) {
+      signal?.throwIfAborted()
+      hash.update(chunk)
+    }
+  } catch (error) {
+    signal?.throwIfAborted()
+    throw error
   }
   signal?.throwIfAborted()
   return hash.digest('hex')

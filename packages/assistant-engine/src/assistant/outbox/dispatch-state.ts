@@ -15,7 +15,6 @@ import {
   sanitizeAssistantOutboxIntentForPersistence,
 } from '../redaction.js'
 import { reconcileAssistantCronDeliveryIntent } from '../cron/delivery-reconciliation.js'
-import { retireAssistantExportPacksForSentIntent } from '../generated-export-pack-retirement.js'
 import { repairAssistantOutboxReceiptForIntent } from './receipt-repair.js'
 import {
   createAssistantDeliveryAmbiguousError,
@@ -312,10 +311,6 @@ export async function markAssistantOutboxIntentSent(input: {
     return sentIntent
   })
   await attemptAssistantCronDeliveryReconciliation({
-    intent: sentIntent,
-    vault: input.vault,
-  })
-  await retireAssistantExportPacksForSentIntent({
     intent: sentIntent,
     vault: input.vault,
   })

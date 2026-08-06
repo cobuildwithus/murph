@@ -39,6 +39,7 @@ const MAX_ASSISTANT_HTTP_BODY_BYTES = 256 * 1024
 export interface CreateAssistantHttpServerInput {
   controlToken: string
   host: string
+  onRequestStarted?: (() => void) | null
   port: number
   service: AssistantLocalService
 }
@@ -93,6 +94,7 @@ export function createAssistantHttpRequestHandler(
   input: CreateAssistantHttpServerInput,
 ): AssistantHttpRequestHandler {
   return async (request, response) => {
+    input.onRequestStarted?.()
     await handleAssistantRequest(request, response, input)
   }
 }

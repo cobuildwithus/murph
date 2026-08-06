@@ -32,6 +32,9 @@ import {
   writeJsonFileAtomic,
 } from './shared.js'
 import { quarantineAssistantStateFile } from './quarantine.js'
+import {
+  pruneQuiescentAssistantGeneratedDeliveryResidue,
+} from './runtime-residue.js'
 import type { AssistantStatePaths } from './store/paths.js'
 
 const ASSISTANT_RUNTIME_BUDGET_SCHEMA = 'murph.assistant-runtime-budget.v1'
@@ -46,6 +49,21 @@ export async function maybeRunAssistantRuntimeMaintenance(input: {
   vault: string
 }): Promise<AssistantRuntimeBudgetSnapshot> {
   const now = input.now ?? new Date()
+  if (input.signal?.aborted !== true) {
+    const maintenanceSignal = createAssistantRuntimeMaintenanceSignal(input)
+    try {
+      await pruneQuiescentAssistantGeneratedDeliveryResidue({
+        signal: maintenanceSignal.signal,
+        vault: input.vault,
+      })
+    } catch (error) {
+      if (!assistantRuntimeMaintenanceYieldRequested(input)) {
+        throw error
+      }
+    } finally {
+      maintenanceSignal.dispose()
+    }
+  }
   return await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const current = await readAssistantRuntimeBudgetStatusAtPaths({
@@ -74,6 +92,43 @@ export async function maybeRunAssistantRuntimeMaintenance(input: {
       vault: input.vault,
     })
   })
+}
+
+function createAssistantRuntimeMaintenanceSignal(input: {
+  shouldYield?: (() => boolean) | null
+  signal?: AbortSignal | null
+}): { dispose(): void; signal: AbortSignal | null } {
+  if (!input.shouldYield) {
+    return { dispose() {}, signal: input.signal ?? null }
+  }
+
+  const controller = new AbortController()
+  const abortForUpstream = () => {
+    controller.abort(input.signal?.reason)
+  }
+  const abortForYield = () => {
+    if (input.shouldYield?.()) {
+      controller.abort(new DOMException(
+        'Assistant runtime maintenance yielded to foreground work.',
+        'AbortError',
+      ))
+    }
+  }
+  if (input.signal?.aborted) {
+    abortForUpstream()
+  } else {
+    input.signal?.addEventListener('abort', abortForUpstream, { once: true })
+  }
+  abortForYield()
+  const yieldPoll = setInterval(abortForYield, 25)
+  yieldPoll.unref()
+  return {
+    dispose() {
+      clearInterval(yieldPoll)
+      input.signal?.removeEventListener('abort', abortForUpstream)
+    },
+    signal: controller.signal,
+  }
 }
 
 export async function runAssistantRuntimeMaintenance(input: {

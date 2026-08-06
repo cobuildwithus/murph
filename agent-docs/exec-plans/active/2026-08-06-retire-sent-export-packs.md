@@ -22,8 +22,8 @@ Updated: 2026-08-06
   and intent persistence cannot race behind a completed pack deletion.
 - Retirement is bounded and abortable, retains the terminal ZIP while work
   remains, and converges across archives containing more than twenty packs.
-- Hosted checkpointing and local assistant-daemon startup both recover a sent
-  export pack whose immediate best-effort retirement was interrupted.
+- Hosted idle cleanup and recurring local maintenance recover sent export-pack
+  work without running optional archive inspection on the serial send path.
 - Existing generated delivery retry, approval, checkpoint, and cleanup
   behavior remains unchanged for other files.
 - Focused proof, exact-head ReviewGPT passes, and required CI complete with no
@@ -61,9 +61,13 @@ Updated: 2026-08-06
    Mitigation: require a trusted outbox record with terminal `sent` state for
    the exact generated archive ref.
 4. Risk: retirement adds a competing lifecycle. Mitigation: derive proof from
-   the existing sent attachment and retry only inside the existing hosted
-   checkpoint and local-daemon startup residue pass; add no queue, receipt
-   file, or schema version.
+   the existing sent attachment and retry only inside the existing quiescent
+   generated-delivery owner; add no queue, cursor, receipt file, or schema
+   version.
+5. Risk: ordinary terminal-outbox retention removes the only cleanup authority
+   before a deferred pack converges. Mitigation: retain an exact sent ZIP
+   intent while its staged archive ref still exists, then return it to ordinary
+   age and count pruning after the archive is removed.
 
 ## Tasks
 
@@ -75,9 +79,12 @@ Updated: 2026-08-06
 4. [completed] Add focused success, retry, refusal, mutation, archive, and path
    safety proof; update durable contracts.
 5. [completed] Resolve preliminary ReviewGPT recovery and coverage findings.
-6. [in progress] Resolve final ReviewGPT active-ownership, interruptibility,
-   continuation-evidence, and shared-ZIP-owner findings; then push the exact
-   remediation head and complete final ReviewGPT plus exact-head CI.
+6. [completed] Resolve final ReviewGPT round 1 active-ownership,
+   interruptibility, continuation-evidence, and shared-ZIP-owner findings.
+7. [in progress] Resolve final ReviewGPT round 2 archive starvation, local
+   continuation, authority-retention, and complexity findings with one
+   quiescent owner; then push the exact remediation head and complete final
+   ReviewGPT plus exact-head CI.
 
 ## Verification
 
@@ -95,4 +102,7 @@ Updated: 2026-08-06
 - Shared ZIP integration-ingest and cancellation tests; active direct-file
   ownership, deletion/persistence ordering, 21-pack continuation, and abort
   recovery tests.
-- Pending final round 2 ReviewGPT and exact-head CI.
+- Focused quiescent-owner proof covers missing and unsafe earlier archives,
+  stale and active earlier pack candidates, multi-unit progress, cumulative
+  inspection limits, terminal-authority retention, and abort recovery.
+- Pending final round 3 ReviewGPT and exact-head CI.

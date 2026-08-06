@@ -2,6 +2,19 @@ import assert from 'node:assert/strict'
 import { setImmediate as waitForImmediate } from 'node:timers/promises'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
+interface TestCleanupInput {
+  signal?: AbortSignal | null
+  vault: string
+}
+
+interface TestServerInput {
+  controlToken: string
+  host: string
+  onRequestStarted?: (() => void) | null
+  port: number
+  service: unknown
+}
+
 const mocks = vi.hoisted(() => {
   const handleClose = vi.fn(async () => undefined)
   return {
@@ -14,20 +27,32 @@ const mocks = vi.hoisted(() => {
       port: 50241,
       vaultRoot: '/tmp/bin-vault',
     })),
-    pruneQuiescentAssistantGeneratedDeliveryResidue: vi.fn(async () => ({
-      bytesPruned: 0,
-      exportPackBytesPruned: 0,
-      exportPacksPruned: 0,
-      filesPruned: 0,
-    })),
-    startAssistantHttpServer: vi.fn(async () => ({
-      address: {
-        baseUrl: 'http://127.0.0.1:50241',
-        host: '127.0.0.1',
-        port: 50241,
-      },
-      close: handleClose,
-    })),
+    pruneQuiescentAssistantGeneratedDeliveryResidue: vi.fn<
+      (input: TestCleanupInput) => Promise<{
+        bytesPruned: number
+        exportPackBytesPruned: number
+        exportPacksPruned: number
+        filesPruned: number
+      }>
+    >(async () => ({
+        bytesPruned: 0,
+        exportPackBytesPruned: 0,
+        exportPacksPruned: 0,
+        filesPruned: 0,
+      })),
+    startAssistantHttpServer: vi.fn<
+      (input: TestServerInput) => Promise<{
+        address: { baseUrl: string; host: string; port: number }
+        close(): Promise<void>
+      }>
+    >(async () => ({
+        address: {
+          baseUrl: 'http://127.0.0.1:50241',
+          host: '127.0.0.1',
+          port: 50241,
+        },
+        close: handleClose,
+      })),
   }
 })
 
@@ -88,25 +113,26 @@ test('assistantd bin loads env, starts the server, and announces the bound addre
   assert.equal(process.env[ASSISTANTD_DISABLE_CLIENT_ENV], '1')
   assert.deepEqual(mocks.loadAssistantdEnvFiles.mock.calls, [[]])
   assert.deepEqual(mocks.createAssistantLocalService.mock.calls, [['/tmp/bin-vault']])
-  assert.deepEqual(
-    mocks.pruneQuiescentAssistantGeneratedDeliveryResidue.mock.calls,
-    [[{
-      vault: '/tmp/bin-vault',
-    }]],
-  )
+  const cleanupInput = mocks
+    .pruneQuiescentAssistantGeneratedDeliveryResidue.mock.calls[0]?.[0]
+  assert.equal(cleanupInput?.vault, '/tmp/bin-vault')
+  assert.ok(cleanupInput?.signal instanceof AbortSignal)
   assert.ok(
-    mocks.pruneQuiescentAssistantGeneratedDeliveryResidue
+    mocks.startAssistantHttpServer
       .mock.invocationCallOrder[0]!
-      < mocks.startAssistantHttpServer.mock.invocationCallOrder[0]!,
+      < mocks.pruneQuiescentAssistantGeneratedDeliveryResidue
+        .mock.invocationCallOrder[0]!,
   )
-  assert.deepEqual(mocks.startAssistantHttpServer.mock.calls, [[
-    {
-      controlToken: 'secret-token',
-      host: '127.0.0.1',
-      port: 50241,
-      service: { kind: 'service' },
-    },
-  ]])
+  const serverInput = mocks.startAssistantHttpServer.mock.calls[0]?.[0]
+  assert.equal(serverInput?.controlToken, 'secret-token')
+  assert.equal(serverInput?.host, '127.0.0.1')
+  assert.equal(serverInput?.port, 50241)
+  assert.deepEqual(serverInput?.service, { kind: 'service' })
+  assert.equal(typeof serverInput?.onRequestStarted, 'function')
+  assert.equal(cleanupInput?.signal?.aborted, false)
+  serverInput?.onRequestStarted?.()
+  assert.equal(cleanupInput?.signal?.aborted, true)
+  assert.equal(cleanupInput?.signal?.reason?.name, 'AbortError')
   assert.equal(onceSpy.mock.calls[0]?.[0], 'SIGINT')
   assert.equal(onceSpy.mock.calls[1]?.[0], 'SIGTERM')
 

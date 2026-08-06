@@ -5,7 +5,9 @@ import {
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
+import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
+import { isAssistantGeneratedDeliveryRef } from '../generated-delivery-files.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
 import { ensureAssistantState } from '../store/persistence.js'
 import { resolveAssistantStatePaths } from '../store.js'
@@ -183,6 +185,10 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
         intent,
         protectedNewsletterOccurrencePrefixes,
       )
+      || await sentAssistantGeneratedExportAuthorityStillExists({
+        intent,
+        vault: input.vault,
+      })
     ) {
       continue
     }
@@ -220,6 +226,36 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
   }
 
   return pruned
+}
+
+async function sentAssistantGeneratedExportAuthorityStillExists(input: {
+  intent: AssistantOutboxIntent
+  vault: string
+}): Promise<boolean> {
+  if (input.intent.status !== 'sent' || input.intent.media.length !== 1) {
+    return false
+  }
+  const [media] = input.intent.media
+  if (
+    media?.kind !== 'vault_file'
+    || media.contentType !== 'application/zip'
+    || !media.ref.toLowerCase().endsWith('.zip')
+    || !isAssistantGeneratedDeliveryRef(media.ref)
+  ) {
+    return false
+  }
+
+  try {
+    const archivePath = await resolveAssistantVaultPath(
+      input.vault,
+      media.ref,
+      'file path',
+    )
+    await lstat(archivePath)
+    return true
+  } catch (error) {
+    return !isMissingFileError(error)
+  }
 }
 
 export async function findAssistantOutboxIntentByDedupeIdentity(input: {

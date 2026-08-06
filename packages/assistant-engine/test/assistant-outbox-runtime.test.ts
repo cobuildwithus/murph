@@ -64,6 +64,12 @@ import {
 } from '../src/assistant/outbox.ts'
 import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
 import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from '../src/assistant/generated-delivery-files.ts'
+import {
+  resolveAssistantVaultFileResponseMedia,
+} from '../src/assistant/vault-file-send.ts'
+import {
   buildAssistantCronNotificationDedupeToken,
 } from '../src/assistant/cron/notification-delivery.ts'
 import {
@@ -1809,6 +1815,70 @@ describe('assistant outbox runtime', () => {
       retained.some((intent) => intent.message === 'old terminal intent'),
     ).toBe(false)
     expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(100)
+  })
+
+  it('retains sent ZIP authority beyond age and count limits until staging is gone', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-export-authority-',
+    )
+    const archiveRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/retained-export.zip`
+    const archivePath = path.join(vaultRoot, ...archiveRef.split('/'))
+    await mkdir(path.dirname(archivePath), { recursive: true })
+    await writeFile(archivePath, 'retained export authority')
+    const archiveMedia = await resolveAssistantVaultFileResponseMedia({
+      ref: archiveRef,
+      vaultRoot,
+    })
+    const authority = await createIntent(vaultRoot, {
+      channel: 'linq',
+      createdAt: '2026-03-01T00:00:00.000Z',
+      media: [archiveMedia],
+      message: 'retained export ZIP',
+      sessionId: 'session-retained-export',
+      turnId: 'turn-retained-export',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...authority,
+      sentAt: '2026-03-01T00:05:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-03-01T00:05:00.000Z',
+    })
+
+    for (let index = 0; index < 101; index += 1) {
+      const createdAt = new Date(Date.UTC(2026, 3, 19, 0, index, 0)).toISOString()
+      const terminal = await createIntent(vaultRoot, {
+        createdAt,
+        message: `newer terminal authority ${index}`,
+        sessionId: `session-newer-authority-${index}`,
+        turnId: `turn-newer-authority-${index}`,
+      })
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...terminal,
+        status: 'failed',
+        updatedAt: createdAt,
+      })
+    }
+
+    await expect(pruneAssistantTerminalOutboxIntents({
+      now: new Date('2026-04-20T12:00:00.000Z'),
+      paths,
+      vault: vaultRoot,
+    })).resolves.toBe(1)
+    await expect(readAssistantOutboxIntent(
+      vaultRoot,
+      authority.intentId,
+    )).resolves.toMatchObject({ status: 'sent' })
+
+    await rm(archivePath)
+    await expect(pruneAssistantTerminalOutboxIntents({
+      now: new Date('2026-04-20T12:00:00.000Z'),
+      paths,
+      vault: vaultRoot,
+    })).resolves.toBe(1)
+    await expect(readAssistantOutboxIntent(
+      vaultRoot,
+      authority.intentId,
+    )).resolves.toBeNull()
   })
 
   it('retains group newsletter terminal occurrence evidence during outbox pruning', async () => {

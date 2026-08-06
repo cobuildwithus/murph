@@ -33,6 +33,7 @@ import {
   pruneAssistantRuntimeResidue,
   pruneQuiescentAssistantGeneratedDeliveryResidue,
 } from '../src/assistant/runtime-residue.ts'
+import { maybeRunAssistantRuntimeMaintenance } from '../src/assistant/runtime-budgets.ts'
 import {
   createAssistantTurnReceipt,
   readAssistantTurnReceipt,
@@ -134,7 +135,7 @@ describe('assistant generated export-pack retirement', () => {
     })).resolves.toBeNull()
   })
 
-  it('retires the exact pack immediately after its generated ZIP reaches sent', async () => {
+  it('keeps the sent transition free of cleanup and retires the pack at quiescence', async () => {
     const setup = await createExportPackDelivery('immediate-sent')
     const intent = await createDeliveryIntent({
       media: setup.media,
@@ -158,10 +159,17 @@ describe('assistant generated export-pack retirement', () => {
     })
 
     expect(sent?.status).toBe('sent')
-    await expect(stat(setup.packPath)).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(stat(setup.archivePath)).resolves.toMatchObject({
-      size: setup.archive.byteLength,
+    await expect(stat(setup.packPath)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
     })
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })).resolves.toMatchObject({
+      exportPacksPruned: 1,
+      filesPruned: 1,
+    })
+    await expect(stat(setup.packPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('keeps provider success terminal when immediate cleanup refuses stale evidence', async () => {
@@ -248,6 +256,9 @@ describe('assistant generated export-pack retirement', () => {
 
     await expect(markExportPackIntentSent(intent, setup.vaultRoot)).resolves
       .toMatchObject({ status: 'sent' })
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })).resolves.toMatchObject({ exportPacksPruned: 0 })
     await expect(readFile(nestedAbsolutePath, 'utf8')).resolves.toBe(
       '{"private":"outside direct pack inventory"}\n',
     )
@@ -271,6 +282,9 @@ describe('assistant generated export-pack retirement', () => {
 
     await expect(markExportPackIntentSent(intent, setup.vaultRoot)).resolves
       .toMatchObject({ status: 'sent' })
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })).resolves.toMatchObject({ exportPacksPruned: 0 })
     await expect(readFile(externalPath, 'utf8')).resolves.toBe(
       '{"external":"unchanged"}\n',
     )
@@ -310,8 +324,8 @@ describe('assistant generated export-pack retirement', () => {
     await expect(readFile(canonicalPath, 'utf8')).resolves.toBe('canonical data\n')
   })
 
-  it('retires a production-shaped deflated export ZIP immediately and after local restart', async () => {
-    const immediate = await createProductionFixtureDelivery('fixture-immediate')
+  it('retires a production-shaped deflated export ZIP after send and local restart', async () => {
+    const immediate = await createProductionFixtureDelivery('fixture-sent')
     const pending = await createDeliveryIntent({
       media: immediate.media,
       status: 'pending',
@@ -320,10 +334,14 @@ describe('assistant generated export-pack retirement', () => {
 
     await expect(markExportPackIntentSent(pending, immediate.vaultRoot)).resolves
       .toMatchObject({ status: 'sent' })
-    await expect(stat(immediate.packPath)).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(stat(immediate.archivePath)).resolves.toMatchObject({
-      size: immediate.archive.byteLength,
+    await expect(stat(immediate.packPath)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
     })
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: immediate.vaultRoot,
+    })).resolves.toMatchObject({ exportPacksPruned: 1 })
+    await expect(stat(immediate.packPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(immediate.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
 
     const restarted = await createProductionFixtureDelivery('fixture-restart')
     await createDeliveryIntent({
@@ -406,6 +424,148 @@ describe('assistant generated export-pack retirement', () => {
         isDirectory: expect.any(Function),
       })
     }
+  })
+
+  it('scans past completed missing archives and retires the next present ZIP', async () => {
+    const setup = await createMultiExportPackDelivery(2)
+    const missingRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/000-completed.zip`
+    const missingPath = path.join(setup.vaultRoot, ...missingRef.split('/'))
+    const missingArchive = createTestZip([['ordinary.json', '{}\n']])
+    await writeFile(missingPath, missingArchive)
+    const missingMedia = await resolveAssistantVaultFileResponseMedia({
+      ref: missingRef,
+      vaultRoot: setup.vaultRoot,
+    })
+    await createDeliveryIntent({
+      media: missingMedia,
+      status: 'sent',
+      vaultRoot: setup.vaultRoot,
+    })
+    await rm(missingPath)
+    await createDeliveryIntent({
+      media: setup.media,
+      status: 'sent',
+      vaultRoot: setup.vaultRoot,
+    })
+
+    const result = await pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })
+
+    expect(result.exportPacksPruned).toBe(2)
+    for (const packPath of setup.packPaths) {
+      await expect(stat(packPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+    await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('fails closed on a symlinked archive before a later valid ZIP', async () => {
+    const setup = await createMultiExportPackDelivery(2)
+    const unsafeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/000-unsafe.zip`
+    const unsafePath = path.join(setup.vaultRoot, ...unsafeRef.split('/'))
+    const externalPath = path.join(setup.vaultRoot, 'external-archive.zip')
+    const unsafeArchive = createTestZip([['ordinary.json', '{}\n']])
+    await writeFile(unsafePath, unsafeArchive)
+    const unsafeMedia = await resolveAssistantVaultFileResponseMedia({
+      ref: unsafeRef,
+      vaultRoot: setup.vaultRoot,
+    })
+    await createDeliveryIntent({
+      media: unsafeMedia,
+      status: 'sent',
+      vaultRoot: setup.vaultRoot,
+    })
+    await writeFile(externalPath, unsafeArchive)
+    await rm(unsafePath)
+    await symlink(externalPath, unsafePath)
+    await createDeliveryIntent({
+      media: setup.media,
+      status: 'sent',
+      vaultRoot: setup.vaultRoot,
+    })
+
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })).rejects.toThrow(
+      'resolves outside the vault root.',
+    )
+    for (const packPath of setup.packPaths) {
+      await expect(stat(packPath)).resolves.toMatchObject({
+        isDirectory: expect.any(Function),
+      })
+    }
+    await expect(stat(setup.archivePath)).resolves.toMatchObject({
+      size: setup.archive.byteLength,
+    })
+    await expect(readFile(externalPath)).resolves.toEqual(unsafeArchive)
+  })
+
+  it('retires a later exact pack when the first archive candidate is stale', async () => {
+    const setup = await createMultiExportPackDelivery(2)
+    await createDeliveryIntent({
+      media: setup.media,
+      status: 'sent',
+      vaultRoot: setup.vaultRoot,
+    })
+    await writeFile(
+      path.join(setup.packPaths[0]!, 'entities.json'),
+      '{"records":["newer"]}\n',
+    )
+
+    const result = await pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })
+
+    expect(result.exportPacksPruned).toBe(1)
+    await expect(stat(setup.packPaths[0]!)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    })
+    await expect(stat(setup.packPaths[1]!)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('retires a later unowned pack while the first pack has an active delivery', async () => {
+    const setup = await createMultiExportPackDelivery(2)
+    const directMedia = await resolveAssistantVaultFileResponseMedia({
+      ref: 'exports/packs/pack-many-00/entities.json',
+      vaultRoot: setup.vaultRoot,
+    })
+    const directIntent = await createDirectPackFileIntent({
+      deliveryConfirmationPending: false,
+      media: directMedia,
+      seed: 'multi-active-first',
+      status: 'pending',
+      vaultRoot: setup.vaultRoot,
+    })
+    await createDeliveryIntent({
+      media: setup.media,
+      status: 'sent',
+      vaultRoot: setup.vaultRoot,
+    })
+
+    const deferred = await pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })
+    expect(deferred.exportPacksPruned).toBe(1)
+    await expect(stat(setup.packPaths[0]!)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    })
+    await expect(stat(setup.packPaths[1]!)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(setup.archivePath)).resolves.toMatchObject({
+      size: setup.archive.byteLength,
+    })
+
+    await saveAssistantOutboxIntent(setup.vaultRoot, {
+      ...directIntent,
+      status: 'failed',
+      updatedAt: '2026-08-06T18:03:00.000Z',
+    })
+    const completed = await pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })
+    expect(completed.exportPacksPruned).toBe(1)
+    await expect(stat(setup.packPaths[0]!)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it.each([
@@ -495,7 +655,7 @@ describe('assistant generated export-pack retirement', () => {
     })
   })
 
-  it('retires more than twenty packs incrementally and keeps the ZIP until the final pass', async () => {
+  it('retires more than twenty packs through the existing local maintenance owner', async () => {
     const setup = await createMultiExportPackDelivery(21)
     await createDeliveryIntent({
       media: setup.media,
@@ -503,21 +663,7 @@ describe('assistant generated export-pack retirement', () => {
       vaultRoot: setup.vaultRoot,
     })
 
-    let prunedPacks = 0
-    for (let pass = 0; pass < setup.packPaths.length; pass += 1) {
-      const result = await pruneQuiescentAssistantGeneratedDeliveryResidue({
-        vault: setup.vaultRoot,
-      })
-      prunedPacks += result.exportPacksPruned
-      expect(result.exportPacksPruned).toBe(1)
-      if (pass < setup.packPaths.length - 1) {
-        await expect(stat(setup.archivePath)).resolves.toMatchObject({
-          size: setup.archive.byteLength,
-        })
-      }
-    }
-
-    expect(prunedPacks).toBe(21)
+    await maybeRunAssistantRuntimeMaintenance({ vault: setup.vaultRoot })
     for (const packPath of setup.packPaths) {
       await expect(stat(packPath)).rejects.toMatchObject({ code: 'ENOENT' })
     }
@@ -535,19 +681,39 @@ describe('assistant generated export-pack retirement', () => {
       vaultRoot: setup.vaultRoot,
     })
 
-    const first = await pruneQuiescentAssistantGeneratedDeliveryResidue({
+    const result = await pruneQuiescentAssistantGeneratedDeliveryResidue({
       vault: setup.vaultRoot,
     })
-    expect(first.exportPacksPruned).toBe(1)
+    expect(result.exportPacksPruned).toBe(2)
+    await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('retains ZIP proof when stale-candidate scanning exhausts the cumulative unit', async () => {
+    const payloadBytes = 52 * 1024 * 1024
+    const setup = await createMultiExportPackDelivery(2, payloadBytes)
+    await createDeliveryIntent({
+      media: setup.media,
+      status: 'sent',
+      vaultRoot: setup.vaultRoot,
+    })
+    await writeFile(
+      path.join(setup.packPaths[0]!, 'entities.json'),
+      Buffer.alloc(payloadBytes, 99),
+    )
+
+    const result = await pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })
+
+    expect(result.exportPacksPruned).toBe(0)
+    for (const packPath of setup.packPaths) {
+      await expect(stat(packPath)).resolves.toMatchObject({
+        isDirectory: expect.any(Function),
+      })
+    }
     await expect(stat(setup.archivePath)).resolves.toMatchObject({
       size: setup.archive.byteLength,
     })
-
-    const second = await pruneQuiescentAssistantGeneratedDeliveryResidue({
-      vault: setup.vaultRoot,
-    })
-    expect(second.exportPacksPruned).toBe(1)
-    await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('aborts bounded retirement without losing its archive continuation', async () => {
@@ -559,8 +725,8 @@ describe('assistant generated export-pack retirement', () => {
     })
     await expect(markExportPackIntentSent(pending, setup.vaultRoot)).resolves
       .toMatchObject({ status: 'sent' })
-    // Large archives leave the serial delivery path after a fixed-size unit;
-    // quiescent cleanup owns their interruptible continuation.
+    // Durable sent never runs optional archive work on the serial dispatch
+    // stack; quiescent cleanup owns the interruptible continuation.
     await expect(stat(setup.packPath)).resolves.toMatchObject({
       isDirectory: expect.any(Function),
     })
