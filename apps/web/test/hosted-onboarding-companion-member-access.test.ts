@@ -284,6 +284,7 @@ describe("native companion hosted member admission", () => {
       },
       now: expect.any(Date),
       prisma,
+      pulseTrialStartSource: "companion_onboarding",
       suppressSignupWelcome: true,
     });
     expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledOnce();
@@ -314,6 +315,7 @@ describe("native companion hosted member admission", () => {
       },
       now: expect.any(Date),
       prisma,
+      pulseTrialStartSource: "companion_onboarding",
       suppressSignupWelcome: true,
     });
     expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
@@ -398,6 +400,7 @@ describe("native companion hosted member admission", () => {
       },
       now: new Date("2026-07-31T11:15:00.000Z"),
       prisma,
+      pulseTrialStartSource: "companion_onboarding",
     });
     expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
       memberId: pendingMember.id,

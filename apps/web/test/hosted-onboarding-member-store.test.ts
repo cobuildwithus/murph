@@ -3419,6 +3419,7 @@ describe("hosted-member-store", () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const upsert = vi.fn().mockResolvedValue({
       memberId: "member_123",
+      pulseTrialStartSource: "web_onboarding",
       stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-customer-id",
         memberId: "member_123",
@@ -3447,12 +3448,14 @@ describe("hosted-member-store", () => {
     await expect(
       writeHostedMemberStripeBillingRefTx({
         memberId: "member_123",
+        pulseTrialStartSource: "web_onboarding",
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: "sub_123",
         tx: prisma,
       }),
     ).resolves.toEqual({
       memberId: "member_123",
+      pulseTrialStartSource: "web_onboarding",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
     });
@@ -3472,6 +3475,7 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
         pulseTrialPolicyVersion: null,
         pulseTrialRedeemedAt: null,
+        pulseTrialStartSource: "web_onboarding",
         scheduledBillingEffectiveAt: null,
         scheduledBillingPlanCode: null,
         stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
@@ -3486,6 +3490,7 @@ describe("hosted-member-store", () => {
         usagePlanTransitionToCode: null,
       },
       update: {
+        pulseTrialStartSource: "web_onboarding",
         stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
         stripeSubscriptionIdEncrypted: expect.stringMatching(/^hsb-test:/u),
@@ -3665,6 +3670,7 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
         pulseTrialPolicyVersion: null,
         pulseTrialRedeemedAt: null,
+        pulseTrialStartSource: null,
         scheduledBillingEffectiveAt: null,
         scheduledBillingPlanCode: null,
         stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),

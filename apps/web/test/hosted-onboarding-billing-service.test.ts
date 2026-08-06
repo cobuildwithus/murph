@@ -298,6 +298,14 @@ describe("createHostedBillingCheckout", () => {
         timeout: 5_000,
       }),
     );
+    const standardCheckoutInput =
+      mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
+    expect(standardCheckoutInput?.metadata).not.toHaveProperty(
+      "pulseTrialStartSource",
+    );
+    expect(standardCheckoutInput?.subscription_data?.metadata).not.toHaveProperty(
+      "pulseTrialStartSource",
+    );
     const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
     expect(checkoutSessionRequest).not.toHaveProperty("customer");
     expect(checkoutSessionRequest).not.toHaveProperty("automatic_tax");
@@ -491,6 +499,7 @@ describe("createHostedBillingCheckout", () => {
           billingPlanCode: "launch_monthly",
           checkoutOffer: "pulse_trial_7d",
           memberId: "member_123",
+          pulseTrialStartSource: "web_onboarding",
           trialDurationDays: "14",
           trialPolicyVersion: "pulse-trial-2026-07-15-v3",
           trialUsageLimitUsdMicros: "4500000",
@@ -500,6 +509,7 @@ describe("createHostedBillingCheckout", () => {
             billingPlanCode: "launch_monthly",
             checkoutOffer: "pulse_trial_7d",
             memberId: "member_123",
+            pulseTrialStartSource: "web_onboarding",
             trialDurationDays: "14",
             trialPolicyVersion: "pulse-trial-2026-07-15-v3",
             trialUsageLimitUsdMicros: "4500000",

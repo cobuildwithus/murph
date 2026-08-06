@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 
 import { GrowthCharts } from "./growth-charts";
 import { GrowthScorecard } from "./growth-scorecard";
+import { GrowthWeeklyTable } from "./growth-weekly-table";
+import { TrialStartAttribution } from "./trial-start-attribution";
 import {
   captureHostedGrowthDailySnapshot,
   readHostedGrowthDashboard,
@@ -79,6 +81,8 @@ export default async function HostedOpsGrowthPage() {
         snapshotSeries={dashboard.snapshotSeries}
       />
 
+      <TrialStartAttribution attribution={dashboard.trialStartAttribution} />
+
       <section aria-labelledby="growth-revenue-title" className="flex flex-col gap-4">
         <SectionHeading
           description="Recurring revenue comes from active paid plan definitions. The tracked top-up total starts with retained fulfilled history at cutover, adds each new first fulfillment, and may omit purchases deleted before tracking began."
@@ -141,45 +145,7 @@ export default async function HostedOpsGrowthPage() {
         </div>
       </section>
 
-      <section aria-labelledby="growth-weekly-title" className="flex flex-col gap-4">
-        <SectionHeading
-          description="Rolling seven-day acquisition and trial-start volumes, newest first. These changes compare weekly volume; the company growth rate is the MRR score above."
-          id="growth-weekly-title"
-          title="Weekly acquisition"
-        />
-        <div className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Window</TableHead>
-                <TableHead className="text-right">New members</TableHead>
-                <TableHead className="text-right">Member change</TableHead>
-                <TableHead className="text-right">Trial starts</TableHead>
-                <TableHead className="text-right">Trial change</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {dashboard.weeklyRows.map((row) => (
-                <TableRow key={`${row.startDate}-${row.endDate}`}>
-                  <TableCell>{formatDateRange(row.startDate, row.endDate)}</TableCell>
-                  <TableCell className="text-right">
-                    {formatInteger(row.newMembers)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatChange(row.newMembersWowPercent)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatInteger(row.trialStarts)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatChange(row.trialStartsWowPercent)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
+      <GrowthWeeklyTable rows={dashboard.weeklyRows} />
 
       <section aria-labelledby="growth-cohort-title" className="flex flex-col gap-4">
         <SectionHeading
@@ -326,16 +292,6 @@ function formatPercent(value: number | null): string {
   }
 
   return `${formatInteger(Math.round(value))}%`;
-}
-
-function formatChange(value: number | null): string {
-  if (value === null) {
-    return "No week baseline";
-  }
-
-  const rounded = Math.round(value);
-  const prefix = rounded > 0 ? "+" : "";
-  return `${prefix}${formatInteger(rounded)}% week over week`;
 }
 
 function formatDateTime(value: string): string {
