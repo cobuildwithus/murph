@@ -65,6 +65,7 @@ export function HostedAiUsageActivity(props: {
           <div className="border-t border-border/70 py-5">
             <p className="text-sm leading-6 text-muted-foreground">
               Invite friends to Murph or ask about referral missions.
+              Qualifying rewards are added automatically.
             </p>
           </div>
         )}
