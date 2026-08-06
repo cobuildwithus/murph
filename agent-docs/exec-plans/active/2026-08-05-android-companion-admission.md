@@ -72,7 +72,34 @@ No public device-sync ingress or Junction boundary is reachable.
 - [x] Resolve corrected-head review by suppressing signup-welcome routing only
       for account admission and proving fresh phone/email activation remains
       successful, side-effect-free, and idempotent before explicit Connect.
+- [x] Record the required round-3 change-shape retrospective and explicitly
+      continue the current owner-bound design without a new access owner,
+      route split, or lifecycle mechanism.
 - [ ] Complete required exact-head review and CI after parent integration.
+
+## Review Retrospective
+
+The immutable first-reviewed patch had 81 additions and no deletions in
+authored production source. The corrected patch has 160 additions and one
+deletion: round 1 added the route-owned closed recovery adapter and direct
+owner proof while removing accidental iOS build-spec scope; round 2 added the
+admission-only welcome-suppression option through the existing companion-member
+and auto-trial call chain plus its focused proof.
+
+Continue this PR at that scope. Successful admission must leave an eligible
+new account with hosted access, and the existing Pulse-trial service is the
+sole billing/access owner. The route adapter is the stable Android recovery
+contract over broader hosted-domain failures. The default-false suppression
+option is the smallest way to reuse canonical trial activation and preserve
+`member.activated` without Linq routing, welcome queueing, or welcome email.
+Splitting or duplicating those owners would add a deploy boundary without
+removing a concept.
+
+The final scope remains closed to admission validation, canonical member/access
+activation, stable recovery mapping, admission-only welcome suppression, and
+direct phone, email, idempotency, no-line, no-device-ingress, and existing-caller
+proof. No Junction/device enrollment, UI, durable state, queue, scheduler, or
+new lifecycle belongs in this PR.
 
 ## Verification
 
@@ -90,8 +117,9 @@ No public device-sync ingress or Junction boundary is reachable.
   accidental iOS-only build-spec scope. Both are accepted and corrected;
   corrected-head round 2 then found that account admission inherited ordinary
   signup-welcome routing. The admission caller now uses the existing
-  suppression policy while preserving trial activation and access; another
-  corrected-head review and exact-head CI remain pending.
+  suppression policy while preserving trial activation and access. Round 3
+  verified both correction sets and required the change-shape retrospective
+  recorded above; another exact-head review and CI remain pending.
 
 ## Rollout
 
