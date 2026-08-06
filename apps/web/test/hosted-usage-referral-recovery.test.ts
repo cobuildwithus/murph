@@ -81,6 +81,7 @@ describe("hosted usage-referral recovery", () => {
     const findMailboxItems = vi.fn().mockResolvedValue([
       {
         id: "mailbox_referral_existing",
+        lane: "conversation",
         laneSeq: 11n,
         userId: "member_existing_source",
       },
@@ -184,6 +185,7 @@ describe("hosted usage-referral recovery", () => {
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         id: true,
+        lane: true,
         laneSeq: true,
         userId: true,
       },
@@ -195,7 +197,6 @@ describe("hosted usage-referral recovery", () => {
             "assistant.notification.requested:usage-referral-reward:",
         },
         kind: "assistant.notification.requested",
-        lane: "system",
       },
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(
@@ -229,7 +230,7 @@ describe("hosted usage-referral recovery", () => {
       {
         expectedUserId: "member_existing_source",
         knownCheckpoint: {
-          lane: "system",
+          lane: "conversation",
           laneSeq: "11",
           userId: "member_existing_source",
         },
