@@ -7,6 +7,7 @@ import {
 
 import { renderClientComponent } from "./render-client-component";
 
+const IDENTITY_KEY = "member_referrer";
 const SIGNUP_URL = "https://www.withmurph.ai/r/stable_referral";
 
 describe("HostedSignupReferralLinkButton", () => {
@@ -19,6 +20,7 @@ describe("HostedSignupReferralLinkButton", () => {
     vi.stubGlobal("fetch", fetchMock);
     const rendered = await renderClientComponent(
       React.createElement(HostedSignupReferralLinkButton, {
+        identityKey: IDENTITY_KEY,
         signupUrl: SIGNUP_URL,
       }),
     );
@@ -50,8 +52,12 @@ describe("HostedSignupReferralLinkButton", () => {
       React.createElement(
         React.Fragment,
         null,
-        React.createElement(HostedSignupReferralLinkButton),
-        React.createElement(HostedSignupReferralLinkButton),
+        React.createElement(HostedSignupReferralLinkButton, {
+          identityKey: IDENTITY_KEY,
+        }),
+        React.createElement(HostedSignupReferralLinkButton, {
+          identityKey: IDENTITY_KEY,
+        }),
       ),
       { requireButton: false },
     );
@@ -70,13 +76,65 @@ describe("HostedSignupReferralLinkButton", () => {
     await rendered.cleanup();
   });
 
+  it("clears an old account URL before reloading another account", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("offline"))
+      .mockResolvedValueOnce(referralResponse("new_account"));
+    vi.stubGlobal("fetch", fetchMock);
+    const rendered = await renderClientComponent(
+      React.createElement(HostedSignupReferralLinkButton, {
+        identityKey: "member_old",
+        signupUrl: "https://www.withmurph.ai/r/old_account",
+      }),
+    );
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(rendered.window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    await rendered.rerender(
+      React.createElement(HostedSignupReferralLinkButton, {
+        identityKey: "member_new",
+      }),
+    );
+    await React.act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(rendered.button.textContent).toBe("Reload link");
+    expect(writeText).not.toHaveBeenCalled();
+
+    await React.act(async () => {
+      rendered.button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(rendered.button.textContent).toBe("Copy link");
+
+    await React.act(async () => {
+      rendered.button.click();
+    });
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(
+      "https://www.withmurph.ai/r/new_account",
+    );
+    expect(writeText).not.toHaveBeenCalledWith(
+      "https://www.withmurph.ai/r/old_account",
+    );
+
+    await rendered.cleanup();
+  });
+
   it("distinguishes reloading a link from retrying a clipboard write", async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("offline"))
       .mockResolvedValueOnce(referralResponse("reloaded"));
     vi.stubGlobal("fetch", fetchMock);
     const rendered = await renderClientComponent(
-      React.createElement(HostedSignupReferralLinkButton),
+      React.createElement(HostedSignupReferralLinkButton, {
+        identityKey: IDENTITY_KEY,
+      }),
     );
     await React.act(async () => {
       await Promise.resolve();
@@ -107,6 +165,7 @@ describe("HostedSignupReferralLinkButton", () => {
   it("keeps a failed clipboard write recoverable", async () => {
     const rendered = await renderClientComponent(
       React.createElement(HostedSignupReferralLinkButton, {
+        identityKey: IDENTITY_KEY,
         signupUrl: SIGNUP_URL,
       }),
     );
