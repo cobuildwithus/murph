@@ -416,6 +416,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       "packages/query/dist/browser-replica/murph-age.js",
       /packages\/query\/dist\/browser-replica\/murph-age\.js/,
     ],
+    [
+      "dynamic-tool execution runtime",
+      ".deploy/runner-bundle/node_modules/@murphai/assistant-engine/dist/assistant-codex/dynamic-tools.js",
+      /assistant-engine\/dist\/assistant-codex\/dynamic-tools\.js/,
+    ],
   ])("rejects %s inputs from the static boot closure", (_label, inputPath, expected) => {
     const metafile = staticBootClosureMetafile(inputPath);
 
@@ -563,7 +568,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
       entryBytes: 1_699_250 + 48_000,
-      staticClosureBytes: 8_540_082 + 96_000,
+      staticClosureBytes: 8_423_496 + 96_000,
       totalBytes: 10_276_559 + 32_768,
     });
   });

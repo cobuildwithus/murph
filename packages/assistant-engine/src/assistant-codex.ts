@@ -61,18 +61,17 @@ import {
   buildRuntimeIssueInputForFailedCodexAction,
   createCodexActionDiagnosticsReducer,
 } from './assistant-codex/action-diagnostics.js'
+import type {
+  MurphDynamicToolFinalActionPatch,
+  MurphDynamicToolReactionPatch,
+  MurphDynamicToolReplyTargetPatch,
+  MurphDynamicToolRequest,
+} from './assistant-codex/dynamic-tools.js'
 import {
-  executeMurphDynamicToolRequest,
-  isComputerDynamicToolRequest,
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   type AssistantStyleTurnSettingsOverlay,
-  type MurphDynamicToolFinalActionPatch,
-  type MurphDynamicToolReactionPatch,
-  type MurphDynamicToolReplyTargetPatch,
-  type MurphDynamicToolRequest,
-  readMurphDynamicToolRequest,
-} from './assistant-codex/dynamic-tools.js'
+} from './assistant-codex/dynamic-tool-catalog.js'
 import type {
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
@@ -168,7 +167,7 @@ export { extractCodexTraceUpdates } from './assistant-codex-events.js'
 export {
   listMurphDynamicToolNames,
   resolveMurphDynamicTools,
-} from './assistant-codex/dynamic-tools.js'
+} from './assistant-codex/dynamic-tool-catalog.js'
 export { resolveCodexDisplayOptions } from './assistant-codex/config.js'
 export type { CodexProgressEvent } from './assistant-codex-events.js'
 export type { CodexDisplayOptions } from './assistant-codex/config.js'
@@ -188,6 +187,15 @@ const CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS = 5_000
 const CODEX_BACKGROUND_WORK_WAIT_TIMEOUT_MS = 120_000
 const CODEX_BACKGROUND_WORK_POLL_INTERVAL_MS = 50
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
+type MurphDynamicToolRuntime =
+  typeof import('./assistant-codex/dynamic-tools.js')
+let murphDynamicToolRuntimePromise: Promise<MurphDynamicToolRuntime> | null = null
+
+function loadMurphDynamicToolRuntime(): Promise<MurphDynamicToolRuntime> {
+  murphDynamicToolRuntimePromise ??=
+    import('./assistant-codex/dynamic-tools.js')
+  return murphDynamicToolRuntimePromise
+}
 const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
 const CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES = [
@@ -3220,6 +3228,7 @@ async function runCodexAppServerTurnOnProcess(
   let contextCompactionProgressNotified = false
   let contextCompactionProgressPending = false
   let releaseLiveTurn = () => {}
+  const pendingDynamicToolRequests = new Set<Promise<void>>()
   const pendingProgressDeliveries = new Set<Promise<void>>()
   let dynamicToolExecutionChain: Promise<void> = Promise.resolve()
   const dynamicToolAbortController = new AbortController()
@@ -3795,6 +3804,19 @@ async function runCodexAppServerTurnOnProcess(
     pendingProgressDeliveries.add(tracked)
   }
 
+  const trackDynamicToolRequest = (promise: Promise<void>): void => {
+    const tracked = promise.finally(() => {
+      pendingDynamicToolRequests.delete(tracked)
+    })
+    pendingDynamicToolRequests.add(tracked)
+  }
+
+  const drainPendingDynamicToolRequests = async (): Promise<void> => {
+    while (pendingDynamicToolRequests.size > 0) {
+      await Promise.all([...pendingDynamicToolRequests])
+    }
+  }
+
   const drainPendingProgressDeliveries = async (): Promise<void> => {
     while (pendingProgressDeliveries.size > 0) {
       await waitForCodexProgressDrain([
@@ -4036,10 +4058,10 @@ async function runCodexAppServerTurnOnProcess(
     jsonEvents.push(message)
   }
 
-  const handleAcceptedServerRequest = (
+  const handleAcceptedServerRequest = async (
     message: CodexRpcMessage,
     requestId: CodexRpcId,
-  ): void => {
+  ): Promise<void> => {
     acceptJsonEvent(message)
 
     if (turnTerminal) {
@@ -4057,6 +4079,23 @@ async function runCodexAppServerTurnOnProcess(
       })
       return
     }
+
+    if (message.method !== 'item/tool/call') {
+      denyUnsupportedCodexServerRequest({
+        message,
+        requestId,
+        writeRpcMessage: (payload) => {
+          void tryWriteRpcMessage(payload)
+        },
+      })
+      return
+    }
+
+    const {
+      executeMurphDynamicToolRequest,
+      isComputerDynamicToolRequest,
+      readMurphDynamicToolRequest,
+    } = await loadMurphDynamicToolRuntime()
 
     const dynamicToolRequest = readMurphDynamicToolRequest(message)
     if (!dynamicToolRequest) {
@@ -4973,7 +5012,19 @@ async function runCodexAppServerTurnOnProcess(
         rejectPreStartParentTurnRequest(requestId)
         return
       }
-      handleAcceptedServerRequest(message, requestId)
+      const dynamicToolRequest = handleAcceptedServerRequest(
+        message,
+        requestId,
+      ).catch(() => {
+        void tryWriteRpcMessage({
+          id: requestId,
+          error: {
+            code: -32000,
+            message: 'Dynamic tool runtime is unavailable.',
+          },
+        })
+      })
+      trackDynamicToolRequest(dynamicToolRequest)
       return
     }
 
@@ -5238,6 +5289,7 @@ async function runCodexAppServerTurnOnProcess(
     lifecycleStage = 'turn_running'
     await turnCompleted
     clearInterruptCleanupTimer()
+    await drainPendingDynamicToolRequests()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
     emitActionDiagnosticsTrace()
@@ -5294,6 +5346,7 @@ async function runCodexAppServerTurnOnProcess(
       ? (buildRecordedTerminationError(lastEventError) ?? error)
       : error
     emitActionDiagnosticsTrace()
+    await drainPendingDynamicToolRequests()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
@@ -5623,7 +5676,11 @@ function isSerializedDynamicToolRequest(
     request.kind === 'subscription' ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
-    isComputerDynamicToolRequest(request)
+    request.kind === 'computer-open' ||
+    request.kind === 'computer-act' ||
+    request.kind === 'computer-os-control' ||
+    request.kind === 'computer-pause-for-user' ||
+    request.kind === 'computer-finish-run'
 }
 
 function isResponseAttachmentDynamicToolRequest(
