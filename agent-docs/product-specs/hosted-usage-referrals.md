@@ -3,9 +3,10 @@
 ## Status
 
 Active implementation contract for earned usage rewards. Web owns attribution,
-qualification, receipts, caps, and credit accounting. Linq and Telegram
-normalize conversational mission evidence into the same provider-neutral state
-machine. Shareable signup links reuse the same receipt, cap, and credit-ledger
+qualification, receipts, caps, credit accounting, and the durable completion
+notification handoff. Linq and Telegram normalize conversational mission
+evidence into the same provider-neutral state machine. Shareable signup links
+reuse the same receipt, cap, credit-ledger, recovery, and assistant-notification
 primitives without inventing a second mission lifecycle.
 
 There are two independent rollout gates:
@@ -14,8 +15,8 @@ There are two independent rollout gates:
 - `HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED=1` enables rewards for attributed
   signup-link activations.
 
-The stable referral link itself remains available to an active signed-in member
-when either reward gate is disabled.
+The stable referral link remains available to an active signed-in member when
+either reward gate is disabled.
 
 ## Product behavior
 
@@ -28,6 +29,14 @@ beside separately authorized plan, top-up, or group-funding paths.
 Describing a mission is not consent. Murph arms a mission only after the person
 explicitly chooses its exact server-returned policy. Different policies may be
 active at the same time.
+
+A shareable signup link is different. Murph creates it only when the member
+explicitly asks for a signup, invite, referral, or shareable link. Sharing or
+opening the link is not a completed referral and does not guarantee a reward.
+Murph may explain in one short sentence that a qualifying reward is applied
+automatically after the recipient completes their own Murph setup. Murph never
+chooses or contacts the recipient and never promises an amount the tool did not
+return.
 
 | Path | Qualification | Public reward label |
 | --- | --- | --- |
@@ -60,11 +69,32 @@ attribution row, or reward state. The same issuance function serves:
 
 - the existing runtime `create_signup_referral_link` action when a member asks
   Murph for their link;
-- the authenticated Settings `Copy link` action.
+- the authenticated Settings `Copy link` actions.
+
+Settings begins one shared authenticated link read when its referral actions
+mount. Concurrent actions share only that in-flight read; the resolved URL is
+not retained in a module-level identity cache. Once loaded, copying happens in
+the original click without another network request so browser clipboard gesture
+requirements remain intact. Success and failure are announced accessibly, and a
+failed preload remains explicitly retryable.
 
 A public `GET /r/<token>` only validates the token and renders a small landing
 page. Link previews, crawlers, and scanners therefore cannot allocate onboarding
-state. An explicit same-origin `POST /r/<token>/claim` creates a fresh ordinary
+state. The route is `noindex`, `nofollow`, and `no-referrer` so stable tokens do
+not enter search indexes or downstream referrer headers.
+
+The available landing has one action: `Join Murph`. It explains that continuing
+creates a private Murph setup, that Murph records who shared the link only for
+referral attribution, and that the referrer cannot see the recipient's
+conversations or health information.
+
+Known unavailable links render a human-readable recovery state instead of a
+generic 404. A temporarily exhausted claim allowance renders `Try again soon`
+and tells the recipient to reopen the same link later. Invalid cross-origin
+submissions remain hard authorization failures and are never disguised as a link
+problem.
+
+An explicit same-origin `POST /r/<token>/claim` creates a fresh ordinary
 `/join/<inviteCode>` invite and placeholder member. Every claimant receives
 isolated onboarding state, while `HostedInvite.referrerMemberId` remains attached
 to that invite throughout ordinary onboarding.
@@ -99,7 +129,9 @@ A signup-link activation is already one complete durable qualification event. It
 does not fabricate a group target, participant subject, or `target_bound` phase.
 Instead, one transaction creates the standard rewarded `HostedUsageReferral`
 receipt and its immutable referral grant. A distinct policy version preserves
-accurate Settings copy without relying on an ID prefix or a second table.
+accurate Settings copy without relying on an ID prefix or a second table. The
+policy-version registry retains old versions when policy semantics change so
+historical receipts remain classifiable.
 
 `superseded` remains a legacy terminal status for rows created by the original
 one-at-a-time mission contract. New arming does not emit it.
@@ -192,7 +224,7 @@ independent clients through concurrent settlement and replay and requires one
 receipt, one immutable entry, one remaining-capacity projection, and one member
 ledger increment.
 
-## Recovery and celebrations
+## Recovery and completion notices
 
 The existing Vercel-authenticated referral recovery cron remains the only
 scheduler. Each bounded pass:
@@ -200,40 +232,53 @@ scheduler. Each bounded pass:
 1. scans up to 50 recent attributed `member.activated` events when signup-link
    rewards are enabled;
 2. atomically settles eligible signup-link receipts and grants;
-3. reconciles up to 50 ordinary qualified missions or ordinary rewarded
-   referrals awaiting a source celebration;
-4. re-signals up to 50 oldest unconsumed referral-celebration mailbox items.
+3. reconciles up to 50 ordinary qualified missions, ordinary rewarded referrals
+   awaiting their source celebration, or signup-link rewards awaiting their
+   personal completion notice;
+4. re-signals up to 50 oldest unconsumed referral-notification mailbox items.
 
-No signup-specific queue, scheduler, outbox, grant worker, or notification path
-exists.
+No signup-specific queue, scheduler, outbox, grant worker, or runtime action
+exists. A small policy-aware presenter chooses between the existing ordinary
+mission celebration and the signup-link completion notice, then both use the
+same assistant-notification mailbox, dedupe key family, signal path, retry fence,
+and `celebrationQueuedAt` completion marker.
 
 Conversational mission completion remains celebrated in its frozen source
 conversation. Group notifications carry live external-thread authority. Personal
 notifications require the frozen direct thread and never move to a newer home
 conversation.
 
-Signup-link rewards are deliberately notification-free in the first version.
-They create no source-conversation record, no synthetic "challenge complete"
-message, and no false `celebrationQueuedAt` marker. The member receives the
-usage immediately and sees the completed `Invite someone to Murph` entry in
-Settings history. Notification delivery therefore cannot delay, reverse, or
-duplicate a signup-link reward.
+After a qualifying signup-link reward commits, Murph sends one concise personal
+confirmation through the member's current authorized Linq or Telegram route. It
+states that someone completed setup through the referral link and that the
+approximate-message reward is already applied. It does not identify or guess who
+joined, mention dollars or internal qualification logic, or ask the member to do
+another step. A missing route delays only this notice; it never delays, reverses,
+or duplicates the reward. Settings history remains the durable visible receipt.
 
-A failed conversational notification cannot duplicate or claw back its reward.
-Once a mailbox item is durable, failed signaling leaves that same item eligible
-for the next bounded pass.
+Once a notification mailbox item is durable, failed signaling leaves that same
+item eligible for the next bounded pass. A notification failure cannot duplicate
+or claw back its reward.
 
 ## Settings projection
 
-Settings keeps the combined AI usage meter as the aggregate balance owner. The
-Referrals detail surface is read-only:
+Settings keeps the combined AI usage meter as the aggregate balance owner.
+Referral access and history remain read-only projections:
 
-- `Copy link` is available to every active signed-in member, independent of the
-  conversational mission rollout gate or messaging channel;
+- Messaging always includes a compact `Referral link` row for an active signed-in
+  account, including first-run, email-only, and mission-disabled members;
+- the AI usage `Referrals` surface repeats the same deterministic Copy link when
+  mission activity or usage history makes that contextual surface visible;
+- concurrent Copy-link actions share one in-flight authenticated read but never
+  cache the resolved identity-bound URL across later mounts or account changes;
 - `Ask Murph` appears only when conversational missions are enabled and a
   supported Murph conversation exists;
+- the empty referral explanation says qualifying rewards are added
+  automatically;
 - current mission rows show title, status, deadline, approximate message reward,
   and reward owner;
+- reward columns stack below descriptions on narrow screens instead of forcing
+  horizontal compression;
 - qualification requirements and selection date stay in one native details
   disclosure;
 - completed mission and signup-link rewards appear in History;
@@ -261,14 +306,15 @@ preserves grant provenance without retaining cross-account identity.
 Stable referral URLs contain only a random internal member identifier inside an
 authenticated token. They contain no recipient or health information. A claimant
 cannot see the referrer's private conversations, files, connected data, or
-health information.
+health information. Completion notices deliberately omit the referred member's
+identity.
 
 ## Deployment and rollback
 
 The stable-link surface is Web-only and schema-free. Deploy the `/r/<token>`
-landing page, explicit claim route, authenticated Settings endpoint, and runtime
-handler together before sharing stable URLs. Existing `/join/<inviteCode>` URLs
-remain compatible.
+landing page, explicit claim route, authenticated Settings endpoint, runtime
+handler, and completion-notice presenter together before sharing stable URLs.
+Existing `/join/<inviteCode>` URLs remain compatible.
 
 Keep `HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED` unset during deployment. Before
 enabling it:
@@ -276,14 +322,18 @@ enabling it:
 1. confirm exact-head unit, typecheck, app, viewport, and design-proof checks;
 2. run the focused local-PostgreSQL concurrent settlement and replay proof;
 3. smoke one attributed activation and confirm one receipt, entry, grant, member
-   balance increment, and accurate Settings history;
-4. replay the activation/recovery pass and confirm no second grant;
+   balance increment, accurate Settings history, and one identity-safe
+   completion notice;
+4. replay the activation and recovery pass and confirm no second grant or notice;
 5. smoke one cap rejection and one self-referral rejection;
 6. exercise the 50-claims-per-hour boundary and confirm the rejected claim
-   creates no placeholder member or invite.
+   creates no placeholder member or invite;
+7. verify invalid-origin claims remain 403 while known unavailable and busy
+   links render their human-readable landing states.
 
 Disabling the signup-reward gate immediately stops new activation scans. It does
-not revoke stable links, hide prior history, or claw back existing credit.
+not revoke stable links, hide prior history, claw back existing credit, or
+suppress a notice for a reward that already committed.
 
 Once the first signup-link referral grant exists, Web must not roll back below a
 version that understands referral-backed entries and the signup policy version.
