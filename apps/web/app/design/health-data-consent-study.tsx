@@ -195,7 +195,7 @@ function ConsentStateFrame({
 }) {
   return (
     <div
-      className="rounded-2xl border border-border bg-background p-5"
+      className="min-w-0 rounded-2xl border border-border bg-background p-5"
       data-design-state={label.toLowerCase().replaceAll(" ", "-")}
     >
       <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
