@@ -1484,6 +1484,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       const encryptedBytes = await readFile(encrypted.encryptedFilePath);
       await rm(snapshotScratchRoot, { force: true, recursive: true });
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
       const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot restore fetch");
@@ -1513,8 +1515,19 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           );
         }
         if (request.url === getUrl) {
-          await delayWithAbort(25, request.signal);
-          return new Response(encryptedBytes, {
+          vi.setSystemTime(new Date(Date.now() + 25));
+          let bodySent = false;
+          return new Response(new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (bodySent) {
+                return;
+              }
+              bodySent = true;
+              vi.setSystemTime(new Date(Date.now() + 30));
+              controller.enqueue(encryptedBytes);
+              controller.close();
+            },
+          }, { highWaterMark: 0 }), {
             headers: {
               "content-length": String(encrypted.encryptedByteSize),
               "content-type": "application/octet-stream",
@@ -1584,7 +1597,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       expect(restoreTimings?.encryptedBytes).toBe(encrypted.encryptedByteSize);
       expect(restoreTimings?.plainBytes).toBe(encrypted.totalPlainBytes);
-      expect(restoreTimings?.objectFetchResponseHeadersMs).toBeGreaterThanOrEqual(20);
+      expect(restoreTimings?.objectFetchResponseHeadersMs).toBe(25);
+      expect(restoreTimings?.objectFetchBodyReadMs).toBe(30);
       expect(
         (restoreTimings?.objectFetchResponseHeadersMs ?? 0)
           + (restoreTimings?.objectFetchBodyReadMs ?? 0),
@@ -1652,6 +1666,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain("note.md");
       expect(serializedLogs).not.toContain("restored through direct r2");
     } finally {
+      vi.useRealTimers();
       dataKey.fill(0);
       await rm(tempRoot, {
         force: true,
@@ -1695,6 +1710,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         outputDir: scratchRoot,
       });
       const encryptedBytes = await readFile(encrypted.encryptedFilePath);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
       const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
       let objectFetchCount = 0;
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
@@ -1721,17 +1738,19 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         if (request.url === getUrl) {
           objectFetchCount += 1;
           if (objectFetchCount === 1) {
+            vi.setSystemTime(new Date(Date.now() + 80));
             let prefixSent = false;
             return new Response(new ReadableStream<Uint8Array>({
               pull(controller) {
                 if (!prefixSent) {
                   prefixSent = true;
+                  vi.setSystemTime(new Date(Date.now() + 70));
                   controller.enqueue(encryptedBytes.subarray(0, 32));
                   return;
                 }
                 controller.error(new TypeError("connection reset"));
               },
-            }), {
+            }, { highWaterMark: 0 }), {
               headers: {
                 "content-length": String(encrypted.encryptedByteSize),
                 "content-type": "application/octet-stream",
@@ -1739,7 +1758,19 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               status: 200,
             });
           }
-          return new Response(encryptedBytes, {
+          vi.setSystemTime(new Date(Date.now() + 7));
+          let bodySent = false;
+          return new Response(new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (bodySent) {
+                return;
+              }
+              bodySent = true;
+              vi.setSystemTime(new Date(Date.now() + 11));
+              controller.enqueue(encryptedBytes);
+              controller.close();
+            },
+          }, { highWaterMark: 0 }), {
             headers: {
               "content-length": String(encrypted.encryptedByteSize),
               "content-type": "application/octet-stream",
@@ -1783,8 +1814,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
 
       expect(objectFetchCount).toBe(2);
-      expect(restoreTimings?.objectFetchResponseHeadersMs).toEqual(expect.any(Number));
-      expect(restoreTimings?.objectFetchBodyReadMs).toEqual(expect.any(Number));
+      expect(restoreTimings?.objectFetchResponseHeadersMs).toBe(7);
+      expect(restoreTimings?.objectFetchBodyReadMs).toBe(11);
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
       await expect(
         readdir(tempRoot).then((entries) =>
@@ -1810,6 +1841,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain(dataKeyBase64);
       expect(serializedLogs).not.toContain(tempRoot);
     } finally {
+      vi.useRealTimers();
       dataKey.fill(0);
       await rm(tempRoot, {
         force: true,

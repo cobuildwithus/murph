@@ -89,5 +89,14 @@ Updated: 2026-08-06
   assignments per GET attempt. The existing fetch and restore awaits remain the
   only awaited boundaries, and request-count assertions remain three calls for
   the ordinary restore and two object GET attempts for the retry fixture.
-- Pending: exact pushed-head CI plus preliminary specialist and final ReviewGPT
-  results.
+- Preliminary specialists: accepted one coverage-only finding. The existing
+  runner fixtures now use a Date-only fake clock and pull-controlled streams to
+  prove exact 25/30 ms successful response/body spans and exact 7/11 ms final
+  successful-attempt spans after a deliberately slower failed attempt. The 145
+  runner tests and Cloudflare typecheck passed after applying that test-only
+  patch.
+- Final ReviewGPT round 1: `ROUND_OUTCOME: PASS` with no qualifying code
+  findings. Its PR-body cardinality note was verified against the default
+  50-item initial mailbox import and corrected without changing repository
+  code.
+- Pending: exact final-head CI.
