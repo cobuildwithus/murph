@@ -71,12 +71,13 @@ attribution row, or reward state. The same issuance function serves:
   Murph for their link;
 - the authenticated Settings `Copy link` actions.
 
-Settings begins one shared authenticated link read when its referral actions
-mount. Concurrent actions share only that in-flight read; the resolved URL is
-not retained in a module-level identity cache. Once loaded, copying happens in
-the original click without another network request so browser clipboard gesture
-requirements remain intact. Success and failure are announced accessibly, and a
-failed preload remains explicitly retryable.
+Each mounted Settings action performs its own authenticated link read. This
+intentionally avoids any module-level or cross-component cache of an
+identity-bound URL, including during an in-app account switch. Once a URL is
+loaded, copying happens in the original click without another network request so
+browser clipboard gesture requirements remain intact. Success and load-versus-
+copy failures are announced accessibly, and a failed preload remains explicitly
+retryable.
 
 A public `GET /r/<token>` only validates the token and renders a small landing
 page. Link previews, crawlers, and scanners therefore cannot allocate onboarding
@@ -269,8 +270,8 @@ Referral access and history remain read-only projections:
   account, including first-run, email-only, and mission-disabled members;
 - the AI usage `Referrals` surface repeats the same deterministic Copy link when
   mission activity or usage history makes that contextual surface visible;
-- concurrent Copy-link actions share one in-flight authenticated read but never
-  cache the resolved identity-bound URL across later mounts or account changes;
+- each Copy-link action performs its own authenticated read and never retains a
+  resolved identity-bound URL across another component, mount, or account;
 - `Ask Murph` appears only when conversational missions are enabled and a
   supported Murph conversation exists;
 - the empty referral explanation says qualifying rewards are added
