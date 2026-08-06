@@ -164,6 +164,7 @@ const assistantInputConversationRefSchema = z
     actorId: safeNullableAssistantInputTokenSchema('actorId'),
     actorIsSelf: z.boolean(),
     source: safeNullableAssistantInputTokenSchema('source'),
+    sessionId: safeNullableAssistantInputTokenSchema('sessionId').optional(),
     threadId: safeNullableAssistantInputTokenSchema('threadId'),
     threadIsDirect: z.boolean().nullable().default(null),
   })

@@ -199,6 +199,8 @@ export function createAssistantHostedToolContext(input: {
   const route = input.route ?? null
   const clinicalRecordsConnectLinkTool =
     executionContext?.clinicalRecordsConnectLinkTool ?? null
+  const imageGenerationLauncher =
+    executionContext?.imageGenerationLauncher ?? null
   const newsletterPort = input.messageInput.scheduledAutomationAuthority
     ? executionContext?.newsletterTool ?? null
     : null
@@ -293,7 +295,23 @@ export function createAssistantHostedToolContext(input: {
     groupTool: executionContext?.groupTool ?? null,
     imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
-    imageGenerationLauncher: executionContext?.imageGenerationLauncher ?? null,
+    imageGenerationLauncher: imageGenerationLauncher
+      ? {
+          launch(request) {
+            return imageGenerationLauncher.launch({
+              ...request,
+              scopeId: readDeliveryContext().session.sessionId,
+            })
+          },
+          ...(imageGenerationLauncher.readStatus
+            ? {
+                readStatus(scopeId: string) {
+                  return imageGenerationLauncher.readStatus?.(scopeId) ?? null
+                },
+              }
+            : {}),
+        }
+      : null,
     persistGeneratedImageCapture:
       executionContext?.persistGeneratedImageCapture ?? null,
     newsletterTool,

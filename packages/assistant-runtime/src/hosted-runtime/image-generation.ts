@@ -357,6 +357,7 @@ async function stageImageGenerationCompletion(input: {
         ...origin.conversation,
         actorId: null,
         actorIsSelf: false,
+        sessionId: input.completion.scopeId,
       },
       occurredAt: input.completion.completedAt,
       receivedAt: input.completion.completedAt,
