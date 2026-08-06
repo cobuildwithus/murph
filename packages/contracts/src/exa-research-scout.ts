@@ -156,7 +156,7 @@ const unsafePublicResearchQuestionPatterns = [
   /\b(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+[a-z]{2,24}(?:\/\S*)?\b/iu,
   /(?<!\d)\+?(?:\d[\s().-]*){9,}\d(?!\d)/u,
   /\b(?:dob|date of birth|birthdate|born on)\b/iu,
-  /\b(?:my|mine|me|i'm|i've|i have|i am|i was|i take|i use|i weigh|i should|i can|i could|i would|should i|can i|could i|would i)\b/iu,
+  /\b(?:i|my|mine|me|i'm|i've|i have|i am|i was|i take|i use|i weigh|i should|i can|i could|i would|should i|can i|could i|would i)\b/iu,
   /\b(?:member|patient|user)[-_ ]?id\b/iu,
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu,
   /\b(?:appointment|medical record|clinical note|mychart|street address)\b/iu,
