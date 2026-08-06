@@ -2,11 +2,14 @@ import {
   buildHostedGrowthMessageSeries,
   type HostedGrowthMessageSnapshot,
 } from "@/src/lib/hosted-ops/growth-message-series";
+import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
 import {
   GrowthScorecard,
   type GrowthScorecardProps,
 } from "../(dashboard)/ops/growth/growth-scorecard";
 import { GrowthCharts } from "../(dashboard)/ops/growth/growth-charts";
+import { GrowthWeeklyTable } from "../(dashboard)/ops/growth/growth-weekly-table";
+import { TrialStartAttribution } from "../(dashboard)/ops/growth/trial-start-attribution";
 
 const GROWTH_DATES = Array.from({ length: 30 }, (_, index) => {
   const date = new Date(Date.UTC(2026, 6, index + 1));
@@ -60,6 +63,72 @@ const SNAPSHOT_SERIES = GROWTH_DATES.map((date, index) => ({
   payingCustomers: 54 + Math.floor(index * 0.8),
   trialingMembers: 16 + (index % 7),
 }));
+
+const TRIAL_START_ATTRIBUTION = {
+  counts: {
+    companion_onboarding: 8,
+    linq_instant_start: 5,
+    unknown: 3,
+    web_onboarding: 11,
+  },
+  recent: [
+    {
+      memberCreatedAt: "2026-07-31T14:08:00.000Z",
+      phoneHint: "*** 0194",
+      pulseTrialStartSource: "linq_instant_start",
+      trialStartedAt: "2026-07-31T14:09:00.000Z",
+    },
+    {
+      memberCreatedAt: "2026-07-12T09:20:00.000Z",
+      phoneHint: null,
+      pulseTrialStartSource: "companion_onboarding",
+      trialStartedAt: "2026-07-30T17:42:00.000Z",
+    },
+    {
+      memberCreatedAt: "2026-07-29T11:15:00.000Z",
+      phoneHint: "*** 4827",
+      pulseTrialStartSource: "web_onboarding",
+      trialStartedAt: "2026-07-29T11:21:00.000Z",
+    },
+    {
+      memberCreatedAt: "2026-06-18T18:00:00.000Z",
+      phoneHint: null,
+      pulseTrialStartSource: "unknown",
+      trialStartedAt: "2026-07-28T13:05:00.000Z",
+    },
+  ],
+  windowStartDate: "2026-07-02",
+} satisfies HostedGrowthDashboard["trialStartAttribution"];
+
+const EMPTY_TRIAL_START_ATTRIBUTION = {
+  counts: {
+    companion_onboarding: 0,
+    linq_instant_start: 0,
+    unknown: 0,
+    web_onboarding: 0,
+  },
+  recent: [],
+  windowStartDate: "2026-07-02",
+} satisfies HostedGrowthDashboard["trialStartAttribution"];
+
+const WEEKLY_ROWS: HostedGrowthDashboard["weeklyRows"] = [
+  {
+    endDate: "2026-07-31",
+    newMembers: 34,
+    newMembersWowPercent: 13.3,
+    startDate: "2026-07-25",
+    trialStarts: 23,
+    trialStartsWowPercent: 9.5,
+  },
+  {
+    endDate: "2026-07-24",
+    newMembers: 30,
+    newMembersWowPercent: null,
+    startDate: "2026-07-18",
+    trialStarts: 21,
+    trialStartsWowPercent: null,
+  },
+];
 
 const STUDY_INPUT = {
   activeUsers: {
@@ -158,6 +227,33 @@ export function GrowthScorecardStudy() {
           dailySeries={DAILY_SERIES}
           messageSeries={MESSAGE_SERIES}
           snapshotSeries={SNAPSHOT_SERIES}
+        />
+      </div>
+      <div id="growth-trial-start-attribution">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Trial start provenance
+        </div>
+        <TrialStartAttribution
+          attribution={TRIAL_START_ATTRIBUTION}
+          titleId="design-trial-start-attribution-title"
+        />
+      </div>
+      <div id="growth-trial-start-attribution-empty">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Empty trial start provenance
+        </div>
+        <TrialStartAttribution
+          attribution={EMPTY_TRIAL_START_ATTRIBUTION}
+          titleId="design-empty-trial-start-attribution-title"
+        />
+      </div>
+      <div id="growth-weekly-intake-and-activation">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Weekly intake semantics
+        </div>
+        <GrowthWeeklyTable
+          rows={WEEKLY_ROWS}
+          titleId="design-growth-weekly-title"
         />
       </div>
       <StudyState id="target-hit" label="Target hit" mrrWowPercent={10.8} />

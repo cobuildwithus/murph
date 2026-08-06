@@ -32,6 +32,10 @@ import {
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
+import {
+  parseHostedPulseTrialStartSource,
+  type HostedPulseTrialStartSource,
+} from "./pulse-trial-start-source";
 
 export interface HostedMemberStripeBillingRefSnapshot {
   checkoutAttemptId?: string | null;
@@ -48,6 +52,7 @@ export interface HostedMemberStripeBillingRefSnapshot {
   memberId: string;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
+  pulseTrialStartSource?: HostedPulseTrialStartSource | null;
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: string | null;
   stripeCheckoutSessionId?: string | null;
@@ -93,6 +98,7 @@ export interface HostedMemberStripeBillingRefWriteInput {
   memberId: string;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
+  pulseTrialStartSource?: HostedPulseTrialStartSource | null;
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: string | null;
   stripeEventCreatedAt?: Date | null;
@@ -784,6 +790,7 @@ export async function writeAcceptedHostedMemberPulseTrialBillingTx(input: {
   memberId: string;
   preparedCompletion: PreparedHostedMemberStripeCheckoutCompletion;
   pulseTrialPolicyVersion: string;
+  pulseTrialStartSource: HostedPulseTrialStartSource | null;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
   if (input.preparedCompletion.memberId !== input.memberId) {
@@ -801,6 +808,7 @@ export async function writeAcceptedHostedMemberPulseTrialBillingTx(input: {
       currentTrialStartedAt: input.currentTrialStartedAt,
       pulseTrialPolicyVersion: input.pulseTrialPolicyVersion,
       pulseTrialRedeemedAt: input.currentTrialStartedAt,
+      pulseTrialStartSource: input.pulseTrialStartSource,
     },
     where: {
       memberId: input.memberId,
@@ -1140,6 +1148,13 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
     ...(billingRef.pulseTrialRedeemedAt !== undefined
       ? { pulseTrialRedeemedAt: billingRef.pulseTrialRedeemedAt }
       : {}),
+    ...(billingRef.pulseTrialStartSource !== undefined
+      ? {
+          pulseTrialStartSource: parseHostedPulseTrialStartSource(
+            billingRef.pulseTrialStartSource,
+          ),
+        }
+      : {}),
     ...(billingRef.scheduledBillingEffectiveAt
       ? { scheduledBillingEffectiveAt: billingRef.scheduledBillingEffectiveAt }
       : {}),
@@ -1225,6 +1240,7 @@ async function buildHostedMemberBillingRefCreateData(
     currentTrialStartedAt: input.currentTrialStartedAt ?? null,
     pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
     pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
+    pulseTrialStartSource: input.pulseTrialStartSource ?? null,
     scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
     scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
     stripeCustomerLookupKey: createHostedStripeCustomerLookupKey(input.stripeCustomerId ?? null),
@@ -1287,6 +1303,9 @@ async function buildHostedMemberBillingRefUpdateData(
   }
   if (input.pulseTrialPolicyVersion !== undefined) {
     data.pulseTrialPolicyVersion = input.pulseTrialPolicyVersion;
+  }
+  if (input.pulseTrialStartSource !== undefined) {
+    data.pulseTrialStartSource = input.pulseTrialStartSource;
   }
   if (input.scheduledBillingPlanCode !== undefined) {
     data.scheduledBillingPlanCode = input.scheduledBillingPlanCode;

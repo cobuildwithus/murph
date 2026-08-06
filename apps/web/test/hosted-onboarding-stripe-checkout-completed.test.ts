@@ -758,6 +758,7 @@ describe("applyStripeCheckoutCompleted", () => {
       currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
       memberId: "member_123",
       pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      pulseTrialStartSource: "web_onboarding",
     }));
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(
@@ -800,6 +801,18 @@ describe("applyStripeCheckoutCompleted", () => {
   });
 
   it("accepts legacy seven-day Pulse Trial checkout metadata for in-flight sessions", async () => {
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce({
+      ...makePulseTrialSubscription(),
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        trialDurationDays: "7",
+        trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+        trialUsageLimitUsdMicros: "4500000",
+      },
+    });
+
     await expect(
       applyStripeCheckoutCompleted(
         {
@@ -825,6 +838,37 @@ describe("applyStripeCheckoutCompleted", () => {
       mocks.writeAcceptedHostedMemberPulseTrialBillingTx,
     ).toHaveBeenCalledWith(expect.objectContaining({
       pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      pulseTrialStartSource: null,
+    }));
+  });
+
+  it("keeps website attribution unchanged when Stripe repeats trial completion", async () => {
+    const session = makePulseTrialCheckoutSession();
+
+    await applyStripeCheckoutCompleted(session as never, {} as never);
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot.mockResolvedValueOnce(
+      makePulseTrialDecisionSnapshot({
+        billingStatus: HostedBillingStatus.active,
+        currentBillingPhase: "trial",
+        pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
+      }),
+    );
+
+    await expect(
+      applyStripeCheckoutCompleted(session as never, {} as never),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: "member_123",
+    });
+
+    expect(
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx,
+    ).toHaveBeenCalledOnce();
+    expect(
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      pulseTrialStartSource: "web_onboarding",
     }));
   });
 
@@ -1600,6 +1644,7 @@ function makePulseTrialMetadata(): Record<string, string> {
     billingPlanCode: "launch_monthly",
     checkoutOffer: "pulse_trial_7d",
     memberId: "member_123",
+    pulseTrialStartSource: "web_onboarding",
     trialDurationDays: "10",
     trialPolicyVersion: "pulse-trial-2026-06-30-v2",
     trialUsageLimitUsdMicros: "4500000",
