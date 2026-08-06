@@ -305,11 +305,18 @@ Last verified: 2026-08-05
   suspension or deletion won, it expires the session instead. Account deletion
   suspends first, re-reads all direct attempts and Family billing owners,
   expires every open session, absorbs an expiry/completion race by canceling
-  the resulting subscription, and only then prepares the final
-  customer-cleanup receipt.
+  the resulting subscription, and reuses the exact bound direct-PaymentIntent
+  cancellation owner before preparing the final customer-cleanup receipt.
+  Provider `processing` or `succeeded` state remains a deletion blocker; only a
+  provider-proven cancellation may terminalize local `payment_pending` state.
   Pulse Trial loser cleanup validates exact provider targets before one short
   member-owner revalidation transaction and cancels them only after that
   transaction releases; no Stripe request is made while that lock is held.
+- Stripe receipts poison only after the normal attempt cap for failures that
+  remain proven permanent before the owning billing transaction commits.
+  Concrete Stripe/Prisma/network timeouts and every replay-safe post-commit
+  wake, cleanup, notification, or completion failure stay in the existing
+  bounded-backoff receipt lane. No second queue owns redrive.
 - Immediate paid-plan upgrades use a one-item Customer Portal
   `subscription_update_confirm` session rather than a Murph-owned Subscription
   mutation or pending-invoice retry loop. Web takes the member lock only to

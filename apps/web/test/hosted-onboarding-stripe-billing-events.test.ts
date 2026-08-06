@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberStripeBillingLookupState: vi.fn(),
   reconcileHostedAiUsageGateForBillingModeChangeTx: vi.fn(),
   requireHostedStripeApi: vi.fn(),
+  stripeRefundsList: vi.fn(),
   suspendHostedMemberForBillingReversalTx: vi.fn(),
   clearHostedMemberStripeCheckoutAttemptForSessionTx: vi.fn(),
   lockHostedMemberRow: vi.fn(),
@@ -217,13 +218,20 @@ describe("hosted onboarding stripe billing events", () => {
     mocks.applyHostedFamilyStripeCheckoutCompletedTx.mockResolvedValue({ groupId: null });
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValue({
       activations: [],
-      billingModeChangedMemberIds: [],
       groupId: null,
+      runtimeRecheckMemberIds: [],
     });
     mocks.reconcileHostedAiUsageGateForBillingModeChangeTx.mockResolvedValue(undefined);
+    mocks.stripeRefundsList.mockResolvedValue({
+      data: [],
+      has_more: false,
+    });
     mocks.requireHostedStripeApi.mockReturnValue({
       invoicePayments: {
         list: vi.fn(async () => ({ data: [] })),
+      },
+      refunds: {
+        list: mocks.stripeRefundsList,
       },
       subscriptions: {
         retrieve: vi.fn(async () => makeStripeSubscription()),
@@ -440,7 +448,10 @@ describe("hosted onboarding stripe billing events", () => {
       welcomeEmailMemberId: "member_123",
     });
 
-    expect(mocks.readHostedMemberFamilyBillingClaim).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberFamilyBillingClaim).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {},
+    });
     expect(
       mocks.acceptHostedMemberStripeCheckoutCompletionTx,
     ).toHaveBeenCalledOnce();
@@ -498,6 +509,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
 
@@ -516,6 +528,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
 
@@ -610,7 +623,10 @@ describe("hosted onboarding stripe billing events", () => {
       welcomeEmailMemberId: expect.anything(),
     }));
 
-    expect(mocks.readHostedMemberFamilyBillingClaim).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberFamilyBillingClaim).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {},
+    });
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledOnce();
   });
 
@@ -633,6 +649,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
 
@@ -679,6 +696,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -733,6 +751,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -779,6 +798,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: "wake_existing",
+      runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
   });
@@ -803,6 +823,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
 
@@ -835,7 +856,9 @@ describe("hosted onboarding stripe billing events", () => {
       ),
     ).resolves.toEqual({
       activatedMemberId: null,
+      activatedMembers: [],
       hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -870,8 +893,8 @@ describe("hosted onboarding stripe billing events", () => {
   it("routes Family subscription updates to group billing without member billing writes", async () => {
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
       activations: [],
-      billingModeChangedMemberIds: ["member_owner"],
       groupId: "hbag_family",
+      runtimeRecheckMemberIds: ["member_owner"],
     });
     const tx = {};
     const preparedFamilyCryptoDomainRoots = new Map([
@@ -916,8 +939,8 @@ describe("hosted onboarding stripe billing events", () => {
   it("reconciles a direct-to-Family usage handoff from invoice.paid", async () => {
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
       activations: [],
-      billingModeChangedMemberIds: ["member_owner"],
       groupId: "hbag_family",
+      runtimeRecheckMemberIds: ["member_owner"],
     });
     const tx = {};
     const preparedFamilyCryptoDomainRoots = new Map([
@@ -965,8 +988,8 @@ describe("hosted onboarding stripe billing events", () => {
   it("reconciles a direct-to-Family usage handoff from invoice.payment_failed", async () => {
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
       activations: [],
-      billingModeChangedMemberIds: ["member_owner"],
       groupId: "hbag_family",
+      runtimeRecheckMemberIds: ["member_owner"],
     });
     const tx = {};
     const preparedFamilyCryptoDomainRoots = new Map([
@@ -1066,6 +1089,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: [],
       subscriptionCancellationEmail: {
         memberId: "member_123",
         stripeSubscriptionId: "sub_123",
@@ -1108,6 +1132,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: [],
       subscriptionCancellationEmail: {
         memberId: "member_123",
         stripeSubscriptionId: "sub_123",
@@ -1141,6 +1166,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: [],
       subscriptionCancellationEmail: null,
       welcomeEmailMemberId: null,
     });
@@ -1167,6 +1193,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: [],
       subscriptionCancellationEmail: null,
       welcomeEmailMemberId: null,
     });
@@ -1611,6 +1638,175 @@ describe("hosted onboarding stripe billing events", () => {
     expect(mocks.suspendHostedMemberForBillingReversalTx).not.toHaveBeenCalled();
   });
 
+  it("reconciles a pending refund when refund.updated proves success", async () => {
+    const pendingRefund = makeStripeRefund({
+      id: "re_pending_then_succeeded",
+      status: "pending",
+    });
+    await applyStripeRefundCreated(
+      pendingRefund,
+      {
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        sourceEventId: "evt_refund_pending_first",
+        sourceType: "stripe.refund.created",
+      },
+      {} as never,
+      "cus_123",
+    );
+    expect(mocks.findMemberForStripeReversal).not.toHaveBeenCalled();
+
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      subscriptions: {
+        retrieve: vi.fn(async () => makeStripeSubscription({
+          latestInvoice: makeStripeInvoice({
+            amountPaid: 5_000,
+            charge: null,
+            invoicePayments: [makeStripeInvoicePayment({
+              amountPaid: 5_000,
+              paymentIntent: "pi_123",
+            })],
+            paymentIntent: null,
+          }),
+        })),
+      },
+    });
+    const succeededRefund = makeStripeRefund({
+      id: pendingRefund.id,
+      status: "succeeded",
+    });
+    const preparedProviderState = await prepareStripeReversalProviderState(
+      "refund.updated",
+      succeededRefund,
+    );
+
+    await applyStripeRefundCreated(
+      succeededRefund,
+      {
+        eventCreatedAt: new Date("2026-04-25T00:01:00.000Z"),
+        sourceEventId: "evt_refund_succeeded_update",
+        sourceType: "stripe.refund.updated",
+      },
+      {} as never,
+      "cus_123",
+      preparedProviderState,
+    );
+
+    expect(mocks.suspendHostedMemberForBillingReversalTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        freshnessPolicy: "proven-current-refund",
+        stripeSubscriptionId: "sub_123",
+      }),
+    );
+  });
+
+  it("accumulates succeeded partial refunds for the exact current payment", async () => {
+    const firstPartial = makeStripeRefund({
+      amount: 2_500,
+      id: "re_partial_first",
+      status: "succeeded",
+    });
+    const secondPartial = makeStripeRefund({
+      amount: 2_500,
+      id: "re_partial_second",
+      status: "succeeded",
+    });
+    mocks.stripeRefundsList.mockResolvedValueOnce({
+      data: [firstPartial],
+      has_more: false,
+    });
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      subscriptions: {
+        retrieve: vi.fn(async () => makeStripeSubscription({
+          latestInvoice: makeStripeInvoice({
+            amountPaid: 5_000,
+            charge: null,
+            invoicePayments: [makeStripeInvoicePayment({
+              amountPaid: 5_000,
+              paymentIntent: "pi_123",
+            })],
+            paymentIntent: null,
+          }),
+        })),
+      },
+    });
+    const preparedProviderState = await prepareStripeReversalProviderState(
+      "refund.updated",
+      secondPartial,
+    );
+
+    await applyStripeRefundCreated(
+      secondPartial,
+      {
+        eventCreatedAt: new Date("2026-04-25T00:02:00.000Z"),
+        sourceEventId: "evt_refund_partial_cumulative",
+        sourceType: "stripe.refund.updated",
+      },
+      {} as never,
+      "cus_123",
+      preparedProviderState,
+    );
+
+    expect(mocks.stripeRefundsList).toHaveBeenCalledWith({
+      limit: 100,
+      payment_intent: "pi_123",
+    });
+    expect(mocks.suspendHostedMemberForBillingReversalTx).toHaveBeenCalledOnce();
+  });
+
+  it("does not double-count a replayed partial refund", async () => {
+    const partial = makeStripeRefund({
+      amount: 2_500,
+      id: "re_partial_replay",
+      status: "succeeded",
+    });
+    mocks.stripeRefundsList.mockResolvedValueOnce({
+      data: [partial],
+      has_more: false,
+    });
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      subscriptions: {
+        retrieve: vi.fn(async () => makeStripeSubscription({
+          latestInvoice: makeStripeInvoice({
+            amountPaid: 5_000,
+            charge: null,
+            invoicePayments: [makeStripeInvoicePayment({
+              amountPaid: 5_000,
+              paymentIntent: "pi_123",
+            })],
+            paymentIntent: null,
+          }),
+        })),
+      },
+    });
+    const preparedProviderState = await prepareStripeReversalProviderState(
+      "refund.updated",
+      partial,
+    );
+
+    await applyStripeRefundCreated(
+      partial,
+      {
+        eventCreatedAt: new Date("2026-04-25T00:03:00.000Z"),
+        sourceEventId: "evt_refund_partial_replay",
+        sourceType: "stripe.refund.updated",
+      },
+      {} as never,
+      "cus_123",
+      preparedProviderState,
+    );
+
+    expect(mocks.suspendHostedMemberForBillingReversalTx).not.toHaveBeenCalled();
+  });
+
   it("ignores partial refunds for the current entitlement invoice", async () => {
     mocks.requireHostedStripeApi.mockReturnValueOnce({
       invoicePayments: {
@@ -1758,6 +1954,87 @@ describe("hosted onboarding stripe billing events", () => {
     expect(mocks.suspendHostedMemberForBillingReversalTx).not.toHaveBeenCalled();
   });
 
+  it("ignores a refund proof when the prepared subscription latest invoice changes", async () => {
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      subscriptions: {
+        retrieve: vi.fn(async () => makeStripeSubscription({
+          latestInvoice: makeStripeInvoice({ id: "in_current" }),
+        })),
+      },
+    });
+    const refund = makeStripeRefund({ status: "succeeded" });
+    const preparedProviderState = await prepareStripeReversalProviderState(
+      "refund.updated",
+      refund,
+    );
+    expect(preparedProviderState?.subscription).not.toBeNull();
+    const changedInvoiceState = preparedProviderState?.subscription
+      ? {
+          ...preparedProviderState,
+          subscription: {
+            ...preparedProviderState.subscription,
+            latest_invoice: "in_new",
+          } as Stripe.Subscription,
+        }
+      : null;
+
+    await applyStripeRefundCreated(
+      refund,
+      {
+        eventCreatedAt: new Date("2026-04-25T00:04:00.000Z"),
+        sourceEventId: "evt_refund_changed_invoice",
+        sourceType: "stripe.refund.updated",
+      },
+      {} as never,
+      "cus_123",
+      changedInvoiceState,
+    );
+
+    expect(mocks.suspendHostedMemberForBillingReversalTx).not.toHaveBeenCalled();
+  });
+
+  it("ignores a refund proof after the member changes subscriptions", async () => {
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      subscriptions: {
+        retrieve: vi.fn(async () => makeStripeSubscription({
+          latestInvoice: makeStripeInvoice(),
+        })),
+      },
+    });
+    const refund = makeStripeRefund({ status: "succeeded" });
+    const preparedProviderState = await prepareStripeReversalProviderState(
+      "refund.updated",
+      refund,
+    );
+    mocks.findMemberForStripeReversal.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_replacement",
+      },
+    }));
+
+    await applyStripeRefundCreated(
+      refund,
+      {
+        eventCreatedAt: new Date("2026-04-25T00:05:00.000Z"),
+        sourceEventId: "evt_refund_changed_subscription",
+        sourceType: "stripe.refund.updated",
+      },
+      {} as never,
+      "cus_123",
+      preparedProviderState,
+    );
+
+    expect(mocks.suspendHostedMemberForBillingReversalTx).not.toHaveBeenCalled();
+  });
+
   it("matches full refunds against current invoice payment records", async () => {
     const retrieveInvoice = vi.fn(async () => makeStripeInvoice({
       amountPaid: 5_000,
@@ -1776,6 +2053,9 @@ describe("hosted onboarding stripe billing events", () => {
       },
       invoices: {
         retrieve: retrieveInvoice,
+      },
+      refunds: {
+        list: mocks.stripeRefundsList,
       },
       subscriptions: {
         retrieve: vi.fn(async () => makeStripeSubscription({
@@ -2072,12 +2352,14 @@ function makeStripeInvoicePayment(overrides?: Partial<{
 function makeStripeRefund(overrides?: Partial<{
   amount: number;
   charge: string | null;
+  id: string;
   paymentIntent: string | null;
   status: Stripe.Refund["status"];
 }>): Stripe.Refund {
   return {
     amount: overrides?.amount ?? 5_000,
     charge: overrides?.charge ?? "ch_123",
+    id: overrides?.id ?? "re_123",
     payment_intent: overrides?.paymentIntent ?? "pi_123",
     status: overrides?.status ?? "succeeded",
   } as Stripe.Refund;

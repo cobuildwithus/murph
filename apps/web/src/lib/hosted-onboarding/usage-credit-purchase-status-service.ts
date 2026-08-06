@@ -14,8 +14,10 @@ import {
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
-import { cancelHostedUsageCreditDirectPayment } from
-  "./usage-credit-saved-card-payment";
+import {
+  cancelHostedUsageCreditDirectPayment,
+  canCancelHostedUsageCreditDirectPayment,
+} from "./usage-credit-saved-card-payment";
 import {
   hostedUsageCreditPolicySupportsSavedCardTarget,
   parseHostedUsageCreditCheckoutRequestPolicyVersion,
@@ -536,22 +538,7 @@ export function canRetryHostedUsageCreditSavedCardPayment(
     );
 }
 
-export function canCancelHostedUsageCreditDirectPayment(
-  purchase: Pick<
-    HostedUsageCreditPurchase,
-    | "status"
-    | "stripeCheckoutSessionLookupKey"
-    | "stripePaymentIntentIdEncrypted"
-    | "stripePaymentIntentLookupKey"
-  >,
-): boolean {
-  return purchase.status === HostedUsageCreditPurchaseStatus.payment_pending &&
-    !purchase.stripeCheckoutSessionLookupKey &&
-    Boolean(
-      purchase.stripePaymentIntentIdEncrypted &&
-      purchase.stripePaymentIntentLookupKey,
-    );
-}
+export { canCancelHostedUsageCreditDirectPayment };
 
 export async function projectHostedUsageCreditCheckoutResult(input: {
   prisma: HostedOnboardingReadClient;

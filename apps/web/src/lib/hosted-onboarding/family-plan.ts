@@ -335,6 +335,7 @@ export type HostedFamilyStripeSubscriptionResult = {
   activations: HostedMemberActivationResult[];
   billingModeChangedMemberIds?: string[];
   groupId: string | null;
+  runtimeRecheckMemberIds?: string[];
 };
 
 export type PreparedHostedFamilyCryptoDomainRoots = ReadonlyMap<
@@ -1135,7 +1136,8 @@ export async function readHostedMemberFamilyBillingClaim(input: {
   });
   if (
     memberships.length > 0
-    && await hasHostedFamilyMemberDirectPaid({
+    && memberships.every(({ group }) => group.ownerMemberId === input.memberId)
+    && await hasHostedFamilyMemberLiveDirectSubscription({
       memberId: input.memberId,
       prisma: input.prisma,
     })
@@ -1668,18 +1670,9 @@ export async function prepareHostedFamilyStripeActivationCryptoDomainRoots(input
     PreparedHostedCryptoDomainRootCandidates
   >();
   for (const membership of memberships) {
-    // A reused direct subscription still resolves to the owner until the
-    // authoritative Family transaction clears that same billing reference.
-    // Prepare the owner unconditionally so that handoff cannot retry forever.
-    if (
-      membership.memberId !== group.ownerMemberId
-      && await hasHostedFamilyMemberDirectPaid({
-        memberId: membership.memberId,
-        prisma: input.prisma,
-      })
-    ) {
-      continue;
-    }
+    // Prepare every active membership. The authoritative transaction decides
+    // whether an owner handoff or sponsored-member direct-subscription cleanup
+    // applies under lock, and either path may need activation crypto material.
     preparedByMember.set(
       membership.memberId,
       await prepareHostedCryptoDomainRootCandidates({
@@ -1818,6 +1811,14 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     return {
       activations: [],
       groupId: group.id,
+      runtimeRecheckMemberIds:
+        group.billingStatus === HostedBillingStatus.active
+          ? await readHostedFamilyRuntimeRecheckMemberIdsForEventTx({
+              eventCreatedAt,
+              groupId: group.id,
+              tx: input.tx,
+            })
+          : [],
     };
   }
 
@@ -1830,6 +1831,14 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     return {
       activations: [],
       groupId: group.id,
+      runtimeRecheckMemberIds:
+        group.billingStatus === HostedBillingStatus.active
+          ? await readHostedFamilyRuntimeRecheckMemberIdsForEventTx({
+              eventCreatedAt,
+              groupId: group.id,
+              tx: input.tx,
+            })
+          : [],
     };
   }
 
@@ -1865,6 +1874,9 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
         ? [group.ownerMemberId]
         : [],
       groupId: group.id,
+      runtimeRecheckMemberIds: billingModeChanged
+        ? [group.ownerMemberId]
+        : [],
     };
   }
 
@@ -1905,7 +1917,16 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
 
   const [activeMemberships, currentCapacities] = await Promise.all([
     input.tx.hostedAccountGroupMembership.findMany({
-      select: { id: true, pendingPlanCode: true, planCode: true },
+      select: {
+        id: true,
+        memberId: true,
+        pendingPlanCode: true,
+        planCode: true,
+        usagePlanTransitionAt: true,
+        usagePlanTransitionFromCode: true,
+        usagePlanTransitionKind: true,
+        usagePlanTransitionToCode: true,
+      },
       where: {
         groupId: group.id,
         status: "active",
@@ -1918,6 +1939,17 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   ]);
   const pendingMemberships = activeMemberships.filter(
     (membership) => typeof membership.pendingPlanCode === "string",
+  );
+  const runtimeRecheckMemberIds = new Set(
+    eventCreatedAt
+      ? activeMemberships
+          .filter((membership) =>
+            membership.usagePlanTransitionKind === "plan_upgrade"
+            && membership.usagePlanTransitionAt?.getTime()
+              === eventCreatedAt.getTime()
+          )
+          .map((membership) => membership.memberId)
+      : [],
   );
   let membershipsForCapacity = activeMemberships;
   if (currentCapacities && pendingMemberships.length === 1) {
@@ -1964,6 +1996,12 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
         },
       });
       if (completed.count === 1) {
+        if (isHostedBillingPlanImmediateUpgrade({
+          currentPlanCode: getHostedBillingPlanCodeForPlan(sourcePlanCode),
+          targetPlanCode: getHostedBillingPlanCodeForPlan(targetPlanCode),
+        })) {
+          runtimeRecheckMemberIds.add(pendingMembership.memberId);
+        }
         membershipsForCapacity = activeMemberships.map((membership) =>
           membership.id === pendingMembership.id
             ? { ...membership, pendingPlanCode: null, planCode: targetPlanCode }
@@ -2045,6 +2083,10 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
         ? [group.ownerMemberId]
         : [],
       groupId: group.id,
+      runtimeRecheckMemberIds: [
+        ...runtimeRecheckMemberIds,
+        ...(billingModeChanged ? [group.ownerMemberId] : []),
+      ],
     };
   }
 
@@ -2052,6 +2094,27 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     activations: [],
     groupId: group.id,
   };
+}
+
+async function readHostedFamilyRuntimeRecheckMemberIdsForEventTx(input: {
+  eventCreatedAt: Date | null;
+  groupId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<string[]> {
+  if (!input.eventCreatedAt) {
+    return [];
+  }
+  const memberships = await input.tx.hostedAccountGroupMembership.findMany({
+    orderBy: { memberId: "asc" },
+    select: { memberId: true },
+    where: {
+      groupId: input.groupId,
+      status: "active",
+      usagePlanTransitionAt: input.eventCreatedAt,
+      usagePlanTransitionKind: "plan_upgrade",
+    },
+  });
+  return memberships.map((membership) => membership.memberId);
 }
 
 export async function createHostedFamilyBillingCheckout(input: {
@@ -5355,19 +5418,19 @@ async function assertHostedFamilyMemberNotDirectPaidTx(input: {
   if (input.allowDirectPaidOwner) {
     return;
   }
-  if (await hasHostedFamilyMemberDirectPaid({
+  if (await hasHostedFamilyMemberLiveDirectSubscription({
     memberId: input.memberId,
     prisma: input.tx,
   })) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
       httpStatus: 409,
-      message: "You're currently paying for Murph yourself. Switching paid accounts into Family billing is not supported in this release.",
+      message: "Your personal Murph subscription must be canceled before you can join a Family plan.",
     });
   }
 }
 
-async function hasHostedFamilyMemberDirectPaid(input: {
+async function hasHostedFamilyMemberLiveDirectSubscription(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
 }): Promise<boolean> {
@@ -5375,7 +5438,7 @@ async function hasHostedFamilyMemberDirectPaid(input: {
     select: {
       billingRef: {
         select: {
-          currentBillingPhase: true,
+          stripeSubscriptionIdEncrypted: true,
         },
       },
       billingStatus: true,
@@ -5386,8 +5449,8 @@ async function hasHostedFamilyMemberDirectPaid(input: {
   });
 
   return (
-    member?.billingStatus === HostedBillingStatus.active &&
-    parseHostedBillingPhase(member.billingRef?.currentBillingPhase) === "paid"
+    Boolean(member?.billingRef?.stripeSubscriptionIdEncrypted)
+    && member?.billingStatus !== HostedBillingStatus.canceled
   );
 }
 
@@ -5404,6 +5467,7 @@ async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
     },
     select: {
       memberId: true,
+      role: true,
     },
     where: {
       groupId: input.groupId,
@@ -5418,10 +5482,13 @@ async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
       memberId: membership.memberId,
       tx: input.tx,
     });
-    if (await hasHostedFamilyMemberDirectPaid({
+    if (
+      membership.role === "owner"
+      && await hasHostedFamilyMemberLiveDirectSubscription({
       memberId: membership.memberId,
       prisma: input.tx,
-    })) {
+      })
+    ) {
       continue;
     }
     eligibleMemberships.push(membership);

@@ -301,6 +301,78 @@ describe("hosted onboarding stripe billing policy", () => {
     );
   });
 
+  it("applies an older proven-current refund without moving the billing cursor backward", async () => {
+    const refundCreatedAt = new Date("2026-04-25T00:00:00.000Z");
+    const newerBillingCursor = new Date("2026-04-25T00:05:00.000Z");
+    const member = makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: newerBillingCursor,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(member);
+
+    await suspendHostedMemberForBillingReversalTx({
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: {
+        eventCreatedAt: refundCreatedAt,
+        sourceEventId: "evt_refund_older_current_invoice",
+        sourceType: "stripe.refund.updated",
+      },
+      freshnessPolicy: "proven-current-refund",
+      member,
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      tx: {} as never,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeEventCreatedAt: newerBillingCursor,
+        stripeSubscriptionId: "sub_123",
+      }),
+    );
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
+      billingStatus: HostedBillingStatus.unpaid,
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: newerBillingCursor,
+    });
+  });
+
+  it("rejects an older refund when the proven subscription identity no longer matches", async () => {
+    const member = makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: new Date("2026-04-25T00:05:00.000Z"),
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_new",
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(member);
+
+    await suspendHostedMemberForBillingReversalTx({
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        sourceEventId: "evt_refund_old_subscription",
+        sourceType: "stripe.refund.updated",
+      },
+      freshnessPolicy: "proven-current-refund",
+      member,
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_old",
+      tx: {} as never,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+  });
+
   it("treats replay of an already-applied reversal suspension as idempotent", async () => {
     const eventCreatedAt = new Date("2026-04-25T00:00:00.000Z");
     const suspendedMember = makeMemberSnapshot({

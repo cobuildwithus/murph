@@ -452,7 +452,10 @@ describe("applyStripeCheckoutCompleted", () => {
       subscriptionCancellationEmail: null,
     });
 
-    expect(mocks.readHostedMemberFamilyBillingClaim).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberFamilyBillingClaim).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {},
+    });
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledOnce();
   });
 
@@ -505,6 +508,7 @@ describe("applyStripeCheckoutCompleted", () => {
         activatedMemberId: null,
         activatedMembers: [],
         hostedExecutionEventId: null,
+        runtimeRecheckMemberIds: [],
         welcomeEmailMemberId: null,
       });
     }
@@ -600,6 +604,7 @@ describe("applyStripeCheckoutCompleted", () => {
           activatedMemberId: null,
           activatedMembers: [],
           hostedExecutionEventId: null,
+          runtimeRecheckMemberIds: [],
           welcomeEmailMemberId: null,
         });
         // The reconciliation owner only starts loser cancel/refund cleanup when
@@ -796,7 +801,10 @@ describe("applyStripeCheckoutCompleted", () => {
       welcomeEmailMemberId: "member_123",
     });
 
-    expect(mocks.readHostedMemberFamilyBillingClaim).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberFamilyBillingClaim).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {},
+    });
     expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
   });
 

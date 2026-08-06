@@ -174,7 +174,9 @@ describe("HostedBillingSettings", () => {
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
+      billingStatus: "active",
       canUpgradeToEdge: true,
+      currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
     }));
 
@@ -199,6 +201,7 @@ describe("HostedBillingSettings", () => {
       canSwitchToPulse: true,
       canUpgradeToEdge: true,
       canUpgradeToPulse: true,
+      billingStatus: "active",
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "standard",
@@ -216,9 +219,12 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Current plan/);
-    assert.doesNotMatch(markup, /<button/);
-    assert.doesNotMatch(markup, /Upgrade from usage|Manage billing/);
-    assert.doesNotMatch(markup, /Everything in Pulse|2 to 6 people, one bill/);
+    assert.match(markup, /Everything in Pulse|2 to 6 people, one bill/);
+    assert.match(markup, /Manage billing/);
+    assert.doesNotMatch(
+      markup,
+      />Upgrade from usage<\/button>|>Choose (?:Core|Pulse|Edge|Family)<\/button>/,
+    );
   });
 
   test("shows the $3.50 Core plan only from the server-authorized catalog", async () => {
@@ -262,6 +268,7 @@ describe("HostedBillingSettings", () => {
         authenticated: true,
         canUpgradeToEdge: true,
         canUpgradeToPulse: true,
+        billingStatus: "active",
         currentBillingPhase: "paid",
         currentBillingPlanCode: "launch_group_monthly",
         showGroupPlan: true,
@@ -284,6 +291,7 @@ describe("HostedBillingSettings", () => {
         authenticated: true,
         canStartPaidPulse: true,
         canSwitchToGroup: true,
+        billingStatus: "active",
         currentBillingPhase: "trial",
         currentBillingPlanCode: "launch_monthly",
         currentCheckoutOffer: "pulse_trial_7d",
@@ -315,6 +323,7 @@ describe("HostedBillingSettings", () => {
       HostedBillingSettings,
       {
         authenticated: true,
+        billingStatus: "active",
         currentBillingPhase: "paid",
         currentBillingPlanCode: "launch_group_monthly",
         showGroupPlan: true,
@@ -380,6 +389,7 @@ describe("HostedBillingSettings", () => {
       HostedBillingSettings,
       {
         authenticated: true,
+        billingStatus: "active",
         currentBillingPhase: "paid",
         currentBillingPlanCode: "launch_monthly",
         scheduledBillingEffectiveAt:
@@ -425,6 +435,7 @@ describe("HostedBillingSettings", () => {
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
+      billingStatus: "active",
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
@@ -988,6 +999,7 @@ describe("HostedBillingSettings", () => {
       {
         authenticated: true,
         canStartPaidPulse: true,
+        billingStatus: "active",
         currentBillingPhase: "trial",
         currentBillingPlanCode: "launch_monthly",
         currentCheckoutOffer: "pulse_trial_7d",
@@ -1023,6 +1035,7 @@ describe("HostedBillingSettings", () => {
       {
         authenticated: true,
         canUpgradeToPulse: true,
+        billingStatus: "active",
         currentBillingPhase: "paid",
         currentBillingPlanCode: "launch_group_monthly",
         usageStatus: buildUsageStatus({
@@ -1056,6 +1069,7 @@ describe("HostedBillingSettings", () => {
       {
         authenticated: true,
         canSwitchToGroup: true,
+        billingStatus: "active",
         currentBillingPhase: "paid",
         currentBillingPlanCode: "launch_monthly",
         showGroupPlan: true,
@@ -1114,6 +1128,7 @@ describe("HostedBillingSettings", () => {
       authenticated: true,
       canStartPaidPulse: true,
       canUpgradeToEdge: false,
+      billingStatus: "active",
       currentBillingPhase: "trial",
       currentCheckoutOffer: "pulse_trial_7d",
       currentBillingPlanCode: "launch_monthly",
@@ -1138,6 +1153,7 @@ describe("HostedBillingSettings", () => {
     const availableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
+      billingStatus: "active",
       canStartPaidPulse: true,
       currentBillingPhase: "trial",
       currentCheckoutOffer: "pulse_trial_7d",
@@ -1171,14 +1187,33 @@ describe("HostedBillingSettings", () => {
       authenticated: true,
       canStartPaidPulse: false,
       canUpgradeToEdge: false,
+      billingStatus: "active",
       currentBillingPhase: "trial",
       currentCheckoutOffer: "standard",
       currentBillingPlanCode: "launch_monthly",
     }));
 
     assert.match(markup, /Pulse/);
-    assert.match(markup, /Current plan/);
-    assert.doesNotMatch(markup, /Start Pulse plan/);
+    assert.match(markup, /Pulse is not active/);
+    assert.doesNotMatch(markup, /Current plan|Free trial|Start Pulse plan/);
+  });
+
+  test("renders retained inactive billing as lapsed with a recovery path", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "past_due",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }));
+
+    assert.match(markup, /Pulse is not active/);
+    assert.match(markup, /Manage billing/);
+    assert.doesNotMatch(markup, /Current plan|Free trial/);
   });
 
   test("shows the Family card as current for the family owner", async () => {
@@ -1227,7 +1262,10 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /Sponsored/);
     assert.match(markup, /Billing is managed by your Family plan owner/);
-    assert.doesNotMatch(markup, /Manage billing/);
+    assert.doesNotMatch(
+      markup,
+      />Choose (?:Pulse|Edge)<\/button>|>Manage (?:Family )?billing<\/(?:a|button)>/,
+    );
   });
 
   test("offers the Family start action to an eligible member", async () => {
@@ -1287,6 +1325,7 @@ describe("HostedBillingSettings", () => {
       authenticated: true,
       canSwitchToPulse: true,
       canUpgradeToEdge: false,
+      billingStatus: "active",
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_edge_monthly",
       currentPeriodEnd: new Date("2026-05-06T12:00:00.000Z"),
@@ -1305,6 +1344,7 @@ describe("HostedBillingSettings", () => {
       payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canSwitchToPulse: true,
+      billingStatus: "active",
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_edge_monthly",
       currentPeriodEnd: new Date("2026-05-06T12:00:00.000Z"),

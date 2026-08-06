@@ -149,6 +149,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
   applyStripeInvoicePaymentFailed: mocks.applyStripeInvoicePaymentFailed,
   applyStripeRefundCreated: mocks.applyStripeRefundCreated,
   applyStripeSubscriptionUpdated: mocks.applyStripeSubscriptionUpdated,
+  isHostedStripeRefundEventType: (type: string) =>
+    type === "refund.created" || type === "refund.updated",
   cancelHostedFamilySponsoredCheckoutSubscription:
     mocks.cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription:
@@ -826,6 +828,92 @@ describe("hosted Stripe event reconciliation", () => {
     expect(grantCount).toBe(1);
     expect(mocks.reconcileHostedUsageCreditStripeEvent).toHaveBeenCalledTimes(2);
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledOnce();
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 7,
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it("keeps a generic operational timeout claimable after attempt six", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeInvoicePaid.mockRejectedValueOnce(
+      Object.assign(new Error("database request timed out"), {
+        code: "ETIMEDOUT",
+      }),
+    );
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 6,
+      processedAt: null,
+      status: HostedStripeEventStatus.failed,
+    }));
+
+    prisma.rows[0]!.nextAttemptAt = new Date(0);
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledTimes(2);
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 7,
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it("keeps a committed billing wake claimable after a generic sixth-attempt post-commit failure", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeInvoicePaid.mockResolvedValue({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: ["member_123"],
+      welcomeEmailMemberId: null,
+    });
+    mocks.signalHostedRuntimeRecheckRuntime
+      .mockRejectedValueOnce(new Error("runtime unavailable"))
+      .mockResolvedValueOnce({
+        signalAccepted: true,
+        workflowId: "hosted-user-runtime:member_123",
+      });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 6,
+      processedAt: null,
+      status: HostedStripeEventStatus.failed,
+    }));
+
+    prisma.rows[0]!.nextAttemptAt = new Date(0);
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       attemptCount: 7,
       processedAt: expect.any(Date),
@@ -3146,6 +3234,45 @@ describe("hosted Stripe event reconciliation", () => {
       expect.objectContaining({
         sourceEventId: event.id,
         sourceType: "stripe.refund.created",
+      }),
+      expect.anything(),
+      "cus_refund",
+      preparedProviderState,
+    );
+  });
+
+  it("dispatches refund.updated through the same live reversal owner", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = {
+      ...makeRefundCreatedEvent(),
+      id: "evt_refund_updated_123",
+      type: "refund.updated",
+    } as Stripe.Event;
+    const preparedProviderState = {
+      memberId: "member_123",
+      refundCoversCurrentEntitlement: true,
+      stripeSubscriptionId: "sub_123",
+      subscription: null,
+    };
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.resolveStripeCustomerContext.mockResolvedValue({
+      customerId: "cus_refund",
+    });
+    mocks.prepareHostedStripeReversalProviderState.mockResolvedValueOnce(
+      preparedProviderState,
+    );
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.applyStripeRefundCreated).toHaveBeenCalledWith(
+      event.data.object,
+      expect.objectContaining({
+        sourceEventId: event.id,
+        sourceType: "stripe.refund.updated",
       }),
       expect.anything(),
       "cus_refund",

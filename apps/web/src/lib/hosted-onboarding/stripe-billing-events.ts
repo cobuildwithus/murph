@@ -46,7 +46,6 @@ import {
   acceptHostedMemberStripeCheckoutCompletionTx,
   clearHostedMemberStripeCheckoutAttemptForSessionTx,
   prepareHostedMemberStripeCheckoutCompletion,
-  readHostedMemberStripeBillingLookupState,
   writeAcceptedHostedMemberPulseTrialBillingTx,
   type PreparedHostedMemberStripeCheckoutCompletion,
 } from "./hosted-member-billing-store";
@@ -61,10 +60,6 @@ import {
   upsertHostedMemberStripeCheckoutEmailIfFreshTx,
   upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx,
 } from "./hosted-member-store";
-import {
-  createHostedStripeCustomerLookupKeyReadCandidates,
-  createHostedStripeSubscriptionLookupKeyReadCandidates,
-} from "./contact-privacy";
 import {
   findMemberForStripeCheckoutSession,
   findMemberForStripeInvoice,
@@ -118,6 +113,7 @@ type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
   cleanupStandardCheckoutStripeSubscriptionId?: string | null;
+  runtimeRecheckMemberIds?: string[];
   welcomeEmailMemberId: string | null;
 };
 
@@ -172,8 +168,12 @@ export interface PreparedHostedStripeCheckoutCompletion {
 }
 
 export interface PreparedHostedStripeReversalProviderState {
+  latestInvoiceId: string | null;
   memberId: string;
+  paymentChargeId: string | null;
+  paymentIntentId: string | null;
   refundCoversCurrentEntitlement: boolean;
+  stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   subscription: Stripe.Subscription | null;
 }
@@ -187,34 +187,6 @@ async function classifyHostedFamilyBillingClaimTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedFamilyBillingClaimDisposition> {
   await lockHostedMemberRow(input.tx, input.memberId);
-  const currentBillingRef = await readHostedMemberStripeBillingLookupState({
-    memberId: input.memberId,
-    prisma: input.tx,
-  });
-  const subscriptionLookupKeys =
-    createHostedStripeSubscriptionLookupKeyReadCandidates(
-      input.stripeSubscriptionId,
-    );
-  const customerLookupKeys =
-    createHostedStripeCustomerLookupKeyReadCandidates(
-      input.stripeCustomerId,
-    );
-  if (
-    input.stripeSubscriptionId
-    && currentBillingRef?.stripeSubscriptionLookupKey
-    && subscriptionLookupKeys.includes(
-      currentBillingRef.stripeSubscriptionLookupKey,
-    )
-    && (
-      !input.stripeCustomerId
-      || !currentBillingRef.stripeCustomerLookupKey
-      || customerLookupKeys.includes(
-        currentBillingRef.stripeCustomerLookupKey,
-      )
-    )
-  ) {
-    return "none";
-  }
 
   if (input.checkoutSession) {
     // A Family handoff can outlive both mutable billing projections. The
@@ -1056,9 +1028,18 @@ export async function applyStripeSubscriptionUpdated(
     stripeSubscriptionId: subscription.id,
     tx: prisma,
   });
+  const runtimeRecheckMemberId = await reconcileHostedMemberUsagePlanTransitionTx({
+    dispatchContext,
+    memberId: member.core.id,
+    tx: prisma,
+    updatedMember,
+  });
 
   return {
     ...buildEmptyHostedStripeActivationOutcome(),
+    runtimeRecheckMemberIds: runtimeRecheckMemberId
+      ? [runtimeRecheckMemberId]
+      : [],
     subscriptionCancellationEmail:
       resolveHostedSubscriptionCancellationEmail({
         sourceType: dispatchContext.sourceType,
@@ -1186,12 +1167,19 @@ export async function applyStripeInvoicePaid(
     stripeSubscriptionId: subscriptionId,
     tx: prisma,
   });
+  const runtimeRecheckMemberId = await reconcileHostedMemberUsagePlanTransitionTx({
+    dispatchContext,
+    memberId: member.core.id,
+    tx: prisma,
+    updatedMember,
+  });
 
   if (!updatedMember) {
     return {
-      activatedMemberId: null,
-      hostedExecutionEventId: null,
-      welcomeEmailMemberId: null,
+      ...buildEmptyHostedStripeActivationOutcome(),
+      runtimeRecheckMemberIds: runtimeRecheckMemberId
+        ? [runtimeRecheckMemberId]
+        : [],
     };
   }
 
@@ -1204,9 +1192,10 @@ export async function applyStripeInvoicePaid(
 
   if (isHostedAccessBlockedBillingStatus(startingBillingStatus)) {
     return {
-      activatedMemberId: null,
-      hostedExecutionEventId: null,
-      welcomeEmailMemberId: null,
+      ...buildEmptyHostedStripeActivationOutcome(),
+      runtimeRecheckMemberIds: runtimeRecheckMemberId
+        ? [runtimeRecheckMemberId]
+        : [],
     };
   }
 
@@ -1224,6 +1213,9 @@ export async function applyStripeInvoicePaid(
   return {
     activatedMemberId: activation.activated ? updatedMember.core.id : null,
     hostedExecutionEventId: activation.hostedExecutionEventId,
+    runtimeRecheckMemberIds: runtimeRecheckMemberId
+      ? [runtimeRecheckMemberId]
+      : [],
     welcomeEmailMemberId: isHostedStripeActivationWelcomeCandidate(activation)
       ? updatedMember.core.id
       : null,
@@ -1317,6 +1309,7 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
     activatedMemberId: firstActivation?.activatedMemberId ?? null,
     activatedMembers,
     hostedExecutionEventId: firstActivation?.hostedExecutionEventId ?? null,
+    runtimeRecheckMemberIds: familySubscription.runtimeRecheckMemberIds ?? [],
     welcomeEmailMemberId: null,
   };
 }
@@ -1329,7 +1322,7 @@ async function applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx(input: {
 }): Promise<HostedFamilyStripeSubscriptionResult> {
   const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx(input);
   const now = input.dispatchContext.eventCreatedAt ?? new Date();
-  for (const memberId of familySubscription.billingModeChangedMemberIds ?? []) {
+  for (const memberId of familySubscription.runtimeRecheckMemberIds ?? []) {
     await reconcileHostedAiUsageGateForBillingModeChangeTx({
       memberId,
       now,
@@ -1344,8 +1337,35 @@ function buildEmptyHostedStripeActivationOutcome(): HostedStripeActivationOutcom
     activatedMemberId: null,
     activatedMembers: [],
     hostedExecutionEventId: null,
+    runtimeRecheckMemberIds: [],
     welcomeEmailMemberId: null,
   };
+}
+
+async function reconcileHostedMemberUsagePlanTransitionTx(input: {
+  dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt">;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+  updatedMember: HostedMemberBillingSnapshot | null;
+}): Promise<string | null> {
+  const currentMember = input.updatedMember ?? await readHostedMemberBillingSnapshot({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  if (
+    currentMember?.billingRef?.usagePlanTransitionKind !== "plan_upgrade"
+    || currentMember.billingRef.usagePlanTransitionAt?.getTime()
+      !== input.dispatchContext.eventCreatedAt.getTime()
+  ) {
+    return null;
+  }
+
+  await reconcileHostedAiUsageGateForBillingModeChangeTx({
+    memberId: input.memberId,
+    now: input.dispatchContext.eventCreatedAt,
+    tx: input.tx,
+  });
+  return input.memberId;
 }
 
 export async function applyStripeRefundCreated(
@@ -1378,8 +1398,22 @@ export async function applyStripeRefundCreated(
   }
   if (
     preparedProviderState.memberId !== member.core.id
+    || preparedProviderState.stripeCustomerId !==
+      (member.billingRef?.stripeCustomerId ?? null)
     || preparedProviderState.stripeSubscriptionId !==
       (member.billingRef?.stripeSubscriptionId ?? null)
+    || !preparedProviderState.latestInvoiceId
+    || preparedProviderState.subscription?.id !==
+      preparedProviderState.stripeSubscriptionId
+    || coerceStripeObjectId(preparedProviderState.subscription.customer) !==
+      preparedProviderState.stripeCustomerId
+    || coerceStripeObjectId(
+      preparedProviderState.subscription.latest_invoice,
+    ) !== preparedProviderState.latestInvoiceId
+    || !hostedStripeRefundMatchesPaymentIdentity(refund, {
+      chargeId: preparedProviderState.paymentChargeId,
+      paymentIntentId: preparedProviderState.paymentIntentId,
+    })
     || !preparedProviderState.refundCoversCurrentEntitlement
   ) {
     return;
@@ -1398,8 +1432,10 @@ export async function applyStripeRefundCreated(
   await suspendHostedMemberForBillingReversalTx({
     canonicalBillingStatus,
     dispatchContext,
+    freshnessPolicy: "proven-current-refund",
     member: preparedMember,
-    stripeCustomerId: customerId ?? member.billingRef?.stripeCustomerId ?? undefined,
+    stripeCustomerId: preparedProviderState.stripeCustomerId,
+    stripeSubscriptionId: preparedProviderState.stripeSubscriptionId,
     tx: prisma,
   });
 }
@@ -1428,23 +1464,86 @@ function resolveHostedSubscriptionCancellationEmail(input: {
   };
 }
 
-async function isHostedStripeCurrentEntitlementFullRefund(input: {
+type HostedStripePaymentIdentity = {
+  chargeId: string | null;
+  paymentIntentId: string | null;
+};
+
+type HostedStripeCurrentEntitlementRefundProof = HostedStripePaymentIdentity & {
+  latestInvoiceId: string | null;
+  refundCoversCurrentEntitlement: boolean;
+};
+
+const HOSTED_STRIPE_REFUND_LIST_MAX_PAGES = 10;
+
+async function prepareHostedStripeCurrentEntitlementRefundProof(input: {
   refund: Stripe.Refund;
   subscription: Stripe.Subscription | null;
-}): Promise<boolean> {
+}): Promise<HostedStripeCurrentEntitlementRefundProof> {
+  const emptyProof: HostedStripeCurrentEntitlementRefundProof = {
+    chargeId: null,
+    latestInvoiceId: null,
+    paymentIntentId: null,
+    refundCoversCurrentEntitlement: false,
+  };
   const subscription = input.subscription;
-  if (!subscription || mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status) !== HostedBillingStatus.active) {
-    return false;
+  if (
+    !subscription
+    || mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status)
+      !== HostedBillingStatus.active
+  ) {
+    return emptyProof;
   }
 
   const invoice = await readHostedStripeSubscriptionLatestInvoice(subscription);
-  if (!invoice || !await hostedStripeRefundMatchesInvoice(input.refund, invoice)) {
-    return false;
+  if (!invoice?.id) {
+    return emptyProof;
+  }
+  const paymentIdentity = await resolveHostedStripeInvoicePaymentIdentity({
+    invoice,
+    refund: input.refund,
+  });
+  if (!paymentIdentity) {
+    return {
+      ...emptyProof,
+      latestInvoiceId: invoice.id,
+    };
   }
 
-  const refundAmount = readHostedStripePositiveAmount(input.refund.amount);
-  const paidAmount = readHostedStripePositiveAmount((invoice as Stripe.Invoice & { amount_paid?: unknown }).amount_paid);
-  return refundAmount !== null && paidAmount !== null && refundAmount >= paidAmount;
+  const paidAmount = readHostedStripePositiveAmount(
+    (invoice as Stripe.Invoice & { amount_paid?: unknown }).amount_paid,
+  );
+  if (paidAmount === null) {
+    return {
+      ...paymentIdentity,
+      latestInvoiceId: invoice.id,
+      refundCoversCurrentEntitlement: false,
+    };
+  }
+
+  const refunds = await listHostedStripeRefundsForPaymentIdentity(paymentIdentity);
+  const refundsById = new Map(refunds.map((refund) => [refund.id, refund]));
+  refundsById.set(input.refund.id, input.refund);
+  let succeededExposure = 0;
+  for (const refund of refundsById.values()) {
+    if (
+      !isHostedStripeSucceededRefund(refund)
+      || !hostedStripeRefundMatchesPaymentIdentity(refund, paymentIdentity)
+    ) {
+      continue;
+    }
+    const amount = readHostedStripePositiveAmount(refund.amount);
+    if (amount === null || !Number.isSafeInteger(succeededExposure + amount)) {
+      throw new TypeError("Stripe refund exposure exceeded the supported integer range.");
+    }
+    succeededExposure += amount;
+  }
+
+  return {
+    ...paymentIdentity,
+    latestInvoiceId: invoice.id,
+    refundCoversCurrentEntitlement: succeededExposure >= paidAmount,
+  };
 }
 
 async function readHostedStripeSubscriptionLatestInvoice(
@@ -1471,21 +1570,24 @@ async function readHostedStripeSubscriptionLatestInvoice(
   );
 }
 
-async function hostedStripeRefundMatchesInvoice(refund: Stripe.Refund, invoice: Stripe.Invoice): Promise<boolean> {
-  const payments = readHostedStripeInvoicePayments(invoice);
-  if (payments.some((payment) => hostedStripeRefundMatchesInvoicePayment(refund, payment))) {
-    return true;
+async function resolveHostedStripeInvoicePaymentIdentity(input: {
+  invoice: Stripe.Invoice;
+  refund: Stripe.Refund;
+}): Promise<HostedStripePaymentIdentity | null> {
+  const expandedMatch = readHostedStripeInvoicePayments(input.invoice)
+    .map(readHostedStripeInvoicePaymentIdentity)
+    .find((identity) =>
+      identity !== null
+      && hostedStripeRefundMatchesPaymentIdentity(input.refund, identity)
+    );
+  if (expandedMatch) {
+    return expandedMatch;
   }
 
-  if (!invoice.id) {
-    return false;
-  }
-
-  const invoiceId = invoice.id;
   const listedPayments = await withHostedStripeFailureLog(
     "invoicePayments.list.refund-match",
     () => requireHostedStripeApi().invoicePayments.list({
-      invoice: invoiceId,
+      invoice: input.invoice.id,
       limit: 100,
       status: "paid",
       expand: [
@@ -1494,11 +1596,63 @@ async function hostedStripeRefundMatchesInvoice(refund: Stripe.Refund, invoice: 
       ],
     }),
   );
-  if (listedPayments.data.some((payment) => hostedStripeRefundMatchesInvoicePayment(refund, payment))) {
-    return true;
+  const listedMatch = listedPayments.data
+    .map(readHostedStripeInvoicePaymentIdentity)
+    .find((identity) =>
+      identity !== null
+      && hostedStripeRefundMatchesPaymentIdentity(input.refund, identity)
+    );
+  if (listedMatch) {
+    return listedMatch;
   }
 
-  return hostedStripeRefundMatchesLegacyInvoicePaymentFields(refund, invoice);
+  const legacyIdentity = readHostedStripeLegacyInvoicePaymentIdentity(input.invoice);
+  return legacyIdentity
+    && hostedStripeRefundMatchesPaymentIdentity(input.refund, legacyIdentity)
+    ? legacyIdentity
+    : null;
+}
+
+async function listHostedStripeRefundsForPaymentIdentity(
+  paymentIdentity: HostedStripePaymentIdentity,
+): Promise<Stripe.Refund[]> {
+  const selector = paymentIdentity.chargeId
+    ? { charge: paymentIdentity.chargeId }
+    : paymentIdentity.paymentIntentId
+      ? { payment_intent: paymentIdentity.paymentIntentId }
+      : null;
+  if (!selector) {
+    return [];
+  }
+
+  const refunds: Stripe.Refund[] = [];
+  let startingAfter: string | undefined;
+  for (let pageNumber = 0; pageNumber < HOSTED_STRIPE_REFUND_LIST_MAX_PAGES; pageNumber += 1) {
+    const page = await withHostedStripeFailureLog(
+      "refunds.list.current-entitlement",
+      () => requireHostedStripeApi().refunds.list({
+        ...selector,
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      }),
+    );
+    refunds.push(...page.data);
+    if (!page.has_more) {
+      return refunds;
+    }
+    const lastRefundId = page.data.at(-1)?.id;
+    if (!lastRefundId) {
+      break;
+    }
+    startingAfter = lastRefundId;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_STRIPE_REFUND_RECONCILIATION_BOUNDED",
+    httpStatus: 502,
+    message: "Stripe refund reconciliation is temporarily unavailable.",
+    retryable: true,
+  });
 }
 
 function readHostedStripeInvoicePayments(invoice: Stripe.Invoice): Stripe.InvoicePayment[] {
@@ -1512,39 +1666,48 @@ function readHostedStripeInvoicePayments(invoice: Stripe.Invoice): Stripe.Invoic
     : [];
 }
 
-function hostedStripeRefundMatchesInvoicePayment(
-  refund: Stripe.Refund,
+function readHostedStripeInvoicePaymentIdentity(
   invoicePayment: Stripe.InvoicePayment,
-): boolean {
+): HostedStripePaymentIdentity | null {
   if (invoicePayment.status !== "paid") {
-    return false;
+    return null;
   }
-
-  const refundChargeId = coerceStripeObjectId(refund.charge);
-  const refundPaymentIntentId = coerceStripeObjectId(refund.payment_intent);
-  const invoiceChargeId = coerceUnknownStripeObjectId(invoicePayment.payment.charge);
-  const invoicePaymentIntentId = coerceUnknownStripeObjectId(invoicePayment.payment.payment_intent);
-  return (
-    Boolean(refundChargeId && refundChargeId === invoiceChargeId) ||
-    Boolean(refundPaymentIntentId && refundPaymentIntentId === invoicePaymentIntentId)
+  const chargeId = coerceUnknownStripeObjectId(invoicePayment.payment.charge);
+  const paymentIntentId = coerceUnknownStripeObjectId(
+    invoicePayment.payment.payment_intent,
   );
+  return chargeId || paymentIntentId
+    ? { chargeId, paymentIntentId }
+    : null;
 }
 
-function hostedStripeRefundMatchesLegacyInvoicePaymentFields(
-  refund: Stripe.Refund,
+function readHostedStripeLegacyInvoicePaymentIdentity(
   invoice: Stripe.Invoice,
+): HostedStripePaymentIdentity | null {
+  const chargeId = coerceUnknownStripeObjectId(
+    (invoice as Stripe.Invoice & { charge?: unknown }).charge,
+  );
+  const paymentIntentId = coerceUnknownStripeObjectId(
+    (invoice as Stripe.Invoice & { payment_intent?: unknown }).payment_intent,
+  );
+  return chargeId || paymentIntentId
+    ? { chargeId, paymentIntentId }
+    : null;
+}
+
+function hostedStripeRefundMatchesPaymentIdentity(
+  refund: Stripe.Refund,
+  paymentIdentity: HostedStripePaymentIdentity,
 ): boolean {
   const refundChargeId = coerceStripeObjectId(refund.charge);
   const refundPaymentIntentId = coerceStripeObjectId(refund.payment_intent);
-  const invoiceChargeId = coerceUnknownStripeObjectId(
-    (invoice as Stripe.Invoice & { charge?: unknown }).charge,
-  );
-  const invoicePaymentIntentId = coerceUnknownStripeObjectId(
-    (invoice as Stripe.Invoice & { payment_intent?: unknown }).payment_intent,
-  );
-  return (
-    Boolean(refundChargeId && refundChargeId === invoiceChargeId) ||
-    Boolean(refundPaymentIntentId && refundPaymentIntentId === invoicePaymentIntentId)
+  return Boolean(
+    (refundChargeId
+      && paymentIdentity.chargeId
+      && refundChargeId === paymentIdentity.chargeId)
+    || (refundPaymentIntentId
+      && paymentIdentity.paymentIntentId
+      && refundPaymentIntentId === paymentIdentity.paymentIntentId),
   );
 }
 
@@ -1565,7 +1728,9 @@ function coerceUnknownStripeObjectId(value: unknown): string | null {
 }
 
 function readHostedStripePositiveAmount(value: unknown): number | null {
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
 }
 
 async function writeHostedStripeCheckoutEmailIfPresentTx(input: {
@@ -2100,7 +2265,7 @@ export async function prepareHostedStripeReversalProviderState(input: {
   memberId: string;
   prisma: PrismaClient;
 }): Promise<PreparedHostedStripeReversalProviderState | null> {
-  const isRefund = input.event.type === "refund.created";
+  const isRefund = isHostedStripeRefundEventType(input.event.type);
   const isDispute = input.event.type.startsWith("charge.dispute.");
   if (!isRefund && !isDispute) {
     return null;
@@ -2117,6 +2282,7 @@ export async function prepareHostedStripeReversalProviderState(input: {
   }
   const stripeSubscriptionId =
     member.billingRef?.stripeSubscriptionId ?? null;
+  const stripeCustomerId = member.billingRef?.stripeCustomerId ?? null;
   const disputeOutcome = isDispute
     ? classifyHostedStripeDisputeOutcome(
         input.event.data.object as Stripe.Dispute,
@@ -2135,26 +2301,43 @@ export async function prepareHostedStripeReversalProviderState(input: {
     : null;
   if (
     subscription
-    && subscription.id !== stripeSubscriptionId
+    && (
+      subscription.id !== stripeSubscriptionId
+      || coerceStripeObjectId(subscription.customer) !== stripeCustomerId
+    )
   ) {
     throw new TypeError(
       "Prepared Stripe reversal Subscription does not match the member.",
     );
   }
 
-  const refundCoversCurrentEntitlement = refund
-    ? await isHostedStripeCurrentEntitlementFullRefund({
+  const refundProof = refund
+    ? await prepareHostedStripeCurrentEntitlementRefundProof({
         refund,
         subscription,
       })
-    : false;
+    : {
+        chargeId: null,
+        latestInvoiceId: null,
+        paymentIntentId: null,
+        refundCoversCurrentEntitlement: false,
+      };
 
   return {
+    latestInvoiceId: refundProof.latestInvoiceId,
     memberId: member.core.id,
-    refundCoversCurrentEntitlement,
+    paymentChargeId: refundProof.chargeId,
+    paymentIntentId: refundProof.paymentIntentId,
+    refundCoversCurrentEntitlement:
+      refundProof.refundCoversCurrentEntitlement,
+    stripeCustomerId,
     stripeSubscriptionId,
     subscription,
   };
+}
+
+export function isHostedStripeRefundEventType(type: string): boolean {
+  return type === "refund.created" || type === "refund.updated";
 }
 
 type HostedStripeDisputeOutcome = "ignore" | "restore" | "suspend";

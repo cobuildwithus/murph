@@ -3,12 +3,22 @@ import { randomUUID } from "node:crypto";
 import {
   HostedBillingStatus,
   HostedStripeEventStatus,
+  type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 
 const workflowBoundary = vi.hoisted(() => ({
   start: vi.fn(async () => ({ runId: "run_hosted_stripe_fixture" })),
+}));
+const runtimeRecheckBoundary = vi.hoisted(() => ({
+  signal: vi.fn(async () => ({
+    signalAccepted: true,
+    workflowId: "hosted-user-runtime:fixture",
+  })),
+}));
+const familyPreparationBoundary = vi.hoisted(() => ({
+  prepare: vi.fn(async () => new Map()),
 }));
 
 vi.mock(
@@ -18,7 +28,33 @@ vi.mock(
   }),
 );
 
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-orchestration/signal-runtime")
+  >("@/src/lib/hosted-orchestration/signal-runtime");
+
+  return {
+    ...actual,
+    signalHostedRuntimeRecheckRuntime: runtimeRecheckBoundary.signal,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/family-plan")
+  >("@/src/lib/hosted-onboarding/family-plan");
+
+  return {
+    ...actual,
+    prepareHostedFamilyStripeActivationCryptoDomainRoots:
+      familyPreparationBoundary.prepare,
+  };
+});
+
 import { POST as postHostedStripeWebhook } from "@/app/api/hosted-onboarding/stripe/webhook/route";
+import {
+  getHostedAiUsageMonthlyAllowanceUsdMicros,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   readHostedPersonalAiUsageStatus,
 } from "@/src/lib/hosted-execution/usage-status";
@@ -226,6 +262,378 @@ describe.skipIf(!runPostgresProof)(
         await prisma.$disconnect();
       }
     }, 60_000);
+
+    it("resets an exhausted direct Pulse period and replays the post-commit Edge wake", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_direct_capacity_${fixtureId}`;
+      const stripeCustomerId = `cus_direct_capacity_${fixtureId}`;
+      const stripeSubscriptionId = `sub_direct_capacity_${fixtureId}`;
+      const stripeEventId = `evt_direct_capacity_${fixtureId}`;
+      const pulsePriceId = `price_pulse_capacity_${fixtureId}`;
+      const edgePriceId = `price_edge_capacity_${fixtureId}`;
+      const webhookSecret = "whsec_hosted_direct_capacity_fixture";
+      const nowSeconds = Math.floor(Date.now() / 1_000);
+      const eventCreatedAt = new Date(nowSeconds * 1_000);
+      const periodStart = new Date((nowSeconds - 60) * 1_000);
+      const periodEnd = new Date((nowSeconds + 30 * 24 * 60 * 60) * 1_000);
+      const subscription = buildActiveDirectSubscription({
+        billingPlanCode: "launch_edge_monthly",
+        customerId: stripeCustomerId,
+        nowSeconds,
+        priceId: edgePriceId,
+        subscriptionId: stripeSubscriptionId,
+      });
+      const event = buildSubscriptionUpdatedEvent({
+        created: nowSeconds,
+        eventId: stripeEventId,
+        subscription,
+      });
+      const stripeFixture = await startHostedStripeHttpFixture({
+        events: { [stripeEventId]: event },
+        subscriptions: { [stripeSubscriptionId]: subscription },
+      });
+      const runtimeGlobals = readHostedStripeRuntimeGlobals();
+
+      workflowBoundary.start.mockClear();
+      runtimeRecheckBoundary.signal.mockReset();
+      runtimeRecheckBoundary.signal
+        .mockRejectedValueOnce(new Error("Temporal fixture unavailable"))
+        .mockResolvedValue({
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${memberId}`,
+        });
+      configureHostedStripeFixtureEnvironment({
+        edgePriceId,
+        pulsePriceId,
+        stripe: stripeFixture.stripe,
+        webhookSecret,
+      });
+
+      try {
+        await prisma.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: memberId,
+          },
+        });
+        await prisma.$transaction((tx) =>
+          writeHostedMemberStripeBillingRefTx({
+            currentBillingPhase: "paid",
+            currentBillingPlanCode: "launch_monthly",
+            currentCheckoutOffer: "standard",
+            currentPeriodEnd: periodEnd,
+            currentPeriodStart: periodStart,
+            memberId,
+            stripeCustomerId,
+            stripeEventCreatedAt: new Date(eventCreatedAt.getTime() - 1_000),
+            stripeSubscriptionId,
+            tx,
+          })
+        );
+        const pendingMailboxItemId = await seedUsageBlockedPendingWork({
+          billingPlanCode: "launch_monthly",
+          memberId,
+          periodEnd,
+          periodStart,
+          prisma,
+        });
+
+        await postSignedHostedStripeEvent({
+          event,
+          stripe: stripeFixture.stripe,
+          webhookSecret,
+        });
+        await expect(processRecordedHostedStripeWebhookEvent({
+          eventId: stripeEventId,
+          prisma,
+          timeoutMs: 5_000,
+        })).rejects.toBeDefined();
+
+        await expect(readUsageResetProof({ memberId, periodStart, prisma }))
+          .resolves.toEqual({
+            billingPlanCode: "launch_edge_monthly",
+            blockedAt: null,
+            highestBillingPlanCode: "launch_edge_monthly",
+            planResetAt: eventCreatedAt,
+            spentUsdMicros: 0n,
+          });
+        await expect(readPendingMailboxProof({
+          mailboxItemId: pendingMailboxItemId,
+          prisma,
+        })).resolves.toMatchObject({
+          aiUsageDeniedAt: expect.any(Date),
+          consumedAt: null,
+        });
+        await expect(readStripeReceiptProof({
+          eventId: stripeEventId,
+          prisma,
+        })).resolves.toMatchObject({
+          attemptCount: 1,
+          processedAt: null,
+          status: HostedStripeEventStatus.failed,
+        });
+        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(1);
+        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledWith(
+          expect.objectContaining({ userId: memberId }),
+        );
+
+        await makeStripeReceiptImmediatelyRetryable({
+          eventId: stripeEventId,
+          prisma,
+        });
+        await expect(processRecordedHostedStripeWebhookEvent({
+          eventId: stripeEventId,
+          prisma,
+          timeoutMs: 5_000,
+        })).resolves.toEqual({ accepted: true, required: false });
+
+        await expect(readUsageResetProof({ memberId, periodStart, prisma }))
+          .resolves.toEqual({
+            billingPlanCode: "launch_edge_monthly",
+            blockedAt: null,
+            highestBillingPlanCode: "launch_edge_monthly",
+            planResetAt: eventCreatedAt,
+            spentUsdMicros: 0n,
+          });
+        await expect(readStripeReceiptProof({
+          eventId: stripeEventId,
+          prisma,
+        })).resolves.toMatchObject({
+          attemptCount: 2,
+          processedAt: expect.any(Date),
+          status: HostedStripeEventStatus.completed,
+        });
+        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(2);
+      } finally {
+        clearHostedStripeFixtureEnvironment(runtimeGlobals);
+        await stripeFixture.stop();
+        await prisma.hostedStripeEvent.deleteMany({
+          where: { eventId: stripeEventId },
+        });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it("resets an exhausted sponsored member and replays the Family tier-increase wake", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const fixtureId = randomUUID();
+      const ownerMemberId = `hbm_family_owner_${fixtureId}`;
+      const memberId = `hbm_family_member_${fixtureId}`;
+      const groupId = `hbag_capacity_${fixtureId}`;
+      const stripeCustomerId = `cus_family_capacity_${fixtureId}`;
+      const stripeSubscriptionId = `sub_family_capacity_${fixtureId}`;
+      const stripeEventId = `evt_family_capacity_${fixtureId}`;
+      const pulsePriceId = `price_pulse_capacity_${fixtureId}`;
+      const edgePriceId = `price_edge_capacity_${fixtureId}`;
+      const familyPulsePriceId = `price_family_pulse_capacity_${fixtureId}`;
+      const familyEdgePriceId = `price_family_edge_capacity_${fixtureId}`;
+      const webhookSecret = "whsec_hosted_family_capacity_fixture";
+      const nowSeconds = Math.floor(Date.now() / 1_000);
+      const eventCreatedAt = new Date(nowSeconds * 1_000);
+      const periodStart = new Date((nowSeconds - 60) * 1_000);
+      const periodEnd = new Date((nowSeconds + 30 * 24 * 60 * 60) * 1_000);
+      const subscription = buildActiveFamilySubscription({
+        customerId: stripeCustomerId,
+        edgePriceId: familyEdgePriceId,
+        groupId,
+        nowSeconds,
+        pulsePriceId: familyPulsePriceId,
+        subscriptionId: stripeSubscriptionId,
+      });
+      const event = buildSubscriptionUpdatedEvent({
+        created: nowSeconds,
+        eventId: stripeEventId,
+        subscription,
+      });
+      const stripeFixture = await startHostedStripeHttpFixture({
+        events: { [stripeEventId]: event },
+        subscriptions: { [stripeSubscriptionId]: subscription },
+      });
+      const runtimeGlobals = readHostedStripeRuntimeGlobals();
+
+      workflowBoundary.start.mockClear();
+      runtimeRecheckBoundary.signal.mockReset();
+      runtimeRecheckBoundary.signal
+        .mockRejectedValueOnce(new Error("Temporal fixture unavailable"))
+        .mockResolvedValue({
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${memberId}`,
+        });
+      configureHostedStripeFixtureEnvironment({
+        edgePriceId,
+        familyEdgePriceId,
+        familyPulsePriceId,
+        pulsePriceId,
+        stripe: stripeFixture.stripe,
+        webhookSecret,
+      });
+
+      try {
+        await prisma.hostedMember.createMany({
+          data: [
+            { billingStatus: HostedBillingStatus.active, id: ownerMemberId },
+            { billingStatus: HostedBillingStatus.active, id: memberId },
+          ],
+        });
+        await prisma.hostedAccountGroup.create({
+          data: {
+            billingRef: {
+              create: {
+                billedSeatCount: 2,
+                currentBillingPhase: "paid",
+                currentBillingPlanCode: "launch_family_monthly",
+                currentPeriodEnd: periodEnd,
+                currentPeriodStart: periodStart,
+                lastStripeEventCreatedAt: new Date(
+                  eventCreatedAt.getTime() - 1_000,
+                ),
+              },
+            },
+            billingStatus: HostedBillingStatus.active,
+            id: groupId,
+            memberships: {
+              create: [
+                {
+                  id: `hbagm_owner_${fixtureId}`,
+                  joinedAt: periodStart,
+                  memberId: ownerMemberId,
+                  planCode: "pulse",
+                  role: "owner",
+                  status: "active",
+                },
+                {
+                  id: `hbagm_member_${fixtureId}`,
+                  joinedAt: periodStart,
+                  memberId,
+                  pendingPlanCode: "edge",
+                  planCode: "pulse",
+                  role: "member",
+                  status: "active",
+                },
+              ],
+            },
+            ownerMemberId,
+            planCapacities: {
+              create: {
+                billedQuantity: 2,
+                planCode: "pulse",
+              },
+            },
+          },
+        });
+        const pendingMailboxItemId = await seedUsageBlockedPendingWork({
+          billingPlanCode: "launch_monthly",
+          memberId,
+          periodEnd,
+          periodStart,
+          prisma,
+        });
+        await seedHostedMemberActivationProof({
+          memberId: ownerMemberId,
+          prisma,
+          sequence: 1n,
+        });
+        await seedHostedMemberActivationProof({
+          memberId,
+          prisma,
+          sequence: 2n,
+        });
+
+        await postSignedHostedStripeEvent({
+          event,
+          stripe: stripeFixture.stripe,
+          webhookSecret,
+        });
+        await expect(processRecordedHostedStripeWebhookEvent({
+          eventId: stripeEventId,
+          prisma,
+          timeoutMs: 5_000,
+        })).rejects.toBeDefined();
+
+        await expect(prisma.hostedAccountGroupMembership.findUniqueOrThrow({
+          select: {
+            pendingPlanCode: true,
+            planCode: true,
+            usagePlanTransitionAt: true,
+            usagePlanTransitionKind: true,
+          },
+          where: { id: `hbagm_member_${fixtureId}` },
+        })).resolves.toEqual({
+          pendingPlanCode: null,
+          planCode: "edge",
+          usagePlanTransitionAt: eventCreatedAt,
+          usagePlanTransitionKind: "plan_upgrade",
+        });
+        await expect(readUsageResetProof({ memberId, periodStart, prisma }))
+          .resolves.toEqual({
+            billingPlanCode: "launch_edge_monthly",
+            blockedAt: null,
+            highestBillingPlanCode: "launch_edge_monthly",
+            planResetAt: eventCreatedAt,
+            spentUsdMicros: 0n,
+          });
+        await expect(readPendingMailboxProof({
+          mailboxItemId: pendingMailboxItemId,
+          prisma,
+        })).resolves.toMatchObject({
+          aiUsageDeniedAt: expect.any(Date),
+          consumedAt: null,
+        });
+        await expect(readStripeReceiptProof({
+          eventId: stripeEventId,
+          prisma,
+        })).resolves.toMatchObject({
+          attemptCount: 1,
+          processedAt: null,
+          status: HostedStripeEventStatus.failed,
+        });
+        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(1);
+        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledWith(
+          expect.objectContaining({ userId: memberId }),
+        );
+
+        await makeStripeReceiptImmediatelyRetryable({
+          eventId: stripeEventId,
+          prisma,
+        });
+        await expect(processRecordedHostedStripeWebhookEvent({
+          eventId: stripeEventId,
+          prisma,
+          timeoutMs: 5_000,
+        })).resolves.toEqual({ accepted: true, required: false });
+
+        await expect(readUsageResetProof({ memberId, periodStart, prisma }))
+          .resolves.toEqual({
+            billingPlanCode: "launch_edge_monthly",
+            blockedAt: null,
+            highestBillingPlanCode: "launch_edge_monthly",
+            planResetAt: eventCreatedAt,
+            spentUsdMicros: 0n,
+          });
+        await expect(readStripeReceiptProof({
+          eventId: stripeEventId,
+          prisma,
+        })).resolves.toMatchObject({
+          attemptCount: 2,
+          processedAt: expect.any(Date),
+          status: HostedStripeEventStatus.completed,
+        });
+        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(2);
+      } finally {
+        clearHostedStripeFixtureEnvironment(runtimeGlobals);
+        await stripeFixture.stop();
+        await prisma.hostedStripeEvent.deleteMany({
+          where: { eventId: stripeEventId },
+        });
+        await prisma.hostedAccountGroup.deleteMany({ where: { id: groupId } });
+        await prisma.hostedMember.deleteMany({
+          where: { id: { in: [ownerMemberId, memberId] } },
+        });
+        await prisma.$disconnect();
+      }
+    }, 60_000);
   },
 );
 
@@ -247,6 +655,19 @@ function buildStripeWebhookRequest(input: {
 }
 
 function buildActivePulseSubscription(input: {
+  customerId: string;
+  nowSeconds: number;
+  priceId: string;
+  subscriptionId: string;
+}): Stripe.Subscription {
+  return buildActiveDirectSubscription({
+    ...input,
+    billingPlanCode: "launch_monthly",
+  });
+}
+
+function buildActiveDirectSubscription(input: {
+  billingPlanCode: "launch_edge_monthly" | "launch_monthly";
   customerId: string;
   nowSeconds: number;
   priceId: string;
@@ -301,7 +722,7 @@ function buildActivePulseSubscription(input: {
     latest_invoice: null,
     livemode: false,
     metadata: {
-      billingPlanCode: "launch_monthly",
+      billingPlanCode: input.billingPlanCode,
       checkoutOffer: "standard",
     },
     object: "subscription",
@@ -339,6 +760,264 @@ function buildSubscriptionUpdatedEvent(input: {
     },
     type: "customer.subscription.updated",
   } as Stripe.Event;
+}
+
+function buildActiveFamilySubscription(input: {
+  customerId: string;
+  edgePriceId: string;
+  groupId: string;
+  nowSeconds: number;
+  pulsePriceId: string;
+  subscriptionId: string;
+}): Stripe.Subscription {
+  const base = buildActiveDirectSubscription({
+    billingPlanCode: "launch_monthly",
+    customerId: input.customerId,
+    nowSeconds: input.nowSeconds,
+    priceId: input.pulsePriceId,
+    subscriptionId: input.subscriptionId,
+  });
+  const pulseItem = base.items.data[0];
+  if (!pulseItem) {
+    throw new Error("Family Stripe fixture requires a Pulse item.");
+  }
+
+  return {
+    ...base,
+    items: {
+      ...base.items,
+      data: [
+        {
+          ...pulseItem,
+          id: `si_family_pulse_${input.subscriptionId}`,
+          price: {
+            ...pulseItem.price,
+            id: input.pulsePriceId,
+          },
+          quantity: 1,
+        },
+        {
+          ...pulseItem,
+          id: `si_family_edge_${input.subscriptionId}`,
+          price: {
+            ...pulseItem.price,
+            id: input.edgePriceId,
+          },
+          quantity: 1,
+        },
+      ],
+    },
+    metadata: {
+      accountGroupId: input.groupId,
+      billingPlanCode: "launch_family_monthly",
+      kind: "hosted_family_plan",
+    },
+  };
+}
+
+type HostedStripeRuntimeGlobals = typeof globalThis & {
+  __murphHostedOnboardingEnv?: unknown;
+  __murphHostedOnboardingStripe?: Stripe | null;
+};
+
+function readHostedStripeRuntimeGlobals(): HostedStripeRuntimeGlobals {
+  return globalThis as HostedStripeRuntimeGlobals;
+}
+
+function configureHostedStripeFixtureEnvironment(input: {
+  edgePriceId: string;
+  familyEdgePriceId?: string;
+  familyPulsePriceId?: string;
+  pulsePriceId: string;
+  stripe: Stripe;
+  webhookSecret: string;
+}): void {
+  vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://join.example.test");
+  vi.stubEnv(
+    "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
+    input.pulsePriceId,
+  );
+  vi.stubEnv(
+    "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
+    input.edgePriceId,
+  );
+  if (input.familyPulsePriceId) {
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
+      input.familyPulsePriceId,
+    );
+  }
+  if (input.familyEdgePriceId) {
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY",
+      input.familyEdgePriceId,
+    );
+  }
+  vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_hosted_capacity_fixture");
+  vi.stubEnv("STRIPE_WEBHOOK_SECRET", input.webhookSecret);
+
+  const runtimeGlobals = readHostedStripeRuntimeGlobals();
+  runtimeGlobals.__murphHostedOnboardingEnv =
+    readHostedOnboardingEnvironment(process.env);
+  runtimeGlobals.__murphHostedOnboardingStripe = input.stripe;
+}
+
+function clearHostedStripeFixtureEnvironment(
+  runtimeGlobals: HostedStripeRuntimeGlobals,
+): void {
+  delete runtimeGlobals.__murphHostedOnboardingEnv;
+  delete runtimeGlobals.__murphHostedOnboardingStripe;
+  vi.unstubAllEnvs();
+}
+
+async function postSignedHostedStripeEvent(input: {
+  event: Stripe.Event;
+  stripe: Stripe;
+  webhookSecret: string;
+}): Promise<void> {
+  const payload = JSON.stringify(input.event);
+  const signature = input.stripe.webhooks.generateTestHeaderString({
+    payload,
+    secret: input.webhookSecret,
+  });
+  const response = await postHostedStripeWebhook(
+    buildStripeWebhookRequest({ payload, signature }),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    ok: true,
+    type: input.event.type,
+  });
+}
+
+async function seedUsageBlockedPendingWork(input: {
+  billingPlanCode: "launch_edge_monthly" | "launch_monthly";
+  memberId: string;
+  periodEnd: Date;
+  periodStart: Date;
+  prisma: PrismaClient;
+}): Promise<string> {
+  const deniedAt = new Date(input.periodStart.getTime() + 30_000);
+  const mailboxItemId = `hmi_usage_blocked_${input.memberId}`;
+  const allowance = getHostedAiUsageMonthlyAllowanceUsdMicros(
+    input.billingPlanCode,
+  );
+
+  await input.prisma.hostedWorkspace.create({
+    data: { userId: input.memberId },
+  });
+  await input.prisma.hostedMailboxItem.create({
+    data: {
+      aiUsageDeniedAt: deniedAt,
+      causalSeq: 1n,
+      dedupeKey: `usage-blocked:${input.memberId}`,
+      id: mailboxItemId,
+      kind: "linq.message",
+      lane: "conversation",
+      laneSeq: 1n,
+      occurredAt: deniedAt,
+      payloadSchema: "murph.hosted-execution.test-pending-input.v1",
+      userId: input.memberId,
+    },
+  });
+  await input.prisma.hostedAiUsagePeriod.create({
+    data: {
+      billingPlanCode: input.billingPlanCode,
+      blockedAt: deniedAt,
+      highestBillingPlanCode: input.billingPlanCode,
+      limitUsdMicros: allowance,
+      memberId: input.memberId,
+      periodEnd: input.periodEnd,
+      periodStart: input.periodStart,
+      spentUsdMicros: allowance,
+    },
+  });
+
+  return mailboxItemId;
+}
+
+async function seedHostedMemberActivationProof(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  sequence: bigint;
+}): Promise<void> {
+  await input.prisma.hostedWorkspace.upsert({
+    create: { userId: input.memberId },
+    update: {},
+    where: { userId: input.memberId },
+  });
+  await input.prisma.hostedMailboxItem.create({
+    data: {
+      dedupeKey: `member.activated:fixture:${input.memberId}`,
+      id: `hmi_activation_${input.memberId}`,
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: input.sequence,
+      occurredAt: new Date(),
+      payloadSchema: "murph.hosted-execution.member-activated.v1",
+      userId: input.memberId,
+    },
+  });
+}
+
+function readUsageResetProof(input: {
+  memberId: string;
+  periodStart: Date;
+  prisma: PrismaClient;
+}) {
+  return input.prisma.hostedAiUsagePeriod.findUniqueOrThrow({
+    select: {
+      billingPlanCode: true,
+      blockedAt: true,
+      highestBillingPlanCode: true,
+      planResetAt: true,
+      spentUsdMicros: true,
+    },
+    where: {
+      memberId_periodStart: {
+        memberId: input.memberId,
+        periodStart: input.periodStart,
+      },
+    },
+  });
+}
+
+function readPendingMailboxProof(input: {
+  mailboxItemId: string;
+  prisma: PrismaClient;
+}) {
+  return input.prisma.hostedMailboxItem.findUniqueOrThrow({
+    select: {
+      aiUsageDeniedAt: true,
+      consumedAt: true,
+    },
+    where: { id: input.mailboxItemId },
+  });
+}
+
+function readStripeReceiptProof(input: {
+  eventId: string;
+  prisma: PrismaClient;
+}) {
+  return input.prisma.hostedStripeEvent.findUniqueOrThrow({
+    select: {
+      attemptCount: true,
+      processedAt: true,
+      status: true,
+    },
+    where: { eventId: input.eventId },
+  });
+}
+
+async function makeStripeReceiptImmediatelyRetryable(input: {
+  eventId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.hostedStripeEvent.update({
+    data: { nextAttemptAt: new Date(0) },
+    where: { eventId: input.eventId },
+  });
 }
 
 function isClearlyLocalPostgresUrl(value: string): boolean {
