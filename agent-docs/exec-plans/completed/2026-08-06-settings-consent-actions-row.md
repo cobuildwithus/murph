@@ -1,6 +1,6 @@
 # Keep connected-source and consent actions in one responsive row
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-06
 
@@ -83,3 +83,4 @@ Updated: 2026-08-06
 - Expected outcomes:
   - The active action group stays horizontal without overflow and all existing
     consent behavior remains green.
+Completed: 2026-08-06
