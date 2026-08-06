@@ -56,6 +56,7 @@ describe("hosted runtime operational report contracts", () => {
       "runner_job_accepted_at >= accepted_at",
     );
     expect(coldStartReportSql).toContain("stamp_candidate_count = 1");
+    expect(coldStartReportSql).toContain("SELECT DISTINCT\n    runtime_attempt_id");
     expect(coldStartReportSql).toContain("WHERE phase.duration_ms >= 0");
     expect(coldStartReportSql).toContain("'web_direct_cold'");
     expect(coldStartReportSql).toContain("'temporal_recovery'");
@@ -391,6 +392,17 @@ function createFixtureSql(schemaName: string): string {
     FROM fixture
     UNION ALL
     SELECT
+      'temporal-owned-with-direct-wake-backlog',
+      t0 + INTERVAL '12.5 seconds',
+      t0 + INTERVAL '16 seconds',
+      'attempt-temporal-owned-with-direct-wake',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'temporalActivityStartedAtEpochMs', base_ms + 12000,
+        'triggeredByWebDirect', false
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
       'temporal-legacy-unclassified',
       t0 + INTERVAL '12 seconds',
       t0 + INTERVAL '17 seconds',
@@ -399,6 +411,28 @@ function createFixtureSql(schemaName: string): string {
         'temporalActivityStartedAtEpochMs', base_ms + 12000,
         'triggeredByWebDirect', true,
         'directEnsureRequestStartedAtEpochMs', base_ms + 12100
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'temporal-conflict-temporal-owner',
+      t0 + INTERVAL '13 seconds',
+      t0 + INTERVAL '19 seconds',
+      'attempt-temporal-conflicting-cohort',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'temporalActivityStartedAtEpochMs', base_ms + 13000,
+        'triggeredByWebDirect', false
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'temporal-conflict-direct-owner',
+      t0 + INTERVAL '13.5 seconds',
+      t0 + INTERVAL '19 seconds',
+      'attempt-temporal-conflicting-cohort',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'temporalActivityStartedAtEpochMs', base_ms + 13000,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-conflict'
       ))
     FROM fixture
     UNION ALL

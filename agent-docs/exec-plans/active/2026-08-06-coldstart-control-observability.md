@@ -144,6 +144,12 @@ Updated: 2026-08-06
   only explicit `false` proves a current Temporal-owned launch, a launch-owned
   direct id still takes precedence, historical `true` without that id remains
   `legacy_unclassified`, and rows without direct evidence remain Temporal-only.
+- Round 5 found that deduplicating the raw mailbox-local marker booleans before
+  applying cohort precedence could omit a valid multi-item Temporal attempt
+  when only its initiating row had Web direct timing. Resolve the cohort per
+  row first, then deduplicate the attempt-level owner/activity/runner tuple.
+  Lower-priority marker differences now collapse when the final cohort agrees;
+  conflicting final cohorts or attempt-level timestamps still fail closed.
 
 ## Verification
 
@@ -182,6 +188,10 @@ Updated: 2026-08-06
 - ReviewGPT final round 4: historical-cohort compatibility finding accepted and
   resolved by limiting current Temporal ownership to explicit false. The real
   PostgreSQL fixture again contains historical true and keeps it unclassified.
+- ReviewGPT final round 5: attempt-deduplication finding accepted and resolved
+  by applying cohort precedence before DISTINCT. The PostgreSQL fixture covers
+  differing mailbox-local markers that resolve to one cohort and a genuinely
+  conflicting cohort pair that remains omitted.
 - `git diff --check`: passed.
-- Pending: corrected-head ReviewGPT round 5, exact-head CI, parent final review, plan
+- Pending: corrected-head ReviewGPT round 6, exact-head CI, parent final review, plan
   closure, and mergeability proof.

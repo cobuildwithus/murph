@@ -52,25 +52,36 @@ FROM samples
 HAVING count(*) > 0;
 
 \echo 'Temporal activity to runner job by recovery cohort (seconds)'
-WITH attempt_stamps AS (
-  SELECT DISTINCT
+WITH row_stamps AS (
+  SELECT
     runtime_attempt_id,
     EXTRACT(EPOCH FROM (
       runner_job_accepted_at - TIMESTAMP '1970-01-01'
     )) * 1000 AS runner_job_accepted_ms,
     (phase_breakdown_json #>> '{orchestration,temporalActivityStartedAtEpochMs}')::double precision AS activity_started_ms,
-    phase_breakdown_json #> '{orchestration,runtimeInvocationOrchestrationAttemptId}' IS NOT NULL AS used_direct_recovery,
-    phase_breakdown_json #>> '{orchestration,triggeredByWebDirect}' = 'false'
-      AS explicitly_temporal_launch,
-    phase_breakdown_json #>> '{orchestration,triggeredByWebDirect}' = 'true'
-      OR phase_breakdown_json #> '{orchestration,directEnsureRequestStartedAtEpochMs}' IS NOT NULL
-      AS has_legacy_direct_marker
+    CASE
+      WHEN phase_breakdown_json #> '{orchestration,runtimeInvocationOrchestrationAttemptId}' IS NOT NULL
+        THEN 'temporal_recovery'
+      WHEN phase_breakdown_json #>> '{orchestration,triggeredByWebDirect}' = 'false'
+        THEN 'temporal_only'
+      WHEN phase_breakdown_json #>> '{orchestration,triggeredByWebDirect}' = 'true'
+        OR phase_breakdown_json #> '{orchestration,directEnsureRequestStartedAtEpochMs}' IS NOT NULL
+        THEN 'legacy_unclassified'
+      ELSE 'temporal_only'
+    END AS cohort
   FROM hosted_ingress_latency_trace
   WHERE runner_job_accepted_at >=
       (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - make_interval(hours => :window_hours)
     AND runtime_attempt_id IS NOT NULL
     AND runner_job_accepted_at IS NOT NULL
     AND phase_breakdown_json #> '{orchestration,temporalActivityStartedAtEpochMs}' IS NOT NULL
+), attempt_stamps AS (
+  SELECT DISTINCT
+    runtime_attempt_id,
+    runner_job_accepted_ms,
+    activity_started_ms,
+    cohort
+  FROM row_stamps
 ), unambiguous_attempt_stamps AS (
   SELECT
     attempt_stamps.*,
@@ -78,12 +89,7 @@ WITH attempt_stamps AS (
   FROM attempt_stamps
 ), samples AS (
   SELECT
-    CASE
-      WHEN used_direct_recovery THEN 'temporal_recovery'
-      WHEN explicitly_temporal_launch THEN 'temporal_only'
-      WHEN has_legacy_direct_marker THEN 'legacy_unclassified'
-      ELSE 'temporal_only'
-    END AS cohort,
+    cohort,
     (runner_job_accepted_ms - activity_started_ms) / 1000 AS duration_seconds
   FROM unambiguous_attempt_stamps
   WHERE stamp_candidate_count = 1

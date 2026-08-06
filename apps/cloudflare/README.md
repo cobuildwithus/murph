@@ -305,7 +305,9 @@ first table reports accepted-to-runner-job time only for those causal direct
 cold starts. The second reports Temporal-activity-to-runner-job time by exact
 recovery versus Temporal-only attempt; current Temporal-owned launches remain
 Temporal-only when a direct wake overlaps, while pre-deploy rows with legacy
-direct markers are labeled `legacy_unclassified` instead of being guessed. Warm direct
+direct markers are labeled `legacy_unclassified` instead of being guessed.
+The final cohort is resolved before attempt-level deduplication, so mailbox-local
+marker differences cannot discard a coherent multi-item invocation. Warm direct
 wakes are omitted because they create no new runner job. The final table splits
 the same causal direct samples across Durable Object dispatch,
 consent locking, the existing health-data admission callback, runner-state
