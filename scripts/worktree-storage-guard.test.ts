@@ -91,7 +91,6 @@ function runScript(
       MURPH_WORKTREE_GUARD_STATE_DIR: harness.state,
       MURPH_WORKTREE_MAX_LIVE: '2',
       MURPH_WORKTREE_MIN_FREE_GIB: '1',
-      MURPH_WORKTREE_MIN_FREE_PERCENT: '20',
       MURPH_WORKTREE_TEMP_ROOTS: harness.tempRoot,
       ...overrides,
     },
@@ -235,7 +234,6 @@ touch hook-installed
           MURPH_WORKTREE_GUARD_STATE_DIR: harness.state,
           MURPH_WORKTREE_MAX_LIVE: '3',
           MURPH_WORKTREE_MIN_FREE_GIB: '1',
-          MURPH_WORKTREE_MIN_FREE_PERCENT: '20',
         },
       })
       expect(commit.status).toBe(1)
@@ -374,37 +372,7 @@ touch hook-installed
     expect(guard.stdout).toContain('unmanaged_temp=0')
   })
 
-  it.each([
-    {
-      available: '10000000',
-      capacity: '80%',
-      name: 'absolute free-space',
-      total: '50000000',
-    },
-    {
-      available: '30000000',
-      capacity: '85%',
-      name: 'percentage free-space',
-      total: '200000000',
-    },
-  ])('fails closed when the $name floor alone is missed', ({ available, capacity, total }) => {
-    const harness = createHarness()
-    executable(
-      path.join(harness.fakeBin, 'df'),
-      `#!/usr/bin/env bash
-printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'
-printf '%s\\n' 'testfs ${total} 1 ${available} ${capacity} /'
-`,
-    )
-    const result = runScript(harness, 'worktree-storage-guard', [], {
-      MURPH_WORKTREE_MIN_FREE_GIB: '20',
-      MURPH_WORKTREE_MIN_FREE_PERCENT: '20',
-    })
-    expect(result.status).toBe(1)
-    expect(result.stderr).toContain('require at least 20 GiB and 20% free')
-  })
-
-  it('initializes authorization even when the first disk-floor check fails', () => {
+  it('uses a fixed free-space floor regardless of disk percentage', () => {
     const harness = createHarness()
     executable(
       path.join(harness.fakeBin, 'df'),
@@ -413,13 +381,44 @@ printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'
 printf '%s\\n' 'testfs 200000000 1 30000000 85% /'
 `,
     )
+    const result = runScript(harness, 'worktree-storage-guard', [], {
+      MURPH_WORKTREE_MIN_FREE_GIB: '20',
+    })
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stdout).toContain('free=28GiB')
+  })
+
+  it('fails closed when the fixed free-space floor is missed', () => {
+    const harness = createHarness()
+    executable(
+      path.join(harness.fakeBin, 'df'),
+      `#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'
+printf '%s\\n' 'testfs 50000000 1 10000000 80% /'
+`,
+    )
+    const result = runScript(harness, 'worktree-storage-guard', [], {
+      MURPH_WORKTREE_MIN_FREE_GIB: '20',
+    })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('only 9 GiB free; require at least 20 GiB free')
+  })
+
+  it('initializes authorization even when the first disk-floor check fails', () => {
+    const harness = createHarness()
+    executable(
+      path.join(harness.fakeBin, 'df'),
+      `#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'
+printf '%s\\n' 'testfs 200000000 1 10000000 95% /'
+`,
+    )
     const first = runScript(harness, 'worktree-storage-guard', [], {
       MURPH_WORKTREE_MIN_FREE_GIB: '20',
-      MURPH_WORKTREE_MIN_FREE_PERCENT: '20',
       MURPH_WORKTREE_MAX_LIVE: '3',
     })
     expect(first.status).toBe(1)
-    expect(first.stderr).toContain('only 15% free')
+    expect(first.stderr).toContain('only 9 GiB free')
 
     executable(
       path.join(harness.fakeBin, 'df'),
@@ -453,7 +452,7 @@ printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'
 for candidate in "$@"; do
   [[ "$candidate" == -* ]] && continue
   if [[ "$candidate" == *external-parent* ]]; then
-    printf '%s\\n' 'external volume 200000000 1 30000000 85% /Volumes/External SSD'
+    printf '%s\\n' 'external volume 200000000 1 10000000 95% /Volumes/External SSD'
   else
     printf '%s\\n' 'primary 100000000 1 90000000 10% /primary'
   fi
@@ -467,12 +466,11 @@ done
       ['-b', 'external-low-disk', target],
       {
         MURPH_WORKTREE_MIN_FREE_GIB: '20',
-        MURPH_WORKTREE_MIN_FREE_PERCENT: '20',
         MURPH_WORKTREE_MAX_LIVE: '3',
       },
     )
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain('only 15% free')
+    expect(result.stderr).toContain('only 9 GiB free')
     expect(existsSync(target)).toBe(false)
   })
 
@@ -583,14 +581,13 @@ done
       path.join(harness.fakeBin, 'df'),
       `#!/usr/bin/env bash
 printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'
-printf '%s\\n' 'testfs 200000000 1 30000000 85% /'
+printf '%s\\n' 'testfs 200000000 1 10000000 95% /'
 `,
     )
     const lowDisk = runScript(harness, 'worktree-storage-guard', [], {
       MURPH_WORKTREE_MIN_FREE_GIB: '20',
-      MURPH_WORKTREE_MIN_FREE_PERCENT: '20',
     })
     expect(lowDisk.status).toBe(1)
-    expect(lowDisk.stderr).toContain('only 15% free')
+    expect(lowDisk.stderr).toContain('only 9 GiB free')
   })
 })

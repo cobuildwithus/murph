@@ -16,6 +16,8 @@ const HOSTED_XAI_ALLOWED_REQUEST_KEYS = new Set([
 ]);
 const HOSTED_XAI_ALLOWED_X_SEARCH_TOOL_KEYS = new Set([
   "allowed_x_handles",
+  "enable_image_understanding",
+  "enable_video_understanding",
   "excluded_x_handles",
   "from_date",
   "to_date",
@@ -30,9 +32,9 @@ export interface HostedXaiRequestBody {
 
 // Structural gate for the fixed-shape x_search Responses request the
 // assistant engine builds. It pins the tool surface (exactly one x_search
-// entry with only the documented filter keys) and store: false, and reads the
-// requested model for usage recording. Prompt text is deliberately not
-// re-validated here.
+// entry with only the documented filters and media-understanding flags) and
+// store: false, and reads the requested model for usage recording. Prompt text
+// is deliberately not re-validated here.
 export function parseHostedXaiRequestBody(input: {
   body: ArrayBuffer;
   contentType: string | null;
@@ -110,10 +112,16 @@ function isAllowedXaiSearchToolEntry(entry: unknown): boolean {
   if (
     !isOptionalXaiHandleList(record.allowed_x_handles)
     || !isOptionalXaiHandleList(record.excluded_x_handles)
+    || !isOptionalBoolean(record.enable_image_understanding)
+    || !isOptionalBoolean(record.enable_video_understanding)
   ) {
     return false;
   }
   return isOptionalXaiDate(record.from_date) && isOptionalXaiDate(record.to_date);
+}
+
+function isOptionalBoolean(value: unknown): boolean {
+  return value === undefined || typeof value === "boolean";
 }
 
 function isOptionalXaiHandleList(value: unknown): boolean {

@@ -40,9 +40,11 @@ const ASK_GROK_REQUEST_TIMEOUT_MS = 60_000
 // output tokens and then discard them; the token ceiling is the real limit.
 const ASK_GROK_MAX_ANSWER_CHARS = 8000
 const ASK_GROK_DEVELOPER_INSTRUCTION =
-  'Use the x_search tool to answer the question about X (Twitter). Include the '
-  + 'URL of every post you rely on. Say plainly when you cannot find relevant '
-  + 'posts; never invent posts, links, or authors.'
+  'Use the x_search tool to answer the question about X (Twitter). Inspect images '
+  + 'and videos in relevant posts when they help answer it, and distinguish what '
+  + 'the post says from what its media shows or says. Include the URL of every '
+  + 'post you rely on. Say plainly when you cannot find relevant posts; never '
+  + 'invent posts, links, authors, or media details.'
 // One-way boundary: the answer is always last, so there is no closing marker
 // for untrusted text to forge and nothing after it to impersonate. A two-sided
 // span would need a sanitizer, and any sanitizer is bypassable by an equivalent
@@ -121,7 +123,11 @@ export async function executeAskGrokTool(input: {
           { role: 'developer', content: ASK_GROK_DEVELOPER_INSTRUCTION },
           { role: 'user', content: input.args.question },
         ],
-        tools: [{ type: 'x_search' }],
+        tools: [{
+          type: 'x_search',
+          enable_image_understanding: true,
+          enable_video_understanding: true,
+        }],
         max_output_tokens: ASK_GROK_MAX_OUTPUT_TOKENS,
         store: false,
       }),

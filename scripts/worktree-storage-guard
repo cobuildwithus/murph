@@ -28,15 +28,14 @@ done
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 max_regular="${MURPH_WORKTREE_MAX_LIVE:-100}"
 min_free_gib="${MURPH_WORKTREE_MIN_FREE_GIB:-20}"
-min_free_percent="${MURPH_WORKTREE_MIN_FREE_PERCENT:-15}"
 
-for value in "$max_regular" "$min_free_gib" "$min_free_percent"; do
+for value in "$max_regular" "$min_free_gib"; do
   if [[ ! "$value" =~ ^[0-9]+$ ]]; then
     printf 'worktree storage guard: limits must be non-negative integers\n' >&2
     exit 2
   fi
 done
-if (( max_regular < 1 || min_free_percent > 100 )); then
+if (( max_regular < 1 )); then
   printf 'worktree storage guard: invalid worktree or free-space limit\n' >&2
   exit 2
 fi
@@ -359,29 +358,30 @@ df_output="$(df -Pk "${disk_paths[@]}" 2>/dev/null)" || {
   exit 1
 }
 minimum_kib=$((min_free_gib * 1024 * 1024))
-available_percent=101
+minimum_available_kib=''
 disk_rows=0
 disk_floor_failed=0
 disk_capacity_rows="$(awk '
   NR > 1 {
     for (field = 1; field <= NF; field++) {
       if ($field ~ /^[0-9]+%$/ && field >= 4) {
-        print $(field - 3), $(field - 1)
+        print $(field - 1)
         break
       }
     }
   }
 ' <<<"$df_output")"
-while read -r disk_kib available_kib; do
-  [[ -n "$disk_kib" && -n "$available_kib" ]] || continue
-  if [[ ! "$disk_kib" =~ ^[0-9]+$ || ! "$available_kib" =~ ^[0-9]+$ || "$disk_kib" == 0 ]]; then
+while read -r available_kib; do
+  [[ -n "$available_kib" ]] || continue
+  if [[ ! "$available_kib" =~ ^[0-9]+$ ]]; then
     printf 'worktree storage guard: could not read filesystem capacity\n' >&2
     exit 1
   fi
   disk_rows=$((disk_rows + 1))
-  row_percent=$((available_kib * 100 / disk_kib))
-  (( row_percent < available_percent )) && available_percent="$row_percent"
-  if (( available_kib < minimum_kib || row_percent < min_free_percent )); then
+  if [[ -z "$minimum_available_kib" ]] || (( available_kib < minimum_available_kib )); then
+    minimum_available_kib="$available_kib"
+  fi
+  if (( available_kib < minimum_kib )); then
     disk_floor_failed=1
   fi
 done <<<"$disk_capacity_rows"
@@ -390,8 +390,9 @@ if (( disk_rows == 0 )); then
   exit 1
 fi
 if (( disk_floor_failed == 1 )); then
-  printf 'worktree storage guard: a worktree filesystem has only %d%% free; require at least %d GiB and %d%% free\n' \
-    "$available_percent" "$min_free_gib" "$min_free_percent" >&2
+  available_gib=$((minimum_available_kib / 1024 / 1024))
+  printf 'worktree storage guard: a worktree filesystem has only %d GiB free; require at least %d GiB free\n' \
+    "$available_gib" "$min_free_gib" >&2
   exit 1
 fi
 
@@ -429,5 +430,6 @@ tmp_state="$state_file.tmp.$$"
 printf '%d\n' "$ratcheted" >"$tmp_state"
 mv "$tmp_state" "$state_file"
 
-printf 'worktree storage guard: regular=%d data=%d ceiling=%d free=%d%% unmanaged_temp=%d\n' \
-  "$regular_count" "$data_count" "$ratcheted" "$available_percent" "${#unmanaged_fingerprints[@]}"
+available_gib=$((minimum_available_kib / 1024 / 1024))
+printf 'worktree storage guard: regular=%d data=%d ceiling=%d free=%dGiB unmanaged_temp=%d\n' \
+  "$regular_count" "$data_count" "$ratcheted" "$available_gib" "${#unmanaged_fingerprints[@]}"

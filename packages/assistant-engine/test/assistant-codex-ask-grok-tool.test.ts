@@ -96,6 +96,7 @@ describe('murph.ask_grok availability and framing', () => {
   })
 
   it('tells the model the answer is untrusted, unverified, and must be attributed', () => {
+    expect(MURPH_ASK_GROK_TOOL.description).toContain('images or videos')
     expect(MURPH_ASK_GROK_TOOL.description)
       .toContain('untrusted third-party content')
     expect(MURPH_ASK_GROK_TOOL.description).toContain('not independently verified')
@@ -117,9 +118,14 @@ describe('executeAskGrokTool', () => {
         model: 'grok-4.5',
         max_output_tokens: 2500,
         store: false,
-        tools: [{ type: 'x_search' }],
+        tools: [{
+          type: 'x_search',
+          enable_image_understanding: true,
+          enable_video_understanding: true,
+        }],
       })
       expect(body.input[0].role).toBe('developer')
+      expect(body.input[0].content).toContain('Inspect images and videos')
       expect(body.input[1]).toEqual({
         role: 'user',
         content: 'what is @acme posting about?',
