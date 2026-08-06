@@ -163,7 +163,7 @@ export function registerResearchCommands(cli: Cli.Cli) {
       },
     ],
     hint:
-      'Requires EXA_API_KEY. Pass exactly one focused generalized public question as {"question":"..."}, or one compact non-identifying tag profile; use research payload-schema --format json for the exact file-body contract. Use --input @file.json or --input - for stdin, not inline JSON. Do not include private notes, names, contacts, member or patient identifiers, credentials, dates of birth, exact personal labs or measurements, appointments, or medical records. The tool returns the provider response; source evaluation, local relevance, and final medical framing remain the assistant job.',
+      'Requires EXA_API_KEY. Pass exactly one focused generalized public question as {"question":"..."}, or one compact non-identifying tag profile; use research payload-schema --format json for the exact file-body contract. Use --input @file.json or --input - for stdin, not inline JSON. Do not include private notes, names or details that identify the member or another private person, contacts, member or patient identifiers, credentials, dates of birth, exact personal labs or measurements, appointments, or medical records. Preserve public study titles, researcher names, institutions, and other public entities when they materially focus the search. The tool returns the provider response; source evaluation, local relevance, and final medical framing remain the assistant job.',
     output: researchScoutResultSchema,
     async run({ options }) {
       const rawProfile = await loadJsonInputObject(
