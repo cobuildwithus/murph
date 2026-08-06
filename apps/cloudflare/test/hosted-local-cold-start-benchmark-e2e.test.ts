@@ -15,6 +15,9 @@ import {
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
+  assertSingleSuccessfulColdStartAttempt,
+} from "./helpers/hosted-local-cold-start-benchmark.js";
+import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
@@ -86,6 +89,7 @@ describe("hosted local cold-start benchmark e2e", () => {
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
         OPENAI_API_KEY: "stub-local-openai-key",
       },
+      assistantProviderMode: "stub",
       assistantProviderStubModelId: assistantModel,
       localDatabaseUrl,
       persistDirOverride: workerPersistDirOverride,
@@ -178,6 +182,8 @@ async function runColdStartTrial(
   // first contact are imported by one genuinely cold runtime attempt.
   await activeScenario.enqueueWake(buildActivationWake(userId, ordinal), userId);
   const providerRequestBaseline = listResponsesApiRequests().length;
+  const totalProviderRequestBaseline = activeScenario.assistantProviderRequests.length;
+  const totalAcceptedSendBaseline = activeLinqStub.acceptedSendRequests.length;
   const acceptedReplyBaseline = activeLinqStub.countAcceptedSends(
     replyPath,
     replyMatcher,
@@ -223,8 +229,14 @@ async function runColdStartTrial(
   expect(activeLinqStub.countAcceptedSends(replyPath, replyMatcher)).toBe(
     acceptedReplyBaseline + 1,
   );
+  expect(activeLinqStub.acceptedSendRequests).toHaveLength(
+    totalAcceptedSendBaseline + 1,
+  );
 
   const responsesApiRequests = listResponsesApiRequests();
+  expect(activeScenario.assistantProviderRequests).toHaveLength(
+    totalProviderRequestBaseline + 1,
+  );
   expect(responsesApiRequests).toHaveLength(providerRequestBaseline + 1);
   const providerRequestsForTrial = responsesApiRequests
     .slice(providerRequestBaseline)
@@ -268,6 +280,7 @@ async function runColdStartTrial(
   if (!runtimeAttemptId) {
     throw new Error("Expected the benchmark runtime attempt id.");
   }
+  assertSingleSuccessfulColdStartAttempt(runtimeLogs, runtimeAttemptId);
   // Each trial creates a new member with no prior snapshot, so coldness is the
   // first container/Codex process use proved above—not an R2 restore of an
   // existing workspace object. The attributed mailbox event proves the same
