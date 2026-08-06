@@ -2520,7 +2520,7 @@ describe("hostedRunnerIntercept", () => {
     });
   });
 
-  it("normalizes Responses Lite tools before Venice upstream egress", async () => {
+  it("normalizes Responses Lite tools and marks the stable Venice cache prefix", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
@@ -2543,11 +2543,18 @@ describe("hostedRunnerIntercept", () => {
       ],
       type: "namespace",
     }];
-    const standardInput = [{
-      content: [{ text: "Show my connected apps.", type: "input_text" }],
-      role: "user",
-      type: "message",
-    }];
+    const standardInput = [
+      {
+        content: [{ text: "Stable Codex instructions.", type: "input_text" }],
+        role: "developer",
+        type: "message",
+      },
+      {
+        content: [{ text: "Show my connected apps.", type: "input_text" }],
+        role: "user",
+        type: "message",
+      },
+    ];
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.venice.ai/api/v1/responses", {
@@ -2580,7 +2587,18 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded).toBeInstanceOf(Request);
     const forwardedRequest = forwarded as Request;
     await expect(forwardedRequest.json()).resolves.toEqual({
-      input: standardInput,
+      input: [
+        {
+          content: [{
+            prompt_cache_breakpoint: { mode: "explicit" },
+            text: "Stable Codex instructions.",
+            type: "input_text",
+          }],
+          role: "developer",
+          type: "message",
+        },
+        standardInput[1],
+      ],
       model:
         "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
       parallel_tool_calls: false,

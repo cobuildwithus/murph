@@ -29,7 +29,9 @@ provider-rendered iMessage response-card fallback are jointly specified by
 `agent-docs/operations/imessage-deliverability.md`.
 
 Venice's code-owned provider-model binding without duplicate deploy variables
-and its provider-aware immutable allowance pricing are jointly specified by
+provider-aware immutable allowance pricing, explicit Codex prompt-cache
+boundary, and capped real-Codex cache-reuse activation gate are jointly
+specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
 `agent-docs/RELIABILITY.md`,
 `agent-docs/product-specs/hosted-plan-usage.md`, and the Web and Cloudflare app

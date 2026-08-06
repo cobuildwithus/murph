@@ -112,6 +112,9 @@ Last verified: 2026-08-05
   only the two Responses POST paths, canonical product model ids, a bounded
   20 MiB request body, and fixed code-owned model mappings; it disables Venice's
   added system prompt, web search, and web scraping at the final egress rewrite.
+  For the exact Codex Responses Lite shape, that rewrite may add only cache
+  control metadata to a supported developer content block; it does not log or
+  persist prompt content, request bodies, or cache keys.
   Those mappings are pinned to `openai-gpt-56-luna`,
   `openai-gpt-56-terra`, and `openai-gpt-56-sol`. Runtime egress derives them
   directly from the shared code-owned map, so provider-aware allowance pricing
