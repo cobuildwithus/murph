@@ -1,7 +1,9 @@
+import { Cli } from 'incur'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
   parseResearchScoutCliProfileInput,
+  registerResearchCommands,
 } from '../src/commands/research.js'
 import {
   fetchExaResearchScoutCandidates,
@@ -21,6 +23,15 @@ function jsonResponse(payload: unknown, status = 200): Response {
   })
 }
 
+function createResearchCli() {
+  const cli = Cli.create('vault-cli', {
+    description: 'focused research question test cli',
+    version: '0.0.0-test',
+  })
+  registerResearchCommands(cli)
+  return cli
+}
+
 describe('focused public research questions', () => {
   it('accepts a question profile through the existing research scout input parser', () => {
     expect(parseResearchScoutCliProfileInput(QUESTION_PROFILE)).toMatchObject({
@@ -35,6 +46,30 @@ describe('focused public research questions', () => {
       topics: [],
       behaviors: [],
     })
+  })
+
+  it('documents both focused questions and compact tag profiles on the existing command', async () => {
+    const output: string[] = []
+
+    await createResearchCli().serve(['research', 'scout', '--help'], {
+      exit() {},
+      stdout(chunk) {
+        output.push(chunk)
+      },
+    })
+
+    const help = output.join('')
+    expect(help).toContain('focused public question')
+    expect(help).toContain('compact non-identifying tag profile')
+    expect(help).toContain('{"question":"..."}')
+    expect(help).toContain('--input @file.json')
+    expect(help).toContain('--input -')
+  })
+
+  it('gives actionable guidance for invalid focused-question input', () => {
+    expect(() => parseResearchScoutCliProfileInput({
+      question: 'What should I do about my LDL 181 mg/dL?',
+    })).toThrow(/either .*focused public question or a compact profile/u)
   })
 
   it('uses the existing Exa request path and reports the sent profile kind', async () => {

@@ -32,6 +32,36 @@ const QUESTION_PROFILE = {
     'What do recent randomized trials and systematic reviews show about creatine and cognitive performance in healthy adults?',
 } as const
 
+function createQuestionRequestBody() {
+  return buildExaResearchScoutRequest({
+    profile: {
+      ...QUESTION_PROFILE,
+      topics: [],
+      biomarkers: [],
+      behaviors: [],
+      supplements: [],
+      conditionsOrConcerns: [],
+      goals: [],
+      activeExperiments: [],
+    },
+    since: '2021-01-01T00:00:00.000Z',
+    until: '2026-08-06T00:00:00.000Z',
+    maxCandidates: 6,
+  })
+}
+
+function createExaTestEnv(validateRuntimeWriteFence: () => Promise<boolean>) {
+  return {
+    ...createHostedExecutionTestEnv(),
+    EXA_API_KEY: 'exa-worker-secret',
+    USER_RUNNER: {
+      getByName: () => ({
+        validateRuntimeWriteFence,
+      }),
+    },
+  } as unknown as RunnerOutboundEnvironmentSource
+}
+
 afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -42,33 +72,10 @@ describe('hosted Exa egress for focused public questions', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-06T12:00:00.000Z'))
 
-    const requestBody = buildExaResearchScoutRequest({
-      profile: {
-        ...QUESTION_PROFILE,
-        topics: [],
-        biomarkers: [],
-        behaviors: [],
-        supplements: [],
-        conditionsOrConcerns: [],
-        goals: [],
-        activeExperiments: [],
-      },
-      since: '2021-01-01T00:00:00.000Z',
-      until: '2026-08-06T00:00:00.000Z',
-      maxCandidates: 6,
-    })
+    const requestBody = createQuestionRequestBody()
     const fetchMock = vi.fn<typeof fetch>(async () => new Response('ok'))
     vi.stubGlobal('fetch', fetchMock)
     const validateRuntimeWriteFence = vi.fn(async () => true)
-    const env = {
-      ...createHostedExecutionTestEnv(),
-      EXA_API_KEY: 'exa-worker-secret',
-      USER_RUNNER: {
-        getByName: () => ({
-          validateRuntimeWriteFence,
-        }),
-      },
-    } as unknown as RunnerOutboundEnvironmentSource
 
     const response = await hostedRunnerIntercept(
       new Request('https://api.exa.ai/search', {
@@ -82,7 +89,7 @@ describe('hosted Exa egress for focused public questions', () => {
         },
         method: 'POST',
       }),
-      env,
+      createExaTestEnv(validateRuntimeWriteFence),
       { containerId: 'opaque-container-id' },
     )
 
@@ -101,5 +108,44 @@ describe('hosted Exa egress for focused public questions', () => {
     expect(forwardedRequest.headers.has('authorization')).toBe(false)
     expect(forwardedRequest.headers.has('cookie')).toBe(false)
     await expect(forwardedRequest.json()).resolves.toEqual(requestBody)
+  })
+
+  it('fails closed before upstream fetch when the exact question recipe is mutated with private data', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-06T12:00:00.000Z'))
+
+    const requestBody = createQuestionRequestBody()
+    const unsafeRequestBody = {
+      ...requestBody,
+      query: requestBody.query.replace(
+        QUESTION_PROFILE.question,
+        'What should I do about my LDL 181 mg/dL?',
+      ),
+    }
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('unexpected'))
+    vi.stubGlobal('fetch', fetchMock)
+    const validateRuntimeWriteFence = vi.fn(async () => true)
+
+    const response = await hostedRunnerIntercept(
+      new Request('https://api.exa.ai/search', {
+        body: JSON.stringify(unsafeRequestBody),
+        headers: {
+          ...WRITE_FENCE_HEADERS,
+          'content-type': 'application/json; charset=utf-8',
+          'x-api-key': HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: 'POST',
+      }),
+      createExaTestEnv(validateRuntimeWriteFence),
+      { containerId: 'opaque-container-id' },
+    )
+
+    expect(response.status).toBe(403)
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: 'attempt_1',
+      generation: '7',
+      userId: 'member_123',
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
