@@ -1,6 +1,10 @@
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { readRawBodyBuffer } from "@/src/lib/http";
-import { retellWebhookPayloadSchema } from "@/src/lib/phone-calls/retell-payloads";
+import {
+  retellWebhookPayloadSchema,
+  type RetellCallPayload,
+} from "@/src/lib/phone-calls/retell-payloads";
+import { prepareRetellCallResult } from "@/src/lib/phone-calls/retell-result-lifecycle";
 import {
   handleRetellCallAnalyzed,
   handleRetellCallEnded,
@@ -30,27 +34,44 @@ export const POST = withJsonError(async (request: Request) => {
       ]);
       break;
     case "call_analyzed": {
+      const resultCall = prepareRetellCallResult({
+        call: payload.call,
+        event: "call_analyzed",
+      });
       await settleRetellWebhookBranches([
         () => accountRetellPhoneCallUsage({ call: payload.call }),
-        async () => {
-          const result = await handleRetellCallAnalyzed({ call: payload.call });
-          if (result.notificationMailboxItemId) {
-            await signalHostedMailboxAppendRuntime({
-              expectedUserId: result.notificationUserId,
-              mailboxItemId: result.notificationMailboxItemId,
-            });
-          }
-        },
+        ...(resultCall
+          ? [() => handleRetellResult(resultCall)]
+          : []),
       ]);
       break;
     }
-    case "transfer_ended":
-      await accountRetellPhoneCallUsage({ call: payload.call });
+    case "transfer_ended": {
+      const resultCall = prepareRetellCallResult({
+        call: payload.call,
+        event: "transfer_ended",
+      });
+      await settleRetellWebhookBranches([
+        () => accountRetellPhoneCallUsage({ call: payload.call }),
+        () => handleRetellResult(resultCall),
+      ]);
       break;
+    }
   }
 
   return new Response(null, { status: 204 });
 });
+
+async function handleRetellResult(call: RetellCallPayload): Promise<void> {
+  const result = await handleRetellCallAnalyzed({ call });
+  if (!result.notificationMailboxItemId) {
+    return;
+  }
+  await signalHostedMailboxAppendRuntime({
+    expectedUserId: result.notificationUserId,
+    mailboxItemId: result.notificationMailboxItemId,
+  });
+}
 
 async function settleRetellWebhookBranches(
   branches: ReadonlyArray<() => Promise<unknown>>,
