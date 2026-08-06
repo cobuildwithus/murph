@@ -222,7 +222,13 @@ describe('onboarding first personal read', () => {
       'A generic closing invitation such as `anything else?` is not an unresolved task',
     )
     expect(prompt).toContain(
-      'If any existing section heading begins `First read `, return skip; this one-shot never sends a second first personal read.',
+      'return skip if the page is malformed or unreadable',
+    )
+    expect(prompt).toContain(
+      'If a `First read <Occurrence local date>` section already exists, reuse only its exact stored outbound text for retry or replay of this occurrence',
+    )
+    expect(prompt).toContain(
+      'If any other section heading begins `First read `, return skip; this one-shot never sends a second first personal read.',
     )
     expect(prompt).toContain(
       'vault-cli knowledge append-section weekly-health-insights',
