@@ -16,6 +16,8 @@ import type {
 } from "./workspace-snapshot-store.ts";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+  HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+  HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER,
   readHostedWorkspaceSnapshotR2BucketRole,
 } from "./workspace-snapshot-store.ts";
 import {
@@ -196,7 +198,7 @@ export async function handleRunnerOutboundRequest(
         });
       }
 
-      const match = /^\/workspace-snapshots\/(?<snapshotId>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?<suffix>\/complete|\/data-key\/unwrap|\/presign-get|\/presign-put)?$/u.exec(
+      const match = /^\/workspace-snapshots\/(?<snapshotId>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?<suffix>\/complete|\/data-key\/unwrap|\/object|\/presign-get|\/presign-put)?$/u.exec(
         url.pathname,
       );
       if (!match?.groups) {
@@ -234,6 +236,18 @@ export async function handleRunnerOutboundRequest(
           return methodNotAllowed();
         }
         return handleRunnerWorkspaceSnapshotPresignGetRequest({
+          env,
+          request,
+          snapshotId: match.groups.snapshotId,
+          userId,
+        });
+      }
+
+      if (match.groups.suffix === "/object") {
+        if (request.method !== "POST") {
+          return markWorkspaceSnapshotObjectReadResponse(methodNotAllowed());
+        }
+        return await handleRunnerWorkspaceSnapshotObjectReadRequest({
           env,
           request,
           snapshotId: match.groups.snapshotId,
@@ -307,12 +321,19 @@ export async function handleRunnerOutboundRequest(
     const details = buildHostedExecutionSafeErrorDetails(error);
     const errorName = readHostedExecutionSafeErrorName(error);
 
-    return json({
+    const response = json({
       code: deriveHostedExecutionErrorCode(error),
       error: summarizeHostedExecutionError(error),
       ...(details ? { details } : {}),
       ...(errorName ? { errorName } : {}),
     }, 500);
+    return safeUrl
+      && safeUrl.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore
+      && /^\/workspace-snapshots\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\/object$/u.test(
+        safeUrl.pathname,
+      )
+      ? markWorkspaceSnapshotObjectReadResponse(response)
+      : response;
   }
 }
 
@@ -946,6 +967,130 @@ async function handleRunnerWorkspaceSnapshotPresignGetRequest(input: {
     expiresAt: presigned.expiresAt,
     getUrl: presigned.url,
   });
+}
+
+async function handleRunnerWorkspaceSnapshotObjectReadRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  snapshotId: string;
+  userId: string;
+}): Promise<Response> {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeFence) {
+    return markWorkspaceSnapshotObjectReadResponse(unauthorized());
+  }
+
+  const body = await readJsonObject(input.request, {
+    limitBytes: 16 * 1024,
+  });
+  const requestedSnapshotId = requireSnapshotDataKeyString(body.snapshotId, "snapshotId");
+  const requestedObjectKey = requireSnapshotDataKeyString(body.objectKey, "objectKey");
+  let requestedRef: HostedWorkspaceSnapshotV2Ref;
+  try {
+    requestedRef = parseHostedWorkspaceSnapshotV2Ref(
+      body.ref,
+      "Hosted workspace snapshot object read ref",
+    );
+  } catch {
+    return markWorkspaceSnapshotObjectReadResponse(
+      jsonError("Hosted workspace snapshot object read ref is invalid.", 400),
+    );
+  }
+  if (requestedSnapshotId !== input.snapshotId) {
+    return markWorkspaceSnapshotObjectReadResponse(
+      jsonError("Hosted workspace snapshot object read snapshotId does not match its route.", 400),
+    );
+  }
+  if (
+    requestedRef.userId !== input.userId
+    || requestedRef.snapshotId !== input.snapshotId
+    || requestedRef.objectKey !== requestedObjectKey
+    || requestedRef.encryption.aad.userId !== input.userId
+    || requestedRef.encryption.aad.snapshotId !== input.snapshotId
+    || requestedRef.encryption.aad.objectKey !== requestedObjectKey
+  ) {
+    return markWorkspaceSnapshotObjectReadResponse(
+      jsonError("Hosted workspace snapshot object read ref does not match its route.", 403),
+    );
+  }
+
+  const expectedObjectKey = await hostedWorkspaceSnapshotObjectKey({
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+  if (requestedObjectKey !== expectedObjectKey) {
+    return markWorkspaceSnapshotObjectReadResponse(
+      jsonError("Hosted workspace snapshot object read target is outside the bound user namespace.", 403),
+    );
+  }
+
+  const bucket: WorkspaceSnapshotR2BucketLike = input.env.BUNDLES;
+  if (!bucket.get) {
+    return markWorkspaceSnapshotObjectReadResponse(
+      jsonError("Hosted workspace snapshot object store is unavailable.", 503),
+    );
+  }
+  const object = await bucket.get(requestedObjectKey);
+  if (!object) {
+    return markWorkspaceSnapshotObjectReadResponse(notFound());
+  }
+
+  const objectMatchesRef =
+    object.key === requestedObjectKey
+    && Number.isSafeInteger(object.size)
+    && object.size === requestedRef.archive.encryptedByteSize
+    && readHostedWorkspaceSnapshotSha256ChecksumHex(object.checksums?.sha256)
+      === requestedRef.archive.encryptedObjectSha256
+    && readWorkspaceSnapshotObjectMetadata(object.customMetadata, "encryptedsha256")
+      === requestedRef.archive.encryptedObjectSha256
+    && readWorkspaceSnapshotObjectMetadata(object.customMetadata, "schema")
+      === HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA
+    && readWorkspaceSnapshotObjectMetadata(object.customMetadata, "snapshotid")
+      === requestedRef.snapshotId;
+  if (!objectMatchesRef) {
+    await cancelWorkspaceSnapshotObjectBody(object.body);
+    return markWorkspaceSnapshotObjectReadResponse(
+      jsonError("Hosted workspace snapshot object metadata does not match its ref.", 409),
+    );
+  }
+  if (!object.body) {
+    return markWorkspaceSnapshotObjectReadResponse(
+      jsonError("Hosted workspace snapshot object body is unavailable.", 503),
+    );
+  }
+
+  return new Response(object.body, {
+    headers: {
+      "cache-control": "private, no-store",
+      "content-length": String(requestedRef.archive.encryptedByteSize),
+      "content-type": HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+      [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+        HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+    },
+    status: 200,
+  });
+}
+
+function markWorkspaceSnapshotObjectReadResponse(response: Response): Response {
+  response.headers.set(
+    HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER,
+    HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+  );
+  return response;
+}
+
+async function cancelWorkspaceSnapshotObjectBody(
+  body: ReadableStream<Uint8Array> | undefined,
+): Promise<void> {
+  try {
+    await body?.cancel();
+  } catch {
+    // Best-effort cleanup only; preserve the validation response.
+  }
 }
 
 async function handleRunnerWorkspaceSnapshotDataKeyRequest(input: {

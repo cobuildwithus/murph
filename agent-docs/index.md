@@ -56,6 +56,14 @@ That contract is jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `apps/cloudflare/R2_BUNDLES_ENAM_MIGRATION.md`.
 
+Hosted v2 workspace snapshot upload remains direct presigned `PUT`, while
+restore uses the fixed internal container-outbound host and a validated,
+phase-ordered R2-binding response stream with one whole-restore retry. The
+three-release presigned-GET compatibility and rollback window is jointly
+specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+`agent-docs/RELIABILITY.md`, `apps/cloudflare/README.md`, and
+`apps/cloudflare/DEPLOY.md`.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

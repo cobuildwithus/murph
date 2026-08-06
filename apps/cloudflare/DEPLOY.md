@@ -533,7 +533,7 @@ Set these in the selected GitHub environment as vars:
   OC-to-ENAM cutover; `paused` is emergency incident containment only
 
 `CF_PUBLIC_BASE_URL` is a required non-secret Worker variable as well as the standard deploy-and-smoke target. Private-media capability creation uses that exact deployment origin, and hosted Web validates capabilities against its matching `HOSTED_EXECUTION_CONTROL_URL` origin. Production preflight pins both sides to `https://murph-hosted.cobuildwithus.workers.dev`; preview uses its isolated staging Worker origin and must reject production-origin capabilities. Change the production pin and deploy invariant together before moving the production origin. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
-`HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the Worker R2 binding. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
+`HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload through presigned `PUT` URLs, while current restore streams through the internal Worker route and R2 binding. The presign settings remain required during the rolling-compatibility window because old runners still call `/presign-get` and current runners can fall back when an old Worker returns an unversioned route error. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
 For production deploys, `HOSTED_WEB_BASE_URL` must exactly match the normalized
 origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and
@@ -755,9 +755,11 @@ Core execution tuning:
   `HOSTED_R2_CUTOVER_PHASE` to `destination_active`; new writes target ENAM while
   explicit reads prefer the phase-active bucket and use the other bucket only
   after a definitive miss, and old source-bucket upload capabilities drain.
-  Both coexistence phases omit the fixed-source prepared snapshot URL; cold
-  restore uses the existing write-fenced `/presign-get` locator and presigns
-  the concrete bucket that contains the checkpoint.
+  Both coexistence phases omit the fixed-source prepared snapshot URL. Current
+  cold restore uses the write-fenced internal object route; its binding read
+  prefers the phase-active bucket and reaches the other bucket only after a
+  definitive `get` miss. The compatibility `/presign-get` locator remains
+  available for old runners and current-runner fallback during rollout.
   `paused` is an incident-containment lever: it returns a bounded `retry_later`
   from `runtime/ensure-processing` before any UserRunner Durable Object call.
 - `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` must be unset during the healthy live
@@ -773,6 +775,26 @@ Core execution tuning:
   set for deploys, it must be `https://<account-id>.r2.cloudflarestorage.com`.
   Hosted-local dev, worker-only, and E2E profiles inject local MinIO flags;
   those local flags must not be set for deploys.
+
+Workspace snapshot restore uses a three-release compatibility window:
+
+1. Add the versioned internal object route and ship a binding-first runner while
+   retaining prepared `getUrl` payloads, `/presign-get`, GET signing, and the
+   role-aware locator. This release is bidirectionally skew-safe: old runners
+   use the current Worker's preserved presign route; current runners recognize
+   an old Worker by an unversioned non-OK object-route response and fall back.
+2. After Worker and runner convergence is proven, stop producing prepared GET
+   URLs while keeping the reader-compatible payload parser, runner fallback,
+   `/presign-get`, and locator for one complete rollback release.
+3. Only after that rollback window closes may a later release delete the legacy
+   payload field/parser, runner fallback, `/presign-get`, GET signer, and locator.
+   Presigned `PUT` and its credentials remain because upload is unchanged.
+
+Do not reverse that order. A rollback during releases 1 or 2 restores the old
+runner first and remains compatible with the still-present Worker presign route.
+Release 3 is the explicit rollback-floor advance and requires current Worker and
+runner convergence plus successful binding-stream restore evidence before the
+legacy path is removed.
 
 `CF_MAX_EVENT_ATTEMPTS` renders to `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` and is
 the per-user Durable Object consecutive failure cap. Exhausted runners stop

@@ -197,7 +197,11 @@ export function parseHostedWorkspaceSnapshotPreparedRestore(
 export function requireHostedWorkspaceSnapshotPreparedRestoreForRef(input: {
   prepared: HostedWorkspaceSnapshotPreparedRestore;
   ref: HostedWorkspaceSnapshotV2Ref;
-}): HostedWorkspaceSnapshotPreparedRestore & { expiresAtMs: number } {
+}): {
+  compatibilityGet: { expiresAtMs: number; getUrl: string } | null;
+  dataKey: string;
+  snapshotFingerprint: string;
+} {
   const prepared = parseHostedWorkspaceSnapshotPreparedRestore(input.prepared);
   if (prepared.snapshotFingerprint !== buildHostedWorkspaceSnapshotV2FingerprintSha256(input.ref)) {
     throw new Error("Hosted workspace snapshot prepared restore did not match the selected snapshot.");
@@ -207,13 +211,16 @@ export function requireHostedWorkspaceSnapshotPreparedRestoreForRef(input: {
     new URL(prepared.getUrl),
     "Hosted workspace snapshot prepared restore",
   );
-  if (expiresAtMs <= Date.now() + HOSTED_WORKSPACE_SNAPSHOT_PREPARED_GET_MIN_REMAINING_MS) {
-    throw new Error("Hosted workspace snapshot prepared restore URL is expired or too close to expiry.");
-  }
-
   return {
-    ...prepared,
-    expiresAtMs,
+    compatibilityGet:
+      expiresAtMs > Date.now() + HOSTED_WORKSPACE_SNAPSHOT_PREPARED_GET_MIN_REMAINING_MS
+        ? {
+            expiresAtMs,
+            getUrl: prepared.getUrl,
+          }
+        : null,
+    dataKey: prepared.dataKey,
+    snapshotFingerprint: prepared.snapshotFingerprint,
   };
 }
 

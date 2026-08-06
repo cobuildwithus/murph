@@ -790,8 +790,13 @@ Last verified: 2026-08-05
   the other bucket only after a definitive miss, and bounded exact-key tail
   copies converge after those source writers drain. Coexistence dispatch
   deliberately omits the fixed-source prepared snapshot URL, so a cold restore
-  uses the existing write-fenced locator and presigns the bucket that contains
-  the checkpoint. This adds no dual write, queue, restore protocol, or persisted
+  uses the write-fenced internal object route. The Worker validates the ref and
+  object metadata before forwarding the binding body stream; runner cancellation
+  cancels that stream, and a transport failure may replay the complete
+  fetch/decrypt/extract operation once. During the rolling window, an unversioned
+  error from an old Worker falls back to the retained presign locator, while a
+  versioned current-Worker error fails closed. This adds no dual write, queue,
+  restore protocol, or persisted
   migration owner. The existing pause is incident
   containment only: it is a Worker-route
   gate before UserRunner dispatch, a paused signed Temporal ensure returns a

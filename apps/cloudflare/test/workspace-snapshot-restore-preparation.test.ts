@@ -38,6 +38,10 @@ import {
   prepareHostedWorkspaceSnapshotRestore,
   type HostedWorkspaceSnapshotPreparedRestore,
 } from "../src/workspace-snapshot-restore-preparation.ts";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+  HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER,
+} from "../src/workspace-snapshot-store.ts";
 
 const TEST_USER_ID = "member_snapshot_restore_prepare";
 const TEST_ROOT_KEY_ID = "root_key_snapshot_restore_prepare";
@@ -254,10 +258,16 @@ describe("workspace snapshot restore preparation", () => {
     }
   });
 
-  it("uses prepared restore data without calling unwrap or presign control routes", async () => {
+  it("uses the binding route before the legacy URL carried by prepared restore data", async () => {
     const fixture = await createSnapshotFixture();
     const getUrl = createPreparedGetUrl("prepared-snapshot.enc");
-    const fetchMock = vi.fn(async () => new Response("unavailable", { status: 500 }));
+    const fetchMock = vi.fn(async () => new Response("unavailable", {
+      headers: {
+        [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+          HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+      },
+      status: 500,
+    }));
     const port = createCloudflareWorkspaceSnapshotPort({
       boundUserId: TEST_USER_ID,
       fetchImpl: fetchMock as typeof fetch,
@@ -272,10 +282,11 @@ describe("workspace snapshot restore preparation", () => {
         ref: fixture.ref,
       })).rejects.toThrow(/Hosted workspace snapshot fetch failed with HTTP 500/u);
 
-      expect(fetchMock).toHaveBeenCalled();
-      for (const call of fetchMock.mock.calls) {
-        expect(readRequestUrl(call)).toBe(getUrl);
-      }
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(readRequestUrl(fetchMock.mock.calls[0])).toBe(
+        `http://workspace-snapshots.worker/workspace-snapshots/${fixture.ref.snapshotId}/object`,
+      );
+      expect(readRequestUrl(fetchMock.mock.calls[0])).not.toBe(getUrl);
     } finally {
       fixture.dataKey.fill(0);
       fixture.rootKey.fill(0);
@@ -310,9 +321,15 @@ describe("workspace snapshot restore preparation", () => {
     }
   });
 
-  it("fails closed before fetch when prepared data is expired", async () => {
+  it("ignores an expired prepared URL and still attempts the binding route", async () => {
     const fixture = await createSnapshotFixture();
-    const fetchMock = vi.fn(async () => new Response("unexpected", { status: 500 }));
+    const fetchMock = vi.fn(async () => new Response("binding unavailable", {
+      headers: {
+        [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+          HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+      },
+      status: 500,
+    }));
     const port = createCloudflareWorkspaceSnapshotPort({
       boundUserId: TEST_USER_ID,
       fetchImpl: fetchMock as typeof fetch,
@@ -328,42 +345,40 @@ describe("workspace snapshot restore preparation", () => {
       await expect(port.restoreWorkspaceSnapshot({
         durableRoot: "/tmp/unused-expired-snapshot-restore",
         ref: fixture.ref,
-      })).rejects.toThrow(
-        "Hosted workspace snapshot prepared restore URL is expired or too close to expiry.",
+      })).rejects.toThrow(/Hosted workspace snapshot fetch failed with HTTP 500/u);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(readRequestUrl(fetchMock.mock.calls[0])).toBe(
+        `http://workspace-snapshots.worker/workspace-snapshots/${fixture.ref.snapshotId}/object`,
       );
-      expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       fixture.dataKey.fill(0);
       fixture.rootKey.fill(0);
     }
   });
 
-  it("starts legacy unwrap and presign fallback reads in parallel", async () => {
+  it("falls back through presign when the current runner reaches an old Worker", async () => {
     const fixture = await createSnapshotFixture();
     const getUrl = "https://r2.example.test/fallback-snapshot.enc";
-    const unwrapStarted = createDeferred<void>();
-    const presignStarted = createDeferred<void>();
     const events: string[] = [];
     const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
       const url = readRequestUrl(args);
       if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/data-key/unwrap`)) {
-        events.push("unwrap:start");
-        unwrapStarted.resolve();
-        await withBarrierTimeout(presignStarted.promise);
-        events.push("unwrap:end");
+        events.push("unwrap");
         return jsonResponse({ dataKey: fixture.dataKeyBase64 });
       }
+      if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/object`)) {
+        events.push("object");
+        return new Response("old Worker route missing", { status: 404 });
+      }
       if (url.endsWith(`/workspace-snapshots/${fixture.ref.snapshotId}/presign-get`)) {
-        events.push("presign:start");
-        presignStarted.resolve();
-        await withBarrierTimeout(unwrapStarted.promise);
-        events.push("presign:end");
+        events.push("presign");
         return jsonResponse({
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
           getUrl,
         });
       }
       if (url === getUrl) {
+        events.push("get");
         return new Response("unavailable", { status: 500 });
       }
       return new Response("unexpected", { status: 500 });
@@ -380,9 +395,11 @@ describe("workspace snapshot restore preparation", () => {
         durableRoot: "/tmp/unused-fallback-snapshot-restore",
         ref: fixture.ref,
       })).rejects.toThrow(/Hosted workspace snapshot fetch failed with HTTP 500/u);
-      expect(events.slice(0, 2).sort()).toEqual([
-        "presign:start",
-        "unwrap:start",
+      expect(events).toEqual([
+        "unwrap",
+        "object",
+        "presign",
+        "get",
       ]);
     } finally {
       fixture.dataKey.fill(0);
@@ -599,33 +616,4 @@ function jsonResponse(value: unknown): Response {
     },
     status: 200,
   });
-}
-
-function createDeferred<T>(): {
-  promise: Promise<T>;
-  resolve(value: T | PromiseLike<T>): void;
-} {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((nextResolve) => {
-    resolve = nextResolve;
-  });
-  return { promise, resolve };
-}
-
-async function withBarrierTimeout(promise: Promise<void>): Promise<void> {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  try {
-    await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => {
-          reject(new Error("Expected unwrap and presign restore reads to overlap."));
-        }, 250);
-      }),
-    ]);
-  } finally {
-    if (timeout !== null) {
-      clearTimeout(timeout);
-    }
-  }
 }

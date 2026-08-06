@@ -27,6 +27,8 @@ import {
 import {
   encodeHostedWorkspaceSnapshotSha256Base64,
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+  HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+  HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER,
 } from "../workspace-snapshot-store.ts";
 import { restoreEncryptedWorkspaceSnapshotFromEncryptedStream } from "../workspace-snapshot-local.ts";
 import {
@@ -263,17 +265,14 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       timing.sizeGuardMs = readHostedRuntimeStepElapsedMs(sizeGuardStartedAt);
 
       let dataKey: string;
-      let presignedGet: { expiresAtMs: number; getUrl: string };
+      let compatibilityGet: { expiresAtMs: number; getUrl: string } | null = null;
       if (input.preparedSnapshotRestore) {
         const prepared = requireHostedWorkspaceSnapshotPreparedRestoreForRef({
           prepared: input.preparedSnapshotRestore,
           ref: request.ref,
         });
         dataKey = prepared.dataKey;
-        presignedGet = {
-          expiresAtMs: prepared.expiresAtMs,
-          getUrl: prepared.getUrl,
-        };
+        compatibilityGet = prepared.compatibilityGet;
         timing.dataKeyUnwrapMs = 0;
         timing.presignGetMs = 0;
       } else {
@@ -294,37 +293,8 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           timing.dataKeyUnwrapMs = readHostedRuntimeStepElapsedMs(dataKeyUnwrapStartedAt);
         });
 
-        const presignGetStartedAt = Date.now();
-        const presignedGetPromise = runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
-          details: restoreLogDetails,
-          run: async () => {
-            const result = await presignWorkspaceSnapshotGet({
-              fetchImpl: input.fetchImpl,
-              objectKey: request.ref.objectKey,
-              ref: request.ref,
-              signal: request.signal ?? null,
-              snapshotId: request.ref.snapshotId,
-              timeoutMs: input.timeoutMs,
-              workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-            });
-            const expiresAtMs = Date.parse(result.expiresAt);
-            if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
-              throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
-            }
-            return {
-              ...result,
-              expiresAtMs,
-            };
-          },
-          step: "presign_get",
-        }).finally(() => {
-          timing.presignGetMs = readHostedRuntimeStepElapsedMs(presignGetStartedAt);
-        });
-
-        [dataKey, presignedGet] = await Promise.all([
-          dataKeyPromise,
-          presignedGetPromise,
-        ]);
+        dataKey = await dataKeyPromise;
+        timing.presignGetMs = 0;
       }
 
       const objectFetchStartedAt = Date.now();
@@ -335,17 +305,21 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
             objectFetchResponseHeadersMs: 0,
             objectFetchBodyReadMs: 0,
           };
-          const objectFetchTimeoutMs =
-            Math.max(1, presignedGet.expiresAtMs - Date.now() - 5_000);
+          const objectFetchTimeoutMs = input.timeoutMs;
           const objectFetchDeadlineMs = Date.now() + objectFetchTimeoutMs;
           const encryptedStream = readHostedWorkspaceSnapshotEncryptedObjectStream({
+            compatibilityGet,
             deadlineMs: objectFetchDeadlineMs,
             expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
             fetchImpl: input.fetchImpl,
-            getUrl: presignedGet.getUrl,
+            onCompatibilityPresignElapsedMs(elapsedMs) {
+              timing.presignGetMs = (timing.presignGetMs ?? 0) + elapsedMs;
+            },
+            ref: request.ref,
             signal: request.signal ?? null,
             timing: objectFetchAttemptTiming,
             timeoutMs: objectFetchTimeoutMs,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
           });
           const archiveRestoreTiming =
             await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
@@ -634,10 +608,110 @@ async function unwrapWorkspaceSnapshotDataKey(input: {
 }
 
 async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
+  compatibilityGet: { expiresAtMs: number; getUrl: string } | null;
   deadlineMs: number;
   expectedEncryptedByteSize: number;
   fetchImpl: typeof fetch;
-  getUrl: string;
+  onCompatibilityPresignElapsedMs: (elapsedMs: number) => void;
+  ref: HostedWorkspaceSnapshotV2Ref;
+  signal?: AbortSignal | null;
+  timeoutMs: number;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
+}): AsyncIterable<Uint8Array> {
+  const headers = await requireHostedRuntimeWriteFenceHeaders(
+    input.workspaceCheckpointBridge,
+    "Hosted workspace snapshot object read",
+  );
+  headers.set("content-type", "application/json; charset=utf-8");
+  const response = await fetchHostedResponse({
+    description: "Hosted workspace snapshot fetch",
+    fetchImpl: input.fetchImpl,
+    init: {
+      body: JSON.stringify({
+        objectKey: input.ref.objectKey,
+        ref: input.ref,
+        snapshotId: input.ref.snapshotId,
+      }),
+      headers,
+      method: "POST",
+    },
+    redactedLogPath: "/workspace-snapshots/REDACTED/object",
+    redactedResponseOrigin: "workspace_snapshot_object",
+    signal: input.signal ?? null,
+    timeoutMs: input.timeoutMs,
+    url: new URL(
+      `/workspace-snapshots/${encodeURIComponent(input.ref.snapshotId)}/object`,
+      `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+    ),
+  });
+  const responseVersion = response.headers.get(
+    HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER,
+  );
+  // Compatibility Workers cannot mark this route, whether their router returns
+  // 404/405 directly or an older proxy normalizes that miss to another error.
+  // A current Worker marks every handled response, so its failures stay closed.
+  if (
+    responseVersion === null
+    && !response.ok
+  ) {
+    await cancelHostedWorkspaceSnapshotResponseBody(response.body);
+    const compatibilityGet = input.compatibilityGet
+      ?? await presignWorkspaceSnapshotCompatibilityGet(input);
+    yield* readHostedWorkspaceSnapshotEncryptedCompatibilityStream({
+      ...input,
+      compatibilityGet,
+    });
+    return;
+  }
+  if (
+    responseVersion !== HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION
+  ) {
+    await cancelHostedWorkspaceSnapshotResponseBody(response.body);
+    throw new Error("Hosted workspace snapshot object read version is unsupported.");
+  }
+  yield* readHostedWorkspaceSnapshotEncryptedResponseStream({
+    ...input,
+    response,
+  });
+}
+
+async function presignWorkspaceSnapshotCompatibilityGet(input: {
+  fetchImpl: typeof fetch;
+  onCompatibilityPresignElapsedMs: (elapsedMs: number) => void;
+  ref: HostedWorkspaceSnapshotV2Ref;
+  signal?: AbortSignal | null;
+  timeoutMs: number;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
+}): Promise<{ expiresAtMs: number; getUrl: string }> {
+  const startedAt = Date.now();
+  try {
+    const result = await presignWorkspaceSnapshotGet({
+      fetchImpl: input.fetchImpl,
+      objectKey: input.ref.objectKey,
+      ref: input.ref,
+      signal: input.signal ?? null,
+      snapshotId: input.ref.snapshotId,
+      timeoutMs: input.timeoutMs,
+      workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+    });
+    const expiresAtMs = Date.parse(result.expiresAt);
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+      throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
+    }
+    return {
+      ...result,
+      expiresAtMs,
+    };
+  } finally {
+    input.onCompatibilityPresignElapsedMs(readHostedRuntimeStepElapsedMs(startedAt));
+  }
+}
+
+async function* readHostedWorkspaceSnapshotEncryptedCompatibilityStream(input: {
+  compatibilityGet: { expiresAtMs: number; getUrl: string };
+  deadlineMs: number;
+  expectedEncryptedByteSize: number;
+  fetchImpl: typeof fetch;
   signal?: AbortSignal | null;
   timing: {
     objectFetchResponseHeadersMs: number;
@@ -645,6 +719,10 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
   };
   timeoutMs: number;
 }): AsyncIterable<Uint8Array> {
+  const compatibilityTimeoutMs = Math.max(
+    1,
+    input.compatibilityGet.expiresAtMs - Date.now() - 5_000,
+  );
   const responseHeadersStartedAt = Date.now();
   const response = await fetchHostedResponse({
     description: "Hosted workspace snapshot fetch",
@@ -655,11 +733,29 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
     redactedLogPath: "/workspace-snapshot-object",
     redactedResponseOrigin: "workspace_snapshot_object",
     signal: input.signal ?? null,
-    timeoutMs: input.timeoutMs,
-    url: new URL(input.getUrl),
+    timeoutMs: compatibilityTimeoutMs,
+    url: new URL(input.compatibilityGet.getUrl),
   });
   input.timing.objectFetchResponseHeadersMs =
     readHostedRuntimeStepElapsedMs(responseHeadersStartedAt);
+  yield* readHostedWorkspaceSnapshotEncryptedResponseStream({
+    ...input,
+    deadlineMs: Date.now() + compatibilityTimeoutMs,
+    response,
+  });
+}
+
+async function* readHostedWorkspaceSnapshotEncryptedResponseStream(input: {
+  deadlineMs: number;
+  expectedEncryptedByteSize: number;
+  response: Response;
+  signal?: AbortSignal | null;
+  timing: {
+    objectFetchResponseHeadersMs: number;
+    objectFetchBodyReadMs: number;
+  };
+}): AsyncIterable<Uint8Array> {
+  const { response } = input;
   if (response.status === 404) {
     await cancelHostedWorkspaceSnapshotResponseBody(response.body);
     throw new Error("Hosted workspace snapshot encrypted object is unavailable.");

@@ -132,6 +132,10 @@ import {
 import {
   createEncryptedWorkspaceSnapshotFile,
 } from "../src/workspace-snapshot-local.ts";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+  HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER,
+} from "../src/workspace-snapshot-store.ts";
 
 function requireFetchCallArgs(
   call: readonly unknown[] | undefined,
@@ -547,7 +551,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const ref = createWorkspaceSnapshotV2Ref({
       encryptedByteSize: 128,
     });
-    const getUrl = `https://r2.example.test/bundles/${ref.objectKey}?X-Amz-Signature=fixture-get`;
     let objectFetchCount = 0;
     const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
       const request = requireFetchRequest(args, "workspace snapshot unwrap body fetch");
@@ -555,22 +558,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         await delayWithAbort(50, request.signal);
         return new Response("unwrap denied", { status: 403 });
       }
-      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
-        return new Response(JSON.stringify({
-          expiresAt: new Date(Date.now() + 60_000).toISOString(),
-          getUrl,
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-      if (request.url === getUrl) {
-        objectFetchCount += 1;
-        return new Response("unexpected object fetch", { status: 500 });
-      }
-      return new Response("unexpected", { status: 500 });
+      objectFetchCount += 1;
+      return new Response("unexpected object fetch", { status: 500 });
     });
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -595,7 +584,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const ref = createWorkspaceSnapshotV2Ref({
       encryptedByteSize: 128,
     });
-    const getUrl = `https://r2.example.test/bundles/${ref.objectKey}?X-Amz-Signature=fixture-get`;
     const abortController = new AbortController();
     let objectFetchCount = 0;
     let unwrapBodyCanceled = false;
@@ -621,22 +609,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
-      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
-        return new Response(JSON.stringify({
-          expiresAt: new Date(Date.now() + 60_000).toISOString(),
-          getUrl,
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-      if (request.url === getUrl) {
-        objectFetchCount += 1;
-        return new Response("unexpected object fetch", { status: 500 });
-      }
-      return new Response("unexpected", { status: 500 });
+      objectFetchCount += 1;
+      return new Response("unexpected object fetch", { status: 500 });
     });
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -705,6 +679,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           },
           status: 200,
         });
+      }
+      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/object`)) {
+        return new Response("old Worker route missing", { status: 404 });
       }
       objectFetchCount += 1;
       return new Response("unexpected", { status: 500 });
@@ -1447,7 +1424,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("restores v2 workspace snapshots through unwrap, presigned GET, and direct R2 fetch", async () => {
+  it("restores v2 workspace snapshots through unwrap and the binding-backed object stream", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-restore-"));
     const sourceRoot = path.join(tempRoot, "source");
     const snapshotScratchRoot = path.join(tempRoot, "snapshot-scratch");
@@ -1486,7 +1463,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await rm(snapshotScratchRoot, { force: true, recursive: true });
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
-      const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot restore fetch");
         if (request.url.includes(`/workspace-snapshots/${snapshotId}/data-key/unwrap`)) {
@@ -1500,21 +1476,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             },
           );
         }
-        if (request.url.includes(`/workspace-snapshots/${snapshotId}/presign-get`)) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              getUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
-        }
-        if (request.url === getUrl) {
+        if (request.url.includes(`/workspace-snapshots/${snapshotId}/object`)) {
           vi.setSystemTime(new Date(Date.now() + 25));
           let bodySent = false;
           return new Response(new ReadableStream<Uint8Array>({
@@ -1531,6 +1493,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             headers: {
               "content-length": String(encrypted.encryptedByteSize),
               "content-type": "application/octet-stream",
+              [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+                HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
             },
             status: 200,
           });
@@ -1539,7 +1503,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       const platform = buildTestHostedExecutionRuntimePlatform({
         boundUserId: "member_123",
-        commitTimeoutMs: 10,
+        commitTimeoutMs: 5_000,
         fetchImpl: fetchMock as typeof fetch,
         workspaceCheckpointBridge: {
           readCurrentLease: () => ({
@@ -1604,14 +1568,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           + (restoreTimings?.objectFetchBodyReadMs ?? 0),
       ).toBeLessThanOrEqual(restoreTimings?.decryptMs ?? 0);
 
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
       const restoreRequests = fetchMock.mock.calls.map((call) =>
         requireFetchRequest(call, "workspace snapshot restore request"),
       );
       expect(restoreRequests.map((request) => request.url)).toEqual([
         "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform_restore/data-key/unwrap",
-        "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform_restore/presign-get",
-        getUrl,
+        "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform_restore/object",
       ]);
       const unwrapRequest = restoreRequests.find((request) => request.url.endsWith("/data-key/unwrap"));
       expect(unwrapRequest?.url).toBe(
@@ -1622,11 +1585,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         rootKeyId: "root_key_test",
         wrappedDataKey: "wrapped_data_key_test",
       });
-      const presignRequest = restoreRequests.find((request) => request.url.endsWith("/presign-get"));
-      expect(presignRequest?.url).toBe(
-        "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform_restore/presign-get",
+      const objectRequest = restoreRequests.find((request) => request.url.endsWith("/object"));
+      expect(objectRequest?.url).toBe(
+        "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform_restore/object",
       );
-      await expect(presignRequest!.json()).resolves.toEqual({
+      await expect(objectRequest!.json()).resolves.toEqual({
         objectKey,
         ref: expect.objectContaining({
           objectKey,
@@ -1635,7 +1598,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         }),
         snapshotId,
       });
-      expect(restoreRequests.some((request) => request.url === getUrl)).toBe(true);
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
       const workspaceSnapshotLogs = readWorkspaceSnapshotDiagnosticLogs();
       const completedSteps = workspaceSnapshotLogs
@@ -1644,7 +1606,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(completedSteps).toEqual([
         "size_guard",
         "data_key_unwrap",
-        "presign_get",
         "object_fetch",
       ]);
       expect(workspaceSnapshotLogs[0]?.details).toEqual(expect.objectContaining({
@@ -1656,7 +1617,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const serializedLogs = JSON.stringify(workspaceSnapshotLogs);
       expect(serializedLogs).not.toContain(objectKey);
       expect(serializedLogs).not.toContain(snapshotId);
-      expect(serializedLogs).not.toContain(getUrl);
       expect(serializedLogs).not.toContain("member_123");
       expect(serializedLogs).not.toContain("root_key_test");
       expect(serializedLogs).not.toContain(dataKeyBase64);
@@ -1712,7 +1672,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const encryptedBytes = await readFile(encrypted.encryptedFilePath);
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
-      const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
       let objectFetchCount = 0;
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot restore retry fetch");
@@ -1724,18 +1683,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             status: 200,
           });
         }
-        if (request.url.includes(`/workspace-snapshots/${snapshotId}/presign-get`)) {
-          return new Response(JSON.stringify({
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            getUrl,
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-        if (request.url === getUrl) {
+        if (request.url.includes(`/workspace-snapshots/${snapshotId}/object`)) {
           objectFetchCount += 1;
           if (objectFetchCount === 1) {
             vi.setSystemTime(new Date(Date.now() + 80));
@@ -1754,6 +1702,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               headers: {
                 "content-length": String(encrypted.encryptedByteSize),
                 "content-type": "application/octet-stream",
+                [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+                  HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
               },
               status: 200,
             });
@@ -1774,6 +1724,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             headers: {
               "content-length": String(encrypted.encryptedByteSize),
               "content-type": "application/octet-stream",
+              [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+                HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
             },
             status: 200,
           });
@@ -1836,7 +1788,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const serializedLogs = JSON.stringify(readWorkspaceSnapshotDiagnosticLogs());
       expect(serializedLogs).not.toContain(objectKey);
       expect(serializedLogs).not.toContain(snapshotId);
-      expect(serializedLogs).not.toContain(getUrl);
       expect(serializedLogs).toContain("connection reset");
       expect(serializedLogs).not.toContain(dataKeyBase64);
       expect(serializedLogs).not.toContain(tempRoot);
@@ -1858,7 +1809,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const ref = createWorkspaceSnapshotV2Ref({
       encryptedByteSize: 128,
     });
-    const getUrl = `https://r2.example.test/bundles/${ref.objectKey}?X-Amz-Signature=fixture-get`;
     const abortController = new AbortController();
     let objectFetchCount = 0;
     let objectBodyCancelCount = 0;
@@ -1878,18 +1828,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             status: 200,
           });
         }
-        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
-          return new Response(JSON.stringify({
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            getUrl,
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-        if (request.url === getUrl) {
+        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/object`)) {
           objectFetchCount += 1;
           return new Response(new ReadableStream<Uint8Array>({
             cancel: () => {
@@ -1903,6 +1842,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             headers: {
               "content-length": String(ref.archive.encryptedByteSize),
               "content-type": "application/octet-stream",
+              [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+                HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
             },
             status: 200,
           });
@@ -1946,7 +1887,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const ref = createWorkspaceSnapshotV2Ref({
       encryptedByteSize: 1024,
     });
-    const getUrl = `https://r2.example.test/bundles/${ref.objectKey}?X-Amz-Signature=fixture-get`;
     let objectFetchCount = 0;
 
     try {
@@ -1960,22 +1900,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             status: 200,
           });
         }
-        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
-          return new Response(JSON.stringify({
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            getUrl,
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-        if (request.url === getUrl) {
+        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/object`)) {
           objectFetchCount += 1;
           return new Response(new Uint8Array([1, 2, 3]), {
             headers: {
               "content-type": "application/octet-stream",
+              [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+                HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
             },
             status: 200,
           });
@@ -2013,8 +1944,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const ref = createWorkspaceSnapshotV2Ref({
       encryptedByteSize: 1024,
     });
-    const getUrl = "https://r2.example.test/bundles/hidden-object?X-Amz-Signature=fixture-get";
-
     try {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot restore failure fetch");
@@ -2029,22 +1958,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             },
           );
         }
-        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              getUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
+        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/object`)) {
+          return new Response("missing", {
+            headers: {
+              [HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER]:
+                HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
             },
-          );
-        }
-        if (request.url === getUrl) {
-          return new Response("missing", { status: 404 });
+            status: 404,
+          });
         }
         return new Response("unexpected", { status: 500 });
       });
@@ -2076,7 +1997,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const serializedLogs = JSON.stringify(readWorkspaceSnapshotDiagnosticLogs());
       expect(serializedLogs).not.toContain(ref.objectKey);
       expect(serializedLogs).not.toContain(ref.snapshotId);
-      expect(serializedLogs).not.toContain(getUrl);
       expect(serializedLogs).not.toContain("hidden-object");
       expect(serializedLogs).not.toContain("member_123");
       expect(serializedLogs).not.toContain(dataKeyBase64);

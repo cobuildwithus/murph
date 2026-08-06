@@ -155,9 +155,12 @@ import {
 } from "../src/storage-paths.ts";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+  HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION,
+  HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER,
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
   type HostedWorkspaceSnapshotOrphanCandidate,
+  type WorkspaceSnapshotR2ObjectLike,
   type HostedWorkspaceSnapshotUploadSession,
 } from "../src/workspace-snapshot-store.ts";
 import {
@@ -5331,6 +5334,204 @@ describe("handleRunnerOutboundRequest", () => {
     expect(workerBodyResponse.status).toBe(405);
   });
 
+  it("streams a validated workspace snapshot body through the binding route with phase-ordered fallback", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_binding_stream";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const getOrder: string[] = [];
+    const sourceBucket = createBridgeWorkspaceSnapshotBucket(
+      async (key) => {
+        getOrder.push(`source:${key}`);
+        return null;
+      },
+      async () => null,
+    );
+    const destinationBucket = createBridgeWorkspaceSnapshotBucket(
+      async (key) => {
+        getOrder.push(`destination:${key}`);
+        return key === objectKey
+          ? createWorkspaceSnapshotStreamingObject(snapshotRef, bytes)
+          : null;
+      },
+      async () => null,
+    );
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotObjectReadRequest({
+        objectKey,
+        snapshotRef,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      createRunnerOutboundEnv({
+        BUNDLES: sourceBucket,
+        BUNDLES_ENAM: destinationBucket,
+        HOSTED_R2_CUTOVER_PHASE: "source_active",
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-length")).toBe(String(bytes.byteLength));
+    expect(response.headers.get("content-type")).toBe(HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE);
+    expect(response.headers.get(HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER))
+      .toBe(HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION);
+    await expect(response.arrayBuffer()).resolves.toEqual(toArrayBuffer(bytes));
+    expect(getOrder).toEqual([
+      `source:${objectKey}`,
+      `destination:${objectKey}`,
+    ]);
+  });
+
+  it("propagates binding-route response cancellation without reading or buffering the object", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_binding_cancel";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const pull = vi.fn();
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      cancel,
+      pull,
+    }, {
+      highWaterMark: 0,
+    });
+    const bucket = createWorkspaceSnapshotBucket(async (key) =>
+      key === objectKey
+        ? createWorkspaceSnapshotStreamingObject(snapshotRef, new Uint8Array(4), body)
+        : null
+    );
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotObjectReadRequest({
+        objectKey,
+        snapshotRef,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      createRunnerOutboundEnv({
+        BUNDLES: bucket,
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(pull).not.toHaveBeenCalled();
+    await response.body?.cancel("runner disconnected");
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledWith("runner disconnected");
+  });
+
+  it("cancels and rejects a binding object whose metadata does not match its ref", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_binding_metadata";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const cancel = vi.fn();
+    const object = createWorkspaceSnapshotStreamingObject(
+      snapshotRef,
+      new Uint8Array(4),
+      new ReadableStream<Uint8Array>({ cancel }),
+    );
+    object.customMetadata = {
+      ...object.customMetadata,
+      encryptedsha256: "b".repeat(64),
+    };
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotObjectReadRequest({
+        objectKey,
+        snapshotRef,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      createRunnerOutboundEnv({
+        BUNDLES: createWorkspaceSnapshotBucket(async () => object),
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get(HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER))
+      .toBe(HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("marks binding object read failures so current-Worker errors fail closed", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_binding_failure";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotObjectReadRequest({
+        objectKey,
+        snapshotRef,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      createRunnerOutboundEnv({
+        BUNDLES: createWorkspaceSnapshotBucket(async () => {
+          throw new Error("synthetic binding read failure");
+        }),
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get(HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER))
+      .toBe(HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION);
+  });
+
   it("presigns a destination-only snapshot for a source-active mixed-version reader", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_read_destination_only";
@@ -10195,6 +10396,31 @@ function createWorkspaceSnapshotPresignGetRequest(input: {
   );
 }
 
+function createWorkspaceSnapshotObjectReadRequest(input: {
+  objectKey: string;
+  snapshotRef?: HostedWorkspaceSnapshotV2Ref;
+  snapshotId: string;
+  workspaceVersion: string;
+}): Request {
+  return new Request(
+    `http://workspace-snapshots.worker/workspace-snapshots/${input.snapshotId}/object`,
+    {
+      body: JSON.stringify({
+        objectKey: input.objectKey,
+        ...(input.snapshotRef === undefined ? {} : { ref: input.snapshotRef }),
+        snapshotId: input.snapshotId,
+      }),
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+        "x-hosted-runtime-attempt-id": "attempt_1",
+        "x-hosted-runtime-lease-generation": "9",
+        "x-hosted-runtime-workspace-version": input.workspaceVersion,
+      }),
+      method: "POST",
+    },
+  );
+}
+
 function createWorkspaceSnapshotAbortRequest(input: {
   objectKey: string;
   snapshotId: string;
@@ -10394,7 +10620,7 @@ function createArtifactOnlyWorkspaceBundleForTest(
 }
 
 function createWorkspaceSnapshotBucket(
-  get: (key: string) => Promise<{ key: string; size?: number } | null>,
+  get: (key: string) => Promise<WorkspaceSnapshotR2ObjectLike | null>,
   head?: (key: string) => Promise<{
     checksums?: { sha256: Uint8Array };
     customMetadata?: Record<string, string>;
@@ -10423,7 +10649,7 @@ function createWorkspaceSnapshotBucket(
 }
 
 function createBridgeWorkspaceSnapshotBucket(
-  get: (key: string) => Promise<{ key: string; size?: number } | null>,
+  get: (key: string) => Promise<WorkspaceSnapshotR2ObjectLike | null>,
   head: (key: string) => Promise<{
     checksums?: { sha256: Uint8Array };
     customMetadata?: Record<string, string>;
@@ -10440,6 +10666,25 @@ function createBridgeWorkspaceSnapshotBucket(
         truncated: false,
       };
     },
+  };
+}
+
+function createWorkspaceSnapshotStreamingObject(
+  snapshotRef: HostedWorkspaceSnapshotV2Ref,
+  bytes: Uint8Array,
+  body: ReadableStream<Uint8Array> = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  }),
+): WorkspaceSnapshotR2ObjectLike {
+  return {
+    body,
+    checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+    customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+    key: snapshotRef.objectKey,
+    size: bytes.byteLength,
   };
 }
 

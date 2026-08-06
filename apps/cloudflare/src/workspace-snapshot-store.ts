@@ -16,6 +16,9 @@ import {
 import type { HostedR2BucketRole } from "./r2-cutover.ts";
 
 export const HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE = "application/octet-stream";
+export const HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION_HEADER =
+  "x-murph-workspace-snapshot-object-read-version";
+export const HOSTED_WORKSPACE_SNAPSHOT_OBJECT_READ_VERSION = "1";
 export const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA =
   "murph.hosted-workspace-snapshot-upload.v1";
 export const HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA =
