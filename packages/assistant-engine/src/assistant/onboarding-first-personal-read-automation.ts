@@ -94,6 +94,7 @@ export function buildOnboardingFirstPersonalReadAutomationSaveRequest(input: {
       ).toISOString(),
     },
     slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+    status: 'active',
     summary:
       'One private first read across the context and health data collected during onboarding.',
     tags: [
