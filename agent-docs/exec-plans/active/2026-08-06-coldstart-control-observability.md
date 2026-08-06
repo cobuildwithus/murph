@@ -138,6 +138,12 @@ Updated: 2026-08-06
   a later pending direct wake cannot change its owner during trace merging.
   This adds no mechanism or operation beyond the already-selected in-memory
   field propagation.
+- Round 4 found that the first compatibility branch treated historical
+  `triggeredByWebDirect: true` wake diagnostics as if any boolean presence were
+  a current launch-owner marker. Continue fail-closed in the read-only report:
+  only explicit `false` proves a current Temporal-owned launch, a launch-owned
+  direct id still takes precedence, historical `true` without that id remains
+  `legacy_unclassified`, and rows without direct evidence remain Temporal-only.
 
 ## Verification
 
@@ -173,6 +179,9 @@ Updated: 2026-08-06
   PostgreSQL test skipped in the default lane; the assistant-runtime merge
   regression passed; the opt-in PostgreSQL report lane passed all 3 tests; and
   Cloudflare typecheck passed.
+- ReviewGPT final round 4: historical-cohort compatibility finding accepted and
+  resolved by limiting current Temporal ownership to explicit false. The real
+  PostgreSQL fixture again contains historical true and keeps it unclassified.
 - `git diff --check`: passed.
-- Pending: corrected-head ReviewGPT round 4, exact-head CI, parent final review, plan
+- Pending: corrected-head ReviewGPT round 5, exact-head CI, parent final review, plan
   closure, and mergeability proof.

@@ -60,8 +60,8 @@ WITH attempt_stamps AS (
     )) * 1000 AS runner_job_accepted_ms,
     (phase_breakdown_json #>> '{orchestration,temporalActivityStartedAtEpochMs}')::double precision AS activity_started_ms,
     phase_breakdown_json #> '{orchestration,runtimeInvocationOrchestrationAttemptId}' IS NOT NULL AS used_direct_recovery,
-    phase_breakdown_json #> '{orchestration,triggeredByWebDirect}' IS NOT NULL
-      AS has_launch_trigger_marker,
+    phase_breakdown_json #>> '{orchestration,triggeredByWebDirect}' = 'false'
+      AS explicitly_temporal_launch,
     phase_breakdown_json #>> '{orchestration,triggeredByWebDirect}' = 'true'
       OR phase_breakdown_json #> '{orchestration,directEnsureRequestStartedAtEpochMs}' IS NOT NULL
       AS has_legacy_direct_marker
@@ -80,7 +80,7 @@ WITH attempt_stamps AS (
   SELECT
     CASE
       WHEN used_direct_recovery THEN 'temporal_recovery'
-      WHEN has_launch_trigger_marker THEN 'temporal_only'
+      WHEN explicitly_temporal_launch THEN 'temporal_only'
       WHEN has_legacy_direct_marker THEN 'legacy_unclassified'
       ELSE 'temporal_only'
     END AS cohort,

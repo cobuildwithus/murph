@@ -60,6 +60,9 @@ describe("hosted runtime operational report contracts", () => {
     expect(coldStartReportSql).toContain("'web_direct_cold'");
     expect(coldStartReportSql).toContain("'temporal_recovery'");
     expect(coldStartReportSql).toContain("'legacy_unclassified'");
+    expect(coldStartReportSql).toContain(
+      "triggeredByWebDirect}' = 'false'",
+    );
     expect(coldStartReportSql).not.toContain("web_direct_existing_runtime");
     expect(coldStartReportSql).toContain(
       "GREATEST(fresh_start_container_ready_ms, fresh_start_invocation_prepared_ms)",
@@ -394,6 +397,7 @@ function createFixtureSql(schemaName: string): string {
       'attempt-temporal-legacy-unclassified',
       jsonb_build_object('orchestration', jsonb_build_object(
         'temporalActivityStartedAtEpochMs', base_ms + 12000,
+        'triggeredByWebDirect', true,
         'directEnsureRequestStartedAtEpochMs', base_ms + 12100
       ))
     FROM fixture
