@@ -1941,6 +1941,65 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("does not report success or run secondary recovery when group setup is unavailable", async () => {
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValueOnce({
+      claimed: false,
+      id: "hld_group_setup_unavailable",
+      outcome: "incompatible",
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+        update: vi.fn(),
+      },
+      hostedLinqLine: buildManagedInboundHostedLinqLineFixture("+15550000000"),
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findFirst: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn(),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+        upsert: vi.fn(),
+      },
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_group_setup_unavailable",
+            is_group: true,
+            owner_handle: {
+              handle: "+15550000000",
+              id: "handle_owner_group_setup_unavailable",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+        },
+        eventId: "evt_group_setup_unavailable",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-setup-message-unavailable",
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("preserves all active-member Linq text parts when the inbound part count exceeds the old cap", async () => {
     const prisma = asPrismaTransactionClient({
       $queryRaw: vi.fn().mockResolvedValue([]),

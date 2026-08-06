@@ -23,6 +23,11 @@ Updated: 2026-08-06
 - Production evidence proved that a recognized, configured sender with lapsed
   access entered that branch; an active participant's next inbound then
   provisioned the group normally.
+- The first candidate put the inactive-versus-unresolved reason inside the
+  request-local payload while keeping one group/day provider identity. A stale
+  retry could therefore reuse one provider key for two different room bodies.
+  The final design removes that incongruent intent and renders one canonical
+  neutral body from the stable effect identity.
 
 ## Success criteria
 
@@ -31,7 +36,8 @@ Updated: 2026-08-06
 - Every inactive-sender room variant states both recovery paths: an active
   Murph participant can message in the group, or someone can open the
   group-start link.
-- The unknown-sender setup behavior remains unchanged.
+- Unknown and inactive senders share the same canonical account-neutral room
+  body; unknown-sender admission and provisioning behavior remains unchanged.
 - Variant selection is deterministic for retries and rotates across distinct
   group/day effect identities.
 - The room's existing logical setup delivery retains one full first-party URL
@@ -58,8 +64,7 @@ Updated: 2026-08-06
 
 ## Tasks
 
-1. [x] Add a reason-bearing group-setup payload and reviewed inactive-sender
-   variants.
+1. [x] Add reviewed canonical account-neutral group-setup variants.
 2. [x] Add focused rendering, planner, and dispatch coverage.
 3. [x] Run scoped tests, typecheck, diff checks, and identifier review.
 4. [ ] Push the exact candidate and complete the required specialist review and
@@ -78,6 +83,12 @@ Updated: 2026-08-06
   tests. Coverage proves stable same-day private identity, next-day and changed-
   recovery separation, and retry-before-private behavior while room setup is in
   flight.
+- The substantive round-3 review found that one group/day effect could render
+  two different bodies after sender resolution changed. The redesign deleted
+  the reason-bearing payload and dual-body branch, retained one canonical
+  50-variant renderer keyed only by the effect identity, and made terminally
+  unavailable room setup fail closed before private recovery. The same five
+  focused suites passed afterward: 397 tests.
 - Hosted Web TypeScript check passed after generating the standard ignored
   Prisma and Health Commons build inputs in the fresh task worktree.
 - Scoped ESLint passed across all changed source and test files after the

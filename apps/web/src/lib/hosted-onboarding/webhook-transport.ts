@@ -64,7 +64,6 @@ import {
 import {
   buildHostedLinqGroupEmailRecoveryEffectId,
   buildHostedLinqGroupEmailRecoveryMessage,
-  buildHostedLinqGroupInactiveSenderRoomMessage,
   buildHostedLinqGroupSetupEffectId,
   buildHostedLinqGroupSetupMessage,
   HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE,
@@ -198,7 +197,6 @@ export type HostedLinqAiUsageQuotaPayload =
 
 export type HostedLinqGroupSetupMessagePayload = {
   chatId: string;
-  groupSetupReason: "sender-inactive" | "sender-identity-unresolved";
   occurredAt: string;
   replyToMessageId: string | null;
   sourceEventId: string;
@@ -355,7 +353,6 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
     }
   | {
       chatId: string;
-      groupSetupReason: "sender-inactive" | "sender-identity-unresolved";
       occurredAt: string;
       replyToMessageId?: string | null;
       sourceEventId: string;
@@ -2145,9 +2142,7 @@ async function buildHostedLinqSideEffectMessage(
 ): Promise<string> {
   switch (effect.payload.template) {
     case HOSTED_LINQ_GROUP_SETUP_TEMPLATE:
-      return effect.payload.groupSetupReason === "sender-inactive"
-        ? buildHostedLinqGroupInactiveSenderRoomMessage({ seed: effect.effectId })
-        : buildHostedLinqGroupSetupMessage();
+      return buildHostedLinqGroupSetupMessage({ seed: effect.effectId });
     case HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE:
       return buildHostedLinqGroupEmailRecoveryMessage({
         recoveryToken: effect.payload.recoveryToken,
@@ -2302,7 +2297,6 @@ function buildHostedWebhookLinqMessagePayload(
     case HOSTED_LINQ_GROUP_SETUP_TEMPLATE:
       return {
         chatId: input.chatId,
-        groupSetupReason: input.groupSetupReason,
         occurredAt: input.occurredAt,
         replyToMessageId,
         sourceEventId: input.sourceEventId,

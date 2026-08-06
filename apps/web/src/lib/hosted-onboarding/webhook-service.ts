@@ -767,6 +767,25 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           },
         };
       }
+      const decidedUnsentGroupSetup = drainResult.skipped.find(
+        (skip) =>
+          skip.template === HOSTED_LINQ_GROUP_SETUP_TEMPLATE
+          && (
+            skip.reason === "effect_unresolved"
+            || skip.reason === "notice_target_unauthorized"
+          ),
+      );
+      if (decidedUnsentGroupSetup && drainResult.sentCount === 0) {
+        plan = {
+          ...plan,
+          desiredSideEffects: [],
+          response: {
+            ignored: true,
+            ok: true,
+            reason: "group-setup-message-unavailable",
+          },
+        };
+      }
       const decidedUnsentSignup = drainResult.skipped.find(
         (skip) =>
           (

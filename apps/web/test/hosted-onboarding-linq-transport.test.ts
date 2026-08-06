@@ -4044,7 +4044,6 @@ describe("hosted Linq webhook transport", () => {
       });
       const effect = createHostedWebhookLinqMessageSideEffect({
         chatId: "chat-group-email-budget",
-        groupSetupReason: "sender-identity-unresolved",
         occurredAt: "2026-03-27T11:59:00.000Z",
         replyToMessageId: "message-group-1",
         sourceEventId: "event-group-setup-at-limit",
@@ -4073,7 +4072,7 @@ describe("hosted Linq webhook transport", () => {
       }
     });
 
-    it("renders privacy-safe rotating room copy for a known inactive group sender", async () => {
+    it("renders canonical privacy-safe rotating group setup copy", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(dispatchNow);
       const lookupKey = arrangeAssignableRecoveryLine();
@@ -4085,7 +4084,6 @@ describe("hosted Linq webhook transport", () => {
       });
       const effect = createHostedWebhookLinqMessageSideEffect({
         chatId: "chat-group-inactive-sender",
-        groupSetupReason: "sender-inactive",
         occurredAt: "2026-03-27T11:59:00.000Z",
         replyToMessageId: "message-group-inactive-sender",
         sourceEventId: "event-group-inactive-sender",

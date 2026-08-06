@@ -3,12 +3,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildHostedLinqGroupEmailRecoveryEffectId,
   buildHostedLinqGroupEmailRecoveryMessage,
-  buildHostedLinqGroupInactiveSenderRoomMessage,
   buildHostedLinqGroupSetupEffectId,
-  HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_VARIANT_COUNT,
+  buildHostedLinqGroupSetupMessage,
+  HOSTED_LINQ_GROUP_SETUP_ROOM_VARIANT_COUNT,
   issueHostedLinqGroupEmailRecoveryToken,
   openHostedLinqGroupEmailRecoveryToken,
-  readHostedLinqGroupInactiveSenderRoomVariantTemplates,
+  readHostedLinqGroupSetupRoomVariantTemplates,
 } from "../src/lib/hosted-onboarding/linq-group-setup";
 
 const TEST_SESSION_KEY = Buffer.alloc(32, 7).toString("base64url");
@@ -35,10 +35,10 @@ describe("Hosted Linq group setup", () => {
     }
   });
 
-  it("keeps 50 reviewed inactive-sender room variants on one privacy-safe action contract", () => {
-    const variants = readHostedLinqGroupInactiveSenderRoomVariantTemplates();
+  it("keeps 50 reviewed setup-room variants on one privacy-safe action contract", () => {
+    const variants = readHostedLinqGroupSetupRoomVariantTemplates();
 
-    expect(HOSTED_LINQ_GROUP_INACTIVE_SENDER_ROOM_VARIANT_COUNT).toBe(50);
+    expect(HOSTED_LINQ_GROUP_SETUP_ROOM_VARIANT_COUNT).toBe(50);
     expect(variants).toHaveLength(50);
     expect(new Set(variants).size).toBe(50);
     for (const variant of variants) {
@@ -57,19 +57,19 @@ describe("Hosted Linq group setup", () => {
     }
   });
 
-  it("selects inactive-sender room copy deterministically with broad rotation", () => {
-    const first = buildHostedLinqGroupInactiveSenderRoomMessage({
+  it("selects canonical setup-room copy deterministically with broad rotation", () => {
+    const first = buildHostedLinqGroupSetupMessage({
       seed: "linq-group-setup:stable-seed",
     });
     const rotated = new Set(
       Array.from({ length: 500 }, (_, index) =>
-        buildHostedLinqGroupInactiveSenderRoomMessage({
+        buildHostedLinqGroupSetupMessage({
           seed: `linq-group-setup:seed-${index}`,
         })
       ),
     );
 
-    expect(buildHostedLinqGroupInactiveSenderRoomMessage({
+    expect(buildHostedLinqGroupSetupMessage({
       seed: "linq-group-setup:stable-seed",
     })).toBe(first);
     expect(rotated.size).toBe(50);
