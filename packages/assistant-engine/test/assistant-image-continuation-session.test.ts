@@ -60,6 +60,7 @@ describe('exact asynchronous image session continuation', () => {
       threadIsDirect: true,
     })
     expect(ordinaryConversation.participantId).toBe('actor_1')
+    expect(ordinaryConversation.sessionId).toBeNull()
 
     const resolution = buildResolveAssistantSessionInput(
       {
@@ -139,6 +140,7 @@ describe('exact asynchronous image session continuation', () => {
     expect(
       context.imageGenerationLauncher?.readStatus?.('caller_selected_scope'),
     ).toBe('pending')
+    expect(readStatus).toHaveBeenCalledOnce()
     expect(readStatus).toHaveBeenCalledWith('caller_selected_scope')
   })
 })
