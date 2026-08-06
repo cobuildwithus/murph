@@ -38,8 +38,18 @@ const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
-const overlapForegroundInboundText = "still there while the bedtime reminder is due?";
-const overlapForegroundReplyText = "Yep mate, I am here.";
+const overlapForegroundInboundText = "Show the daily nutrition summary as a card.";
+const overlapForegroundNutritionCard = {
+  kind: "daily_nutrition",
+  localDate: "2026-07-28",
+  mealCount: 3,
+  totals: {
+    calories: { mealCount: 3, total: 1_490.25 },
+    carbsGrams: { mealCount: 3, total: 193.125 },
+    fatGrams: { mealCount: 3, total: 34.75 },
+    proteinGrams: { mealCount: 3, total: 94.5 },
+  },
+} as const;
 const wakePreservationWindowRequestText =
   "Confirm the hosted-local wake-preservation checkpoint window.";
 const wakePreservationWindowReplyText =
@@ -84,8 +94,9 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 
   it("creates a reminder from the hosted assistant turn, wakes from the scheduled alarm, and sends it", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
+    const homePhone = buildLinqHomePhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
-      homePhone: buildLinqHomePhoneNumber(userId),
+      homePhone,
       memberId: userId,
       memberPhone,
     });
@@ -322,17 +333,34 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       matchInputContains: scheduledReminderInstructions,
     });
     requireScenario().queueAssistantResponses([
-      overlapForegroundReplyText,
+      buildAssistantProviderMurphToolCall("attach_response_card", {
+        card: overlapForegroundNutritionCard,
+      }),
+      { text: "" },
     ], {
       matchInputContains: overlapForegroundInboundText,
     });
     const overlapProviderBaselineCount = countAssistantProviderResponsesApiRequests();
-    const overlapForegroundReplyMatcher =
-      createObservedLinqMessageTextMatcher(overlapForegroundReplyText);
+    const overlapForegroundCardMatcher = createObservedLinqIMessageAppCardMatcher();
     const overlapReminderMatcher =
       createObservedLinqMessageTextMatcher(overlapReminderText);
-    const overlapForegroundSendBaselineCount =
-      requireLinqStub().countObservedSends(reminderPath, overlapForegroundReplyMatcher);
+    const overlapForegroundSendBaselineCount = requireLinqStub().countObservedSends(reminderPath);
+    const overlapForegroundCardBaselineCount =
+      requireLinqStub().countObservedSends(reminderPath, overlapForegroundCardMatcher);
+    const overlapCreateChatBaselineCount = requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: requireLinqStub().createChatPath,
+    });
+    const capabilityPath = "/capability/check_imessage";
+    const capabilityMatcher = requireLinqStub().createIMessageCapabilityRequestMatcher({
+      address: memberPhone,
+      from: homePhone,
+    });
+    const overlapCapabilityBaselineCount = requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: capabilityPath,
+      matchRequest: capabilityMatcher,
+    });
     const overlapReminderSendBaselineCount =
       requireLinqStub().countObservedSends(reminderPath, overlapReminderMatcher);
     try {
@@ -348,13 +376,14 @@ describe("hosted local Linq scheduled reminder e2e", () => {
           {
             eventId: `evt_scheduled_reminder_overlap_foreground_${userId}`,
             messageId: `msg_scheduled_reminder_overlap_foreground_${userId}`,
+            service: "iMessage",
             text: overlapForegroundInboundText,
           },
         ),
       );
       expect(overlapForegroundWebhookResponse.status).toBe(202);
       await waitForAssistantProviderResponsesApiRequestCount(
-        overlapProviderBaselineCount + 2,
+        overlapProviderBaselineCount + 3,
         userId,
       );
       const foregroundOverlapProviderRequest =
@@ -367,14 +396,35 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       });
 
       const overlapForegroundSend = await requireLinqStub().waitForAdditionalSend({
-        baselineCount: overlapForegroundSendBaselineCount,
+        baselineCount: overlapForegroundCardBaselineCount,
         expectedPath: reminderPath,
-        matchRequest: overlapForegroundReplyMatcher,
+        matchRequest: overlapForegroundCardMatcher,
         scenario: requireScenario(),
         userId,
       });
-      expect(requireLinqStub().readObservedMessageText(overlapForegroundSend))
-        .toBe(overlapForegroundReplyText);
+      expect(requireLinqStub().readObservedMessageText(overlapForegroundSend)).toBeNull();
+      expect(requireLinqStub().readObservedMessageAppCard(overlapForegroundSend)).toMatchObject({
+        fallback_text: "Ask Murph for this card in text",
+        interactive: false,
+        layout: {
+          caption: "Jul 28 · 3 meals",
+          subcaption: "1,490.25 cal",
+          trailing_caption: "94.5g protein · 193.125g carbs",
+          trailing_subcaption: "34.75g fat",
+        },
+        type: "imessage_app",
+        url: "https://murph.ai",
+      });
+      expect(requireLinqStub().countObservedSends(reminderPath))
+        .toBe(overlapForegroundSendBaselineCount + 1);
+      await requireLinqStub().waitForMatchingRequestCount({
+        expectedCount: overlapCapabilityBaselineCount + 1,
+        expectedMethod: "POST",
+        expectedPath: capabilityPath,
+        matchRequest: capabilityMatcher,
+        scenario: requireScenario(),
+        userId,
+      });
       requireScenario().queueAssistantResponses([
         buildHostedAssistantNotificationDecisionResponse({
           privateSummary: "deliver overlap sleep reminder after foreground reply",
@@ -397,10 +447,21 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         timeoutMs: scheduledReminderCompletionWaitMs,
       });
       expect(overlapFinalStatus.lastErrorCode ?? null).toBeNull();
-      expect(requireLinqStub().countObservedSends(reminderPath, overlapForegroundReplyMatcher))
-        .toBe(overlapForegroundSendBaselineCount + 1);
+      expect(requireLinqStub().countObservedSends(reminderPath, overlapForegroundCardMatcher))
+        .toBe(overlapForegroundCardBaselineCount + 1);
+      expect(requireLinqStub().countObservedRequests({
+        expectedMethod: "POST",
+        expectedPath: capabilityPath,
+        matchRequest: capabilityMatcher,
+      })).toBe(overlapCapabilityBaselineCount + 1);
       expect(requireLinqStub().countObservedSends(reminderPath, overlapReminderMatcher))
         .toBe(overlapReminderSendBaselineCount + 1);
+      expect(requireLinqStub().countObservedSends(reminderPath))
+        .toBe(overlapForegroundSendBaselineCount + 2);
+      expect(requireLinqStub().countObservedRequests({
+        expectedMethod: "POST",
+        expectedPath: requireLinqStub().createChatPath,
+      })).toBe(overlapCreateChatBaselineCount);
     } finally {
       heldOverlapReminderResponse.release();
     }
@@ -922,6 +983,10 @@ function createObservedLinqMessageTextMatcher(
   expectedText: string,
 ): ObservedLinqRequestMatcher {
   return (request) => requireLinqStub().readObservedMessageText(request) === expectedText;
+}
+
+function createObservedLinqIMessageAppCardMatcher(): ObservedLinqRequestMatcher {
+  return (request) => requireLinqStub().readObservedMessageAppCard(request) !== null;
 }
 
 function resolveScheduledReminderTimes(
