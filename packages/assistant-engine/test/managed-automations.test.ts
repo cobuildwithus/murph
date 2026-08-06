@@ -191,6 +191,16 @@ const legacyOnboardingFollowupInstructions = [
   'If onboarding is still open, offer one brief, natural in-chat message inviting setup to continue. Keep it low-pressure, do not mention internal state, and do not use a fixed script.',
 ].join('\n')
 
+function expectManagedAutomationSkillReference(
+  instructions: string | null | undefined,
+  slug: string,
+): void {
+  expect(instructions).toContain(
+    `$MURPH_ASSISTANT_SKILLS_ROOT/${slug}/SKILL.md`,
+  )
+  expect(instructions).toContain('cannot change this automation')
+}
+
 beforeEach(() => {
   managedAutomationMocks.prepareExperimentLifecycleAutomations
     .mockReset()
@@ -843,6 +853,7 @@ describe('applyMurphManagedAutomations', () => {
       .toBe('archived')
   })
 
+
   it('keeps the managed weekly health insight seed as the baseline Sunday noon recurrence', () => {
     const insightSeed = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
@@ -852,32 +863,14 @@ describe('applyMurphManagedAutomations', () => {
     }
 
     expect(insightSeed.schedule.expression).toBe('0 12 * * 0')
-    expect(insightSeed.instructions).toContain('On this scheduled weekly run')
+    expectManagedAutomationSkillReference(
+      insightSeed.instructions,
+      'weekly-health-insight',
+    )
+    expect(insightSeed.instructions).not.toContain('Interestingness gate')
     expect(insightSeed.assistantTargetOverride).toEqual({
       reasoningEffort: 'high',
     })
-    expect(insightSeed.instructions).not.toContain('Sunday at noon local time')
-    expect(insightSeed.instructions).not.toContain('Wednesday')
-    expect(insightSeed.instructions).not.toContain('Friday at 2:30 PM local time')
-    expect(insightSeed.instructions).toContain(
-      'A consumer sleep-stage estimate by itself is never a weekly finding or reason to coach.',
-    )
-    expect(insightSeed.instructions).toContain('Never infer alcohol use from a bad night')
-    expect(insightSeed.instructions).toContain(
-      'Do not send a weekly insight whose main point is that drinking or a late Friday/Saturday night hurt sleep or recovery',
-    )
-    expect(insightSeed.instructions).not.toContain('rough portions, alcohol')
-    expect(insightSeed.instructions).not.toContain('drink count')
-    expect(insightSeed.instructions).not.toContain('alcohol plus travel day')
-    expect(insightSeed.instructions).toContain(
-      'One weekly window or a repeated correlation can support "lined up with" or "was associated with," not "caused," "explains," or "proved."',
-    )
-    expect(insightSeed.instructions).toContain(
-      'Check plausible alternatives and confounders.',
-    )
-    expect(insightSeed.instructions).not.toContain(
-      'The recovery dip looked tied to stacking hard days',
-    )
 
     const nextRunAt = findNextAssistantCronOccurrence(
       insightSeed.schedule.expression,
@@ -894,6 +887,7 @@ describe('applyMurphManagedAutomations', () => {
       'America/New_York',
     )).toBe('2026-06-28T16:00:00.000Z')
   })
+
 
   it('keeps the managed monthly improvement coach seed on the first day of each month', () => {
     const seed = MURPH_MANAGED_AUTOMATIONS.find(
@@ -914,67 +908,13 @@ describe('applyMurphManagedAutomations', () => {
     })
     expect(seed.tags).toContain('murph-managed:monthly-improvement-coach')
     expect(seed.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(seed.instructions).toContain('knowledge show improvement-opportunities')
-    expect(seed.instructions).toContain(
-      'knowledge append-section improvement-opportunities YYYY-MM-DD',
-    )
-    expect(seed.instructions).toContain(
-      '{"kind":"skip","privateSummary":"No monthly improvement opportunity cleared the evidence and taste bars, and no open check-in was due."}',
-    )
-    expect(seed.instructions).toContain('Every completed run must leave one compact private decision record')
-    expect(seed.instructions).toContain('only run and outreach ledger')
-    expect(seed.instructions).toContain('at most once in any 30-day window')
-    expect(seed.instructions).toContain(
-      'If no earlier record has `outreach: delivery_requested`, the unanswered-question gate does not block outreach',
-    )
-    expect(seed.instructions).toContain(
-      'platform context affirmatively proves that request never entered dispatch',
-    )
-    expect(seed.instructions).toContain('An unrelated inbound does not close it')
-    expect(seed.instructions).toContain(
-      'answered, declined, acknowledged, or otherwise closed that coach question',
-    )
-    expect(seed.instructions).toContain('outreach: delivery_requested')
-    expect(seed.instructions).toContain(
-      'engine-supplied `Occurrence local date` from the Scheduled occurrence context',
-    )
-    expect(seed.instructions).toContain('the later-occurrence closure gate does not apply')
-    expect(seed.instructions).toContain('engine-described valid delivery retry')
-    expect(seed.instructions).toContain(
-      'stable labels for `outcome`, `evidence_window`, `checked`, `decision`, and `outreach`',
-    )
-    expect(seed.instructions).toContain('record that exact text under `outbound_text`')
-    expect(seed.instructions).toContain('return the exact same text byte-for-byte')
-    expect(seed.instructions).toContain('Use `delivery_requested`, never `sent` or `delivered`')
-    expect(seed.instructions).toContain(
-      'an active health concern, an unanswered proactive health question, a decline, or a request for less outreach',
-    )
-    expect(seed.instructions).toContain(
-      'If the section cannot be appended and read back, send nothing',
-    )
-    expect(seed.instructions).toContain(
-      'Keep the body factual and compact, not a scratchpad or hidden chain of thought',
-    )
-    expect(seed.instructions).not.toContain('do not append to the ledger')
-    expect(seed.instructions).toContain(
-      'Never infer absence of a behavior from absence of data',
-    )
-    expect(seed.instructions).toContain(
-      'Start from an explicit active goal, concern, symptom, experiment, request for help, or recurring friction',
-    )
-    expect(seed.instructions).toContain(
-      'Describe a practical friction, mismatch, or design problem—not a deficit, failure, slip, lack of discipline, or compliance problem.',
-    )
-    expect(seed.instructions).toContain(
-      'consumer deep/REM estimates and vendor sleep scores cannot create an opportunity on their own',
-    )
-    expect(seed.instructions).toContain(
-      'A metric being lower than a population target or lower than months ago does not create permission to coach.',
+    expectManagedAutomationSkillReference(
+      seed.instructions,
+      'monthly-improvement-coach',
     )
     expect(seed.instructions).not.toContain(
-      'Deep sleep or total sleep consistently well below typical reference ranges.',
+      'Every completed run must leave one compact private decision record',
     )
-    expect(seed.instructions).not.toContain('most adults get 1.5 to 2 hours')
 
     const nextRunAt = findNextAssistantCronOccurrence(
       seed.schedule.expression,
@@ -992,6 +932,7 @@ describe('applyMurphManagedAutomations', () => {
     )).toBe('2026-08-01T21:00:00.000Z')
   })
 
+
   it('keeps the managed weekly health research scout seed as the baseline Wednesday evening recurrence', () => {
     const researchScoutSeed = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -1004,9 +945,11 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutSeed.assistantTargetOverride).toEqual({
       reasoningEffort: 'high',
     })
-    expect(researchScoutSeed.instructions).toContain('On this scheduled weekly run')
-    expect(researchScoutSeed.instructions).not.toContain('7:30 PM local time')
-    expect(researchScoutSeed.instructions).not.toContain('Friday morning')
+    expectManagedAutomationSkillReference(
+      researchScoutSeed.instructions,
+      'weekly-health-research-scout',
+    )
+    expect(researchScoutSeed.instructions).not.toContain('Hard provenance gate')
 
     const nextRunAt = findNextAssistantCronOccurrence(
       researchScoutSeed.schedule.expression,
@@ -1336,23 +1279,13 @@ describe('applyMurphManagedAutomations', () => {
     expect(digestRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.digest)
     expect(digestRecord?.tags).toContain('murph-managed:weekly-health-digest')
     expect(digestRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(digestRecord?.instructions).toContain('still remember ten seconds after reading')
-    expect(digestRecord?.instructions).toContain('New data or a decline alone is not substance')
-    expect(digestRecord?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
-    expect(digestRecord?.instructions).toContain('If the reconnect branch applies, it wins over suppression')
-    expect(digestRecord?.instructions).toContain('what was probably noise')
-    expect(digestRecord?.instructions).toContain(
-      'An official weather alert alone never clears the proactive send bar',
+
+    expectManagedAutomationSkillReference(
+      digestRecord?.instructions,
+      'weekly-health-digest',
     )
-    expect(digestRecord?.instructions).toContain(
-      'Never infer an alert from raw weather, AQI, or Murph-defined thresholds',
-    )
-    expect(digestRecord?.instructions).toContain(
-      'Use only a returned alert about extreme heat, extreme cold, or outdoor air quality',
-    )
-    expect(digestRecord?.instructions).toContain('Never restate single-day metric values')
-    expect(digestRecord?.instructions).toContain(
-      '{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}',
+    expect(digestRecord?.instructions).not.toContain(
+      'still remember ten seconds after reading',
     )
 
     const insightRecord = managedAutomationMocks.records.get(
@@ -1369,77 +1302,12 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.insight)
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(insightRecord?.instructions).toContain('On this scheduled weekly run')
-    expect(insightRecord?.instructions).not.toContain('Sunday at noon local time')
-    expect(insightRecord?.instructions).not.toContain('assistant onboarding')
-    expect(insightRecord?.instructions).not.toContain('14 days')
-    expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
-    expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
-    expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
-    expect(insightRecord?.instructions).toContain('do not create per-week insight pages')
-    expect(insightRecord?.instructions).toContain('find zero or one useful')
-    expect(insightRecord?.instructions).toContain('better to send nothing')
-    expect(insightRecord?.instructions).toContain('knowledge append-section weekly-health-insights YYYY-MM-DD')
-    expect(insightRecord?.instructions).toContain('section already exists')
-    expect(insightRecord?.instructions).toContain('do not append another section')
-    expect(insightRecord?.instructions).toContain('useful enough to repeat now')
-    expect(insightRecord?.instructions).toContain('apply the same current interestingness gate')
-    expect(insightRecord?.instructions).toContain(
-      '{"kind":"skip","privateSummary":"No weekly health insight cleared the interestingness bar."}',
+
+    expectManagedAutomationSkillReference(
+      insightRecord?.instructions,
+      'weekly-health-insight',
     )
-    expect(insightRecord?.instructions).toContain(
-      '{"kind":"skip","privateSummary":"Existing weekly health insight did not clear the current send bar."}',
-    )
-    expect(insightRecord?.instructions).not.toContain('finish_without_reply')
-    expect(insightRecord?.instructions).toContain('Do not send a process note')
-    expect(insightRecord?.instructions).toContain('--body <markdown>')
-    expect(insightRecord?.instructions).toContain('--source-path <canonical-vault-path>')
-    expect(insightRecord?.instructions).toContain('suppress the scheduled message')
-    expect(insightRecord?.instructions).toContain('do not append to the wiki')
-    expect(insightRecord?.instructions).toContain('only when the finding clears the bar')
-    expect(insightRecord?.instructions).toContain('plain adult language')
-    expect(insightRecord?.instructions).toContain('clear claim anchored in recognizable context')
-    expect(insightRecord?.instructions).toContain('Use dates for traceability, not as the story')
-    expect(insightRecord?.instructions).toContain('Name the outcome before contrasting inputs')
-    expect(insightRecord?.instructions).toContain('simple translation')
-    expect(insightRecord?.instructions).toContain('raw biomarker names')
-    expect(insightRecord?.instructions).toContain('TSH is the brain\'s signal')
-    expect(insightRecord?.instructions).toContain('Name the practical takeaway clearly')
-    expect(insightRecord?.instructions).toContain('Reject tautological findings')
-    expect(insightRecord?.instructions).toContain('direct or obvious input')
-    expect(insightRecord?.instructions).toContain('WHOOP recovery tracks sleep')
-    expect(insightRecord?.instructions).toContain('compare independent signals')
-    expect(insightRecord?.instructions).toContain('one or two credible studies')
-    expect(insightRecord?.instructions).toContain('outbound note URL-free')
-    expect(insightRecord?.instructions).toContain('Bloodwork plus behavior')
-    expect(insightRecord?.instructions).toContain('Biomarkers plus sleep')
-    expect(insightRecord?.instructions).toContain('Supplement interplay')
-    expect(insightRecord?.instructions).toContain('Treat this as a hypothesis')
-    expect(insightRecord?.instructions).toContain('Do not block the run')
-    expect(insightRecord?.instructions).toContain('Food capture')
-    expect(insightRecord?.instructions).toContain('Easy missing measurement')
-    expect(insightRecord?.instructions).toContain('Supplement and pill routines')
-    expect(insightRecord?.instructions).toContain('Food planning')
-    expect(insightRecord?.instructions).toContain('Goal progress')
-    expect(insightRecord?.instructions).toContain('A goal plus missing or messy logs is not enough')
-    expect(insightRecord?.instructions).toContain('Subjective state')
-    expect(insightRecord?.instructions).toContain('Adherence friction')
-    expect(insightRecord?.instructions).toContain('Fun experiments')
-    expect(insightRecord?.instructions).toContain('feel more in control')
-    expect(insightRecord?.instructions).toContain('CGM and running food/symptom logs')
-    expect(insightRecord?.instructions).toContain('glucose curves')
-    expect(insightRecord?.instructions).toContain('brain floor')
-    expect(insightRecord?.instructions).toContain('do not diagnose insulin sensitivity')
-    expect(insightRecord?.instructions).toContain('Interestingness gate')
-    expect(insightRecord?.instructions).toContain('worth a short weekly note')
-    expect(insightRecord?.instructions).toContain('I did not know that about me')
-    expect(insightRecord?.instructions).toContain('hunch-falsifying')
-    expect(insightRecord?.instructions).toContain('Suppress true-but-boring findings')
-    expect(insightRecord?.instructions).toContain('missing data, messy tags')
-    expect(insightRecord?.instructions).toContain('Murph cannot currently see X')
-    expect(insightRecord?.instructions).toContain(
-      'An official weather alert alone never clears the proactive send bar',
-    )
+    expect(insightRecord?.instructions).not.toContain('Interestingness gate')
 
     const improvementCoachRecord = managedAutomationMocks.records.get(
       MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
@@ -1461,48 +1329,13 @@ describe('applyMurphManagedAutomations', () => {
     })
     expect(improvementCoachRecord?.tags).toContain('murph-managed:monthly-improvement-coach')
     expect(improvementCoachRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(improvementCoachRecord?.instructions).toContain(
-      'An official weather alert alone never clears the proactive send bar',
+
+    expectManagedAutomationSkillReference(
+      improvementCoachRecord?.instructions,
+      'monthly-improvement-coach',
     )
-    expect(improvementCoachRecord?.instructions).toContain(
-      'knowledge show improvement-opportunities',
-    )
-    expect(improvementCoachRecord?.instructions).toContain(
-      'knowledge append-section improvement-opportunities YYYY-MM-DD',
-    )
-    expect(improvementCoachRecord?.instructions).toContain(
-      '{"kind":"skip","privateSummary":"No monthly improvement opportunity cleared the evidence and taste bars, and no open check-in was due."}',
-    )
-    expect(improvementCoachRecord?.instructions).toContain(
+    expect(improvementCoachRecord?.instructions).not.toContain(
       'Every completed run must leave one compact private decision record',
-    )
-    expect(improvementCoachRecord?.instructions).toContain(
-      'at most once in any 30-day window',
-    )
-    expect(improvementCoachRecord?.instructions).toContain(
-      'If no earlier record has `outreach: delivery_requested`, the unanswered-question gate does not block outreach',
-    )
-    expect(improvementCoachRecord?.instructions).toContain(
-      'An unrelated inbound does not close it',
-    )
-    expect(improvementCoachRecord?.instructions).toContain('outreach: delivery_requested')
-    expect(improvementCoachRecord?.instructions).toContain(
-      'engine-supplied `Occurrence local date` from the Scheduled occurrence context',
-    )
-    expect(improvementCoachRecord?.instructions).toContain(
-      'the later-occurrence closure gate does not apply',
-    )
-    expect(improvementCoachRecord?.instructions).toContain(
-      'record that exact text under `outbound_text`',
-    )
-    expect(improvementCoachRecord?.instructions).toContain(
-      'an active health concern, an unanswered proactive health question, a decline, or a request for less outreach',
-    )
-    expect(improvementCoachRecord?.instructions).toContain(
-      'If the section cannot be appended and read back, send nothing',
-    )
-    expect(improvementCoachRecord?.instructions).toContain(
-      'Never infer absence of a behavior from absence of data',
     )
 
     const researchScoutRecord = managedAutomationMocks.records.get(
@@ -1522,77 +1355,14 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.researchScout)
     expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
     expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(researchScoutRecord?.instructions).toContain('On this scheduled weekly run')
-    expect(researchScoutRecord?.instructions).not.toContain('Wednesday at 7:30 PM local time')
-    expect(researchScoutRecord?.instructions).not.toContain('assistant onboarding')
-    expect(researchScoutRecord?.instructions).not.toContain('14 days')
-    expect(researchScoutRecord?.instructions).toContain('0-1 genuinely useful research-backed insight')
-    expect(researchScoutRecord?.instructions).toContain('natural chat message from Murph')
-    expect(researchScoutRecord?.instructions).toContain('The unit of value is the insight, not the paper')
-    expect(researchScoutRecord?.instructions).toContain('one insight may synthesize several returned sources')
-    expect(researchScoutRecord?.instructions).not.toContain('0-3 new studies')
-    expect(researchScoutRecord?.instructions).toContain('normal Murph chat language')
-    expect(researchScoutRecord?.instructions).toContain('If unclear, use English')
-    expect(researchScoutRecord?.instructions).toContain('Do not infer the output language from Telegram')
-    expect(researchScoutRecord?.instructions).toContain('Do not mix languages')
-    expect(researchScoutRecord?.instructions).toContain('thoughtful chat message')
-    expect(researchScoutRecord?.instructions).toContain('Do not use a numbered list of studies')
-    expect(researchScoutRecord?.instructions).toContain('Do not use fixed labels')
-    expect(researchScoutRecord?.instructions).toContain('Do not lead with journal')
-    expect(researchScoutRecord?.instructions).toContain('last two years')
-    expect(researchScoutRecord?.instructions).toContain('knowledge show weekly-health-research-scout')
-    expect(researchScoutRecord?.instructions).toContain('EXA_API_KEY')
-    expect(researchScoutRecord?.instructions).toContain('tag-level only')
-    expect(researchScoutRecord?.instructions).toContain('lowercase non-identifying category tags')
-    expect(researchScoutRecord?.instructions).toContain('Do not send raw lab values')
-    expect(researchScoutRecord?.instructions).toContain('Define 1-4 focused, mechanism-shaped research lanes')
-    expect(researchScoutRecord?.instructions).toContain('do not create one lane per tag')
-    expect(researchScoutRecord?.instructions).toContain('vault-cli research scout-batch-payload-schema --format json')
-    expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout-batch` once')
-    expect(researchScoutRecord?.instructions).toContain('If none exists, suppress the scheduled message without calling `vault-cli research scout-batch`')
-    expect(researchScoutRecord?.instructions).not.toContain('Use `vault-cli research scout` once')
-    expect(researchScoutRecord?.instructions).toContain('`topics`, `biomarkers`, `behaviors`, `supplements`, `conditionsOrConcerns`, `goals`, and `activeExperiments`')
-    expect(researchScoutRecord?.instructions).toContain('do not use a generic `tags` field')
-    expect(researchScoutRecord?.instructions).toContain('Example body: `{"lanes":[{"label":"evening light and sleep"')
-    expect(researchScoutRecord?.instructions).toContain('late meals and glucose')
-    expect(researchScoutRecord?.instructions).toContain('zone 2 training and resting heart rate')
-    expect(researchScoutRecord?.instructions).toContain('device and measurement meta-commentary')
-    expect(researchScoutRecord?.instructions).toContain('a trend in their own wearable data')
-    expect(researchScoutRecord?.instructions).toContain('ignore a metric their own data shows is noisy for them')
-    expect(researchScoutRecord?.instructions).not.toContain('wearable hrv reliability')
-    expect(researchScoutRecord?.instructions).not.toContain('wearable tracking')
-    expect(researchScoutRecord?.instructions).toContain('YYYY-MM-DD dates or full ISO timestamps are accepted')
-    expect(researchScoutRecord?.instructions).toContain('cap `--maxCandidatesPerLane` at 8')
-    expect(researchScoutRecord?.instructions).not.toContain('capping `--maxCandidates` at 5')
-    expect(researchScoutRecord?.instructions).not.toContain('cap `--maxCandidates` at 1')
-    expect(researchScoutRecord?.instructions).not.toContain('cap `--maxCandidates` at 3')
-    expect(researchScoutRecord?.instructions).toContain('Treat the returned results as a candidate pool')
-    expect(researchScoutRecord?.instructions).toContain('The scout-batch call is the retrieval budget')
-    expect(researchScoutRecord?.instructions).toContain('Do not perform an open-ended web browsing loop')
-    expect(researchScoutRecord?.instructions).toContain('current user question each candidate would answer')
-    expect(researchScoutRecord?.instructions).toContain('Recent conversation and automation/regimen changes are veto context')
-    expect(researchScoutRecord?.instructions).toContain('stale vault tags')
-    expect(researchScoutRecord?.instructions).toContain('incremental value beyond known basics')
-    expect(researchScoutRecord?.instructions).toContain('still remember the point ten seconds after reading')
-    expect(researchScoutRecord?.instructions).toContain('Hard provenance gate: if the note could have been written without this run\'s retrieved sources')
-    expect(researchScoutRecord?.instructions).toContain('Skipping is the expected outcome')
-    expect(researchScoutRecord?.instructions).toContain('Do not reuse the provider candidate\'s `actionOrQuestion` as advice')
-    expect(researchScoutRecord?.instructions).toContain('Automatically skip generic health news, obvious habit advice')
-    expect(researchScoutRecord?.instructions).toContain('`do more support work`, `be consistent`, `sleep better`, `eat protein`, `manage stress`')
-    expect(researchScoutRecord?.instructions).toContain('Suppress the scheduled message')
-    expect(researchScoutRecord?.instructions).toContain('Send exactly one short note')
-    expect(researchScoutRecord?.instructions).toContain('Never send a second item')
-    expect(researchScoutRecord?.instructions).not.toContain('Send 1-3 items max')
-    expect(researchScoutRecord?.instructions).toContain("Lead with what changes for the user's current thinking")
-    expect(researchScoutRecord?.instructions).toContain('small cluster of sources')
-    expect(researchScoutRecord?.instructions).toContain('Mention source provenance naturally')
-    expect(researchScoutRecord?.instructions).toContain('Keep study names, publication dates, study type, evidence strength')
-    expect(researchScoutRecord?.instructions).not.toContain('For each item include:')
-    expect(researchScoutRecord?.instructions).not.toContain('one thing not to overinterpret')
-    expect(researchScoutRecord?.instructions).not.toContain('plain-English `Basically:` sentence')
-    expect(researchScoutRecord?.instructions).toContain('Append one dated section to `weekly-health-research-scout`')
-    expect(researchScoutRecord?.instructions).toContain('why close alternatives were suppressed')
-    expect(researchScoutRecord?.instructions).toContain('clinician discussion prompt')
+
+    expectManagedAutomationSkillReference(
+      researchScoutRecord?.instructions,
+      'weekly-health-research-scout',
+    )
+    expect(researchScoutRecord?.instructions).not.toContain(
+      'Hard provenance gate',
+    )
 
     const productUpdatesRecord = managedAutomationMocks.records.get(
       MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
@@ -1961,6 +1731,7 @@ describe('applyMurphManagedAutomations', () => {
       .toBe('archived')
   })
 
+
   it('updates existing research-oriented automations without rewriting their cadence', async () => {
     managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, {
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
@@ -2004,38 +1775,39 @@ describe('applyMurphManagedAutomations', () => {
       skipped: 0,
       updated: 2,
     })
-    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
-      .toEqual(expect.objectContaining({
-        schedule: {
-          kind: 'cron',
-          expression: '30 14 * * 5',
-        },
-      }))
-    expect(
-      managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)
-        ?.instructions,
+    const insightRecord = managedAutomationMocks.records.get(
+      MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
     )
-      .toContain('On this scheduled weekly run')
-    expect(
-      managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)
-        ?.instructions,
+    expect(insightRecord).toEqual(expect.objectContaining({
+      schedule: {
+        kind: 'cron',
+        expression: '30 14 * * 5',
+      },
+    }))
+    expectManagedAutomationSkillReference(
+      insightRecord?.instructions,
+      'weekly-health-insight',
     )
-      .not.toContain('Sunday at noon local time')
-    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
-      .toEqual(expect.objectContaining({
-        schedule: {
-          kind: 'cron',
-          expression: '0 11 * * 5',
-        },
-      }))
-    expect(
-      managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)
-        ?.instructions,
-    ).toContain('On this scheduled weekly run')
-    expect(
-      managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)
-        ?.instructions,
-    ).not.toContain('Wednesday at 7:30 PM local time')
+    expect(insightRecord?.instructions).not.toContain(
+      'Each Friday at 2:30 PM local time',
+    )
+
+    const researchScoutRecord = managedAutomationMocks.records.get(
+      MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+    )
+    expect(researchScoutRecord).toEqual(expect.objectContaining({
+      schedule: {
+        kind: 'cron',
+        expression: '0 11 * * 5',
+      },
+    }))
+    expectManagedAutomationSkillReference(
+      researchScoutRecord?.instructions,
+      'weekly-health-research-scout',
+    )
+    expect(researchScoutRecord?.instructions).not.toContain(
+      'Each Friday morning',
+    )
   })
 
   it('migrates existing weekly product notes to the two-week cadence', async () => {
@@ -2130,8 +1902,11 @@ describe('applyMurphManagedAutomations', () => {
       'murph-managed:weekly-health-digest',
     ])
     expect(digestRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(digestRecord?.instructions).toContain('On this scheduled weekly run')
-    expect(digestRecord?.instructions).toContain('If the reconnect branch applies, it wins over suppression')
+
+    expectManagedAutomationSkillReference(
+      digestRecord?.instructions,
+      'weekly-health-digest',
+    )
     expect(digestRecord?.instructions).not.toContain('OLD weekly digest instructions')
   })
 
@@ -2165,11 +1940,17 @@ describe('applyMurphManagedAutomations', () => {
       updated: 1,
     })
 
-    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
-      .toEqual(expect.objectContaining({
-        instructions: expect.stringContaining('On this scheduled weekly run'),
-        schedule: deviceActivitySchedule,
-      }))
+
+    const record = managedAutomationMocks.records.get(
+      MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+    )
+    expect(record).toEqual(expect.objectContaining({
+      schedule: deviceActivitySchedule,
+    }))
+    expectManagedAutomationSkillReference(
+      record?.instructions,
+      'weekly-health-insight',
+    )
   })
 
   it('does not overwrite a queued device activity occurrence payload', async () => {
@@ -2349,11 +2130,17 @@ describe('applyMurphManagedAutomations', () => {
       updated: 1,
     })
 
-    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
-      .toEqual(expect.objectContaining({
-        instructions: expect.stringContaining('On this scheduled weekly run'),
-        schedule: existingDigestSchedule,
-      }))
+
+    const digestRecord = managedAutomationMocks.records.get(
+      MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+    )
+    expect(digestRecord).toEqual(expect.objectContaining({
+      schedule: existingDigestSchedule,
+    }))
+    expectManagedAutomationSkillReference(
+      digestRecord?.instructions,
+      'weekly-health-digest',
+    )
     expect(managedAutomationMocks.records.get(experimentSeed.automationId))
       .toEqual(expect.objectContaining({
         instructions: experimentSeed.instructions,
