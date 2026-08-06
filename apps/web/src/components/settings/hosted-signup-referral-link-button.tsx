@@ -11,6 +11,8 @@ type CopyState =
   | "loading"
   | "success";
 
+let referralLinkPromise: Promise<string> | null = null;
+
 export function HostedSignupReferralLinkButton(props: {
   signupUrl?: string | null;
 }) {
@@ -26,39 +28,23 @@ export function HostedSignupReferralLinkButton(props: {
       return;
     }
 
-    const controller = new AbortController();
-    void loadReferralLink(controller.signal);
-    return () => controller.abort();
-
-    async function loadReferralLink(signal: AbortSignal) {
-      setState("loading");
-      try {
-        const response = await fetch("/api/settings/signup-referral-link", {
-          cache: "no-store",
-          method: "GET",
-          signal,
-        });
-        if (!response.ok) {
-          throw new Error("Referral link unavailable");
-        }
-        const payload = await response.json() as {
-          signupUrl?: unknown;
-        };
-        if (
-          typeof payload.signupUrl !== "string"
-          || payload.signupUrl.length === 0
-        ) {
-          throw new Error("Referral link missing");
-        }
-        setSignupUrl(payload.signupUrl);
-        setState("idle");
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
+    let active = true;
+    void readHostedSettingsSignupReferralLink()
+      .then((url) => {
+        if (!active) {
           return;
         }
-        setState("error");
-      }
-    }
+        setSignupUrl(url);
+        setState("idle");
+      })
+      .catch(() => {
+        if (active) {
+          setState("error");
+        }
+      });
+    return () => {
+      active = false;
+    };
   }, [props.signupUrl]);
 
   async function copyReferralLink() {
@@ -68,23 +54,8 @@ export function HostedSignupReferralLinkButton(props: {
     if (!signupUrl) {
       setState("loading");
       try {
-        const response = await fetch("/api/settings/signup-referral-link", {
-          cache: "no-store",
-          method: "GET",
-        });
-        if (!response.ok) {
-          throw new Error("Referral link unavailable");
-        }
-        const payload = await response.json() as {
-          signupUrl?: unknown;
-        };
-        if (
-          typeof payload.signupUrl !== "string"
-          || payload.signupUrl.length === 0
-        ) {
-          throw new Error("Referral link missing");
-        }
-        setSignupUrl(payload.signupUrl);
+        const url = await readHostedSettingsSignupReferralLink();
+        setSignupUrl(url);
         setState("idle");
       } catch {
         setState("error");
@@ -134,4 +105,31 @@ export function HostedSignupReferralLinkButton(props: {
       </span>
     </>
   );
+}
+
+function readHostedSettingsSignupReferralLink(): Promise<string> {
+  referralLinkPromise ??= fetch("/api/settings/signup-referral-link", {
+    cache: "no-store",
+    method: "GET",
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error("Referral link unavailable");
+      }
+      const payload = await response.json() as {
+        signupUrl?: unknown;
+      };
+      if (
+        typeof payload.signupUrl !== "string"
+        || payload.signupUrl.length === 0
+      ) {
+        throw new Error("Referral link missing");
+      }
+      return payload.signupUrl;
+    })
+    .catch((error) => {
+      referralLinkPromise = null;
+      throw error;
+    });
+  return referralLinkPromise;
 }
