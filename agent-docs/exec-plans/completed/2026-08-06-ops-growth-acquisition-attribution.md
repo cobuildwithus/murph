@@ -1,6 +1,6 @@
 # Show durable acquisition sources on the ops growth dashboard
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-06
 
@@ -98,3 +98,20 @@ Updated: 2026-08-06
 - Expected outcomes: all new sources persist exactly once, unknown legacy data
   remains visible without guesswork, UI is readable and responsive, no full
   identifiers enter output/artifacts, and all required gates are green.
+
+## Completion evidence
+
+- Focused ESLint, Prisma validation, prepared web typecheck, migration guards,
+  and 290 focused Vitest tests passed.
+- The focused growth Playwright gate passed at 1440px and 390px, including
+  accessible chart names, keyboard focus, forced-colors behavior, and viewport
+  containment. Ten synthetic design-catalog captures cover every renamed
+  surface plus populated and empty attribution states at desktop and mobile.
+- The preliminary completion-specialists gate passed with no product,
+  frontend, prompt, or coverage findings after its evidence packet was made
+  exact-head consistent. Final ReviewGPT round 2 passed with no findings after
+  verifying both accepted round-1 corrections.
+- The parent final review found no remaining correctness, privacy, UX,
+  architecture, or proof gap. Required GitHub Actions will evaluate the
+  plan-closure head before handoff.
+Completed: 2026-08-06
