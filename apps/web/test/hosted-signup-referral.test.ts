@@ -39,11 +39,13 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => {
 import {
   buildHostedSignupReferralUrl,
   claimHostedSignupReferralLink,
+  HOSTED_SIGNUP_REFERRAL_MAX_CLAIMS_PER_HOUR,
   issueHostedSignupReferralLink,
   readHostedSignupReferralLink,
 } from "@/src/lib/hosted-growth/signup-referral";
 
 function createPrisma(input: {
+  recentClaimCount?: number;
   referrer?: { id: string; suspendedAt: Date | null } | null;
 } = {}) {
   const createdInvites: Array<Record<string, unknown>> = [];
@@ -56,6 +58,7 @@ function createPrisma(input: {
   };
   const tx = {
     hostedInvite: {
+      count: vi.fn().mockResolvedValue(input.recentClaimCount ?? 0),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         createdInvites.push(data);
         return {
@@ -158,7 +161,7 @@ describe("hosted signup referral links", () => {
     mocks.generateHostedInviteCode
       .mockReturnValueOnce("invite_one")
       .mockReturnValueOnce("invite_two");
-    const { createdInvites, prisma } = createPrisma();
+    const { createdInvites, prisma, tx } = createPrisma();
     const issued = await issueHostedSignupReferralLink({
       prisma: prisma as never,
       referrerMemberId: "member_referrer",
@@ -182,17 +185,55 @@ describe("hosted signup referral links", () => {
 
     expect(createdInvites).toEqual([
       expect.objectContaining({
+        channel: "signup-referral",
         inviteCode: "invite_one",
         memberId: "member_target_one",
         referrerMemberId: "member_referrer",
       }),
       expect.objectContaining({
+        channel: "signup-referral",
         inviteCode: "invite_two",
         memberId: "member_target_two",
         referrerMemberId: "member_referrer",
       }),
     ]);
+    expect(tx.hostedInvite.count).toHaveBeenCalledTimes(2);
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds explicit claims before allocating a placeholder member", async () => {
+    const now = new Date("2026-08-06T12:00:00.000Z");
+    const { prisma, tx } = createPrisma({
+      recentClaimCount: HOSTED_SIGNUP_REFERRAL_MAX_CLAIMS_PER_HOUR,
+    });
+    const issued = await issueHostedSignupReferralLink({
+      now,
+      prisma: prisma as never,
+      referrerMemberId: "member_referrer",
+    });
+
+    await expect(claimHostedSignupReferralLink({
+      now,
+      prisma: prisma as never,
+      referralCode: readReferralToken(issued.signupUrl),
+    })).rejects.toMatchObject({
+      code: "HOSTED_SIGNUP_REFERRAL_CLAIM_LIMIT_REACHED",
+      httpStatus: 429,
+      retryable: true,
+    });
+
+    expect(tx.hostedInvite.count).toHaveBeenCalledWith({
+      where: {
+        channel: "signup-referral",
+        createdAt: {
+          gte: new Date("2026-08-06T11:00:00.000Z"),
+        },
+        referrerMemberId: "member_referrer",
+      },
+    });
+    expect(mocks.createHostedMember).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberIdentity).not.toHaveBeenCalled();
+    expect(tx.hostedInvite.create).not.toHaveBeenCalled();
   });
 
   it("rejects tampered and ordinary invite tokens before mutation", async () => {

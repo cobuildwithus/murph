@@ -40,6 +40,9 @@ const HOSTED_SIGNUP_REFERRAL_TOKEN_VERSION = 1;
 const HOSTED_SIGNUP_REFERRAL_TOKEN_MAX_BYTES = 512;
 const HOSTED_SIGNUP_REFERRAL_LINK_EXPIRES_AT =
   new Date("2099-12-31T23:59:59.999Z");
+const HOSTED_SIGNUP_REFERRAL_INVITE_CHANNEL = "signup-referral";
+export const HOSTED_SIGNUP_REFERRAL_MAX_CLAIMS_PER_HOUR = 50;
+const ONE_HOUR_MS = 60 * 60 * 1_000;
 const SHA256_BASE64URL_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 
@@ -294,10 +297,28 @@ async function claimHostedSignupReferralLinkTx(input: {
     referrerMemberId: input.referrerMemberId,
   });
 
+  const recentClaimCount = await input.prisma.hostedInvite.count({
+    where: {
+      channel: HOSTED_SIGNUP_REFERRAL_INVITE_CHANNEL,
+      createdAt: {
+        gte: new Date(input.now.getTime() - ONE_HOUR_MS),
+      },
+      referrerMemberId: input.referrerMemberId,
+    },
+  });
+  if (recentClaimCount >= HOSTED_SIGNUP_REFERRAL_MAX_CLAIMS_PER_HOUR) {
+    throw hostedOnboardingError({
+      code: "HOSTED_SIGNUP_REFERRAL_CLAIM_LIMIT_REACHED",
+      httpStatus: 429,
+      message: "That referral link has been used too many times recently. Try again later.",
+      retryable: true,
+    });
+  }
+
   const targetMemberId = await createPristineHostedSignupMemberTx(input.prisma);
   return input.prisma.hostedInvite.create({
     data: {
-      channel: "share",
+      channel: HOSTED_SIGNUP_REFERRAL_INVITE_CHANNEL,
       expiresAt: inviteExpiresAt(
         input.now,
         getHostedOnboardingEnvironment().inviteTtlHours,
