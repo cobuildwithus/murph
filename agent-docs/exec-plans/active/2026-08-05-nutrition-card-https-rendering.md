@@ -161,3 +161,9 @@ Updated: 2026-08-05
   accounting discrepancy: the restored native path adds the already-existing
   capability probe before the one card-or-text send, rather than keeping the
   old text-only request count.
+- Final ReviewGPT round 2 found that the accepted hosted-local correction used
+  a bare empty string rejected by the shared response-script guard and omitted
+  the explicit iMessage service on the synthetic late inbound. The correction
+  now uses the existing structured empty-text response for a card-only model
+  completion and declares the inbound service explicitly; no production logic
+  or new test-harness branch was added.

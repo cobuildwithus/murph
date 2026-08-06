@@ -336,7 +336,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       buildAssistantProviderMurphToolCall("attach_response_card", {
         card: overlapForegroundNutritionCard,
       }),
-      "",
+      { text: "" },
     ], {
       matchInputContains: overlapForegroundInboundText,
     });
@@ -376,6 +376,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
           {
             eventId: `evt_scheduled_reminder_overlap_foreground_${userId}`,
             messageId: `msg_scheduled_reminder_overlap_foreground_${userId}`,
+            service: "iMessage",
             text: overlapForegroundInboundText,
           },
         ),
