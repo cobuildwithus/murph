@@ -43,9 +43,10 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "id String @id",
     'memberId String @map("member_id")',
     'installationIdHash String @map("installation_id_hash")',
-    'uploadTokenHash String @unique @map("upload_token_hash")',
-    'idempotencySecretEncrypted String @map("idempotency_secret_encrypted")',
-    'expiresAt DateTime @map("expires_at")',
+    'authorityRevision Int @default(0) @map("authority_revision")',
+    'uploadTokenHash String? @unique @map("upload_token_hash")',
+    'idempotencySecretEncrypted String? @map("idempotency_secret_encrypted")',
+    'expiresAt DateTime? @map("expires_at")',
     'revokedAt DateTime? @map("revoked_at")',
     'revokeReason String? @map("revoke_reason")',
     'createdAt DateTime @default(now()) @map("created_at")',
@@ -1069,6 +1070,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260804223000_hosted_signup_referral_attribution",
       "20260805010000_rearm_generated_image_capture_retention",
       "20260805160000_hosted_usage_plan_reset_epoch",
+      "20260805230000_meal_photo_authority_revision",
       "migration_lock.toml",
     ]);
     expect(hostedPendingGroupSetupMigrationSql).toContain(

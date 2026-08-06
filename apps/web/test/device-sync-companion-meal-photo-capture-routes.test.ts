@@ -233,6 +233,64 @@ describe("meal photo companion routes", () => {
     });
   });
 
+  it("keeps the successful schema-v2 enrollment response credential-only", async () => {
+    const schemaV2Request = {
+      ...ENROLLMENT_REQUEST,
+      authorityRevision: 1,
+      schemaVersion: 2 as const,
+    };
+    mocks.parseMealPhotoCaptureEnrollmentRequest.mockReturnValueOnce(schemaV2Request);
+
+    const response = await enrollmentRoute.POST(
+      jsonRequest("https://app.example.test/enrollment", schemaV2Request),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      expiresAt: "2026-08-11T12:00:00.000Z",
+      idempotencySecret: "idempotency-secret",
+      uploadToken: "scoped-upload-token",
+    });
+    expect(mocks.issueMealPhotoCaptureEnrollment).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.anything(),
+      request: schemaV2Request,
+    });
+  });
+
+  it("returns the current authority revision only on schema-v2 conflict", async () => {
+    mocks.issueMealPhotoCaptureEnrollment.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+        details: {
+          currentAuthorityRevision: 3,
+          currentAuthorityState: "revoked",
+          requestedOperation: "enroll",
+        },
+        httpStatus: 409,
+        message: "Meal photo capture authority changed. Retry from the current state.",
+      }),
+    );
+
+    const response = await enrollmentRoute.POST(
+      jsonRequest("https://app.example.test/enrollment", ENROLLMENT_REQUEST),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+        details: {
+          currentAuthorityRevision: 3,
+          currentAuthorityState: "revoked",
+          requestedOperation: "enroll",
+        },
+        message: "Meal photo capture authority changed. Retry from the current state.",
+        retryable: false,
+      },
+    });
+  });
+
   it("rejects enrollment when historical launch consent is missing", async () => {
     mocks.assertHostedHistoricalLaunchConsentGranted.mockRejectedValueOnce(
       hostedOnboardingError({

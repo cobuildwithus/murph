@@ -51,16 +51,17 @@ type MealPhotoCaptureTransactionForTest =
   Parameters<typeof assertCurrentMealPhotoCaptureEnrollmentTx>[0]["prisma"];
 
 interface StoredEnrollment {
+  authorityRevision: number;
   createdAt: Date;
-  expiresAt: Date;
+  expiresAt: Date | null;
   id: string;
-  idempotencySecretEncrypted: string;
+  idempotencySecretEncrypted: string | null;
   installationIdHash: string;
   memberId: string;
   revokeReason: string | null;
   revokedAt: Date | null;
   updatedAt: Date;
-  uploadTokenHash: string;
+  uploadTokenHash: string | null;
 }
 
 describe("meal photo capture enrollment credentials", () => {
@@ -139,6 +140,11 @@ describe("meal photo capture enrollment credentials", () => {
         schemaVersion: 1,
       },
     })).resolves.toEqual({ revoked: true });
+    expect(prisma.getRecord()).toMatchObject({
+      expiresAt: null,
+      idempotencySecretEncrypted: null,
+      uploadTokenHash: null,
+    });
 
     const second = await issueMealPhotoCaptureEnrollment({
       memberId: MEMBER_ID,
@@ -148,6 +154,205 @@ describe("meal photo capture enrollment credentials", () => {
     expect(second.uploadToken).not.toBe(first.uploadToken);
     expect(second.idempotencySecret).not.toBe(first.idempotencySecret);
     expect(prisma.getRecord()).toMatchObject({ revokedAt: null, revokeReason: null });
+  });
+
+  it("keeps a newer schema-v2 tombstone when a delayed enrollment arrives", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+
+    await expect(revokeMealPhotoCaptureEnrollmentForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2RevocationRequest(2),
+    })).resolves.toEqual({ revoked: true });
+
+    await expect(issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2EnrollmentRequest(1),
+    })).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+      details: {
+        currentAuthorityRevision: 2,
+        currentAuthorityState: "revoked",
+        requestedOperation: "enroll",
+      },
+      httpStatus: 409,
+    });
+    expect(prisma.getRecord()).toMatchObject({
+      authorityRevision: 2,
+      expiresAt: null,
+      idempotencySecretEncrypted: null,
+      revokeReason: "member_disabled",
+      revokedAt: expect.any(Date),
+      uploadTokenHash: null,
+    });
+  });
+
+  it("keeps a newer tombstone over a delayed enrollment after prior authority", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2EnrollmentRequest(1),
+    });
+    await revokeMealPhotoCaptureEnrollmentForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2RevocationRequest(3),
+    });
+
+    await expect(issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2EnrollmentRequest(2),
+    })).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+      details: { currentAuthorityRevision: 3, currentAuthorityState: "revoked" },
+    });
+    expect(prisma.getRecord()).toMatchObject({
+      authorityRevision: 3,
+      idempotencySecretEncrypted: null,
+      revokedAt: expect.any(Date),
+      uploadTokenHash: null,
+    });
+  });
+
+  it("ends disabled when schema-v2 enrollment arrives before a newer revocation", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2EnrollmentRequest(1),
+    });
+
+    await expect(revokeMealPhotoCaptureEnrollmentForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2RevocationRequest(2),
+    })).resolves.toEqual({ revoked: true });
+    const tombstoneUpdatedAt = prisma.getRecord()?.updatedAt;
+    await expect(revokeMealPhotoCaptureEnrollmentForMember({
+      memberId: MEMBER_ID,
+      now: new Date("2026-08-01T12:00:00.000Z"),
+      prisma: prisma.client,
+      request: v2RevocationRequest(2),
+    })).resolves.toEqual({ revoked: true });
+
+    expect(prisma.getRecord()).toMatchObject({
+      authorityRevision: 2,
+      revokedAt: expect.any(Date),
+      updatedAt: tombstoneUpdatedAt,
+      uploadTokenHash: null,
+    });
+  });
+
+  it("allows only a higher schema-v2 revision to re-enable a tombstone", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    await revokeMealPhotoCaptureEnrollmentForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2RevocationRequest(1),
+    });
+    const issued = await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2EnrollmentRequest(2),
+    });
+
+    await expect(revokeMealPhotoCaptureEnrollmentForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2RevocationRequest(1),
+    })).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+      details: { currentAuthorityRevision: 2, currentAuthorityState: "active" },
+    });
+    await expect(requireActiveMealPhotoCaptureEnrollment({
+      prisma: prisma.client,
+      request: uploadRequest(issued.uploadToken),
+    })).resolves.toMatchObject({ memberId: MEMBER_ID });
+  });
+
+  it("rejects duplicate schema-v2 enrollment without rotating plaintext credentials", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    const issued = await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2EnrollmentRequest(1),
+    });
+    const storedTokenHash = prisma.getRecord()?.uploadTokenHash;
+
+    await expect(issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2EnrollmentRequest(1),
+    })).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+      details: { currentAuthorityRevision: 1, currentAuthorityState: "active" },
+    });
+    expect(prisma.getRecord()?.uploadTokenHash).toBe(storedTokenHash);
+    await expect(requireActiveMealPhotoCaptureEnrollment({
+      prisma: prisma.client,
+      request: uploadRequest(issued.uploadToken),
+    })).resolves.toMatchObject({ memberId: MEMBER_ID });
+  });
+
+  it("keeps schema-v1 behavior at revision zero and blocks it after v2 adoption", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    expect(prisma.getRecord()?.authorityRevision).toBe(0);
+
+    await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: v2EnrollmentRequest(1),
+    });
+    await expect(issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    })).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+      details: { currentAuthorityRevision: 1 },
+    });
+    await expect(revokeMealPhotoCaptureEnrollmentForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: {
+        appInstallationId: INSTALLATION_ID,
+        schemaVersion: 1,
+      },
+    })).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+      details: { currentAuthorityRevision: 1 },
+    });
+  });
+
+  it("fails closed instead of repairing incomplete active credential state", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    const issued = await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    prisma.setRecord({
+      ...requireStoredEnrollment(prisma.getRecord()),
+      idempotencySecretEncrypted: null,
+    });
+
+    await expect(issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    })).rejects.toThrow("incomplete credentials");
+    await expect(requireActiveMealPhotoCaptureEnrollment({
+      prisma: prisma.client,
+      request: uploadRequest(issued.uploadToken),
+    })).rejects.toMatchObject({ code: "AUTH_REQUIRED", httpStatus: 401 });
   });
 
   it("revokes every active enrollment when health-data consent is withdrawn", async () => {
@@ -166,9 +371,12 @@ describe("meal photo capture enrollment credentials", () => {
     })).resolves.toEqual({ revokedCount: 1 });
 
     expect(prisma.getRecord()).toMatchObject({
+      expiresAt: null,
+      idempotencySecretEncrypted: null,
       revokeReason: "health_data_consent_withdrawn",
       revokedAt: now,
       updatedAt: now,
+      uploadTokenHash: null,
     });
     expect(mocks.lockHostedMemberRow).toHaveBeenLastCalledWith(
       prisma.tx,
@@ -213,8 +421,11 @@ describe("meal photo capture enrollment credentials", () => {
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledOnce();
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(prisma.tx, MEMBER_ID);
     expect(prisma.getRecord()).toMatchObject({
+      expiresAt: null,
+      idempotencySecretEncrypted: null,
       revokeReason: "scoped_token_revoked",
       revokedAt: expect.any(Date),
+      uploadTokenHash: null,
     });
   });
 
@@ -431,6 +642,29 @@ function enrollmentRequest() {
     appVersion: "1.2.3",
     schemaVersion: 1 as const,
   };
+}
+
+function v2EnrollmentRequest(authorityRevision: number) {
+  return {
+    appInstallationId: INSTALLATION_ID,
+    appVersion: "1.2.3",
+    authorityRevision,
+    schemaVersion: 2 as const,
+  };
+}
+
+function v2RevocationRequest(authorityRevision: number) {
+  return {
+    appInstallationId: INSTALLATION_ID,
+    authorityRevision,
+    schemaVersion: 2 as const,
+  };
+}
+
+function uploadRequest(uploadToken: string): Request {
+  return new Request("https://app.example.test/photos", {
+    headers: { authorization: `Bearer ${uploadToken}` },
+  });
 }
 
 function createEnrollmentPrismaHarness(): {
