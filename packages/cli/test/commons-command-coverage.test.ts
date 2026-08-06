@@ -65,6 +65,31 @@ test("commons knowledge search returns a bounded source-backed sauna packet", as
   assert.equal(data.safety?.kind, "safety");
 });
 
+test("commons knowledge search returns a safety-only sauna hard stop", async () => {
+  const result = await runInProcessJsonCli<{
+    available: boolean;
+    items: unknown[];
+    safety: {
+      sources: Array<{ pmid: string | null; title: string }>;
+      text: string;
+    } | null;
+  }>(createCommonsSliceCli(), [
+    "commons",
+    "knowledge",
+    "search",
+    "sauna fentanyl patch",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.equal(data.available, true);
+  assert.deepEqual(data.items, []);
+  assert.match(data.safety?.text ?? "", /opioid|fentanyl|life-threatening/iu);
+  assert.ok(data.safety?.sources.some((source) =>
+    source.pmid === "32740103" || /opioid patch|fentanyl patch/iu.test(source.title)
+  ));
+});
+
 test("commons knowledge search stays non-blocking when its generated index is missing", async () => {
   const previousRoot = process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
   process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = path.join(
