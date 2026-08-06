@@ -75,10 +75,13 @@ Updated: 2026-08-06
   273 tests, including no-context regressions for imported-without-input and
   retryable-blocked conversation work plus the positive fresh-input case;
   assistant-runtime typecheck and `git diff --check` passed.
-- FIXED: final review also corrected the PR-body hot-path count. The complete
-  first-provider partition takes ten monotonic reads, not nine. The App Server
-  hook now checks its already-notified guard before taking a fallback tick, so
-  a later `turn/started` notification does not add an unused eleventh read.
-  The 249-test App Server suite and assistant-engine typecheck passed.
+- FIXED: final review also corrected the PR-body hot-path count. A normal
+  first-provider partition takes ten monotonic reads, not nine. If speculative
+  App Server initialization fails and the existing warm fallback succeeds, the
+  failed attempt's process stamp is replaced, so eleven raw reads still yield
+  the same ten final boundaries. The hook checks its already-notified guard
+  before taking any fallback tick, so a later `turn/started` notification adds
+  no unused read. The 249-test App Server suite and assistant-engine typecheck
+  passed.
 - Pending: push the corrected candidate, resolve the final ReviewGPT delta
   review, and require green exact-head CI.
