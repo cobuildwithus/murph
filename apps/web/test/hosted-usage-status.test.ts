@@ -1077,6 +1077,43 @@ describe("readHostedPersonalAiUsageStatus", () => {
     );
   });
 
+  it("uses the later plan reset as the usage meter boundary", async () => {
+    const planResetAt = new Date("2026-07-03T12:00:00.000Z");
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      limitUsdMicros: 16_000_000n,
+      planResetAt,
+      remainingUsdMicros: 12_000_000n,
+      spentUsdMicros: 4_000_000n,
+      usageCreditBalanceUsdMicros: 5_000_000n,
+      usageCreditLedgerVersion: 6n,
+    }));
+    const prisma = buildPrisma(null, {
+      latestPurchaseGrantAt: new Date("2026-07-02T12:00:00.000Z"),
+      spentSincePurchaseUsdMicros: 4_000_000n,
+    });
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_plan_reset_usage",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: null,
+    })).resolves.toMatchObject({
+      remainingPercent: 75,
+      usedPercent: 25,
+    });
+
+    expect(prisma.hostedAiUsage.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          occurredAt: {
+            gt: planResetAt,
+            lte: NOW,
+          },
+        }),
+      }),
+    );
+  });
+
   it("forecasts exhaustion against overall available capacity", async () => {
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       limitUsdMicros: 10_000_000n,
@@ -1157,6 +1194,7 @@ function buildDecision(input: {
     | "hosted_access_inactive"
     | "trial_expired_pending_billing";
   remainingUsdMicros?: bigint;
+  planResetAt?: Date | null;
   spentUsdMicros?: bigint;
   usageCreditBalanceUsdMicros?: bigint;
   usageCreditLedgerVersion?: bigint;
@@ -1169,6 +1207,7 @@ function buildDecision(input: {
     memberId: "member_usage",
     periodEnd: PERIOD_END,
     periodStart: PERIOD_START,
+    planResetAt: input.planResetAt ?? null,
     remainingUsdMicros: input.remainingUsdMicros ?? 5_000_000n,
     spentUsdMicros: input.spentUsdMicros ?? 5_000_000n,
     usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros ?? 0n,

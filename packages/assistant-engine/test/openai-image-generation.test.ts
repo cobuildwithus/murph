@@ -43,6 +43,7 @@ describe('generateOpenAiImage', () => {
   })
 
   it('uses the generations endpoint with JSON when no references are present', async () => {
+    const beforeRequest = Date.now()
     let capturedUrl: string | null = null
     let capturedInit: RequestInit | undefined
     const fetchImpl: typeof fetch = async (url, init) => {
@@ -59,6 +60,7 @@ describe('generateOpenAiImage', () => {
       quality: 'medium',
       size: '1024x1024',
     })
+    const afterRequest = Date.now()
 
     expect(capturedUrl).toBe('https://api.openai.com/v1/images/generations')
     expect(capturedInit?.method).toBe('POST')
@@ -74,6 +76,8 @@ describe('generateOpenAiImage', () => {
       size: '1024x1024',
     })
     expect(result.providerRequestId).toBe('req_image_123')
+    expect(Date.parse(result.occurredAt)).toBeGreaterThanOrEqual(beforeRequest)
+    expect(Date.parse(result.occurredAt)).toBeLessThanOrEqual(afterRequest)
     expect([...result.imageBytes]).toEqual([...RESPONSE_IMAGE_BYTES])
   })
 

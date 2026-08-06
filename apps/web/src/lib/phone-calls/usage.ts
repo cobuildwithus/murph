@@ -7,7 +7,7 @@ import {
 import { recordHostedRetellPhoneCallUsageTx } from "../hosted-execution/usage";
 import { getPrisma } from "../prisma";
 import {
-  readRetellCallEndAt,
+  readRetellCallStartAt,
   readRetellTransferEndAt,
   type RetellCallPayload,
 } from "./retell-payloads";
@@ -40,7 +40,7 @@ export async function accountRetellPhoneCallUsage(input: {
   prisma?: RetellPhoneCallUsageStore;
 }): Promise<RetellPhoneCallUsageAccountingResult> {
   const cost = readRetellCombinedCostUsdMicros(input.call);
-  const occurredAt = readRetellTransferEndAt(input.call) ?? readRetellCallEndAt(input.call);
+  const occurredAt = readRetellCallStartAt(input.call);
   if (
     cost === null
     || occurredAt === null
@@ -75,7 +75,7 @@ export function readRetellTerminalProviderUsage(
   call: RetellCallPayload,
 ): { state: "pending" } | { state: "ready"; usage: HostedPhoneCallProviderUsage } {
   const combinedCostUsdMicros = readRetellCombinedCostUsdMicros(call);
-  const occurredAt = readRetellTransferEndAt(call) ?? readRetellCallEndAt(call);
+  const occurredAt = readRetellCallStartAt(call);
   if (
     combinedCostUsdMicros === null
     || occurredAt === null

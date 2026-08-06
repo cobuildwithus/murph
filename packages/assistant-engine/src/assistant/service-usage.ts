@@ -38,6 +38,7 @@ export interface AssistantUsageProviderResult {
 export async function recordAssistantUsageEvent(input: {
   effectiveEnv?: Readonly<Record<string, string | undefined>>
   executionContext: AssistantExecutionContext
+  occurredAt?: string
   providerRequestAcceptedInputIds?: readonly string[]
   providerRequestOutcome?: AssistantProviderRequestOutcome
   providerRequestOrdinal?: number
@@ -70,7 +71,7 @@ export async function recordAssistantUsageEvent(input: {
       turnId: input.turnId,
       attemptCount: input.providerResult.attemptCount,
       providerRequestOrdinal: input.providerRequestOrdinal ?? 0,
-      occurredAt: new Date().toISOString(),
+      occurredAt: normalizeAssistantUsageOccurredAt(input.occurredAt),
       provider: input.providerResult.provider,
       routeId: readCodexThreadRouteFingerprint(input.providerResult.route),
       requestedModel: usage.requestedModel ?? input.providerResult.providerOptions.model,
@@ -152,6 +153,7 @@ export async function recordAdditionalAssistantUsageEvents(input: {
       : null
     await recordAssistantUsageEvent({
       executionContext: input.executionContext,
+      occurredAt: usageDraft.occurredAt,
       ...(input.providerRequestAcceptedInputIds === undefined
         ? {}
         : {
@@ -169,6 +171,17 @@ export async function recordAdditionalAssistantUsageEvents(input: {
       turnId: input.turnId,
     })
   }
+}
+
+function normalizeAssistantUsageOccurredAt(value: string | undefined): string {
+  if (value === undefined) {
+    return new Date().toISOString()
+  }
+  const parsed = new Date(value)
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new TypeError('Assistant usage occurrence timestamp is invalid.')
+  }
+  return parsed.toISOString()
 }
 
 function warnAssistantUsageRecordingFailure(error: unknown): void {

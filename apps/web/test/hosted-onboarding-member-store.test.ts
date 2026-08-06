@@ -3480,6 +3480,10 @@ describe("hosted-member-store", () => {
         stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
         stripeSubscriptionScheduleIdEncrypted: null,
         stripeSubscriptionScheduleLookupKey: null,
+        usagePlanTransitionAt: null,
+        usagePlanTransitionFromCode: null,
+        usagePlanTransitionKind: null,
+        usagePlanTransitionToCode: null,
       },
       update: {
         stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
@@ -3669,6 +3673,10 @@ describe("hosted-member-store", () => {
         stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
         stripeSubscriptionScheduleIdEncrypted: null,
         stripeSubscriptionScheduleLookupKey: null,
+        usagePlanTransitionAt: null,
+        usagePlanTransitionFromCode: null,
+        usagePlanTransitionKind: null,
+        usagePlanTransitionToCode: null,
       },
       update: {
         lastStripeEventCreatedAt: freshnessAt,

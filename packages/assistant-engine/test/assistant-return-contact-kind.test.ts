@@ -181,6 +181,7 @@ describe('assistant return contact kind', () => {
       operationId: 'image-operation-1',
       originAssistantInputId: 'assistant_input_1',
       usageDraft: {
+        occurredAt: '2026-07-16T12:00:03.000Z',
         provider: 'openai-images',
         providerRequestOrdinal: 2,
         providerRequestOutcome: 'succeeded',
@@ -206,6 +207,7 @@ describe('assistant return contact kind', () => {
     expect(recordUsage).toHaveBeenCalledOnce()
     expect(recordUsage).toHaveBeenCalledWith(
       expect.objectContaining({
+        occurredAt: '2026-07-16T12:00:03.000Z',
         provider: 'openai-images',
         providerRequestOrdinal: 2,
         turnId: 'image-operation-1',

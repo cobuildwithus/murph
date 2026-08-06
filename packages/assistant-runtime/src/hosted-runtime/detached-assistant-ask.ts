@@ -387,7 +387,6 @@ async function runOneHostedDetachedAssistantAsk(input: {
         attemptCount: claimed.attemptCount,
         effectiveEnv: { ...input.env },
         memberId: input.memberId ?? claimed.wake.userId,
-        occurredAt: claimed.lastAttemptAt ?? claimed.occurredAt,
         providerUsages: [...providerUsages],
         requestId: claimed.wake.eventId,
         usageRecordPort: input.usageRecordPort,
@@ -410,7 +409,6 @@ async function recordHostedDetachedAssistantAskUsageBestEffort(input: {
   attemptCount: number;
   effectiveEnv: Readonly<Record<string, string>>;
   memberId: string;
-  occurredAt: string;
   providerUsages: readonly ReadOnlyAssistantAskProviderUsageEvent[];
   requestId: string;
   usageRecordPort: HostedRuntimeUsageRecordPort;
@@ -437,7 +435,7 @@ async function recordHostedDetachedAssistantAskUsageBestEffort(input: {
         gatewayTags: [],
         inputTokens: usage.inputTokens,
         memberId: input.memberId,
-        occurredAt: input.occurredAt,
+        occurredAt: event.usage.occurredAt,
         outputTokens: usage.outputTokens,
         provider: event.usage.provider,
         providerName: usage.providerName,

@@ -196,6 +196,7 @@ function dedupeHostedAiUsageLimitNoticeCandidates(
     const key = [
       candidate.memberId,
       candidate.periodStart.toISOString(),
+      candidate.planResetAt?.toISOString() ?? "",
       candidate.usageCreditLedgerVersion.toString(),
       candidate.userNotice.code,
     ].join("\u0000");
@@ -226,6 +227,7 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
         chatId: input.noticeDeliveryTarget.target,
         claimToken: {
           periodStart: input.candidate.periodStart.toISOString(),
+          planResetAt: input.candidate.planResetAt?.toISOString() ?? null,
           sentAt: sentAt.toISOString(),
           usageCreditLedgerVersion:
             input.candidate.usageCreditLedgerVersion.toString(),
@@ -258,6 +260,7 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
         }),
         noticeCode: input.candidate.userNotice.code,
         periodStart: input.candidate.periodStart,
+        planResetAt: input.candidate.planResetAt,
         prisma: input.prisma,
         replyToMessageId: input.noticeDeliveryTarget.replyToMessageId,
         sentAt,
@@ -293,6 +296,7 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
       chatId: route.chatId,
       claimToken: {
         periodStart: input.candidate.periodStart.toISOString(),
+        planResetAt: input.candidate.planResetAt?.toISOString() ?? null,
         sentAt: sentAt.toISOString(),
         usageCreditLedgerVersion:
           input.candidate.usageCreditLedgerVersion.toString(),
