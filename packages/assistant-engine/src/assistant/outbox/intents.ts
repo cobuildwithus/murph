@@ -59,6 +59,18 @@ export function resolveAssistantOutboxQuarantineDirectory(
   return path.join(outboxDirectory, '.quarantine')
 }
 
+export function isActiveAssistantOutboxDeliveryIntent(
+  intent: AssistantOutboxIntent,
+): boolean {
+  return (
+    intent.deliveryConfirmationPending
+    || intent.status === 'awaiting_approval'
+    || intent.status === 'pending'
+    || intent.status === 'sending'
+    || intent.status === 'retryable'
+  )
+}
+
 export function buildAssistantOutboxRawTargetIdentity(
   input: AssistantOutboxRawTargetIdentityInput,
 ): AssistantOutboxRawTargetIdentityInput {

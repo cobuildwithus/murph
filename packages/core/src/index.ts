@@ -9,6 +9,17 @@ export {
   VAULT_SCHEMA_VERSION,
 } from "./constants.ts";
 export { VaultError, isVaultError } from "./errors.ts";
+export {
+  BoundedZipError,
+  readBoundedZipDirectory,
+  readBoundedZipEntry,
+} from "./bounded-zip.ts";
+export type {
+  BoundedZipDirectory,
+  BoundedZipEntry,
+  BoundedZipEntryContents,
+  BoundedZipErrorCode,
+} from "./bounded-zip.ts";
 export { deterministicContractId } from "./ids.ts";
 export {
   reconcileAutomationSupportSeries,

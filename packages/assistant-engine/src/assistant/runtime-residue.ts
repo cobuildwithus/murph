@@ -42,13 +42,17 @@ import {
 import {
   retireSentAssistantExportPacks,
   type SentAssistantGeneratedExportArchive,
+  type SentAssistantExportPackRetirementResult,
 } from './generated-export-pack-retirement.js'
 import {
   readAssistantInputEvent,
   resolveAssistantInputEventsDirectory,
   type AssistantInputEventRecord,
 } from './input-store.js'
-import { readAssistantOutboxIntentInventoryEntry } from './outbox/store.js'
+import {
+  readAssistantOutboxIntentInventory,
+} from './outbox/store.js'
+import { isActiveAssistantOutboxDeliveryIntent } from './outbox/intents.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { isMissingFileError } from './shared.js'
 import { ensureAssistantState } from './store/persistence.js'
@@ -124,7 +128,6 @@ interface AssistantGeneratedDeliveryFileSnapshot {
 }
 
 interface AssistantGeneratedDeliveryPrunePlan {
-  exportPackArchives: SentAssistantGeneratedExportArchive[]
   files: AssistantGeneratedDeliveryFileSnapshot[]
   inventoryFiles: AssistantGeneratedDeliveryFileSnapshot[]
   root: string | null
@@ -138,27 +141,137 @@ export interface AssistantGeneratedDeliveryResiduePruneResult {
   filesPruned: number
 }
 
+async function retireQuiescentAssistantExportPacks(input: {
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<SentAssistantExportPackRetirementResult> {
+  const archives = await withAssistantRuntimeWriteLock(
+    input.vault,
+    async (paths) => {
+      await ensureAssistantState(paths)
+      const outbox = await readAssistantOutboxIntentInventory({
+        directory: paths.outboxDirectory,
+        signal: input.signal,
+        vault: input.vault,
+      })
+      if (!outbox.trusted) {
+        return null
+      }
+      const media = [...collectSentAssistantGeneratedExportArchiveMedia(
+        outbox.records,
+      ).values()].sort((left, right) => left.ref.localeCompare(right.ref))
+      const resolved: SentAssistantGeneratedExportArchive[] = []
+      for (const file of media) {
+        input.signal?.throwIfAborted()
+        resolved.push({
+          archivePath: await resolveAssistantVaultPath(
+            input.vault,
+            file.ref,
+            'file path',
+          ),
+          file,
+        })
+      }
+      return resolved
+    },
+    input.signal,
+  )
+  if (archives === null) {
+    return {
+      ...emptySentAssistantExportPackRetirementResult(),
+      inventoryTrusted: false,
+    }
+  }
+  return await retireSentAssistantExportPacks({
+    archives,
+    signal: input.signal,
+    vault: input.vault,
+  })
+}
+
+function emptySentAssistantExportPackRetirementResult(): SentAssistantExportPackRetirementResult {
+  return {
+    bytesPruned: 0,
+    completedArchives: [],
+    inventoryTrusted: true,
+    packsPruned: 0,
+  }
+}
+
+function collectSentAssistantGeneratedExportArchiveMedia(
+  records: readonly PersistedRecord<AssistantOutboxIntent>[],
+): Map<string, AssistantVaultFileResponseMedia> {
+  const byRef = new Map<string, AssistantVaultFileResponseMedia>()
+  const conflictedRefs = new Set<string>()
+  for (const { record } of records) {
+    if (record.status !== 'sent') {
+      continue
+    }
+    const matchingMedia = record.media.filter(
+      (media): media is AssistantVaultFileResponseMedia =>
+        media.kind === 'vault_file'
+        && media.contentType === 'application/zip'
+        && isAssistantGeneratedDeliveryRef(media.ref)
+        && media.ref.toLowerCase().endsWith('.zip'),
+    )
+    if (record.media.length !== 1 || matchingMedia.length !== 1) {
+      for (const media of matchingMedia) {
+        byRef.delete(media.ref)
+        conflictedRefs.add(media.ref)
+      }
+      continue
+    }
+    const file = matchingMedia[0]
+    if (!file || conflictedRefs.has(file.ref)) {
+      continue
+    }
+    const existing = byRef.get(file.ref)
+    if (!existing || sameAssistantVaultFileDescriptor(existing, file)) {
+      byRef.set(file.ref, file)
+    } else {
+      byRef.delete(file.ref)
+      conflictedRefs.add(file.ref)
+    }
+  }
+  return byRef
+}
+
+function sameAssistantVaultFileDescriptor(
+  left: AssistantVaultFileResponseMedia,
+  right: AssistantVaultFileResponseMedia,
+): boolean {
+  return left.ref === right.ref
+    && left.contentType === right.contentType
+    && left.sizeBytes === right.sizeBytes
+    && left.sha256 === right.sha256
+}
+
 export async function pruneQuiescentAssistantGeneratedDeliveryResidue(input: {
   signal?: AbortSignal | null
   vault: string
 }): Promise<AssistantGeneratedDeliveryResiduePruneResult> {
+  const exportPackPruneResult = await retireQuiescentAssistantExportPacks(input)
+  input.signal?.throwIfAborted()
   return await withAssistantRuntimeWriteLock(
     input.vault,
     async (paths) => {
       await ensureAssistantState(paths)
       input.signal?.throwIfAborted()
-      const outbox = await readOutboxInventory(
-        paths.outboxDirectory,
-        input.vault,
-        input.signal,
-      )
+      const outbox = await readAssistantOutboxIntentInventory({
+        directory: paths.outboxDirectory,
+        signal: input.signal,
+        vault: input.vault,
+      })
       const plan = await planAssistantGeneratedDeliveryPrune({
+        completedExportPackArchives: exportPackPruneResult.completedArchives,
+        priorOutboxInventoryTrusted: exportPackPruneResult.inventoryTrusted,
         outbox,
         signal: input.signal,
         vault: input.vault,
       })
       input.signal?.throwIfAborted()
       return await applyAssistantGeneratedDeliveryPrunePlan({
+        exportPackPruneResult,
         plan,
         signal: input.signal,
         vault: input.vault,
@@ -177,6 +290,13 @@ export async function pruneAssistantRuntimeResidue(input: {
   vault: string
 }): Promise<AssistantRuntimeResiduePruneResult> {
   input.signal?.throwIfAborted()
+  const exportPackPruneResult = input.generatedDeliveryFilesQuiescent
+    ? await retireQuiescentAssistantExportPacks({
+        signal: input.signal,
+        vault: input.vault,
+      })
+    : emptySentAssistantExportPackRetirementResult()
+  input.signal?.throwIfAborted()
   const result = await withAssistantRuntimeWriteLock(
     input.vault,
     async (paths) => {
@@ -185,6 +305,7 @@ export async function pruneAssistantRuntimeResidue(input: {
       return await pruneAssistantRuntimeResidueAtPaths({
         generatedDeliveryFilesQuiescent:
           input.generatedDeliveryFilesQuiescent ?? false,
+        exportPackPruneResult,
         now: input.now ?? new Date(),
         paths,
         pendingInputIds: input.pendingInputIds,
@@ -201,6 +322,7 @@ export async function pruneAssistantRuntimeResidue(input: {
 }
 
 async function pruneAssistantRuntimeResidueAtPaths(input: {
+  exportPackPruneResult: SentAssistantExportPackRetirementResult
   generatedDeliveryFilesQuiescent: boolean
   now: Date
   paths: AssistantStatePaths
@@ -227,12 +349,15 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
   })
   const generatedDeliveryPlan = input.generatedDeliveryFilesQuiescent
     ? await planAssistantGeneratedDeliveryPrune({
+        completedExportPackArchives:
+          input.exportPackPruneResult.completedArchives,
+        priorOutboxInventoryTrusted:
+          input.exportPackPruneResult.inventoryTrusted,
         outbox: inventory.outbox,
         signal: input.signal,
         vault: input.vault,
       })
       : {
-        exportPackArchives: [],
         files: [],
         inventoryFiles: [],
         root: null,
@@ -267,6 +392,7 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
 
   const generatedDeliveryPruneResult =
     await applyAssistantGeneratedDeliveryPrunePlan({
+      exportPackPruneResult: input.exportPackPruneResult,
       plan: generatedDeliveryPlan,
       signal: input.signal,
       vault: input.vault,
@@ -305,13 +431,14 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
 }
 
 async function planAssistantGeneratedDeliveryPrune(input: {
+  completedExportPackArchives: readonly SentAssistantGeneratedExportArchive[]
   outbox: Inventory<PersistedRecord<AssistantOutboxIntent>>
+  priorOutboxInventoryTrusted: boolean
   signal?: AbortSignal | null
   vault: string
 }): Promise<AssistantGeneratedDeliveryPrunePlan> {
-  if (!input.outbox.trusted) {
+  if (!input.priorOutboxInventoryTrusted || !input.outbox.trusted) {
     return {
-      exportPackArchives: [],
       files: [],
       inventoryFiles: [],
       root: null,
@@ -323,44 +450,10 @@ async function planAssistantGeneratedDeliveryPrune(input: {
     string,
     AssistantVaultFileResponseMedia[]
   >()
-  const sentExportArchiveByRef = new Map<
-    string,
-    AssistantVaultFileResponseMedia
-  >()
-  const conflictedSentExportArchiveRefs = new Set<string>()
+  const sentExportArchiveByRef =
+    collectSentAssistantGeneratedExportArchiveMedia(input.outbox.records)
   for (const { record } of input.outbox.records) {
-    if (record.status === 'sent') {
-      const matchingMedia = record.media.filter(
-        (media): media is AssistantVaultFileResponseMedia =>
-          media.kind === 'vault_file'
-          && media.contentType === 'application/zip'
-          && isAssistantGeneratedDeliveryRef(media.ref)
-          && media.ref.toLowerCase().endsWith('.zip'),
-      )
-      const file = matchingMedia[0]
-      if (record.media.length !== 1 || matchingMedia.length !== 1) {
-        for (const media of matchingMedia) {
-          sentExportArchiveByRef.delete(media.ref)
-          conflictedSentExportArchiveRefs.add(media.ref)
-        }
-      } else if (file && !conflictedSentExportArchiveRefs.has(file.ref)) {
-        const existing = sentExportArchiveByRef.get(file.ref)
-        if (
-          !existing
-          || (
-            existing.contentType === file.contentType
-            && existing.sizeBytes === file.sizeBytes
-            && existing.sha256 === file.sha256
-          )
-        ) {
-          sentExportArchiveByRef.set(file.ref, file)
-        } else {
-          sentExportArchiveByRef.delete(file.ref)
-          conflictedSentExportArchiveRefs.add(file.ref)
-        }
-      }
-    }
-    if (!isActiveAssistantOutboxIntent(record)) {
+    if (!isActiveAssistantOutboxDeliveryIntent(record)) {
       continue
     }
     for (const media of record.media) {
@@ -392,7 +485,6 @@ async function planAssistantGeneratedDeliveryPrune(input: {
         || media.sha256 !== first.sha256)
     ) {
       return {
-        exportPackArchives: [],
         files: [],
         inventoryFiles: [],
         root: null,
@@ -418,7 +510,6 @@ async function planAssistantGeneratedDeliveryPrune(input: {
         )
       }
       return {
-        exportPackArchives: [],
         files: [],
         inventoryFiles: [],
         root: null,
@@ -476,13 +567,23 @@ async function planAssistantGeneratedDeliveryPrune(input: {
     }
     inventoryFiles.push(file)
     const activeMedia = activeMediaByRef.get(ref) ?? []
-    if (!(await assistantGeneratedDeliveryFileMatchesActiveMedia({
+    const retainedForActiveMedia =
+      await assistantGeneratedDeliveryFileMatchesActiveMedia({
       activeMedia,
       filePath: absolutePath,
       ref,
       signal: input.signal,
       stats,
-    }))) {
+    })
+    const sentArchive = sentExportArchiveByRef.get(ref)
+    const completedArchive = input.completedExportPackArchives.find(
+      ({ file }) => file.ref === ref,
+    )?.file
+    const retirementComplete = !sentArchive || (
+      completedArchive !== undefined
+      && sameAssistantVaultFileDescriptor(sentArchive, completedArchive)
+    )
+    if (!retainedForActiveMedia && retirementComplete) {
       files.push(file)
     }
   }
@@ -506,17 +607,6 @@ async function planAssistantGeneratedDeliveryPrune(input: {
   }
 
   return {
-    exportPackArchives: [...sentExportArchiveByRef.entries()].flatMap(
-      ([archiveRef, file]) => {
-        const archive = inventoryFiles.find((file) => file.ref === archiveRef)
-        return archive && archive.stats.size === file.sizeBytes
-          ? [{
-              archivePath: archive.absolutePath,
-              file,
-            }]
-          : []
-      },
-    ),
     files,
     inventoryFiles,
     root,
@@ -581,6 +671,7 @@ async function sha256AssistantGeneratedDeliveryFile(
 }
 
 async function applyAssistantGeneratedDeliveryPrunePlan(input: {
+  exportPackPruneResult: SentAssistantExportPackRetirementResult
   plan: AssistantGeneratedDeliveryPrunePlan
   signal?: AbortSignal | null
   vault: string
@@ -595,11 +686,6 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
       vault: input.vault,
     })
   }
-
-  const exportPackPruneResult = await retireSentAssistantExportPacks({
-    archives: input.plan.exportPackArchives,
-    vault: input.vault,
-  })
 
   for (const file of input.plan.files) {
     input.signal?.throwIfAborted()
@@ -644,8 +730,8 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
       ) {
         return {
           bytesPruned,
-          exportPackBytesPruned: exportPackPruneResult.bytesPruned,
-          exportPacksPruned: exportPackPruneResult.packsPruned,
+          exportPackBytesPruned: input.exportPackPruneResult.bytesPruned,
+          exportPacksPruned: input.exportPackPruneResult.packsPruned,
           filesPruned,
         }
       }
@@ -655,8 +741,8 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
 
   return {
     bytesPruned,
-    exportPackBytesPruned: exportPackPruneResult.bytesPruned,
-    exportPacksPruned: exportPackPruneResult.packsPruned,
+    exportPackBytesPruned: input.exportPackPruneResult.bytesPruned,
+    exportPacksPruned: input.exportPackPruneResult.packsPruned,
     filesPruned,
   }
 }
@@ -713,7 +799,7 @@ function planAssistantRuntimeResiduePrune(input: {
   )
   const activeOutbox = input.inventory.outbox.records
     .map(({ record }) => record)
-    .filter(isActiveAssistantOutboxIntent)
+    .filter(isActiveAssistantOutboxDeliveryIntent)
   const activeIntentIds = new Set(activeOutbox.map((intent) => intent.intentId))
   const activeTurnIds = new Set(activeOutbox.map((intent) => intent.turnId))
   const allOutboxIntentIds = new Set(
@@ -964,16 +1050,6 @@ function isPrunableTerminalAssistantTurnReceipt(
   )
 }
 
-function isActiveAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean {
-  return (
-    intent.deliveryConfirmationPending ||
-    intent.status === 'awaiting_approval' ||
-    intent.status === 'pending' ||
-    intent.status === 'sending' ||
-    intent.status === 'retryable'
-  )
-}
-
 // Migration-window guard only: hosted callers set
 // protectPendingProviderCleanupEvidence until the provider-cleanup recovery
 // marker is durable, so pre-upgrade evidence carrying undeleted Linq message
@@ -1125,11 +1201,11 @@ async function readAssistantRuntimeResidueInventory(input: {
         (value) => assistantAcceptedTurnInputJournalSchema.parse(value),
         input.signal,
       ),
-      readOutboxInventory(
-        input.paths.outboxDirectory,
-        input.vault,
-        input.signal,
-      ),
+      readAssistantOutboxIntentInventory({
+        directory: input.paths.outboxDirectory,
+        signal: input.signal,
+        vault: input.vault,
+      }),
       readProvenanceInventory(
         input.directories.provenance,
         input.vault,
@@ -1232,57 +1308,6 @@ async function readInputEventInventory(
       }
       records.push({
         filePath: path.join(directory, entry.name),
-        record,
-      })
-    } catch {
-      signal?.throwIfAborted()
-      trusted = false
-    }
-  }
-
-  return { records, trusted }
-}
-
-async function readOutboxInventory(
-  directory: string,
-  vault: string,
-  signal?: AbortSignal | null,
-): Promise<Inventory<PersistedRecord<AssistantOutboxIntent>>> {
-  const records: Array<PersistedRecord<AssistantOutboxIntent>> = []
-  let trusted = true
-
-  for (const entry of await readDirectoryEntries(directory, signal)) {
-    signal?.throwIfAborted()
-    if (!entry.name.endsWith('.json')) {
-      if (entry.name === '.quarantine') {
-        const quarantineStats = await lstat(path.join(directory, entry.name))
-        signal?.throwIfAborted()
-        if (
-          entry.isDirectory()
-          && quarantineStats.isDirectory()
-          && !quarantineStats.isSymbolicLink()
-        ) {
-          continue
-        }
-      }
-      trusted = false
-      continue
-    }
-    if (!entry.isFile()) {
-      trusted = false
-      continue
-    }
-
-    const filePath = path.join(directory, entry.name)
-    try {
-      const record = await readAssistantOutboxIntentInventoryEntry(vault, filePath)
-      signal?.throwIfAborted()
-      if (!record) {
-        trusted = false
-        continue
-      }
-      records.push({
-        filePath,
         record,
       })
     } catch {

@@ -2,8 +2,12 @@ import { createHash } from 'node:crypto'
 import { type Stats } from 'node:fs'
 import { lstat, readFile, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
-import { crc32, inflateRawSync } from 'node:zlib'
 
+import {
+  readBoundedZipDirectory,
+  readBoundedZipEntry,
+  type BoundedZipEntry,
+} from '@murphai/core'
 import {
   assistantVaultFileMaxBytes,
   type AssistantOutboxIntent,
@@ -12,6 +16,13 @@ import {
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { z } from 'zod'
 import { isAssistantGeneratedDeliveryRef } from './generated-delivery-files.js'
+import { isActiveAssistantOutboxDeliveryIntent } from './outbox/intents.js'
+import {
+  readAssistantOutboxIntentInventory,
+} from './outbox/store.js'
+import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
+import { isMissingFileError } from './shared.js'
+import { ensureAssistantState } from './store/persistence.js'
 
 interface AssistantGeneratedExportPackRetirementFile {
   path: string
@@ -32,16 +43,6 @@ interface AssistantGeneratedDeliveryRetirement {
   packs: AssistantGeneratedExportPackRetirement[]
 }
 
-interface ZipEntry {
-  compressedSize: number
-  compressionMethod: number
-  crc32: number
-  flags: number
-  localHeaderOffset: number
-  name: string
-  uncompressedSize: number
-}
-
 interface LiveExportPackSnapshot {
   absoluteBasePath: string
   fileStats: Map<string, Stats>
@@ -49,9 +50,39 @@ interface LiveExportPackSnapshot {
   rootStats: Stats
 }
 
+interface GeneratedExportArchiveSnapshot {
+  bytes: Buffer
+  stats: Stats
+}
+
+interface GeneratedExportPackCandidate {
+  basePath: string
+  entries: BoundedZipEntry[]
+  manifestEntry: BoundedZipEntry
+  manifestPath: string
+  packId: string
+}
+
+type GeneratedExportArchiveInspection =
+  | { kind: 'complete' }
+  | { kind: 'deferred' }
+  | {
+      candidateBasePaths: string[]
+      kind: 'candidate'
+      liveSnapshot: LiveExportPackSnapshot
+      retirement: AssistantGeneratedDeliveryRetirement
+    }
+
 export interface SentAssistantGeneratedExportArchive {
   archivePath: string
   file: AssistantVaultFileResponseMedia
+}
+
+export interface SentAssistantExportPackRetirementResult {
+  bytesPruned: number
+  completedArchives: SentAssistantGeneratedExportArchive[]
+  inventoryTrusted: boolean
+  packsPruned: number
 }
 
 const exportPackManifestSchema = z
@@ -64,187 +95,115 @@ const exportPackManifestSchema = z
   })
   .passthrough()
 
-const ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50
-const ZIP_CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50
-const ZIP_LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50
-const ZIP64_MARKER_16 = 0xffff
-const ZIP64_MARKER_32 = 0xffffffff
-const ZIP_MAX_EOCD_SEARCH_BYTES = 65_557
 const ZIP_MAX_ENTRY_COUNT = 20_000
 const ZIP_MAX_MANIFEST_BYTES = 1024 * 1024
+const HASH_CHUNK_BYTES = 1024 * 1024
+const IMMEDIATE_RETIREMENT_ARCHIVE_MAX_BYTES = 8 * 1024 * 1024
 const EXPORT_PACK_ID_PATTERN = /^[A-Za-z0-9_-]+$/u
 const EXPORT_PACK_FILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u
 const EXPORT_PACK_MANIFEST_PATTERN = /^exports\/packs\/([A-Za-z0-9_-]+)\/manifest\.json$/u
+const EXPORT_PACK_ENTRY_PATTERN = /^exports\/packs\/([A-Za-z0-9_-]+)\/(.+)$/u
 
 export async function buildAssistantGeneratedDeliveryRetirement(input: {
   archiveBytes: Uint8Array
   file: AssistantVaultFileResponseMedia
+  signal?: AbortSignal | null
   vault: string
 }): Promise<AssistantGeneratedDeliveryRetirement | null> {
-  if (
-    input.file.contentType !== 'application/zip'
-    || !isAssistantGeneratedDeliveryRef(input.file.ref)
-    || !input.file.ref.toLowerCase().endsWith('.zip')
-    || input.file.sha256 !== sha256Hex(input.archiveBytes)
-  ) {
-    return null
-  }
-
-  let entries: Map<string, ZipEntry>
-  const archive = Buffer.from(input.archiveBytes)
-  try {
-    entries = readZipEntries(archive)
-  } catch {
-    return null
-  }
-
-  const packs: AssistantGeneratedExportPackRetirement[] = []
-  let extractedBytes = 0
-  for (const [manifestPath, manifestEntry] of entries) {
-    const match = EXPORT_PACK_MANIFEST_PATTERN.exec(manifestPath)
-    if (!match) {
-      continue
-    }
-    const packId = match[1]
-    if (!packId || !EXPORT_PACK_ID_PATTERN.test(packId)) {
-      continue
-    }
-
-    try {
-      const manifestBytes = extractZipEntry(
-        archive,
-        manifestEntry,
-        ZIP_MAX_MANIFEST_BYTES,
-      )
-      extractedBytes += manifestBytes.byteLength
-      assertRetirementExtractionWithinLimit(extractedBytes)
-      const manifest = exportPackManifestSchema.parse(
-        JSON.parse(manifestBytes.toString('utf8')),
-      )
-      if (manifest.packId !== packId) {
-        continue
-      }
-
-      const basePath = `exports/packs/${packId}`
-      const declaredPaths = manifest.files.map((file) => file.path)
-      if (!isExactDirectExportPackFileList(basePath, declaredPaths)) {
-        continue
-      }
-      const archivedPackPaths = [...entries.keys()]
-        .filter((entryPath) => entryPath.startsWith(`${basePath}/`) && !entryPath.endsWith('/'))
-        .sort((left, right) => left.localeCompare(right))
-      const sortedDeclaredPaths = [...declaredPaths]
-        .sort((left, right) => left.localeCompare(right))
-      if (!sameStrings(archivedPackPaths, sortedDeclaredPaths)) {
-        continue
-      }
-
-      const archivedFiles: AssistantGeneratedExportPackRetirementFile[] = []
-      for (const filePath of declaredPaths) {
-        const entry = entries.get(filePath)
-        if (!entry) {
-          throw new Error('Export-pack ZIP entry is missing.')
-        }
-        const contents = filePath === manifestPath
-          ? manifestBytes
-          : extractZipEntry(
-              archive,
-              entry,
-              assistantVaultFileMaxBytes - extractedBytes,
-            )
-        if (filePath !== manifestPath) {
-          extractedBytes += contents.byteLength
-          assertRetirementExtractionWithinLimit(extractedBytes)
-        }
-        archivedFiles.push({
-          path: filePath,
-          sha256: sha256Hex(contents),
-          sizeBytes: contents.byteLength,
-        })
-      }
-
-      const live = await readLiveExportPackSnapshot({
-        basePath,
-        expectedFiles: archivedFiles,
-        packId,
-        vault: input.vault,
-      })
-      if (live) {
-        packs.push(live.receipt)
-      }
-    } catch {
-      // ZIP delivery is user-critical; malformed or stale derived-pack
-      // evidence disables retirement without blocking the attachment.
-    }
-  }
-
-  if (packs.length === 0 || packs.length > 20) {
-    return null
-  }
-  return {
-    archiveRef: input.file.ref,
-    archiveSha256: input.file.sha256,
-    kind: 'sent_export_packs_v1',
-    packs,
-  }
+  const archive = Buffer.isBuffer(input.archiveBytes)
+    ? input.archiveBytes
+    : Buffer.from(input.archiveBytes)
+  const inspection = await inspectAssistantGeneratedExportArchive({
+    archive,
+    file: input.file,
+    signal: input.signal,
+    vault: input.vault,
+  })
+  return inspection.kind === 'candidate' ? inspection.retirement : null
 }
 
 export async function retireSentAssistantExportPacks(input: {
   archives: readonly SentAssistantGeneratedExportArchive[]
+  maxArchiveBytes?: number
+  signal?: AbortSignal | null
   vault: string
-}): Promise<{ bytesPruned: number; packsPruned: number }> {
-  let bytesPruned = 0
-  let packsPruned = 0
-  const visitedPackPaths = new Set<string>()
-
-  for (const { archivePath, file } of input.archives) {
-    const archiveBytes = await readMatchingGeneratedArchiveBytes(
-      archivePath,
-      file,
+}): Promise<SentAssistantExportPackRetirementResult> {
+  input.signal?.throwIfAborted()
+  const [archive] = input.archives
+  const result: SentAssistantExportPackRetirementResult = {
+    bytesPruned: 0,
+    completedArchives: [],
+    inventoryTrusted: true,
+    packsPruned: 0,
+  }
+  if (!archive) {
+    return result
+  }
+  if (
+    archive.file.sizeBytes > (
+      input.maxArchiveBytes ?? assistantVaultFileMaxBytes
     )
-    if (!archiveBytes) {
-      continue
-    }
-    const retirement = await buildAssistantGeneratedDeliveryRetirement({
-      archiveBytes,
-      file,
-      vault: input.vault,
-    })
-    if (!retirement) {
-      continue
-    }
-    if (!(await archiveMatchesRetirement(archivePath, retirement))) {
-      continue
-    }
-    for (const pack of retirement.packs) {
-      if (visitedPackPaths.has(pack.basePath)) {
-        continue
-      }
-      visitedPackPaths.add(pack.basePath)
-      try {
-        const snapshot = await readLiveExportPackSnapshot({
-          basePath: pack.basePath,
-          expectedFiles: pack.files,
-          packId: pack.packId,
-          vault: input.vault,
-        })
-        if (!snapshot || !(await liveExportPackSnapshotIsUnchanged(snapshot))) {
-          continue
-        }
-        await rm(snapshot.absoluteBasePath, { recursive: true })
-        bytesPruned += pack.files.reduce(
-          (total, file) => total + file.sizeBytes,
-          0,
-        )
-        packsPruned += 1
-      } catch {
-        // A changed, missing, or unsafe pack must survive cleanup. Generated
-        // delivery cleanup may still reclaim the terminal archive itself.
-      }
-    }
+  ) {
+    return result
   }
 
-  return { bytesPruned, packsPruned }
+  try {
+    const snapshot = await readMatchingGeneratedArchiveSnapshot(
+      archive.archivePath,
+      archive.file,
+      input.signal,
+    )
+    if (!snapshot) {
+      result.completedArchives.push(archive)
+      return result
+    }
+    const inspection = await inspectAssistantGeneratedExportArchive({
+      archive: snapshot.bytes,
+      deferForActiveOutboxOwner: true,
+      file: archive.file,
+      signal: input.signal,
+      vault: input.vault,
+    })
+    if (inspection.kind === 'complete') {
+      result.completedArchives.push(archive)
+      return result
+    }
+    if (inspection.kind === 'deferred') {
+      return result
+    }
+
+    const deletion = await deleteProvenAssistantExportPack({
+      archive,
+      archiveStats: snapshot.stats,
+      liveSnapshot: inspection.liveSnapshot,
+      signal: input.signal,
+      vault: input.vault,
+    })
+    if (deletion === 'deferred') {
+      return result
+    }
+    if (deletion === 'pruned') {
+      result.bytesPruned += inspection.liveSnapshot.receipt.files.reduce(
+        (total, file) => total + file.sizeBytes,
+        0,
+      )
+      result.packsPruned += 1
+    }
+
+    const hasRemainingPack = await hasRemainingAssistantExportPackRoot({
+      basePaths: inspection.candidateBasePaths,
+      signal: input.signal,
+      vault: input.vault,
+    })
+    if (hasRemainingPack) {
+      return result
+    }
+    result.completedArchives.push(archive)
+    return result
+  } catch (error) {
+    input.signal?.throwIfAborted()
+    return result
+  }
 }
 
 export async function retireAssistantExportPacksForSentIntent(input: {
@@ -274,23 +233,306 @@ export async function retireAssistantExportPacksForSentIntent(input: {
       file.ref,
       'file path',
     )
-    return await retireSentAssistantExportPacks({
+    const result = await retireSentAssistantExportPacks({
       archives: [{ archivePath, file }],
+      maxArchiveBytes: IMMEDIATE_RETIREMENT_ARCHIVE_MAX_BYTES,
       vault: input.vault,
     })
+    return {
+      bytesPruned: result.bytesPruned,
+      packsPruned: result.packsPruned,
+    }
   } catch {
-    // Delivery success is authoritative even if best-effort derived cleanup
-    // cannot prove that the archive and pack are still safe to remove.
+    // Sent is authoritative. Quiescent recovery will retry any cleanup whose
+    // proof could not be completed after provider success was persisted.
     return { bytesPruned: 0, packsPruned: 0 }
   }
 }
 
-async function readMatchingGeneratedArchiveBytes(
+async function inspectAssistantGeneratedExportArchive(input: {
+  archive: Buffer
+  deferForActiveOutboxOwner?: boolean
+  file: AssistantVaultFileResponseMedia
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<GeneratedExportArchiveInspection> {
+  input.signal?.throwIfAborted()
+  if (
+    input.file.contentType !== 'application/zip'
+    || !isAssistantGeneratedDeliveryRef(input.file.ref)
+    || !input.file.ref.toLowerCase().endsWith('.zip')
+    || input.file.sha256 !== await sha256HexInterruptible(
+      input.archive,
+      input.signal,
+    )
+  ) {
+    return { kind: 'complete' }
+  }
+
+  let entries: BoundedZipEntry[]
+  try {
+    entries = (await readBoundedZipDirectory(input.archive, {
+      maxEntries: ZIP_MAX_ENTRY_COUNT,
+      signal: input.signal,
+    })).entries
+  } catch (error) {
+    input.signal?.throwIfAborted()
+    return { kind: 'complete' }
+  }
+
+  const candidates = buildGeneratedExportPackCandidates(entries)
+  const candidateBasePaths = candidates.map(({ basePath }) => basePath)
+  let candidate: GeneratedExportPackCandidate | null = null
+  for (const possible of candidates) {
+    input.signal?.throwIfAborted()
+    const rootState = await readAssistantExportPackRootState({
+      basePath: possible.basePath,
+      signal: input.signal,
+      vault: input.vault,
+    })
+    if (rootState === 'invalid') {
+      return { kind: 'complete' }
+    }
+    if (rootState === 'present') {
+      candidate = possible
+      break
+    }
+  }
+  if (!candidate) {
+    return { kind: 'complete' }
+  }
+  if (
+    input.deferForActiveOutboxOwner
+    && await assistantExportPackHasActiveOutboxOwner({
+      basePath: candidate.basePath,
+      signal: input.signal,
+      vault: input.vault,
+    })
+  ) {
+    return { kind: 'deferred' }
+  }
+
+  const liveSnapshot = await inspectGeneratedExportPackCandidate({
+    archive: input.archive,
+    candidate,
+    signal: input.signal,
+    vault: input.vault,
+  })
+  if (!liveSnapshot) {
+    return { kind: 'complete' }
+  }
+  return {
+    candidateBasePaths,
+    kind: 'candidate',
+    liveSnapshot,
+    retirement: {
+      archiveRef: input.file.ref,
+      archiveSha256: input.file.sha256,
+      kind: 'sent_export_packs_v1',
+      packs: [liveSnapshot.receipt],
+    },
+  }
+}
+
+function buildGeneratedExportPackCandidates(
+  entries: readonly BoundedZipEntry[],
+): GeneratedExportPackCandidate[] {
+  const byPackId = new Map<string, GeneratedExportPackCandidate>()
+  for (const entry of entries) {
+    const match = EXPORT_PACK_MANIFEST_PATTERN.exec(entry.name)
+    const packId = match?.[1]
+    if (!packId || !EXPORT_PACK_ID_PATTERN.test(packId)) {
+      continue
+    }
+    byPackId.set(packId, {
+      basePath: `exports/packs/${packId}`,
+      entries: [],
+      manifestEntry: entry,
+      manifestPath: entry.name,
+      packId,
+    })
+  }
+  for (const entry of entries) {
+    const packId = EXPORT_PACK_ENTRY_PATTERN.exec(entry.name)?.[1]
+    const candidate = packId ? byPackId.get(packId) : undefined
+    if (candidate && !entry.name.endsWith('/')) {
+      candidate.entries.push(entry)
+    }
+  }
+  return [...byPackId.values()].sort((left, right) =>
+    left.basePath.localeCompare(right.basePath),
+  )
+}
+
+async function inspectGeneratedExportPackCandidate(input: {
+  archive: Buffer
+  candidate: GeneratedExportPackCandidate
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<LiveExportPackSnapshot | null> {
+  let archivedFiles: AssistantGeneratedExportPackRetirementFile[]
+  try {
+    const manifestBytes = (await readBoundedZipEntry(
+      input.archive,
+      input.candidate.manifestEntry,
+      {
+        maxOutputBytes: ZIP_MAX_MANIFEST_BYTES,
+        signal: input.signal,
+      },
+    )).bytes
+    let extractedBytes = manifestBytes.byteLength
+    assertRetirementExtractionWithinLimit(extractedBytes)
+    const manifest = exportPackManifestSchema.parse(
+      JSON.parse(manifestBytes.toString('utf8')),
+    )
+    if (manifest.packId !== input.candidate.packId) {
+      return null
+    }
+
+    const declaredPaths = manifest.files.map((file) => file.path)
+    if (!isExactDirectExportPackFileList(
+      input.candidate.basePath,
+      declaredPaths,
+    )) {
+      return null
+    }
+    const archivedPackPaths = input.candidate.entries
+      .map((entry) => entry.name)
+      .sort((left, right) => left.localeCompare(right))
+    const sortedDeclaredPaths = [...declaredPaths]
+      .sort((left, right) => left.localeCompare(right))
+    if (!sameStrings(archivedPackPaths, sortedDeclaredPaths)) {
+      return null
+    }
+
+    const entriesByPath = new Map(
+      input.candidate.entries.map((entry) => [entry.name, entry]),
+    )
+    archivedFiles = []
+    for (const filePath of declaredPaths) {
+      input.signal?.throwIfAborted()
+      const entry = entriesByPath.get(filePath)
+      if (!entry) {
+        return null
+      }
+      const contents = filePath === input.candidate.manifestPath
+        ? manifestBytes
+        : (await readBoundedZipEntry(input.archive, entry, {
+            maxOutputBytes: assistantVaultFileMaxBytes - extractedBytes,
+            signal: input.signal,
+          })).bytes
+      if (filePath !== input.candidate.manifestPath) {
+        extractedBytes += contents.byteLength
+        assertRetirementExtractionWithinLimit(extractedBytes)
+      }
+      archivedFiles.push({
+        path: filePath,
+        sha256: await sha256HexInterruptible(contents, input.signal),
+        sizeBytes: contents.byteLength,
+      })
+    }
+  } catch (error) {
+    input.signal?.throwIfAborted()
+    return null
+  }
+  return await readLiveExportPackSnapshot({
+    basePath: input.candidate.basePath,
+    expectedFiles: archivedFiles,
+    packId: input.candidate.packId,
+    signal: input.signal,
+    vault: input.vault,
+  })
+}
+
+async function assistantExportPackHasActiveOutboxOwner(input: {
+  basePath: string
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<boolean> {
+  return await withAssistantRuntimeWriteLock(
+    input.vault,
+    async (paths) => {
+      await ensureAssistantState(paths)
+      const outbox = await readAssistantOutboxIntentInventory({
+        directory: paths.outboxDirectory,
+        signal: input.signal,
+        vault: input.vault,
+      })
+      return !outbox.trusted || outbox.records.some(({ record }) =>
+        isActiveAssistantOutboxDeliveryIntent(record)
+        && record.media.some((media) =>
+          media.kind === 'vault_file'
+          && refIsEqualToOrBeneath(media.ref, input.basePath)
+        )
+      )
+    },
+    input.signal,
+  )
+}
+
+async function deleteProvenAssistantExportPack(input: {
+  archive: SentAssistantGeneratedExportArchive
+  archiveStats: Stats
+  liveSnapshot: LiveExportPackSnapshot
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<'complete' | 'deferred' | 'pruned'> {
+  return await withAssistantRuntimeWriteLock(
+    input.vault,
+    async (paths) => {
+      await ensureAssistantState(paths)
+      input.signal?.throwIfAborted()
+      const outbox = await readAssistantOutboxIntentInventory({
+        directory: paths.outboxDirectory,
+        signal: input.signal,
+        vault: input.vault,
+      })
+      if (!outbox.trusted) {
+        return 'deferred'
+      }
+      if (!outboxProvesExactSentArchiveClaim(
+        outbox.records.map(({ record }) => record),
+        input.archive.file,
+      )) {
+        return 'deferred'
+      }
+      if (outbox.records.some(({ record }) =>
+        isActiveAssistantOutboxDeliveryIntent(record)
+        && record.media.some((media) =>
+          media.kind === 'vault_file'
+          && refIsEqualToOrBeneath(media.ref, input.liveSnapshot.receipt.basePath)
+        )
+      )) {
+        return 'deferred'
+      }
+      if (!(await assistantGeneratedArchiveSnapshotIsUnchanged({
+        archive: input.archive,
+        stats: input.archiveStats,
+        vault: input.vault,
+      }))) {
+        return 'complete'
+      }
+      if (!(await liveExportPackSnapshotIsUnchanged(input.liveSnapshot))) {
+        return 'complete'
+      }
+      input.signal?.throwIfAborted()
+      await rm(input.liveSnapshot.absoluteBasePath, { recursive: true })
+      input.signal?.throwIfAborted()
+      return 'pruned'
+    },
+    input.signal,
+  )
+}
+
+async function readMatchingGeneratedArchiveSnapshot(
   archivePath: string,
   file: AssistantVaultFileResponseMedia,
-): Promise<Buffer | null> {
+  signal?: AbortSignal | null,
+): Promise<GeneratedExportArchiveSnapshot | null> {
+  signal?.throwIfAborted()
   try {
     const before = await lstat(archivePath)
+    signal?.throwIfAborted()
     if (
       !before.isFile()
       || before.isSymbolicLink()
@@ -300,37 +542,94 @@ async function readMatchingGeneratedArchiveBytes(
       return null
     }
     const bytes = await readFile(archivePath)
+    signal?.throwIfAborted()
     const after = await lstat(archivePath)
-    return fileStatsMatch(before, after) && sha256Hex(bytes) === file.sha256
-      ? bytes
-      : null
-  } catch {
-    return null
+    signal?.throwIfAborted()
+    return fileStatsMatch(before, after) ? { bytes, stats: after } : null
+  } catch (error) {
+    signal?.throwIfAborted()
+    if (isMissingFileError(error)) {
+      return null
+    }
+    throw error
   }
 }
 
-async function archiveMatchesRetirement(
-  archivePath: string,
-  retirement: AssistantGeneratedDeliveryRetirement,
-): Promise<boolean> {
-  try {
-    const before = await lstat(archivePath)
-    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
-      return false
-    }
-    const bytes = await readFile(archivePath)
-    const after = await lstat(archivePath)
-    return fileStatsMatch(before, after)
-      && sha256Hex(bytes) === retirement.archiveSha256
-  } catch {
+async function assistantGeneratedArchiveSnapshotIsUnchanged(input: {
+  archive: SentAssistantGeneratedExportArchive
+  stats: Stats
+  vault: string
+}): Promise<boolean> {
+  const resolved = await resolveAssistantVaultPath(
+    input.vault,
+    input.archive.file.ref,
+    'file path',
+  )
+  if (resolved !== input.archive.archivePath) {
     return false
   }
+  try {
+    const current = await lstat(resolved)
+    return current.isFile()
+      && !current.isSymbolicLink()
+      && current.nlink === 1
+      && fileStatsMatch(input.stats, current)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false
+    }
+    throw error
+  }
+}
+
+async function readAssistantExportPackRootState(input: {
+  basePath: string
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<'invalid' | 'missing' | 'present'> {
+  const absoluteBasePath = await resolveAssistantVaultPath(
+    input.vault,
+    input.basePath,
+  )
+  input.signal?.throwIfAborted()
+  try {
+    const stats = await lstat(absoluteBasePath)
+    input.signal?.throwIfAborted()
+    return stats.isDirectory() && !stats.isSymbolicLink()
+      ? 'present'
+      : 'invalid'
+  } catch (error) {
+    input.signal?.throwIfAborted()
+    if (isMissingFileError(error)) {
+      return 'missing'
+    }
+    throw error
+  }
+}
+
+async function hasRemainingAssistantExportPackRoot(input: {
+  basePaths: readonly string[]
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<boolean> {
+  for (const basePath of input.basePaths) {
+    const state = await readAssistantExportPackRootState({
+      basePath,
+      signal: input.signal,
+      vault: input.vault,
+    })
+    if (state !== 'missing') {
+      return true
+    }
+  }
+  return false
 }
 
 async function readLiveExportPackSnapshot(input: {
   basePath: string
   expectedFiles: readonly AssistantGeneratedExportPackRetirementFile[]
   packId: string
+  signal?: AbortSignal | null
   vault: string
 }): Promise<LiveExportPackSnapshot | null> {
   if (
@@ -348,13 +647,24 @@ async function readLiveExportPackSnapshot(input: {
     input.vault,
     input.basePath,
   )
-  const rootStats = await lstat(absoluteBasePath)
+  input.signal?.throwIfAborted()
+  let rootStats: Stats
+  try {
+    rootStats = await lstat(absoluteBasePath)
+  } catch (error) {
+    input.signal?.throwIfAborted()
+    if (isMissingFileError(error)) {
+      return null
+    }
+    throw error
+  }
   if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
     return null
   }
   const directoryEntries = await readdir(absoluteBasePath, {
     withFileTypes: true,
   })
+  input.signal?.throwIfAborted()
   if (
     directoryEntries.some((entry) => !entry.isFile() || entry.isSymbolicLink())
     || !sameStrings(
@@ -370,32 +680,40 @@ async function readLiveExportPackSnapshot(input: {
   const fileStats = new Map<string, Stats>()
   const files: AssistantGeneratedExportPackRetirementFile[] = []
   for (const expected of input.expectedFiles) {
+    input.signal?.throwIfAborted()
     const absoluteFilePath = await resolveAssistantVaultPath(
       input.vault,
       expected.path,
       'file path',
     )
-    const before = await lstat(absoluteFilePath)
+    let before: Stats
+    try {
+      before = await lstat(absoluteFilePath)
+    } catch (error) {
+      input.signal?.throwIfAborted()
+      if (isMissingFileError(error)) {
+        return null
+      }
+      throw error
+    }
     if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
       return null
     }
     const contents = await readFile(absoluteFilePath)
+    input.signal?.throwIfAborted()
     const after = await lstat(absoluteFilePath)
     if (
       !fileStatsMatch(before, after)
       || contents.byteLength !== expected.sizeBytes
-      || sha256Hex(contents) !== expected.sha256
+      || await sha256HexInterruptible(contents, input.signal) !== expected.sha256
     ) {
       return null
     }
     fileStats.set(expected.path, after)
-    files.push({
-      path: expected.path,
-      sha256: expected.sha256,
-      sizeBytes: expected.sizeBytes,
-    })
+    files.push({ ...expected })
   }
   const finalRootStats = await lstat(absoluteBasePath)
+  input.signal?.throwIfAborted()
   if (!fileStatsMatch(rootStats, finalRootStats)) {
     return null
   }
@@ -447,177 +765,11 @@ async function liveExportPackSnapshotIsUnchanged(
       }
     }
     return true
-  } catch {
-    return false
-  }
-}
-
-function readZipEntries(archive: Buffer): Map<string, ZipEntry> {
-  const eocdOffset = findZipEndOfCentralDirectory(archive)
-  if (eocdOffset < 0) {
-    throw new Error('ZIP central directory is missing.')
-  }
-  assertZipRange(archive, eocdOffset, 22)
-  const diskNumber = archive.readUInt16LE(eocdOffset + 4)
-  const centralDirectoryDisk = archive.readUInt16LE(eocdOffset + 6)
-  const diskEntryCount = archive.readUInt16LE(eocdOffset + 8)
-  const entryCount = archive.readUInt16LE(eocdOffset + 10)
-  const centralDirectorySize = archive.readUInt32LE(eocdOffset + 12)
-  const centralDirectoryOffset = archive.readUInt32LE(eocdOffset + 16)
-  const commentLength = archive.readUInt16LE(eocdOffset + 20)
-  if (
-    diskNumber !== 0
-    || centralDirectoryDisk !== 0
-    || diskEntryCount !== entryCount
-    || entryCount === ZIP64_MARKER_16
-    || entryCount > ZIP_MAX_ENTRY_COUNT
-    || centralDirectorySize === ZIP64_MARKER_32
-    || centralDirectoryOffset === ZIP64_MARKER_32
-    || eocdOffset + 22 + commentLength !== archive.byteLength
-    || centralDirectoryOffset + centralDirectorySize !== eocdOffset
-  ) {
-    throw new Error('ZIP central directory is unsupported.')
-  }
-
-  assertZipRange(
-    archive,
-    centralDirectoryOffset,
-    centralDirectorySize,
-  )
-  const entries = new Map<string, ZipEntry>()
-  let offset = centralDirectoryOffset
-  for (let index = 0; index < entryCount; index += 1) {
-    assertZipRange(archive, offset, 46)
-    if (archive.readUInt32LE(offset) !== ZIP_CENTRAL_DIRECTORY_SIGNATURE) {
-      throw new Error('ZIP central directory entry is invalid.')
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false
     }
-    const flags = archive.readUInt16LE(offset + 8)
-    const compressionMethod = archive.readUInt16LE(offset + 10)
-    const entryCrc32 = archive.readUInt32LE(offset + 16)
-    const compressedSize = archive.readUInt32LE(offset + 20)
-    const uncompressedSize = archive.readUInt32LE(offset + 24)
-    const fileNameLength = archive.readUInt16LE(offset + 28)
-    const extraLength = archive.readUInt16LE(offset + 30)
-    const entryCommentLength = archive.readUInt16LE(offset + 32)
-    const localHeaderOffset = archive.readUInt32LE(offset + 42)
-    if (
-      compressedSize === ZIP64_MARKER_32
-      || uncompressedSize === ZIP64_MARKER_32
-      || localHeaderOffset === ZIP64_MARKER_32
-      || (flags & 0x1) !== 0
-    ) {
-      throw new Error('ZIP entry is unsupported.')
-    }
-    const nameStart = offset + 46
-    const nameEnd = nameStart + fileNameLength
-    assertZipRange(
-      archive,
-      nameStart,
-      fileNameLength + extraLength + entryCommentLength,
-    )
-    const name = archive.subarray(nameStart, nameEnd).toString('utf8')
-    if (
-      name.length === 0
-      || name.includes('\uFFFD')
-      || name.includes('\\')
-      || name.includes('\u0000')
-      || entries.has(name)
-    ) {
-      throw new Error('ZIP entry name is invalid.')
-    }
-    entries.set(name, {
-      compressedSize,
-      compressionMethod,
-      crc32: entryCrc32,
-      flags,
-      localHeaderOffset,
-      name,
-      uncompressedSize,
-    })
-    offset = nameEnd + extraLength + entryCommentLength
-  }
-  if (offset !== eocdOffset) {
-    throw new Error('ZIP central directory size is invalid.')
-  }
-  return entries
-}
-
-function extractZipEntry(
-  archive: Buffer,
-  entry: ZipEntry,
-  maxOutputLength: number,
-): Buffer {
-  if (
-    maxOutputLength < 0
-    || entry.uncompressedSize > maxOutputLength
-    || (entry.compressionMethod !== 0 && entry.compressionMethod !== 8)
-  ) {
-    throw new Error('ZIP entry exceeds the retirement inspection limit.')
-  }
-  assertZipRange(archive, entry.localHeaderOffset, 30)
-  if (archive.readUInt32LE(entry.localHeaderOffset) !== ZIP_LOCAL_FILE_HEADER_SIGNATURE) {
-    throw new Error('ZIP local header is invalid.')
-  }
-  const localFlags = archive.readUInt16LE(entry.localHeaderOffset + 6)
-  const localCompressionMethod = archive.readUInt16LE(entry.localHeaderOffset + 8)
-  const fileNameLength = archive.readUInt16LE(entry.localHeaderOffset + 26)
-  const extraLength = archive.readUInt16LE(entry.localHeaderOffset + 28)
-  const nameStart = entry.localHeaderOffset + 30
-  const contentOffset = nameStart + fileNameLength + extraLength
-  assertZipRange(archive, nameStart, fileNameLength + extraLength)
-  assertZipRange(archive, contentOffset, entry.compressedSize)
-  if (
-    localFlags !== entry.flags
-    || localCompressionMethod !== entry.compressionMethod
-    || archive.subarray(nameStart, nameStart + fileNameLength).toString('utf8') !== entry.name
-  ) {
-    throw new Error('ZIP local and central entry metadata disagree.')
-  }
-  const compressed = archive.subarray(
-    contentOffset,
-    contentOffset + entry.compressedSize,
-  )
-  const contents = entry.compressionMethod === 0
-    ? Buffer.from(compressed)
-    : inflateRawSync(compressed, { maxOutputLength })
-  if (
-    contents.byteLength !== entry.uncompressedSize
-    || (crc32(contents) >>> 0) !== entry.crc32
-  ) {
-    throw new Error('ZIP entry integrity check failed.')
-  }
-  return contents
-}
-
-function findZipEndOfCentralDirectory(archive: Buffer): number {
-  const firstOffset = Math.max(
-    0,
-    archive.byteLength - ZIP_MAX_EOCD_SEARCH_BYTES,
-  )
-  for (let offset = archive.byteLength - 22; offset >= firstOffset; offset -= 1) {
-    if (
-      archive.readUInt32LE(offset) === ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE
-      && offset + 22 + archive.readUInt16LE(offset + 20) === archive.byteLength
-    ) {
-      return offset
-    }
-  }
-  return -1
-}
-
-function assertZipRange(
-  archive: Buffer,
-  offset: number,
-  length: number,
-): void {
-  if (
-    !Number.isSafeInteger(offset)
-    || !Number.isSafeInteger(length)
-    || offset < 0
-    || length < 0
-    || offset + length > archive.byteLength
-  ) {
-    throw new Error('ZIP entry range is invalid.')
+    throw error
   }
 }
 
@@ -637,9 +789,41 @@ function isExactDirectExportPackFileList(
   })
 }
 
+function refIsEqualToOrBeneath(ref: string, basePath: string): boolean {
+  return ref === basePath || ref.startsWith(`${basePath}/`)
+}
+
+function outboxProvesExactSentArchiveClaim(
+  intents: readonly AssistantOutboxIntent[],
+  file: AssistantVaultFileResponseMedia,
+): boolean {
+  let exactClaims = 0
+  for (const intent of intents) {
+    const claims = intent.media.filter(
+      (media): media is AssistantVaultFileResponseMedia =>
+        media.kind === 'vault_file' && media.ref === file.ref,
+    )
+    if (claims.length === 0) {
+      continue
+    }
+    if (
+      intent.status !== 'sent'
+      || intent.media.length !== 1
+      || claims.length !== 1
+      || claims[0]?.contentType !== file.contentType
+      || claims[0]?.sizeBytes !== file.sizeBytes
+      || claims[0]?.sha256 !== file.sha256
+    ) {
+      return false
+    }
+    exactClaims += 1
+  }
+  return exactClaims > 0
+}
+
 function assertRetirementExtractionWithinLimit(extractedBytes: number): void {
   if (extractedBytes > assistantVaultFileMaxBytes) {
-    throw new Error('Generated ZIP export packs exceed the inspection limit.')
+    throw new Error('Generated ZIP export pack exceeds the inspection limit.')
   }
 }
 
@@ -658,6 +842,19 @@ function fileStatsMatch(left: Stats, right: Stats): boolean {
     && left.ctimeMs === right.ctimeMs
 }
 
-function sha256Hex(value: Uint8Array): string {
-  return createHash('sha256').update(value).digest('hex')
+async function sha256HexInterruptible(
+  value: Uint8Array,
+  signal?: AbortSignal | null,
+): Promise<string> {
+  const hash = createHash('sha256')
+  for (let offset = 0; offset < value.byteLength; offset += HASH_CHUNK_BYTES) {
+    signal?.throwIfAborted()
+    hash.update(value.subarray(
+      offset,
+      Math.min(value.byteLength, offset + HASH_CHUNK_BYTES),
+    ))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  signal?.throwIfAborted()
+  return hash.digest('hex')
 }

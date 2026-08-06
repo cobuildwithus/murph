@@ -1,4 +1,4 @@
-import { readdir, readFile, rename, rm } from 'node:fs/promises'
+import { lstat, readdir, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assistantOutboxIntentSchema,
@@ -89,6 +89,66 @@ export async function listAssistantOutboxIntentsLocal(
     compareAssistantTimestampsAscending(left.createdAt, right.createdAt) ||
     compareAssistantOutboxDeliverySequenceOrder(left, right),
   )
+}
+
+export interface AssistantOutboxIntentInventory {
+  records: Array<{
+    filePath: string
+    record: AssistantOutboxIntent
+  }>
+  trusted: boolean
+}
+
+export async function readAssistantOutboxIntentInventory(input: {
+  directory: string
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<AssistantOutboxIntentInventory> {
+  const records: AssistantOutboxIntentInventory['records'] = []
+  let trusted = true
+  const entries = await readdir(input.directory, { withFileTypes: true })
+
+  for (const entry of entries) {
+    input.signal?.throwIfAborted()
+    const filePath = path.join(input.directory, entry.name)
+    if (!entry.name.endsWith('.json')) {
+      if (entry.name === '.quarantine') {
+        const stats = await lstat(filePath)
+        input.signal?.throwIfAborted()
+        if (
+          entry.isDirectory()
+          && stats.isDirectory()
+          && !stats.isSymbolicLink()
+        ) {
+          continue
+        }
+      }
+      trusted = false
+      continue
+    }
+    if (!entry.isFile()) {
+      trusted = false
+      continue
+    }
+
+    try {
+      const record = await readAssistantOutboxIntentInventoryEntry(
+        input.vault,
+        filePath,
+      )
+      input.signal?.throwIfAborted()
+      if (!record) {
+        trusted = false
+        continue
+      }
+      records.push({ filePath, record })
+    } catch {
+      input.signal?.throwIfAborted()
+      trusted = false
+    }
+  }
+
+  return { records, trusted }
 }
 
 export async function pruneAssistantTerminalOutboxIntents(input: {

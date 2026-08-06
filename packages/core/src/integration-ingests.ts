@@ -10,7 +10,6 @@ import {
   crc32,
   deflateRawSync,
   gzipSync,
-  inflateRawSync,
 } from "node:zlib";
 
 import {
@@ -27,6 +26,12 @@ import {
   prepareFileAtomicExclusive,
   writeFileAtomic,
 } from "./atomic-write.ts";
+import {
+  BoundedZipError,
+  readBoundedZipDirectory,
+  readBoundedZipEntry,
+  type BoundedZipEntry,
+} from "./bounded-zip.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
 import { pathExists, walkVaultFiles } from "./fs.ts";
@@ -211,17 +216,6 @@ interface ValidatedIntegrationIngestSourceReceipt
   rowCount: number;
 }
 
-interface ZipCentralDirectoryEntry {
-  centralDirectoryOffset: number;
-  compressedSize: number;
-  compressionMethod: number;
-  crc32: number;
-  flags: number;
-  localHeaderOffset: number;
-  name: string;
-  uncompressedSize: number;
-}
-
 type IntegrationIngestNoveltyTailDecision = "continue" | "complete" | "unsafe";
 
 interface IntegrationIngestNoveltyTailScanResult {
@@ -234,9 +228,6 @@ const INTEGRATION_INGEST_ARCHIVE_SUFFIXES = [".gz", ".zip"] as const;
 const ZIP_EOCD_SIGNATURE = 0x06054b50;
 const ZIP_CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50;
 const ZIP_LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
-const ZIP_MAX_EOCD_SEARCH_BYTES = 65_557;
-const ZIP64_MARKER_16 = 0xffff;
-const ZIP64_MARKER_32 = 0xffffffff;
 
 export function integrationIngestShardPath(importedAt: string): string {
   return toMonthlyShardRelativePath(
@@ -2632,88 +2623,69 @@ async function readZippedIntegrationIngestJsonlText(
     );
   }
   const archive = await readFile(archivePath);
-  const entry = selectZippedIntegrationIngestJsonlEntry(archive, source);
-  assertZippedIntegrationIngestEntrySize(entry, source.sourcePath);
-  const localHeaderOffset = entry.localHeaderOffset;
-  if (localHeaderOffset !== 0) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${source.sourcePath}" has hidden bytes before its JSONL entry.`,
-      { relativePath: source.sourcePath },
+  try {
+    const directory = await readBoundedZipDirectory(archive, {
+      maxEntries: 20_000,
+    });
+    if (directory.commentLength !== 0) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ARCHIVE_INVALID",
+        `Integration ingest archive "${source.sourcePath}" has an invalid ZIP comment length.`,
+        { relativePath: source.sourcePath },
+      );
+    }
+    const entry = selectZippedIntegrationIngestJsonlEntry(
+      directory.entries,
+      source,
     );
+    assertZippedIntegrationIngestEntrySize(entry, source.sourcePath);
+    if (
+      entry.centralExtraLength !== 0
+      || entry.centralCommentLength !== 0
+    ) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ARCHIVE_INVALID",
+        `Integration ingest archive "${source.sourcePath}" has hidden central directory metadata.`,
+        { relativePath: source.sourcePath },
+      );
+    }
+    if (entry.localHeaderOffset !== 0) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ARCHIVE_INVALID",
+        `Integration ingest archive "${source.sourcePath}" has hidden bytes before its JSONL entry.`,
+        { relativePath: source.sourcePath },
+      );
+    }
+    const content = await readBoundedZipEntry(archive, entry, {
+      maxOutputBytes: MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES,
+    });
+    if (content.localExtraLength !== 0) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ARCHIVE_INVALID",
+        `Integration ingest archive "${source.sourcePath}" has hidden local header metadata.`,
+        { relativePath: source.sourcePath },
+      );
+    }
+    if (content.contentEnd !== directory.centralDirectoryOffset) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ARCHIVE_INVALID",
+        `Integration ingest archive "${source.sourcePath}" has hidden bytes before its central directory.`,
+        { relativePath: source.sourcePath },
+      );
+    }
+    return content.bytes.toString("utf8");
+  } catch (error) {
+    throw mapBoundedZipError(error, source.sourcePath);
   }
-  assertZipReadableRange(archive, localHeaderOffset, 30, source.sourcePath);
-  if (archive.readUInt32LE(localHeaderOffset) !== ZIP_LOCAL_FILE_HEADER_SIGNATURE) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${source.sourcePath}" has an invalid local file header.`,
-      { relativePath: source.sourcePath },
-    );
-  }
-  if ((entry.flags & 0x1) !== 0) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_UNSUPPORTED",
-      `Integration ingest archive "${source.sourcePath}" contains an encrypted entry.`,
-      { relativePath: source.sourcePath },
-    );
-  }
-
-  const fileNameLength = archive.readUInt16LE(localHeaderOffset + 26);
-  const extraLength = archive.readUInt16LE(localHeaderOffset + 28);
-  if (extraLength !== 0) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${source.sourcePath}" has hidden local header metadata.`,
-      { relativePath: source.sourcePath },
-    );
-  }
-  const localNameStart = localHeaderOffset + 30;
-  const localNameEnd = localNameStart + fileNameLength;
-  assertZipReadableRange(archive, localNameStart, fileNameLength, source.sourcePath);
-  const localName = archive.subarray(localNameStart, localNameEnd).toString("utf8").replaceAll("\\", "/");
-  if (localName !== entry.name) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${source.sourcePath}" local file header does not match its central directory.`,
-      { relativePath: source.sourcePath },
-    );
-  }
-  const contentOffset = localHeaderOffset + 30 + fileNameLength + extraLength;
-  assertZipReadableRange(archive, contentOffset, entry.compressedSize, source.sourcePath);
-  if (contentOffset + entry.compressedSize !== entry.centralDirectoryOffset) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${source.sourcePath}" has hidden bytes before its central directory.`,
-      { relativePath: source.sourcePath },
-    );
-  }
-  const compressed = archive.subarray(contentOffset, contentOffset + entry.compressedSize);
-  const content = unzipIntegrationIngestEntry(compressed, entry, source.sourcePath);
-  if (content.byteLength !== entry.uncompressedSize) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${source.sourcePath}" has an invalid uncompressed size.`,
-      { relativePath: source.sourcePath },
-    );
-  }
-  if ((crc32(content) >>> 0) !== entry.crc32) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${source.sourcePath}" failed CRC-32 verification.`,
-      { relativePath: source.sourcePath },
-    );
-  }
-  return content.toString("utf8");
 }
 
 function selectZippedIntegrationIngestJsonlEntry(
-  archive: Buffer,
+  entries: readonly BoundedZipEntry[],
   source: IntegrationIngestRowSource,
-): ZipCentralDirectoryEntry {
-  const entries = readZipCentralDirectory(archive, source.sourcePath);
+): BoundedZipEntry {
   const expectedName = source.logicalPath.split("/").at(-1) ?? "";
   if (entries.length === 1 && entries[0]?.name === expectedName) {
-    return entries[0] as ZipCentralDirectoryEntry;
+    return entries[0];
   }
   throw new VaultError(
     "INTEGRATION_INGEST_ARCHIVE_INVALID",
@@ -2722,163 +2694,19 @@ function selectZippedIntegrationIngestJsonlEntry(
   );
 }
 
-function readZipCentralDirectory(
-  archive: Buffer,
-  relativePath: string,
-): ZipCentralDirectoryEntry[] {
-  const eocdOffset = findZipEndOfCentralDirectory(archive);
-  if (eocdOffset < 0) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${relativePath}" is missing a ZIP central directory.`,
-      { relativePath },
-    );
+function mapBoundedZipError(error: unknown, relativePath: string): unknown {
+  if (!(error instanceof BoundedZipError)) {
+    return error;
   }
-  assertZipReadableRange(archive, eocdOffset, 22, relativePath);
-  const diskNumber = archive.readUInt16LE(eocdOffset + 4);
-  const centralDirectoryDisk = archive.readUInt16LE(eocdOffset + 6);
-  const diskEntryCount = archive.readUInt16LE(eocdOffset + 8);
-  const entryCount = archive.readUInt16LE(eocdOffset + 10);
-  const centralDirectorySize = archive.readUInt32LE(eocdOffset + 12);
-  const centralDirectoryOffset = archive.readUInt32LE(eocdOffset + 16);
-  const commentLength = archive.readUInt16LE(eocdOffset + 20);
-  if (
-    diskNumber !== 0
-    || centralDirectoryDisk !== 0
-    || diskEntryCount !== entryCount
-    || entryCount === ZIP64_MARKER_16
-    || centralDirectorySize === ZIP64_MARKER_32
-    || centralDirectoryOffset === ZIP64_MARKER_32
-  ) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_UNSUPPORTED",
-      `Integration ingest archive "${relativePath}" uses an unsupported ZIP variant.`,
-      { relativePath },
-    );
-  }
-  if (commentLength !== 0 || eocdOffset + 22 !== archive.byteLength) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${relativePath}" has an invalid ZIP comment length.`,
-      { relativePath },
-    );
-  }
-
-  const entries: ZipCentralDirectoryEntry[] = [];
-  let offset = centralDirectoryOffset;
-  const centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize;
-  if (centralDirectoryEnd !== eocdOffset) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${relativePath}" has hidden central directory padding.`,
-      { relativePath },
-    );
-  }
-  assertZipReadableRange(archive, centralDirectoryOffset, centralDirectorySize, relativePath);
-  for (let index = 0; index < entryCount; index += 1) {
-    assertZipReadableRange(archive, offset, 46, relativePath);
-    if (archive.readUInt32LE(offset) !== ZIP_CENTRAL_DIRECTORY_SIGNATURE) {
-      throw new VaultError(
-        "INTEGRATION_INGEST_ARCHIVE_INVALID",
-        `Integration ingest archive "${relativePath}" has an invalid central directory entry.`,
-        { relativePath },
-      );
-    }
-    const flags = archive.readUInt16LE(offset + 8);
-    const compressionMethod = archive.readUInt16LE(offset + 10);
-    const entryCrc32 = archive.readUInt32LE(offset + 16);
-    const compressedSize = archive.readUInt32LE(offset + 20);
-    const uncompressedSize = archive.readUInt32LE(offset + 24);
-    const fileNameLength = archive.readUInt16LE(offset + 28);
-    const extraLength = archive.readUInt16LE(offset + 30);
-    const commentLength = archive.readUInt16LE(offset + 32);
-    const localHeaderOffset = archive.readUInt32LE(offset + 42);
-    if (extraLength !== 0 || commentLength !== 0) {
-      throw new VaultError(
-        "INTEGRATION_INGEST_ARCHIVE_INVALID",
-        `Integration ingest archive "${relativePath}" has hidden central directory metadata.`,
-        { relativePath },
-      );
-    }
-    if (
-      compressedSize === ZIP64_MARKER_32
-      || uncompressedSize === ZIP64_MARKER_32
-      || localHeaderOffset === ZIP64_MARKER_32
-    ) {
-      throw new VaultError(
-        "INTEGRATION_INGEST_ARCHIVE_UNSUPPORTED",
-        `Integration ingest archive "${relativePath}" uses an unsupported ZIP64 entry.`,
-        { relativePath },
-      );
-    }
-
-    const nameStart = offset + 46;
-    const nameEnd = nameStart + fileNameLength;
-    assertZipReadableRange(archive, nameStart, fileNameLength, relativePath);
-    entries.push({
-      centralDirectoryOffset,
-      compressedSize,
-      compressionMethod,
-      crc32: entryCrc32,
-      flags,
-      localHeaderOffset,
-      name: archive.subarray(nameStart, nameEnd).toString("utf8").replaceAll("\\", "/"),
-      uncompressedSize,
-    });
-    offset = nameEnd + extraLength + commentLength;
-  }
-  if (offset !== centralDirectoryEnd) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${relativePath}" has an invalid central directory size.`,
-      { relativePath },
-    );
-  }
-  return entries;
-}
-
-function findZipEndOfCentralDirectory(archive: Buffer): number {
-  const firstOffset = Math.max(0, archive.byteLength - ZIP_MAX_EOCD_SEARCH_BYTES);
-  for (let offset = archive.byteLength - 22; offset >= firstOffset; offset -= 1) {
-    if (archive.readUInt32LE(offset) === ZIP_EOCD_SIGNATURE) {
-      return offset;
-    }
-  }
-  return -1;
-}
-
-function unzipIntegrationIngestEntry(
-  compressed: Buffer,
-  entry: ZipCentralDirectoryEntry,
-  relativePath: string,
-): Buffer {
-  if (entry.compressionMethod === 0) {
-    return Buffer.from(compressed);
-  }
-  if (entry.compressionMethod === 8) {
-    try {
-      return inflateRawSync(compressed, {
-        maxOutputLength: MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES,
-      });
-    } catch (error) {
-      if (isZlibMaxOutputLengthError(error)) {
-        throw new VaultError(
-          "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE",
-          `Integration ingest archive "${relativePath}" exceeds the ${MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES}-byte uncompressed size limit.`,
-          { relativePath },
-        );
-      }
-      throw new VaultError(
-        "INTEGRATION_INGEST_ARCHIVE_INVALID",
-        `Integration ingest archive "${relativePath}" contains invalid deflated data.`,
-        { relativePath },
-      );
-    }
-  }
-  throw new VaultError(
-    "INTEGRATION_INGEST_ARCHIVE_UNSUPPORTED",
-    `Integration ingest archive "${relativePath}" uses an unsupported compression method.`,
-    { compressionMethod: entry.compressionMethod, relativePath },
+  const code = error.code === "ZIP_TOO_LARGE"
+    ? "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE"
+    : error.code === "ZIP_UNSUPPORTED"
+      ? "INTEGRATION_INGEST_ARCHIVE_UNSUPPORTED"
+      : "INTEGRATION_INGEST_ARCHIVE_INVALID";
+  return new VaultError(
+    code,
+    `Integration ingest archive "${relativePath}" is not a supported bounded ZIP.`,
+    { relativePath },
   );
 }
 
@@ -2908,7 +2736,7 @@ function assertSingleIntegrationIngestShardRepresentation(
 }
 
 function assertZippedIntegrationIngestEntrySize(
-  entry: ZipCentralDirectoryEntry,
+  entry: BoundedZipEntry,
   relativePath: string,
 ): void {
   if (entry.compressedSize > MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES) {
@@ -2923,21 +2751,6 @@ function assertZippedIntegrationIngestEntrySize(
       "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE",
       `Integration ingest archive "${relativePath}" contains an entry that exceeds the ${MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES}-byte uncompressed size limit.`,
       { byteSize: entry.uncompressedSize, relativePath },
-    );
-  }
-}
-
-function assertZipReadableRange(
-  archive: Buffer,
-  offset: number,
-  length: number,
-  relativePath: string,
-): void {
-  if (offset < 0 || length < 0 || offset + length > archive.byteLength) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${relativePath}" has an invalid ZIP offset.`,
-      { relativePath },
     );
   }
 }

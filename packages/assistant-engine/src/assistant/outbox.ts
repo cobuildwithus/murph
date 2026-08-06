@@ -1,4 +1,6 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { createReadStream, type Stats } from 'node:fs'
+import { lstat } from 'node:fs/promises'
 import {
   ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT,
   type AssistantChannelDelivery,
@@ -24,6 +26,7 @@ import {
 } from '@murphai/query'
 import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import {
   looksLikePrivateAssistantRoutePlaceholder,
 } from '@murphai/operator-config/assistant/current-delivery-route'
@@ -431,6 +434,11 @@ export async function createAssistantOutboxIntent(
       })
       return upgradedExisting
     }
+
+    await assertAssistantExportPackMediaStillMatchesVault({
+      media,
+      vault: input.vault,
+    })
 
     const intent = assistantOutboxIntentSchema.parse({
       schema: ASSISTANT_OUTBOX_INTENT_SCHEMA,
@@ -2540,4 +2548,62 @@ function shouldUpgradeAssistantOutboxIntentReactionOperation(
   }
 
   return intent.preparedDispatchToken === null
+}
+
+const DIRECT_ASSISTANT_EXPORT_PACK_FILE_PATTERN =
+  /^exports\/packs\/[A-Za-z0-9_-]+\/[A-Za-z0-9][A-Za-z0-9._-]*$/u
+
+async function assertAssistantExportPackMediaStillMatchesVault(input: {
+  media: readonly AssistantResponseMedia[]
+  vault: string
+}): Promise<void> {
+  for (const media of input.media) {
+    if (
+      media.kind !== 'vault_file'
+      || !DIRECT_ASSISTANT_EXPORT_PACK_FILE_PATTERN.test(media.ref)
+    ) {
+      continue
+    }
+    try {
+      const filePath = await resolveAssistantVaultPath(
+        input.vault,
+        media.ref,
+        'file path',
+      )
+      const before = await lstat(filePath)
+      if (
+        !before.isFile()
+        || before.isSymbolicLink()
+        || before.size !== media.sizeBytes
+      ) {
+        throw new Error('Export-pack file metadata changed.')
+      }
+      const hash = createHash('sha256')
+      for await (const chunk of createReadStream(filePath)) {
+        hash.update(chunk)
+      }
+      const after = await lstat(filePath)
+      if (
+        !assistantOutboxFileStatsMatch(before, after)
+        || hash.digest('hex') !== media.sha256
+      ) {
+        throw new Error('Export-pack file bytes changed.')
+      }
+    } catch {
+      throw new VaultCliError(
+        'ASSISTANT_VAULT_FILE_CHANGED_BEFORE_PERSISTENCE',
+        'The export-pack file changed before its delivery obligation was saved.',
+      )
+    }
+  }
+}
+
+function assistantOutboxFileStatsMatch(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.size === right.size
+    && left.nlink === right.nlink
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs
 }
