@@ -165,6 +165,14 @@ UUID, and outbox bookkeeping never enter Postgres or the hosted workspace; only
 an individual strict six-field envelope is uploaded through the derived-data
 route. The UUID never uploads or enters logs.
 
+Native account admission is separate from both band enrollment and hosted
+device lifecycle authority. `POST /api/device-sync/companion/admission`
+accepts only an optional validated IANA time zone, reuses the canonical hosted
+member consent/trial/access owner, and returns only `{ "ok": true }`. Its
+static dependency graph is kept outside device-sync public ingress, so account
+admission cannot create, resume, reactivate, or otherwise mutate a Junction
+connection.
+
 ### Cloudflare execution state
 
 Cloudflare storage keeps hosted execution coordination state only, such as encrypted hosted workspace bundles, opaque runner residue, and other execution-plane metadata described in `ARCHITECTURE.md`.
@@ -254,10 +262,13 @@ These are browser-initiated but lower-level than the settings surface. They must
 
 ### Hosted companion routes
 
+- `POST /api/device-sync/companion/admission`
 - `POST /api/device-sync/companion/sign-in-token`
 - `POST /api/device-sync/companion/hrv-rmssd`
 
-Both are Privy-bearer-authenticated and consent-gated. Sign-in honors the
+All are Privy-bearer-authenticated and consent-gated. Admission validates its
+complete bounded optional-time-zone body before canonical member mutation and
+does not enter device sync. Sign-in honors the
 resume, omitted-intent inference, and future explicit-connect authority split
 above. The derived route accepts only the closed overnight summary contract,
 reuses one active member-owned Junction connection, and never establishes or
