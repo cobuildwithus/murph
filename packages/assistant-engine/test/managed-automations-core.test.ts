@@ -642,7 +642,13 @@ describe('applyMurphManagedAutomations core integration', () => {
       'preserve required prerequisites, availability limits, and approval or confirmation boundaries',
     )
     expect(productUpdatesRecord?.instructions).toContain(
-      'open with one sentence of no more than 10 words',
+      'Open every outbound note with one sentence of no more than 20 words before the first bullet',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      "In Murph's first-person voice",
+    )
+    expect(productUpdatesRecord?.instructions).not.toContain(
+      'If the ledger page was missing before this run',
     )
     expect(productUpdatesRecord?.instructions).toContain(
       'Close with one invitation sentence of no more than 12 words',
