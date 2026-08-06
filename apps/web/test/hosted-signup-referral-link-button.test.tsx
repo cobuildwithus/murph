@@ -40,6 +40,52 @@ describe("HostedSignupReferralLinkButton", () => {
     await rendered.cleanup();
   });
 
+  it("deduplicates concurrent preload reads without caching across mounts", async () => {
+    let resolveFirstFetch!: (response: Response) => void;
+    const firstFetch = new Promise<Response>((resolve) => {
+      resolveFirstFetch = resolve;
+    });
+    const fetchMock = vi.fn()
+      .mockReturnValueOnce(firstFetch)
+      .mockResolvedValueOnce(referralResponse("new_session_referral"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const firstMount = await renderClientComponent(
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(HostedSignupReferralLinkButton),
+        React.createElement(HostedSignupReferralLinkButton),
+      ),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await React.act(async () => {
+      resolveFirstFetch(referralResponse("shared_in_flight_referral"));
+      await firstFetch;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      [...firstMount.container.querySelectorAll("button")].map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(["Copy link", "Copy link"]);
+    await firstMount.cleanup();
+
+    const secondMount = await renderClientComponent(
+      React.createElement(HostedSignupReferralLinkButton),
+    );
+    await React.act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(secondMount.button.textContent).toBe("Copy link");
+
+    await secondMount.cleanup();
+  });
+
   it("keeps a failed clipboard write recoverable", async () => {
     const rendered = await renderClientComponent(
       React.createElement(HostedSignupReferralLinkButton, {
@@ -67,3 +113,12 @@ describe("HostedSignupReferralLinkButton", () => {
     await rendered.cleanup();
   });
 });
+
+function referralResponse(suffix: string): Response {
+  return new Response(JSON.stringify({
+    signupUrl: `https://www.withmurph.ai/r/${suffix}`,
+  }), {
+    headers: { "Content-Type": "application/json" },
+    status: 200,
+  });
+}
