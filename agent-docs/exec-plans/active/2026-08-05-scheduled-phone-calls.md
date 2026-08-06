@@ -107,9 +107,9 @@ phone call it requested through the existing hosted phone-call port.
   email/Telegram cases before the channel gate, then the focused planning and
   authority suites passed 98 tests after exact direct-Linq scoping; Assistant
   Engine typecheck also passed.
-- The corrected production runner bundle passed at 10,275,785 bytes against the
-  10,308,229-byte total budget, and the 34-test bundle policy suite plus agent
-  docs drift and diff checks passed.
+- The pre-merge corrected production runner bundle passed at 10,275,785 bytes
+  against the 10,308,229-byte total budget, and the 34-test bundle policy suite
+  plus agent docs drift and diff checks passed.
 - Final ReviewGPT round 3 confirmed both earlier findings resolved and found one
   review-induced feedback gap: a changed-brief retry correctly starts no second
   call but inherited the definitive attended-call failure text. The scheduled
@@ -117,3 +117,8 @@ phone call it requested through the existing hosted phone-call port.
   must not be retried automatically. Its regression failed before the change;
   afterward the two focused suites passed 100 tests and Assistant Engine
   typecheck passed. Attended-call error copy remains unchanged.
+- Latest `main` conflicted only in the independently ratcheted runner bundle
+  baseline and its matching policy test. The resolved combined graph passed at
+  10,276,559 bytes with a 10,309,327-byte budget. The 34-test bundle policy
+  suite, 100 focused Assistant tests, Assistant Engine typecheck, docs drift,
+  and cached merge diff check passed after reconciliation.
