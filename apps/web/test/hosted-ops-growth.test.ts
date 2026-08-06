@@ -24,6 +24,7 @@ import {
 import {
   addUtcDays,
   buildHostedGrowthMessageSeries,
+  buildHostedGrowthTrialStartAttribution,
   buildTrialCohortRows,
   calculateHostedGrowthCurrentMetrics,
   calculateHostedTrialMetrics,
@@ -322,6 +323,70 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
+  it("keeps trial-start attribution explicit and orders recent starts newest first", () => {
+    const attribution = buildHostedGrowthTrialStartAttribution({
+      endExclusive: new Date("2026-08-01T00:00:00.000Z"),
+      limit: 3,
+      rows: [
+        {
+          memberCreatedAt: new Date("2026-07-30T09:00:00.000Z"),
+          phoneHint: "*** 0194",
+          pulseTrialRedeemedAt: new Date("2026-07-30T09:05:00.000Z"),
+          pulseTrialStartSource: "linq_instant_start",
+        },
+        {
+          memberCreatedAt: new Date("2026-06-03T11:00:00.000Z"),
+          phoneHint: null,
+          pulseTrialRedeemedAt: new Date("2026-07-29T16:00:00.000Z"),
+          pulseTrialStartSource: "companion_onboarding",
+        },
+        {
+          memberCreatedAt: new Date("2026-06-12T10:00:00.000Z"),
+          phoneHint: null,
+          pulseTrialRedeemedAt: new Date("2026-07-28T18:00:00.000Z"),
+          pulseTrialStartSource: null,
+        },
+        {
+          memberCreatedAt: new Date("2026-06-01T10:00:00.000Z"),
+          phoneHint: "*** 4421",
+          pulseTrialRedeemedAt: new Date("2026-06-30T18:00:00.000Z"),
+          pulseTrialStartSource: "web_onboarding",
+        },
+      ],
+      startInclusive: new Date("2026-07-01T00:00:00.000Z"),
+    });
+
+    expect(attribution).toEqual({
+      counts: {
+        companion_onboarding: 1,
+        linq_instant_start: 1,
+        unknown: 1,
+        web_onboarding: 0,
+      },
+      recent: [
+        {
+          memberCreatedAt: "2026-07-30T09:00:00.000Z",
+          phoneHint: "*** 0194",
+          pulseTrialStartSource: "linq_instant_start",
+          trialStartedAt: "2026-07-30T09:05:00.000Z",
+        },
+        {
+          memberCreatedAt: "2026-06-03T11:00:00.000Z",
+          phoneHint: null,
+          pulseTrialStartSource: "companion_onboarding",
+          trialStartedAt: "2026-07-29T16:00:00.000Z",
+        },
+        {
+          memberCreatedAt: "2026-06-12T10:00:00.000Z",
+          phoneHint: null,
+          pulseTrialStartSource: "unknown",
+          trialStartedAt: "2026-07-28T18:00:00.000Z",
+        },
+      ],
+      windowStartDate: "2026-07-01",
+    });
+  });
+
   it("keeps exact trial maturity boundary rows immature", () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const rows = buildTrialCohortRows({
@@ -602,9 +667,16 @@ describe("hosted ops growth metrics", () => {
                 status: "active",
               },
             },
+            createdAt: true,
+            identity: {
+              select: {
+                maskedPhoneNumberHint: true,
+              },
+            },
             suspendedAt: true,
           },
         },
+        pulseTrialStartSource: true,
       },
     });
     expect(mocks.hostedMemberBillingRef.count.mock.calls[1]?.[0]).toMatchObject({

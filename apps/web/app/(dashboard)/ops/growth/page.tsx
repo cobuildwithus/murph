@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { GrowthCharts } from "./growth-charts";
 import { GrowthScorecard } from "./growth-scorecard";
+import { TrialStartAttribution } from "./trial-start-attribution";
 import {
   captureHostedGrowthDailySnapshot,
   readHostedGrowthDashboard,
@@ -79,6 +80,8 @@ export default async function HostedOpsGrowthPage() {
         snapshotSeries={dashboard.snapshotSeries}
       />
 
+      <TrialStartAttribution attribution={dashboard.trialStartAttribution} />
+
       <section aria-labelledby="growth-revenue-title" className="flex flex-col gap-4">
         <SectionHeading
           description="Recurring revenue comes from active paid plan definitions. The tracked top-up total starts with retained fulfilled history at cutover, adds each new first fulfillment, and may omit purchases deleted before tracking began."
@@ -143,17 +146,17 @@ export default async function HostedOpsGrowthPage() {
 
       <section aria-labelledby="growth-weekly-title" className="flex flex-col gap-4">
         <SectionHeading
-          description="Rolling seven-day acquisition and trial-start volumes, newest first. These changes compare weekly volume; the company growth rate is the MRR score above."
+          description="Rolling seven-day member-record creation and trial-start volumes, newest first. A member record can predate activation, so use Trial start paths for acquisition provenance."
           id="growth-weekly-title"
-          title="Weekly acquisition"
+          title="Weekly intake and activation"
         />
         <div className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Window</TableHead>
-                <TableHead className="text-right">New members</TableHead>
-                <TableHead className="text-right">Member change</TableHead>
+                <TableHead className="text-right">Member records</TableHead>
+                <TableHead className="text-right">Record change</TableHead>
                 <TableHead className="text-right">Trial starts</TableHead>
                 <TableHead className="text-right">Trial change</TableHead>
               </TableRow>

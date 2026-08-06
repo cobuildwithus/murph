@@ -234,6 +234,15 @@ across supported channels with tracked Linq replies. Give each keyboard-enabled
 chart one visible focus surface named by its heading. Keep acquisition and
 revenue snapshots as the second chart row.
 
+Below the chart grid, show trial-start provenance in one flat bordered surface:
+30-day UTC totals for Direct text, Website, Companion, and Unknown followed by
+a recent-start ledger. Direct text means an inbound iMessage or SMS initiated
+the trial. The ledger may show only the persisted masked phone hint and must
+pair the trial timestamp with the member-record creation date or age so delayed
+activation is visible. Historical rows without event-time provenance stay
+Unknown. Label raw member creation metrics as member records, never as proof of
+an acquisition channel.
+
 ### Measured Biomarker Index
 On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
 band bracketed by warm one-pixel rules. Do not wrap that band in a rounded card
