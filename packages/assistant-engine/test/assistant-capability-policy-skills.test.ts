@@ -53,31 +53,31 @@ describe('assistant capability policy skills', () => {
       'ordinary shared-life logistics task',
     )
     expect(normalized).toContain(
-      'For a hosted group call, first deliver one complete canonical preview, then stop without invoking `murph.create_phone_call`.',
-    )
-    expect(normalized).toContain(
-      'Render exactly these ten lines, with each value encoded as compact JSON',
-    )
-    expect(normalized).toContain(
-      'Only a later inbound message received after that preview was successfully delivered may confirm it.',
-    )
-    expect(normalized).toContain(
-      'The runtime compares the entire delivered preview with this canonical rendering',
-    )
-    expect(normalized).toContain(
-      'Set `message_ref` to that confirming inbound message\'s visible `ain_...` reference.',
-    )
-    expect(normalized).toContain(
-      'If any term or disclosure changes, deliver the complete revised preview and stop again.',
+      'Private and hosted-group calls use the same current-request authority model.',
     )
     expect(normalized).toContain(
       'do not add an extra round trip when the existing private-call gate is already satisfied',
     )
     expect(normalized).toContain(
-      'The current confirmation message must itself explicitly approve any requester name or contact fact used in the call',
+      'never emit a special structured group-call preview merely because the request came from a group',
     )
     expect(normalized).toContain(
-      'One participant\'s acknowledgement never authorizes a different participant\'s identity, account, contact details, or private facts',
+      'the current request may authorize the call in the same provider turn',
+    )
+    expect(normalized).toContain(
+      'Set `message_ref` to that inbound message\'s visible `ain_...` reference.',
+    )
+    expect(normalized).toContain(
+      'It must be the newest accepted request when the runtime starts the call.',
+    )
+    expect(normalized).toContain(
+      'The host reloads the exact message and revalidates the provider sender\'s current room membership and Murph activation',
+    )
+    expect(normalized).toContain(
+      'The current requester must explicitly supply or approve any requester name or contact fact used in the call.',
+    )
+    expect(normalized).toContain(
+      'One participant\'s request never authorizes a different participant\'s identity, account, contact details, health facts, or other private facts.',
     )
     expect(normalized).toContain(
       'For a hosted-group reservation, availability check, or service call',
@@ -90,6 +90,9 @@ describe('assistant capability policy skills', () => {
       'charge, commitment, materially different booking, or failed reservation',
     )
     expect(normalized).toContain(
+      'Do not make a purchase, payment, reservation, or other commitment unless the requester explicitly asked for it and supplied adequate bounds.',
+    )
+    expect(normalized).toContain(
       'This skill never expands the conversation\'s scope boundary or authorizes code production or work, school, or professional operations.',
     )
     expect(normalized).toContain('room-visible logistical facts may be used')
@@ -100,7 +103,7 @@ describe('assistant capability policy skills', () => {
     expect(normalized).toContain('Set `callerName`')
     expect(normalized).toContain('call-relevant, disclosable facts approved by the requester')
     expect(normalized).toContain(
-      'A requester name or contact fact may be disclosed only when the destination requires it and the current confirmation message explicitly supplies or approves it again',
+      'A requester name or contact fact may be disclosed only when the destination requires it and the current request explicitly supplies or approves it',
     )
     expect(normalized).toContain(
       'never infer or disclose another participant\'s private identity, account, contact, or health facts',
@@ -109,6 +112,8 @@ describe('assistant capability policy skills', () => {
     expect(normalized).toContain('Set `allowTransferToUser: true`')
     expect(normalized).toContain('Set it to `false` for information-only calls')
     expect(normalized).toContain('Never call emergency services')
+    expect(normalized).not.toContain('GROUP CALL PREVIEW')
+    expect(normalized).not.toContain('Render exactly these ten lines')
 
     for (const status of ['starting', 'calling', 'failed'] as const) {
       expect(skill).toContain(`\`${status}\``)
