@@ -115,7 +115,13 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // transcript, and Linq delivery paths without adding a forbidden boot input.
 // Linux CI measured an 8,540,082B static closure on 2026-08-05; retain the
 // established allowance above that reviewed measurement.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_186_925 + 32_768;
+//
+// The runtime-owned idle checkpoint floor now lives in a boot-safe
+// hosted-execution leaf export so the Worker can share the default without
+// importing the full runtime-control contract. macOS assembly measured
+// 10,273,389B total on 2026-08-06; retain the established allowance above that
+// reviewed measurement.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_273_389 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_699_250;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_540_082;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
