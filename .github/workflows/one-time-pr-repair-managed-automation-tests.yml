@@ -1,0 +1,64 @@
+name: One-time PR repair managed automation tests
+
+on:
+  pull_request:
+    types:
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+        with:
+          run_install: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Run the checked-in one-time repair
+        shell: pwsh
+        run: |
+          $workflow = (Get-Content '.github/workflows/one-time-repair-managed-automation-tests.yml' -Raw).Replace("`r`n", "`n")
+          $startMarker = "          @'`n"
+          $endMarker = "`n          '@ | python -"
+          $start = $workflow.IndexOf($startMarker)
+          if ($start -lt 0) { throw 'Repair script start marker not found.' }
+          $start += $startMarker.Length
+          $end = $workflow.IndexOf($endMarker, $start)
+          if ($end -lt 0) { throw 'Repair script end marker not found.' }
+          $script = $workflow.Substring($start, $end - $start)
+          $script = [regex]::Replace($script, '(?m)^ {10}', '')
+          Set-Content -Path repair-managed-automation-tests.py -Value $script -NoNewline
+          python repair-managed-automation-tests.py
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify managed automation extraction
+        run: >-
+          pnpm --dir packages/assistant-engine exec vitest run
+          --config vitest.config.ts --no-coverage
+          test/managed-automation-skill-assets.test.ts
+          test/managed-automations-core.test.ts
+          test/managed-automations.test.ts
+          test/assistant-skill-assets.test.ts
+      - name: Typecheck assistant engine
+        run: pnpm --dir packages/assistant-engine typecheck
+      - name: Commit repaired tests
+        shell: pwsh
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packages/assistant-engine/test/managed-automations.test.ts
+          git diff --cached --check
+          git commit -m 'Update managed automation tests for private skill policy'
+          git push origin "HEAD:$env:GITHUB_HEAD_REF"
