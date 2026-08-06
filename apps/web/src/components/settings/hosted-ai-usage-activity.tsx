@@ -30,11 +30,11 @@ export function HostedAiUsageActivity(props: {
       data-hosted-ai-usage-activity
     >
       <section aria-label="Referrals">
-        <div className="flex min-h-14 items-center justify-between gap-4 py-3">
+        <div className="flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
           <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
             Referrals
           </h3>
-          <div className="flex items-center gap-4">
+          <div className="ml-auto flex items-center gap-4">
             <HostedSignupReferralLinkButton />
             {canStartMissions && props.missionContactOption ? (
               <MurphContactLink
@@ -127,7 +127,7 @@ function MissionRow(props: {
 
   return (
     <li className="py-5">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-5 sm:gap-8">
+      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-8">
         <div className="min-w-0">
           <h4 className="text-balance font-serif text-xl font-semibold leading-snug tracking-tight text-foreground">
             {mission.title}
@@ -159,7 +159,7 @@ function MissionRow(props: {
             </div>
           </details>
         </div>
-        <div className="text-right">
+        <div className="text-left sm:text-right">
           <div className="font-serif text-2xl font-semibold leading-none tabular-nums text-foreground">
             {mission.rewardLabel}
           </div>
@@ -181,7 +181,7 @@ function HistoryRow(props: {
 }) {
   return (
     <li className="py-3.5">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-5 sm:gap-8">
+      <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-8">
         <div className="min-w-0">
           <h4 className="text-balance text-sm font-medium leading-snug text-foreground">
             {props.title}
@@ -196,7 +196,7 @@ function HistoryRow(props: {
             <span>{props.secondaryMeta}</span>
           </p>
         </div>
-        <div className="text-right">
+        <div className="text-left sm:text-right">
           <div className="font-serif text-lg font-semibold tabular-nums text-foreground">
             {props.amountLabel}
           </div>
