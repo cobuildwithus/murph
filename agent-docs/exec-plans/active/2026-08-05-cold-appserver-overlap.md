@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-05
-Updated: 2026-08-05
+Updated: 2026-08-06
 
 ## Goal
 
@@ -93,3 +93,23 @@ Updated: 2026-08-05
   requires bootstrap metadata and durable input staging before the callback;
   existing regressions retain system-only, email-first, active-turn, failure
   fallback, and snapshot-cancellation exclusions.
+- The preliminary specialist finding requesting production-faithful process
+  ownership coverage was accepted. A hosted-local Linq scenario now queues
+  activation without waking, lets the inbound webhook own the only cold
+  processing ensure, and checks terminal delivery plus the real App Server
+  `preinitialized` timing trace with `node-process-first-use` cold authority.
+  The trace and the cold restore plus two-item initial import must share the
+  same runtime attempt ID.
+- `pnpm --filter @murphai/cloudflare-runner typecheck` passed after the
+  hosted-local coverage addition.
+- `pnpm hosted-local e2e linq-first-contact` was blocked before scenario start
+  by the pre-existing runner entrypoint bundle ratchet: the assembled output
+  measured 10,273,354 bytes against the checked-in 10,219,693-byte budget.
+  This patch adds only test/test-support code outside the runner bundle, and
+  the production source diff deletes three lines, so the coverage scenario
+  remains direct proof pending resolution of that unrelated bundle baseline.
+- The sanctioned prepared-artifact reuse lane,
+  `pnpm hosted-local e2e linq-first-contact --no-bundle`, also stopped before
+  scenario start because the local Docker API was unavailable while preparing
+  the pinned runner base image. No bundle budget or runtime invariant was
+  bypassed.

@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  listHostedRuntimeLogsForTest,
   readHostedMailboxItemForTest,
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
@@ -61,6 +62,7 @@ import {
 } from "./helpers/hosted-local-linq-support.js";
 
 const userId = `member_local_linq_first_contact_${Date.now()}`;
+const coldOverlapUserId = `member_local_linq_cold_overlap_${Date.now()}`;
 const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
 const richLinkLostAckUserId = `member_local_linq_link_lost_ack_${Date.now()}`;
 const richLinkRetryRecoveryUserId = `member_local_linq_link_retry_recovery_${Date.now()}`;
@@ -80,6 +82,7 @@ const checkpointReplayReplyText = "Yes - I can help with that.";
 const progressToolAttemptText = "Checking the current iMessage thread now.";
 const progressToolFinalReplyText = "I checked that and can keep helping from here.";
 const typingLoopReplyText = "I saw that and can help from here.";
+const coldOverlapReplyText = "I can help you get started from here.";
 const richLinkLostAckUrl = "https://example.test/continue/lost-ack";
 const richLinkRetryRecoveryUrl = "https://example.test/continue/recovered";
 const richLinkFallbackUrl = "https://example.test/continue/fallback";
@@ -181,6 +184,126 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       },
       to: [buildLinqRecipientPhoneNumber(userId)],
     });
+  }, 300_000);
+
+  it("claims cold App Server preparation after bootstrap in the same Linq execution", async () => {
+    const chatId = `chat_local_linq_cold_overlap_${Date.now()}`;
+    const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
+    const inboundText = "Can you help me get started?";
+    const eventId = `evt_linq_cold_overlap_${coldOverlapUserId}`;
+    const replyMatcher = (request: ObservedLinqRequest): boolean =>
+      requireLinqStub().readObservedMessageText(request) === coldOverlapReplyText;
+
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone: buildLinqHomePhoneNumber(coldOverlapUserId),
+      memberId: coldOverlapUserId,
+      memberPhone: buildLinqRecipientPhoneNumber(coldOverlapUserId),
+    });
+    await requireScenario().bindActiveHostedLinqHomeChat({
+      chatId,
+      memberId: coldOverlapUserId,
+      recipientPhone: buildLinqRecipientPhoneNumber(coldOverlapUserId),
+    });
+
+    // Appending activation without waking leaves the cold workspace bootstrap
+    // and the webhook's eligible conversation for one production runtime
+    // execution. The inbound webhook below owns the only processing ensure.
+    await requireScenario().enqueueWake(
+      buildActivationWake(coldOverlapUserId),
+      coldOverlapUserId,
+    );
+    const providerRequestBaseline = countAssistantProviderResponsesApiRequests();
+    const acceptedReplyBaseline = requireLinqStub().countAcceptedSends(
+      replyPath,
+      replyMatcher,
+    );
+    requireScenario().queueAssistantResponses([coldOverlapReplyText], {
+      matchInputContains: inboundText,
+    });
+
+    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      coldOverlapUserId,
+      chatId,
+      {
+        eventId,
+        messageId: `msg_${eventId}`,
+        text: inboundText,
+      },
+    ));
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    await requireScenario().waitForLatestPendingWake(coldOverlapUserId);
+    const completionPromise = requireScenario().waitForHostedCompletion(
+      coldOverlapUserId,
+    );
+    const acceptedReplies = await requireLinqStub().waitForMatchingAcceptedSendCount({
+      expectedCount: acceptedReplyBaseline + 1,
+      expectedPath: replyPath,
+      matchRequest: replyMatcher,
+      scenario: requireScenario(),
+      userId: coldOverlapUserId,
+    });
+    expect(acceptedReplies.at(-1)?.authorizationStatus).toBe("hosted-sentinel");
+
+    const finalStatus = await completionPromise;
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(countAssistantProviderResponsesApiRequests()).toBe(
+      providerRequestBaseline + 1,
+    );
+    await expect(readHostedMailboxItemForTest({
+      dedupeKey: eventId,
+      environment: requireScenario().runtimeEnv,
+      userId: coldOverlapUserId,
+    })).resolves.toMatchObject({
+      consumedAt: expect.any(String),
+    });
+
+    const runtimeLogs = await listHostedRuntimeLogsForTest({
+      environment: requireScenario().runtimeEnv,
+      limit: 500,
+      userId: coldOverlapUserId,
+    });
+    expect(runtimeLogs.length).toBeLessThan(500);
+    const appServerInitializationLogs = runtimeLogs.filter((entry) =>
+      entry.eventCode === "assistant.automation_detail"
+      && entry.redactedJson?.providerTraceKind === "codex.app_server_timing"
+      && (
+        entry.redactedJson.codexTimingStage === "initialized"
+        || entry.redactedJson.codexTimingStage === "preinitialized"
+      )
+    );
+    expect(appServerInitializationLogs).toHaveLength(1);
+    const runtimeAttemptId = appServerInitializationLogs[0]?.attemptId;
+    expect(runtimeAttemptId).toEqual(expect.any(String));
+    expect(appServerInitializationLogs[0]?.redactedJson).toMatchObject({
+      codexTimingColdStartReason: "node-process-first-use",
+      codexTimingStage: "preinitialized",
+    });
+    expect(runtimeLogs).toContainEqual(expect.objectContaining({
+      attemptId: runtimeAttemptId,
+      component: "runtime",
+      redactedJson: expect.objectContaining({
+        restoreWasCold: true,
+        runtimePhase: "workspace.restore",
+        runtimePhaseStatus: "done",
+      }),
+    }));
+    expect(runtimeLogs).toContainEqual(expect.objectContaining({
+      attemptId: runtimeAttemptId,
+      component: "runtime",
+      redactedJson: expect.objectContaining({
+        bootstrapPending: false,
+        fetchedCount: 2,
+        importedCount: 2,
+        runtimePhase: "mailbox.import.initial",
+        runtimePhaseStatus: "done",
+      }),
+    }));
   }, 300_000);
 
   it("sends a Linq reply after a later inbound Linq message", async () => {
@@ -1630,6 +1753,7 @@ async function restartLinqScenario(
 function buildLinqFirstContactLocalInboundAllowlist(): string {
   return [
     directReplyUserId,
+    coldOverlapUserId,
     richLinkLostAckUserId,
     richLinkRetryRecoveryUserId,
     richLinkFallbackUserId,
