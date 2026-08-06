@@ -222,11 +222,11 @@ monitor.
 Defaulted worker vars:
 
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
-- `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=90000` for the runtime-owned idle
+- `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=60000` for the runtime-owned idle
   window before a dirty invocation checkpoints and returns; production rejects
-  lower values so routine checkpoints cannot bypass the 90-second quiet floor.
+  lower values so routine checkpoints cannot bypass the 60-second quiet floor.
   Accepted start/wake owner rechecks use this value plus the runner commit
-  timeout and a 5-second margin, so default production rechecks move to 140
+  timeout and a 5-second margin, so default production rechecks move to 110
   seconds.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=1200000` for the post-completion
   conversation warm lease (code default is `300000` when unset)
