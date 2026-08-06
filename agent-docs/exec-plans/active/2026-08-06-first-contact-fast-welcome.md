@@ -6,25 +6,27 @@ Updated: 2026-08-06
 
 ## Goal
 
-- Remove the mandatory onboarding-skill and resume-context action round trip
-  from a provably fresh private Linq turn whose entire accepted message is a
-  bare greeting, so Murph can send the existing exact welcome several seconds
-  sooner without weakening ordinary health, safety, resumed-onboarding, or
-  delivery behavior.
+- Reduce the first fresh onboarding turn's provider latency by turning the
+  56-KB Murph onboarding skill into a compact progressive-disclosure router:
+  keep the exact welcome, resume, immediate-need, and early-stage rules in the
+  top-level skill, and load deeper stage references only when relevant. Preserve
+  the skill as the single policy owner and keep reply/delivery behavior intact.
 
 ## Success criteria
 
-- A narrow engine-owned proof identifies only a new private Linq session with
-  open onboarding, no prior conversation turn/history, and a strict bare
-  greeting.
-- That exact branch receives the canonical existing Murph welcome in prompt
-  context and may answer directly without reading the onboarding skill or
-  running onboarding resume-context.
-- A greeting plus any health/safety/request content, an established or resumed
-  conversation, every non-Linq channel, and every unproven state retain the
-  full onboarding skill and tool path.
-- Prompt-layer, turn-planning, and production-shaped hosted-local regressions
-  prove both the fast branch and the fail-closed counterexamples.
+- The top-level onboarding skill remains a complete router and is held to a
+  bounded size target while retaining the exact welcome, minimal identity,
+  resume check, immediate-need rule, relationship promise, and an explicit
+  stage-to-reference routing table.
+- Aspiration/foundation/delegation, return/launch/completion, and scheduled
+  recovery/persistence policy move to directly referenced files without losing
+  or duplicating any current invariant.
+- A fresh greeting needs only the compact router plus the existing bounded
+  resume snapshot; substantive health/safety requests and later/resumed stages
+  load the owning reference and retain full behavior.
+- Asset integrity and prompt/runtime regressions prove every reference ships,
+  all former invariants remain present exactly once, and terminal Linq delivery
+  remains one reply.
 - Focused tests, package typecheck, prompt/product/coverage specialist review,
   and exact-head CI pass. The candidate remains unmerged and undeployed per the
   user's explicit instruction.
@@ -32,30 +34,30 @@ Updated: 2026-08-06
 ## Scope
 
 - In scope:
-  - assistant turn planning and prompt assembly for fresh private Linq turns;
-  - reuse of the existing canonical onboarding welcome copy;
-  - strict greeting recognition owned by assistant-engine;
-  - prompt, planning, and hosted-local direct proof;
+  - the package-owned `murph-onboarding` skill and stage references;
+  - skill packaging, invariant, prompt, and hosted-local direct proof;
   - matching onboarding product/protocol documentation.
 - Out of scope:
   - deterministic delivery outside the assistant outbox;
   - changing the admission classifier schema or persisted admission records;
   - signup/enrollment/runtime wake ordering;
-  - health/safety intent classification;
-  - other channels, resumed onboarding, later turns, merge, or deployment.
+  - changing onboarding policy, copy, lifecycle, state, or canonical owners;
+  - merge or deployment.
 
 ## Constraints
 
 - Technical constraints:
-  - derive eligibility from existing authoritative turn/session/context facts;
+  - preserve the existing top-level skill entrypoint and packaging contract;
     add no persisted onboarding step or parallel state owner;
+  - references must be directly reachable from the top-level router and ship in
+    the same assistant-engine skill asset;
   - preserve the ordinary provider request, assistant outbox, route, receipt,
     retry, and idempotency owners;
-  - fail closed to the full skill path whenever proof is incomplete.
+  - preserve every existing onboarding instruction with no semantic weakening.
 - Product/process constraints:
   - preserve the exact onboarding welcome and its easy reply question;
-  - never fast-path a message containing a health concern, request, attachment,
-    or additional semantic content;
+  - immediate health/safety needs, resumed context, persistence, completion,
+    and scheduled recovery must still route to their full owning policy;
   - follow iMessage deliverability guidance and keep the user-initiated reply
     conversational, link-free, and non-acquisitional;
   - prompt-primary work uses the worktree/PR lane, preliminary combined
@@ -63,48 +65,47 @@ Updated: 2026-08-06
 
 ## Risks and mitigations
 
-1. Risk: A greeting prefix such as `hi, I have chest pain` is mistaken for a
-   bare greeting and bypasses urgent handling.
-   Mitigation: Normalize only bounded whitespace/punctuation and require the
-   whole accepted text to match a tiny allowlist; counterexample tests retain
-   the full skill path.
-2. Risk: A resumed or prior conversation receives the introductory welcome
-   again.
-   Mitigation: Require authoritative new-session/zero-prior-turn evidence in
-   addition to open onboarding and private Linq route; absence or ambiguity
-   disables the exception.
-3. Risk: Prompt instructions conflict and the model still performs the skill
-   read, or skips it beyond the narrow branch.
-   Mitigation: Express one explicit branch in the onboarding overlay, snapshot
-   both prompt variants, and prove the hosted-local greeting turn emits text
-   without a command/tool action while counterexamples retain the mandate.
-4. Risk: Copy or routing changes create a second delivery owner.
-   Mitigation: Reuse the current exact welcome inside ordinary assistant
-   generation and outbox delivery; add no direct Web/Linq send path.
+1. Risk: A moved rule becomes undiscoverable and a later onboarding stage
+   silently skips an invariant.
+   Mitigation: Put an explicit stage routing table in the top-level skill and
+   add asset tests that require every former invariant and every referenced
+   path exactly once.
+2. Risk: The router becomes another policy summary that drifts from references.
+   Mitigation: Keep only cross-stage routing and early-stage rules at the top;
+   each detailed rule has one owning file, and tests reject duplicate ownership.
+3. Risk: Model tool use does not improve because it reads every reference up
+   front.
+   Mitigation: Tell the model to read only the reference for the current stage,
+   enforce a top-level byte ceiling, and use provider-shaped evals to verify the
+   fresh greeting reads no later-stage reference.
+4. Risk: Packaging omits nested reference files from hosted runners.
+   Mitigation: extend the canonical assistant skill asset/packaging test and
+   inspect the assembled package path before accepting the candidate.
 
 ## Tasks
 
-1. Trace the authoritative first-turn/session facts and current onboarding
-   prompt assembly, then record the smallest eligibility proof.
-2. Add red prompt/planning counterexamples for exact greeting, semantic suffix,
-   prior history, non-Linq route, and closed onboarding.
-3. Implement the narrow eligibility proof and onboarding-overlay exception
-   using the existing welcome copy.
+1. Inventory every top-level onboarding rule and assign one owning router or
+   stage-reference location without changing meaning.
+2. Add red asset/size/routing tests for the compact top-level skill and nested
+   references.
+3. Split the skill into the smallest coherent stage references and add the
+   explicit read-only-current-stage router.
 4. Add production-shaped hosted-local proof when the existing harness exposes
-   the required action/text trace without new production state.
-5. Measure prompt token/byte impact, update durable onboarding documentation,
+   the required skill/action trace without new production state.
+5. Measure skill/prompt byte impact, update durable onboarding documentation,
    run focused verification, and open the unmerged PR.
 6. Run the combined preliminary product/prompt/coverage review and applicable
    final gate, resolve accepted findings, and leave the verified PR undeployed.
 
 ## Decisions
 
-- Prefer a prompt exception over a deterministic delivery shortcut: production
-  traces show a 5.72-second median first-output-to-text gap caused by the action
-  round trip, while ordinary assistant/outbox ownership is already correct.
-- Keep the exception greeting-only. A deterministic welcome for broader vague
-  intent would require another classifier/state owner and is not justified by
-  the current evidence.
+- Prefer progressive disclosure over a system-prompt exception or deterministic
+  Web reply. Production traces prove the 56,295-byte full-skill read and
+  re-inference own most of the 5.72-second median first-output-to-text gap;
+  compact routing removes irrelevant context while preserving one policy and
+  the ordinary assistant/outbox path.
+- Keep deterministic or prompt-bypass welcome handling out of this candidate;
+  either would duplicate policy or broaden accepted-input terminal semantics.
 
 ## Verification
 
@@ -114,6 +115,6 @@ Updated: 2026-08-06
   - assistant-engine and affected package typechecks;
   - docs drift, `git diff --check`, exact-head CI, and required ReviewGPT passes.
 - Expected outcomes:
-  - exact bare greeting receives the fast-welcome prompt contract;
-  - all ambiguous or substantive inputs retain mandatory skill/resume behavior;
+  - fresh greeting reads the compact router and no later-stage reference;
+  - substantive, resumed, and later-stage inputs load the required owner;
   - no delivery, provider, tool, schema, persisted-state, or channel regression.
