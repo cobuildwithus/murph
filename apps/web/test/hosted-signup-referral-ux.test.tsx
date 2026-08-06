@@ -114,4 +114,30 @@ describe("hosted signup referral UX", () => {
     );
     expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
+
+  it("keeps invalid claim origins as hard authorization failures", async () => {
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementationOnce(() => {
+      throw hostedOnboardingError({
+        code: "HOSTED_ONBOARDING_ORIGIN_MISMATCH",
+        httpStatus: 403,
+        message: "Hosted browser mutation origin is not allowed.",
+      });
+    });
+    const route = await import("../app/r/[referralCode]/claim/route");
+    const response = await route.POST(
+      new Request(
+        "https://www.withmurph.ai/r/stable_referral/claim",
+        {
+          headers: { Origin: "https://attacker.example" },
+          method: "POST",
+        },
+      ),
+      {
+        params: Promise.resolve({ referralCode: "stable_referral" }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.claimHostedSignupReferralLink).not.toHaveBeenCalled();
+  });
 });
