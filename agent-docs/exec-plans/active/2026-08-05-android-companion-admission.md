@@ -3,7 +3,7 @@
 Status: active
 Owner: Codex
 Started: 2026-08-05
-Updated: 2026-08-05
+Updated: 2026-08-06
 
 ## Goal
 
@@ -62,20 +62,26 @@ No public device-sync ingress or Junction boundary is reachable.
       control-plane documentation.
 - [x] Run focused tests and typecheck, then inspect the complete diff for
       privacy and scope.
+- [x] Resolve final-review findings by closing the public native recovery
+      vocabulary, exercising the real member owner through the route, and
+      removing the accidental iOS-only build-spec change.
 - [ ] Complete required exact-head review and CI after parent integration.
 
 ## Verification
 
-- Focused hosted Web proof: 2 files and 12 tests pass for the route contract,
-  validation order, auth/consent/access propagation, and historical-consent
-  boundary.
+- Focused hosted Web proof: 3 files and 33 tests pass for the route contract,
+  validation order, normalized recovery outcomes, the real identity/member/
+  consent/trial/access owner path, zero device ingress, and the historical
+  consent boundary.
 - Full `@murphai/device-syncd` package proof: 44 files and 881 tests pass,
-  including the static provider-runtime import-graph guard.
+  including the static provider-runtime import-graph guard, on the initial
+  candidate head. The focused four-test static boundary also passes.
 - Hosted Web typecheck passes.
-- Touched Web TypeScript paths pass the app-owned ESLint configuration; the
-  device-syncd boundary test sits outside that app lint root and is covered by
-  its full package suite.
-- Broad exact-head review and CI remain owned by the eventual PR lane.
+- Touched Web TypeScript paths pass the app-owned ESLint configuration; docs
+  drift, diff, and privacy scans also pass.
+- Final ReviewGPT round 1 found the incomplete Android recovery vocabulary and
+  accidental iOS-only build-spec scope. Both are accepted and corrected;
+  corrected-head round 2 and exact-head CI remain pending.
 
 ## Rollout
 

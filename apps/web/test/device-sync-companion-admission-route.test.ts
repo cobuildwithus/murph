@@ -71,6 +71,7 @@ describe("POST /api/device-sync/companion/admission", () => {
     mocks.requireHostedCompanionMemberIdFromRequest.mockResolvedValue(
       "member_native",
     );
+    vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
@@ -181,6 +182,16 @@ describe("POST /api/device-sync/companion/admission", () => {
       message: "Active hosted access is required to continue.",
       status: 403,
     },
+    {
+      code: "HOSTED_MEMBER_SUSPENDED",
+      message: "This account is suspended.",
+      status: 403,
+    },
+    {
+      code: "PRIVY_USER_MISMATCH",
+      message: "Use the existing account to continue.",
+      status: 409,
+    },
   ])("returns $code without crossing into device sync", async ({ code, message, status }) => {
     mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
       hostedOnboardingError({
@@ -195,6 +206,135 @@ describe("POST /api/device-sync/companion/admission", () => {
     expect(response.status).toBe(status);
     await expect(response.json()).resolves.toMatchObject({
       error: { code },
+    });
+    expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "PRIVY_ACCOUNT_REQUIRED",
+    "PRIVY_AUTH_FAILED",
+  ])("maps %s to the public login recovery", async (code) => {
+    mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code,
+        httpStatus: 401,
+        message: "Request a fresh code and try again.",
+      }),
+    );
+
+    const response = await route.POST(request());
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "AUTH_REQUIRED",
+        message: "Sign in to continue.",
+      },
+    });
+    expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "HOSTED_AUTO_PULSE_TRIAL_BLOCKED",
+    "HOSTED_AUTO_PULSE_TRIAL_DISABLED",
+    "HOSTED_PULSE_TRIAL_ALREADY_REDEEMED",
+  ])("maps %s to the public access recovery", async (code) => {
+    mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code,
+        httpStatus: 409,
+        message: "Internal trial state is not directly actionable here.",
+      }),
+    );
+
+    const response = await route.POST(request());
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_ACCESS_REQUIRED",
+        message: "Active hosted access is required to continue.",
+      },
+    });
+    expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+  });
+
+  it("preserves account conflicts for alternate-sign-in recovery", async () => {
+    mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "PRIVY_IDENTITY_CONFLICT",
+        httpStatus: 409,
+        message: "Use the existing typed recovery.",
+      }),
+    );
+
+    const response = await route.POST(request());
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "PRIVY_IDENTITY_CONFLICT",
+        retryable: false,
+      },
+    });
+    expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+  });
+
+  it("collapses retryable owner failures to one stable retry recovery", async () => {
+    mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_AUTO_PULSE_TRIAL_STRIPE_UNAVAILABLE",
+        httpStatus: 503,
+        message: "Stripe is temporarily unavailable.",
+        retryable: true,
+      }),
+    );
+
+    const response = await route.POST(request());
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "COMPANION_ADMISSION_RETRYABLE",
+        retryable: true,
+      },
+    });
+    expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+  });
+
+  it("collapses every remaining terminal owner failure to support recovery", async () => {
+    mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
+        httpStatus: 409,
+        message: "Internal routing setup is incomplete.",
+      }),
+    );
+
+    const response = await route.POST(request());
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "COMPANION_ADMISSION_SUPPORT_REQUIRED",
+        retryable: false,
+      },
+    });
+    expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+  });
+
+  it("leaves unexpected non-domain failures on the common internal-error path", async () => {
+    mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
+      new Error("unexpected owner failure"),
+    );
+
+    const response = await route.POST(request());
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "INTERNAL_ERROR",
+      },
     });
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
   });

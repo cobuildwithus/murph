@@ -150,12 +150,6 @@ Launch
 Login screen
   └─ phone → privy.sms.sendCode(to:) → privy.sms.loginWithCode(_:sentTo:)
   └─ email → equivalent email OTP flow
-Account admission (after login, before any health connection flow)
-  └─ app sends only optional local IANA time zone to
-     POST /api/device-sync/companion/admission
-  └─ backend resolves canonical member, historical consent, trial, and access
-     through the existing hosted member owner, then returns { "ok": true }
-  └─ no Junction SDK sign-in, account ensure, or device connection is reachable
 Token exchange (on demand, immediately before SDK exchange; retry = new token)
   └─ app sends Privy auth token to Murph web API
   └─ backend verifies Privy identity (@privy-io/node, already a dependency)
@@ -260,17 +254,10 @@ Apple HealthKit with an explicit unverified WHOOP-metadata hint. Therefore:
 
 ## Backend Work
 
-Five small endpoints in `apps/web`, all authenticated via Privy token
+Four small endpoints in `apps/web`, all authenticated via Privy token
 verification (existing `@privy-io/node`):
 
-1. `POST /api/device-sync/companion/admission`
-   — accept a closed, 256-byte-bounded object containing only an optional valid
-   IANA `timeZone`; resolve the canonical hosted member through the existing
-   historical launch-consent, untouched-member Pulse trial, and active-access
-   owner; and return only `{ "ok": true }`. The complete request is validated
-   before member mutation. This route neither imports device-sync public
-   ingress nor creates, resumes, or reactivates a Junction connection.
-2. `POST /api/device-sync/companion/sign-in-token`
+1. `POST /api/device-sync/companion/sign-in-token`
    — resolve member → apply lifecycle intent against durable connection state →
    resume the established Junction user or conditionally establish the first
    one through the existing `junction-client` → `POST
@@ -297,14 +284,14 @@ verification (existing `@privy-io/node`):
    is also deferred: the hosted app has no rate-limiting layer for
    authenticated routes today and this change does not invent one; the
    existing Privy verification is the auth boundary.
-3. `GET /api/device-sync/companion/status`
+2. `GET /api/device-sync/companion/status`
    — last data receipt overall and per resource (sleep / workouts / heart
    rate / respiratory), sourced from the existing pipeline, plus server
    `observedAt` for the snapshot. Native clients use that server clock for
    setup age, receipt freshness, and relative-time copy; a fresh connection
    requires a receipt that strictly advances the receipt observed immediately
    before the explicit connect. This is what the Connect screen renders.
-4. `POST /api/device-sync/companion/health-metadata`
+3. `POST /api/device-sync/companion/health-metadata`
    — accepts schema version 1 with 1–200 records, exact lower-case SHA-256
    record identities, required non-negative safe-integer sync versions, and
    only `recovery_score` / `workout_strain`. It
@@ -330,7 +317,7 @@ Cloudflare/device-syncd and Vercel/web changes through their normal backend
 release paths, verify both, and release the iOS app last. After the iOS release,
 keep both backend surfaces on feature-aware versions while supported clients
 can upload companion metadata.
-5. `POST /api/device-sync/companion/hrv-rmssd`
+4. `POST /api/device-sync/companion/hrv-rmssd`
    — accept only the strict, sub-512-byte
    `murph.companion.overnight-prv-rmssd.v1` summary. After explicit enrollment,
    the phone continuously subscribes to the WHOOP 5/MG pulse-interval stream

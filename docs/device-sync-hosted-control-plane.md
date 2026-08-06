@@ -169,9 +169,15 @@ Native account admission is separate from both band enrollment and hosted
 device lifecycle authority. `POST /api/device-sync/companion/admission`
 accepts only an optional validated IANA time zone, reuses the canonical hosted
 member consent/trial/access owner, and returns only `{ "ok": true }`. Its
-static dependency graph is kept outside device-sync public ingress, so account
-admission cannot create, resume, reactivate, or otherwise mutate a Junction
-connection.
+public Android recovery boundary preserves the stable login, consent, access,
+suspension, and alternate-sign-in identity-conflict outcomes. All other
+retryable owner failures normalize to `COMPANION_ADMISSION_RETRYABLE`; all
+remaining terminal setup failures normalize to
+`COMPANION_ADMISSION_SUPPORT_REQUIRED`. The client may retry only the former
+and must stop automatic admission attempts on the latter, while internal
+hosted lifecycle codes remain private. The route's static dependency graph is
+kept outside device-sync public ingress, so account admission cannot create,
+resume, reactivate, or otherwise mutate a Junction connection.
 
 ### Cloudflare execution state
 

@@ -148,13 +148,19 @@ before status, token exchange, or any health setup:
 
 1. `POST /api/device-sync/companion/admission` with the Privy identity bearer
    and only the optional device-local IANA `timeZone`.
-2. On typed `AUTH_REQUIRED`, discard the stale authentication state and return
-   to login. On typed `HOSTED_CONSENT_REQUIRED`, use the existing bearer-only
-   `GET` and `POST /api/device-sync/companion/legal-consent` boundary to render
-   and record the required launch grants, then retry admission. On typed
-   `HOSTED_ACCESS_REQUIRED`, enter the existing billing/activation access
-   recovery instead of falling through to health setup. Typed
-   `HOSTED_MEMBER_SUSPENDED` enters support recovery, not an access bypass.
+2. The route normalizes a rejected non-empty Privy bearer to `AUTH_REQUIRED`;
+   discard that stale authentication state and return to login. Preserve typed
+   `PRIVY_USER_MISMATCH` and `PRIVY_IDENTITY_CONFLICT` for the existing safe
+   alternate-sign-in recovery. On typed `HOSTED_CONSENT_REQUIRED`, use the
+   existing bearer-only legal-consent `GET` and `POST` boundary to render and
+   record the required launch grants, then retry admission. On typed
+   `HOSTED_ACCESS_REQUIRED`—including normalized unavailable, blocked, or
+   already-used automatic-trial outcomes—enter the existing billing/activation
+   access recovery instead of falling through to health setup. Typed
+   `HOSTED_MEMBER_SUSPENDED` enters suspended-account support recovery.
+   `COMPANION_ADMISSION_RETRYABLE` keeps the account gate visible with an
+   explicit retry, while `COMPANION_ADMISSION_SUPPORT_REQUIRED` enters support
+   without repeating a terminal request.
 3. Advance only when the admission response is exactly `{ "ok": true }`.
    Transport failures, malformed success bodies, unrecognized typed errors,
    and failed recovery remain on the account gate.
