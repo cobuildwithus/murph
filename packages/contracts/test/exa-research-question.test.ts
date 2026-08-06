@@ -71,6 +71,7 @@ describe("focused public Exa research questions", () => {
   it.each([
     "What should I do about my LDL 181 mg/dL?",
     "What does this mean for me at 27 years old?",
+    "I experienced insomnia; what does the research show?",
     "Review the research for patient id member_123.",
     "Email person@example.test with the latest evidence.",
     "Use Bearer secret-token to research sleep.",
