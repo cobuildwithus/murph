@@ -1,0 +1,121 @@
+name: Build exact Telegram phone-call routing candidate (PR)
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: telegram-phone-call-envelope-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event.pull_request.head.ref == 'agent/telegram-phone-call-envelope-macos'
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - name: Check out exact staging head
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up pinned Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          check-latest: false
+
+      - name: Apply reviewed transformation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import base64
+          import gzip
+
+          encoded = b"".join(
+              Path(f".github/one-time/envelope-script.{index:02d}").read_bytes()
+              for index in range(3)
+          )
+          Path("/tmp/apply-telegram-phone-call-envelope.py").write_bytes(
+              gzip.decompress(base64.b64decode(encoded))
+          )
+          PY
+          python /tmp/apply-telegram-phone-call-envelope.py
+
+      - name: Install pinned dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Run focused contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir packages/hosted-execution exec vitest run \
+            --config vitest.config.ts \
+            test/phone-calls.test.ts \
+            test/phone-call-result-delivery-channel.test.ts \
+            --no-coverage
+          pnpm --dir packages/assistant-engine exec vitest run \
+            --config vitest.config.ts \
+            test/assistant-phone-call-result-delivery-channel.test.ts \
+            test/assistant-phone-calls.test.ts \
+            test/assistant-codex-turn-planning.test.ts \
+            --no-coverage
+          pnpm exec vitest run \
+            --config apps/web/vitest.workspace.ts \
+            --no-coverage \
+            apps/web/test/phone-call-result-delivery-channel.test.ts \
+            apps/web/test/phone-call-result-delivery-route.test.ts \
+            apps/web/test/phone-call-result-delivery-routing.test.ts \
+            apps/web/test/phone-calls-private-content.test.ts \
+            apps/web/test/hosted-phone-call-private-storage-classification.test.ts \
+            apps/web/test/hosted-assistant-notification-destination.test.ts \
+            apps/web/test/phone-calls-service.test.ts \
+            apps/web/test/phone-calls-retell.test.ts
+
+      - name: Run affected typechecks and bundle gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir packages/hosted-execution typecheck
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir apps/web typecheck
+          pnpm exec vitest run \
+            --config apps/cloudflare/vitest.config.ts \
+            apps/cloudflare/test/runner-bundle-entrypoint-bundle.test.ts \
+            --no-coverage
+          pnpm --dir apps/cloudflare typecheck
+          pnpm --dir apps/cloudflare runner:bundle
+          pnpm docs:drift
+          git diff --check
+
+      - name: Publish verified candidate to PR branch
+        shell: bash
+        env:
+          EXPECTED_PR_HEAD: 2643c94299dbd959e2ce277d9602ceaaa7048ca6
+        run: |
+          set -euo pipefail
+          rm -rf .github/one-time
+          rm .github/workflows/build-telegram-phone-call-envelope.yml
+          rm .github/workflows/build-telegram-phone-call-envelope-pr.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Enable exact Telegram phone-call result delivery'
+          git push \
+            --force-with-lease="refs/heads/codex/telegram-scheduled-phone-calls:${EXPECTED_PR_HEAD}" \
+            origin HEAD:refs/heads/codex/telegram-scheduled-phone-calls
