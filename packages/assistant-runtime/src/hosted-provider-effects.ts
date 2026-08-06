@@ -5,6 +5,7 @@ import {
   setLinqMessageReaction,
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-runtime";
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import type {
   AssistantMessageReaction,
   AssistantVaultFileResponseMedia,
@@ -335,9 +336,29 @@ async function sendHostedProviderLinqMessageDirect(
       : {}),
     ...(context.loadVaultFile ? { loadVaultFile: context.loadVaultFile } : {}),
     ...(context.loadVaultImage ? { loadVaultImage: context.loadVaultImage } : {}),
+    onAppCardFallbackError: emitHostedLinqAppCardFallbackError,
     ...(context.persistAppCardTextFallback
       ? { persistAppCardTextFallback: context.persistAppCardTextFallback }
       : {}),
+  });
+}
+
+function emitHostedLinqAppCardFallbackError(input: {
+  error: unknown;
+  reason: "app_card_rejected" | "capability_check_failed";
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "assistant-delivery",
+    details: {
+      eventType: "assistant.delivery.linq_app_card_fallback_error",
+      fallbackKind: "text",
+      linqAppCardFallbackReason: input.reason,
+      providerKind: "linq",
+    },
+    error: input.error,
+    level: "warn",
+    message: "Hosted Linq iMessage app-card delivery recovered with text after an error.",
+    phase: "outbox",
   });
 }
 

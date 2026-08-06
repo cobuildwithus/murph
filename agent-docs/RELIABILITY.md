@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-05
+Last verified: 2026-08-06
 
 ## Current Guardrails
 
@@ -22,9 +22,12 @@ Last verified: 2026-08-05
   binding while updating only accepted-message and idempotency context. Native
   reply and reaction authorization rechecks the accepted event against the same
   thread binding, so deleting the duplicate does not remove those tools or
-  change the provider contract. Transport ambiguity, timeouts, rate
-  limits, and server failures remain failed delivery attempts and must not
-  start a second send.
+  change the provider contract. Transport ambiguity, timeouts, rate limits,
+  and server failures remain failed delivery attempts and must not start a
+  second send. A caught capability-check failure or definitive
+  app-card rejection emits one sanitized hosted warning before the existing
+  text transition; an ordinary `available: false` result remains expected
+  fallback rather than an error.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
 - Health-data withdrawal commits its revocation boundary, then waits for the

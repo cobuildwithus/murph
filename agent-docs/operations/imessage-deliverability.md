@@ -1,6 +1,6 @@
 # iMessage Deliverability and Reply Safety
 
-Last verified: 2026-08-04
+Last verified: 2026-08-06
 
 ## Purpose
 
@@ -74,6 +74,13 @@ message, reaction capability, and idempotency inputs, but they must retain the
 turn's thread binding and must not recreate an explicit-target override.
 Exact-message reply and reaction authorization rechecks the accepted input
 against that same thread binding.
+
+A capability-check exception and a definitive app-card rejection each emit one
+sanitized hosted warning before text recovery. A successful
+`available: false` capability result remains an expected fallback rather than
+an error. Diagnostics identify only the bounded failure class and safe provider
+error metadata; they do not record card values, message bodies, recipient or
+thread identifiers, delivery keys, credentials, or provider response text.
 
 ## Implementation checklist
 

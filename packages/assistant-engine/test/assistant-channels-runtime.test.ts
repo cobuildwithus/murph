@@ -1618,6 +1618,7 @@ describe('assistant channels runtime seam', () => {
   })
 
   it('falls back to deterministic ordinary text when Linq card capability is unavailable', async () => {
+    const onAppCardFallbackError = vi.fn()
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
     runtimeMocks.sendLinqChatMessage.mockResolvedValue({
       message: { id: 'fallback-message-1' },
@@ -1634,12 +1635,12 @@ describe('assistant channels runtime seam', () => {
       threadIsDirect: true,
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
+      onAppCardFallbackError,
       persistAppCardTextFallback,
     })).resolves.toMatchObject({ providerMessageId: 'fallback-message-1' })
 
-    runtimeMocks.checkLinqIMessageCapability.mockRejectedValueOnce(
-      new Error('capability unavailable'),
-    )
+    const capabilityError = new Error('capability unavailable')
+    runtimeMocks.checkLinqIMessageCapability.mockRejectedValueOnce(capabilityError)
     await expect(sendLinqMessage({
       card: NUTRITION_CARD,
       directRecipientPhoneNumber: '+15550001',
@@ -1650,6 +1651,7 @@ describe('assistant channels runtime seam', () => {
       threadIsDirect: true,
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
+      onAppCardFallbackError,
       persistAppCardTextFallback,
     })).resolves.toMatchObject({ providerMessageId: 'fallback-message-1' })
 
@@ -1680,6 +1682,11 @@ describe('assistant channels runtime seam', () => {
     })).resolves.toMatchObject({ providerMessageId: 'fallback-message-1' })
 
     expect(runtimeMocks.checkLinqIMessageCapability).toHaveBeenCalledTimes(2)
+    expect(onAppCardFallbackError).toHaveBeenCalledOnce()
+    expect(onAppCardFallbackError).toHaveBeenCalledWith({
+      error: capabilityError,
+      reason: 'capability_check_failed',
+    })
     expect(runtimeMocks.sendLinqIMessageAppCard).not.toHaveBeenCalled()
     expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledTimes(4)
     expect(persistAppCardTextFallback).toHaveBeenCalledTimes(4)
@@ -1692,9 +1699,10 @@ describe('assistant channels runtime seam', () => {
   })
 
   it('falls back once with a distinct key after a definitive Linq app-card rejection', async () => {
+    const onAppCardFallbackError = vi.fn()
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
     runtimeMocks.checkLinqIMessageCapability.mockResolvedValue(true)
-    runtimeMocks.sendLinqIMessageAppCard.mockRejectedValue(new VaultCliError(
+    const rejectionError = new VaultCliError(
       'LINQ_API_REQUEST_FAILED',
       'Linq rejected the iMessage app card.',
       {
@@ -1706,7 +1714,8 @@ describe('assistant channels runtime seam', () => {
         retryable: false,
         status: 400,
       },
-    ))
+    )
+    runtimeMocks.sendLinqIMessageAppCard.mockRejectedValue(rejectionError)
     runtimeMocks.sendLinqChatMessage.mockResolvedValue({
       message: { id: 'card-text-fallback-1' },
     })
@@ -1721,6 +1730,7 @@ describe('assistant channels runtime seam', () => {
       threadIsDirect: true,
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
+      onAppCardFallbackError,
       persistAppCardTextFallback,
     })).resolves.toEqual({
       idempotencyKey: 'card-definitive-rejection:fallback',
@@ -1733,6 +1743,10 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledTimes(1)
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
       idempotencyKey: 'card-definitive-rejection:fallback',
+    })
+    expect(onAppCardFallbackError).toHaveBeenCalledWith({
+      error: rejectionError,
+      reason: 'app_card_rejected',
     })
     expect(persistAppCardTextFallback.mock.invocationCallOrder[0]).toBeLessThan(
       runtimeMocks.sendLinqChatMessage.mock.invocationCallOrder[0]!,

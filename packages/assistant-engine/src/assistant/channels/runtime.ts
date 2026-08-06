@@ -602,6 +602,10 @@ export async function sendLinqMessage(
       if (dependencies.signal?.aborted) {
         throw error
       }
+      dependencies.onAppCardFallbackError?.({
+        error,
+        reason: 'capability_check_failed',
+      })
     }
     if (capabilityAvailable) {
       try {
@@ -629,6 +633,10 @@ export async function sendLinqMessage(
         ) {
           throw error
         }
+        dependencies.onAppCardFallbackError?.({
+          error,
+          reason: 'app_card_rejected',
+        })
         appCardFallbackIdempotencyKey = `${idempotencyKey}:fallback`
       }
     }

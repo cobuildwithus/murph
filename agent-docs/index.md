@@ -41,8 +41,9 @@ docs.
 Response-card request eligibility, multi-input live-turn invalidation,
 whole-response semantics, delivery ownership, provider-rendered static
 transcript layout with explicit partial labeling, one trusted provider
-reply-thread binding, and bounded offline V3 compact-table fragments are
-specified by
+reply-thread binding, bounded offline V3 compact-table fragments, and
+privacy-safe diagnostics for caught native-card failures before text recovery
+are specified by
 `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`,
 `agent-docs/RELIABILITY.md`, and

@@ -4,6 +4,9 @@ import {
   buildExaResearchScoutRequest,
   MAX_RESEARCH_SCOUT_CANDIDATES,
 } from "@murphai/contracts";
+import {
+  checkLinqIMessageCapability,
+} from "@murphai/operator-config/linq-runtime";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -7102,6 +7105,17 @@ describe("hostedRunnerIntercept", () => {
 
   it.each([
     {
+      body: {
+        address: "+15550000001",
+        from: "+15550000000",
+      },
+      method: "POST",
+      name: "iMessage capability check",
+      operation: "capability_check",
+      path: "/capability/check_imessage",
+      responseBody: JSON.stringify({ available: true }),
+    },
+    {
       name: "phone number probe",
       method: "GET",
       operation: "phone_numbers_list",
@@ -7231,6 +7245,9 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    if ("body" in route) {
+      await expect(forwarded.clone().json()).resolves.toEqual(route.body);
+    }
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
@@ -7239,6 +7256,83 @@ describe("hostedRunnerIntercept", () => {
       }),
     );
   });
+
+  it("carries the real Linq capability client through hosted provider interception", async () => {
+    const upstreamFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({ available: true })
+    );
+    vi.stubGlobal("fetch", upstreamFetch);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const interceptEnv = createInterceptEnv({
+      LINQ_API_TOKEN: "linq-worker-secret",
+      validateRuntimeWriteFence,
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const headers = new Headers(request.headers);
+      for (const [name, value] of Object.entries(BOUND_USER_WRITE_FENCE_HEADERS)) {
+        headers.set(name, value);
+      }
+      return await hostedRunnerIntercept(
+        new Request(request, { headers }),
+        interceptEnv,
+        { containerId: "opaque-container-id" },
+      );
+    });
+
+    await expect(checkLinqIMessageCapability({
+      address: "+15550000001",
+      from: "+15550000000",
+    }, {
+      env: {
+        LINQ_API_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+      },
+      fetchImplementation: providerFetch,
+    })).resolves.toBe(true);
+
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(upstreamFetch);
+    expect(forwarded.url).toBe(
+      "https://api.linqapp.com/api/partner/v3/capability/check_imessage",
+    );
+    expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
+    await expect(forwarded.clone().json()).resolves.toEqual({
+      address: "+15550000001",
+      from: "+15550000000",
+    });
+  });
+
+  it.each(["GET", "DELETE"])(
+    "rejects %s for the Linq iMessage capability route",
+    async (method) => {
+      const upstreamFetch = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+      vi.stubGlobal("fetch", upstreamFetch);
+      const validateRuntimeWriteFence = vi.fn(async () => true);
+
+      const response = await hostedRunnerIntercept(
+        new Request(
+          "https://api.linqapp.com/api/partner/v3/capability/check_imessage",
+          {
+            headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+            method,
+          },
+        ),
+        createInterceptEnv({
+          LINQ_API_TOKEN: "linq-worker-secret",
+          validateRuntimeWriteFence,
+        }),
+        { containerId: "opaque-container-id" },
+      );
+
+      expect(response.status).toBe(403);
+      expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+      expect(upstreamFetch).not.toHaveBeenCalled();
+    },
+  );
 
   it("honors configured Linq base URL pathname prefixes before validating allowed suffixes", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
@@ -7300,6 +7394,23 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(403);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "runner",
+      details: {
+        method: "POST",
+        providerEgressPolicyRejectReason: "operation_not_allowed",
+        providerKind: "linq",
+        providerRequestAuthorized: false,
+        runtimeAuthorityHeadersPresent: true,
+        userIdPresent: true,
+      },
+      level: "warn",
+      message: "Hosted runner Linq provider egress rejected by policy.",
+      phase: "wake.running",
+    });
+    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(serializedLogs).not.toContain("webhook-subscriptions");
+    expect(serializedLogs).not.toContain("target_url");
   });
 
   it.each([
@@ -7527,6 +7638,23 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(403);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "runner",
+      details: {
+        method: "POST",
+        providerEgressPolicyRejectReason: "credential_sentinel_missing",
+        providerKind: "linq",
+        providerOperation: "message_send",
+        providerRequestAuthorized: false,
+        runtimeAuthorityHeadersPresent: true,
+        userIdPresent: true,
+      },
+      level: "warn",
+      message: "Hosted runner Linq provider egress rejected by policy.",
+      phase: "wake.running",
+    });
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain("chat_1");
   });
 
   it("rejects Linq credential injection on a nonconfigured port for the same provider host", async () => {

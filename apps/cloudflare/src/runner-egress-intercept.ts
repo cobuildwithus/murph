@@ -3766,9 +3766,20 @@ async function maybeHandleLinqRequest(input: {
     pathMatch.pathnameSuffix,
   );
   if (!providerOperation) {
+    emitHostedLinqProviderPolicyRejection({
+      request: input.request,
+      reason: "operation_not_allowed",
+      userId: input.userId,
+    });
     return disallowedProviderEgress();
   }
   if (!hasBearerCredentialSentinel(input.request.headers)) {
+    emitHostedLinqProviderPolicyRejection({
+      providerOperation,
+      request: input.request,
+      reason: "credential_sentinel_missing",
+      userId: input.userId,
+    });
     return disallowedProviderEgress();
   }
 
@@ -3975,6 +3986,7 @@ function hasHeaderCredentialSentinel(headers: Headers, name: string): boolean {
 type HostedLinqProviderOperation =
   | "attachment_create"
   | "attachment_read"
+  | "capability_check"
   | "chat_create"
   | "message_delete"
   | "message_send"
@@ -3989,6 +4001,9 @@ function readAllowedLinqOperation(
   method: string,
   pathnameSuffix: string,
 ): HostedLinqProviderOperation | null {
+  if (method === "POST" && pathnameSuffix === "/capability/check_imessage") {
+    return "capability_check";
+  }
   if (method === "GET" && pathnameSuffix === "/phone_numbers") {
     return "phone_numbers_list";
   }
@@ -4023,6 +4038,33 @@ function readAllowedLinqOperation(
     return "message_delete";
   }
   return null;
+}
+
+function emitHostedLinqProviderPolicyRejection(input: {
+  providerOperation?: HostedLinqProviderOperation;
+  request: Request;
+  reason: "credential_sentinel_missing" | "operation_not_allowed";
+  userId: string | null;
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      method: readHostedRunnerDiagnosticMethod(input.request.method),
+      providerEgressPolicyRejectReason: input.reason,
+      providerKind: "linq",
+      providerRequestAuthorized: false,
+      ...(input.providerOperation
+        ? { providerOperation: input.providerOperation }
+        : {}),
+      runtimeAuthorityHeadersPresent: hostedRuntimeAuthorityHeadersPresent(
+        input.request.headers,
+      ),
+      userIdPresent: input.userId !== null,
+    },
+    level: "warn",
+    message: "Hosted runner Linq provider egress rejected by policy.",
+    phase: "wake.running",
+  });
 }
 
 function readTelegramSentinelOperation(pathname: string): string | null {

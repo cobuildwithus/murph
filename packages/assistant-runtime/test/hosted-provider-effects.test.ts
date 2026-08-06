@@ -20,6 +20,7 @@ import {
 describe("hosted provider effects", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
 
@@ -461,6 +462,78 @@ describe("hosted provider effects", () => {
     expect(persistAppCardTextFallback.mock.invocationCallOrder[0]).toBeLessThan(
       fetchMock.mock.invocationCallOrder[1]!,
     );
+  });
+
+  it("logs a sanitized warning when a hosted capability error recovers with text", async () => {
+    vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith("/capability/check_imessage")) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      return new Response(JSON.stringify({
+        message: { id: "fallback-message" },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-08-05",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "hosted-card-capability-error",
+      message: "Nutrition summary",
+      target: "direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      providerMessageId: "fallback-message",
+    });
+
+    expect(warn).toHaveBeenCalledOnce();
+    const logged = JSON.parse(String(warn.mock.calls[0]?.[0])) as {
+      details?: Record<string, unknown>;
+      errorCode?: string;
+      level?: string;
+      message?: string;
+    };
+    expect(logged).toMatchObject({
+      details: {
+        eventType: "assistant.delivery.linq_app_card_fallback_error",
+        fallbackKind: "text",
+        linqAppCardFallbackReason: "capability_check_failed",
+        operation: "check_imessage_capability",
+        provider: "linq",
+        providerKind: "linq",
+        status: 403,
+      },
+      errorCode: "authorization_error",
+      level: "warn",
+    });
+    expect(logged.message).toContain(
+      "Hosted Linq iMessage app-card delivery recovered with text after an error.",
+    );
+    const serializedLog = JSON.stringify(logged);
+    expect(serializedLog).not.toContain("+15550001");
+    expect(serializedLog).not.toContain("direct-chat");
+    expect(serializedLog).not.toContain("hosted-card-capability-error");
+    expect(serializedLog).not.toContain("linq-token");
+    expect(serializedLog).not.toContain("Forbidden");
   });
 
   it("returns the promoted identity after a direct app-card text fallback", async () => {
