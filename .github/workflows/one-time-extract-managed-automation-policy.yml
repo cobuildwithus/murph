@@ -32,11 +32,33 @@ jobs:
           if (end < 0) {
             throw new Error('Repair script end marker not found.')
           }
-          const script = workflow
+          let script = workflow
             .slice(bodyStart, end)
             .split('\n')
             .map((line) => line.startsWith('          ') ? line.slice(10) : line)
             .join('\n')
+          script = script.replace(
+            /stale_phrases = \[[\s\S]*?path\.write_text\(source\)/u,
+            [
+              "if 'On this scheduled weekly run' in source:",
+              "    raise RuntimeError('Stale inline managed-automation prose remains')",
+              '',
+              'expected_counts = {',
+              "    'still remember ten seconds after reading': 1,",
+              "    'Interestingness gate': 2,",
+              "    'Every completed run must leave one compact private decision record': 2,",
+              "    'Hard provenance gate: if the note could have been written': 2,",
+              '}',
+              'for phrase, expected_count in expected_counts.items():',
+              '    count = source.count(phrase)',
+              '    if count != expected_count:',
+              '        raise RuntimeError(',
+              "            f'Expected {expected_count} negative assertions for {phrase!r}, found {count}'",
+              '        )',
+              '',
+              'path.write_text(source)',
+            ].join('\n'),
+          )
           const python = process.platform === 'win32' ? 'python' : 'python3'
           const result = spawnSync(python, ['-c', script], {
             stdio: 'inherit',
