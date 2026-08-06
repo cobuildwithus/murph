@@ -1,6 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-
 const mocks = vi.hoisted(() => ({
   recordHostedProductFeedback: vi.fn(),
   requireHostedCloudflareCallbackJsonRequest: vi.fn(),
