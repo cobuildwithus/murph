@@ -3343,6 +3343,72 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
+  it.each([
+    ['direct', true],
+    ['group', false],
+  ] as const)(
+    'gates phone calls on a canonical scheduled %s turn',
+    async (_scope, threadIsDirect) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        null,
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      const occurrenceAt = '2026-08-05T18:00:00.000Z'
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: [],
+        executionContext: {
+          hosted: {
+            memberId: 'member-scheduled-phone-call',
+            progressDeliveryDependencies: {},
+            providerFetch: null,
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext: {
+          ...createHostedToolContext(),
+          phoneCalls: { start: vi.fn() },
+        },
+        input: {
+          ...createMessageInput(),
+          channel: 'linq',
+          scheduledInvocationAuthority: {
+            automationId: 'automation-scheduled-phone-call',
+            occurrenceAt,
+          },
+          scheduledOccurrenceAt: occurrenceAt,
+          threadIsDirect,
+          turnTrigger: 'automation-cron',
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-05',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({}, {
+          channel: 'linq',
+          effectiveThreadIsDirect: threadIsDirect,
+          threadId: threadIsDirect
+            ? 'linq-direct-thread'
+            : 'linq-group-thread',
+          threadIsDirect,
+        }),
+      })
+
+      expect(plan.dynamicTools.map((tool) => tool.name).includes(
+        'create_phone_call',
+      )).toBe(threadIsDirect)
+    },
+  )
+
   it('withholds group phone calls until a delivered preview precedes the current input', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       null,

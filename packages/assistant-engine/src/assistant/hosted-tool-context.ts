@@ -4,6 +4,7 @@ import type {
 import type {
   HostedRuntimeNewsletterToolResponse,
   HostedRuntimeNewsletterScheduledAuthority,
+  HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
 import {
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
@@ -80,6 +81,11 @@ export interface AssistantHostedUserActionScope
   originSessionId: string
 }
 
+export interface AssistantHostedScheduledPhoneCallScope
+  extends HostedRuntimeScheduledAutomationAuthority {
+  originSessionId: string
+}
+
 export interface AssistantHostedInvocationScope {
   conversationScope: AssistantConversationScope | null
   origin: HostedExecutionAssistantAskOrigin
@@ -149,6 +155,7 @@ export interface AssistantHostedToolContext {
     originAssistantInputId: string
     usageDraft: AssistantProviderUsageDraft
   }): void
+  currentScheduledPhoneCallScope?(): AssistantHostedScheduledPhoneCallScope | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
@@ -246,6 +253,15 @@ export function createAssistantHostedToolContext(input: {
         input.getConversationScope?.() ?? 'unverified-external',
       originSessionId: deliveryContext.session.sessionId,
     }
+  }
+  const readCurrentScheduledPhoneCallScope = () => {
+    const deliveryContext = readDeliveryContext()
+    return resolveAssistantHostedScheduledPhoneCallScope({
+      conversationScope:
+        input.getConversationScope?.() ?? 'unverified-external',
+      messageInput: deliveryContext.messageInput,
+      originSessionId: deliveryContext.session.sessionId,
+    })
   }
   let subscriptionActionClaimed = false
   let imessageContactActionClaimed = false
@@ -428,6 +444,7 @@ export function createAssistantHostedToolContext(input: {
     },
     closeNewsletterCapability: newsletterOutboxTool?.closeCapability,
     recordNewsletterSendResult: input.recordNewsletterSendResult,
+    currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,
     currentUserActionScope: readCurrentUserActionScope,
     currentProductFeedbackAcceptedInputIds: () =>
       input.getProductFeedbackAcceptedInputIds?.() ?? [],
@@ -435,6 +452,31 @@ export function createAssistantHostedToolContext(input: {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
     vaultFileSendAvailable: typeof input.sendVaultFile === 'function',
+  }
+}
+
+export function resolveAssistantHostedScheduledPhoneCallScope(input: {
+  conversationScope: AssistantConversationScope
+  messageInput: Pick<
+    AssistantMessageInput,
+    'scheduledInvocationAuthority' | 'scheduledOccurrenceAt' | 'turnTrigger'
+  >
+  originSessionId: string
+}): AssistantHostedScheduledPhoneCallScope | null {
+  const authority = input.messageInput.scheduledInvocationAuthority ?? null
+  if (
+    input.conversationScope !== 'direct'
+    || input.messageInput.turnTrigger !== 'automation-cron'
+    || authority === null
+    || authority.occurrenceAt !== input.messageInput.scheduledOccurrenceAt
+  ) {
+    return null
+  }
+
+  return {
+    automationId: authority.automationId,
+    occurrenceAt: authority.occurrenceAt,
+    originSessionId: input.originSessionId,
   }
 }
 

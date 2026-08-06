@@ -7,6 +7,7 @@ import type {
 import {
   MURPH_CREATE_PHONE_CALL_TOOL,
   createPhoneCallRequestKey,
+  createScheduledPhoneCallRequestKey,
   resolveAssistantUserActionAcceptedInputIds,
 } from "../src/assistant-codex/dynamic-tools/phone-calls.js";
 import {
@@ -16,7 +17,11 @@ import {
 } from "../src/assistant-codex/dynamic-tools.js";
 import type {
   AssistantHostedToolContext,
+  AssistantHostedScheduledPhoneCallScope,
   AssistantHostedToolRequestKeyScope,
+} from "../src/assistant/hosted-tool-context.js";
+import {
+  resolveAssistantHostedScheduledPhoneCallScope,
 } from "../src/assistant/hosted-tool-context.js";
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
@@ -128,6 +133,41 @@ describe("assistant phone calls", () => {
     })).toEqual(["assistant_input", "manual_input"]);
   });
 
+  it.each([
+    ["exact direct occurrence", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", true],
+    ["group occurrence", "group", "automation-cron", "2026-08-05T18:00:00.000Z", false],
+    ["mismatched occurrence", "direct", "automation-cron", "2026-08-05T18:01:00.000Z", false],
+    ["manual trigger", "direct", "manual-ask", "2026-08-05T18:00:00.000Z", false],
+  ] as const)("grants scheduled phone-call authority only for an %s", (
+    _case,
+    conversationScope,
+    turnTrigger,
+    scheduledOccurrenceAt,
+    expectedAuthorized,
+  ) => {
+    const scope = resolveAssistantHostedScheduledPhoneCallScope({
+      conversationScope,
+      messageInput: {
+        scheduledInvocationAuthority: {
+          automationId: "automation-scheduled-call",
+          occurrenceAt: "2026-08-05T18:00:00.000Z",
+        },
+        scheduledOccurrenceAt,
+        turnTrigger,
+      },
+      originSessionId: "session-scheduled-call",
+    });
+
+    expect(scope !== null).toBe(expectedAuthorized);
+    if (expectedAuthorized) {
+      expect(scope).toEqual({
+        automationId: "automation-scheduled-call",
+        occurrenceAt: "2026-08-05T18:00:00.000Z",
+        originSessionId: "session-scheduled-call",
+      });
+    }
+  });
+
   it("keys calls by accepted input and the exact bounded brief", () => {
     const first = createPhoneCallRequestKey({
       brief: BASE_BRIEF,
@@ -223,6 +263,41 @@ describe("assistant phone calls", () => {
     })).toThrow("accepted user input");
   });
 
+  it("keys scheduled calls by the exact automation occurrence and bounded brief", () => {
+    const scope: AssistantHostedScheduledPhoneCallScope = {
+      automationId: "automation-scheduled-call",
+      occurrenceAt: "2026-08-05T18:00:00.000Z",
+      originSessionId: "session-scheduled-call",
+    };
+    const first = createScheduledPhoneCallRequestKey({
+      brief: BASE_BRIEF,
+      scope,
+    });
+
+    expect(first).toMatch(/^phone_call_[a-f0-9]{64}$/u);
+    expect(createScheduledPhoneCallRequestKey({
+      brief: BASE_BRIEF,
+      scope: {
+        ...scope,
+        originSessionId: "session-scheduled-call-retry",
+      },
+    })).toBe(first);
+    expect(createScheduledPhoneCallRequestKey({
+      brief: BASE_BRIEF,
+      scope: {
+        ...scope,
+        occurrenceAt: "2026-08-05T18:01:00.000Z",
+      },
+    })).not.toBe(first);
+    expect(createScheduledPhoneCallRequestKey({
+      brief: {
+        ...BASE_BRIEF,
+        goal: "Ask about availability without booking.",
+      },
+      scope,
+    })).not.toBe(first);
+  });
+
   it("fails closed when a hidden phone-call request has transport but no execution authority", async () => {
     const start = vi.fn();
     const request = readMurphDynamicToolRequest(dynamicToolCall({
@@ -250,7 +325,7 @@ describe("assistant phone calls", () => {
       success: false,
     });
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "user-sourced input",
+      "user-sourced input or direct scheduled automation authority",
     );
   });
 
@@ -306,6 +381,51 @@ describe("assistant phone calls", () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       "When the call finishes, Murph reports the result back in this conversation if it is worth sharing; you may tell them you will follow up once you hear back.",
     );
+  });
+
+  it("starts a direct scheduled call with deterministic occurrence authority", async () => {
+    const scheduledScope: AssistantHostedScheduledPhoneCallScope = {
+      automationId: "automation-scheduled-call",
+      occurrenceAt: "2026-08-05T18:00:00.000Z",
+      originSessionId: "session-scheduled-call",
+    };
+    const expectedRequestKey = createScheduledPhoneCallRequestKey({
+      brief: BASE_BRIEF,
+      scope: scheduledScope,
+    });
+    const start = vi.fn(async () => ({
+      phoneCallId: "hpc_scheduled",
+      status: "calling" as const,
+    }));
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentScheduledPhoneCallScope: () => scheduledScope,
+        currentUserActionScope: () => null,
+        phoneCalls: { start },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(start).toHaveBeenCalledWith({
+      brief: BASE_BRIEF,
+      originSessionId: "session-scheduled-call",
+      requestKey: expectedRequestKey,
+    }, {
+      signal: null,
+    });
+    expect(result.rpcResult.success).toBe(true);
   });
 
   it("uses the exact accepted group message for requester authority", async () => {
@@ -630,6 +750,7 @@ function dynamicToolCall(input: {
 
 function createHostedToolContext(input: {
   currentGroupPhoneCallPreviewAuthority?: AssistantHostedToolContext["currentGroupPhoneCallPreviewAuthority"];
+  currentScheduledPhoneCallScope?: AssistantHostedToolContext["currentScheduledPhoneCallScope"];
   currentUserActionScope?: AssistantHostedToolContext["currentUserActionScope"];
   phoneCalls?: AssistantHostedToolContext["phoneCalls"];
 }): AssistantHostedToolContext {
@@ -639,6 +760,7 @@ function createHostedToolContext(input: {
     currentHostedMailboxItemIds: () => [],
     currentGroupPhoneCallPreviewAuthority:
       input.currentGroupPhoneCallPreviewAuthority,
+    currentScheduledPhoneCallScope: input.currentScheduledPhoneCallScope,
     currentUserActionScope: input.currentUserActionScope,
     phoneCalls: input.phoneCalls ?? null,
     sendVaultFile: vi.fn(async () => {

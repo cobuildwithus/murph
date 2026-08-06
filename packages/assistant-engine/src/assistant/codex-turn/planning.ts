@@ -75,8 +75,9 @@ import {
   resolveAssistantProductFeedbackAcceptedInputIds,
   type AssistantProgressDelivery,
 } from '../turn-progress.js'
-import type {
-  AssistantHostedToolContext,
+import {
+  resolveAssistantHostedScheduledPhoneCallScope,
+  type AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
 import {
   buildAssistantAskContinuationSystemPromptWithCacheMetadata,
@@ -455,6 +456,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   }
   const privateInteractiveAudience = conversationScope === 'direct'
+  const scheduledPhoneCallScope =
+    resolveAssistantHostedScheduledPhoneCallScope({
+      conversationScope,
+      messageInput: input.input,
+      originSessionId: input.session.sessionId,
+    })
   const hostedGroupRuntime =
     conversationScope === 'group' && input.executionContext?.hosted != null
   const authenticatedGroupChatRuntime =
@@ -888,12 +895,17 @@ export async function resolveAssistantRouteTurnPlan(input: {
           input.hostedToolContext?.physicalNotes != null &&
           input.hostedToolContext?.privateImageUrlPublisher != null,
         phoneCallsAvailable:
+          input.hostedToolContext?.phoneCalls != null &&
           (
-            privateInteractiveAudience
-            || deliveredGroupPhoneCallPreviewAvailable
-          ) &&
-          userActionAcceptedInputIds.length > 0 &&
-          input.hostedToolContext?.phoneCalls != null,
+            scheduledPhoneCallScope !== null ||
+            (
+              (
+                privateInteractiveAudience
+                || deliveredGroupPhoneCallPreviewAvailable
+              ) &&
+              userActionAcceptedInputIds.length > 0
+            )
+          ),
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,

@@ -7,6 +7,7 @@ import {
 } from '@murphai/hosted-execution/phone-calls'
 
 import type {
+  AssistantHostedScheduledPhoneCallScope,
   AssistantHostedToolRequestKeyScope,
 } from '../../assistant/hosted-tool-context.js'
 import type { AssistantConversationScope } from '../../assistant/conversation-policy.js'
@@ -113,6 +114,21 @@ export function createPhoneCallRequestKey(input: {
         : [],
       recipientKey: input.scope.recipientKey,
       schema: 'murph.create-phone-call.request-key.v1',
+    }))
+    .digest('hex')
+  return `phone_call_${digest}`
+}
+
+export function createScheduledPhoneCallRequestKey(input: {
+  brief: HostedPhoneCallBrief
+  scope: AssistantHostedScheduledPhoneCallScope
+}): string {
+  const digest = createHash('sha256')
+    .update(stableJson({
+      automationId: input.scope.automationId,
+      brief: input.brief,
+      occurrenceAt: input.scope.occurrenceAt,
+      schema: 'murph.create-phone-call.scheduled-request-key.v1',
     }))
     .digest('hex')
   return `phone_call_${digest}`

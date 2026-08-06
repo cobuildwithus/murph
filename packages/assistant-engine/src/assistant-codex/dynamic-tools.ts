@@ -49,6 +49,9 @@ import {
   HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from '@murphai/hosted-execution/assistant-model'
+import type {
+  HostedPhoneCallBrief,
+} from '@murphai/hosted-execution/phone-calls'
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
@@ -230,6 +233,7 @@ import {
 } from './dynamic-tools/generate-voice-memo.js'
 import {
   createPhoneCallRequestKey,
+  createScheduledPhoneCallRequestKey,
   MURPH_CREATE_PHONE_CALL_TOOL,
   normalizePhoneCallBriefForConversationScope,
   readPhoneCallDynamicToolRequest,
@@ -3531,28 +3535,52 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
 
-      const requestKeyScope =
+      const userActionScope =
         hostedToolContext.currentUserActionScope?.() ?? null
-      if (!requestKeyScope) {
+      const scheduledScope = userActionScope
+        ? null
+        : hostedToolContext.currentScheduledPhoneCallScope?.() ?? null
+      const phoneCallAuthority = userActionScope
+        ? {
+            originSessionId: userActionScope.originSessionId,
+            requestKey: (brief: HostedPhoneCallBrief) =>
+              createPhoneCallRequestKey({
+                brief,
+                scope: userActionScope,
+              }),
+          }
+        : scheduledScope
+          ? {
+              originSessionId: scheduledScope.originSessionId,
+              requestKey: (brief: HostedPhoneCallBrief) =>
+                createScheduledPhoneCallRequestKey({
+                  brief,
+                  scope: scheduledScope,
+                }),
+            }
+          : null
+      if (!phoneCallAuthority) {
         return toolTextResult(
           false,
-          'phone calling requires user-sourced input for this turn',
+          'phone calling requires user-sourced input or direct scheduled automation authority for this turn',
         )
       }
 
       try {
+        const conversationScope =
+          userActionScope?.conversationScope ?? 'direct'
         const brief = normalizePhoneCallBriefForConversationScope({
           brief: input.request.brief,
-          conversationScope: requestKeyScope.conversationScope,
+          conversationScope,
         })
-        const groupRequester = requestKeyScope.conversationScope === 'group'
+        const groupRequester = conversationScope === 'group'
           ? await authorizeDynamicToolParticipant({
               authorizer: input.authorizeAcceptedMessageTarget ?? null,
               deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
               messageRef: input.request.messageRef ?? '',
             })
           : null
-        if (requestKeyScope.conversationScope === 'group') {
+        if (conversationScope === 'group') {
           const confirmationInputId = input.request.messageRef
           if (!groupRequester) {
             return toolTextResult(
@@ -3577,11 +3605,8 @@ export async function executeMurphDynamicToolRequest(input: {
         const result = await phoneCalls.start({
           brief,
           ...(groupRequester ? { groupRequester } : {}),
-          originSessionId: requestKeyScope.originSessionId,
-          requestKey: createPhoneCallRequestKey({
-            brief,
-            scope: requestKeyScope,
-          }),
+          originSessionId: phoneCallAuthority.originSessionId,
+          requestKey: phoneCallAuthority.requestKey(brief),
         }, {
           signal: input.abortSignal ?? null,
         })
