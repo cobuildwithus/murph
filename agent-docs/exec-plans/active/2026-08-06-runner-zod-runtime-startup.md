@@ -70,6 +70,20 @@ Updated: 2026-08-06
 5. [ ] Complete exact-head CI, ReviewGPT gates, parent final review, plan
    closure, and PR handoff.
 
+## Round 2 retrospective
+
+- The original requirement remains one bounded Contracts-owned Zod surface,
+  with Gateway Core as the sole acyclic exception.
+- The first remediation used a hand-selected list of remaining consumers and
+  repeated the same incomplete-inventory mechanism by missing one dynamic test
+  import after removing Inbox Services' dependency. A stale local package link
+  could therefore hide the clean-checkout failure.
+- Continue the hard cut because it remains net deletion and adds no owner or
+  compatibility layer. Replace the hand-selected check with an exhaustive
+  workspace import-policy rule covering static, dynamic, and require
+  specifiers. Validate Inbox Services after removing its stale local Zod link
+  so the proof matches a clean dependency graph.
+
 ## Verification log
 
 - Production runner assembly: entry 1,729,632 B; static closure 8,182,922 B;
@@ -133,3 +147,16 @@ Updated: 2026-08-06
   focused test files (42 tests), workspace-boundary verification, package-cycle
   verification, and production runner assembly. The corrected assembly retains
   the same 1,729,632 B entry, 8,182,922 B static closure, and 9,862,735 B total.
+- Final ReviewGPT round 2 found one Inbox Services test that dynamically
+  imported undeclared root Zod after the package dependency was removed. The
+  accepted finding repeated the first remediation's incomplete hand-selected
+  inventory mechanism, so the requirement-level retrospective above explicitly
+  continues the simpler single-owner hard cut and replaces that inventory with
+  an exhaustive workspace import-policy rule.
+- The missed test now uses the Contracts runtime. The new policy checks static
+  imports, dynamic imports, and `require` specifiers across governed workspace
+  source and tests, allowing direct Zod only in Contracts and Gateway Core's
+  narrow `zod/v4` adapter. Its 35 policy tests, workspace boundaries, and package
+  cycles pass. After deleting the stale Inbox Services Zod link and rerunning a
+  frozen install, the link stayed absent and the package typecheck plus all ten
+  focused tests passed.
