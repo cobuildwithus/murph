@@ -107,6 +107,7 @@ const ONBOARDING_POLICY_PATHS = [
 const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
   fresh_greeting: [ONBOARDING_POLICY_PATHS[0][1]],
   generic_records_vague_opener: [ONBOARDING_POLICY_PATHS[0][1]],
+  immediate_need_first_resume: [ONBOARDING_POLICY_PATHS[0][1]],
   later_stage_resume: [
     ONBOARDING_POLICY_PATHS[0][1],
     ONBOARDING_POLICY_PATHS[3][1],
@@ -258,10 +259,32 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           'fresh greeting resume-context evidence',
         ).toHaveLength(1)
 
+        const immediateNeedFirst = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          excludeResumeTurns: true,
+          prompt: [
+            'Earlier I asked about a meal and you helped with that first.',
+            'We never did your intro or the getting-to-know-me questions.',
+            "I'm ready to continue now.",
+          ].join(' '),
+          scenario: 'immediate_need_first_resume',
+        })
+        expect(
+          immediateNeedFirst.policyFiles,
+          'immediate-need-first recovery policy reads',
+        ).toEqual(['SKILL.md'])
+        expect(
+          readSuccessfulOnboardingResumeContexts(immediateNeedFirst.actions),
+          'immediate-need-first resume-context evidence',
+        ).toHaveLength(1)
+        expect(immediateNeedFirst.finalMessage.trim()).toBe(
+          ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+        )
+
         const minimalIdentity = await executeRealCodexOnboardingProbe({
           ...turnInput,
           prompt: 'Yeah',
-          resumeSessionId: fresh.sessionId,
+          resumeSessionId: immediateNeedFirst.sessionId,
           scenario: 'minimal_identity_prompt',
         })
         expect(
@@ -389,6 +412,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         ])
         expect(later.finalMessage.trim(), 'later resume choice').toMatch(
           /(?:sleep|what (?:i|murph) can do|capabilit)[\s\S]*\?/iu,
+        )
+        expect(later.finalMessage, 'no aged-out root-step replay').not.toMatch(
+          /what should i call you|ready to get started|everything you share stays private/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths(temporaryPaths)

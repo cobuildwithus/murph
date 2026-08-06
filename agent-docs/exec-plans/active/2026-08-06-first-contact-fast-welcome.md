@@ -109,10 +109,10 @@ Updated: 2026-08-06
 
 ## Implementation evidence
 
-- The current top-level skill is 11,543 bytes, down from 56,295 bytes: the
-  fresh policy read is 44,752 bytes (79.5%) smaller and remains below the
-  executable 12-KiB ceiling. The complete four-file asset is 61,552 bytes; its
-  5,257-byte growth preserves explicit routing and every later-stage policy
+- The current top-level skill is 11,892 bytes, down from 56,295 bytes: the
+  fresh policy read is 44,403 bytes (78.9%) smaller and remains below the
+  executable 12-KiB ceiling. The complete four-file asset is 61,901 bytes; its
+  5,606-byte growth preserves explicit routing and every later-stage policy
   rather than deleting behavior.
 - The three directly referenced owners are
   `aspiration-foundation-delegation.md`,
@@ -137,9 +137,11 @@ Updated: 2026-08-06
   aspiration. Exact-current fixtures also distinguish a fully populated
   ordinary snapshot with no onboarding referent from a resumed flow missing a
   progress signal and from a foundation-complete resume that still lacks
-  minimal identity. Every scenario rejects unrelated explicit asset reads and
-  broad, wildcard, or recursive skill reads. The newly added exact-current
-  boundaries are deterministic/gated proof only because the current provider
+  minimal identity. It also models affirmative immediate-need-first omission
+  and an established later resume whose early root steps are no longer visible.
+  Every scenario rejects unrelated explicit asset reads and broad, wildcard,
+  or recursive skill reads. The newly added exact-current boundaries are gated
+  probe definitions, not executed model proof, because the current provider
   retry stopped before its first action.
 - Live evaluation exposed and corrected three real routing defects: continuing
   minimal-identity answers could omit persistence, resolved later stages could
@@ -169,19 +171,28 @@ Updated: 2026-08-06
 - Final audit also restored injury history to the owning medical/safety
   checkpoint and its complete synthetic resume evidence so an unresolved
   safety fact cannot qualify a flow for contextual return.
-- A post-round-3 independent audit found that the compact direct-return guard
-  omitted two earlier prerequisites owned by the root. The root now requires
-  the broad/private/context-compounding relationship promise to have been
-  delivered and minimal identity to be known or explicitly skipped; otherwise
-  it stays root-only and recovers the missing prerequisite. A schema-valid
-  missing-identity fixture guards that route without adding a provider request
-  to production.
+- A post-round-3 independent audit correctly identified relationship promise
+  and minimal identity as root-owned prerequisites, but its initial late-resume
+  hard gate was not observable after bounded history aged out. ReviewGPT round
+  4 caught that review-induced regression: the existing resume snapshot has no
+  relationship-delivery or onboarding-step provenance by design. The final
+  rule therefore enforces those prerequisites at the first root-to-aspiration
+  transition while they are visible. An established later-stage resume
+  preserves forward progress unless the current or visible conversation
+  affirmatively says a root step never happened; only that explicit omission
+  stays root-only for recovery. No new state or runtime owner is added.
 - The same audit's proposed per-subfield medical gate was rejected after
   tracing the canonical spec and base monolith. Medical/safety is intentionally
   one optional open checkpoint; its medications, conditions, injury,
   allergy/intolerance, and pregnancy/nursing list defines facts to preserve
   when supplied, not five mandatory disclosures. Explicit deferrals remain
   unresolved under the root's existing rule.
+- Parent product-experience revalidation finds no remaining journey issue. The
+  smallest complete flow is still the compact root plus one bounded resume
+  snapshot, then only the owning reference or one explicitly missing root
+  question. Exact-current actual-model selection remains an evidence gap due
+  to provider quota and is not represented as production, comparative, or SLO
+  proof.
 
 ## Verification
 
@@ -218,9 +229,11 @@ Updated: 2026-08-06
   switch. The routing predicate is corrected; the round-3 retrospective then
   removed the auth switch and its scaffold entirely. The same-thread round-3
   retry passed against `b20fcf7569507950a1bea9b583fbd68ebd33cc5d`, and all
-  required CI was green on that exact head. The subsequent independent
-  relationship/minimal-identity guard is locally proven; its new exact-head CI
-  and final same-thread ReviewGPT remediation round remain pending.
+  required CI was green on that exact head. ReviewGPT round 4 accepted the
+  subsequent relationship/minimal-identity concern but found its first hard
+  gate unobservable after bounded history loss; that finding is accepted and
+  the transition-only/affirmative-omission correction is locally proven. Its
+  final exact-head CI and same-thread ReviewGPT round remain pending.
 - Commands to run:
   - focused assistant-engine turn-planning and model-behavior Vitest files;
   - focused hosted-local Linq first-contact scenario when locally runnable;

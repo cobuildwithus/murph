@@ -2159,10 +2159,13 @@ describe('assistant skill assets', () => {
       'Missing evidence is unresolved unless the visible conversation shows that the user said it was not relevant or explicitly skipped it.',
     )
     expect(root).toContain(
-      'the broad role, private default, and context-compounding relationship promise\nwere delivered; minimal identity is known or explicitly skipped;',
+      'Before the first aspiration read, visible conversation must show that the\nrelationship promise was delivered and bundled minimal identity was answered\nor skipped.',
     )
     expect(root).toContain(
-      'When the relationship promise or minimal identity is still missing, stay in\nthis file and recover only that prerequisite before reading the return owner.',
+      'Once later-stage progression is established, missing early relationship or\nidentity wording in bounded history does not prove omission.',
+    )
+    expect(root).toContain(
+      'Preserve progress\nunless the current message or visible conversation affirmatively says a root\nprerequisite never happened;',
     )
     expect(raw).toContain('## The immediate need wins')
     expect(compact).toContain(

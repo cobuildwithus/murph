@@ -59,12 +59,15 @@ decision:
   persistence reference when completion depends on canonical save, skip, or
   deferral evidence.
 
+Before the first aspiration read, visible conversation must show that the
+relationship promise was delivered and bundled minimal identity was answered
+or skipped. After an immediate need, recover any missing root step before that
+read. Do not apply this transition check to an established later-stage resume.
+
 For routing only, the six foundation areas are data sources, movement, current
 protocols, supplements, medical and safety context, and recent labs. Go
 directly to the return owner only when the `Resume without repeating` evidence
 proves onboarding already began and the reflect-and-park transition occurred;
-the broad role, private default, and context-compounding relationship promise
-were delivered; minimal identity is known or explicitly skipped;
 the open thread is aspiration-ready under its owning rule (for each desired
 change, the outcome is known and its progress signal and reason are known or
 explicitly unknown or declined); any required bounded post-park legacy
@@ -75,8 +78,11 @@ that bounded clarifier, not the return owner. A vague opener—including bare
 records—even a goal plus aspiration readiness and all six areas—do not
 establish onboarding stage. Once the return conditions are established, read
 the return owner rather than rereading aspiration merely to revalidate them.
-When the relationship promise or minimal identity is still missing, stay in
-this file and recover only that prerequisite before reading the return owner.
+Once later-stage progression is established, missing early relationship or
+identity wording in bounded history does not prove omission. Preserve progress
+unless the current message or visible conversation affirmatively says a root
+prerequisite never happened; then stay here and recover that named step before
+reading the return owner.
 
 If one turn genuinely crosses a stage boundary, read each newly relevant owner.
 Do not preload the stage references. Do not read a later-stage reference merely

@@ -72,6 +72,11 @@ privacy, authorization, or provider boundaries.
   literal park wording. Later foundation or contextual-return evidence after a
   saved aspiration establishes that the reflect-and-park transition already
   occurred; existing records without evidence that onboarding began do not.
+- Enforce the relationship promise and bundled minimal identity at the first
+  root-to-aspiration transition while that exchange is visible. After
+  later-stage progression is established, absence of those early messages from
+  bounded history does not prove omission; recover a root step only when the
+  current or visible conversation affirmatively says it never happened.
 - Keep member facts in their existing canonical owners: goals, memory,
   regimens, supplements, conditions, allergies, records, devices, Habitat,
   experiments, automations, and group state. Assistant runtime state is not
