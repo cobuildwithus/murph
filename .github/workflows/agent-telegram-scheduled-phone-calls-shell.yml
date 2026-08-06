@@ -30,7 +30,7 @@ jobs:
           git checkout --detach FETCH_HEAD
           git switch -C "${GITHUB_REF_NAME}"
 
-      - name: Select the pinned Node runtime
+      - name: Install the pinned Node runtime without marketplace actions
         shell: bash
         run: |
           set -euo pipefail
@@ -44,10 +44,28 @@ jobs:
               break
             fi
           done
+          if [ -z "${selected}" ] \
+            && command -v node >/dev/null 2>&1 \
+            && [ "$(node --version)" = "v${desired}" ]; then
+            selected="$(dirname "$(command -v node)")"
+          fi
           if [ -z "${selected}" ]; then
-            echo "::error::Pinned Node ${desired} is not present in the runner toolcache."
-            find /opt/hostedtoolcache/node -maxdepth 3 -type f -name node -print 2>/dev/null || true
-            exit 1
+            case "$(uname -m)" in
+              x86_64) node_arch=x64 ;;
+              aarch64 | arm64) node_arch=arm64 ;;
+              *) echo "::error::Unsupported runner architecture: $(uname -m)"; exit 1 ;;
+            esac
+            archive="node-v${desired}-linux-${node_arch}.tar.xz"
+            base="https://nodejs.org/dist/v${desired}"
+            curl --fail --location --retry 4 --retry-all-errors \
+              "${base}/SHASUMS256.txt" -o /tmp/node-SHASUMS256.txt
+            curl --fail --location --retry 4 --retry-all-errors \
+              "${base}/${archive}" -o "/tmp/${archive}"
+            grep "  ${archive}$" /tmp/node-SHASUMS256.txt \
+              > /tmp/node-SHASUMS256-selected.txt
+            (cd /tmp && sha256sum --check node-SHASUMS256-selected.txt)
+            tar -xJf "/tmp/${archive}" -C /tmp
+            selected="/tmp/node-v${desired}-linux-${node_arch}/bin"
           fi
           echo "${selected}" >> "${GITHUB_PATH}"
           "${selected}/node" --version
