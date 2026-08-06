@@ -7,6 +7,10 @@ import type {
 } from "@prisma/client";
 
 import {
+  HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY,
+  isHostedSignupReferralPolicyVersion,
+} from "../hosted-growth/signup-referral-reward";
+import {
   buildHostedUsageReferralOutstandingWhere,
   buildHostedUsageReferralRewardLabel,
   getHostedUsageReferralPolicyDisplay,
@@ -50,6 +54,7 @@ interface HostedUsageReferralActivityRecord {
   expiresAt: Date;
   id: string;
   policyCode: HostedUsageReferralPolicyCode;
+  policyVersion: string;
   qualifiedAt: Date | null;
   rewardedAt: Date | null;
   status: HostedUsageReferralStatus;
@@ -99,6 +104,7 @@ export async function readHostedAiUsageActivity(input: {
       expiresAt: true,
       id: true,
       policyCode: true,
+      policyVersion: true,
       qualifiedAt: true,
       rewardedAt: true,
       status: true,
@@ -123,6 +129,7 @@ export async function readHostedAiUsageActivity(input: {
           expiresAt: true,
           id: true,
           policyCode: true,
+          policyVersion: true,
           qualifiedAt: true,
           rewardedAt: true,
           status: true,
@@ -163,7 +170,9 @@ function projectHostedUsageMissionActivity(input: {
   now: Date;
   row: HostedUsageReferralActivityRecord;
 }): HostedAiUsageMissionActivityRow {
-  const policy = getHostedUsageReferralPolicyDisplay(input.row.policyCode);
+  const policy = isHostedSignupReferralPolicyVersion(input.row.policyVersion)
+    ? HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY
+    : getHostedUsageReferralPolicyDisplay(input.row.policyCode);
   const status = projectHostedUsageMissionStatus(input.row, input.now);
   const destinationKind = input.row.beneficiaryMemberId === input.memberId
     ? "personal"

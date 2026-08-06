@@ -7,6 +7,9 @@ import {
 } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
 import {
+  admitPendingHostedSignupReferralActivations,
+} from "./signup-referral-reward";
+import {
   reconcileHostedUsageReferralRewardAfterCommit,
 } from "./usage-referral";
 
@@ -23,12 +26,15 @@ export interface HostedUsageReferralRecoveryResult {
 /**
  * Bounded recovery for referrals whose qualifying ingress committed before
  * reward reconciliation, or whose final credit committed before the source
- * celebration reached the durable mailbox.
+ * celebration reached the durable mailbox. Signup-link activations are first
+ * admitted into this same state machine; they do not own another grant path.
  */
 export async function recoverPendingHostedUsageReferrals(input: {
   prisma?: PrismaClient;
 } = {}): Promise<HostedUsageReferralRecoveryResult> {
   const prisma = input.prisma ?? getPrisma();
+  const signupAdmissions =
+    await admitPendingHostedSignupReferralActivations({ prisma });
   const [referrals, unconsumedCelebrations] = await Promise.all([
     prisma.hostedUsageReferral.findMany({
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
@@ -67,7 +73,7 @@ export async function recoverPendingHostedUsageReferrals(input: {
     }),
   ]);
 
-  let failed = 0;
+  let failed = signupAdmissions.failed;
   let pending = 0;
   let queued = 0;
   for (const referral of referrals) {
@@ -125,6 +131,9 @@ export async function recoverPendingHostedUsageReferrals(input: {
     pending,
     queued,
     resignaled: unconsumedCelebrations.length,
-    scanned: referrals.length + unconsumedCelebrations.length,
+    scanned:
+      signupAdmissions.scanned
+      + referrals.length
+      + unconsumedCelebrations.length,
   };
 }
