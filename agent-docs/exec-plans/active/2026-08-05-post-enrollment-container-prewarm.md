@@ -116,8 +116,29 @@ Updated: 2026-08-06
 - A stateful two-attempt regression now models activation committing before the
   continuation returns, then sends the identical raw event again and proves
   one event-id-deduped conversation append plus the ordinary pointer signal.
+- The preliminary specialist review correctly identified that the mocked Web
+  ordering proof did not compose the post-enrollment state with the real local
+  runtime stack. Its literal unknown-number/classifier/Stripe scenario would
+  have required new production test seams outside this ordering change, so the
+  accepted correction instead adds a post-enrollment-equivalent hosted-local
+  layer alongside the existing exact-event Web regression.
+- That hosted-local layer passed its exact isolated run (1 passed, 7 skipped,
+  43.37 seconds). It uses real local Postgres, signed Web ingress, Temporal,
+  Cloudflare Worker/runner, and Linq/provider stubs to prove the direct ensure
+  starts one `default` fence, conversation and deferred-activation signals do
+  not replace it, both mailbox-lane watermarks converge, and exactly one model
+  request and one accepted reply occur. It intentionally does not claim to
+  exercise classifier, Stripe enrollment, continuation creation, or provider
+  crash redelivery; the focused stateful Web regressions own those boundaries.
+- A full-file diagnostic run was noisy from unrelated local MinIO restart and
+  pool-pressure failures. The final changed case was rerun in isolation after
+  correcting its assertion to the canonical system handled-through watermark.
 - The final focused run includes the existing activation/group-join
   continuation owner suite and passes all 240 tests across three files.
 - `pnpm --dir apps/web typecheck` passed.
+- `pnpm --dir apps/cloudflare typecheck` passed after the hosted-local proof.
 - `pnpm docs:drift` and `git diff --check` passed; the scoped diff and privacy
   scan were clean.
+- Final ReviewGPT round 1 passed against the original pushed candidate. The
+  hosted-local remediation still requires an exact-head correction-verification
+  round and refreshed CI before this plan can close.

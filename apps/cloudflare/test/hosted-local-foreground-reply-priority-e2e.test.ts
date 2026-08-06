@@ -73,6 +73,9 @@ import {
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
+  ensureProcessingAfterSyntheticMailboxAppendForTest,
+} from "./helpers/hosted-local-wake.js";
+import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
@@ -119,6 +122,9 @@ const systemMailboxProbe = createProbeIdentity("system-mailbox");
 const retentionProbe = createProbeIdentity("retention");
 const stuckInvocationProbe = createProbeIdentity("stuck-invocation");
 const activeTurnProbe = createProbeIdentity("active-turn");
+const postEnrollmentPrewarmProbe = createProbeIdentity(
+  "post-enrollment-prewarm",
+);
 const interruptedSnapshotOrderingProbe = createProbeIdentity(
   "interrupted-snapshot-ordering",
 );
@@ -158,7 +164,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
           String(productionIdleCheckpointDelayMs),
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
-          allProbeIdentities.map((identity) => identity.memberPhone).join(","),
+          [...allProbeIdentities, postEnrollmentPrewarmProbe]
+            .map((identity) => identity.memberPhone)
+            .join(","),
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: "linq-local-test-token",
         LINQ_WEBHOOK_SECRET: linqWebhookSecret,
@@ -421,6 +429,195 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
 
     writeLatencyProof("active_default", latencyMs);
   }, 180_000);
+
+  it("keeps one live default owner across post-enrollment-equivalent signals", async () => {
+    const identity = postEnrollmentPrewarmProbe;
+    const activationEventId = "member.activated:instant-start";
+    const inboundEventId = `evt_priority_post_enrollment_${runId}`;
+    const inboundText = "Start the first synthetic post-enrollment conversation.";
+    const replyText = "The post-enrollment foreground owner handled both lanes.";
+    const replyPath = replyPathFor(identity);
+    const replyMatcher = matchLinqMessageText(replyText);
+
+    // This full-stack layer begins after enrollment has committed. Focused Web
+    // regressions own unknown-number admission, continuation ordering, and
+    // crash-redelivery recovery; this proves the resulting runtime handoff.
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone: identity.homePhone,
+      memberId: identity.userId,
+      memberPhone: identity.memberPhone,
+    });
+    await requireScenario().bindActiveHostedLinqHomeChat({
+      chatId: identity.chatId,
+      memberId: identity.userId,
+      recipientPhone: identity.memberPhone,
+    });
+    await expect(requireScenario().readHostedLinqWorkspaceIsolationState({
+      chatId: identity.chatId,
+      memberId: identity.userId,
+    })).resolves.toMatchObject({
+      personal: {
+        conversationMailboxCount: 0,
+        homeChatBound: true,
+        pendingChatBound: false,
+        workspaceVersion: null,
+      },
+      thread: null,
+    });
+
+    const activationWake = buildHostedExecutionMemberActivatedWake({
+      eventId: activationEventId,
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      memberId: identity.userId,
+      occurredAt: new Date().toISOString(),
+    });
+    const activationAppend = await appendHostedExecutionWakeForTest({
+      environment: requireScenario().runtimeEnv,
+      wake: activationWake,
+    });
+    expect(activationAppend).toMatchObject({
+      duplicate: false,
+      inserted: true,
+    });
+
+    const prewarm = await ensureProcessingAfterSyntheticMailboxAppendForTest({
+      harness: requireScenario().harness,
+      userId: identity.userId,
+    });
+    expect(prewarm).toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await waitForRuntimeInFlight(
+      identity.userId,
+      "post-enrollment prewarm",
+      "default",
+    );
+    const initialFence = await readActiveRuntimeFenceForTest(identity.userId);
+    expect(initialFence).toMatchObject({
+      processingMode: "default",
+    });
+    if (!initialFence) {
+      throw new Error("Post-enrollment prewarm did not bind a runtime fence.");
+    }
+
+    const providerRequestBaseline = countAssistantProviderInputs(inboundText);
+    const replyBaseline = requireLinqStub().countAcceptedSends(
+      replyPath,
+      replyMatcher,
+    );
+    requireScenario().queueAssistantResponses(
+      [replyText],
+      { matchInputContains: inboundText },
+    );
+    const inboundEvent = buildHostedLinqInboundEvent(
+      identity.userId,
+      identity.chatId,
+      {
+        eventId: inboundEventId,
+        messageId: `msg_priority_post_enrollment_${runId}`,
+        text: inboundText,
+      },
+    );
+    const response = await postSignedLinqWebhook(inboundEvent);
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    const conversationItem = await readHostedMailboxItemForTest({
+      dedupeKey: inboundEventId,
+      environment: requireScenario().runtimeEnv,
+      userId: identity.userId,
+    });
+    expect(conversationItem).toMatchObject({
+      kind: "conversation.message",
+      lane: "conversation",
+    });
+    const fenceAfterConversation = await readActiveRuntimeFenceForTest(
+      identity.userId,
+    );
+    expect(fenceAfterConversation).toEqual(initialFence);
+
+    // Production runs this activation continuation only after the ordinary
+    // conversation signal. Recreate that final handoff while the prewarmed
+    // default owner is still active.
+    await signalHostedMailboxAppendRuntimeForTest({
+      environment: requireScenario().runtimeEnv,
+      expectedUserId: identity.userId,
+      mailboxItemId: activationAppend.wake.id,
+    });
+    expect(await readActiveRuntimeFenceForTest(identity.userId)).toEqual(
+      initialFence,
+    );
+
+    await waitForAssistantProviderInput(inboundText, identity.userId, 60_000);
+    await waitForAcceptedReplyBeforeDeadline({
+      baselineCount: replyBaseline,
+      deadlineAt: Date.now() + promptReplyDeadlineMs,
+      identity,
+      label: "post-enrollment default owner",
+      matcher: replyMatcher,
+      replyPath,
+    });
+    await expect(
+      requireScenario().harness.beginShutdownCheckpointGracefulStopForTest(
+        identity.userId,
+      ),
+    ).resolves.toEqual({ ok: true });
+    const finalStatus = await requireScenario().waitForHostedCompletion(
+      identity.userId,
+      { timeoutMs: 60_000 },
+    );
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(finalStatus.workspace?.redactedStatus).toMatchObject({
+      hostedMailboxSystemHandledThroughSeq: activationAppend.wake.seq,
+      hostedMailboxSystemImportedSeq: activationAppend.wake.seq,
+    });
+
+    await expect(readHostedMailboxItemForTest({
+      dedupeKey: activationEventId,
+      environment: requireScenario().runtimeEnv,
+      userId: identity.userId,
+    })).resolves.toMatchObject({
+      kind: "member.activated",
+      lane: "system",
+    });
+    await expect(readHostedMailboxItemForTest({
+      dedupeKey: inboundEventId,
+      environment: requireScenario().runtimeEnv,
+      userId: identity.userId,
+    })).resolves.toMatchObject({
+      consumedAt: expect.any(String),
+      kind: "conversation.message",
+      lane: "conversation",
+    });
+    await expect(requireScenario().readHostedLinqWorkspaceIsolationState({
+      chatId: identity.chatId,
+      memberId: identity.userId,
+    })).resolves.toMatchObject({
+      personal: {
+        conversationMailboxCount: 1,
+        homeChatBound: true,
+        pendingChatBound: false,
+        workspaceVersion: expect.any(String),
+      },
+      thread: null,
+    });
+    expect(countAssistantProviderInputs(inboundText)).toBe(
+      providerRequestBaseline + 1,
+    );
+    expect(requireLinqStub().countAcceptedSends(replyPath, replyMatcher)).toBe(
+      replyBaseline + 1,
+    );
+
+  }, 600_000);
 
   it("pages one operator incident through the real cron, database, and Resend boundary", async () => {
     const anomalousTrace = await setLatestHostedLinqReplyLatencyForTest({
@@ -1758,6 +1955,13 @@ async function waitForAssistantProviderInput(
     timeoutMs,
     userId,
   });
+}
+
+function countAssistantProviderInputs(expectedText: string): number {
+  return requireScenario().assistantProviderRequests.filter((request) =>
+    request.url === "/v1/responses"
+    && request.body.includes(expectedText)
+  ).length;
 }
 
 async function seedActivatedWorkspaceCheckpoint(userId: string): Promise<void> {
