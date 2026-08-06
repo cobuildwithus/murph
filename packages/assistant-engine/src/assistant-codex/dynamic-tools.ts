@@ -201,6 +201,15 @@ import {
 } from './dynamic-tools/labs.js'
 export { MURPH_LABS_TOOL } from './dynamic-tools/labs.js'
 import {
+  executePendingVaultFilesDynamicTool,
+  MURPH_PENDING_VAULT_FILES_TOOL,
+  readPendingVaultFilesDynamicToolRequest,
+  type PendingVaultFilesDynamicToolRequest,
+} from './dynamic-tools/pending-vault-files.js'
+export {
+  MURPH_PENDING_VAULT_FILES_TOOL,
+} from './dynamic-tools/pending-vault-files.js'
+import {
   executeGroupRoomModelDynamicTool,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   readGroupRoomModelDynamicToolRequest,
@@ -1422,6 +1431,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ASK_GROK_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
+  MURPH_PENDING_VAULT_FILES_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
@@ -1527,6 +1537,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
+    [MURPH_PENDING_VAULT_FILES_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
     [MURPH_SEND_PHYSICAL_NOTE_TOOL, defaultOff((a) => a.physicalNotesAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
@@ -2309,6 +2320,7 @@ export type MurphDynamicToolRequest =
   | AutomationDynamicToolRequest
   | DeviceDynamicToolRequest
   | LabsDynamicToolRequest
+  | PendingVaultFilesDynamicToolRequest
   | GroupRoomModelDynamicToolRequest
   | AssistantStyleDynamicToolRequest
   | {
@@ -2549,6 +2561,14 @@ export function readMurphDynamicToolRequest(
   })
   if (labsRequest) {
     return labsRequest
+  }
+
+  const pendingVaultFilesRequest = readPendingVaultFilesDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (pendingVaultFilesRequest) {
+    return pendingVaultFilesRequest
   }
 
   const groupRoomModelRequest = readGroupRoomModelDynamicToolRequest({
@@ -3060,6 +3080,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid device arguments')
     case 'invalid-labs-arguments':
       return toolTextResult(false, 'invalid labs arguments')
+    case 'invalid-pending-vault-files-arguments':
+      return toolTextResult(false, 'invalid pending vault-file arguments')
     case 'invalid-group-room-model-arguments':
       return toolTextResult(false, 'invalid group room-model arguments')
     case 'invalid-connected-apps-arguments':
@@ -3235,6 +3257,14 @@ export async function executeMurphDynamicToolRequest(input: {
         request: input.request,
       })
     }
+    case 'pending-vault-files-list':
+    case 'pending-vault-files-cancel':
+      return await executePendingVaultFilesDynamicTool({
+        request: input.request,
+        userActionScope:
+          input.hostedToolContext?.currentUserActionScope?.() ?? null,
+        vaultRoot: input.vaultRoot?.trim() || null,
+      })
     case 'assistant-style': {
       const hostedToolContext = input.hostedToolContext ?? null
       return await executeAssistantStyleDynamicTool({

@@ -2942,6 +2942,7 @@ describe('assistant Codex turn planning', () => {
       'create_clinical_records_connect_link',
       'family_plan',
       'labs',
+      'pending_vault_files',
       'plan_usage',
       'send_vault_file',
       'subscription',

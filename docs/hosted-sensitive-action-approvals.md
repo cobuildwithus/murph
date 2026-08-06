@@ -61,6 +61,19 @@ The hosted assistant-configuration tool uses this path for model and reasoning c
 
 The runtime keeps the exact file-and-destination delivery intent in its own outbox as `awaiting_approval`. One active approval cycle owns one parked intent, keyed by the approval ID and cycle expiry, so repeating the same request in another turn reuses that owner. Web never reconstructs the effect from the approval row. A later approval wake names that exact cycle owner and observed approval generation, then only asks the runtime to re-read and dispatch that owner; it cannot select an older same-action owner or unrelated due delivery work. A delayed older-cycle wake cannot apply a refreshed generation. At assistant admission, a due reconciliation wake is selected by both its runtime-control route and its exact pending-effects kind. If re-reading approval produces that named delivery effect, it owns the pass and drains before simultaneously pending foreground chat. If the effect is denied, missing, superseded, or otherwise not deliverable, the runtime records the control receipt and continues the foreground assistant pass; every unrelated system wake remains queued. The normal pre-dispatch consume gate remains the authorization boundary. If Linq re-homes the delivery to a different final provider target, the runtime terminalizes the approved file intent before consumption or provider entry; sending to the new target requires a fresh action and approval. Ordinary text delivery may still use the current-home fallback. Background fallback reconciliation is a separate bounded path.
 
+An explicit current-user cleanup request may list or cancel only generated-file
+intents whose exact origin session matches the trusted current user-action
+scope. Cancellation may compare-and-set an intent from `awaiting_approval` to
+terminal `abandoned`; once delivery preparation or dispatch advances the
+outbox owner, cancellation refuses. The outbox remains the effect owner:
+cancellation adds no approval-row state and does not rewrite the historical
+approval decision, so a delayed approval observation cannot revive an intent
+that cancellation already terminalized. Cancellation does not unlink files.
+The existing quiescent runtime-residue pass remains the sole byte-deletion
+owner and applies its complete inventory and fingerprint contract before the
+next encrypted workspace checkpoint. Canonical and user-owned vault files
+remain outside that cleanup authority.
+
 ## Browser decision flow
 
 1. `/approve/:approvalId` requires the owning member's active hosted app session before showing details.
