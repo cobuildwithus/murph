@@ -7,7 +7,12 @@ import type {
 } from "@prisma/client";
 
 import {
+  HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY,
+  isHostedSignupReferralPolicyVersion,
+} from "../hosted-growth/signup-referral-policy";
+import {
   buildHostedUsageReferralOutstandingWhere,
+  buildHostedUsageReferralRewardLabel,
   getHostedUsageReferralPolicyDisplay,
   isHostedUsageReferralEnabled,
 } from "../hosted-growth/usage-referral";
@@ -49,9 +54,9 @@ interface HostedUsageReferralActivityRecord {
   expiresAt: Date;
   id: string;
   policyCode: HostedUsageReferralPolicyCode;
+  policyVersion: string;
   qualifiedAt: Date | null;
   rewardedAt: Date | null;
-  rewardUsdMicros: bigint;
   status: HostedUsageReferralStatus;
 }
 
@@ -99,9 +104,9 @@ export async function readHostedAiUsageActivity(input: {
       expiresAt: true,
       id: true,
       policyCode: true,
+      policyVersion: true,
       qualifiedAt: true,
       rewardedAt: true,
-      rewardUsdMicros: true,
       status: true,
     },
     take: MAX_USAGE_MISSION_ROWS,
@@ -124,9 +129,9 @@ export async function readHostedAiUsageActivity(input: {
           expiresAt: true,
           id: true,
           policyCode: true,
+          policyVersion: true,
           qualifiedAt: true,
           rewardedAt: true,
-          rewardUsdMicros: true,
           status: true,
         },
         take: remainingMissionRows,
@@ -165,16 +170,24 @@ function projectHostedUsageMissionActivity(input: {
   now: Date;
   row: HostedUsageReferralActivityRecord;
 }): HostedAiUsageMissionActivityRow {
-  const policy = getHostedUsageReferralPolicyDisplay(input.row.policyCode);
+  const policy = isHostedSignupReferralPolicyVersion(input.row.policyVersion)
+    ? HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY
+    : getHostedUsageReferralPolicyDisplay(input.row.policyCode);
   const status = projectHostedUsageMissionStatus(input.row, input.now);
+  const destinationKind = input.row.beneficiaryMemberId === input.memberId
+    ? "personal"
+    : "group";
 
   return {
-    destinationLabel: input.row.beneficiaryMemberId === input.memberId
+    destinationLabel: destinationKind === "personal"
       ? "your Murph"
       : "the group",
     id: input.row.id,
     requirementsLabel: policy.requirementsLabel,
-    rewardLabel: formatUsdMicros(input.row.rewardUsdMicros),
+    rewardLabel: buildHostedUsageReferralRewardLabel({
+      destinationKind,
+      policyCode: input.row.policyCode,
+    }),
     selectedLabel: formatDate(input.row.armedAt),
     status,
     statusLabel: projectHostedUsageMissionStatusLabel(status),
