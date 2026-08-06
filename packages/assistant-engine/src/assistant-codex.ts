@@ -3719,12 +3719,14 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const notifyProviderRequestStarted = (
-    providerStartedAtMonotonicMs = readAssistantProviderStartMonotonicTickMs(),
+    providedStartedAtMonotonicMs?: number,
   ) => {
     if (providerRequestStartedNotified) {
       return
     }
     providerRequestStartedNotified = true
+    const providerStartedAtMonotonicMs = providedStartedAtMonotonicMs
+      ?? readAssistantProviderStartMonotonicTickMs()
     const startedAtMs = Date.now()
     codexProviderRequestStartedAtMs = startedAtMs
     const completedProviderStartCriticalPath =
