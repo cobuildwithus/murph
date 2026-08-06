@@ -21,8 +21,9 @@ Updated: 2026-08-06
   deletion clears and proves stable emptiness in the canonical ENAM bucket.
 - Deploy rendering, preflight, lifecycle application, smoke, hosted-local, and
   shared status contracts describe only the canonical ENAM owner.
-- Migration-only Web controls, tests, live docs, and the active bridge plan are
-  retired while immutable completed plans remain untouched.
+- After the physical buckets are absent, migration-only Web controls, tests,
+  live docs, and the active bridge plan are retired while immutable completed
+  plans remain untouched.
 - Focused checks, exact-head CI, preliminary specialist review, and final
   ReviewGPT complete with no unresolved actionable findings.
 
@@ -30,6 +31,9 @@ Updated: 2026-08-06
 
 - Do not delete either OC bucket until current-owner reconciliation, lifecycle
   repair, a no-OC Worker rollout, and final aggregate inventory all pass.
+- Keep the Web account-deletion maintenance guard live until both OC buckets
+  are physically absent; the protected deploy workflow can consume only public
+  `main`, so the no-OC Worker rollout must precede that final Web cleanup.
 - Preserve durable encrypted-object ownership, direct-R2 signing, lifecycle
   backstops, account deletion, and legacy snapshot restore compatibility.
 - Keep the ENAM deployment cut atomic: `BUNDLES`, the presign bucket name,
@@ -46,8 +50,11 @@ Updated: 2026-08-06
    with no OC runtime or deletion binding.
 4. Run focused verification and inspect the candidate diff for accidental
    identifier or secret leakage.
-5. Commit and push the exact candidate, open the PR, start specialist and final
-   ReviewGPT concurrently with CI, resolve findings, and close this plan.
+5. Commit and push the no-OC Worker candidate with the Web guard retained, run
+   exact-head review and CI, merge and deploy it, then reverify and delete the
+   exact OC buckets.
+6. Remove the now-obsolete Web guard in a post-deletion cleanup PR, complete its
+   focused proof, archive this plan, and retire both task worktrees.
 
 ## Verification log
 
@@ -101,3 +108,8 @@ Updated: 2026-08-06
   contracts. The private deploy workflow passed its typecheck and all seven
   focused workflow checks. Both diffs passed whitespace and secret/identifier
   scans before commit.
+- Deployment-workflow inspection found that protected production deployment
+  always resolves public `main`; it cannot deploy an unmerged public PR head.
+  The Web maintenance guard was therefore restored exactly to the current base
+  for the no-OC rollout. Its two focused route files passed all 12 checks. The
+  guard will be removed only after both old buckets are physically absent.

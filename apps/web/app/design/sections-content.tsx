@@ -17,6 +17,7 @@ import { TogetherSection } from "@/src/components/homepage/together-section";
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
+import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
@@ -304,6 +305,12 @@ export function SectionsContent() {
 
       <StudySection title="Core member plan">
         <GroupMemberPlanStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Account deletion during migration maintenance">
+        <AccountDeletionMaintenanceStudy />
       </StudySection>
 
       <Separator />
