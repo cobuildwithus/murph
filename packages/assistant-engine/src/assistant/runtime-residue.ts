@@ -145,68 +145,49 @@ async function retireQuiescentAssistantExportPacks(input: {
   signal?: AbortSignal | null
   vault: string
 }): Promise<SentAssistantExportPackRetirementResult> {
-  const aggregate = emptySentAssistantExportPackRetirementResult()
-  const completedRefs = new Set<string>()
-
-  while (true) {
-    input.signal?.throwIfAborted()
-    const archives = await withAssistantRuntimeWriteLock(
-      input.vault,
-      async (paths) => {
-        await ensureAssistantState(paths)
-        const outbox = await readAssistantOutboxIntentInventory({
-          directory: paths.outboxDirectory,
-          signal: input.signal,
-          vault: input.vault,
-        })
-        if (!outbox.trusted) {
-          return null
-        }
-        const media = [...collectSentAssistantGeneratedExportArchiveMedia(
-          outbox.records,
-        ).values()]
-          .filter((file) => !completedRefs.has(file.ref))
-          .sort((left, right) => left.ref.localeCompare(right.ref))
-        const resolved: SentAssistantGeneratedExportArchive[] = []
-        for (const file of media) {
-          input.signal?.throwIfAborted()
-          resolved.push({
-            archivePath: await resolveAssistantVaultPath(
-              input.vault,
-              file.ref,
-              'file path',
-            ),
-            file,
-          })
-        }
-        return resolved
-      },
-      input.signal,
-    )
-    if (archives === null) {
-      return { ...aggregate, inventoryTrusted: false }
-    }
-
-    const unit = await retireSentAssistantExportPacks({
-      archives,
-      signal: input.signal,
-      vault: input.vault,
-    })
-    aggregate.bytesPruned += unit.bytesPruned
-    aggregate.packsPruned += unit.packsPruned
-    let progressed = unit.packsPruned > 0
-    for (const archive of unit.completedArchives) {
-      if (completedRefs.has(archive.file.ref)) {
-        continue
+  input.signal?.throwIfAborted()
+  const archives = await withAssistantRuntimeWriteLock(
+    input.vault,
+    async (paths) => {
+      await ensureAssistantState(paths)
+      const outbox = await readAssistantOutboxIntentInventory({
+        directory: paths.outboxDirectory,
+        signal: input.signal,
+        vault: input.vault,
+      })
+      if (!outbox.trusted) {
+        return null
       }
-      completedRefs.add(archive.file.ref)
-      aggregate.completedArchives.push(archive)
-      progressed = true
-    }
-    if (!progressed) {
-      return aggregate
+      const media = [...collectSentAssistantGeneratedExportArchiveMedia(
+        outbox.records,
+      ).values()].sort((left, right) => left.ref.localeCompare(right.ref))
+      const resolved: SentAssistantGeneratedExportArchive[] = []
+      for (const file of media) {
+        input.signal?.throwIfAborted()
+        resolved.push({
+          archivePath: await resolveAssistantVaultPath(
+            input.vault,
+            file.ref,
+            'file path',
+          ),
+          file,
+        })
+      }
+      return resolved
+    },
+    input.signal,
+  )
+  if (archives === null) {
+    return {
+      ...emptySentAssistantExportPackRetirementResult(),
+      inventoryTrusted: false,
     }
   }
+  return await retireSentAssistantExportPacks({
+    archives,
+    signal: input.signal,
+    vault: input.vault,
+  })
 }
 
 function emptySentAssistantExportPackRetirementResult(): SentAssistantExportPackRetirementResult {

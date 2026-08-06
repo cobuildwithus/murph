@@ -39,7 +39,8 @@ const MAX_ASSISTANT_HTTP_BODY_BYTES = 256 * 1024
 export interface CreateAssistantHttpServerInput {
   controlToken: string
   host: string
-  onRequestStarted?: (() => void) | null
+  onAuthenticatedRequestCompleted?: (() => void) | null
+  onAuthenticatedRequestStarted?: (() => void) | null
   port: number
   service: AssistantLocalService
 }
@@ -93,10 +94,8 @@ export async function startAssistantHttpServer(
 export function createAssistantHttpRequestHandler(
   input: CreateAssistantHttpServerInput,
 ): AssistantHttpRequestHandler {
-  return async (request, response) => {
-    input.onRequestStarted?.()
+  return async (request, response) =>
     await handleAssistantRequest(request, response, input)
-  }
 }
 
 async function handleAssistantRequest(
@@ -104,6 +103,7 @@ async function handleAssistantRequest(
   response: ServerResponse,
   input: CreateAssistantHttpServerInput,
 ): Promise<void> {
+  let foregroundAdmitted = false
   try {
     assertAssistantControlRequest({
       headers: request.headers,
@@ -118,6 +118,8 @@ async function handleAssistantRequest(
       sendJson(response, 200, await input.service.health())
       return
     }
+    foregroundAdmitted = true
+    input.onAuthenticatedRequestStarted?.()
     if (method === 'POST' && url.pathname === '/open-conversation') {
       const body = parseOpenConversationRequestBody(await readJsonBody(request))
       sendJson(response, 200, await input.service.openConversation(body))
@@ -201,6 +203,10 @@ async function handleAssistantRequest(
   } catch (error) {
     const statusCode = resolveAssistantHttpErrorStatus(error)
     sendJson(response, statusCode, buildAssistantHttpErrorPayload(error, statusCode))
+  } finally {
+    if (foregroundAdmitted) {
+      input.onAuthenticatedRequestCompleted?.()
+    }
   }
 }
 

@@ -2,6 +2,7 @@
 import { pruneQuiescentAssistantGeneratedDeliveryResidue } from '@murphai/assistant-engine/assistant-runtime-residue'
 import { loadAssistantdEnvironment, loadAssistantdEnvFiles } from './config.js'
 import { startAssistantHttpServer } from './http.js'
+import { createAssistantQuiescentMaintenanceOwner } from './quiescent-maintenance.js'
 import { createAssistantLocalService } from './service.js'
 
 async function main(): Promise<void> {
@@ -9,16 +10,19 @@ async function main(): Promise<void> {
   loadAssistantdEnvFiles()
   const env = loadAssistantdEnvironment()
   const service = createAssistantLocalService(env.vaultRoot)
-  const startupMaintenanceController = new AbortController()
+  const maintenance = createAssistantQuiescentMaintenanceOwner({
+    async run(signal) {
+      await pruneQuiescentAssistantGeneratedDeliveryResidue({
+        signal,
+        vault: env.vaultRoot,
+      })
+    },
+  })
   const handle = await startAssistantHttpServer({
     controlToken: env.controlToken,
     host: env.host,
-    onRequestStarted: () => {
-      startupMaintenanceController.abort(new DOMException(
-        'Assistant request preempted startup maintenance.',
-        'AbortError',
-      ))
-    },
+    onAuthenticatedRequestCompleted: maintenance.foregroundCompleted,
+    onAuthenticatedRequestStarted: maintenance.foregroundStarted,
     port: env.port,
     service,
   })
@@ -35,6 +39,7 @@ async function main(): Promise<void> {
   )
 
   const shutdown = async () => {
+    maintenance.stop()
     await handle.close().catch(() => undefined)
     process.exit(0)
   }
@@ -46,10 +51,7 @@ async function main(): Promise<void> {
     void shutdown()
   })
 
-  await pruneQuiescentAssistantGeneratedDeliveryResidue({
-    signal: startupMaintenanceController.signal,
-    vault: env.vaultRoot,
-  }).catch(() => undefined)
+  maintenance.start()
 }
 
 void main().catch((error) => {

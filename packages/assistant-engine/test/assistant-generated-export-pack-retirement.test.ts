@@ -33,7 +33,6 @@ import {
   pruneAssistantRuntimeResidue,
   pruneQuiescentAssistantGeneratedDeliveryResidue,
 } from '../src/assistant/runtime-residue.ts'
-import { maybeRunAssistantRuntimeMaintenance } from '../src/assistant/runtime-budgets.ts'
 import {
   createAssistantTurnReceipt,
   readAssistantTurnReceipt,
@@ -568,6 +567,59 @@ describe('assistant generated export-pack retirement', () => {
     await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('scans past a deferred archive and retires a later independent ZIP', async () => {
+    const first = await createExportPackDelivery('000-active-archive')
+    const second = await createExportPackDelivery(
+      '999-independent-archive',
+      first.vaultRoot,
+    )
+    const directMedia = await resolveAssistantVaultFileResponseMedia({
+      ref: `${first.packBasePath}/entities.json`,
+      vaultRoot: first.vaultRoot,
+    })
+    const directIntent = await createDirectPackFileIntent({
+      deliveryConfirmationPending: false,
+      media: directMedia,
+      seed: 'deferred-archive',
+      status: 'pending',
+      vaultRoot: first.vaultRoot,
+    })
+    await createDeliveryIntent({
+      media: first.media,
+      status: 'sent',
+      vaultRoot: first.vaultRoot,
+    })
+    await createDeliveryIntent({
+      media: second.media,
+      status: 'sent',
+      vaultRoot: first.vaultRoot,
+    })
+
+    const firstSweep = await pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: first.vaultRoot,
+    })
+    expect(firstSweep.exportPacksPruned).toBe(1)
+    await expect(stat(first.packPath)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    })
+    await expect(stat(first.archivePath)).resolves.toMatchObject({
+      size: first.archive.byteLength,
+    })
+    await expect(stat(second.packPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(second.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    await saveAssistantOutboxIntent(first.vaultRoot, {
+      ...directIntent,
+      status: 'failed',
+      updatedAt: '2026-08-06T18:04:00.000Z',
+    })
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: first.vaultRoot,
+    })).resolves.toMatchObject({ exportPacksPruned: 1 })
+    await expect(stat(first.packPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(first.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it.each([
     { seed: 'approval', status: 'awaiting_approval' as const },
     { seed: 'pending', status: 'pending' as const },
@@ -655,7 +707,7 @@ describe('assistant generated export-pack retirement', () => {
     })
   })
 
-  it('retires more than twenty packs through the existing local maintenance owner', async () => {
+  it('retires more than twenty packs in one interruptible quiescent sweep', async () => {
     const setup = await createMultiExportPackDelivery(21)
     await createDeliveryIntent({
       media: setup.media,
@@ -663,7 +715,9 @@ describe('assistant generated export-pack retirement', () => {
       vaultRoot: setup.vaultRoot,
     })
 
-    await maybeRunAssistantRuntimeMaintenance({ vault: setup.vaultRoot })
+    await pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })
     for (const packPath of setup.packPaths) {
       await expect(stat(packPath)).rejects.toMatchObject({ code: 'ENOENT' })
     }
@@ -688,7 +742,7 @@ describe('assistant generated export-pack retirement', () => {
     await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('retains ZIP proof when stale-candidate scanning exhausts the cumulative unit', async () => {
+  it('scopes inspection budgets per candidate so a stale large pack cannot starve a later exact pack', async () => {
     const payloadBytes = 52 * 1024 * 1024
     const setup = await createMultiExportPackDelivery(2, payloadBytes)
     await createDeliveryIntent({
@@ -705,15 +759,12 @@ describe('assistant generated export-pack retirement', () => {
       vault: setup.vaultRoot,
     })
 
-    expect(result.exportPacksPruned).toBe(0)
-    for (const packPath of setup.packPaths) {
-      await expect(stat(packPath)).resolves.toMatchObject({
-        isDirectory: expect.any(Function),
-      })
-    }
-    await expect(stat(setup.archivePath)).resolves.toMatchObject({
-      size: setup.archive.byteLength,
+    expect(result.exportPacksPruned).toBe(1)
+    await expect(stat(setup.packPaths[0]!)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
     })
+    await expect(stat(setup.packPaths[1]!)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('aborts bounded retirement without losing its archive continuation', async () => {
@@ -754,7 +805,10 @@ describe('assistant generated export-pack retirement', () => {
   })
 })
 
-async function createExportPackDelivery(seed: string): Promise<{
+async function createExportPackDelivery(
+  seed: string,
+  existingVaultRoot?: string,
+): Promise<{
   archive: Buffer
   archivePath: string
   media: AssistantVaultFileResponseMedia
@@ -765,8 +819,12 @@ async function createExportPackDelivery(seed: string): Promise<{
   retirement: Awaited<ReturnType<typeof buildAssistantGeneratedDeliveryRetirement>>
   vaultRoot: string
 }> {
-  const context = await createTempVaultContext(`assistant-export-pack-${seed}-`)
-  tempRoots.push(context.parentRoot)
+  const context = existingVaultRoot
+    ? { parentRoot: null, vaultRoot: existingVaultRoot }
+    : await createTempVaultContext(`assistant-export-pack-${seed}-`)
+  if (context.parentRoot) {
+    tempRoots.push(context.parentRoot)
+  }
   const packId = `pack-${seed}`
   const packBasePath = `exports/packs/${packId}`
   const filePaths = [

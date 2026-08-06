@@ -21,9 +21,14 @@ Updated: 2026-08-06
 - An active direct-file outbox obligation at or beneath a pack defers removal,
   and intent persistence cannot race behind a completed pack deletion.
 - Retirement is bounded and abortable, retains the terminal ZIP while work
-  remains, and converges across archives containing more than twenty packs.
-- Hosted idle cleanup and recurring local maintenance recover sent export-pack
-  work without running optional archive inspection on the serial send path.
+  remains, and visits each archive and pack once per sweep so an earlier
+  deferred item cannot starve later eligible work.
+- Hosted idle cleanup and one ephemeral assistantd maintenance owner recover
+  sent export-pack work without running optional archive inspection on the
+  serial send or request-result paths.
+- Assistantd cleanup is coalesced, starts only after the listener, yields to
+  authenticated foreground requests, and resumes after request completion and
+  outbox drains without persisted cursor state.
 - Existing generated delivery retry, approval, checkpoint, and cleanup
   behavior remains unchanged for other files.
 - Focused proof, exact-head ReviewGPT passes, and required CI complete with no
@@ -81,9 +86,12 @@ Updated: 2026-08-06
 5. [completed] Resolve preliminary ReviewGPT recovery and coverage findings.
 6. [completed] Resolve final ReviewGPT round 1 active-ownership,
    interruptibility, continuation-evidence, and shared-ZIP-owner findings.
-7. [in progress] Resolve final ReviewGPT round 2 archive starvation, local
+7. [completed] Resolve final ReviewGPT round 2 archive starvation, local
    continuation, authority-retention, and complexity findings with one
-   quiescent owner; then push the exact remediation head and complete final
+   quiescent owner.
+8. [in progress] Resolve final ReviewGPT round 3 cross-archive starvation and
+   local-owner findings with a one-snapshot sweep and one coalesced assistantd
+   maintenance task; then push the exact remediation head and complete final
    ReviewGPT plus exact-head CI.
 
 ## Verification
@@ -103,6 +111,7 @@ Updated: 2026-08-06
   ownership, deletion/persistence ordering, 21-pack continuation, and abort
   recovery tests.
 - Focused quiescent-owner proof covers missing and unsafe earlier archives,
-  stale and active earlier pack candidates, multi-unit progress, cumulative
-  inspection limits, terminal-authority retention, and abort recovery.
-- Pending final round 3 ReviewGPT and exact-head CI.
+  stale, over-budget, and active earlier pack candidates, cross-archive
+  progress, terminal-authority retention, authenticated request preemption,
+  outbox-drain recovery, coalescing, shutdown, and abort recovery.
+- Pending final round 4 ReviewGPT and exact-head CI.

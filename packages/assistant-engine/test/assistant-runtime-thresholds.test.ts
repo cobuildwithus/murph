@@ -20,7 +20,6 @@ afterEach(async () => {
   vi.doUnmock('../src/assistant/outbox/store.js')
   vi.doUnmock('../src/assistant/runtime-cache.js')
   vi.doUnmock('../src/assistant/runtime-events.js')
-  vi.doUnmock('../src/assistant/runtime-residue.js')
   vi.doUnmock('../src/assistant/runtime-write-lock.js')
   vi.doUnmock('../src/assistant/state-write-lock.ts')
   vi.doUnmock('../src/assistant/store/paths.ts')
@@ -317,14 +316,6 @@ describe('assistant runtime thresholds', () => {
     })
     vi.doMock('../src/assistant/runtime-events.js', () => ({
       appendAssistantRuntimeEventAtPaths: vi.fn(async () => undefined),
-    }))
-    vi.doMock('../src/assistant/runtime-residue.js', () => ({
-      pruneQuiescentAssistantGeneratedDeliveryResidue: vi.fn(async () => ({
-        bytesPruned: 0,
-        exportPackBytesPruned: 0,
-        exportPacksPruned: 0,
-        filesPruned: 0,
-      })),
     }))
     vi.doMock('../src/assistant/store/persistence.js', () => ({
       ensureAssistantState: vi.fn(async () => undefined),
@@ -959,14 +950,6 @@ function mockRuntimeBudgetDependencies(
   })
   vi.doMock('../src/assistant/runtime-events.js', () => ({
     appendAssistantRuntimeEventAtPaths: vi.fn(async () => undefined),
-  }))
-  vi.doMock('../src/assistant/runtime-residue.js', () => ({
-    pruneQuiescentAssistantGeneratedDeliveryResidue: vi.fn(async () => ({
-      bytesPruned: 0,
-      exportPackBytesPruned: 0,
-      exportPacksPruned: 0,
-      filesPruned: 0,
-    })),
   }))
   vi.doMock('../src/assistant/store/persistence.js', () => ({
     ensureAssistantState: vi.fn(async () => undefined),

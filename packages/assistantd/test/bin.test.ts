@@ -10,14 +10,17 @@ interface TestCleanupInput {
 interface TestServerInput {
   controlToken: string
   host: string
-  onRequestStarted?: (() => void) | null
+  onAuthenticatedRequestCompleted?: (() => void) | null
+  onAuthenticatedRequestStarted?: (() => void) | null
   port: number
   service: unknown
 }
 
 const mocks = vi.hoisted(() => {
   const handleClose = vi.fn(async () => undefined)
+  const cleanupResolutions: Array<() => void> = []
   return {
+    cleanupResolutions,
     createAssistantLocalService: vi.fn(() => ({ kind: 'service' })),
     handleClose,
     loadAssistantdEnvFiles: vi.fn(),
@@ -34,12 +37,14 @@ const mocks = vi.hoisted(() => {
         exportPacksPruned: number
         filesPruned: number
       }>
-    >(async () => ({
+    >(async () => await new Promise((resolve) => {
+      cleanupResolutions.push(() => resolve({
         bytesPruned: 0,
         exportPackBytesPruned: 0,
         exportPacksPruned: 0,
         filesPruned: 0,
-      })),
+      }))
+    })),
     startAssistantHttpServer: vi.fn<
       (input: TestServerInput) => Promise<{
         address: { baseUrl: string; host: string; port: number }
@@ -85,6 +90,7 @@ async function loadAssistantdBin(modulePath: string): Promise<void> {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.resetModules()
+  mocks.cleanupResolutions.splice(0)
   delete process.env[ASSISTANTD_DISABLE_CLIENT_ENV]
 })
 
@@ -128,11 +134,20 @@ test('assistantd bin loads env, starts the server, and announces the bound addre
   assert.equal(serverInput?.host, '127.0.0.1')
   assert.equal(serverInput?.port, 50241)
   assert.deepEqual(serverInput?.service, { kind: 'service' })
-  assert.equal(typeof serverInput?.onRequestStarted, 'function')
+  assert.equal(typeof serverInput?.onAuthenticatedRequestStarted, 'function')
+  assert.equal(typeof serverInput?.onAuthenticatedRequestCompleted, 'function')
   assert.equal(cleanupInput?.signal?.aborted, false)
-  serverInput?.onRequestStarted?.()
+  serverInput?.onAuthenticatedRequestStarted?.()
   assert.equal(cleanupInput?.signal?.aborted, true)
   assert.equal(cleanupInput?.signal?.reason?.name, 'AbortError')
+  serverInput?.onAuthenticatedRequestCompleted?.()
+  mocks.cleanupResolutions[0]?.()
+  await waitForImmediate()
+  await waitForImmediate()
+  const resumedCleanupInput = mocks
+    .pruneQuiescentAssistantGeneratedDeliveryResidue.mock.calls[1]?.[0]
+  assert.ok(resumedCleanupInput?.signal instanceof AbortSignal)
+  assert.equal(resumedCleanupInput?.signal?.aborted, false)
   assert.equal(onceSpy.mock.calls[0]?.[0], 'SIGINT')
   assert.equal(onceSpy.mock.calls[1]?.[0], 'SIGTERM')
 
@@ -156,6 +171,8 @@ test('assistantd bin loads env, starts the server, and announces the bound addre
   mocks.handleClose.mockRejectedValueOnce(new Error('close failed'))
   signalHandlers.get('SIGINT')?.()
   await waitForImmediate()
+  assert.equal(resumedCleanupInput?.signal?.aborted, true)
+  mocks.cleanupResolutions[1]?.()
   signalHandlers.get('SIGTERM')?.()
   await waitForImmediate()
 

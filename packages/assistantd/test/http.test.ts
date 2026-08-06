@@ -785,10 +785,14 @@ test('assistantd http server enforces bearer auth, validates requests, and route
 
   const baseUrl = 'http://127.0.0.1:50241'
   const controlToken = 'secret-token'
+  const onAuthenticatedRequestCompleted = vi.fn()
+  const onAuthenticatedRequestStarted = vi.fn()
   const fetch = createAssistantdTestFetch(
     createAssistantHttpRequestHandler({
       controlToken,
       host: '127.0.0.1',
+      onAuthenticatedRequestCompleted,
+      onAuthenticatedRequestStarted,
       port: 0,
       service,
     }),
@@ -812,6 +816,8 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       remoteAddress: '8.8.8.8',
     })
     assert.equal(forbidden.status, 403)
+    assert.equal(onAuthenticatedRequestStarted.mock.calls.length, 0)
+    assert.equal(onAuthenticatedRequestCompleted.mock.calls.length, 0)
 
     const health = await fetch(`${handle.address.baseUrl}/healthz`, {
       headers: {
@@ -827,6 +833,8 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     assert.equal(healthPayload.ok, true)
     assert.equal(healthPayload.vaultBound, true)
     assert.equal('vault' in healthPayload, false)
+    assert.equal(onAuthenticatedRequestStarted.mock.calls.length, 0)
+    assert.equal(onAuthenticatedRequestCompleted.mock.calls.length, 0)
 
     const message = await fetch(`${handle.address.baseUrl}/message`, {
       method: 'POST',
@@ -841,6 +849,8 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(message.status, 200)
+    assert.equal(onAuthenticatedRequestStarted.mock.calls.length, 1)
+    assert.equal(onAuthenticatedRequestCompleted.mock.calls.length, 1)
     const messagePayload = await message.json() as { response: string }
     assert.equal(messagePayload.response, 'daemon response')
     assert.equal(sendMessage.mock.calls[0]?.[0]?.prompt, 'hello over assistantd')

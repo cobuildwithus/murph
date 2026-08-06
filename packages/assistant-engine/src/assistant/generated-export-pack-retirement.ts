@@ -85,14 +85,10 @@ type GeneratedExportPackCandidateInspection =
   | { kind: 'deferred' }
   | { kind: 'ineligible' }
 
-type GeneratedExportArchiveInspection =
-  | { kind: 'complete' }
-  | { kind: 'deferred' }
-  | {
-      kind: 'candidate'
-      liveSnapshot: LiveExportPackSnapshot
-      retirement: AssistantGeneratedDeliveryRetirement
-    }
+interface GeneratedExportArchiveInspection {
+  candidates: LiveExportPackSnapshot[]
+  deferred: boolean
+}
 
 export interface SentAssistantGeneratedExportArchive {
   archivePath: string
@@ -139,7 +135,15 @@ export async function buildAssistantGeneratedDeliveryRetirement(input: {
     signal: input.signal,
     vault: input.vault,
   })
-  return inspection.kind === 'candidate' ? inspection.retirement : null
+  if (inspection.candidates.length === 0) {
+    return null
+  }
+  return {
+    archiveRef: input.file.ref,
+    archiveSha256: input.file.sha256,
+    kind: 'sent_export_packs_v1',
+    packs: inspection.candidates.map(({ receipt }) => receipt),
+  }
 }
 
 export async function retireSentAssistantExportPacks(input: {
@@ -155,10 +159,6 @@ export async function retireSentAssistantExportPacks(input: {
     packsPruned: 0,
   }
   try {
-    let selected: {
-      archive: SentAssistantGeneratedExportArchive
-      snapshot: GeneratedExportArchiveSnapshot
-    } | null = null
     for (const archive of input.archives) {
       input.signal?.throwIfAborted()
       if (archive.file.sizeBytes > assistantVaultFileMaxBytes) {
@@ -177,44 +177,38 @@ export async function retireSentAssistantExportPacks(input: {
       if (archiveRead.kind === 'invalid') {
         return result
       }
-      selected = { archive, snapshot: archiveRead.snapshot }
-      break
-    }
-    if (!selected) {
-      return result
-    }
-    const { archive, snapshot } = selected
-    const inspection = await inspectAssistantGeneratedExportArchive({
-      archive: snapshot.bytes,
-      deferForActiveOutboxOwner: true,
-      file: archive.file,
-      signal: input.signal,
-      vault: input.vault,
-    })
-    if (inspection.kind === 'complete') {
-      result.completedArchives.push(archive)
-      return result
-    }
-    if (inspection.kind === 'deferred') {
-      return result
-    }
-
-    const deletion = await deleteProvenAssistantExportPack({
-      archive,
-      archiveStats: snapshot.stats,
-      liveSnapshot: inspection.liveSnapshot,
-      signal: input.signal,
-      vault: input.vault,
-    })
-    if (deletion === 'deferred') {
-      return result
-    }
-    if (deletion === 'pruned') {
-      result.bytesPruned += inspection.liveSnapshot.receipt.files.reduce(
-        (total, file) => total + file.sizeBytes,
-        0,
-      )
-      result.packsPruned += 1
+      const inspection = await inspectAssistantGeneratedExportArchive({
+        archive: archiveRead.snapshot.bytes,
+        deferForActiveOutboxOwner: true,
+        file: archive.file,
+        signal: input.signal,
+        vault: input.vault,
+      })
+      let archiveDeferred = inspection.deferred
+      for (const liveSnapshot of inspection.candidates) {
+        input.signal?.throwIfAborted()
+        const deletion = await deleteProvenAssistantExportPack({
+          archive,
+          archiveStats: archiveRead.snapshot.stats,
+          liveSnapshot,
+          signal: input.signal,
+          vault: input.vault,
+        })
+        if (deletion === 'deferred') {
+          archiveDeferred = true
+          continue
+        }
+        if (deletion === 'pruned') {
+          result.bytesPruned += liveSnapshot.receipt.files.reduce(
+            (total, file) => total + file.sizeBytes,
+            0,
+          )
+          result.packsPruned += 1
+        }
+      }
+      if (!archiveDeferred) {
+        result.completedArchives.push(archive)
+      }
     }
     return result
   } catch (error) {
@@ -240,7 +234,7 @@ async function inspectAssistantGeneratedExportArchive(input: {
       input.signal,
     )
   ) {
-    return { kind: 'complete' }
+    return { candidates: [], deferred: false }
   }
 
   let entries: BoundedZipEntry[]
@@ -251,15 +245,12 @@ async function inspectAssistantGeneratedExportArchive(input: {
     })).entries
   } catch (error) {
     input.signal?.throwIfAborted()
-    return { kind: 'complete' }
+    return { candidates: [], deferred: false }
   }
 
   const candidates = buildGeneratedExportPackCandidates(entries)
-  const budget: GeneratedExportPackInspectionBudget = {
-    archivedBytes: 0,
-    liveBytes: 0,
-  }
   let hasDeferredCandidate = false
+  const liveSnapshots: LiveExportPackSnapshot[] = []
   for (const possible of candidates) {
     input.signal?.throwIfAborted()
     const rootState = await readAssistantExportPackRootState({
@@ -282,6 +273,10 @@ async function inspectAssistantGeneratedExportArchive(input: {
       continue
     }
 
+    const budget: GeneratedExportPackInspectionBudget = {
+      archivedBytes: 0,
+      liveBytes: 0,
+    }
     const candidateInspection = await inspectGeneratedExportPackCandidate({
       archive: input.archive,
       budget,
@@ -290,23 +285,18 @@ async function inspectAssistantGeneratedExportArchive(input: {
       vault: input.vault,
     })
     if (candidateInspection.kind === 'deferred') {
-      return { kind: 'deferred' }
+      hasDeferredCandidate = true
+      continue
     }
     if (candidateInspection.kind === 'ineligible') {
       continue
     }
-    return {
-      kind: 'candidate',
-      liveSnapshot: candidateInspection.liveSnapshot,
-      retirement: {
-        archiveRef: input.file.ref,
-        archiveSha256: input.file.sha256,
-        kind: 'sent_export_packs_v1',
-        packs: [candidateInspection.liveSnapshot.receipt],
-      },
-    }
+    liveSnapshots.push(candidateInspection.liveSnapshot)
   }
-  return { kind: hasDeferredCandidate ? 'deferred' : 'complete' }
+  return {
+    candidates: liveSnapshots,
+    deferred: hasDeferredCandidate,
+  }
 }
 
 function buildGeneratedExportPackCandidates(
