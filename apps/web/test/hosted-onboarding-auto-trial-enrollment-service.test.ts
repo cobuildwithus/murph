@@ -151,12 +151,23 @@ import {
   applyHostedAutoPulseTrialCampaignDispositionTx,
   buildHostedAutoPulseTrialCustomerIdempotencyKey,
   buildHostedAutoPulseTrialSubscriptionIdempotencyKey,
-  ensureHostedAutoPulseTrialEnrollment,
+  ensureHostedAutoPulseTrialEnrollment as ensureHostedAutoPulseTrialEnrollmentImpl,
   ensureHostedLinqInstantStartPulseTrialEnrollment,
+  type HostedAutoPulseTrialEnrollmentInput,
   inspectHostedAutoPulseTrialCampaignDisposition,
   runHostedLinqInstantStartDeferredActivationWakeBestEffort,
   runHostedAutoPulseTrialCampaignPostCommitEffects,
 } from "@/src/lib/hosted-onboarding/auto-trial-enrollment-service";
+
+function ensureHostedAutoPulseTrialEnrollment(
+  input: Omit<HostedAutoPulseTrialEnrollmentInput, "pulseTrialStartSource"> &
+    Partial<Pick<HostedAutoPulseTrialEnrollmentInput, "pulseTrialStartSource">>,
+) {
+  return ensureHostedAutoPulseTrialEnrollmentImpl({
+    ...input,
+    pulseTrialStartSource: input.pulseTrialStartSource ?? "web_onboarding",
+  });
+}
 
 describe("ensureHostedAutoPulseTrialEnrollment", () => {
   beforeEach(() => {
@@ -178,7 +189,9 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       object: "subscription",
       status: "canceled",
     });
-    mocks.stripe.subscriptions.create.mockResolvedValue(makeTrialSubscription());
+    mocks.stripe.subscriptions.create.mockImplementation(async (input: {
+      metadata: Record<string, string>;
+    }) => makeTrialSubscription({ metadata: input.metadata }));
     mocks.stripe.subscriptions.list.mockResolvedValue({
       data: [],
     });
@@ -322,6 +335,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         billingPlanCode: "launch_monthly",
         checkoutOffer: "pulse_trial_7d",
         memberId: "member_123",
+        pulseTrialStartSource: "web_onboarding",
         trialDurationDays: "14",
         trialPolicyVersion: "pulse-trial-2026-07-15-v3",
         trialUsageLimitUsdMicros: "4500000",
@@ -406,6 +420,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         freshnessPolicy: "auto-pulse-trial-entitlement",
         pulseTrialPolicyVersion: "pulse-trial-2026-07-15-v3",
         pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
+        pulseTrialStartSource: "web_onboarding",
         stripeCustomerId: "cus_auto_trial_123",
         stripeSubscriptionId: "sub_auto_trial_123",
       }),
@@ -431,6 +446,13 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
 
   it("preserves trial activation while suppressing companion-admission welcome effects", async () => {
     const prisma = makePrisma();
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(
+      makeTrialSubscription({
+        metadata: makeTrialSubscriptionMetadata({
+          pulseTrialStartSource: "companion_onboarding",
+        }),
+      }),
+    );
 
     await expect(
       ensureHostedAutoPulseTrialEnrollment({
@@ -441,6 +463,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         },
         now: new Date("2026-06-14T12:00:05.000Z"),
         prisma: prisma as never,
+        pulseTrialStartSource: "companion_onboarding",
         suppressSignupWelcome: true,
       }),
     ).resolves.toEqual({
@@ -452,6 +475,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       expect.objectContaining({
         billingStatus: HostedBillingStatus.active,
         currentBillingPhase: "trial",
+        pulseTrialStartSource: "companion_onboarding",
       }),
     );
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith(
@@ -978,6 +1002,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         currentPeriodEnd: new Date("2026-06-24T12:00:00.000Z"),
         currentTrialEndsAt: new Date("2026-06-24T12:00:00.000Z"),
         pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        pulseTrialStartSource: "web_onboarding",
         stripeCustomerId: "cus_auto_trial_123",
         stripeSubscriptionId: "sub_recovered_trial_123",
       }),
@@ -2877,6 +2902,11 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         suppressSignupWelcome: true,
       }),
     );
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pulseTrialStartSource: "linq_instant_start",
+      }),
+    );
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
       .not.toHaveBeenCalled();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
@@ -2904,9 +2934,11 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       expect(prisma.isTransactionActive()).toBe(true);
       return { data: [] };
     });
-    mocks.stripe.subscriptions.create.mockImplementationOnce(async () => {
+    mocks.stripe.subscriptions.create.mockImplementationOnce(async (input: {
+      metadata: Record<string, string>;
+    }) => {
       expect(prisma.isTransactionActive()).toBe(true);
-      return makeTrialSubscription();
+      return makeTrialSubscription({ metadata: input.metadata });
     });
 
     await expect(
@@ -2944,6 +2976,11 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       }),
     );
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledOnce();
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pulseTrialStartSource: "linq_instant_start",
+      }),
+    );
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledOnce();
     const transactionClient = prisma.transactionClients[0];
     expect(transactionClient?.hostedInvite.findUnique).toHaveBeenCalledWith({
@@ -3228,6 +3265,7 @@ function makeTrialSubscriptionMetadata(
     billingPlanCode: "launch_monthly",
     checkoutOffer: "pulse_trial_7d",
     memberId: "member_123",
+    pulseTrialStartSource: "web_onboarding",
     trialDurationDays: "14",
     trialPolicyVersion: "pulse-trial-2026-07-15-v3",
     trialUsageLimitUsdMicros: "4500000",

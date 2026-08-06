@@ -79,6 +79,7 @@ describe("hosted member Checkout completion ownership", () => {
       memberId: "member_123",
       preparedCompletion,
       pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      pulseTrialStartSource: "web_onboarding",
       tx: {
         hostedMemberBillingRef: {
           updateMany,
@@ -97,6 +98,7 @@ describe("hosted member Checkout completion ownership", () => {
         currentTrialStartedAt: new Date("2026-07-29T00:00:00.000Z"),
         pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
         pulseTrialRedeemedAt: new Date("2026-07-29T00:00:00.000Z"),
+        pulseTrialStartSource: "web_onboarding",
       },
       where: {
         memberId: "member_123",
