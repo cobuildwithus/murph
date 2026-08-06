@@ -95,7 +95,10 @@ Updated: 2026-08-06
 ## Verification
 
 - Passed: Prisma Client generation and schema validation.
-- Passed: focused hosted growth and migration Vitest suites (48 tests).
+- Passed after base reconciliation and retrospective correction: focused
+  hosted growth and migration Vitest suites (49 tests), Prisma Client
+  generation/schema validation, touched-file ESLint, and hosted Web prepared
+  TypeScript.
 - Passed: hosted Web prepared TypeScript check and touched-file ESLint.
 - Passed: desktop and mobile Playwright accessibility/browser proof from
   `/design?tab=sections#ops-weekly-growth-compass` (2 tests), plus exact and
@@ -105,5 +108,11 @@ Updated: 2026-08-06
   coverage ReviewGPT and final sensitive ReviewGPT round 1. The accepted
   findings added non-color chart encoding, update-branch null coverage, and
   isolation of activity-attribution failures from the legacy snapshot fields.
-- Pending: final sensitive ReviewGPT remediation round, exact-head CI, and
-  parent final review.
+- Resolved after the required anomaly retrospective: the recovered round 2
+  advisory showed that a failed same-date retry could erase exact activity.
+  Failed updates now omit activity fields, while successful exact or
+  proven-incomplete passes remain authoritative; the focused transition proof
+  passes after merging current `main`.
+- Pending: a fresh gate-valid final sensitive ReviewGPT remediation round,
+  post-merge desktop/mobile browser proof, exact-head CI, and parent final
+  review.
