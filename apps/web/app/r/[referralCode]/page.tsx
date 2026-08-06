@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 
 import {
   JoinInviteCenteredShell,
@@ -72,8 +73,21 @@ export default async function HostedSignupReferralPage(props: {
   if (state === "busy") {
     return (
       <HostedSignupReferralMessage
+        action={(
+          <form
+            action={`/r/${encodeURIComponent(referralCode)}/claim`}
+            method="post"
+          >
+            <button
+              className={buttonVariants({ size: "lg" })}
+              type="submit"
+            >
+              Try again
+            </button>
+          </form>
+        )}
         eyebrow="Referral link"
-        message="A lot of people have used this link recently. Wait a little while, then open the same link again."
+        message="A lot of people have used this link recently. Wait a little while, then try again."
         title="Try again soon"
       />
     );
@@ -122,6 +136,7 @@ export default async function HostedSignupReferralPage(props: {
 }
 
 function HostedSignupReferralMessage(props: {
+  action?: ReactNode;
   eyebrow: string;
   message: string;
   title: string;
@@ -138,6 +153,7 @@ function HostedSignupReferralMessage(props: {
         <p className="max-w-md text-base leading-7 text-muted-foreground">
           {props.message}
         </p>
+        {props.action ? <div className="pt-3">{props.action}</div> : null}
       </div>
     </JoinInviteCenteredShell>
   );
