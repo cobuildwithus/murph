@@ -86,11 +86,15 @@ Updated: 2026-08-06
   `PUT` sequence inside the existing 30-second operation budget so retries are
   available only after fast failures and cannot add minutes of head-of-line
   blocking for newer accepted input.
+- Extend that single budget through retryable HTTP error-body reads. A stalled
+  body must not outlive the upload deadline or allow a zero-delay retry to
+  start after the deadline; one sequence-level abort owner is both simpler and
+  stricter than per-attempt deadline bookkeeping.
 
 ## Verification
 
 - `pnpm exec vitest run --config vitest.config.ts --no-coverage test/http-linq-device-runtime.test.ts`
-  from `packages/operator-config`: 52 tests passed.
+  from `packages/operator-config`: 53 tests passed.
 - `pnpm exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-workspace-assistant-phase.test.ts`
   from `packages/assistant-runtime`: 276 tests passed.
 - `pnpm --dir packages/operator-config typecheck`: passed.
@@ -100,3 +104,7 @@ Updated: 2026-08-06
 - `pnpm exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-callbacks.test.ts`
   from `packages/assistant-runtime`: 213 tests passed.
 - `pnpm --dir packages/assistant-engine typecheck`: passed.
+- `pnpm exec vitest run --config vitest.config.ts --no-coverage test/assistant-vault-file-send.test.ts`
+  from `packages/assistant-engine`: 26 tests passed.
+- `pnpm exec vitest run --config vitest.config.ts --no-coverage test/assistant-channels-runtime.test.ts`
+  from `packages/assistant-engine`: 60 tests passed.
