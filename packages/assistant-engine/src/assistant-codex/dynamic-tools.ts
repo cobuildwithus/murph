@@ -3644,12 +3644,19 @@ export async function executeMurphDynamicToolRequest(input: {
             : `phone call attempt was unsuccessful: ${result.phoneCallId}`,
         )
       } catch (error) {
-        return isHostedGroupPhoneCallRequesterActivationRequiredError(error)
-          ? toolTextResult(
-              false,
-              'the group phone call could not be started for the selected participant',
-            )
-          : toolTextResult(false, 'phone call could not be started')
+        if (isHostedGroupPhoneCallRequesterActivationRequiredError(error)) {
+          return toolTextResult(
+            false,
+            'the group phone call could not be started for the selected participant',
+          )
+        }
+        if (scheduledScope) {
+          return toolTextResult(
+            false,
+            'phone call start could not be confirmed for this scheduled occurrence; it may already own a provider attempt under the first accepted brief. Do not retry automatically or claim that no call occurred; wait for the existing attempt\'s result.',
+          )
+        }
+        return toolTextResult(false, 'phone call could not be started')
       }
     }
     case 'create-clinical-records-connect-link': {

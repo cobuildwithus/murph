@@ -56,6 +56,9 @@ phone call it requested through the existing hosted phone-call port.
 6. Restrict scheduled authority to direct Linq after final review proved that
    email can fail before provider start and Telegram can close the result loop
    on Linq; keep those channels unavailable instead of adding new route state.
+7. Keep scheduled start errors uncertainty-safe when a retry's regenerated
+   brief conflicts with the first accepted brief, without weakening equality or
+   adding another error transport.
 
 ## Verification log
 
@@ -107,3 +110,10 @@ phone call it requested through the existing hosted phone-call port.
 - The corrected production runner bundle passed at 10,275,785 bytes against the
   10,308,229-byte total budget, and the 34-test bundle policy suite plus agent
   docs drift and diff checks passed.
+- Final ReviewGPT round 3 confirmed both earlier findings resolved and found one
+  review-induced feedback gap: a changed-brief retry correctly starts no second
+  call but inherited the definitive attended-call failure text. The scheduled
+  branch now states that an occurrence may already own a provider attempt and
+  must not be retried automatically. Its regression failed before the change;
+  afterward the two focused suites passed 100 tests and Assistant Engine
+  typecheck passed. Attended-call error copy remains unchanged.

@@ -421,6 +421,84 @@ describe("assistant phone calls", () => {
     expect(result.rpcResult.success).toBe(true);
   });
 
+  it("keeps scheduled start errors uncertainty-safe", async () => {
+    const scheduledScope: AssistantHostedScheduledPhoneCallScope = {
+      automationId: "automation-scheduled-call",
+      occurrenceAt: "2026-08-05T18:00:00.000Z",
+      originSessionId: "session-scheduled-call-retry",
+    };
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentScheduledPhoneCallScope: () => scheduledScope,
+        currentUserActionScope: () => null,
+        phoneCalls: {
+          start: vi.fn(async () => {
+            throw new Error("Hosted phone call request key collision.");
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "may already own a provider attempt",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "Do not retry automatically",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toBe(
+      "phone call could not be started",
+    );
+  });
+
+  it("keeps attended start errors on the existing result", async () => {
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentUserActionScope: () => ({
+          ...BASE_SCOPE,
+          acceptedInputIds: ["manual_phone_call_input"],
+          conversationScope: "direct",
+          originSessionId: "session_phone_call",
+        }),
+        phoneCalls: {
+          start: vi.fn(async () => {
+            throw new Error("Hosted phone call request failed.");
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(result.rpcResult.contentItems[0]?.text).toBe(
+      "phone call could not be started",
+    );
+  });
+
   it("uses the exact accepted group message for requester authority", async () => {
     const effectiveBrief = {
       ...BASE_BRIEF,
