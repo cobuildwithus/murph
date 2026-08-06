@@ -12,57 +12,14 @@ jobs:
     steps:
       - run: |
           node <<'NODE'
-          const fs = require('node:fs')
           const { spawnSync } = require('node:child_process')
 
-          const workflow = fs
-            .readFileSync(
-              '.github/workflows/one-time-repair-managed-automation-tests.yml',
-              'utf8',
-            )
-            .replaceAll('\r\n', '\n')
-          const startMarker = "          @'\n"
-          const endMarker = "\n          '@ | python -"
-          const start = workflow.indexOf(startMarker)
-          if (start < 0) {
-            throw new Error('Repair script start marker not found.')
-          }
-          const bodyStart = start + startMarker.length
-          const end = workflow.indexOf(endMarker, bodyStart)
-          if (end < 0) {
-            throw new Error('Repair script end marker not found.')
-          }
-          let script = workflow
-            .slice(bodyStart, end)
-            .split('\n')
-            .map((line) => line.startsWith('          ') ? line.slice(10) : line)
-            .join('\n')
-          script = script.replace(
-            /stale_phrases = \[[\s\S]*?path\.write_text\(source\)/u,
-            [
-              "if 'On this scheduled weekly run' in source:",
-              "    raise RuntimeError('Stale inline managed-automation prose remains')",
-              '',
-              'expected_counts = {',
-              "    'still remember ten seconds after reading': 1,",
-              "    'Interestingness gate': 2,",
-              "    'Every completed run must leave one compact private decision record': 2,",
-              "    'Hard provenance gate': 2,",
-              '}',
-              'for phrase, expected_count in expected_counts.items():',
-              '    count = source.count(phrase)',
-              '    if count != expected_count:',
-              '        raise RuntimeError(',
-              "            f'Expected {expected_count} negative assertions for {phrase!r}, found {count}'",
-              '        )',
-              '',
-              'path.write_text(source)',
-            ].join('\n'),
-          )
           const python = process.platform === 'win32' ? 'python' : 'python3'
-          const result = spawnSync(python, ['-c', script], {
-            stdio: 'inherit',
-          })
+          const result = spawnSync(
+            python,
+            ['.github/repair-managed-automation-tests.py'],
+            { stdio: 'inherit' },
+          )
           if (result.error) {
             throw result.error
           }
