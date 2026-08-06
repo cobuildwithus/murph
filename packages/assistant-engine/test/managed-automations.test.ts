@@ -1055,6 +1055,20 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('2-3 things Murph can already do')
     expect(seed.instructions).toContain('Do not pad with weak matches')
     expect(seed.instructions).toContain('member-facing product update, not a dump of release notes')
+    expect(seed.instructions).toContain(
+      'member encountered the corresponding issue',
+    )
+    expect(seed.instructions).toContain(
+      'Do not infer relevance merely from a connected provider',
+    )
+    expect(seed.instructions).toContain(
+      'WHOOP sync should be more reliable now.',
+    )
+    expect(seed.instructions).toContain(
+      'lower priority than exciting capabilities',
+    )
+    expect(seed.instructions).toContain('if neither kind clears, skip')
+    expect(seed.instructions).toContain('member-facing product update, not a dump of release notes')
     expect(seed.instructions).toContain('member encountered the corresponding issue')
     expect(seed.instructions).toContain('Do not infer relevance merely from a connected provider')
     expect(seed.instructions).toContain('WHOOP sync should be more reliable now.')

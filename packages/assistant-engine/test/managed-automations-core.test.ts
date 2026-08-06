@@ -617,6 +617,24 @@ describe('applyMurphManagedAutomations core integration', () => {
       'WHOOP sync should be more reliable now.',
     )
     expect(productUpdatesRecord?.instructions).toContain(
+      'lower priority than exciting capabilities',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'if neither kind clears, skip',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'member-facing product update, not a dump of release notes',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'member encountered the corresponding issue',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'Do not infer relevance merely from a connected provider',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'WHOOP sync should be more reliable now.',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
       'Omit implementation details such as retries, transient writes, artifacts, workers, checkpoints, migrations, or data plumbing',
     )
     expect(productUpdatesRecord?.instructions).toContain(
