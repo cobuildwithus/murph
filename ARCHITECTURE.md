@@ -2263,6 +2263,9 @@ dirty-state checkpoint, not a synthetic wake-handoff snapshot.
 After a parsed successful runtime result has settled and RunnerContainer has
 removed the exact active-operation pointer, RunnerContainer sends UserRunner one
 best-effort internal completion receipt bound to user, attempt, and generation.
+RunnerContainer waits at most one second for that receipt before returning the
+completed result so a slow or unavailable UserRunner cannot block the outer
+completion fallback.
 UserRunner applies the same exact write-fence compare-and-swap used by the outer
 invocation path; whichever path wins is the only owner that can release the
 runtime owner, while the outer path remains the mixed-version and callback-loss

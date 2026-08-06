@@ -1681,8 +1681,9 @@ the attempt and generation. UserRunner re-reads the current runtime fence and
 uses the existing full-token completion compare-and-swap; a stale, duplicate,
 wrong-user, or wrong-generation receipt is a no-op. The compare-and-swap winner
 alone may emit the existing owner-release callback. Receipt failure cannot
-change the completed runner result, and the original outer UserRunner
-continuation remains the mixed-version and callback-loss fallback. The receipt
+change the completed runner result; RunnerContainer stops waiting after one
+second, consumes any late rejection, and lets the original outer UserRunner
+continuation remain the mixed-version and callback-loss fallback. The receipt
 does not make checkpoint success, idle expiry, container stop, or elapsed time
 completion authority.
 When the outer RunnerContainer active-operation pointer is missing, a container

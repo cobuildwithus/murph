@@ -50,6 +50,8 @@ Updated: 2026-08-06
 3. Mixed deployed versions could lack the RPC method.
    Mitigation: make the stub method optional, swallow metadata-only callback
    failures, and retain the current outer completion path.
+4. A slow receipt could block the completed result and its outer fallback.
+   Mitigation: cap the receipt wait at one second and observe late rejection.
 
 ## Tasks
 
@@ -70,7 +72,11 @@ Updated: 2026-08-06
 
 ## Verification
 
-- Focused RunnerContainer and UserRunner tests.
-- Cloudflare typecheck and relevant hosted-local completion proof.
+- Focused RunnerContainer, UserRunner, hosted-local control, and Worker route
+  tests: 267 passed.
+- Cloudflare typecheck passed.
+- The real hosted-local lost-active-operation scenario passed after discarding
+  the completed outer result, clearing the exact fence by receipt, expiring the
+  warm shell, and completing a fresh follow-up wake.
 - ReviewGPT specialist and final review on the exact pushed candidate head.
 - Required exact-head GitHub Actions.

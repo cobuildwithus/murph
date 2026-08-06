@@ -69,6 +69,7 @@ const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_ABORT_WORKSPACE_INVOCATION_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
+const RUNNER_RUNTIME_COMPLETION_RECEIPT_TIMEOUT_MS = 1_000;
 const RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS = 5_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
 const RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS = 5_000;
@@ -574,7 +575,30 @@ export class RunnerContainer extends Container {
       if (!userRunner?.recordRuntimeCompletionFromContainer) {
         return;
       }
-      await userRunner.recordRuntimeCompletionFromContainer(input);
+      const receipt = userRunner.recordRuntimeCompletionFromContainer(input).then(
+        () => ({ kind: "completed" as const }),
+        (error: unknown) => ({ error, kind: "failed" as const }),
+      );
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const outcome = await Promise.race([
+        receipt,
+        new Promise<{ kind: "timed_out" }>((resolve) => {
+          timeoutId = setTimeout(
+            () => resolve({ kind: "timed_out" }),
+            RUNNER_RUNTIME_COMPLETION_RECEIPT_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      if (outcome.kind === "completed") {
+        return;
+      }
+      const error = outcome.kind === "failed"
+        ? outcome.error
+        : new Error("Hosted runner container completion receipt timed out.");
+      throw error;
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "runner.container",

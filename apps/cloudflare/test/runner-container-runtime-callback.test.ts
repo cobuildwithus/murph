@@ -67,6 +67,45 @@ describe("RunnerContainer internal runtime dispatch", () => {
     expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledOnce();
   });
 
+  it("bounds a non-settling completion receipt and consumes its late rejection", async () => {
+    vi.useFakeTimers();
+    let rejectReceipt!: (error: unknown) => void;
+    const receipt = new Promise<{ completed: boolean }>((_resolve, reject) => {
+      rejectReceipt = reject;
+    });
+    const recordRuntimeCompletionFromContainer = vi.fn(() => receipt);
+    const { container } = createActivityExpiryContainerDouble({
+      environment: {
+        USER_RUNNER: {
+          getByName: vi.fn(() => ({ recordRuntimeCompletionFromContainer })),
+        },
+      },
+    });
+
+    try {
+      const invocation = container.invoke({
+        job: createWorkspaceRunnerJob("member_123"),
+        timeoutMs: 5_000,
+        userId: "member_123",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledOnce();
+      await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+        active: false,
+        reason: "no_active_runtime",
+      });
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(invocation).resolves.toMatchObject({ status: "idle" });
+
+      rejectReceipt(new Error("late completion receipt failure"));
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not report an invocation that fails in the container", async () => {
     const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
       completed: true,
