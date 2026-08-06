@@ -151,7 +151,7 @@ describe("hosted signup referral links", () => {
     expect(tx.hostedInvite.create).not.toHaveBeenCalled();
   });
 
-  it("mints a separate attributed invite for each explicit claim", async () => {
+  it("mints isolated attributed invites for immediate and later claimants", async () => {
     mocks.generateHostedMemberId
       .mockReturnValueOnce("member_target_one")
       .mockReturnValueOnce("member_target_two");
@@ -163,12 +163,14 @@ describe("hosted signup referral links", () => {
       .mockReturnValueOnce("invite_two");
     const { createdInvites, prisma, tx } = createPrisma();
     const issued = await issueHostedSignupReferralLink({
+      now: new Date("2026-08-06T12:00:00.000Z"),
       prisma: prisma as never,
       referrerMemberId: "member_referrer",
     });
     const referralCode = readReferralToken(issued.signupUrl);
 
     await expect(claimHostedSignupReferralLink({
+      now: new Date("2026-08-06T12:05:00.000Z"),
       prisma: prisma as never,
       publicBaseUrl: "https://www.withmurph.ai",
       referralCode,
@@ -176,6 +178,7 @@ describe("hosted signup referral links", () => {
       signupUrl: "https://www.withmurph.ai/join/invite_one",
     });
     await expect(claimHostedSignupReferralLink({
+      now: new Date("2026-09-06T12:05:00.000Z"),
       prisma: prisma as never,
       publicBaseUrl: "https://www.withmurph.ai",
       referralCode,
@@ -197,7 +200,20 @@ describe("hosted signup referral links", () => {
         referrerMemberId: "member_referrer",
       }),
     ]);
-    expect(tx.hostedInvite.count).toHaveBeenCalledTimes(2);
+    expect(tx.hostedInvite.count).toHaveBeenNthCalledWith(1, {
+      where: {
+        channel: "signup-referral",
+        createdAt: { gte: new Date("2026-08-06T11:05:00.000Z") },
+        referrerMemberId: "member_referrer",
+      },
+    });
+    expect(tx.hostedInvite.count).toHaveBeenNthCalledWith(2, {
+      where: {
+        channel: "signup-referral",
+        createdAt: { gte: new Date("2026-09-06T11:05:00.000Z") },
+        referrerMemberId: "member_referrer",
+      },
+    });
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
   });
 
