@@ -1231,6 +1231,8 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("deletes the linked support marker while retaining its anonymous issue", async () => {
+    const retainedIssue =
+      "a relative named Rowan says their glucose sensor stopped syncing after a metformin change at the downtown clinic.";
     const productFeedbackRows = [
       {
         id: "product_feedback_linked",
@@ -1240,8 +1242,7 @@ describe("deleteHostedAccountData", () => {
       {
         id: "product_feedback_detail",
         memberId: null,
-        summary:
-          "a connected source reports success but Murph does not finish the connection.",
+        summary: retainedIssue,
       },
     ];
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
@@ -1266,8 +1267,7 @@ describe("deleteHostedAccountData", () => {
     expect(productFeedbackRows).toEqual([{
       id: "product_feedback_detail",
       memberId: null,
-      summary:
-        "a connected source reports success but Murph does not finish the connection.",
+      summary: retainedIssue,
     }]);
   });
 

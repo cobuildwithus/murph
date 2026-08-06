@@ -239,7 +239,7 @@ describe("hosted product feedback digest", () => {
   it("sends only the anonymous written issue from a stored support pair", async () => {
     const memberId = "member_support_digest";
     const writtenIssue =
-      "a connected source reports success but Murph does not finish the connection.";
+      "a relative named Rowan says their glucose sensor stopped syncing after a metformin change at the downtown clinic.";
     const storedRows = [
       {
         kind: "frustration",
@@ -288,6 +288,28 @@ describe("hosted product feedback digest", () => {
     expect(JSON.stringify(sendEmail.mock.calls)).not.toContain(
       HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
     );
+    expect(mocks.groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        NOT: {
+          summary: {
+            startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+          },
+        },
+      }),
+    }));
+    expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: {
+        kind: true,
+        summary: true,
+      },
+      where: expect.objectContaining({
+        NOT: {
+          summary: {
+            startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+          },
+        },
+      }),
+    }));
   });
 
   it("keeps per-kind counts truthful past the display cap", async () => {
