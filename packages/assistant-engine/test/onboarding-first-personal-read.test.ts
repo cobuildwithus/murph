@@ -163,6 +163,20 @@ describe('onboarding first personal read', () => {
     })
     expect(genericSave?.kind).toBe('invalid-automation-arguments')
 
+    const derivedSlugSave = readAutomationDynamicToolRequest({
+      arguments: {
+        action: 'save',
+        instructions: 'Replace the fixed policy through a derived slug.',
+        schedule: {
+          kind: 'at',
+          at: '2026-08-06T21:02:00.000Z',
+        },
+        title: 'Onboarding first personal read',
+      },
+      tool: 'automation',
+    })
+    expect(derivedSlugSave?.kind).toBe('invalid-automation-arguments')
+
     const genericPatch = readAutomationDynamicToolRequest({
       arguments: {
         action: 'patch',
@@ -178,7 +192,7 @@ describe('onboarding first personal read', () => {
     const prompt = MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS
 
     expect(new TextEncoder().encode(prompt).byteLength).toBeLessThanOrEqual(
-      50_000,
+      40_000,
     )
     expect(prompt).toContain(
       'It is better to send nothing than to manufacture a weak insight.',
