@@ -1570,6 +1570,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "dataKeyUnwrapMs",
         "presignGetMs",
         "objectFetchMs",
+        "objectFetchResponseHeadersMs",
+        "objectFetchBodyReadMs",
         "decryptMs",
         "archiveExtractMs",
         "durableRootReplaceMs",
@@ -1582,6 +1584,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       expect(restoreTimings?.encryptedBytes).toBe(encrypted.encryptedByteSize);
       expect(restoreTimings?.plainBytes).toBe(encrypted.totalPlainBytes);
+      expect(restoreTimings?.objectFetchResponseHeadersMs).toBeGreaterThanOrEqual(20);
+      expect(
+        (restoreTimings?.objectFetchResponseHeadersMs ?? 0)
+          + (restoreTimings?.objectFetchBodyReadMs ?? 0),
+      ).toBeLessThanOrEqual(restoreTimings?.decryptMs ?? 0);
 
       expect(fetchMock).toHaveBeenCalledTimes(3);
       const restoreRequests = fetchMock.mock.calls.map((call) =>
@@ -1747,7 +1754,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+      const restoreTimings = await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot,
         ref: {
           archive: {
@@ -1776,6 +1783,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
 
       expect(objectFetchCount).toBe(2);
+      expect(restoreTimings?.objectFetchResponseHeadersMs).toEqual(expect.any(Number));
+      expect(restoreTimings?.objectFetchBodyReadMs).toEqual(expect.any(Number));
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
       await expect(
         readdir(tempRoot).then((entries) =>

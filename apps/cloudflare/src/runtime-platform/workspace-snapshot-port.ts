@@ -331,6 +331,10 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       const archiveTimings = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
         details: restoreLogDetails,
         run: async () => {
+          const objectFetchAttemptTiming = {
+            objectFetchResponseHeadersMs: 0,
+            objectFetchBodyReadMs: 0,
+          };
           const objectFetchTimeoutMs =
             Math.max(1, presignedGet.expiresAtMs - Date.now() - 5_000);
           const objectFetchDeadlineMs = Date.now() + objectFetchTimeoutMs;
@@ -340,15 +344,23 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
             fetchImpl: input.fetchImpl,
             getUrl: presignedGet.getUrl,
             signal: request.signal ?? null,
+            timing: objectFetchAttemptTiming,
             timeoutMs: objectFetchTimeoutMs,
           });
-          return await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
-            dataKey,
-            durableRoot: request.durableRoot,
-            encryptedStream,
-            ref: request.ref,
-            signal: request.signal ?? null,
-          });
+          const archiveRestoreTiming =
+            await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+              dataKey,
+              durableRoot: request.durableRoot,
+              encryptedStream,
+              ref: request.ref,
+              signal: request.signal ?? null,
+            });
+          // Keep the subspans attempt-local: failed replay-safe attempts never
+          // leak partial values into the successful restore diagnostics.
+          timing.objectFetchResponseHeadersMs =
+            objectFetchAttemptTiming.objectFetchResponseHeadersMs;
+          timing.objectFetchBodyReadMs = objectFetchAttemptTiming.objectFetchBodyReadMs;
+          return archiveRestoreTiming;
         },
         step: "object_fetch",
       });
@@ -627,8 +639,13 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
   fetchImpl: typeof fetch;
   getUrl: string;
   signal?: AbortSignal | null;
+  timing: {
+    objectFetchResponseHeadersMs: number;
+    objectFetchBodyReadMs: number;
+  };
   timeoutMs: number;
 }): AsyncIterable<Uint8Array> {
+  const responseHeadersStartedAt = Date.now();
   const response = await fetchHostedResponse({
     description: "Hosted workspace snapshot fetch",
     fetchImpl: input.fetchImpl,
@@ -641,6 +658,8 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
     timeoutMs: input.timeoutMs,
     url: new URL(input.getUrl),
   });
+  input.timing.objectFetchResponseHeadersMs =
+    readHostedRuntimeStepElapsedMs(responseHeadersStartedAt);
   if (response.status === 404) {
     await cancelHostedWorkspaceSnapshotResponseBody(response.body);
     throw new Error("Hosted workspace snapshot encrypted object is unavailable.");
@@ -657,6 +676,7 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
     await cancelHostedWorkspaceSnapshotResponseBody(response.body);
     throw new Error("Hosted workspace snapshot fetch content-length does not match its ref.");
   }
+  const bodyReadStartedAt = Date.now();
   let byteCount = 0;
   for await (const next of readHostedRuntimeResponseBodyChunks({
     body: response.body,
@@ -673,6 +693,7 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
   if (byteCount !== input.expectedEncryptedByteSize) {
     throw new Error("Hosted workspace snapshot fetch byte count does not match its ref.");
   }
+  input.timing.objectFetchBodyReadMs = readHostedRuntimeStepElapsedMs(bodyReadStartedAt);
 }
 
 async function cancelHostedWorkspaceSnapshotResponseBody(
