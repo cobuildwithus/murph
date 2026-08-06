@@ -2809,9 +2809,13 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       requestedLane: "conversation",
     };
     const queryRaw = vi.fn(async () => [sourceRow]);
-    const transaction = vi.fn();
-    const prisma = Object.assign(Object.create(null), {
+    const tx = Object.assign(Object.create(null), {
       $queryRaw: queryRaw,
+    });
+    const transaction = vi.fn(async (
+      operation: (transactionClient: typeof tx) => Promise<unknown>,
+    ) => operation(tx));
+    const prisma = Object.assign(Object.create(null), {
       $transaction: transaction,
     }) as never;
 
@@ -2823,7 +2827,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       userId: sourceUserId,
     });
 
-    expect(transaction).not.toHaveBeenCalled();
+    expect(transaction).toHaveBeenCalledTimes(1);
     expect(queryRaw).toHaveBeenCalledTimes(1);
     expect(result.items).toMatchObject([{
       consumedAt: sourceRow.itemConsumedAt.toISOString(),

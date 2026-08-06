@@ -1129,7 +1129,12 @@ describe("hosted runtime internal web routes", () => {
       resolveGroupReadStarted?.();
       resolveGroupReadStarted = null;
       await usageStarted;
-      return null;
+      return {
+        expiresAt: "2026-04-27T00:00:00.000Z",
+        publicAlias: "Recovery Group",
+        requestedBit: "Keep the reply concise.",
+        schema: "murph.group-sponsorship-bit.v1" as const,
+      };
     });
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
@@ -1149,6 +1154,12 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       conversationUsageStatus: "low",
+      groupRunningBit: {
+        expiresAt: "2026-04-27T00:00:00.000Z",
+        publicAlias: "Recovery Group",
+        requestedBit: "Keep the reply concise.",
+        schema: "murph.group-sponsorship-bit.v1",
+      },
       items: [expect.objectContaining({ id: "mailbox_item_low" })],
     });
     expect(
