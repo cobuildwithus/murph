@@ -1,6 +1,6 @@
 # Group Challenge Data Diagnostics
 
-Last verified: 2026-07-30
+Last verified: 2026-08-05
 
 Status: Implemented
 
@@ -141,11 +141,14 @@ truncating when the source bound is exceeded or the selected source cannot be
 proved. The legacy provider-neutral `deep-sleep-days.v0` and
 `rem-sleep-days.v0` scopes remain read-only compatibility contracts for
 existing policies and grants, disclosing one canonical daily value only. A new
-policy read or access offer replaces the matching legacy policy request with
-v1, so existing groups expose the same single complete permission without an
-owner reconfiguration step. This never upgrades or broadens an existing grant
-in place; each member's v1 grant still requires its own server-owned access
-approval.
+join view or access offer derives the matching legacy policy request as v1, so
+existing groups expose the same single complete permission without an owner
+reconfiguration step. The durable v0 policy entry remains exact. When Web
+acceptance explicitly approves v1, that scope is added alongside v0 in the same
+locked transaction as the grant change, so the previous Web can still show and
+revoke every active authority after rollback. This never upgrades or broadens
+an existing grant in place; each member's v1 grant still requires its own
+server-owned access approval.
 
 The authenticated sharing controls keep a legacy-active sleep grant visible
 under that same single Deep sleep or REM sleep row. Saving without changing it

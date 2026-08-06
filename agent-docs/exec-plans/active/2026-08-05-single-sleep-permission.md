@@ -13,7 +13,8 @@ provider-neutral and by-source choices.
   active legacy deep-sleep grants and no source-aware grants at the start of
   this work.
 - Keep legacy grant parsing and reads available for existing rows and rolling
-  deploys, but map legacy requested policies to the one complete permission.
+  deploys. Derive the one complete current permission from legacy requested
+  policies without rewriting their rollback-readable stored scope.
 - Reuse the current exact-scope consent, encrypted projection, capability
   negotiation, and group-read owners. Add no table, migration service, queue,
   scheduler, or reconciliation loop.
@@ -26,12 +27,14 @@ provider-neutral and by-source choices.
    scopes and label them simply `Deep sleep` and `REM sleep` with complete,
    concise disclosure copy.
 2. Treat legacy v0 grants as read-only compatibility contracts. Read every
-   legacy requested policy as v1 so existing groups immediately have one
-   complete choice; existing v0 share rows remain narrow compatibility
-   evidence until that member explicitly approves v1. Keep a legacy-active
-   grant visible in the same checked permission row: saving preserves it,
-   opting into source details atomically replaces it with v1, and turning the
-   row off revokes both versions.
+   legacy requested policy as v1 at the current join-view and acceptance
+   boundaries so existing groups immediately have one complete choice, while
+   preserving exact v0 policy storage for rollback. Existing v0 share rows
+   remain narrow compatibility evidence until that member explicitly approves
+   v1. Keep a legacy-active grant visible in the same checked permission row:
+   saving preserves it, opting into source details atomically adds v1 alongside
+   v0 in policy storage while replacing the grant with v1, and turning the row
+   off revokes both grant versions without changing policy.
 3. Remove the model-facing source-neutral opt-down and default every new sleep
    stage access offer/read request to v1.
 4. Let a frozen v0 shared-read request fall back to the matching v1 grant's
@@ -44,8 +47,8 @@ provider-neutral and by-source choices.
 
 - Join-policy projection proves exactly one selectable deep-sleep choice and
   one selectable REM-sleep choice.
-- Policy merge tests prove v1 replaces only the matching legacy v0 request and
-  preserves unrelated scopes.
+- Policy merge tests prove existing v0 storage remains exact, a new v1 request
+  is additive for rollback compatibility, and unrelated scopes are preserved.
 - Existing v0 records still parse and remain readable without source fields.
 - A new v1 approval still projects encrypted multi-source data and returns it
   through the authorized group read.
@@ -55,7 +58,7 @@ provider-neutral and by-source choices.
 ## Evidence
 
 - Focused Web group-policy, group-store, consent-client, acceptance-route,
-  reaction-offer, and shared-read tests: 289 passing.
+  reaction-offer, and shared-read tests: 291 passing.
 - Focused assistant capability-offer and prompt-budget tests: 90 passing.
 - Prepared Web and assistant-engine typechecks: passing.
 - Exact v0 shared-read tests prove v1 canonical-value fallback strips every
@@ -77,6 +80,18 @@ provider-neutral and by-source choices.
   are accepted and covered by the corrected one-row legacy state, atomic grant
   replacement/revocation, and narrow v1-to-v0 read fallback. The immutable
   first-reviewed head is `dc5b970118325d99e933355105633f446c48766c`.
+- Final ReviewGPT round 2 found that ordinary link activity still rewrote a
+  legacy stored policy to v1 while leaving its v0 grant active, so the previous
+  Web could hide that authority after rollback. The required retrospective
+  chose deletion of that rollout seam: stored v0 policy stays exact and the
+  current Web derives v1 only in memory. A production-path link-creation test
+  proves the legacy policy remains visible and revocable to the previous Web.
+- Final ReviewGPT round 3 found that explicit v1 approval under a v0-only policy
+  could create a v1 grant that the previous exact-scope Web could not see after
+  rollback. The accepted correction materializes v1 alongside v0 in the same
+  locked Web-acceptance transaction as the grant replacement. Focused tests
+  cover existing-member upgrade, new-member approval, unchanged v0
+  preservation, full revoke, and native-offer policy non-mutation.
 
 Status: active
 Updated: 2026-08-05
