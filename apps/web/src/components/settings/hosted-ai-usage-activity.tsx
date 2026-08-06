@@ -12,8 +12,6 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 export function HostedAiUsageActivity(props: {
   activity: HostedAiUsageActivitySnapshot;
   missionContactOption: MurphContactOption | null;
-  /** Browser-local invalidation only; the authenticated endpoint owns the URL. */
-  referralIdentityKey: string;
   signupReferralUrl?: string | null;
 }) {
   const canStartMissions =
@@ -39,7 +37,9 @@ export function HostedAiUsageActivity(props: {
           </h3>
           <div className="ml-auto flex items-center gap-4">
             <HostedSignupReferralLinkButton
-              identityKey={props.referralIdentityKey}
+              identityKey={
+                props.activity.referralIdentityKey ?? "referral-design-preview"
+              }
               signupUrl={props.signupReferralUrl}
             />
             {canStartMissions && props.missionContactOption ? (
