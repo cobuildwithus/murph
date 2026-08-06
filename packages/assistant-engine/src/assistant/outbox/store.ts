@@ -29,6 +29,12 @@ import { readAssistantCronCanonicalRuntimeStore } from '../cron/runtime-state.js
 
 const ASSISTANT_TERMINAL_OUTBOX_RETENTION_LIMIT = 100
 const ASSISTANT_TERMINAL_OUTBOX_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
+const ASSISTANT_OUTBOX_INVENTORY_READ_CONCURRENCY = 4
+
+export interface AssistantOutboxInventoryScanMetrics {
+  bytesRead: number
+  filesRead: number
+}
 
 export async function readAssistantOutboxIntent(
   vault: string,
@@ -63,27 +69,49 @@ export async function saveAssistantOutboxIntent(
 
 export async function listAssistantOutboxIntentsLocal(
   vault: string,
+  onScan?: (metrics: AssistantOutboxInventoryScanMetrics) => void,
 ): Promise<AssistantOutboxIntent[]> {
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
   const entries = await readdir(paths.outboxDirectory, {
     withFileTypes: true,
   })
+  const inventoryEntries = entries.filter(
+    (entry) => entry.isFile() && entry.name.endsWith('.json'),
+  )
   const intents: AssistantOutboxIntent[] = []
+  let bytesRead = 0
+  let filesRead = 0
 
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.json')) {
-      continue
-    }
-
-    const intent = await readAssistantOutboxIntentInventoryEntry(
-      vault,
-      path.join(paths.outboxDirectory, entry.name),
+  for (
+    let index = 0;
+    index < inventoryEntries.length;
+    index += ASSISTANT_OUTBOX_INVENTORY_READ_CONCURRENCY
+  ) {
+    const batch = inventoryEntries.slice(
+      index,
+      index + ASSISTANT_OUTBOX_INVENTORY_READ_CONCURRENCY,
     )
-    if (intent) {
-      intents.push(intent)
+    const batchIntents = await Promise.all(
+      batch.map((entry) =>
+        readAssistantOutboxIntentInventoryEntry(
+          vault,
+          path.join(paths.outboxDirectory, entry.name),
+          (bytes) => {
+            bytesRead += bytes
+            filesRead += 1
+          },
+        ),
+      ),
+    )
+    for (const intent of batchIntents) {
+      if (intent) {
+        intents.push(intent)
+      }
     }
   }
+
+  onScan?.({ bytesRead, filesRead })
 
   return intents.sort((left, right) =>
     compareAssistantTimestampsAscending(left.createdAt, right.createdAt) ||
@@ -202,13 +230,14 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
 export async function readAssistantOutboxIntentAtPath(
   intentPath: string,
   options?: {
+    onBytesRead?: (bytes: number) => void
     vault?: string
   },
 ): Promise<AssistantOutboxIntent | null> {
   try {
-    return assistantOutboxIntentSchema.parse(
-      JSON.parse(await readFile(intentPath, 'utf8')),
-    )
+    const raw = await readFile(intentPath, 'utf8')
+    options?.onBytesRead?.(Buffer.byteLength(raw, 'utf8'))
+    return assistantOutboxIntentSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (isMissingFileError(error)) {
       return null
@@ -230,8 +259,12 @@ export async function readAssistantOutboxIntentAtPath(
 export async function readAssistantOutboxIntentInventoryEntry(
   vault: string,
   intentPath: string,
+  onBytesRead?: (bytes: number) => void,
 ): Promise<AssistantOutboxIntent | null> {
-  return readAssistantOutboxIntentAtPath(intentPath, { vault })
+  return readAssistantOutboxIntentAtPath(intentPath, {
+    ...(onBytesRead ? { onBytesRead } : {}),
+    vault,
+  })
 }
 
 export async function quarantineAssistantOutboxIntentFile(input: {

@@ -2146,7 +2146,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     systemMailboxMaintenanceMs?: number;
     memberPreferencesPrePlanningMs?: number;
     automationBootstrapMs?: number;
+    outboxScanBytesRead?: number;
     outboxScanElapsedMs?: number;
+    outboxScanFilesRead?: number;
     outboxScanPerformed?: boolean;
     receiptScanBytesRead?: number;
     receiptScanElapsedMs?: number;
@@ -2280,7 +2282,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "systemMailboxMaintenanceMs",
     "memberPreferencesPrePlanningMs",
     "automationBootstrapMs",
+    "outboxScanBytesRead",
     "outboxScanElapsedMs",
+    "outboxScanFilesRead",
     "outboxScanPerformed",
     "receiptScanBytesRead",
     "receiptScanElapsedMs",
