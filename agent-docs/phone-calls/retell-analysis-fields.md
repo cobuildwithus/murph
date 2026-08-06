@@ -11,9 +11,13 @@ result boundary. When Retell reports `call_transfer`, that analysis describes
 only the automated leg, so Murph defers result persistence and notification
 until the human transfer leg ends. `transfer_ended` then becomes the result
 boundary: Murph records that the handoff connected while keeping the
-post-handoff outcome explicitly unknown and asks the member what happened. A
-cancelled or failed transfer remains on ordinary `call_analyzed` handling; only
-a successful transfer with a completed human leg is deferred.
+post-handoff outcome explicitly unknown and asks the member what happened.
+Murph retains a bounded copy of the automated leg's final result as explicitly
+pre-handoff context, so useful dates, options, prices, and policies remain
+available without turning its completion status into a claim about what the
+member and recipient later agreed. A cancelled or failed transfer remains on
+ordinary `call_analyzed` handling; only a successful transfer with a completed
+human leg is deferred.
 
 Signed terminal callbacks also record Retell's provider-reported aggregate call
 cost in the web-owned included-usage ledger. A `call_transfer` observation stays
@@ -37,7 +41,8 @@ result
     State the exact final outcome. Include all confirmed dates, times, locations, business names,
     provider names, prices, pickup details, confirmation codes, preparation instructions, and
     relevant policies. For a transferred call, this field describes only the automated leg before
-    handoff; Murph will not treat it as proof of what the member and recipient agreed afterward.
+    handoff. Murph retains it only as bounded, explicitly pre-handoff context and will not treat it
+    as proof of what the member and recipient agreed afterward.
 
 follow_up
   Type: Text

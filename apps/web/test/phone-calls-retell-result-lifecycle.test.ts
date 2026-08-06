@@ -77,14 +77,14 @@ describe("Retell phone-call result lifecycle", () => {
     })).toBeNull();
   });
 
-  it("turns the completed human leg into an uncertainty-aware follow-up", () => {
+  it("keeps useful pre-handoff context while making the final outcome uncertain", () => {
     const result = prepareRetellCallResult({
       call: {
         call_analysis: {
           custom_analysis_data: {
             follow_up: "Approval was needed before proceeding.",
             outcome: "needs_user",
-            result: "The automated leg did not complete the requested action before transfer.",
+            result: "A Monday morning option was available, but the automated leg did not complete the request before transfer.",
           },
         },
         call_id: "retell_call_transfer",
@@ -101,8 +101,8 @@ describe("Retell phone-call result lifecycle", () => {
         "Murph successfully connected the user to the call recipient",
       ),
     });
-    expect(result.call_analysis?.custom_analysis_data?.result).not.toContain(
-      "did not complete the requested action",
+    expect(result.call_analysis?.custom_analysis_data?.result).toContain(
+      "Before the handoff, the automated call reported: A Monday morning option was available",
     );
     expect(result.call_analysis?.custom_analysis_data?.follow_up).not.toContain(
       "Approval was needed before proceeding",
@@ -117,11 +117,37 @@ describe("Retell phone-call result lifecycle", () => {
       outcome: "needs_user",
       summary: expect.stringContaining("post-handoff outcome is unknown"),
     });
+    expect(mapped.summary).toContain(
+      "Before the handoff, the automated call reported: A Monday morning option was available",
+    );
     expect(instructions).toContain("Ask the user what happened after the handoff");
     expect(instructions).toContain(
       "Murph successfully connected the user to the call recipient",
     );
-    expect(instructions).not.toContain("did not complete the requested action");
+    expect(instructions).toContain(
+      "Before the handoff, the automated call reported: A Monday morning option was available",
+    );
+  });
+
+  it("bounds retained pre-handoff context before persisting the result", () => {
+    const result = prepareRetellCallResult({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "needs_user",
+            result: "context ".repeat(400),
+          },
+        },
+        call_id: "retell_call_transfer",
+        disconnection_reason: "call_transfer",
+        transfer_end_timestamp: 1_782_408_600_000,
+      },
+      event: "transfer_ended",
+    });
+    const mapped = mapRetellCallAnalysis(result);
+
+    expect(mapped.summary.length).toBeLessThanOrEqual(2_000);
+    expect(mapped.summary.endsWith(" [truncated]")).toBe(true);
   });
 
   it("normalizes a late call_analyzed replay after the transfer leg ended", () => {
@@ -144,5 +170,8 @@ describe("Retell phone-call result lifecycle", () => {
       outcome: "needs_user",
       result: expect.stringContaining("post-handoff outcome is unknown"),
     });
+    expect(result?.call_analysis?.custom_analysis_data?.result).toContain(
+      "Before the handoff, the automated call reported:",
+    );
   });
 });

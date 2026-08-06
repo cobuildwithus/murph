@@ -6,6 +6,8 @@ import {
 const RETELL_TRANSFER_DISCONNECTION_REASON = "call_transfer";
 const TRANSFERRED_CALL_SUMMARY =
   "Murph successfully connected the user to the call recipient and then left the conversation. Murph cannot observe what the user and recipient agreed after the handoff, so the final post-handoff outcome is unknown.";
+const TRANSFERRED_CALL_CONTEXT_PREFIX =
+  " Before the handoff, the automated call reported: ";
 const TRANSFERRED_CALL_FOLLOW_UP =
   "Ask the user what happened after the handoff and whether the call goal was completed. Do not claim it was or was not completed. After the user confirms the details, offer a relevant next step such as a reminder when useful.";
 
@@ -45,10 +47,31 @@ export function prepareRetellCallResult(input: {
         ...(input.call.call_analysis?.custom_analysis_data ?? {}),
         follow_up: TRANSFERRED_CALL_FOLLOW_UP,
         outcome: "needs_user",
-        result: TRANSFERRED_CALL_SUMMARY,
+        result: buildTransferredCallSummary(input.call),
       },
     },
   };
+}
+
+function buildTransferredCallSummary(call: RetellCallPayload): string {
+  const preHandoffContext = readTransferredCallPreHandoffContext(call);
+  return preHandoffContext
+    ? `${TRANSFERRED_CALL_SUMMARY}${TRANSFERRED_CALL_CONTEXT_PREFIX}${preHandoffContext}`
+    : TRANSFERRED_CALL_SUMMARY;
+}
+
+function readTransferredCallPreHandoffContext(
+  call: RetellCallPayload,
+): string | null {
+  const value = call.call_analysis?.custom_analysis_data?.result;
+  if (typeof value !== "string") {
+    return null;
+  }
+  const text = value.trim();
+  if (!text) {
+    return null;
+  }
+  return text;
 }
 
 function isRetellTransferredCall(call: RetellCallPayload): boolean {
