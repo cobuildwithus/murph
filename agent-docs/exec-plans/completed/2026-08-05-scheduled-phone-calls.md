@@ -1,8 +1,8 @@
 # Enable phone calls on scheduled turns
 
-Status: active
+Status: completed
 Created: 2026-08-05
-Updated: 2026-08-05
+Updated: 2026-08-06
 
 ## Goal
 
@@ -116,9 +116,10 @@ phone call it requested through the existing hosted phone-call port.
   plus agent docs drift and diff checks passed.
 - Final ReviewGPT round 3 confirmed both earlier findings resolved and found one
   review-induced feedback gap: a changed-brief retry correctly starts no second
-  call but inherited the definitive attended-call failure text. The scheduled
-  branch now states that an occurrence may already own a provider attempt and
-  must not be retried automatically. Its regression failed before the change;
+  call but inherited the definitive attended-call failure text. The round-3
+  correction stated that an occurrence may already own a provider attempt and
+  must not be retried automatically; round 4 later corrected its unconditional
+  promise of an existing result. Its regression failed before the change;
   afterward the two focused suites passed 100 tests and Assistant Engine
   typecheck passed. Attended-call error copy remains unchanged.
 - Latest `main` conflicted only in the independently ratcheted runner bundle
@@ -136,3 +137,13 @@ phone call it requested through the existing hosted phone-call port.
   regressions failed before the correction; afterward the two focused Assistant
   suites passed 101 tests, the Web phone-call owner suites passed 57 tests, and
   Assistant Engine and Web typechecks passed.
+- Final ReviewGPT round 5 returned `ROUND_OUTCOME: PASS` after a substantive
+  full-snapshot review. It independently verified every accepted correction,
+  the exact current change-shape counts, the Web-first rollout, and the combined
+  runner-bundle baseline with no qualifying finding. All GitHub Actions passed
+  on the reviewed head.
+- After the zero-finding review, the latest `origin/main` merged with the normal
+  strategy and no conflict or task-authored resolution. The prior read-only
+  merge-tree proof was clean, so this is the documented base-update-only path;
+  exact-head CI owns the final combined verification.
+Completed: 2026-08-06
