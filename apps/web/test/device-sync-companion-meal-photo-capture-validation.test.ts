@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import {
+  assertMealPhotoCaptureRequestHasNoBody,
   isMealPhotoCaptureScopedAuthorization,
   parseMealPhotoCaptureEnrollmentRequest,
   parseMealPhotoCaptureRevocationRequest,
@@ -96,6 +97,20 @@ describe("meal photo capture validation", () => {
     expect(isMealPhotoCaptureScopedAuthorization(new Request("https://example.test", {
       headers: { authorization: "Bearer privy-identity-token" },
     }))).toBe(false);
+  });
+
+  it("keeps scoped activation and revocation bodyless", async () => {
+    await expect(assertMealPhotoCaptureRequestHasNoBody(new Request(
+      "https://example.test/enrollment",
+      { method: "PUT" },
+    ))).resolves.toBeUndefined();
+    await expect(assertMealPhotoCaptureRequestHasNoBody(new Request(
+      "https://example.test/enrollment",
+      { body: "x", method: "PUT" },
+    ))).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_REQUEST_INVALID",
+      httpStatus: 400,
+    });
   });
 
   it("accepts a bounded metadata-free JPEG and derives server-owned facts", async () => {

@@ -47,6 +47,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'uploadTokenHash String? @unique @map("upload_token_hash")',
     'idempotencySecretEncrypted String? @map("idempotency_secret_encrypted")',
     'expiresAt DateTime? @map("expires_at")',
+    'activatedAt DateTime? @map("activated_at")',
     'revokedAt DateTime? @map("revoked_at")',
     'revokeReason String? @map("revoke_reason")',
     'createdAt DateTime @default(now()) @map("created_at")',

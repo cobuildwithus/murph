@@ -9,6 +9,9 @@ Updated: 2026-08-05
 - Prevent a canceled meal-photo enrollment request from restoring upload
   authority when its delayed `POST` reaches Web after the member's disabling
   `DELETE`.
+- Prevent a schema-v2 enrollment whose response is lost across process death
+  from becoming usable upload authority before the native host durably saves
+  the returned credential.
 - Preserve the existing iOS schema-v1 enrollment behavior until an installation
   adopts the fenced schema-v2 contract.
 - Keep one Web-owned per-installation authority record; do not add a second
@@ -23,6 +26,12 @@ Updated: 2026-08-05
   preserves network arrival order rather than the member's later disable intent.
 - Existing concurrency coverage proves only `POST` first and `DELETE` second;
   it does not exercise the inverse arrival order.
+- Privy authentication happens before the member-locked enrollment
+  transaction. A later request rejected as unauthorized or member-not-found
+  cannot write a revision fence for an older request already admitted as the
+  prior member, and a bodyless scoped deletion has no authority when no token
+  was ever saved. One-phase issuance can therefore leave an active but
+  unrecoverable bearer after process death.
 
 ## Architecture and state
 
@@ -40,8 +49,18 @@ Updated: 2026-08-05
   no-authority tombstone rather than fabricated credential material.
 - A later explicit re-enable uses a larger revision. A delayed older `POST`
   cannot cross the tombstone.
-- Existing rows begin at revision zero. Schema-v1 identity requests retain
-  their current behavior only while the row remains at zero; after a v2
+- Schema-v2 `POST` prepares complete credentials with no activation timestamp.
+  Its success response remains unchanged, but upload rejects that token until
+  the foreground host saves it durably and performs an exact bodyless
+  scoped-token `PUT`. The `PUT` is idempotent for the current token.
+- Activation and scoped `DELETE` lock the same member and reread the exact
+  token. Activation first followed by deletion ends revoked; deletion first
+  makes activation fail authorization. A delayed prepare or lost response is
+  harmless because prepared credentials never authorize upload.
+- Existing rows begin at revision zero and remain immediately active. A null
+  activation marker on a legacy revision-zero row is treated as active during
+  the rollout window and backfilled after old Web drains. Schema-v1 identity
+  requests retain their current behavior only while the row remains at zero; after a v2
   mutation, legacy identity requests fail rather than crossing the fence.
   Exact scoped-bearer self-revocation remains available.
 
@@ -57,16 +76,17 @@ Updated: 2026-08-05
   high-water mark and reactivate a tombstone.
 - Successful enrollment responses keep the existing bearer, idempotency-secret,
   and expiry shape. A revision conflict includes the current revision and
-  active/revoked state so only an explicit foreground enable may reconcile
+  active/prepared/revoked state so only an explicit foreground enable may reconcile
   local state loss; no credential material is added to conflict responses.
 
 ## Scope
 
 - `apps/web/prisma/schema.prisma`, one backward-compatible expand migration,
-  and one post-drain contract migration for credential-shape constraints.
+  and one post-drain contract migration for revision, activation, and
+  credential-shape constraints.
 - `apps/web/src/lib/device-sync/meal-photo-capture.ts`.
 - `apps/web/app/api/device-sync/companion/meal-photo-capture/enrollment/route.ts`
-  only if response or route wiring requires it.
+  for the bodyless scoped activation route.
 - Focused meal-photo enrollment, route, validation, and migration tests.
 - `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
   `agent-docs/RELIABILITY.md`,
@@ -82,13 +102,21 @@ Updated: 2026-08-05
   newer enrollment; a fresh higher revision can explicitly re-enable.
 - A duplicate or same-revision enrollment cannot rotate an unrecoverable
   plaintext bearer.
+- A schema-v2 response lost before durable client save remains prepared and
+  cannot upload. Persist-then-activate succeeds, exact activation replay is
+  idempotent, and scoped activation/deletion are proven in both orders.
 - Schema-v1 behavior remains unchanged at revision zero and cannot cross a
   positive fence.
-- Active upload lookup rejects tombstones and incomplete credential state.
+- Active upload lookup rejects prepared state, tombstones, expiry, and
+  incomplete credential state.
 - Migration structure, strict request parsing, and route response shapes are
-  covered, followed by the hosted-Web typecheck and diff/privacy inspection.
+  covered. An opt-in local-PostgreSQL test executes the exact expand and
+  contract files, simulates a legacy revision-zero write between them, proves
+  active preservation and revoked scrubbing, and exercises the validated
+  constraints before hosted-Web typecheck and diff/privacy inspection.
 
 ## Completion boundary
 
-- Stop before commit, push, PR, ReviewGPT, CI, or external deployment so the
-  parent can review the implementation candidate first.
+- Update PR #1343 with one focused corrected candidate after local proof. The
+  immutable initial-head final review continues independently; do not start a
+  second ReviewGPT pass for this remediation.

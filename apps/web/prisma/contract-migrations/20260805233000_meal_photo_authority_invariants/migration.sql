@@ -2,10 +2,17 @@
 -- function window has drained. Older Web revocation code retained credential
 -- material on revoked rows and would violate the credential-shape constraint.
 UPDATE "hosted_meal_photo_capture_enrollment"
+SET "activated_at" = "created_at"
+WHERE "authority_revision" = 0
+  AND "revoked_at" IS NULL
+  AND "activated_at" IS NULL;
+
+UPDATE "hosted_meal_photo_capture_enrollment"
 SET
   "upload_token_hash" = NULL,
   "idempotency_secret_encrypted" = NULL,
-  "expires_at" = NULL
+  "expires_at" = NULL,
+  "activated_at" = NULL
 WHERE "revoked_at" IS NOT NULL;
 
 DO $$
@@ -41,6 +48,10 @@ ALTER TABLE "hosted_meal_photo_capture_enrollment"
         AND "upload_token_hash" IS NOT NULL
         AND "idempotency_secret_encrypted" IS NOT NULL
         AND "expires_at" IS NOT NULL
+        AND (
+          "authority_revision" > 0
+          OR "activated_at" IS NOT NULL
+        )
       )
       OR
       (
@@ -48,6 +59,7 @@ ALTER TABLE "hosted_meal_photo_capture_enrollment"
         AND "upload_token_hash" IS NULL
         AND "idempotency_secret_encrypted" IS NULL
         AND "expires_at" IS NULL
+        AND "activated_at" IS NULL
       )
     ) NOT VALID;
 

@@ -26,6 +26,9 @@ describe("meal photo capture authority migration", () => {
     expect(EXPAND_MIGRATION).toContain(
       'ADD COLUMN "authority_revision" INTEGER DEFAULT 0',
     );
+    expect(EXPAND_MIGRATION).toContain(
+      'ADD COLUMN "activated_at" TIMESTAMP(3)',
+    );
     expect(EXPAND_MIGRATION).not.toContain(
       'ADD COLUMN "authority_revision" INTEGER NOT NULL',
     );
@@ -59,11 +62,19 @@ describe("meal photo capture authority migration", () => {
     expect(model).toContain(
       'expiresAt                  DateTime?    @map("expires_at")',
     );
+    expect(model).toContain(
+      'activatedAt                DateTime?    @map("activated_at")',
+    );
   });
 
   it("scrubs revoked credentials and validates the post-drain row contract", () => {
     expect(CONTRACT_MIGRATION).toContain(
       'WHERE "revoked_at" IS NOT NULL',
+    );
+    expect(CONTRACT_MIGRATION).toContain(
+      'WHERE "authority_revision" = 0\n'
+      + '  AND "revoked_at" IS NULL\n'
+      + '  AND "activated_at" IS NULL',
     );
     expect(CONTRACT_MIGRATION).toContain(
       'ALTER COLUMN "authority_revision" SET NOT NULL',
@@ -76,6 +87,9 @@ describe("meal photo capture authority migration", () => {
     );
     expect(CONTRACT_MIGRATION).toContain(
       '"revoked_at" IS NOT NULL\n        AND "upload_token_hash" IS NULL',
+    );
+    expect(CONTRACT_MIGRATION).toContain(
+      '"authority_revision" > 0\n          OR "activated_at" IS NOT NULL',
     );
     expect(CONTRACT_MIGRATION).toContain(
       'VALIDATE CONSTRAINT "hosted_meal_photo_capture_enrollment_authority_revision_check"',

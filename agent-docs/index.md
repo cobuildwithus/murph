@@ -15,8 +15,9 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 
 Automatic meal-photo schema-v2 enrollment ordering, including the one-row
 per-installation revision fence, credential-free revocation tombstone,
+prepared-before-active credential handoff, bodyless scoped activation,
 schema-v1 revision-zero compatibility, expand/contract migration sequence, and
-focused proof matrix, is jointly specified by `ARCHITECTURE.md`,
+focused static and PostgreSQL proof matrix, is jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.

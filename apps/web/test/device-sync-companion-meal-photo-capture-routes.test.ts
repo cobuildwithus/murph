@@ -7,6 +7,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  activateMealPhotoCaptureEnrollmentForScopedToken: vi.fn(),
   appendHostedMealPhotoMailboxEnvelopeTx: vi.fn(),
   assertCurrentMealPhotoCaptureEnrollmentTx: vi.fn(),
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
@@ -39,6 +40,8 @@ vi.mock("@murphai/hosted-execution", () => ({
 }));
 
 vi.mock("@/src/lib/device-sync/meal-photo-capture", () => ({
+  activateMealPhotoCaptureEnrollmentForScopedToken:
+    mocks.activateMealPhotoCaptureEnrollmentForScopedToken,
   assertCurrentMealPhotoCaptureEnrollmentTx:
     mocks.assertCurrentMealPhotoCaptureEnrollmentTx,
   assertMealPhotoCaptureRequestHasNoBody: mocks.assertMealPhotoCaptureRequestHasNoBody,
@@ -146,6 +149,9 @@ describe("meal photo companion routes", () => {
       expiresAt: new Date("2026-08-11T12:00:00.000Z"),
       idempotencySecret: "idempotency-secret",
       uploadToken: "scoped-upload-token",
+    });
+    mocks.activateMealPhotoCaptureEnrollmentForScopedToken.mockResolvedValue({
+      activated: true,
     });
     mocks.revokeMealPhotoCaptureEnrollmentForMember.mockResolvedValue({ revoked: true });
     mocks.revokeMealPhotoCaptureEnrollmentForScopedToken.mockResolvedValue({ revoked: true });
@@ -373,6 +379,23 @@ describe("meal photo companion routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.assertMealPhotoCaptureRequestHasNoBody).toHaveBeenCalledWith(request);
     expect(mocks.revokeMealPhotoCaptureEnrollmentForScopedToken).toHaveBeenCalledWith({
+      prisma: expect.anything(),
+      token: "scoped-upload-token",
+    });
+    expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+  });
+
+  it("activates a prepared credential through an exact bodyless scoped PUT", async () => {
+    const request = new Request("https://app.example.test/enrollment", {
+      headers: { authorization: "Bearer scoped-upload-token" },
+      method: "PUT",
+    });
+    const response = await enrollmentRoute.PUT(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ activated: true });
+    expect(mocks.assertMealPhotoCaptureRequestHasNoBody).toHaveBeenCalledWith(request);
+    expect(mocks.activateMealPhotoCaptureEnrollmentForScopedToken).toHaveBeenCalledWith({
       prisma: expect.anything(),
       token: "scoped-upload-token",
     });

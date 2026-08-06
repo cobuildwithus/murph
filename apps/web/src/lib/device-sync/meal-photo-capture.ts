@@ -127,6 +127,7 @@ export async function revokeAllMealPhotoCaptureEnrollmentsForMember(input: {
     }
     const result = await tx.hostedMealPhotoCaptureEnrollment.updateMany({
       data: {
+        activatedAt: null,
         expiresAt: null,
         idempotencySecretEncrypted: null,
         revokeReason: "health_data_consent_withdrawn",
@@ -236,7 +237,7 @@ export async function issueMealPhotoCaptureEnrollment(input: {
     });
     assertMealPhotoCaptureAuthorityRevisionCanAdvance({
       currentRevision: existing?.authorityRevision ?? 0,
-      currentRevoked: existing?.revokedAt !== null && existing?.revokedAt !== undefined,
+      currentState: readMealPhotoCaptureAuthorityState(existing),
       operation: "enroll",
       request: input.request,
     });
@@ -272,9 +273,11 @@ export async function issueMealPhotoCaptureEnrollment(input: {
         });
     const uploadToken = generateMealPhotoCaptureToken();
     const expiresAt = new Date(now.getTime() + MEAL_PHOTO_CAPTURE_ENROLLMENT_TTL_MS);
+    const activatedAt = input.request.schemaVersion === 1 ? now : null;
 
     await tx.hostedMealPhotoCaptureEnrollment.upsert({
       create: {
+        activatedAt,
         authorityRevision: readRequestedAuthorityRevision(input.request),
         createdAt: now,
         expiresAt,
@@ -288,6 +291,7 @@ export async function issueMealPhotoCaptureEnrollment(input: {
         uploadTokenHash: hashMealPhotoCaptureValue(uploadToken),
       },
       update: {
+        activatedAt,
         authorityRevision: readRequestedAuthorityRevision(input.request),
         expiresAt,
         idempotencySecretEncrypted,
@@ -333,7 +337,7 @@ export async function revokeMealPhotoCaptureEnrollmentForMember(input: {
     if (input.request.schemaVersion === 1) {
       assertMealPhotoCaptureAuthorityRevisionCanAdvance({
         currentRevision: existing?.authorityRevision ?? 0,
-        currentRevoked: existing?.revokedAt !== null && existing?.revokedAt !== undefined,
+        currentState: readMealPhotoCaptureAuthorityState(existing),
         operation: "revoke",
         request: input.request,
       });
@@ -342,6 +346,7 @@ export async function revokeMealPhotoCaptureEnrollmentForMember(input: {
       }
       const result = await tx.hostedMealPhotoCaptureEnrollment.updateMany({
         data: {
+          activatedAt: null,
           expiresAt: null,
           idempotencySecretEncrypted: null,
           revokeReason: "member_disabled",
@@ -366,13 +371,14 @@ export async function revokeMealPhotoCaptureEnrollmentForMember(input: {
     }
     assertMealPhotoCaptureAuthorityRevisionCanAdvance({
       currentRevision: existing?.authorityRevision ?? 0,
-      currentRevoked: existing?.revokedAt !== null && existing?.revokedAt !== undefined,
+      currentState: readMealPhotoCaptureAuthorityState(existing),
       operation: "revoke",
       request: input.request,
     });
     const enrollmentId = existing?.id ?? generateMealPhotoCaptureEnrollmentId();
     await tx.hostedMealPhotoCaptureEnrollment.upsert({
       create: {
+        activatedAt: null,
         authorityRevision: input.request.authorityRevision,
         createdAt: now,
         expiresAt: null,
@@ -386,6 +392,7 @@ export async function revokeMealPhotoCaptureEnrollmentForMember(input: {
         uploadTokenHash: null,
       },
       update: {
+        activatedAt: null,
         authorityRevision: input.request.authorityRevision,
         expiresAt: null,
         idempotencySecretEncrypted: null,
@@ -416,9 +423,10 @@ export async function revokeMealPhotoCaptureEnrollmentForScopedToken(input: {
     throw mealPhotoCaptureAuthRequired();
   }
   const now = input.now ?? new Date();
+  const uploadTokenHash = hashMealPhotoCaptureValue(token);
   const enrollment = await input.prisma.hostedMealPhotoCaptureEnrollment.findUnique({
     where: {
-      uploadTokenHash: hashMealPhotoCaptureValue(token),
+      uploadTokenHash,
     },
   });
   if (!enrollment || enrollment.revokedAt) {
@@ -427,8 +435,19 @@ export async function revokeMealPhotoCaptureEnrollmentForScopedToken(input: {
 
   return input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, enrollment.memberId);
+    const current = await tx.hostedMealPhotoCaptureEnrollment.findUnique({
+      where: { id: enrollment.id },
+    });
+    if (
+      !current
+      || current.revokedAt
+      || current.uploadTokenHash !== uploadTokenHash
+    ) {
+      throw mealPhotoCaptureAuthRequired();
+    }
     const result = await tx.hostedMealPhotoCaptureEnrollment.updateMany({
       data: {
+        activatedAt: null,
         expiresAt: null,
         idempotencySecretEncrypted: null,
         revokeReason: "scoped_token_revoked",
@@ -439,6 +458,7 @@ export async function revokeMealPhotoCaptureEnrollmentForScopedToken(input: {
       where: {
         id: enrollment.id,
         revokedAt: null,
+        uploadTokenHash,
       },
     });
 
@@ -447,6 +467,54 @@ export async function revokeMealPhotoCaptureEnrollmentForScopedToken(input: {
     }
 
     return { revoked: true };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+export async function activateMealPhotoCaptureEnrollmentForScopedToken(input: {
+  now?: Date;
+  prisma: PrismaClient;
+  token: string;
+}): Promise<{ activated: true }> {
+  const token = normalizeMealPhotoCaptureToken(input.token);
+  if (!token) {
+    throw mealPhotoCaptureAuthRequired();
+  }
+  const now = input.now ?? new Date();
+  const uploadTokenHash = hashMealPhotoCaptureValue(token);
+  const enrollment = await input.prisma.hostedMealPhotoCaptureEnrollment.findUnique({
+    where: { uploadTokenHash },
+  });
+  if (!enrollment || enrollment.revokedAt) {
+    throw mealPhotoCaptureAuthRequired();
+  }
+
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, enrollment.memberId);
+    const current = await tx.hostedMealPhotoCaptureEnrollment.findUnique({
+      where: { id: enrollment.id },
+    });
+    if (
+      !current
+      || current.revokedAt
+      || current.uploadTokenHash !== uploadTokenHash
+      || !current.idempotencySecretEncrypted
+      || !current.expiresAt
+      || current.expiresAt <= now
+    ) {
+      throw mealPhotoCaptureAuthRequired();
+    }
+    if (current.activatedAt || current.authorityRevision === 0) {
+      return { activated: true };
+    }
+
+    await tx.hostedMealPhotoCaptureEnrollment.update({
+      data: {
+        activatedAt: now,
+        updatedAt: now,
+      },
+      where: { id: current.id },
+    });
+    return { activated: true };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
@@ -467,6 +535,7 @@ export async function requireActiveMealPhotoCaptureEnrollment(input: {
   });
   if (
     !enrollment
+    || (!enrollment.activatedAt && enrollment.authorityRevision > 0)
     || enrollment.revokedAt
     || !enrollment.expiresAt
     || !enrollment.idempotencySecretEncrypted
@@ -535,12 +604,16 @@ export async function assertMealPhotoCaptureRequestHasNoBody(request: Request): 
     body = await readRawBodyBuffer(request, { limitBytes: 1 });
   } catch (error) {
     if (error instanceof RangeError) {
-      throw mealPhotoCaptureRequestInvalid("Scoped revocation does not accept a request body.");
+      throw mealPhotoCaptureRequestInvalid(
+        "Scoped meal-photo authority changes do not accept a request body.",
+      );
     }
     throw error;
   }
   if (body.byteLength !== 0) {
-    throw mealPhotoCaptureRequestInvalid("Scoped revocation does not accept a request body.");
+    throw mealPhotoCaptureRequestInvalid(
+      "Scoped meal-photo authority changes do not accept a request body.",
+    );
   }
 }
 
@@ -658,7 +731,7 @@ function readRequestedAuthorityRevision(
 
 function assertMealPhotoCaptureAuthorityRevisionCanAdvance(input: {
   currentRevision: number;
-  currentRevoked: boolean;
+  currentState: "active" | "prepared" | "revoked";
   operation: "enroll" | "revoke";
   request: MealPhotoCaptureEnrollmentRequest | MealPhotoCaptureRevocationRequest;
 }): void {
@@ -671,9 +744,24 @@ function assertMealPhotoCaptureAuthorityRevisionCanAdvance(input: {
   }
   throw mealPhotoCaptureAuthorityRevisionConflict({
     currentRevision: input.currentRevision,
-    currentRevoked: input.currentRevoked,
+    currentState: input.currentState,
     operation: input.operation,
   });
+}
+
+function readMealPhotoCaptureAuthorityState(
+  enrollment: {
+    activatedAt: Date | null;
+    authorityRevision: number;
+    revokedAt: Date | null;
+  } | null,
+): "active" | "prepared" | "revoked" {
+  if (enrollment?.revokedAt) {
+    return "revoked";
+  }
+  return enrollment && enrollment.authorityRevision > 0 && !enrollment.activatedAt
+    ? "prepared"
+    : "active";
 }
 
 function parseCapturedAt(value: string | null): string {
@@ -888,14 +976,14 @@ function mealPhotoCaptureRequestInvalid(message: string) {
 
 function mealPhotoCaptureAuthorityRevisionConflict(input: {
   currentRevision: number;
-  currentRevoked: boolean;
+  currentState: "active" | "prepared" | "revoked";
   operation: "enroll" | "revoke";
 }) {
   return hostedOnboardingError({
     code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
     details: {
       currentAuthorityRevision: input.currentRevision,
-      currentAuthorityState: input.currentRevoked ? "revoked" : "active",
+      currentAuthorityState: input.currentState,
       requestedOperation: input.operation,
     },
     httpStatus: 409,
