@@ -7,7 +7,7 @@ import {
 } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
 import {
-  HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
+  HOSTED_SIGNUP_REFERRAL_POLICY_VERSIONS,
 } from "./signup-referral-policy";
 import {
   recoverPendingHostedSignupReferralRewards,
@@ -53,7 +53,7 @@ export async function recoverPendingHostedUsageReferrals(input: {
           {
             celebrationQueuedAt: null,
             policyVersion: {
-              not: HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
+              notIn: [...HOSTED_SIGNUP_REFERRAL_POLICY_VERSIONS],
             },
             status: "rewarded",
           },
