@@ -38,6 +38,7 @@ export interface HostedGroupJoinPolicy {
 export interface HostedVaultShareProjectionDisplay {
   description: string;
   label: string;
+  legacyProjectionScope?: HostedVaultShareProjectionScope;
   projectionKind: HostedVaultShareProjectionKind;
   projectionScope: HostedVaultShareProjectionScope;
   projectionScopeKey: string;
@@ -143,7 +144,7 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
     description: "Shares your last 7 days of deep sleep minutes.",
   },
   "deep-sleep-sources-days.v1": {
-    label: "Deep sleep by source",
+    label: "Deep sleep",
     description:
       "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
   },
@@ -152,7 +153,7 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
     description: "Shares your last 7 days of REM sleep minutes.",
   },
   "rem-sleep-sources-days.v1": {
-    label: "REM sleep by source",
+    label: "REM sleep",
     description:
       "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
   },
@@ -261,15 +262,81 @@ export function normalizeHostedVaultShareProjectionScopes(
   );
 }
 
+/**
+ * Current group access offers expose one Deep sleep permission and one REM
+ * sleep permission. Their source-aware v1 scopes are the complete contracts.
+ * Durable join policies keep legacy v0 scopes exact so the previous Web remains
+ * able to show and revoke their independently authoritative grants on rollback.
+ */
+export function normalizeHostedGroupAccessOfferProjectionScopes(
+  value: unknown,
+): HostedVaultShareProjectionScope[] {
+  const offered = normalizeHostedVaultShareProjectionScopes(value).map((scope) => {
+    if (scope.projectionKind === "deep-sleep-days.v0") {
+      return { projectionKind: "deep-sleep-sources-days.v1" } as const;
+    }
+    if (scope.projectionKind === "rem-sleep-days.v0") {
+      return { projectionKind: "rem-sleep-sources-days.v1" } as const;
+    }
+    return scope;
+  });
+  return normalizeHostedVaultShareProjectionScopes(offered);
+}
+
+export function legacyHostedGroupSleepProjectionScope(
+  projectionScope: HostedVaultShareProjectionScope,
+): HostedVaultShareProjectionScope | null {
+  if (projectionScope.projectionKind === "deep-sleep-sources-days.v1") {
+    return { projectionKind: "deep-sleep-days.v0" };
+  }
+  if (projectionScope.projectionKind === "rem-sleep-sources-days.v1") {
+    return { projectionKind: "rem-sleep-days.v0" };
+  }
+  return null;
+}
+
+export function sourceAwareHostedGroupSleepProjectionScope(
+  projectionScope: HostedVaultShareProjectionScope,
+): HostedVaultShareProjectionScope | null {
+  if (projectionScope.projectionKind === "deep-sleep-days.v0") {
+    return { projectionKind: "deep-sleep-sources-days.v1" };
+  }
+  if (projectionScope.projectionKind === "rem-sleep-days.v0") {
+    return { projectionKind: "rem-sleep-sources-days.v1" };
+  }
+  return null;
+}
+
+export function includeLegacyHostedGroupSleepProjectionScopes(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
+): HostedVaultShareProjectionScope[] {
+  return normalizeHostedVaultShareProjectionScopes(projectionScopes.flatMap((scope) => {
+    const legacyScope = legacyHostedGroupSleepProjectionScope(scope);
+    return legacyScope ? [scope, legacyScope] : [scope];
+  }));
+}
+
+export function includeSourceAwareHostedGroupSleepProjectionScopes(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
+): HostedVaultShareProjectionScope[] {
+  return normalizeHostedVaultShareProjectionScopes(projectionScopes.flatMap((scope) => {
+    const sourceAwareScope = sourceAwareHostedGroupSleepProjectionScope(scope);
+    return sourceAwareScope ? [scope, sourceAwareScope] : [scope];
+  }));
+}
+
 export function mergeHostedGroupJoinPolicy(input: {
   existing: unknown;
   requestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
 }): HostedGroupJoinPolicy {
   const existing = readHostedGroupJoinPolicy(input.existing);
+  const offered = normalizeHostedGroupAccessOfferProjectionScopes(
+    input.requestedVaultShareProjectionScopes,
+  );
   return hostedGroupJoinPolicyFromScopes(
     normalizeHostedVaultShareProjectionScopes([
       ...existing.requestedVaultShareProjectionScopes,
-      ...input.requestedVaultShareProjectionScopes,
+      ...offered,
     ]),
   );
 }
@@ -277,16 +344,35 @@ export function mergeHostedGroupJoinPolicy(input: {
 export function projectHostedVaultShareProjectionDisplays(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): HostedVaultShareProjectionDisplay[] {
-  return normalizeHostedVaultShareProjectionScopes(projectionScopes)
+  return collapseLegacySleepProjectionScopes(
+    normalizeHostedVaultShareProjectionScopes(projectionScopes),
+  )
     .map((projectionScope) => {
       const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+      const legacyProjectionScope = legacyHostedGroupSleepProjectionScope(projectionScope);
       return {
+        ...(legacyProjectionScope ? { legacyProjectionScope } : {}),
         projectionKind: projectionScope.projectionKind,
         projectionScope,
         projectionScopeKey,
         ...hostedVaultShareProjectionScopeDisplay(projectionScope),
       };
     });
+}
+
+function collapseLegacySleepProjectionScopes(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
+): HostedVaultShareProjectionScope[] {
+  const hasDeepSleepV1 = projectionScopes.some(
+    (scope) => scope.projectionKind === "deep-sleep-sources-days.v1",
+  );
+  const hasRemSleepV1 = projectionScopes.some(
+    (scope) => scope.projectionKind === "rem-sleep-sources-days.v1",
+  );
+  return projectionScopes.filter((scope) =>
+    !(hasDeepSleepV1 && scope.projectionKind === "deep-sleep-days.v0")
+    && !(hasRemSleepV1 && scope.projectionKind === "rem-sleep-days.v0")
+  );
 }
 
 function hostedGroupJoinPolicyFromScopes(

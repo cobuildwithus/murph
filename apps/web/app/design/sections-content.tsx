@@ -327,7 +327,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group join invites, sharing, and setup recovery">
+      <StudySection title="Group join invites, current and legacy sharing, and setup recovery">
         <GroupJoinStudy />
       </StudySection>
 

@@ -14,6 +14,7 @@ import type {
 import {
   HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS,
   hostedPhoneCallBriefSchema,
+  isHostedScheduledPhoneCallRequestKey,
 } from "@murphai/hosted-execution/phone-calls";
 
 import { waitForAbortableOperation } from "../hosted-onboarding/abortable-settlement";
@@ -611,7 +612,10 @@ async function resolveExistingHostedPhoneCall(input: {
   if (input.call.memberId !== input.memberId) {
     throw new Error("Hosted phone call request key collision.");
   }
-  if (input.call.originSessionId !== input.originSessionId) {
+  if (
+    input.call.originSessionId !== input.originSessionId
+    && !isHostedScheduledPhoneCallRequestKey(input.call.requestKey)
+  ) {
     throw new Error("Hosted phone call request key collision.");
   }
   assertHostedPhoneCallBriefMatches({

@@ -79,6 +79,8 @@ const GROUP_REQUESTER = {
   source: "linq" as const,
 };
 
+const SCHEDULED_REQUEST_KEY = `phone_call_scheduled_${"a".repeat(64)}`;
+
 const GROUP_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = {
   conversationShape: "thread-container",
   externalThreadRouteAuthority: {
@@ -887,6 +889,56 @@ describe("createHostedPhoneCall", () => {
 
     expect(runtime.startCalls).toEqual([]);
     expect(store.updateManyCalls).toEqual([]);
+  });
+
+  it("replays one scheduled occurrence across resident sessions", async () => {
+    const existing = buildHostedPhoneCall({
+      providerCallId: "retell_existing",
+      requestKey: SCHEDULED_REQUEST_KEY,
+      status: "calling",
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      originSessionId: "session_scheduled_retry",
+      prisma: store.prisma,
+      requestKey: SCHEDULED_REQUEST_KEY,
+      runtime: runtime.runtime,
+    })).resolves.toEqual({
+      phoneCallId: existing.id,
+      status: "calling",
+    });
+
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.createCalls).toEqual([]);
+  });
+
+  it("fails closed when a scheduled occurrence retry changes the brief", async () => {
+    const existing = buildHostedPhoneCall({
+      providerCallId: "retell_existing",
+      requestKey: SCHEDULED_REQUEST_KEY,
+      status: "calling",
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCall({
+      brief: {
+        ...VALID_BRIEF,
+        goal: "Ask whether the office accepts walk-ins.",
+      },
+      memberId: existing.memberId,
+      originSessionId: "session_scheduled_retry",
+      prisma: store.prisma,
+      requestKey: SCHEDULED_REQUEST_KEY,
+      runtime: runtime.runtime,
+    })).rejects.toThrow("request key collision");
+
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.createCalls).toEqual([]);
   });
 
   it("allows distinct members to use the same stable request key", async () => {

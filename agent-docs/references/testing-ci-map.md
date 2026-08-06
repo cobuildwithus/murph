@@ -304,6 +304,15 @@ the privacy-foundation migration inventory and production migration guard keep
 the new index and approved ten-minute cron registration aligned. Routine CI
 never reads production feedback or enters Resend.
 
+Immediate support-escalation alert coverage is also Web-owned and provider-free.
+`hosted-product-support-escalation.test.ts` proves private-member authority, the
+fixed linked marker plus anonymous detail ownership, shared recognizable-value
+scrubbing, read-back row validation, a labeled issue summary in the bounded
+plain-text alert, the three-per-member UTC-day cap, exact stable-body/key replay,
+first-stored-detail canonicalization across callback rewording, linked or
+malformed-detail rejection before provider entry, and synthetic-room denial.
+The route suite proves callback-bound member attribution;
+routine tests inject the sender and use a mocked email effect rather than Resend.
 Hosted support-escalation conversation coverage is Assistant Engine-owned.
 `codex-base-support-guidance.test.ts` pins opt-in contact details, explicit
 private-direct authority, immediate reserved submission without a separate
