@@ -92,6 +92,21 @@ describe("POST /api/device-sync/companion/admission", () => {
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
   });
 
+  it("prefers the validated device time zone over a conflicting hosting hint", async () => {
+    const incoming = request(
+      { timeZone: "America/Denver" },
+      { "x-vercel-ip-timezone": "America/New_York" },
+    );
+    const response = await route.POST(incoming);
+
+    expect(response.status).toBe(200);
+    expect(mocks.requireHostedCompanionMemberIdFromRequest).toHaveBeenCalledWith({
+      prisma: { label: "test-prisma" },
+      request: incoming,
+      timeZone: "America/Denver",
+    });
+  });
+
   it("uses the trusted hosting time-zone hint when the optional field is absent", async () => {
     const incoming = request(undefined, {
       "x-vercel-ip-timezone": "America/New_York",
