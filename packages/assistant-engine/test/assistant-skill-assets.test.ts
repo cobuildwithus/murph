@@ -2158,6 +2158,12 @@ describe('assistant skill assets', () => {
     expect(compact).toContain(
       'Missing evidence is unresolved unless the visible conversation shows that the user said it was not relevant or explicitly skipped it.',
     )
+    expect(root).toContain(
+      'the broad role, private default, and context-compounding relationship promise\nwere delivered; minimal identity is known or explicitly skipped;',
+    )
+    expect(root).toContain(
+      'When the relationship promise or minimal identity is still missing, stay in\nthis file and recover only that prerequisite before reading the return owner.',
+    )
     expect(raw).toContain('## The immediate need wins')
     expect(compact).toContain(
       'That request may answer one or more onboarding checkpoints, but it does not complete onboarding by itself.',

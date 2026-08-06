@@ -111,6 +111,7 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
     ONBOARDING_POLICY_PATHS[0][1],
     ONBOARDING_POLICY_PATHS[3][1],
   ],
+  missing_identity_resume: [ONBOARDING_POLICY_PATHS[0][1]],
   missing_progress_resume: [
     ONBOARDING_POLICY_PATHS[0][1],
     ONBOARDING_POLICY_PATHS[1][1],
@@ -343,6 +344,33 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(missingProgress.finalMessage, 'no return-choice framing').not
           .toMatch(/what (?:i|murph) can do|capabilit|hear (?:a bit )?more|dive into|which (?:goal|thread)/iu)
         expect(missingProgress.finalMessage.match(/\?/gu) ?? []).toHaveLength(1)
+
+        await writeRealCodexOnboardingResumeContext(
+          workingDirectory,
+          'missing_identity',
+        )
+        const missingIdentity = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          excludeResumeTurns: true,
+          prompt: [
+            'I remember your intro that you help me follow through, keep this private, and make your help fit better as you learn more.',
+            'We finished the health questions after talking through what better sleep would mean and why it matters.',
+            "We never did the name, age, and gender question. Let's continue.",
+          ].join(' '),
+          scenario: 'missing_identity_resume',
+        })
+        expect(
+          readSuccessfulOnboardingResumeContexts(missingIdentity.actions),
+          'missing-identity resume-context evidence',
+        ).toHaveLength(1)
+        expect(
+          missingIdentity.policyFiles,
+          'missing-identity stage policy reads',
+        ).toEqual(['SKILL.md'])
+        expect(
+          missingIdentity.finalMessage.trim(),
+          'missing-identity recovery question',
+        ).toMatch(/what should i call you/iu)
 
         await writeRealCodexOnboardingResumeContext(workingDirectory, 'later')
         const later = await executeRealCodexOnboardingProbe({
@@ -4429,6 +4457,7 @@ async function writeRealCodexOnboardingResumeContext(
 type RealCodexOnboardingFixture =
   | 'fresh'
   | 'later'
+  | 'missing_identity'
   | 'missing_progress'
   | 'ordinary_records'
 
@@ -4445,12 +4474,16 @@ function buildRealCodexOnboardingResumeContext(
   const records = stage === 'fresh'
     ? []
     : [
-        {
-          id: 'identity_context',
-          section: 'identity',
-          text: 'Preferred name is Riley; age 31; gender is woman.',
-        },
-        ...(stage === 'later' || stage === 'ordinary_records'
+        ...(stage === 'missing_identity'
+          ? []
+          : [{
+              id: 'identity_context',
+              section: 'identity',
+              text: 'Preferred name is Riley; age 31; gender is woman.',
+            }]),
+        ...(stage === 'later'
+            || stage === 'missing_identity'
+            || stage === 'ordinary_records'
           ? [{
               id: 'sleep_thread_context',
               section: 'context',
