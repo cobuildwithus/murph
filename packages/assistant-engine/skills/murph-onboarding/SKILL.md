@@ -43,17 +43,27 @@ decision:
   minimal-identity answer that advances into aspiration discovery, capturing or
   parking an aspiration, collecting any foundation checkpoint, processing a
   foundation memo or lab source, or delegating onboarding persistence.
-- Read `references/persistence-recovery-follow-up.md` before arming the
-  early-stall check-in; persisting or interpreting a skip, decline, or deferral;
-  handling a scheduled recovery occurrence; or applying the cross-stage reply
-  and follow-up rules. When the minimal-identity answer both arms the check-in
-  and advances to aspiration discovery, read this reference and the aspiration
-  reference.
+- After applying the immediate-need override below, every minimal-identity
+  answer that continues onboarding requires both the aspiration reference and
+  `references/persistence-recovery-follow-up.md` before any onboarding action
+  or reply, even when the automation tool is unavailable. Also read the
+  persistence reference before handling any foundation answer that adds or
+  confirms canonical context, including an explicit none or negative fact;
+  arming the early-stall check-in; persisting or interpreting a skip, decline,
+  or deferral; handling a scheduled recovery occurrence; or applying the
+  cross-stage reply and follow-up rules. A turn that only asks the next
+  foundation question may stay in the aspiration reference.
 - Read `references/return-launch-completion.md` after the foundation resolves,
   for the capability tour, thread choice, behavioral-fit questions, first-value
   launch, foreground completion, or an overall decline. Also read the
   persistence reference when completion depends on canonical save, skip, or
   deferral evidence.
+
+For routing only, the six foundation areas are data sources, movement, current
+protocols, supplements, medical and safety context, and recent labs. When the
+resume snapshot resolves all six and contains a concrete aspiration, go
+directly to the return owner; do not reread the aspiration owner merely to
+revalidate completed earlier stages.
 
 If one turn genuinely crosses a stage boundary, read each newly relevant owner.
 Do not preload the stage references. Do not read a later-stage reference merely

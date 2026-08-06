@@ -1988,6 +1988,9 @@ describe('assistant skill assets', () => {
     expect(root).toContain('## Relationship promise')
     expect(root).toContain('### 2. Minimal identity')
     expect(root).toContain('Do not preload the stage references.')
+    expect(root.replace(/\s+/gu, ' ')).toContain(
+      'persistence reference before handling any foundation answer that adds or confirms canonical context, including an explicit none or negative fact;',
+    )
     for (const movedSection of [
       '## Delegating onboarding work',
       '### 3. Find one or two aspiration anchors',

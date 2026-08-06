@@ -1,5 +1,5 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -8,6 +8,12 @@ import {
   readHabitatAspect,
   upsertHabitatAspect,
 } from '@murphai/core'
+import {
+  buildHostedLocalCodexSubscriptionSeedAuth,
+} from '@murphai/hosted-execution/hosted-codex-subscription-auth'
+import {
+  assistantOnboardingResumeContextResultSchema,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { describe, expect, it } from 'vitest'
 
@@ -69,6 +75,9 @@ import {
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
+import {
+  ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+} from '../src/assistant/first-contact-welcome.ts'
 import type {
   AssistantTurnProductFeedbackRecorder,
 } from '../src/assistant/turn-progress.ts'
@@ -83,6 +92,42 @@ import type {
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const describeRealCodex = RUN_REAL_CODEX_E2E ? describe : describe.skip
 const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
+const REAL_CODEX_SUBSCRIPTION_AUTH_ENV =
+  'MURPH_REAL_CODEX_USE_SUBSCRIPTION_AUTH'
+const REAL_CODEX_SUBSCRIPTION_HOME_ENV =
+  'MURPH_REAL_CODEX_SUBSCRIPTION_HOME'
+const REAL_CODEX_SUBSCRIPTION_MINIMUM_RUNWAY_MS = 30 * 60 * 1_000
+const ONBOARDING_POLICY_PATHS = [
+  ['SKILL.md', 'murph-onboarding/SKILL.md'],
+  [
+    'aspiration-foundation-delegation.md',
+    'murph-onboarding/references/aspiration-foundation-delegation.md',
+  ],
+  [
+    'persistence-recovery-follow-up.md',
+    'murph-onboarding/references/persistence-recovery-follow-up.md',
+  ],
+  [
+    'return-launch-completion.md',
+    'murph-onboarding/references/return-launch-completion.md',
+  ],
+] as const
+const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
+  fresh_greeting: [ONBOARDING_POLICY_PATHS[0][1]],
+  later_stage_resume: [
+    ONBOARDING_POLICY_PATHS[0][1],
+    ONBOARDING_POLICY_PATHS[2][1],
+    ONBOARDING_POLICY_PATHS[3][1],
+  ],
+  minimal_identity_answer: [
+    ONBOARDING_POLICY_PATHS[0][1],
+    ONBOARDING_POLICY_PATHS[1][1],
+    ONBOARDING_POLICY_PATHS[2][1],
+  ],
+  minimal_identity_prompt: [ONBOARDING_POLICY_PATHS[0][1]],
+} as const
+type RealCodexOnboardingScenario =
+  keyof typeof REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS
 const OPENAI_ENV_MODEL_PROVIDER = 'openai-env'
 const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 const OPENAI_API_KEY_ENV = 'OPENAI_API_KEY'
@@ -184,6 +229,165 @@ const HABITAT_VOICE_E2E_CLI_ENTRYPOINT = fileURLToPath(
 const HABITAT_VOICE_E2E_TSX_BIN = fileURLToPath(
   new URL('../../../node_modules/.bin/tsx', import.meta.url),
 )
+
+describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
+  it(
+    'routes fresh, minimal-identity, and later resume turns through only their relevant onboarding policy',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const temporaryPaths = [...config.temporaryPaths]
+
+      try {
+        const workingDirectory = await prepareRealCodexOnboardingDirectory()
+        temporaryPaths.unshift(workingDirectory)
+        const turnInput = buildRealCodexOnboardingTurnInput({
+          config,
+          workingDirectory,
+        })
+        const fresh = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          prompt: 'Hey',
+          scenario: 'fresh_greeting',
+        })
+
+        expect(fresh.finalMessage.trim()).toBe(
+          ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+        )
+        expect(fresh.policyFiles, 'fresh greeting policy reads').toEqual([
+          'SKILL.md',
+        ])
+        expect(
+          readSuccessfulOnboardingResumeContexts(fresh.actions),
+          'fresh greeting resume-context evidence',
+        ).toHaveLength(1)
+
+        const minimalIdentity = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          prompt: 'Yeah',
+          resumeSessionId: fresh.sessionId,
+          scenario: 'minimal_identity_prompt',
+        })
+        expect(
+          minimalIdentity.policyFiles.filter((file) => file !== 'SKILL.md'),
+          'minimal-identity prompt stage policy reads',
+        ).toEqual([])
+        expect(minimalIdentity.finalMessage.trim(), 'preferred-name question').toMatch(
+          /what should i call you/iu,
+        )
+
+        const identityAnswer = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          prompt: "Call me Riley. I'm 31 and a guy.",
+          resumeSessionId: minimalIdentity.sessionId,
+          scenario: 'minimal_identity_answer',
+        })
+        expect(
+          identityAnswer.policyFiles.filter((file) => file !== 'SKILL.md'),
+          'minimal-identity answer stage policy reads',
+        ).toEqual([
+          'aspiration-foundation-delegation.md',
+          'persistence-recovery-follow-up.md',
+        ])
+        expect(identityAnswer.finalMessage.trim(), 'aspiration question').toMatch(
+          /what would you most like from your health|what do you want to (?:improve|understand|handle)|what.*health/iu,
+        )
+
+        await writeRealCodexOnboardingResumeContext(workingDirectory, 'later')
+        const later = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          excludeResumeTurns: true,
+          prompt: "Let's continue.",
+          scenario: 'later_stage_resume',
+        })
+        expect(
+          readSuccessfulOnboardingResumeContexts(later.actions),
+          'later resume-context evidence',
+        ).toHaveLength(1)
+        expect(later.policyFiles, 'later resume root policy read').toContain(
+          'SKILL.md',
+        )
+        expect(later.policyFiles, 'later resume stage policy read').toContain(
+          'return-launch-completion.md',
+        )
+        expect(later.policyFiles, 'later resume early-stage policy read').not
+          .toContain('aspiration-foundation-delegation.md')
+        expect(later.finalMessage.trim(), 'later resume choice').toMatch(
+          /(?:sleep|what (?:i|murph) can do|capabilit)[\s\S]*\?/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths(temporaryPaths)
+      }
+    },
+    600_000,
+  )
+})
+
+describe('onboarding policy read detection', () => {
+  it('attributes only substantive policy content surfaced in command output', async () => {
+    const skillsRoot = resolveAssistantSkillsRoot()
+    const broadOutput = [
+      'Hosted onboarding must have capacity for at least three concurrent children.',
+      'Setup drop-off is most likely in these first minutes, so in the same turn',
+      'After the foundation is resolved, close it warmly before asking for anything',
+    ].join('\n')
+    expect(await readOnboardingPolicyFiles([{
+      command: "for f in ./skills/murph-onboarding/references/*; do sed -n '20,30p' \"$f\"; done",
+      eventIndex: 0,
+      kind: 'command',
+      output: broadOutput,
+    }], skillsRoot)).toEqual([
+      'aspiration-foundation-delegation.md',
+      'persistence-recovery-follow-up.md',
+      'return-launch-completion.md',
+    ])
+    expect(await readOnboardingPolicyFiles([{
+      command: 'cat ./skills/murph-onboarding/references/return-launch-completion.md',
+      eventIndex: 0,
+      kind: 'command',
+      output: 'cat: file unavailable',
+    }], skillsRoot)).toEqual([])
+  })
+
+  it('flags explicit unrelated and broad skill policy reads', async () => {
+    const skillsRoot = resolveAssistantSkillsRoot()
+    await expect(readUnexpectedSkillPolicyActionIndexes({
+      actions: [
+        {
+          command: `cat ${path.join(skillsRoot, 'behavior-followthrough', 'SKILL.md')}`,
+          eventIndex: 2,
+          kind: 'command',
+          output: 'unrelated policy content',
+        },
+        {
+          command: 'jq . ./skills/physical-therapy/schemas/exercise.schema.json',
+          eventIndex: 3,
+          kind: 'command',
+          output: 'unrelated schema content',
+        },
+        {
+          command: `for f in ${skillsRoot}/*/SKILL.md; do sed -n '1,20p' "$f"; done`,
+          eventIndex: 4,
+          kind: 'command',
+          output: 'broad policy content',
+        },
+        {
+          command: 'find skills -type f -exec cat {} +',
+          eventIndex: 6,
+          kind: 'command',
+          output: 'recursive skill content',
+        },
+        {
+          command: 'rg . ./skills',
+          eventIndex: 8,
+          kind: 'command',
+          output: 'recursive relative skill content',
+        },
+      ],
+      allowedRelativePaths: [ONBOARDING_POLICY_PATHS[0][1]],
+      skillsRoot,
+    })).resolves.toEqual([2, 3, 4, 6, 8])
+  })
+})
 
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
@@ -4097,6 +4301,313 @@ async function runResumeCacheProbeAttempt(input: {
   }
 }
 
+function buildRealCodexOnboardingTurnInput(input: {
+  config: RealCodexE2eConfig
+  workingDirectory: string
+}) {
+  const skillsRoot = path.join(input.workingDirectory, 'skills')
+  const inheritedPath = normalizeEnvString(input.config.env.PATH)
+
+  return {
+    approvalPolicy: 'never' as const,
+    baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+    codexCommand:
+      normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+      ?? undefined,
+    codexHome: input.config.codexHome,
+    developerInstructions: buildDirectConversationDeveloperInstructions(true),
+    env: {
+      ...input.config.env,
+      [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      PATH: inheritedPath
+        ? `${input.workingDirectory}${path.delimiter}${inheritedPath}`
+        : input.workingDirectory,
+    },
+    model: input.config.model,
+    modelProvider: input.config.modelProvider,
+    reasoningEffort: 'low' as const,
+    sandbox: 'workspace-write' as const,
+    workingDirectory: input.workingDirectory,
+  }
+}
+
+async function prepareRealCodexOnboardingDirectory(): Promise<string> {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), 'murph-onboarding-routing-e2e-'),
+  )
+  try {
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    await cp(
+      resolveAssistantSkillsRoot(),
+      skillsRoot,
+      { recursive: true },
+    )
+    await writeRealCodexOnboardingResumeContext(workingDirectory, 'fresh')
+    await writeFile(
+      path.join(workingDirectory, 'vault-cli'),
+      `#!/bin/sh
+if [ "$*" = "assistant onboarding resume-context --format json" ]; then
+  cat "$(dirname "$0")/onboarding-resume-context.json"
+  exit 0
+fi
+if [ "$1" = "memory" ]; then
+  printf '%s\n' '{"status":"ok"}'
+  exit 0
+fi
+printf '%s\n' '{"error":"unsupported onboarding routing probe command"}' >&2
+exit 1
+`,
+      { encoding: 'utf8', mode: 0o700 },
+    )
+
+    return workingDirectory
+  } catch (error) {
+    await removeRealCodexTemporaryPath(workingDirectory)
+    throw error
+  }
+}
+
+async function writeRealCodexOnboardingResumeContext(
+  workingDirectory: string,
+  stage: 'fresh' | 'later',
+): Promise<void> {
+  await writeFile(
+    path.join(workingDirectory, 'onboarding-resume-context.json'),
+    `${JSON.stringify(buildRealCodexOnboardingResumeContext(stage))}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  )
+}
+
+function buildRealCodexOnboardingResumeContext(
+  stage: 'fresh' | 'later',
+) {
+  const surface = (items: unknown[] = []) => ({
+    count: items.length,
+    items,
+    status: 'ok',
+    truncated: false,
+  })
+  const records = stage === 'later'
+    ? [
+        {
+          id: 'identity_context',
+          section: 'identity',
+          text: 'Preferred name is Riley; age 31; gender is man.',
+        },
+        {
+          id: 'sleep_thread_context',
+          section: 'context',
+          text: 'For the sleep-more-consistently goal, progress means waking rested most weekdays; the reason it matters is steadier energy.',
+        },
+        {
+          id: 'foundation_context',
+          section: 'context',
+          text: 'Walks and strength trains each week. Does not use a wearable or health app, follow a current health protocol, take supplements or medications, or have recent labs. Reports no current conditions or allergies.',
+        },
+      ]
+    : []
+  const emptySurface = surface()
+  return assistantOnboardingResumeContextResultSchema.parse({
+    allergies: emptySurface,
+    conditions: emptySurface,
+    deviceAccounts: emptySurface,
+    experiments: emptySurface,
+    goals: surface(
+      stage === 'later'
+        ? [{ id: 'goal_sleep', title: 'Sleep more consistently' }]
+        : [],
+    ),
+    limit: 3,
+    memory: {
+      exists: records.length > 0,
+      recordCount: records.length,
+      records,
+      status: 'ok',
+      truncated: false,
+      updatedAt: records.length > 0 ? '2026-08-05T12:00:00.000Z' : null,
+    },
+    onboarding: {
+      completedAt: null,
+      completedReason: null,
+      createdAt: '2026-08-01T12:00:00.000Z',
+      schemaVersion: 'murph.assistant-onboarding.v1',
+      status: 'open',
+      updatedAt: '2026-08-05T12:00:00.000Z',
+    },
+    regimens: emptySurface,
+    supplements: emptySurface,
+    vault: 'redacted:/vault',
+  })
+}
+
+async function readOnboardingPolicyFiles(
+  actions: readonly CapabilityRoutingAction[],
+  skillsRoot: string,
+): Promise<string[]> {
+  const policies = await Promise.all(ONBOARDING_POLICY_PATHS.map(async (
+    [file, relativePath],
+  ) => ({
+    content: await readFile(
+      path.join(skillsRoot, relativePath),
+      'utf8',
+    ),
+    file,
+  })))
+  const outputs = actions.flatMap((action) =>
+    action.kind === 'command' ? [action.output] : []
+  )
+
+  return policies.flatMap(({ content, file }) => {
+    const uniqueMarkers = content
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) =>
+        line.length >= 48
+        && !line.startsWith('#')
+        && !line.startsWith('```')
+      )
+      .filter((line) => policies.every((candidate) =>
+        candidate.file === file || !candidate.content.includes(line)
+      ))
+    return uniqueMarkers.some((marker) =>
+      outputs.some((output) => output.includes(marker))
+    ) ? [file] : []
+  })
+}
+
+interface MaterializedSkillAssetPath {
+  absolutePath: string
+  relativePath: string
+}
+
+async function listMaterializedSkillAssetPaths(
+  skillsRoot: string,
+): Promise<MaterializedSkillAssetPath[]> {
+  const assets: MaterializedSkillAssetPath[] = []
+  const visit = async (directory: string, relativeDirectory: string) => {
+    const entries = await readdir(directory, { withFileTypes: true })
+    entries.sort((left, right) => left.name.localeCompare(right.name))
+    for (const entry of entries) {
+      const absolutePath = path.join(directory, entry.name)
+      const relativePath = path.join(relativeDirectory, entry.name)
+      if (entry.isDirectory()) {
+        await visit(absolutePath, relativePath)
+      } else if (entry.isFile()) {
+        assets.push({ absolutePath, relativePath })
+      }
+    }
+  }
+  await visit(skillsRoot, '')
+  return assets
+}
+
+async function readUnexpectedSkillPolicyActionIndexes(input: {
+  actions: readonly CapabilityRoutingAction[]
+  allowedRelativePaths: readonly string[]
+  skillsRoot: string
+}): Promise<number[]> {
+  const allowed = new Set(input.allowedRelativePaths)
+  const assets = await listMaterializedSkillAssetPaths(input.skillsRoot)
+  const rootTokens = [
+    input.skillsRoot,
+    `$${MURPH_ASSISTANT_SKILLS_ROOT_ENV}`,
+    `\${${MURPH_ASSISTANT_SKILLS_ROOT_ENV}}`,
+    './skills',
+    'skills',
+  ]
+  const contentReader =
+    /\b(?:awk|base64|cat|find|grep|head|jq|less|more|od|rg|sed|strings|tail|xxd)\b/u
+
+  return input.actions.flatMap((action) => {
+    if (action.kind !== 'command') {
+      return []
+    }
+    const mentionedAssets = assets.filter((asset) =>
+      action.command.includes(asset.absolutePath)
+      || action.command.includes(asset.relativePath)
+    )
+    const unexpectedExplicitPath = mentionedAssets.some(
+      (asset) => !allowed.has(asset.relativePath),
+    )
+    const referencedRootTokens = rootTokens.filter((token) =>
+      action.command.includes(token)
+    )
+    const globbedRootPath = referencedRootTokens.some((token) => {
+      const tail = action.command
+        .slice(action.command.indexOf(token) + token.length)
+        .split(/[\s;&|]/u, 1)[0] ?? ''
+      return ['*', '?', '[', '{'].some((marker) => tail.includes(marker))
+    })
+    const broadContentRead = referencedRootTokens.length > 0
+      && contentReader.test(action.command)
+      && (mentionedAssets.length === 0 || globbedRootPath)
+    return unexpectedExplicitPath || broadContentRead
+      ? [action.eventIndex]
+      : []
+  })
+}
+
+function readSuccessfulOnboardingResumeContexts(
+  actions: readonly CapabilityRoutingAction[],
+) {
+  return actions.flatMap((action) => {
+    if (
+      action.kind !== 'command'
+      || !action.command.includes('onboarding resume-context')
+    ) {
+      return []
+    }
+    try {
+      return [assistantOnboardingResumeContextResultSchema.parse(
+        JSON.parse(action.output),
+      )]
+    } catch {
+      return []
+    }
+  })
+}
+
+async function executeRealCodexOnboardingProbe(
+  input: Omit<CodexAppServerTurnInput, 'dynamicTools'> & {
+    dynamicTools?: CodexAppServerTurnInput['dynamicTools']
+    scenario: RealCodexOnboardingScenario
+  },
+) {
+  const { scenario, ...turnInput } = input
+  const startedAt = Date.now()
+  const result = await executeRealCodexAppServerTurn(turnInput)
+  const actions = readCapabilityRoutingActions(result.jsonEvents)
+  const skillsRoot = path.join(turnInput.workingDirectory, 'skills')
+  const policyFiles = await readOnboardingPolicyFiles(
+    actions,
+    skillsRoot,
+  )
+  const unexpectedSkillPolicyActionIndexes =
+    await readUnexpectedSkillPolicyActionIndexes({
+      actions,
+      allowedRelativePaths:
+        REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS[scenario],
+      skillsRoot,
+    })
+  expect(
+    unexpectedSkillPolicyActionIndexes,
+    `${scenario} unrelated or broad skill policy reads`,
+  ).toEqual([])
+  const usage = readCodexTokenUsageEvents(result.jsonEvents).at(-1)?.last ?? null
+  process.stdout.write(
+    `[onboarding-routing-e2e] ${JSON.stringify({
+      durationMs: Date.now() - startedAt,
+      providerActionCount: result.providerActionCount,
+      referenceReads: policyFiles,
+      scenario,
+      unexpectedSkillPolicyReadCount:
+        unexpectedSkillPolicyActionIndexes.length,
+      usage,
+    })}\n`,
+  )
+  return { ...result, actions, policyFiles }
+}
+
 async function executeRealCodexAppServerTurn(
   input: Omit<CodexAppServerTurnInput, 'dynamicTools'> & {
     dynamicTools?: CodexAppServerTurnInput['dynamicTools']
@@ -4607,7 +5118,9 @@ function buildHostedUsageOptionsDeveloperInstructions(
   })
 }
 
-function buildDirectConversationDeveloperInstructions(): string {
+function buildDirectConversationDeveloperInstructions(
+  onboardingGuidance = false,
+): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt: null,
@@ -4624,7 +5137,7 @@ function buildDirectConversationDeveloperInstructions(): string {
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
-    onboardingGuidance: false,
+    onboardingGuidance,
     turnTrigger: null,
   })
 }
@@ -5115,6 +5628,7 @@ async function removeRealCodexTemporaryPaths(paths: readonly string[]): Promise<
 }
 
 async function removeRealCodexTemporaryPath(targetPath: string): Promise<void> {
+  let lastError: unknown
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     try {
       await rm(targetPath, {
@@ -5122,10 +5636,14 @@ async function removeRealCodexTemporaryPath(targetPath: string): Promise<void> {
         recursive: true,
       })
       return
-    } catch {
-      await delay(50 * attempt)
+    } catch (error) {
+      lastError = error
+      if (attempt < 5) {
+        await delay(50 * attempt)
+      }
     }
   }
+  throw lastError ?? new Error('Failed to remove real Codex temporary path.')
 }
 
 async function delay(milliseconds: number): Promise<void> {
@@ -5372,6 +5890,8 @@ function summarizeCodexEventSequence(
 }
 
 async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
+  const useSubscriptionAuth =
+    process.env[REAL_CODEX_SUBSCRIPTION_AUTH_ENV] === '1'
   const model =
     normalizeEnvString(process.env.MURPH_REAL_CODEX_MODEL)
     ?? DEFAULT_REAL_CODEX_MODEL
@@ -5384,6 +5904,15 @@ async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
 
   const explicitModelProvider =
     normalizeEnvString(process.env.MURPH_REAL_CODEX_MODEL_PROVIDER)
+  if (useSubscriptionAuth) {
+    if (explicitModelProvider && explicitModelProvider !== 'openai') {
+      throw new Error(
+        `${REAL_CODEX_SUBSCRIPTION_AUTH_ENV}=1 cannot be combined with a non-openai MURPH_REAL_CODEX_MODEL_PROVIDER.`,
+      )
+    }
+    return resolveRealCodexSubscriptionE2eConfig({ model })
+  }
+
   const modelProvider =
     explicitModelProvider
     ?? (
@@ -5449,6 +5978,81 @@ async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
   }
 }
 
+async function resolveRealCodexSubscriptionE2eConfig(input: {
+  model: string
+}): Promise<RealCodexE2eConfig> {
+  let seedAuth: ReturnType<typeof buildHostedLocalCodexSubscriptionSeedAuth>
+  try {
+    const sourceHome =
+      normalizeEnvString(process.env[REAL_CODEX_SUBSCRIPTION_HOME_ENV])
+      ?? path.join(homedir(), '.codex')
+    seedAuth = buildHostedLocalCodexSubscriptionSeedAuth(
+      JSON.parse(await readFile(path.join(sourceHome, 'auth.json'), 'utf8')),
+    )
+    assertRealCodexSubscriptionTokenRunway(seedAuth.tokens.access_token)
+  } catch {
+    throw new Error(
+      `Subscription-backed real Codex e2e requires a valid ChatGPT Codex login with at least 30 minutes of access-token runway in ${REAL_CODEX_SUBSCRIPTION_HOME_ENV} or the default Codex home.`,
+    )
+  }
+  const codexHome = await mkdtemp(path.join(tmpdir(), 'murph-codex-home-'))
+  try {
+    await Promise.all([
+      writeFile(
+        path.join(codexHome, 'auth.json'),
+        `${JSON.stringify(seedAuth)}\n`,
+        { encoding: 'utf8', mode: 0o600 },
+      ),
+      writeFile(
+        path.join(codexHome, 'config.toml'),
+        buildRealCodexConfigToml({
+          apiKeyEnv: null,
+          model: input.model,
+          modelProvider: 'openai',
+        }),
+        { encoding: 'utf8', mode: 0o600 },
+      ),
+    ])
+
+    return {
+      codexHome,
+      env: buildRealCodexE2eEnv({}),
+      model: input.model,
+      modelProvider: 'openai',
+      temporaryPaths: [codexHome],
+    }
+  } catch (error) {
+    await removeRealCodexTemporaryPath(codexHome)
+    throw error
+  }
+}
+
+function assertRealCodexSubscriptionTokenRunway(accessToken: string): void {
+  const payloadSegment = accessToken.split('.')[1]
+  let expiryMs: number | null = null
+  if (payloadSegment) {
+    try {
+      const claims: unknown = JSON.parse(
+        Buffer.from(payloadSegment, 'base64url').toString('utf8'),
+      )
+      if (typeof claims === 'object' && claims !== null) {
+        const expirySeconds = Reflect.get(claims, 'exp')
+        if (typeof expirySeconds === 'number' && Number.isFinite(expirySeconds)) {
+          expiryMs = expirySeconds * 1_000
+        }
+      }
+    } catch {
+      expiryMs = null
+    }
+  }
+  if (
+    expiryMs === null
+    || expiryMs - Date.now() < REAL_CODEX_SUBSCRIPTION_MINIMUM_RUNWAY_MS
+  ) {
+    throw new Error('Codex subscription access token has insufficient runway.')
+  }
+}
+
 function resolveRealCodexProviderApiKeyEnv(modelProvider: string): string | null {
   if (modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER) {
     return VERCEL_AI_GATEWAY_API_KEY_ENV
@@ -5462,20 +6066,11 @@ function resolveRealCodexProviderApiKeyEnv(modelProvider: string): string | null
 }
 
 function buildRealCodexConfigToml(input: {
-  apiKeyEnv: string
+  apiKeyEnv: string | null
   model: string
   modelProvider: string
 }): string {
-  const baseUrl =
-    input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
-      ? VERCEL_AI_GATEWAY_BASE_URL
-      : OPENAI_BASE_URL
-  const providerName =
-    input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
-      ? 'Vercel AI Gateway'
-      : 'OpenAI'
-
-  return [
+  const config = [
     `model = ${tomlString(input.model)}`,
     `model_provider = ${tomlString(input.modelProvider)}`,
     'model_reasoning_effort = "low"',
@@ -5490,9 +6085,16 @@ function buildRealCodexConfigToml(input: {
     ...REAL_CODEX_E2E_ENV_ALLOWLIST.map((key) => `  ${tomlString(key)},`),
     ']',
     '',
+  ]
+  if (!input.apiKeyEnv) {
+    return config.join('\n')
+  }
+  const gateway = input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
+  return [
+    ...config,
     `[model_providers.${tomlKey(input.modelProvider)}]`,
-    `name = ${tomlString(providerName)}`,
-    `base_url = ${tomlString(baseUrl)}`,
+    `name = ${tomlString(gateway ? 'Vercel AI Gateway' : 'OpenAI')}`,
+    `base_url = ${tomlString(gateway ? VERCEL_AI_GATEWAY_BASE_URL : OPENAI_BASE_URL)}`,
     `env_key = ${tomlString(input.apiKeyEnv)}`,
     'wire_api = "responses"',
     'request_max_retries = 4',
@@ -5503,7 +6105,7 @@ function buildRealCodexConfigToml(input: {
 }
 
 function buildRealCodexE2eEnv(input: {
-  apiKeyEnv: string
+  apiKeyEnv?: string
   sourceEnv?: NodeJS.ProcessEnv
 }): NodeJS.ProcessEnv {
   const sourceEnv = input.sourceEnv ?? process.env
@@ -5516,9 +6118,11 @@ function buildRealCodexE2eEnv(input: {
     }
   }
 
-  const apiKey = normalizeEnvString(sourceEnv[input.apiKeyEnv])
-  if (apiKey) {
-    env[input.apiKeyEnv] = apiKey
+  if (input.apiKeyEnv) {
+    const apiKey = normalizeEnvString(sourceEnv[input.apiKeyEnv])
+    if (apiKey) {
+      env[input.apiKeyEnv] = apiKey
+    }
   }
 
   return env
