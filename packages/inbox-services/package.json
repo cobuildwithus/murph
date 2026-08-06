@@ -34,8 +34,7 @@
     "@murphai/operator-config": "workspace:*",
     "@murphai/parsers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "@murphai/vault-usecases": "workspace:*",
-    "zod": "^4.4.3"
+    "@murphai/vault-usecases": "workspace:*"
   },
   "engines": {
     "node": ">=24.14.1"

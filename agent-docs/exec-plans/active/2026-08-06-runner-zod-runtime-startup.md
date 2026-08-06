@@ -97,3 +97,39 @@ Updated: 2026-08-06
   first (251,039 B currently static), followed by wake-kind-specific event
   handlers (roughly 44 KB directly attributable) and post-turn idle maintenance
   (roughly 16 KB directly attributable).
+- Ten native startup CPU profiles still attribute most sampled authored-code
+  work to the shared contracts/Zod schema chunk; the largest separate
+  first-party chunk is Assistant Engine, led by the combined dynamic-tool
+  catalog/parser/executor module. This supports phase-boundary separation over
+  another broad package rewrite.
+- A freshly baked Node module compile cache added 3.1 MiB uncompressed. The
+  immutable application tree makes Node disable that read-only cache. Copying
+  it into writable temporary storage unlocked about 59 ms of compile savings
+  but cost more than that; an end-to-end copy-and-start comparison was about
+  130 ms slower under amd64 emulation. This confirms the current image
+  contract's prior falsification rather than supporting shipment.
+- Syntax/identifier minification with preserved function/class names reduced a
+  rebuilt bundle from about 9.8 MiB to 6.8 MiB, but the in-container paired
+  median became 12 ms slower. It is not a startup correction; retaining
+  readable production output is preferable without separate image-transfer
+  evidence.
+- A Node 24 startup-snapshot prototype cannot safely serialize the current
+  entry graph: Node warns that several built-ins are unsupported and aborts on
+  the `node:http` parser's native global handles. Adapting the application to
+  snapshot only a schema subgraph would add a second runtime/bootstrap shape,
+  so this is not a maintainable near-term path.
+- Preliminary ReviewGPT coverage review passed with no findings after one
+  attachment-evidence recovery retry on the same exact-head review thread.
+- Final ReviewGPT round 1 found that nine migrated packages still declared Zod
+  as a direct production dependency, seven type-only namespace imports still
+  emitted value edges, and one migrated import was unused. The correction
+  removes those nine dependency owners and their lockfile entries, makes the
+  seven imports explicitly type-only, deletes the unused import, and routes the
+  five remaining consumer tests through the contracts-owned runtime surface.
+  Production direct imports and dependencies now remain only in Contracts and
+  Gateway Core, whose independent `zod/v4` surface preserves the acyclic
+  package boundary.
+- Focused remediation proof passed: nine affected package typechecks, six
+  focused test files (42 tests), workspace-boundary verification, package-cycle
+  verification, and production runner assembly. The corrected assembly retains
+  the same 1,729,632 B entry, 8,182,922 B static closure, and 9,862,735 B total.

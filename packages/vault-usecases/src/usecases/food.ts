@@ -6,8 +6,6 @@ import {
   type FoodNutrition,
   type JsonObject,
 } from '@murphai/contracts'
-import * as z from '@murphai/contracts/zod-runtime'
-
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {

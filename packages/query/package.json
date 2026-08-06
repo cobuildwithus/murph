@@ -76,8 +76,7 @@
   "dependencies": {
     "@murphai/contracts": "workspace:*",
     "@murphai/health-metrics": "workspace:*",
-    "@murphai/runtime-state": "workspace:*",
-    "zod": "^4.4.3"
+    "@murphai/runtime-state": "workspace:*"
   },
   "engines": {
     "node": ">=24.14.1"

@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { Cli } from 'incur'
-import * as z from '@murphai/contracts/zod-runtime'
+import type * as z from '@murphai/contracts/zod-runtime'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {

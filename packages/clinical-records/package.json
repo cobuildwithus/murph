@@ -33,8 +33,7 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
-    "@murphai/contracts": "workspace:*",
-    "zod": "^4.4.3"
+    "@murphai/contracts": "workspace:*"
   },
   "engines": {
     "node": ">=24.14.1"

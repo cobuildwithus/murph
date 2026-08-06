@@ -1,4 +1,4 @@
-import * as z from '@murphai/contracts/zod-runtime'
+import type * as z from '@murphai/contracts/zod-runtime'
 import {
   assistantPersistedSessionSchema,
   type AssistantSession,

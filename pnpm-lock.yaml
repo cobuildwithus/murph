@@ -421,9 +421,6 @@ importers:
       '@murphai/vault-usecases':
         specifier: workspace:*
         version: link:../vault-usecases
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
     devDependencies:
       '@openai/codex':
         specifier: 0.145.0
@@ -593,9 +590,6 @@ importers:
       yaml:
         specifier: ^2.8.2
         version: 2.9.0
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
       zxing-wasm:
         specifier: 3.0.3
         version: 3.0.3(@types/emscripten@1.41.5)
@@ -612,9 +606,6 @@ importers:
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
 
   packages/cloudflare-hosted-control:
     dependencies:
@@ -736,9 +727,6 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
 
   packages/hosted-local-harness:
     dependencies:
@@ -766,9 +754,6 @@ importers:
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:../health-metrics
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
     devDependencies:
       '@medplum/fhirtypes':
         specifier: ^5.1.24
@@ -800,9 +785,6 @@ importers:
       '@murphai/vault-usecases':
         specifier: workspace:*
         version: link:../vault-usecases
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
 
   packages/inboxd:
     dependencies:
@@ -852,9 +834,6 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
     devDependencies:
       '@linqapp/sdk':
         specifier: 0.28.0
@@ -883,9 +862,6 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
 
   packages/runtime-state: {}
 
@@ -949,9 +925,6 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
 
 packages:
 
