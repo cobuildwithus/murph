@@ -103,12 +103,12 @@ describe("murph computer dynamic tools", () => {
 
     expect(openDescription.length).toBeLessThanOrEqual(250);
     expect(openDescription).toContain("authorized browser");
-    expect(openDescription).toContain("Returns runId, URL, title, page text");
+    expect(openDescription).toContain("Returns runId, URL, title, text");
     expect(openDescription).toContain("Before multi-step browsing each turn");
-    expect(openDescription).toContain("call send_progress_update");
+    expect(openDescription).toContain("call send_progress_update if available");
     expect(openDescription).toContain("prior-turn progress does not count");
-    expect(openDescription).toContain("reopen after handoff/unknown outcome");
-    expect(openDescription).toContain("cannot prove a prior effect failed");
+    expect(openDescription).toContain("reopen after handoff or uncertainty");
+    expect(openDescription).toContain("cannot prove prior effect failed");
 
     expect(osControlDescription.length).toBeLessThanOrEqual(310);
     expect(osControlDescription).toContain("only when Playwright cannot operate");
@@ -139,6 +139,13 @@ describe("murph computer dynamic tools", () => {
       "computer_pause_for_user",
       "computer_finish_run",
     ]);
+
+    const unavailableProgressToolNames = resolveMurphDynamicTools({
+      computerToolsAvailable: true,
+      progressUpdatesAvailable: false,
+    }).map((tool) => tool.name);
+    expect(unavailableProgressToolNames).not.toContain("send_progress_update");
+    expect(unavailableProgressToolNames).toContain("computer_open");
   });
 
   it("keeps open profile keys off the model surface while sending fresh opens", async () => {

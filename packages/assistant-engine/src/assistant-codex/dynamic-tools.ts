@@ -1256,7 +1256,7 @@ export const MURPH_COMPUTER_OPEN_TOOL = {
   namespace: 'murph',
   name: 'computer_open',
   description:
-    'Open or reuse the authorized browser; reopen after handoff/unknown outcome. Returns runId, URL, title, page text; cannot prove a prior effect failed. Before multi-step browsing each turn, call send_progress_update; prior-turn progress does not count.',
+    'Open/reuse authorized browser; reopen after handoff or uncertainty. Returns runId, URL, title, text; cannot prove prior effect failed. Before multi-step browsing each turn, call send_progress_update if available; prior-turn progress does not count.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

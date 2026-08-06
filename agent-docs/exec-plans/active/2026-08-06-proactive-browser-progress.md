@@ -103,9 +103,9 @@ Updated: 2026-08-06
   were `include`, `input`, `parallel_tool_calls`, `text`, and `tool_choice`, with
   local paths and UUIDs normalized identically and transport-only fields
   excluded:
-  - direct browser turn: 115,473 bytes / 25,321 tokens at base and 115,444 bytes
-    / 25,319 tokens at head (`-29` bytes / `-2` tokens);
-  - group browser turn: 99,190 bytes / 21,651 tokens at base and 99,179 bytes /
-    21,654 tokens at head (`-11` bytes / `+3` tokens).
+  - direct browser turn: 115,473 bytes / 25,320 tokens at base and 115,442 bytes
+    / 25,316 tokens at head (`-31` bytes / `-4` tokens);
+  - group browser turn: 99,190 bytes / 21,650 tokens at base and 99,177 bytes /
+    21,651 tokens at head (`-13` bytes / `+1` token).
 - Pending: exact-head GitHub Actions, preliminary ReviewGPT specialist pass,
   parent final review, plan closure, and mergeability proof.
