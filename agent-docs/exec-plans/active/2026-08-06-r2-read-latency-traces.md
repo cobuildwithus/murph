@@ -72,8 +72,10 @@ Updated: 2026-08-06
 - Cloudflare's ordinary R2 operations dataset does not expose per-object
   request duration, so provider analytics cannot supply this missing split.
 - `objectFetchMs` remains retry-inclusive. The response-header and body-read
-  fields describe only the final successful GET attempt; body-read time
+  fields describe only the final successful binding `POST` or compatibility
+  `GET` response attempt. Header wait may overlap data-key unwrap; body-read time
   includes streamed consumer backpressure and is not labeled pure network time.
+  These overlapping spans must not be summed.
 - Do not attempt per-chunk CPU timing, which would add work proportional to
   response chunk count.
 

@@ -370,12 +370,12 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
             });
             const archiveRestoreTiming =
               await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
-              dataKey,
-              durableRoot: request.durableRoot,
-              encryptedStream,
-              ref: request.ref,
-              signal: request.signal ?? null,
-            });
+                dataKey,
+                durableRoot: request.durableRoot,
+                encryptedStream,
+                ref: request.ref,
+                signal: request.signal ?? null,
+              });
             // Keep the subspans attempt-local: failed replay-safe attempts never
             // leak partial values into the successful restore diagnostics.
             timing.objectFetchResponseHeadersMs =

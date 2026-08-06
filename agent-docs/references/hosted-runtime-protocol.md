@@ -1015,13 +1015,15 @@ process. Its ingress `acceptedAt` value copies the mailbox row's PostgreSQL
 from `acceptedAt` includes the remainder of the append transaction and must not
 be labeled row-insert or commit latency. On a cold workspace restore,
 `restore.objectFetchMs` remains the retry-inclusive wall clock for the whole
-replay-safe object step. The final successful GET attempt also records
-`objectFetchResponseHeadersMs` from request start until Fetch resolves the
-response headers, and `objectFetchBodyReadMs` from validated headers until
-stream EOF. Body consumption overlaps streamed hash/decrypt work and its
-backpressure, so it is not pure network-transfer latency. These two bounded
-numbers are appended to the existing in-memory staged phase breakdown; they do
-not add a request, awaited reporting step, per-chunk timer, or separate log.
+post-key replay-safe object step. The final successful object-read response
+attempt also records `objectFetchResponseHeadersMs` from the binding `POST` or
+compatibility `GET` start until Fetch resolves the response headers, and
+`objectFetchBodyReadMs` from validated headers until stream EOF. The header
+interval may overlap data-key unwrap. Body consumption overlaps streamed
+hash/decrypt work and its backpressure, so it is not pure network-transfer
+latency. Do not sum these overlapping spans. These two bounded numbers are
+appended to the existing in-memory staged phase breakdown; they do not add a
+request, awaited reporting step, per-chunk timer, or separate log.
 The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only

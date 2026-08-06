@@ -118,6 +118,10 @@ Updated: 2026-08-06
   cancels before response, prepared restore takes the binding route, old Worker
   and old runner compatibility remains, and a mid-stream failure replays the
   whole binding-backed restore exactly once.
+- The merged R2 read-latency fields remain attempt-local after the binding
+  transport change: the header timer covers the final successful binding
+  `POST` or compatibility `GET`, body timing is published only after valid EOF
+  and successful restore, and failed replay attempts cannot leak their spans.
 - No latency number was recorded: the existing hosted-local snapshot scenario
   exercises MinIO's S3-compatible path, not Cloudflare's production
   same-machine Container outbound plus R2-binding topology. Adding a bespoke

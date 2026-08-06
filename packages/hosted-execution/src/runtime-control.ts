@@ -2109,10 +2109,12 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     scratchPrepareMs?: number;
     presignGetMs?: number;
     objectFetchMs?: number;
-    // Last successful GET attempt, from request start until Fetch resolves headers.
+    // Last successful object-read response attempt, from request start until
+    // Fetch resolves headers.
     objectFetchResponseHeadersMs?: number;
-    // Last successful GET attempt, from validated headers until stream EOF. This
-    // includes consumer backpressure from streamed hash/decrypt work.
+    // Last successful object-read response attempt, from validated headers
+    // until stream EOF. This includes consumer backpressure from streamed
+    // hash/decrypt work.
     objectFetchBodyReadMs?: number;
     decryptMs?: number;
     archiveExtractMs?: number;
