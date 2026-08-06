@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertEstablishedR2ColdStartAttempt,
+  assertNoRecoveredWorkspaceSnapshotRestore,
   assertSingleSuccessfulColdStartAttempt,
 } from "./hosted-local-cold-start-benchmark.js";
 
@@ -60,6 +61,46 @@ describe("hosted local cold-start benchmark integrity", () => {
         { attemptId: "attempt-success", level: "info", phase: "idle" },
       ], "attempt-success")
     ).toThrow("more than one runtime attempt");
+  });
+
+  it("accepts one failure-free workspace snapshot restore", () => {
+    expect(() => assertNoRecoveredWorkspaceSnapshotRestore([
+      {
+        details: {
+          operation: "workspace_snapshot_restore",
+          workspaceSnapshotRestoreAttempt: 1,
+          workspaceSnapshotRestoreStep: "object_fetch",
+        },
+        message: "Hosted workspace snapshot restore step completed.",
+      },
+    ])).not.toThrow();
+  });
+
+  it("rejects a replay-safe workspace snapshot restore retry", () => {
+    expect(() => assertNoRecoveredWorkspaceSnapshotRestore([
+      {
+        details: {
+          operation: "workspace_snapshot_restore",
+          retrying: true,
+          workspaceSnapshotRestoreAttempt: 1,
+          workspaceSnapshotRestoreStep: "object_fetch",
+        },
+        message: "Hosted workspace snapshot restore read step failed; retrying.",
+      },
+    ])).toThrow("recovered workspace snapshot restore");
+  });
+
+  it("rejects a later workspace snapshot restore step attempt", () => {
+    expect(() => assertNoRecoveredWorkspaceSnapshotRestore([
+      {
+        details: {
+          operation: "workspace_snapshot_restore",
+          workspaceSnapshotRestoreAttempt: 2,
+          workspaceSnapshotRestoreStep: "object_fetch",
+        },
+        message: "Hosted workspace snapshot restore step completed.",
+      },
+    ])).toThrow("recovered workspace snapshot restore");
   });
 
   it("accepts one measured cold v2 restore after setup logs were excluded", () => {

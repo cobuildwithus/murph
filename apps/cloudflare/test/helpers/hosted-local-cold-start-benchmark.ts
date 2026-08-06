@@ -15,6 +15,11 @@ interface ColdStartLatencyTrace {
   runtimeAttemptId: string | null;
 }
 
+interface ColdStartStructuredLog {
+  details?: Record<string, unknown>;
+  message?: unknown;
+}
+
 /**
  * A recovered startup is useful reliability evidence but not a valid latency
  * sample. Keep benchmark statistics limited to one failure-free runtime
@@ -36,6 +41,28 @@ export function assertSingleSuccessfulColdStartAttempt(
   );
   if (attemptIds.size !== 1 || !attemptIds.has(successfulAttemptId)) {
     throw new Error("Cold-start benchmark observed more than one runtime attempt.");
+  }
+}
+
+export function assertNoRecoveredWorkspaceSnapshotRestore(
+  structuredLogs: readonly ColdStartStructuredLog[],
+): void {
+  const recoveredRestore = structuredLogs.find((entry) => {
+    const details = entry.details;
+    if (details?.operation !== "workspace_snapshot_restore") {
+      return false;
+    }
+    const restoreAttempt = details.workspaceSnapshotRestoreAttempt;
+    return entry.message === "Hosted workspace snapshot restore step failed."
+      || details.retrying === true
+      || (
+        typeof restoreAttempt === "number"
+        && Number.isSafeInteger(restoreAttempt)
+        && restoreAttempt > 1
+      );
+  });
+  if (recoveredRestore) {
+    throw new Error("Cold-start benchmark observed a recovered workspace snapshot restore.");
   }
 }
 
