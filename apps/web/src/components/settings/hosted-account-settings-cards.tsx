@@ -31,15 +31,12 @@ export function HostedAccountSettingsCards({
   murphPhoneNumber,
   openEmailLink = false,
   privySessionMatchesAppSession,
-  referralIdentityKey,
 }: {
   account: HostedAccountSettingsSnapshot;
   expectedPrivyUserId?: string | null;
   murphPhoneNumber?: string | null;
   openEmailLink?: boolean;
   privySessionMatchesAppSession?: boolean;
-  /** Browser-local invalidation only; the authenticated endpoint owns the URL. */
-  referralIdentityKey: string;
 }) {
   const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(
     openEmailLink ? "email" : null,
@@ -129,7 +126,7 @@ export function HostedAccountSettingsCards({
         <SettingsRow
           action={(
             <HostedSignupReferralLinkButton
-              identityKey={referralIdentityKey}
+              identityKey={account.referralIdentityKey}
             />
           )}
           icon={<Link2 className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
