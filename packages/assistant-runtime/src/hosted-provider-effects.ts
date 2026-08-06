@@ -357,7 +357,7 @@ function emitHostedLinqAppCardFallbackError(input: {
     },
     error: input.error,
     level: "warn",
-    message: "Hosted Linq iMessage app-card delivery recovered with text after an error.",
+    message: "Hosted Linq iMessage app-card delivery selected text recovery after an error.",
     phase: "outbox",
   });
 }

@@ -63,15 +63,26 @@ Updated: 2026-08-06
 
 ## Verification log
 
-- `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts test/runner-egress-intercept.test.ts`
+- From `apps/cloudflare`, `pnpm exec vitest run --config vitest.config.ts test/runner-egress-intercept.test.ts`
   — 231 passed.
-- `pnpm exec vitest run --config packages/assistant-engine/vitest.config.ts test/assistant-channels-runtime.test.ts`
+- From `packages/assistant-engine`, `pnpm exec vitest run --config vitest.config.ts test/assistant-channels-runtime.test.ts`
   — 60 passed.
-- `pnpm exec vitest run --config packages/assistant-runtime/vitest.config.ts test/hosted-provider-effects.test.ts`
-  — 20 passed.
+- From `packages/assistant-runtime`, `pnpm exec vitest run --config vitest.config.ts test/hosted-provider-effects.test.ts`
+  — 21 passed after the specialist correction.
+- From `packages/assistant-runtime`, `pnpm exec vitest run --config vitest.config.ts test/hosted-runtime-callbacks.test.ts`
+  — 210 passed after updating the exact dependency assertions exposed by CI.
 - Package typechecks passed for `apps/cloudflare`, `packages/assistant-engine`,
   and `packages/assistant-runtime`.
 - `pnpm docs:gardening` and `pnpm docs:drift` passed.
 - Diff whitespace and direct-identifier scans passed; the changed diagnostics
   contain no request body, provider response text, recipient or thread
   identifier, delivery key, or credential.
+- Preliminary ReviewGPT found one truthful-state issue in the warning copy:
+  the pre-transition event claimed completed recovery. The message now says
+  text recovery was selected, and a focused persistence-failure regression
+  proves the operation rejects without a text send.
+- Final ReviewGPT round 1 passed the original candidate with no findings. The
+  accepted specialist correction requires a final correction-delta round after
+  push. Exact-head CI initially exposed four broader test assertions that did
+  not include the new callback; those assertions are corrected and local proof
+  passes, with the replacement CI run pending.

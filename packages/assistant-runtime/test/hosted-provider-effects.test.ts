@@ -464,7 +464,7 @@ describe("hosted provider effects", () => {
     );
   });
 
-  it("logs a sanitized warning when a hosted capability error recovers with text", async () => {
+  it("logs a sanitized warning when a hosted capability error selects text recovery", async () => {
     vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
@@ -526,7 +526,7 @@ describe("hosted provider effects", () => {
       level: "warn",
     });
     expect(logged.message).toContain(
-      "Hosted Linq iMessage app-card delivery recovered with text after an error.",
+      "Hosted Linq iMessage app-card delivery selected text recovery after an error.",
     );
     const serializedLog = JSON.stringify(logged);
     expect(serializedLog).not.toContain("+15550001");
@@ -534,6 +534,49 @@ describe("hosted provider effects", () => {
     expect(serializedLog).not.toContain("hosted-card-capability-error");
     expect(serializedLog).not.toContain("linq-token");
     expect(serializedLog).not.toContain("Forbidden");
+  });
+
+  it("does not claim completed recovery when the hosted text transition fails", async () => {
+    vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const transitionError = new Error("fallback transition failed");
+    const persistAppCardTextFallback = vi.fn().mockRejectedValue(transitionError);
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response("Forbidden", { status: 403 })
+    );
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-08-05",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "hosted-card-transition-error",
+      message: "Nutrition summary",
+      target: "direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      persistAppCardTextFallback,
+    })).rejects.toBe(transitionError);
+
+    expect(warn).toHaveBeenCalledOnce();
+    const logged = JSON.parse(String(warn.mock.calls[0]?.[0])) as {
+      message?: string;
+    };
+    expect(logged.message).toContain("selected text recovery after an error");
+    expect(logged.message).not.toContain("recovered with text");
+    expect(persistAppCardTextFallback).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("returns the promoted identity after a direct app-card text fallback", async () => {
