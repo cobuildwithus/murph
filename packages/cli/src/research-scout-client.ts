@@ -14,6 +14,7 @@ import {
   researchScoutBatchResultSchema,
   researchScoutInputSchema,
   researchScoutResultSchema,
+  resolveResearchScoutProfileKind,
   type ResearchScoutBatchInput,
   type ResearchScoutBatchResult,
   type ResearchScoutInput,
@@ -66,7 +67,7 @@ export async function fetchExaResearchScoutCandidates(
     privacy: {
       tokenSource: 'env',
       persistedByTool: false,
-      sentProfileKind: 'tag_profile',
+      sentProfileKind: resolveResearchScoutProfileKind(input.profile),
       rawVaultValuesSent: false,
     },
     response: await fetchExaResearchScoutResponse(input, apiKey, fetchImpl),
