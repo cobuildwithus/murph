@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: agent-telegram-scheduled-phone-calls-blacksmith
+  group: agent-telegram-scheduled-phone-calls-blacksmith-node-pin
   cancel-in-progress: true
 
 jobs:
