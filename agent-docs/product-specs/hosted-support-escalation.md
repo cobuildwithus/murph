@@ -4,7 +4,7 @@ Last verified: 2026-08-05
 
 Runner policy history: `agent-docs/exec-plans/completed/2026-08-04-support-escalation-consent-prerequisite.md`.
 Written-issue correction history: `agent-docs/exec-plans/completed/2026-08-05-support-escalation-written-summary.md`.
-Detailed-email plan: `agent-docs/exec-plans/active/2026-08-04-support-escalation-email-summary.md`.
+Detailed-email history: `agent-docs/exec-plans/completed/2026-08-04-support-escalation-email-summary.md`.
 
 ## User purpose
 
