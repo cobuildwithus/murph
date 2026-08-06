@@ -1,0 +1,49 @@
+name: One-time ARM verify managed automation repair
+
+on:
+  push:
+    branches:
+      - agent/private-managed-automation-policy
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+        with:
+          run_install: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Repair stale private-policy assertions
+        run: python3 .github/repair-managed-automation-tests.py
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify managed automation extraction
+        run: >-
+          pnpm --dir packages/assistant-engine exec vitest run
+          --config vitest.config.ts --no-coverage
+          test/managed-automation-skill-assets.test.ts
+          test/managed-automations-core.test.ts
+          test/managed-automations.test.ts
+          test/assistant-skill-assets.test.ts
+      - name: Typecheck assistant engine
+        run: pnpm --dir packages/assistant-engine typecheck
+      - name: Commit repaired production test
+        run: |
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages/assistant-engine/test/managed-automations.test.ts
+          git diff --cached --check
+          git commit -m "Update managed automation tests for private skill policy"
+          git push
