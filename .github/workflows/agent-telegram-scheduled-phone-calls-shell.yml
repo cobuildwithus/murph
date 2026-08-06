@@ -1,0 +1,138 @@
+name: Publish Telegram scheduled phone-call candidate
+
+on:
+  push:
+    branches:
+      - agent/telegram-scheduled-phone-calls
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-telegram-scheduled-phone-calls-shell
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: contains(github.event.head_commit.message, '[agent-shell]')
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 50
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the exact branch without marketplace actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
+          git switch -C "${GITHUB_REF_NAME}"
+
+      - name: Select the pinned Node runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          desired="$(tr -d 'v[:space:]' < .nvmrc)"
+          selected=""
+          for candidate in \
+            "/opt/hostedtoolcache/node/${desired}/x64/bin" \
+            "/opt/hostedtoolcache/node/${desired}/x64"; do
+            if [ -x "${candidate}/node" ]; then
+              selected="${candidate}"
+              break
+            fi
+          done
+          if [ -z "${selected}" ]; then
+            echo "::error::Pinned Node ${desired} is not present in the runner toolcache."
+            find /opt/hostedtoolcache/node -maxdepth 3 -type f -name node -print 2>/dev/null || true
+            exit 1
+          fi
+          echo "${selected}" >> "${GITHUB_PATH}"
+          "${selected}/node" --version
+
+      - name: Apply the reviewed transformation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/agent-telegram-scheduled-phone-calls.yml').read_text(
+              encoding='utf-8'
+          ).splitlines()
+          collecting = False
+          found_step = False
+          output: list[str] = []
+          for line in source:
+              if line == '      - name: Apply the reviewed routing correction':
+                  found_step = True
+                  continue
+              if found_step and line == '        run: |':
+                  collecting = True
+                  continue
+              if collecting and line.startswith('      - name: Setup Node'):
+                  break
+              if collecting:
+                  output.append(line[10:] if line.startswith('          ') else line)
+          if not output:
+              raise SystemExit('Could not extract the reviewed routing transformation.')
+          Path('/tmp/apply-telegram-scheduled-phone-calls.py').write_text(
+              '\n'.join(output) + '\n',
+              encoding='utf-8',
+          )
+          PY
+          python /tmp/apply-telegram-scheduled-phone-calls.py
+
+      - name: Install pinned workspace dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Format and verify the exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir apps/web exec prisma format --schema prisma/schema.prisma
+          pnpm --dir apps/web exec prisma validate --schema prisma/schema.prisma
+          pnpm --dir packages/hosted-execution exec vitest run \
+            --config vitest.config.ts \
+            test/phone-calls.test.ts \
+            test/phone-call-result-notification-channel.test.ts \
+            --no-coverage
+          pnpm --dir packages/assistant-engine exec vitest run \
+            --config vitest.config.ts \
+            test/assistant-phone-call-result-channel.test.ts \
+            test/assistant-phone-calls.test.ts \
+            test/assistant-codex-turn-planning.test.ts \
+            --no-coverage
+          pnpm exec vitest run \
+            --config apps/web/vitest.workspace.ts \
+            --no-coverage \
+            apps/web/test/phone-call-result-notification-channel.test.ts \
+            apps/web/test/hosted-assistant-notification-destination.test.ts \
+            apps/web/test/hosted-phone-call-private-storage-classification.test.ts \
+            apps/web/test/phone-calls-retell.test.ts \
+            apps/web/test/phone-calls-service.test.ts \
+            apps/web/test/production-migration-guard.test.ts
+          pnpm --dir packages/hosted-execution typecheck
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir apps/web typecheck
+          pnpm docs:drift
+          git diff --check
+
+      - name: Publish the verified candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/agent-telegram-scheduled-phone-calls.yml
+          rm .github/workflows/agent-telegram-scheduled-phone-calls-shell.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Enable scheduled Telegram phone calls'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
