@@ -420,8 +420,9 @@ only durable history owner for these anonymous aggregates: at each UTC date it
 stores the completed prior-day and completed trailing-seven-day distinct-sender
 counts only when their group evidence is complete. The date-keyed upsert makes
 same-day cron and ops-page retries idempotent. An attribution integrity failure
-is reported and writes null activity values without suppressing the snapshot's
-pre-existing revenue, member, or message aggregates. Legacy or incomplete
+is reported and creates null activity values only when no same-date row exists;
+on retry it leaves any existing activity values untouched while still updating
+the snapshot's revenue, member, and message aggregates. Legacy or incomplete
 windows stay null, and the 30-day activity projection shifts each snapshot onto
 the completed day its windows ended instead of reconstructing identities after
 mailbox expiry. These metrics count the retained sender population at read or
@@ -2153,6 +2154,19 @@ member or billing customer, or definitive enrollment failure keeps the existing
 signup-link or ignored behavior. Active members, explicit thread routes, own
 messages, group chats, local guard rejects, deterministic URL/STOP-style spam,
 and other non-invite paths bypass the classifier.
+
+Pulse-trial acquisition provenance is descriptive, not entitlement authority.
+The auto-enrollment owner writes `web_onboarding`, `companion_onboarding`, or
+`linq_instant_start` into Stripe subscription metadata. The card-based website
+fallback writes `web_onboarding` into its existing Checkout Session and
+subscription metadata. Both acceptance paths copy the canonical subscription
+value to `HostedMemberBillingRef.pulseTrialStartSource` beside the redeemed
+timestamp. Retries therefore recover the event-time source from the existing
+provider record without another state owner. Historical billing rows and
+in-flight legacy Checkout sessions remain null rather than inferring provenance
+from mutable identity state. The ops growth read maps null or invalid values to
+Unknown and exposes only the existing masked phone hint; it never decrypts
+contact data for attribution.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable

@@ -54,7 +54,7 @@ const dailyMessagesChartConfig = {
 const acquisitionChartConfig = {
   newMembers: {
     color: "#7A8C6E",
-    label: "New members",
+    label: "Member records created",
   },
   trialStarts: {
     color: "#D4C4A8",
@@ -309,10 +309,10 @@ export function GrowthCharts(input: GrowthChartsProps) {
             className="font-serif text-lg font-semibold tracking-tight text-foreground"
             id={acquisitionTitleId}
           >
-            Acquisition
+            Intake and activation
           </h3>
           <p className="text-sm leading-6 text-muted-foreground">
-            Daily hosted members and Pulse trial starts by UTC date.
+            Daily member records created and Pulse trials started by UTC date.
           </p>
         </div>
         <ChartContainer
@@ -352,7 +352,7 @@ export function GrowthCharts(input: GrowthChartsProps) {
               dataKey="newMembers"
               fill="var(--color-newMembers)"
               fillOpacity={0.14}
-              name="New members"
+              name="Member records created"
               stroke="var(--color-newMembers)"
               strokeWidth={2}
               type="monotone"

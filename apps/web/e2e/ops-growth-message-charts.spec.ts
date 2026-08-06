@@ -9,7 +9,7 @@ const CHART_NAMES = [
   "People who messaged Murph",
   "Total messages sent",
   "Messages sent per day",
-  "Acquisition",
+  "Intake and activation",
   "Revenue snapshots",
 ] as const;
 

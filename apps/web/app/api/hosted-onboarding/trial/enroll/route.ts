@@ -21,5 +21,6 @@ export const POST = withJsonError(async (request: Request) => {
       suspendedAt: auth.member.suspendedAt,
     },
     prisma,
+    pulseTrialStartSource: "web_onboarding",
   }));
 });

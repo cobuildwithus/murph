@@ -43,6 +43,10 @@ import {
   type HostedGrowthActivityPoint,
 } from "@/src/lib/hosted-ops/growth-activity-series";
 import {
+  parseHostedPulseTrialStartSource,
+  type HostedPulseTrialStartSource,
+} from "@/src/lib/hosted-onboarding/pulse-trial-start-source";
+import {
   buildHostedGrowthMessageSeries,
   type HostedGrowthMessagePoint,
 } from "@/src/lib/hosted-ops/growth-message-series";
@@ -150,6 +154,31 @@ export interface HostedGrowthTrialStartRow {
   };
   paidViaFamily: boolean;
   pulseTrialRedeemedAt: Date | null;
+}
+
+export type HostedGrowthTrialStartSource =
+  | HostedPulseTrialStartSource
+  | "unknown";
+
+export interface HostedGrowthTrialStartSourceCounts {
+  companion_onboarding: number;
+  linq_instant_start: number;
+  unknown: number;
+  web_onboarding: number;
+}
+
+export interface HostedGrowthRecentTrialStart {
+  memberCreatedAt: string;
+  phoneHint: string | null;
+  pulseTrialStartSource: HostedGrowthTrialStartSource;
+  trialStartedAt: string;
+}
+
+interface HostedGrowthTrialStartAttributionRow {
+  memberCreatedAt: Date;
+  phoneHint: string | null;
+  pulseTrialRedeemedAt: Date;
+  pulseTrialStartSource: HostedPulseTrialStartSource | null;
 }
 
 export interface HostedGrowthSnapshotRow {
@@ -260,6 +289,11 @@ export interface HostedGrowthDashboard {
   trialStarts: {
     trailing7Days: number;
     wowPercent: number | null;
+  };
+  trialStartAttribution: {
+    counts: HostedGrowthTrialStartSourceCounts;
+    recent: HostedGrowthRecentTrialStart[];
+    windowStartDate: string;
   };
   usageTopUps: {
     trackedFulfilled: number;
@@ -481,6 +515,45 @@ export function buildDailyGrowthSeries(input: {
   }
 
   return Array.from(counts.values());
+}
+
+export function buildHostedGrowthTrialStartAttribution(input: {
+  endExclusive: Date;
+  limit?: number;
+  rows: HostedGrowthTrialStartAttributionRow[];
+  startInclusive: Date;
+}): HostedGrowthDashboard["trialStartAttribution"] {
+  const counts: HostedGrowthTrialStartSourceCounts = {
+    companion_onboarding: 0,
+    linq_instant_start: 0,
+    unknown: 0,
+    web_onboarding: 0,
+  };
+  const rows = input.rows
+    .filter((row) =>
+      row.pulseTrialRedeemedAt >= input.startInclusive
+      && row.pulseTrialRedeemedAt < input.endExclusive
+    )
+    .sort(
+      (left, right) =>
+        right.pulseTrialRedeemedAt.getTime()
+        - left.pulseTrialRedeemedAt.getTime(),
+    );
+
+  for (const row of rows) {
+    counts[row.pulseTrialStartSource ?? "unknown"] += 1;
+  }
+
+  return {
+    counts,
+    recent: rows.slice(0, input.limit ?? 12).map((row) => ({
+      memberCreatedAt: row.memberCreatedAt.toISOString(),
+      phoneHint: row.phoneHint,
+      pulseTrialStartSource: row.pulseTrialStartSource ?? "unknown",
+      trialStartedAt: row.pulseTrialRedeemedAt.toISOString(),
+    })),
+    windowStartDate: formatUtcDateKey(input.startInclusive),
+  };
 }
 
 export function buildWeeklyGrowthRows(input: {
@@ -1144,10 +1217,17 @@ export async function readHostedGrowthDashboard(
               take: 1,
               where: activePaidFamilyMembershipWhere(),
             },
+            createdAt: true,
+            identity: {
+              select: {
+                maskedPhoneNumberHint: true,
+              },
+            },
             suspendedAt: true,
           },
         },
         pulseTrialRedeemedAt: true,
+        pulseTrialStartSource: true,
       },
       where: {
         pulseTrialRedeemedAt: {
@@ -1306,6 +1386,23 @@ export async function readHostedGrowthDashboard(
     paidViaFamily: row.member.accountGroupMemberships.length > 0,
     pulseTrialRedeemedAt: row.pulseTrialRedeemedAt,
   }));
+  const trialStartAttribution = buildHostedGrowthTrialStartAttribution({
+    endExclusive: addUtcDays(todayStart, 1),
+    rows: rawTrialStartRows.flatMap((row) => {
+      if (row.pulseTrialRedeemedAt === null) {
+        return [];
+      }
+      return [{
+        memberCreatedAt: row.member.createdAt,
+        phoneHint: row.member.identity?.maskedPhoneNumberHint ?? null,
+        pulseTrialRedeemedAt: row.pulseTrialRedeemedAt,
+        pulseTrialStartSource: parseHostedPulseTrialStartSource(
+          row.pulseTrialStartSource,
+        ),
+      }];
+    }),
+    startInclusive: dailyStart,
+  });
 
   const dailySeries = buildDailyGrowthSeries({
     dayCount: DAILY_SERIES_DAYS,
@@ -1412,6 +1509,7 @@ export async function readHostedGrowthDashboard(
         trialStartsPrevious7Days,
       ),
     },
+    trialStartAttribution,
     usageTopUps: {
       trackedFulfilled: growthAggregate.trackedFulfilledUsageTopUps,
     },
@@ -1500,6 +1598,7 @@ export async function captureHostedGrowthDailySnapshot(
     });
 
     return {
+      available: true as const,
       activeUsersPriorDay: activeUsers.todayComplete
         ? activeUsers.today
         : null,
@@ -1509,11 +1608,10 @@ export async function captureHostedGrowthDailySnapshot(
     };
   })().catch(() => {
     console.error(
-      "Hosted growth activity snapshot attribution failed; storing unknown activity aggregates.",
+      "Hosted growth activity snapshot attribution failed; preserving existing activity aggregates when present.",
     );
     return {
-      activeUsersPriorDay: null,
-      activeUsersTrailing7Days: null,
+      available: false as const,
     };
   });
   const [
@@ -1546,12 +1644,17 @@ export async function captureHostedGrowthDailySnapshot(
       }),
       activityCountsPromise,
     ]);
-  const { activeUsersPriorDay, activeUsersTrailing7Days } = activityCounts;
+  const activityCreateCounts = activityCounts.available
+    ? activityCounts
+    : {
+      activeUsersPriorDay: null,
+      activeUsersTrailing7Days: null,
+    };
 
   return prisma.hostedGrowthDailySnapshot.upsert({
     create: {
-      activeUsersPriorDay,
-      activeUsersTrailing7Days,
+      activeUsersPriorDay: activityCreateCounts.activeUsersPriorDay,
+      activeUsersTrailing7Days: activityCreateCounts.activeUsersTrailing7Days,
       capturedAt: now,
       coveredMembers: current.coveredMembers,
       inboundMessagesPriorDay,
@@ -1567,8 +1670,12 @@ export async function captureHostedGrowthDailySnapshot(
     },
     select: growthSnapshotSelect,
     update: {
-      activeUsersPriorDay,
-      activeUsersTrailing7Days,
+      ...(activityCounts.available
+        ? {
+          activeUsersPriorDay: activityCounts.activeUsersPriorDay,
+          activeUsersTrailing7Days: activityCounts.activeUsersTrailing7Days,
+        }
+        : {}),
       capturedAt: now,
       coveredMembers: current.coveredMembers,
       inboundMessagesPriorDay,

@@ -50,8 +50,10 @@ Updated: 2026-08-06
 - The metric covers retained senders. Account deletion removes the deleted
   account or owned group activity, matching the existing row-derived growth
   metrics without adding a durable deletion-timestamp analytics trail.
-- Activity attribution failure writes unknown activity values without losing
-  the snapshot's pre-existing revenue, member, or message history.
+- Activity attribution failure creates unknown activity on the first same-date
+  write but cannot overwrite existing activity on retry; revenue, member, and
+  message history still updates. A successful pass may replace unknown values
+  or write null when it proves retained group evidence incomplete.
 - The migration is additive and nullable so old Web versions and existing rows
   remain valid during deploy and rollback.
 - Keep the MRR weekly growth rate visually primary, with activity readings

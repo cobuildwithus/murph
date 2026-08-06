@@ -25,6 +25,7 @@ import {
   addUtcDays,
   buildHostedGrowthActivitySeries,
   buildHostedGrowthMessageSeries,
+  buildHostedGrowthTrialStartAttribution,
   buildTrialCohortRows,
   calculateHostedGrowthCurrentMetrics,
   calculateHostedTrialMetrics,
@@ -323,6 +324,82 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
+  it("keeps trial-start attribution explicit and orders recent starts newest first", () => {
+    const attribution = buildHostedGrowthTrialStartAttribution({
+      endExclusive: new Date("2026-08-01T00:00:00.000Z"),
+      limit: 4,
+      rows: [
+        {
+          memberCreatedAt: new Date("2026-07-30T09:00:00.000Z"),
+          phoneHint: "*** 0194",
+          pulseTrialRedeemedAt: new Date("2026-07-30T09:05:00.000Z"),
+          pulseTrialStartSource: "linq_instant_start",
+        },
+        {
+          memberCreatedAt: new Date("2026-06-03T11:00:00.000Z"),
+          phoneHint: null,
+          pulseTrialRedeemedAt: new Date("2026-07-29T16:00:00.000Z"),
+          pulseTrialStartSource: "companion_onboarding",
+        },
+        {
+          memberCreatedAt: new Date("2026-06-12T10:00:00.000Z"),
+          phoneHint: null,
+          pulseTrialRedeemedAt: new Date("2026-07-28T18:00:00.000Z"),
+          pulseTrialStartSource: null,
+        },
+        {
+          memberCreatedAt: new Date("2026-07-27T10:00:00.000Z"),
+          phoneHint: "*** 4827",
+          pulseTrialRedeemedAt: new Date("2026-07-27T10:06:00.000Z"),
+          pulseTrialStartSource: "web_onboarding",
+        },
+        {
+          memberCreatedAt: new Date("2026-06-01T10:00:00.000Z"),
+          phoneHint: "*** 4421",
+          pulseTrialRedeemedAt: new Date("2026-06-30T18:00:00.000Z"),
+          pulseTrialStartSource: "web_onboarding",
+        },
+      ],
+      startInclusive: new Date("2026-07-01T00:00:00.000Z"),
+    });
+
+    expect(attribution).toEqual({
+      counts: {
+        companion_onboarding: 1,
+        linq_instant_start: 1,
+        unknown: 1,
+        web_onboarding: 1,
+      },
+      recent: [
+        {
+          memberCreatedAt: "2026-07-30T09:00:00.000Z",
+          phoneHint: "*** 0194",
+          pulseTrialStartSource: "linq_instant_start",
+          trialStartedAt: "2026-07-30T09:05:00.000Z",
+        },
+        {
+          memberCreatedAt: "2026-06-03T11:00:00.000Z",
+          phoneHint: null,
+          pulseTrialStartSource: "companion_onboarding",
+          trialStartedAt: "2026-07-29T16:00:00.000Z",
+        },
+        {
+          memberCreatedAt: "2026-06-12T10:00:00.000Z",
+          phoneHint: null,
+          pulseTrialStartSource: "unknown",
+          trialStartedAt: "2026-07-28T18:00:00.000Z",
+        },
+        {
+          memberCreatedAt: "2026-07-27T10:00:00.000Z",
+          phoneHint: "*** 4827",
+          pulseTrialStartSource: "web_onboarding",
+          trialStartedAt: "2026-07-27T10:06:00.000Z",
+        },
+      ],
+      windowStartDate: "2026-07-01",
+    });
+  });
+
   it("keeps exact trial maturity boundary rows immature", () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const rows = buildTrialCohortRows({
@@ -609,9 +686,16 @@ describe("hosted ops growth metrics", () => {
                 status: "active",
               },
             },
+            createdAt: true,
+            identity: {
+              select: {
+                maskedPhoneNumberHint: true,
+              },
+            },
             suspendedAt: true,
           },
         },
+        pulseTrialStartSource: true,
       },
     });
     expect(mocks.hostedMemberBillingRef.count.mock.calls[1]?.[0]).toMatchObject({
@@ -1870,7 +1954,7 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
-  it("preserves the legacy snapshot when activity attribution fails", async () => {
+  it("creates unknown activity without overwriting exact activity after attribution failure", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const registeredPhone = requireLinqContact("phone", "+15550000001");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -1894,7 +1978,7 @@ describe("hosted ops growth metrics", () => {
     try {
       await captureHostedGrowthDailySnapshot(now);
       expect(errorSpy).toHaveBeenCalledWith(
-        "Hosted growth activity snapshot attribution failed; storing unknown activity aggregates.",
+        "Hosted growth activity snapshot attribution failed; preserving existing activity aggregates when present.",
       );
     } finally {
       errorSpy.mockRestore();
@@ -1909,12 +1993,12 @@ describe("hosted ops growth metrics", () => {
       outboundMessagesPriorDay: 57,
     });
     expect(upsertArg?.update).toMatchObject({
-      activeUsersPriorDay: null,
-      activeUsersTrailing7Days: null,
       inboundMessagesPriorDay: 42,
       mrrUsdCents: 2_800,
       outboundMessagesPriorDay: 57,
     });
+    expect(upsertArg?.update).not.toHaveProperty("activeUsersPriorDay");
+    expect(upsertArg?.update).not.toHaveProperty("activeUsersTrailing7Days");
   });
 
   it("anchors the prior-day message window to the UTC day at exactly midnight", async () => {
