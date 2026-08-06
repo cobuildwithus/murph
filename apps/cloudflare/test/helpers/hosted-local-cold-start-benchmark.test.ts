@@ -32,7 +32,7 @@ describe("hosted local cold-start benchmark integrity", () => {
       assertSingleSuccessfulColdStartAttempt([
         { attemptId: "attempt-success", level: "info", phase: "invoke" },
         { attemptId: "attempt-success", level: "info", phase: "idle" },
-      ], "attempt-success")
+      ], "attempt-success", "1")
     ).not.toThrow();
   });
 
@@ -41,7 +41,7 @@ describe("hosted local cold-start benchmark integrity", () => {
       assertSingleSuccessfulColdStartAttempt([
         { attemptId: "attempt-failed", level: "error", phase: "invoke" },
         { attemptId: "attempt-success", level: "info", phase: "idle" },
-      ], "attempt-success")
+      ], "attempt-success", "1")
     ).toThrow("failed runtime phase");
   });
 
@@ -50,7 +50,7 @@ describe("hosted local cold-start benchmark integrity", () => {
       assertSingleSuccessfulColdStartAttempt([
         { attemptId: "attempt-success", level: "warn", phase: "error" },
         { attemptId: "attempt-success", level: "info", phase: "idle" },
-      ], "attempt-success")
+      ], "attempt-success", "1")
     ).toThrow("failed runtime phase");
   });
 
@@ -59,8 +59,18 @@ describe("hosted local cold-start benchmark integrity", () => {
       assertSingleSuccessfulColdStartAttempt([
         { attemptId: "attempt-retried", level: "warn", phase: "invoke" },
         { attemptId: "attempt-success", level: "info", phase: "idle" },
-      ], "attempt-success")
+      ], "attempt-success", "1")
     ).toThrow("more than one runtime attempt");
+  });
+
+  it("rejects a recovered fresh generation before target-specific validation", () => {
+    expect(() =>
+      assertSingleSuccessfulColdStartAttempt(
+        validMeasuredRuntimeLogs,
+        "attempt-success",
+        "2",
+      )
+    ).toThrow("recovered fresh runtime generation");
   });
 
   it("accepts one measured cold v2 restore after setup logs were excluded", () => {

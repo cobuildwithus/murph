@@ -17,12 +17,13 @@ interface ColdStartLatencyTrace {
 
 /**
  * A recovered startup is useful reliability evidence but not a valid latency
- * sample. Keep benchmark statistics limited to one failure-free runtime
- * attempt so retries cannot silently inflate the reported percentiles.
+ * sample. Keep benchmark statistics limited to the first failure-free runtime
+ * generation and one accepted attempt so retries cannot taint percentiles.
  */
 export function assertSingleSuccessfulColdStartAttempt(
   runtimeLogs: readonly ColdStartRuntimeLog[],
   successfulAttemptId: string,
+  workspaceWriteFenceGeneration: string,
 ): void {
   const failedLog = runtimeLogs.find((entry) =>
     entry.level === "error" || entry.phase === "error"
@@ -37,6 +38,9 @@ export function assertSingleSuccessfulColdStartAttempt(
   if (attemptIds.size !== 1 || !attemptIds.has(successfulAttemptId)) {
     throw new Error("Cold-start benchmark observed more than one runtime attempt.");
   }
+  if (workspaceWriteFenceGeneration !== "1") {
+    throw new Error("Cold-start benchmark observed a recovered fresh runtime generation.");
+  }
 }
 
 export function assertEstablishedR2ColdStartAttempt(input: {
@@ -50,6 +54,7 @@ export function assertEstablishedR2ColdStartAttempt(input: {
   assertSingleSuccessfulColdStartAttempt(
     input.runtimeLogs,
     input.successfulAttemptId,
+    input.workspaceWriteFenceGeneration,
   );
 
   if (input.trace.runtimeAttemptId !== input.successfulAttemptId) {
@@ -75,8 +80,5 @@ export function assertEstablishedR2ColdStartAttempt(input: {
     throw new Error(
       `Cold-start benchmark observed a recovered workspace snapshot restore (replaySafeReadMaxAttempt=${observedAttempt}).`,
     );
-  }
-  if (input.workspaceWriteFenceGeneration !== "1") {
-    throw new Error("Cold-start benchmark observed a recovered fresh runtime generation.");
   }
 }

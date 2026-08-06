@@ -413,7 +413,12 @@ async function runColdStartTrial(
     entry.attemptId === runtimeAttemptId
     || Date.parse(entry.at) <= deliveryObservedAtEpochMs
   );
-  assertSingleSuccessfulColdStartAttempt(runtimeLogs, runtimeAttemptId);
+  const preparation = readRunnerPreparationLog(runtimeAttemptId);
+  assertSingleSuccessfulColdStartAttempt(
+    runtimeLogs,
+    runtimeAttemptId,
+    preparation.workspaceWriteFenceGeneration,
+  );
   // The attributed mailbox event proves the same attempt consumed the exact
   // measured input. First-contact trials also consume activation in that pass.
   expect(runtimeLogs).toContainEqual(expect.objectContaining({
@@ -437,7 +442,6 @@ async function runColdStartTrial(
   if (!trace) {
     throw new Error("Expected the established-workspace latency trace.");
   }
-  const preparation = readPreparedSnapshotRestoreLog(runtimeAttemptId);
   assertEstablishedR2ColdStartAttempt({
     expectedEncryptedBytes: establishedSnapshotRef.archive.encryptedByteSize,
     expectedPlainBytes: establishedSnapshotRef.archive.totalPlainBytes,
@@ -792,7 +796,7 @@ async function waitForMeasuredRuntimeLogs(input: {
   );
 }
 
-function readPreparedSnapshotRestoreLog(runtimeAttemptId: string): {
+function readRunnerPreparationLog(runtimeAttemptId: string): {
   preparedSnapshotRestorePresent: boolean;
   workspaceWriteFenceGeneration: string;
 } {
