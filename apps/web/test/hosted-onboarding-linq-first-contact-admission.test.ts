@@ -156,9 +156,12 @@ describe("Linq first-contact admission", () => {
     );
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
       model: "gpt-5.4-nano",
+      reasoning: { effort: "medium" },
+      service_tier: "priority",
       store: false,
       text: {
         format: {
+          strict: true,
           type: "json_schema",
         },
       },

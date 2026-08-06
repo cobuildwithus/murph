@@ -24,11 +24,16 @@ import {
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  buildHostedCodexMemoryUsageRecord,
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
   buildHostedXaiSearchUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import {
+  resolveHostedAiUsageTokenPricingBasis,
+} from "@murphai/hosted-execution/runtime-control";
+
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import {
@@ -92,8 +97,19 @@ import {
   injectHostedCustomInferenceAuth,
 } from "./runner-egress-custom-inference.ts";
 import {
+  HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
+  hasHostedCodexMemoryBillableUsage,
+  parseHostedCodexMemoryTerminalResponse,
+  parseHostedCodexMemoryRequestMetadata,
   readHostedCodexNativeMemoryKind,
+  type HostedCodexMemoryProviderRequestOutcome,
+  type HostedCodexMemoryRequestMetadata,
+  type HostedCodexMemoryUsage,
+  type HostedCodexNativeMemoryKind,
 } from "./runner-egress-codex-memory.ts";
+import {
+  relayHostedCodexMemoryWebSocketUpgrade,
+} from "./runner-egress-codex-memory-websocket.ts";
 import {
   DEFAULT_ELEVENLABS_API_BASE_URL,
   HOSTED_ELEVENLABS_MAX_BODY_BYTES,
@@ -274,6 +290,7 @@ const OPENAI_CACHE_DIAGNOSTIC_INPUT_NESTED_METRIC_KINDS = [
 ] as const;
 const OPENAI_CACHE_DIAGNOSTIC_CODEX_REQUEST_KINDS = new Set([
   "compaction",
+  "memory",
   "prewarm",
   "turn",
 ]);
@@ -1052,6 +1069,7 @@ async function maybeHandleHostedTranscribeRequest(input: {
     durationMs: readHostedTranscribeOutputDurationMs(output),
     env: input.env,
     memberId: authorization.userId,
+    occurredAt: new Date(upstreamStartedAt).toISOString(),
   });
 
   let response: Response;
@@ -1108,6 +1126,7 @@ function recordHostedTranscribeUsage(input: {
   durationMs: number | null;
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
+  occurredAt: string;
 }): Promise<void> {
   return (async () => {
     if (!input.memberId) {
@@ -1119,6 +1138,7 @@ function recordHostedTranscribeUsage(input: {
       durationMs: input.durationMs,
       memberId: input.memberId,
       model: HOSTED_TRANSCRIBE_WORKERS_AI_MODEL,
+      occurredAt: input.occurredAt,
     });
     await recordHostedRuntimeUsageRecord({
       boundUserId: input.memberId,
@@ -1421,14 +1441,32 @@ async function maybeHandleOpenAiRequest(input: {
     });
   }
 
-  if (readHostedCodexNativeMemoryKind(input.request.headers)) {
-    return disabledHostedCodexMemoryEgress();
-  }
+  const nativeMemoryKind = authorization.platformAiUsageAllowed !== false
+    ? readHostedCodexNativeMemoryKind(input.request.headers)
+    : null;
   const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", "Bearer " + token);
   let boundedBody: ArrayBuffer | undefined;
+  let memoryRequestMetadata: HostedCodexMemoryRequestMetadata | null = null;
   if (
+    nativeMemoryKind
+    && input.request.method === "POST"
+    && pathnameSuffix === "/v1/responses"
+  ) {
+    const body = await readBoundedRequestBody(
+      input.request,
+      HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
+    );
+    if (body === null) {
+      return new Response("Payload Too Large", { status: 413 });
+    }
+    memoryRequestMetadata = parseHostedCodexMemoryRequestMetadata(body);
+    if (!memoryRequestMetadata) {
+      return new Response("Invalid Codex memory request.", { status: 400 });
+    }
+    boundedBody = body;
+  } else if (
     input.request.method === "POST"
     && pathnameSuffix === "/v1/images/edits"
   ) {
@@ -1481,7 +1519,54 @@ async function maybeHandleOpenAiRequest(input: {
     await diagnosticPromise;
   }
 
-  return response;
+  if (
+    nativeMemoryKind
+    && input.request.method === "GET"
+    && pathnameSuffix === "/v1/responses"
+  ) {
+    return relayHostedCodexMemoryWebSocketUpgrade({
+      ...(typeof input.ctx?.waitUntil === "function"
+        ? {
+            defer: (promise) => {
+              input.ctx?.waitUntil?.(promise);
+            },
+          }
+        : {}),
+      persistUsage: async (completion) => {
+        await recordHostedCodexMemoryUsage({
+          apiKeyEnv: "OPENAI_API_KEY",
+          baseUrl: DEFAULT_OPENAI_API_BASE_URL + "/v1",
+          env: input.env,
+          memberId: authorization.userId,
+          providerName: "hosted-openai",
+          providerRequestOutcome: completion.providerRequestOutcome,
+          requestMetadata: completion.requestMetadata,
+          usage: completion.usage,
+        });
+      },
+      reportFailure: ({ phase }) => {
+        reportHostedCodexMemoryUsageFailure({
+          memoryKind: nativeMemoryKind,
+          providerName: "hosted-openai",
+          reason: "websocket_" + phase,
+        });
+      },
+      upstreamResponse: response,
+    });
+  }
+
+  return memoryRequestMetadata && nativeMemoryKind
+    ? await handleHostedCodexMemoryUsageResponse({
+        apiKeyEnv: "OPENAI_API_KEY",
+        baseUrl: DEFAULT_OPENAI_API_BASE_URL + "/v1",
+        env: input.env,
+        memberId: authorization.userId,
+        memoryKind: nativeMemoryKind,
+        providerName: "hosted-openai",
+        requestMetadata: memoryRequestMetadata,
+        response,
+      })
+    : response;
 }
 
 async function maybeHandleVeniceRequest(input: {
@@ -1530,9 +1615,9 @@ async function maybeHandleVeniceRequest(input: {
     });
   }
 
-  if (readHostedCodexNativeMemoryKind(input.request.headers)) {
-    return disabledHostedCodexMemoryEgress();
-  }
+  const nativeMemoryKind = authorization.platformAiUsageAllowed !== false
+    ? readHostedCodexNativeMemoryKind(input.request.headers)
+    : null;
   const body = await readBoundedRequestBody(
     input.request,
     HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
@@ -1540,8 +1625,15 @@ async function maybeHandleVeniceRequest(input: {
   if (body === null) {
     return new Response("Payload Too Large", { status: 413 });
   }
+  const memoryRequestMetadata = nativeMemoryKind
+    ? parseHostedCodexMemoryRequestMetadata(body)
+    : null;
+  if (nativeMemoryKind && !memoryRequestMetadata) {
+    return new Response("Invalid Codex memory request.", { status: 400 });
+  }
   const upstreamBody = buildHostedVeniceResponsesRequestBody({
     body,
+    pathnameSuffix: pathMatch.pathnameSuffix,
   });
   if (upstreamBody === null) {
     return disallowedProviderEgress();
@@ -1560,13 +1652,257 @@ async function maybeHandleVeniceRequest(input: {
     headers,
     { body: upstreamBody },
   );
-  return await fetchAuthorizedProviderUpstream({
-    authorization,
-    providerKind: "venice",
-    request: input.request,
-    startedAt,
-    upstreamRequest,
-    url: input.url,
+  const captureMemoryDiagnostic = nativeMemoryKind !== null;
+  const diagnosticBody = captureMemoryDiagnostic
+    ? upstreamRequest.clone()
+    : null;
+  const canonicalModelKind = captureMemoryDiagnostic
+    ? readHostedResponsesRequestModelKind(body)
+    : null;
+  const providerStartedAt = Date.now();
+  let response: Response;
+  try {
+    response = await fetchAuthorizedProviderUpstream({
+      authorization,
+      providerKind: "venice",
+      request: input.request,
+      startedAt,
+      upstreamRequest,
+      url: input.url,
+    });
+  } catch (error) {
+    if (diagnosticBody) {
+      const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
+        canonicalModelKind,
+        ctx: input.ctx ?? null,
+        endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
+        env: input.env,
+        providerKind: "venice",
+        providerTransportFailed: true,
+        request: input.request,
+        upstreamRequestBody: diagnosticBody,
+        userId: authorization.userId,
+        writeFence: authorization.writeFence,
+      });
+      scheduleHostedProviderDiagnostic({
+        ctx: input.ctx ?? null,
+        promise: diagnosticPromise,
+      });
+    }
+    throw error;
+  }
+
+  if (diagnosticBody) {
+    const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
+      canonicalModelKind,
+      ctx: input.ctx ?? null,
+      endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
+      env: input.env,
+      providerKind: "venice",
+      providerResponseTtfbMs: Date.now() - providerStartedAt,
+      request: input.request,
+      response,
+      upstreamRequestBody: diagnosticBody,
+      userId: authorization.userId,
+      writeFence: authorization.writeFence,
+    });
+    scheduleHostedProviderDiagnostic({
+      ctx: input.ctx ?? null,
+      promise: diagnosticPromise,
+    });
+  }
+  return memoryRequestMetadata && nativeMemoryKind
+    ? await handleHostedCodexMemoryUsageResponse({
+        apiKeyEnv: "VENICE_API_KEY",
+        baseUrl: DEFAULT_VENICE_API_BASE_URL,
+        env: input.env,
+        memberId: authorization.userId,
+        memoryKind: nativeMemoryKind,
+        providerName: "venice",
+        requestMetadata: memoryRequestMetadata,
+        response,
+      })
+    : response;
+}
+
+async function handleHostedCodexMemoryUsageResponse(input: {
+  apiKeyEnv: string;
+  baseUrl: string;
+  env: RunnerOutboundEnvironmentSource;
+  memberId: string | null;
+  memoryKind: HostedCodexNativeMemoryKind;
+  providerName: "hosted-openai" | "venice";
+  requestMetadata: HostedCodexMemoryRequestMetadata;
+  response: Response;
+}): Promise<Response> {
+  if (!input.response.ok) {
+    return input.response;
+  }
+
+  const responseBody = await readBoundedRequestBody(
+    input.response,
+    HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
+  );
+  if (responseBody === null) {
+    reportHostedCodexMemoryUsageFailure({
+      memoryKind: input.memoryKind,
+      providerName: input.providerName,
+      reason: "response_too_large",
+    });
+    return new Response("Hosted Codex memory response too large.", {
+      status: 502,
+    });
+  }
+
+  const terminal = parseHostedCodexMemoryTerminalResponse(responseBody);
+  if (
+    input.requestMetadata.usageRequired
+    && (
+      terminal === null
+      || (
+        terminal.usage === null
+        && terminal.providerRequestOutcome === "succeeded"
+      )
+    )
+  ) {
+    reportHostedCodexMemoryUsageFailure({
+      memoryKind: input.memoryKind,
+      providerName: input.providerName,
+      reason: "terminal_usage_missing",
+    });
+    return new Response("Hosted Codex memory usage was unavailable.", {
+      status: 502,
+    });
+  }
+
+  if (
+    terminal?.usage
+    && hasHostedCodexMemoryBillableUsage(terminal.usage)
+  ) {
+    try {
+      await recordHostedCodexMemoryUsage({
+        apiKeyEnv: input.apiKeyEnv,
+        baseUrl: input.baseUrl,
+        env: input.env,
+        memberId: input.memberId,
+        providerName: input.providerName,
+        providerRequestOutcome: terminal.providerRequestOutcome,
+        requestMetadata: input.requestMetadata,
+        usage: terminal.usage,
+      });
+    } catch (error) {
+      reportHostedCodexMemoryUsageFailure({
+        error,
+        memoryKind: input.memoryKind,
+        providerName: input.providerName,
+        reason: "persistence_failed",
+      });
+      // The provider work has already completed. Preserve its terminal
+      // response so Codex does not retry an irreversible, billable request.
+    }
+  }
+
+  return rebuildBufferedProviderResponse(input.response, responseBody);
+}
+
+async function recordHostedCodexMemoryUsage(input: {
+  apiKeyEnv: string;
+  baseUrl: string;
+  env: RunnerOutboundEnvironmentSource;
+  memberId: string | null;
+  providerName: "hosted-openai" | "venice";
+  providerRequestOutcome: HostedCodexMemoryProviderRequestOutcome;
+  requestMetadata: HostedCodexMemoryRequestMetadata;
+  usage: HostedCodexMemoryUsage;
+}): Promise<void> {
+  if (!input.memberId) {
+    throw new TypeError("Hosted Codex memory usage recording requires a member id.");
+  }
+
+  const environment = readHostedExecutionEnvironment(
+    asWorkerStringEnvironment(input.env),
+  );
+  const record = buildHostedCodexMemoryUsageRecord({
+    apiKeyEnv: input.apiKeyEnv,
+    baseUrl: input.baseUrl,
+    cacheWriteTokens: input.usage.cacheWriteTokens,
+    cachedInputTokens: input.usage.cachedInputTokens,
+    inputTokens: input.usage.inputTokens,
+    memberId: input.memberId,
+    occurredAt: input.usage.occurredAt,
+    outputTokens: input.usage.outputTokens,
+    providerName: input.providerName,
+    providerRequestId: input.usage.providerRequestId,
+    providerRequestOutcome: input.providerRequestOutcome,
+    rawUsageJson: input.usage.rawUsageJson,
+    reasoningTokens: input.usage.reasoningTokens,
+    requestedModel: input.requestMetadata.requestedModel,
+    // Venice exposes its translated provider id. The canonical request model
+    // remains the priceable identity for that provider.
+    servedModel: input.providerName === "venice"
+      ? null
+      : input.usage.servedModel,
+    tokenPricingBasis: resolveHostedAiUsageTokenPricingBasis({
+      model: input.requestMetadata.requestedModel,
+      providerName: input.providerName,
+      serviceTier: input.usage.serviceTier
+        ?? input.requestMetadata.serviceTier,
+    }),
+    totalTokens: input.usage.totalTokens,
+  });
+  await recordHostedRuntimeUsageRecord({
+    boundUserId: input.memberId,
+    fetchImpl: fetch,
+    record,
+    timeoutMs: environment.webControlTimeoutMs,
+    transport: {
+      callbackSigning: environment.webCallbackSigning,
+      mode: "direct",
+      webControlBaseUrl: environment.hostedWebBaseUrl,
+      workspaceCheckpointBridge: null,
+    },
+  });
+}
+
+function rebuildBufferedProviderResponse(
+  response: Response,
+  body: ArrayBuffer,
+): Response {
+  const headers = new Headers(response.headers);
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  return new Response(body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
+function reportHostedCodexMemoryUsageFailure(input: {
+  error?: unknown;
+  memoryKind: HostedCodexNativeMemoryKind;
+  providerName: "hosted-openai" | "venice";
+  reason: string;
+}): void {
+  const errorName = input.error === undefined
+    ? null
+    : readHostedExecutionSafeErrorName(input.error);
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      ...(input.error === undefined
+        ? {}
+        : {
+            errorCode: deriveHostedExecutionErrorCode(input.error),
+            ...(errorName ? { errorName } : {}),
+          }),
+      memoryKind: input.memoryKind,
+      providerKind: input.providerName + "_codex_memory",
+      reason: input.reason,
+    },
+    level: "warn",
+    message: "Hosted Codex memory usage accounting failed.",
+    phase: "wake.running",
   });
 }
 
@@ -1635,19 +1971,21 @@ async function maybeHandleElevenLabsRequest(input: {
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("content-type", "application/json");
   headers.set("xi-api-key", token);
+  const upstreamRequest = await createHostedRunnerUpstreamRequest(
+    input.request,
+    createProviderUpstreamUrl(input.url, pathMatch),
+    headers,
+    {
+      body: providerRequest.upstreamBody,
+    },
+  );
+  const providerRequestStartedAt = Date.now();
   const response = await fetchAuthorizedProviderUpstream({
     authorization,
     providerKind: "elevenlabs",
     request: input.request,
     startedAt,
-    upstreamRequest: await createHostedRunnerUpstreamRequest(
-      input.request,
-      createProviderUpstreamUrl(input.url, pathMatch),
-      headers,
-      {
-        body: providerRequest.upstreamBody,
-      },
-    ),
+    upstreamRequest,
     url: input.url,
   });
   if (response.ok) {
@@ -1657,12 +1995,14 @@ async function maybeHandleElevenLabsRequest(input: {
           env: input.env,
           memberId: authorization.userId,
           model: providerRequest.modelId,
+          occurredAt: new Date(providerRequestStartedAt).toISOString(),
         })
       : recordHostedElevenLabsMusicUsage({
           durationMs: providerRequest.durationMs,
           env: input.env,
           memberId: authorization.userId,
           model: providerRequest.modelId,
+          occurredAt: new Date(providerRequestStartedAt).toISOString(),
           providerRequestId: response.headers.get("request-id"),
         });
     if (typeof input.ctx?.waitUntil === "function") {
@@ -1679,6 +2019,7 @@ function recordHostedElevenLabsTtsUsage(input: {
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
   model: string;
+  occurredAt: string;
 }): Promise<void> {
   return (async () => {
     if (!input.memberId) {
@@ -1689,6 +2030,7 @@ function recordHostedElevenLabsTtsUsage(input: {
       characterCount: input.characterCount,
       memberId: input.memberId,
       model: input.model,
+      occurredAt: input.occurredAt,
     });
     await recordHostedRuntimeUsageRecord({
       boundUserId: input.memberId,
@@ -1721,6 +2063,7 @@ function recordHostedElevenLabsMusicUsage(input: {
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
   model: string;
+  occurredAt: string;
   providerRequestId: string | null;
 }): Promise<void> {
   return (async () => {
@@ -1732,6 +2075,7 @@ function recordHostedElevenLabsMusicUsage(input: {
       durationMs: input.durationMs,
       memberId: input.memberId,
       model: input.model,
+      occurredAt: input.occurredAt,
       providerRequestId: input.providerRequestId,
     });
     await recordHostedRuntimeUsageRecord({
@@ -1821,19 +2165,21 @@ async function maybeHandleXaiRequest(input: {
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("content-type", "application/json");
   headers.set("authorization", `Bearer ${token}`);
+  const upstreamRequest = await createHostedRunnerUpstreamRequest(
+    input.request,
+    createProviderUpstreamUrl(input.url, pathMatch),
+    headers,
+    {
+      body: requestBody,
+    },
+  );
+  const providerRequestStartedAt = Date.now();
   const response = await fetchAuthorizedProviderUpstream({
     authorization,
     providerKind: "xai",
     request: input.request,
     startedAt,
-    upstreamRequest: await createHostedRunnerUpstreamRequest(
-      input.request,
-      createProviderUpstreamUrl(input.url, pathMatch),
-      headers,
-      {
-        body: requestBody,
-      },
-    ),
+    upstreamRequest,
     url: input.url,
   });
   if (!response.ok) {
@@ -1867,6 +2213,7 @@ async function maybeHandleXaiRequest(input: {
     env: input.env,
     memberId: authorization.userId,
     model: providerRequest.model,
+    occurredAt: new Date(providerRequestStartedAt).toISOString(),
     providerRequestId: responseMetadata.providerRequestId,
     usage: responseMetadata.usage,
   });
@@ -1894,6 +2241,7 @@ function recordHostedXaiSearchUsage(input: {
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
   model: string;
+  occurredAt: string;
   providerRequestId: string | null;
   usage: Record<string, unknown> | null;
 }): Promise<void> {
@@ -1905,6 +2253,7 @@ function recordHostedXaiSearchUsage(input: {
     const record = buildHostedXaiSearchUsageRecord({
       memberId: input.memberId,
       model: input.model,
+      occurredAt: input.occurredAt,
       providerRequestId: input.providerRequestId,
       usage: input.usage,
     });
@@ -1950,6 +2299,25 @@ function readOpenAiCacheDiagnosticEndpointKind(
   return null;
 }
 
+function readVeniceCacheDiagnosticEndpointKind(
+  pathnameSuffix: string,
+): HostedOpenAiCacheDiagnosticEndpointKind {
+  return pathnameSuffix === "/responses/compact"
+    ? "responses_compact"
+    : "responses";
+}
+
+function readHostedResponsesRequestModelKind(body: ArrayBuffer): string | null {
+  try {
+    const parsed = JSON.parse(OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(body));
+    return isHostedOpenAiDiagnosticRecord(parsed)
+      ? readStringRecordProperty(parsed, "model")
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   pathnameSuffix: string;
   request: Request;
@@ -1968,6 +2336,34 @@ async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   return readDeployLiveModelTurnSmokeOpenAiModel(
     OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(body),
   );
+}
+
+function scheduleHostedProviderDiagnostic(input: {
+  ctx: HostedRunnerOutboundContext | null;
+  promise: Promise<void>;
+}): void {
+  if (typeof input.ctx?.waitUntil === "function") {
+    try {
+      input.ctx.waitUntil(input.promise);
+      return;
+    } catch {
+      // Production container interception has no lifecycle owner. If an
+      // optional scheduler rejects synchronously, use the same best-effort
+      // detached fallback without extending the provider-response budget.
+    }
+  }
+  void input.promise.catch((error: unknown) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...buildHostedExecutionSafeErrorDetails(error),
+        providerKind: "venice",
+      },
+      level: "warn",
+      message: "Hosted runner provider request diagnostic detached task failed.",
+      phase: "wake.running",
+    });
+  });
 }
 
 async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
@@ -4558,10 +4954,6 @@ function readRequiredInterceptSecret(value: unknown, label: string): string {
 
 function disallowedProviderEgress(): Response {
   return new Response("Forbidden", { status: 403 });
-}
-
-function disabledHostedCodexMemoryEgress(): Response {
-  return new Response("Codex-native memory is disabled.", { status: 403 });
 }
 
 function readHostedDataApiUpstreamBaseUrl(

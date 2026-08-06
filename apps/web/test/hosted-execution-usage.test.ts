@@ -174,6 +174,7 @@ describe("recordHostedAiUsageRecords", () => {
         chatId: "chat_home_123",
         claimToken: {
           periodStart: "2026-03-01T00:00:00.000Z",
+          planResetAt: null,
           sentAt: expect.any(String),
           usageCreditLedgerVersion: "0",
         },

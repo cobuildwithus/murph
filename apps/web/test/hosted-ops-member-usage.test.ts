@@ -38,6 +38,7 @@ const NOW = new Date("2026-07-22T18:00:00.000Z");
 const PERIOD_START = new Date("2026-07-01T00:00:00.000Z");
 const PERIOD_END = new Date("2026-08-01T00:00:00.000Z");
 const PERIOD_UPDATED_AT = new Date("2026-07-22T17:30:00.000Z");
+const PLAN_RESET_AT = new Date("2026-07-12T15:00:00.000Z");
 
 describe("hosted ops member usage", () => {
   beforeEach(() => {
@@ -277,6 +278,7 @@ describe("hosted ops member usage", () => {
       buildHostedAiUsageGateNoticeIdempotencyKey({
         memberId: "hbm_container",
         periodStart: PERIOD_START,
+        planResetAt: PLAN_RESET_AT,
         usageCreditLedgerVersion: 4n,
       }),
     );
@@ -451,6 +453,7 @@ function makeUsageGateDecision(overrides: Record<string, unknown> = {}) {
     memberId: "hbm_container",
     periodEnd: PERIOD_END,
     periodStart: PERIOD_START,
+    planResetAt: PLAN_RESET_AT,
     reason: "ai_usage_limit_exceeded",
     remainingUsdMicros: 500_000n,
     retryAfter: PERIOD_END,

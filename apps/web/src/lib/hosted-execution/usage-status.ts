@@ -192,6 +192,7 @@ export async function projectHostedPersonalAiUsageStatus(input: {
         ledgerVersion: decision.usageCreditLedgerVersion,
         now,
         periodStart: decision.periodStart,
+        planResetAt: decision.planResetAt,
         periodSpentUsdMicros: decision.spentUsdMicros,
         prisma,
       });
@@ -338,6 +339,7 @@ async function readHostedUsageMeterWindow(input: {
   ledgerVersion: bigint;
   now: Date;
   periodStart: Date;
+  planResetAt: Date | null;
   periodSpentUsdMicros: bigint;
   prisma: HostedPlanUsageClient;
 }): Promise<{
@@ -346,7 +348,7 @@ async function readHostedUsageMeterWindow(input: {
 }> {
   if (input.ledgerVersion <= 0n || input.periodSpentUsdMicros <= 0n) {
     return {
-      resetAt: null,
+      resetAt: input.planResetAt,
       spentUsdMicros: input.periodSpentUsdMicros,
     };
   }
@@ -373,10 +375,15 @@ async function readHostedUsageMeterWindow(input: {
     });
   if (!latestPurchaseGrant) {
     return {
-      resetAt: null,
+      resetAt: input.planResetAt,
       spentUsdMicros: input.periodSpentUsdMicros,
     };
   }
+
+  const resetAt = input.planResetAt
+      && input.planResetAt.getTime() > latestPurchaseGrant.effectiveAt.getTime()
+    ? input.planResetAt
+    : latestPurchaseGrant.effectiveAt;
 
   const usageSincePurchase = await input.prisma.hostedAiUsage.aggregate({
     _sum: {
@@ -390,7 +397,7 @@ async function readHostedUsageMeterWindow(input: {
       allowancePeriodStart: input.periodStart,
       memberId: input.beneficiaryMemberId,
       occurredAt: {
-        gt: latestPurchaseGrant.effectiveAt,
+        gt: resetAt,
         lte: input.now,
       },
     },
@@ -404,7 +411,7 @@ async function readHostedUsageMeterWindow(input: {
       : observedSpend;
 
   return {
-    resetAt: latestPurchaseGrant.effectiveAt,
+    resetAt,
     spentUsdMicros: boundedSpend,
   };
 }

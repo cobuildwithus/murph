@@ -834,6 +834,7 @@ describe("hosted orchestration reconciliation facts", () => {
       chatId: "chat_runtime_denied",
       claimToken: {
         periodStart: deniedDecision.periodStart.toISOString(),
+        planResetAt: null,
         sentAt: FIXED_NOW,
         usageCreditLedgerVersion: "3",
       },

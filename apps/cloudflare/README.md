@@ -80,7 +80,12 @@ models, and replaces the model with the matching regular Venice provider id
 Venice's added system prompt, web search, and web scraping at the final egress
 boundary. Runtime egress derives the provider id from the same shared map that
 Web records in its pricing snapshot, so the allowance rate remains bound to
-the actual upstream model. Specialized
+the actual upstream model. Codex Responses Lite `/responses` requests also have
+their standard top-level tools restored and receive an explicit GPT-5.6 prompt
+cache breakpoint on the final block of the contiguous leading developer prefix.
+The Worker preserves the stable cache key and caller-owned cache controls, does
+not modify compact or ordinary Responses cache behavior, and never logs prompt
+content or cache keys. Specialized
 tools such as generated images continue to use their own managed providers even
 when Venice owns the core assistant turn.
 The container supervisor sets `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, and `CURL_CA_BUNDLE` to Cloudflare's runtime interception CA path, and direct invocation builds the runtime config from an explicit frozen supervisor env, preserves those CA bundle pointers plus Cloudflare-managed proxy env needed by hosted-local Containers egress interception, and still blocks operator-only process-control env plus user-supplied proxy overrides.

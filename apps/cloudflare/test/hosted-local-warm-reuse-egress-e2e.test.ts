@@ -12,6 +12,7 @@ import {
   updateHostedMemberAssistantProviderForTest,
 } from "#hosted-web-testing";
 
+import { buildHostedVeniceResponsesRequestBody } from "../src/runner-egress-venice.ts";
 import {
   startHostedLocalLinqEgressScenario,
   type HostedLocalEgressScenario,
@@ -122,6 +123,7 @@ describe("hosted local warm-reuse egress e2e", () => {
     expect(readProviderRequestModel(providerRequestBody))
       .toBe(terraProductModel);
     expectCurrentResponsesLiteToolEnvelope(providerRequestBody);
+    expectCurrentVeniceCacheCompatibility(providerRequestBody);
 
     await Promise.all([
       secondTurn.completion,
@@ -154,6 +156,94 @@ function readProviderRequestModel(body: string): unknown {
   return payload && typeof payload === "object" && !Array.isArray(payload)
     ? Reflect.get(payload, "model")
     : null;
+}
+
+function expectCurrentVeniceCacheCompatibility(body: string): void {
+  const source = readJsonObject(body);
+  const promptCacheKey = Reflect.get(source, "prompt_cache_key");
+  if (typeof promptCacheKey !== "string" || promptCacheKey.length === 0) {
+    throw new TypeError("Expected current Codex to send a stable prompt cache key.");
+  }
+
+  const encodedBody = new TextEncoder().encode(body);
+  const transformedBody = buildHostedVeniceResponsesRequestBody({
+    body: encodedBody.buffer.slice(
+      encodedBody.byteOffset,
+      encodedBody.byteOffset + encodedBody.byteLength,
+    ) as ArrayBuffer,
+    pathnameSuffix: "/responses",
+  });
+  if (transformedBody === null) {
+    throw new TypeError("Expected the current Codex request to be Venice-compatible.");
+  }
+  const transformed = readJsonObject(transformedBody);
+  expect(Reflect.get(transformed, "prompt_cache_key")).toBe(promptCacheKey);
+
+  const tools = Reflect.get(transformed, "tools");
+  if (!Array.isArray(tools) || tools.length === 0) {
+    throw new TypeError("Expected Responses Lite tools to be restored at top level.");
+  }
+
+  const input = Reflect.get(transformed, "input");
+  if (!Array.isArray(input)) {
+    throw new TypeError("Expected transformed Venice input to be an array.");
+  }
+  expect(input.some((item) =>
+    isJsonObject(item) && item.type === "additional_tools"
+  )).toBe(false);
+
+  const leadingDeveloperMessages: Record<string, unknown>[] = [];
+  for (const item of input) {
+    if (
+      !isJsonObject(item)
+      || item.type !== "message"
+      || item.role !== "developer"
+    ) {
+      break;
+    }
+    leadingDeveloperMessages.push(item);
+  }
+  expect(leadingDeveloperMessages.length).toBeGreaterThan(0);
+
+  const supportedPrefixBlocks = leadingDeveloperMessages.flatMap((message) => {
+    const content = message.content;
+    return Array.isArray(content)
+      ? content.filter((block): block is Record<string, unknown> =>
+        isJsonObject(block)
+        && (
+          block.type === "input_text"
+          || block.type === "input_image"
+          || block.type === "input_file"
+        )
+      )
+      : [];
+  });
+  expect(supportedPrefixBlocks.length).toBeGreaterThan(0);
+  expect(supportedPrefixBlocks.at(-1)?.prompt_cache_breakpoint).toEqual({
+    mode: "explicit",
+  });
+
+  const breakpoints = input.flatMap((item) => {
+    if (!isJsonObject(item) || !Array.isArray(item.content)) {
+      return [];
+    }
+    return item.content.filter((block) =>
+      isJsonObject(block) && block.prompt_cache_breakpoint !== undefined
+    );
+  });
+  expect(breakpoints).toHaveLength(1);
+}
+
+function readJsonObject(body: string): Record<string, unknown> {
+  const payload: unknown = JSON.parse(body);
+  if (!isJsonObject(payload)) {
+    throw new TypeError("Expected the provider request to be a JSON object.");
+  }
+  return payload;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function expectCurrentResponsesLiteToolEnvelope(body: string): void {
