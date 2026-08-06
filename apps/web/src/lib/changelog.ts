@@ -79,7 +79,7 @@ const RAW_CHANGELOG_EDITIONS = [
         details:
           "The existing live X search now asks Grok to inspect relevant media. Murph keeps the source link, separates the post text from what the media shows or says, and treats the result as unverified third-party content.",
         relevanceTags: ["assistant", "x-search", "images", "video"],
-        sourcePullRequests: [],
+        sourcePullRequests: [1399],
         tryIt: {
           label: "Ask about an X post",
           prompt:
