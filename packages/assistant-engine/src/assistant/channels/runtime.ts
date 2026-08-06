@@ -534,7 +534,7 @@ export async function sendLinqMessage(
   // Validate all local preconditions BEFORE loading or uploading vault-file
   // bytes. Otherwise approved vault-file bytes leave the vault and reach Linq
   // even when the send would fail closed on a missing target or sender phone.
-  const target = input.target.trim()
+  let target = input.target.trim()
   if (target.length === 0) {
     throw new VaultCliError(
       'ASSISTANT_CHANNEL_TARGET_REQUIRED',
@@ -594,6 +594,7 @@ export async function sendLinqMessage(
     nativeCardDeliveryIdentityAvailable &&
     (replayNativeCard || directRecipientPhoneNumber !== null)
   let appCardFallbackIdempotencyKey: string | null = null
+  let staleTargetRecoveryRequired = false
   if (shouldAttemptNativeCard) {
     let capabilityAvailable = replayNativeCard
     if (!replayNativeCard && directRecipientPhoneNumber !== null) {
@@ -610,7 +611,10 @@ export async function sendLinqMessage(
           },
         )
       } catch (error) {
-        if (dependencies.signal?.aborted) {
+        if (
+          dependencies.signal?.aborted
+          || isLinqAppCardFallbackUnsafeError(error)
+        ) {
           throw error
         }
         dependencies.onAppCardFallbackError?.({
@@ -650,6 +654,10 @@ export async function sendLinqMessage(
           reason: 'app_card_rejected',
         })
         appCardFallbackIdempotencyKey = `${idempotencyKey}:fallback`
+        staleTargetRecoveryRequired =
+          error instanceof VaultCliError
+          && error.context?.status === 404
+          && error.context?.linqFailureKind === 'chat_not_found'
       }
     }
   }
@@ -670,9 +678,23 @@ export async function sendLinqMessage(
         { retryable: true },
       )
     }
-    await dependencies.persistAppCardTextFallback({
-      idempotencyKey: textFallbackIdempotencyKey,
-    })
+    const recoveredFallbackTarget =
+      await dependencies.persistAppCardTextFallback({
+        idempotencyKey: textFallbackIdempotencyKey,
+        ...(staleTargetRecoveryRequired
+          ? { staleTargetRecoveryRequired: true }
+          : {}),
+      })
+    if (recoveredFallbackTarget) {
+      const recoveredTarget = recoveredFallbackTarget.target.trim()
+      if (!recoveredTarget) {
+        throw new VaultCliError(
+          'ASSISTANT_LINQ_APP_CARD_FALLBACK_TARGET_INVALID',
+          'An iMessage app-card text fallback recovered an invalid direct chat.',
+        )
+      }
+      target = recoveredTarget
+    }
   }
 
   const media = await prepareLinqMessageMedia(
@@ -736,6 +758,21 @@ export async function sendLinqMessage(
     providerThreadId: null,
     target,
   }
+}
+
+function isLinqAppCardFallbackUnsafeError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && (
+      (
+        'deliveryMayHaveSucceeded' in error
+        && error.deliveryMayHaveSucceeded === true
+      )
+      || (
+        error instanceof VaultCliError
+        && error.code === 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING'
+      )
+    )
 }
 
 async function prepareLinqMessageMedia(

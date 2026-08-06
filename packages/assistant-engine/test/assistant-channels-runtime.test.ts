@@ -1652,6 +1652,36 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
   })
 
+  it('does not convert capability-boundary delivery ambiguity into text fallback', async () => {
+    const deliveryControlError = Object.assign(new VaultCliError(
+      'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      'Hosted provider delivery requires reconciliation.',
+    ), {
+      deliveryMayHaveSucceeded: true,
+    })
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    runtimeMocks.checkLinqIMessageCapability.mockRejectedValue(
+      deliveryControlError,
+    )
+
+    await expect(sendLinqMessage({
+      card: NUTRITION_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      idempotencyKey: 'card-delivery-control-error',
+      message: NUTRITION_CARD_TEXT,
+      target: 'private-thread-control-error',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      persistAppCardTextFallback,
+    })).rejects.toBe(deliveryControlError)
+
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+  })
+
   it('promotes an exact card replay to text only after definitive rejection', async () => {
     const onAppCardFallbackError = vi.fn()
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)

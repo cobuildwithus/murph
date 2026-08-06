@@ -1401,9 +1401,14 @@ identity, and transfer that Web fence before text enters Linq.
 For a definitive card rejection, the runtime does not send fallback text until
 the existing Web engagement transaction has terminalized the exact original
 `provider_dispatch_started` delivery and claimed the promoted fallback key.
-That transaction verifies the same runtime intent, Linq chat, source, and
-thread target, so the obsolete card fence cannot permanently block later group
-routing. If the transaction response is lost after local fallback persistence,
+That transaction verifies the same runtime intent, source, and thread target.
+For a detached replay whose provider chat is definitively stale, the runtime
+first resolves a current direct chat from Web authority, persists the text
+transition only after that succeeds, terminalizes the predecessor on its old
+chat, and claims the fallback on the current chat. Without an authoritative
+replacement, the card stays unchanged and confirmation-pending. This keeps the
+obsolete card fence from permanently blocking later group routing. If the
+transaction response is lost after local fallback persistence,
 the next ordinary outbox retry derives the predecessor from the stable fallback
 key and repeats the same idempotent transition before entering Linq.
 Linq owns the

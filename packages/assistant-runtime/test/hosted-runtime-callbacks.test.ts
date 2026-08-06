@@ -63,6 +63,7 @@ const mocks = vi.hoisted(() => ({
   sendTelegramMessage: vi.fn(),
   sendTelegramVoiceMemoMessage: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
+  useActualLinqMessage: false,
 }));
 
 vi.mock("@murphai/hosted-execution", async () => {
@@ -129,6 +130,9 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
     async sendLinqMessage(
       ...args: Parameters<typeof actual.sendLinqMessage>
     ) {
+      if (mocks.useActualLinqMessage) {
+        return await actual.sendLinqMessage(...args);
+      }
       const providerFetch = args[1]?.fetchImplementation;
       if (!providerFetch) {
         throw new Error("Expected hosted Linq provider fetch boundary.");
@@ -302,7 +306,7 @@ function createDelivery(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function buildClaimedLinqEngagementResult(request: {
+async function buildClaimedLinqEngagementResult(request: {
   authorityCheckOnly: boolean;
 }) {
   return request.authorityCheckOnly === true
@@ -410,6 +414,7 @@ function createPreparedPreviousDispatchState(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.useActualLinqMessage = false;
   mocks.applyAssistantVaultFileSendApprovalResult.mockImplementation(
     ({ intent }) => intent,
   );
@@ -8941,11 +8946,8 @@ describe("hosted runtime callbacks", () => {
     });
     const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
     const providerFetch = vi.fn<typeof fetch>();
-    mocks.sendLinqMessage.mockResolvedValueOnce({
-      providerMessageId: "unexpected-card-message",
-      providerThreadId: null,
-      target: "linq_chat_123",
-    });
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    mocks.useActualLinqMessage = true;
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       await dependencies.sendLinq({
         card: {
@@ -8962,6 +8964,7 @@ describe("hosted runtime callbacks", () => {
         directRecipientPhoneNumber: "+15550001",
         idempotencyKey: "assistant-outbox:intent_123",
         message: "Nutrition summary",
+        persistAppCardTextFallback,
         target: "linq_chat_123",
         targetKind: "thread",
         threadIsDirect: true,
@@ -8985,11 +8988,87 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled();
     expect(providerFetch.mock.calls).toEqual([
       [expect.stringMatching(/\/typing$/u), expect.objectContaining({
         method: "DELETE",
       })],
     ]);
+  });
+
+  it("marks an exhausted native-card rate limit as confirmation-pending", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(buildClaimedLinqEngagementResult);
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const providerFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({ available: true }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/chats/linq_chat_123/messages")) {
+        return new Response(JSON.stringify({ error: "rate limited" }), {
+          headers: {
+            "content-type": "application/json",
+            "retry-after": "0",
+          },
+          status: 429,
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+    mocks.useActualLinqMessage = true;
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendLinq({
+        card: {
+          kind: "daily_nutrition",
+          localDate: "2026-07-31",
+          mealCount: 1,
+          totals: {
+            calories: { mealCount: 1, total: 500 },
+            carbsGrams: { mealCount: 1, total: 55 },
+            fatGrams: { mealCount: 1, total: 18 },
+            proteinGrams: { mealCount: 1, total: 35 },
+          },
+        },
+        directRecipientPhoneNumber: "+15550001",
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "Nutrition summary",
+        persistAppCardTextFallback,
+        target: "linq_chat_123",
+        targetKind: "thread",
+        threadIsDirect: true,
+      });
+      throw new Error("unreachable after an exhausted native-card rate limit");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      deliveryMayHaveSucceeded: true,
+    });
+
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled();
+    expect(providerFetch.mock.calls.filter(([input]) =>
+      String(input).endsWith("/capability/check_imessage")
+    )).toHaveLength(1);
+    expect(providerFetch.mock.calls.filter(([input]) =>
+      String(input).endsWith("/chats/linq_chat_123/messages")
+    )).toHaveLength(3);
   });
 
   it("durably supersedes a revoked reviewed answer and sends the fixed fallback once after retry", async () => {
@@ -10672,6 +10751,202 @@ describe("hosted runtime callbacks", () => {
       "claim:assistant-outbox:intent_123:fallback",
       "provider:/v1/messages/text",
     ]);
+  });
+
+  it("resolves a current direct thread before persisting detached stale-card fallback", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "stale-direct-chat",
+      channel: "linq",
+      explicitTarget: "stale-direct-chat",
+      transportIdempotent: true,
+    });
+    const observedOrder: string[] = [];
+    const persistAppCardTextFallback = vi.fn(async () => {
+      observedOrder.push("persist-fallback");
+    });
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+      idempotencyKey?: string | null;
+      target?: string | null;
+    }) => {
+      observedOrder.push(
+        `${request.authorityCheckOnly ? "authorize" : "claim"}:${request.idempotencyKey}:${request.target}`,
+      );
+      if (request.authorityCheckOnly) {
+        return {
+          targetOverride: {
+            target: "current-direct-chat",
+            targetKind: "thread" as const,
+          },
+        };
+      }
+      return { providerDispatchClaimed: true };
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/chats/stale-direct-chat/messages")) {
+        observedOrder.push("provider:stale-card");
+        return new Response(JSON.stringify({
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 404,
+        });
+      }
+      if (url.endsWith("/chats/current-direct-chat/messages")) {
+        const body = typeof init?.body === "string"
+          ? JSON.parse(init.body) as {
+              message?: { parts?: Array<{ type?: string }> };
+            }
+          : {};
+        expect(body.message?.parts?.[0]?.type).toBe("text");
+        observedOrder.push("provider:current-text");
+        return new Response(JSON.stringify({
+          message: { id: "recovered-fallback-message" },
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+    mocks.useActualLinqMessage = true;
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        card: {
+          kind: "daily_nutrition",
+          localDate: "2026-07-31",
+          mealCount: 1,
+          totals: {
+            calories: { mealCount: 1, total: 500 },
+            carbsGrams: { mealCount: 1, total: 55 },
+            fatGrams: { mealCount: 1, total: 18 },
+            proteinGrams: { mealCount: 1, total: 35 },
+          },
+        },
+        directRecipientPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_123",
+        linqAppCardReplay: true,
+        message: "Nutrition summary",
+        persistAppCardTextFallback,
+        target: "stale-direct-chat",
+        targetKind: "thread",
+        threadIsDirect: true,
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: "thread",
+        }),
+        status: "sent",
+      });
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      staleTargetRecoveryRequired: true,
+    });
+    expect(observedOrder).toEqual(expect.arrayContaining([
+      "claim:assistant-outbox:intent_123:stale-direct-chat",
+      "provider:stale-card",
+      "authorize:assistant-outbox:intent_123:fallback:stale-direct-chat",
+      "persist-fallback",
+      "claim:assistant-outbox:intent_123:fallback:current-direct-chat",
+      "provider:current-text",
+    ]));
+    expect(observedOrder.indexOf("authorize:assistant-outbox:intent_123:fallback:stale-direct-chat"))
+      .toBeLessThan(observedOrder.indexOf("persist-fallback"));
+    expect(observedOrder.indexOf("persist-fallback"))
+      .toBeLessThan(observedOrder.indexOf("provider:current-text"));
+  });
+
+  it("keeps detached stale-card state when no current direct thread is authorized", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "stale-direct-chat",
+      channel: "linq",
+      explicitTarget: "stale-direct-chat",
+      transportIdempotent: true,
+    });
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly?: boolean;
+    }) => request.authorityCheckOnly
+      ? {}
+      : { providerDispatchClaimed: true });
+    const providerFetch = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith("/chats/stale-direct-chat/messages")) {
+        return new Response(JSON.stringify({
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 404,
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+    mocks.useActualLinqMessage = true;
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendLinq({
+        card: {
+          kind: "daily_nutrition",
+          localDate: "2026-07-31",
+          mealCount: 1,
+          totals: {
+            calories: { mealCount: 1, total: 500 },
+            carbsGrams: { mealCount: 1, total: 55 },
+            fatGrams: { mealCount: 1, total: 18 },
+            proteinGrams: { mealCount: 1, total: 35 },
+          },
+        },
+        directRecipientPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_123",
+        linqAppCardReplay: true,
+        message: "Nutrition summary",
+        persistAppCardTextFallback,
+        target: "stale-direct-chat",
+        targetKind: "thread",
+        threadIsDirect: true,
+      });
+      throw new Error("unreachable without an authorized current direct chat");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+      deliveryMayHaveSucceeded: true,
+    });
+
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled();
+    expect(providerFetch.mock.calls.filter(([input]) =>
+      String(input).includes("/chats/") && String(input).endsWith("/messages")
+    )).toHaveLength(1);
   });
 
   it("reconciles the predecessor when a persisted card fallback retries", async () => {

@@ -704,7 +704,6 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
       });
       if (!predecessor || !hostedLinqAppCardPredecessorMatches({
         delivery: predecessor,
-        linqChatLookupKey,
         sourceRefLookupKey,
         targetKind: input.targetKind,
       })) {
@@ -722,7 +721,6 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
             failureReason: null,
             id: predecessor.id,
             lastReceiptAt: null,
-            linqChatLookupKey,
             messageLookupKey: null,
             skippedAt: null,
             source: "hosted_runtime_linq_delivery",
@@ -747,7 +745,6 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
             !concurrent
             || !hostedLinqAppCardPredecessorMatches({
               delivery: concurrent,
-              linqChatLookupKey,
               sourceRefLookupKey,
               targetKind: input.targetKind,
             })
@@ -775,14 +772,12 @@ function hostedLinqAppCardPredecessorMatches(input: {
   delivery: Prisma.HostedLinqDeliveryGetPayload<{
     select: typeof hostedLinqDeliveryLifecycleSelect;
   }>;
-  linqChatLookupKey: string;
   sourceRefLookupKey: string;
   targetKind: "thread";
 }): boolean {
   return input.delivery.acceptedAt === null
     && input.delivery.deliveredAt === null
     && input.delivery.lastReceiptAt === null
-    && input.delivery.linqChatLookupKey === input.linqChatLookupKey
     && input.delivery.messageLookupKey === null
     && input.delivery.skippedAt === null
     && input.delivery.source === "hosted_runtime_linq_delivery"

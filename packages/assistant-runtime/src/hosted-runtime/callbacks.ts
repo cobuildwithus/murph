@@ -2257,7 +2257,10 @@ function isHostedLinqProviderOutcomeAmbiguous(error: unknown): boolean {
     return true;
   }
   const status = error.context?.status;
-  return typeof status !== "number" || status === 408 || status >= 500;
+  return typeof status !== "number"
+    || status === 408
+    || status === 429
+    || status >= 500;
 }
 
 class HostedBackgroundDeliveryYieldedError extends VaultCliError {
@@ -3557,9 +3560,9 @@ function createHostedAssistantLinqSendDependency(input: {
           targetKind: request.targetKind ?? null,
         })
       : {};
-    const providerTarget =
+    let providerTarget =
       engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
-    const providerTargetKind =
+    let providerTargetKind =
       engagement.targetOverride?.targetKind ?? request.targetKind ?? null;
     if (
       includesVaultFile
@@ -3721,9 +3724,54 @@ function createHostedAssistantLinqSendDependency(input: {
         ...(persistAppCardTextFallback
           ? {
               persistAppCardTextFallback: async (fallback) => {
+                let recoveredTarget:
+                  | { target: string; targetKind: "thread" }
+                  | null = null;
+                if (
+                  fallback.staleTargetRecoveryRequired === true
+                  && directRecipientPhoneNumber === null
+                ) {
+                  const recoveryEngagement =
+                    await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+                      answeredMailboxItemIds: request.answeredMailboxItemIds,
+                      authorityCheckOnly: true,
+                      directRecipientPhoneNumber,
+                      effectsPort: input.effectsPort ?? null,
+                      fromPhoneNumber,
+                      homeRouteFallbackAllowed:
+                        request.homeRouteFallbackAllowed === true,
+                      idempotencyKey: fallback.idempotencyKey,
+                      intentId: input.intentId ?? null,
+                      replyToMessageId: request.replyToMessageId ?? null,
+                      signal: signal ?? null,
+                      target: providerTarget,
+                      targetKind: providerTargetKind,
+                    });
+                  const recoveredProviderTarget =
+                    recoveryEngagement.targetOverride?.target.trim() ?? "";
+                  recoveredTarget =
+                    recoveryEngagement.targetOverride?.targetKind === "thread"
+                      && recoveredProviderTarget.length > 0
+                      ? {
+                          target: recoveredProviderTarget,
+                          targetKind: "thread",
+                        }
+                      : null;
+                  if (!recoveredTarget) {
+                    throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
+                      "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+                      "Hosted iMessage app-card recovery requires a current direct chat before changing to text fallback.",
+                      { retryable: false },
+                    ));
+                  }
+                }
                 await persistAppCardTextFallback(fallback);
                 const predecessorIdempotencyKey = effectiveIdempotencyKey;
                 effectiveIdempotencyKey = fallback.idempotencyKey;
+                if (recoveredTarget) {
+                  providerTarget = recoveredTarget.target;
+                  providerTargetKind = recoveredTarget.targetKind;
+                }
                 if (
                   fallback.idempotencyKey !== predecessorIdempotencyKey
                 ) {
@@ -3739,6 +3787,7 @@ function createHostedAssistantLinqSendDependency(input: {
                   await assertHostedDeliveryCanEnterProvider(input);
                   await enterHostedLinqProviderDispatch();
                 }
+                return recoveredTarget ?? undefined;
               },
             }
           : {}),

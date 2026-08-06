@@ -1534,19 +1534,21 @@ async function fetchLinqResponse(input: {
   return fetchJsonResponse({
     body: input.body,
     createTransportError: ({ error, timedOut }) =>
-      createLinqRequestError({
-        details: input.details,
-        error,
-        requestOrigin: readRequestOrigin(input.url),
-        method: input.method,
-        path: input.path,
-        timedOut,
-        retryable: shouldRetryLinqTransportFailure(
-          input.method,
-          input.allowDeleteRetries,
-          input.details.hasIdempotencyKey === true,
-        ),
-      }),
+      isLinqDeliveryControlError(error)
+        ? error
+        : createLinqRequestError({
+            details: input.details,
+            error,
+            requestOrigin: readRequestOrigin(input.url),
+            method: input.method,
+            path: input.path,
+            timedOut,
+            retryable: shouldRetryLinqTransportFailure(
+              input.method,
+              input.allowDeleteRetries,
+              input.details.hasIdempotencyKey === true,
+            ),
+          }),
     fetchImplementation: input.fetchImplementation,
     headers: input.headers,
     method: input.method,
@@ -1554,6 +1556,20 @@ async function fetchLinqResponse(input: {
     timeoutMs: LINQ_HTTP_TIMEOUT_MS,
     url: input.url,
   })
+}
+
+function isLinqDeliveryControlError(error: unknown): error is Error {
+  return error instanceof Error
+    && (
+      (
+        'deliveryMayHaveSucceeded' in error
+        && error.deliveryMayHaveSucceeded === true
+      )
+      || (
+        error instanceof VaultCliError
+        && error.code === 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING'
+      )
+    )
 }
 
 async function createLinqHttpError(

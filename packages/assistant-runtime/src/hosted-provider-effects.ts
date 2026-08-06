@@ -51,7 +51,11 @@ export interface HostedProviderEffectDependencies {
   onProviderDispatchEntered?: (() => void) | null;
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string;
-  }) => Promise<void>;
+    staleTargetRecoveryRequired?: true;
+  }) => Promise<{
+    target: string;
+    targetKind: "thread";
+  } | void>;
   signal?: AbortSignal;
   telegramMaxDeliveryAttempts?: number;
 }
@@ -64,7 +68,11 @@ interface HostedProviderEffectContext {
   publicFetchImplementation?: typeof fetch;
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string;
-  }) => Promise<void>;
+    staleTargetRecoveryRequired?: true;
+  }) => Promise<{
+    target: string;
+    targetKind: "thread";
+  } | void>;
   signal?: AbortSignal;
 }
 
@@ -166,14 +174,21 @@ export async function sendHostedProviderLinqMessage(
   const persistAppCardTextFallback = context.persistAppCardTextFallback;
   if (persistAppCardTextFallback) {
     context.persistAppCardTextFallback = async (input) => {
-      await persistAppCardTextFallback(input);
+      const recoveredTarget = await persistAppCardTextFallback(input);
       const fallbackRequest: HostedRuntimeLinqSendRequest = {
         ...effectiveRequest,
         card: null,
         idempotencyKey: input.idempotencyKey,
+        ...(recoveredTarget
+          ? {
+              target: recoveredTarget.target,
+              targetKind: recoveredTarget.targetKind,
+            }
+          : {}),
       };
       delete fallbackRequest.linqAppCardReplay;
       effectiveRequest = fallbackRequest;
+      return recoveredTarget;
     };
   }
   if (shouldMaterializeHostedProviderLinqDirectThreadFirst(effectiveRequest)) {

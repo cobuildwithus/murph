@@ -531,6 +531,75 @@ describe("hosted provider effects", () => {
     expect(serializedLog).not.toContain("linq-token");
   });
 
+  it("uses an authority-resolved thread for detached replay fallback after structured stale-chat rejection", async () => {
+    const persistAppCardTextFallback = vi.fn(async () => ({
+      target: "current-direct-chat",
+      targetKind: "thread" as const,
+    }));
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      const body = typeof init?.body === "string"
+        ? JSON.parse(init.body) as {
+          message?: { parts?: Array<{ type?: string }> };
+        }
+        : {};
+      if (url.endsWith("/chats/stale-direct-chat/messages")) {
+        expect(body.message?.parts?.[0]?.type).toBe("imessage_app");
+        return new Response(JSON.stringify({
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 404,
+        });
+      }
+      if (url.endsWith("/chats/current-direct-chat/messages")) {
+        expect(body.message?.parts?.[0]?.type).toBe("text");
+        return new Response(JSON.stringify({
+          message: { id: "recovered-fallback-message" },
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(null, { status: 500 });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-07-31",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: null,
+      idempotencyKey: "detached-stale-card",
+      linqAppCardReplay: true,
+      message: "Nutrition summary",
+      target: "stale-direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      idempotencyKey: "detached-stale-card:fallback",
+      providerMessageId: "recovered-fallback-message",
+      target: "current-direct-chat",
+    });
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: "detached-stale-card:fallback",
+      staleTargetRecoveryRequired: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("logs a sanitized warning when a hosted capability error selects text recovery", async () => {
     vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -601,6 +670,68 @@ describe("hosted provider effects", () => {
     expect(serializedLog).not.toContain("hosted-card-capability-error");
     expect(serializedLog).not.toContain("linq-token");
     expect(serializedLog).not.toContain("Forbidden");
+  });
+
+  it("keeps an exhausted capability rate limit on deterministic text fallback", async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({ error: "rate limited" }), {
+          headers: {
+            "content-type": "application/json",
+            "retry-after": "0",
+          },
+          status: 429,
+        });
+      }
+      if (url.endsWith("/chats/current-direct-chat/messages")) {
+        return new Response(JSON.stringify({
+          message: { id: "capability-fallback-message" },
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(null, { status: 500 });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-07-31",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "capability-rate-limit-card",
+      message: "Nutrition summary",
+      target: "current-direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      idempotencyKey: "capability-rate-limit-card",
+      providerMessageId: "capability-fallback-message",
+      target: "current-direct-chat",
+    });
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: "capability-rate-limit-card",
+    });
+    expect(fetchMock.mock.calls.filter(([input]) =>
+      String(input).endsWith("/capability/check_imessage")
+    )).toHaveLength(3);
+    expect(fetchMock.mock.calls.filter(([input]) =>
+      String(input).endsWith("/chats/current-direct-chat/messages")
+    )).toHaveLength(1);
   });
 
   it("does not claim completed recovery when the hosted text transition fails", async () => {
@@ -834,6 +965,9 @@ describe("hosted provider effects", () => {
     expect(persistAppCardTextFallback).toHaveBeenCalledOnce();
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
       idempotencyKey: expectedIdempotencyKey,
+      ...(appCardChatNotFound
+        ? { staleTargetRecoveryRequired: true }
+        : {}),
     });
     const createChatRequest = providerRequests.find(({ url }) =>
       url.endsWith("/chats")

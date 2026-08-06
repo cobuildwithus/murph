@@ -83,7 +83,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("closes the card fence before claiming and completing text fallback", async () => {
+    it("closes a stale card fence before claiming text fallback on the current chat", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
       const suffix = randomUUID();
       const intentId = `intent-card-fallback-${suffix}`;
@@ -95,7 +95,8 @@ describe.skipIf(!runPostgresProof)(
       const fallbackLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
         fallbackIdempotencyKey,
       );
-      const linqChatId = `chat-card-fallback-${suffix}`;
+      const predecessorLinqChatId = `chat-card-fallback-stale-${suffix}`;
+      const fallbackLinqChatId = `chat-card-fallback-current-${suffix}`;
       if (!predecessorLookupKey || !fallbackLookupKey) {
         await prisma.$disconnect();
         throw new Error("Expected deterministic delivery lookup keys.");
@@ -105,7 +106,7 @@ describe.skipIf(!runPostgresProof)(
         await expect(recordHostedLinqRuntimeProviderDispatchFenceTx({
           attemptedAt: new Date("2026-08-06T12:00:00.000Z"),
           idempotencyKey: predecessorIdempotencyKey,
-          linqChatId,
+          linqChatId: predecessorLinqChatId,
           prisma,
           sourceRef: intentId,
           targetKind: "thread",
@@ -114,7 +115,7 @@ describe.skipIf(!runPostgresProof)(
         await expect(transitionHostedLinqRuntimeAppCardFallbackFenceTx({
           attemptedAt: new Date("2026-08-06T12:00:01.000Z"),
           fallbackIdempotencyKey,
-          linqChatId,
+          linqChatId: fallbackLinqChatId,
           predecessorIdempotencyKey,
           prisma,
           sourceRef: intentId,
@@ -134,14 +135,18 @@ describe.skipIf(!runPostgresProof)(
           status: "failed",
         });
         await expect(hasUnresolvedHostedLinqProviderDispatchForChatTx({
-          linqChatId,
+          linqChatId: predecessorLinqChatId,
+          prisma,
+        })).resolves.toBe(false);
+        await expect(hasUnresolvedHostedLinqProviderDispatchForChatTx({
+          linqChatId: fallbackLinqChatId,
           prisma,
         })).resolves.toBe(true);
 
         await expect(transitionHostedLinqRuntimeAppCardFallbackFenceTx({
           attemptedAt: new Date("2026-08-06T12:00:01.500Z"),
           fallbackIdempotencyKey,
-          linqChatId,
+          linqChatId: fallbackLinqChatId,
           predecessorIdempotencyKey,
           prisma,
           sourceRef: intentId,
@@ -152,7 +157,7 @@ describe.skipIf(!runPostgresProof)(
           acceptedAt: new Date("2026-08-06T12:00:02.000Z"),
           attemptedAt: new Date("2026-08-06T12:00:01.000Z"),
           idempotencyKey: fallbackIdempotencyKey,
-          linqChatId,
+          linqChatId: fallbackLinqChatId,
           messageId: `message-card-fallback-${suffix}`,
           prisma,
           sourceRef: intentId,
@@ -162,7 +167,7 @@ describe.skipIf(!runPostgresProof)(
         });
 
         await expect(hasUnresolvedHostedLinqProviderDispatchForChatTx({
-          linqChatId,
+          linqChatId: fallbackLinqChatId,
           prisma,
         })).resolves.toBe(false);
       } finally {

@@ -8,7 +8,8 @@ Last verified: 2026-08-06
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
 - Native iMessage nutrition-card delivery falls back to its already-derived
   ordinary text only after Linq definitively rejects the app-card request with
-  HTTP 400, 415, or 422. Before that text enters the provider, the existing
+  HTTP 400, 415, or 422, or with a structurally classified stale-chat 404.
+  Before that text enters the provider, the existing
   outbox atomically replaces the card with its text-only replay and persists
   the distinct stable provider key; an interrupted process therefore replays
   only that same text effect. Capability or route fallback freezes the same
@@ -22,8 +23,11 @@ Last verified: 2026-08-06
   binding while updating only accepted-message and idempotency context. Native
   reply and reaction authorization rechecks the accepted event against the same
   thread binding, so deleting the duplicate does not remove those tools or
-  change the provider contract. Transport ambiguity, timeouts, rate limits,
-  and server failures remain ambiguous. A card-bearing Linq attempt marked as
+  change the provider contract. Transport ambiguity, timeouts, post-admission
+  rate limits, and server failures remain ambiguous. Delivery-control errors
+  retain their original type through the Linq HTTP wrapper, so a
+  confirmation-pending capability request cannot be mistaken for an ordinary
+  capability failure. A card-bearing Linq attempt marked as
   possibly accepted becomes delivery-confirmation-pending with its card and
   provider-idempotent key retained. Retry bypasses capability selection and
   replays only that exact card effect without depending on a rehydrated raw
@@ -33,13 +37,18 @@ Last verified: 2026-08-06
   request. Only a definitive rejection, including a structurally classified
   stale-chat `404`, can commit the text-only transition, clear the card, and
   retry under one stable fallback identity. A caught
-  capability-check failure or definitive
+  capability-check failure, including a capability-specific exhausted rate
+  limit, or definitive
   app-card rejection emits one sanitized hosted warning before the existing
   text transition; an ordinary `available: false` result remains expected
   fallback rather than an error. Before promoted fallback text enters Linq,
   Web atomically terminalizes the exact original provider-dispatch fence with
   the bounded app-card rejection code and claims the fallback fence under the
-  same runtime intent, chat, source, and thread target. A retry whose local
+  same runtime intent, source, and thread target. When a detached exact replay
+  proves its old chat stale, Web must first authorize a current direct chat;
+  only then may the runtime persist the text transition and claim its fallback
+  fence on that current chat. Failure to resolve that target leaves the card
+  intact and confirmation-pending. A retry whose local
   outbox already contains the fallback repeats that exact transition, so a
   lost control response cannot strand the original card fence or bypass
   provider-entry authority. Once the fallback outcome is terminal, no
@@ -871,10 +880,13 @@ Last verified: 2026-08-06
   must enter the same confirmation-pending state before capability or provider
   message I/O. Text retry is safe only after a definitive rejection, including
   a structured stale-chat app-card `404`, and the text-only transition commits
-  with `card: null` and a stable fallback identity. Before the first fallback
+  with `card: null` and a stable fallback identity. A detached replay must
+  resolve and authorize the current direct chat before that commit; if it
+  cannot, the card remains unchanged and confirmation-pending. Before the first fallback
   provider request, the existing
   Web delivery transaction must also terminalize the exact card dispatch and
-  claim that fallback identity; a persisted-fallback retry idempotently
+  claim that fallback identity on the authorized current chat, which may differ
+  from the rejected predecessor chat; a persisted-fallback retry idempotently
   reconciles the same predecessor before sending.
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
 - Assistant product-feedback capture accepts at most one in-memory candidate during a successful provider turn. The assistant execution context can only hand that candidate to its hosted invocation synchronously; the existing web-control write remains at the foreground delivery owner and starts only after a current-turn member-channel send succeeds. Failed provider attempts discard their candidate, invocations without a successful foreground send may abandon it, feedback never counts as a provider side effect for transport retry safety, and persistence remains best-effort with a two-second maximum deadline, no retry queue, and no user-visible delivery state. The accepted-input-derived idempotency key remains the ambiguity fence when a timed-out post-reply write may already have reached Web.

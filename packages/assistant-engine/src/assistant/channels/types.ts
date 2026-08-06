@@ -78,7 +78,11 @@ export interface LinqRuntimeDependencies {
   }) => void
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string
-  }) => Promise<void>
+    staleTargetRecoveryRequired?: true
+  }) => Promise<{
+    target: string
+    targetKind: 'thread'
+  } | void>
   refreshMs?: number
   signal?: AbortSignal
 }
@@ -178,7 +182,11 @@ export interface AssistantChannelDependencies {
     threadIsDirect?: boolean | null
     persistAppCardTextFallback?: (input: {
       idempotencyKey: string
-    }) => Promise<void>
+      staleTargetRecoveryRequired?: true
+    }) => Promise<{
+      target: string
+      targetKind: 'thread'
+    } | void>
   }) => Promise<
     | {
         idempotencyKey?: string | null
@@ -192,7 +200,11 @@ export interface AssistantChannelDependencies {
   >
   persistLinqAppCardTextFallback?: (input: {
     idempotencyKey: string
-  }) => Promise<void>
+    staleTargetRecoveryRequired?: true
+  }) => Promise<{
+    target: string
+    targetKind: 'thread'
+  } | void>
   sendLinqVoiceMemo?: (input: {
     answeredMailboxItemIds?: readonly string[] | null
     attachmentId: string

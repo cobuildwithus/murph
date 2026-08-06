@@ -468,6 +468,24 @@ test('linq iMessage capability requires a literal available true response', asyn
   }
 })
 
+test('linq capability preserves delivery-control errors from the hosted fetch boundary', async () => {
+  const deliveryControlError = Object.assign(new VaultCliError(
+    'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    'Hosted provider delivery requires reconciliation.',
+  ), {
+    deliveryMayHaveSucceeded: true,
+  })
+
+  await expect(checkLinqIMessageCapability({
+    address: '+15550001',
+  }, {
+    env: { LINQ_API_TOKEN: 'linq-token' },
+    fetchImplementation: async () => {
+      throw deliveryControlError
+    },
+  })).rejects.toBe(deliveryControlError)
+})
+
 test('linq app-card failure diagnostics do not expose nutrition values', async () => {
   await assert.rejects(
     () => sendLinqIMessageAppCard({

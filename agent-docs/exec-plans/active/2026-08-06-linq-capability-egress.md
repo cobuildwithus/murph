@@ -48,6 +48,13 @@ Updated: 2026-08-06
   the provider-dispatch claim before the runtime persists its ambiguous local
   result. Re-entering ordinary card selection from that state could change the
   effect instead of first deriving exact replay.
+- Final ReviewGPT round 6 exposed three remaining production-boundary gaps.
+  The Linq HTTP wrapper replaced a typed hosted confirmation-pending exception
+  with a generic transport error that capability recovery could swallow. A
+  detached exact replay with a definitively stale chat could persist text
+  fallback before resolving an authoritative current direct chat. A native
+  card request whose three provider attempts all returned `429` was recorded
+  as a definite failure even though provider dispatch had already begun.
 
 ## Success criteria
 
@@ -77,6 +84,15 @@ Updated: 2026-08-06
   dispatch and claims the fallback in one transaction. A retry from the
   already-persisted fallback repeats that exact transition, and completing the
   fallback leaves no unresolved dispatch fence for the chat.
+- Typed hosted delivery-control errors survive the Linq HTTP wrapper and are
+  rethrown rather than logged or persisted as capability fallback.
+- A detached stale-chat replay authorizes a current direct chat before clearing
+  the card. The exact predecessor may be terminalized on its old chat while the
+  fallback fence is claimed on that current chat. Missing authority preserves
+  the card and confirmation-pending state.
+- Exhausted provider-message `429` responses after dispatch admission are
+  confirmation-pending; a capability-only `429` may still select deterministic
+  text fallback before message dispatch.
 
 ## Scope
 
@@ -173,3 +189,15 @@ Updated: 2026-08-06
   the Linq HTTP runtime file passes 47 tests. Assistant engine, assistant
   runtime, and operator config typechecks pass; documentation gardening and
   drift checks pass.
+- Round 6 failing-first proof reproduced all three findings through the actual
+  channel and hosted provider boundary. After correction, focused Linq HTTP,
+  channel, hosted provider/callback, and Web authority tests pass 48, 63, 241,
+  and 47 assertions respectively.
+- The local PostgreSQL lifecycle proof passes both cases, including
+  terminalizing the rejected predecessor on a stale chat, claiming fallback on
+  a different current chat, and closing that current-chat fence on acceptance.
+- Operator config, assistant engine, assistant runtime, and prepared Web
+  typechecks pass. The accidentally broadened assistant-engine package run
+  completed 3,162 tests before one worker exceeded its 4 GiB heap; the intended
+  focused 63-test channel lane passed independently and exact-head CI owns the
+  broad suite.

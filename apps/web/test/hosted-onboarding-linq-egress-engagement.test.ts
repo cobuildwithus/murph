@@ -1070,7 +1070,9 @@ describe("hosted Linq egress authority", () => {
     );
     prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) =>
       where.idempotencyKey === predecessorLookupKey
-        ? buildHostedRuntimeProviderDispatchRow()
+        ? buildHostedRuntimeProviderDispatchRow({
+            linqChatLookupKey: createHostedLinqChatLookupKey("chat-stale"),
+          })
         : null
     );
     prisma.hostedLinqDelivery.updateMany.mockImplementationOnce(async () => {
@@ -1732,7 +1734,10 @@ describe("hosted Linq egress authority", () => {
 });
 
 function buildHostedRuntimeProviderDispatchRow(
-  overrides: { sourceRef?: string | null } = {},
+  overrides: {
+    linqChatLookupKey?: string | null;
+    sourceRef?: string | null;
+  } = {},
 ) {
   return {
     acceptedAt: null,
