@@ -271,6 +271,33 @@ The runtime always includes the minimal `assistant` env profile. Deploy automati
 
 Cloudflare keeps only the wake-payload decryption lane plus the worker-owned callback-signing key. Broad web-private-field encryption stays in `apps/web`, and the hosted runtime reaches the web control plane through the worker proxy instead of holding callback-signing material directly.
 
+## Private Operational Telemetry
+
+The `HOSTED_RUNTIME_RETRY_ANALYTICS` Analytics Engine binding records one
+identifier-free data point only after UserRunner has decided to return
+`retry_later`. `index1` and `blob2` are the bounded retry reason, `blob1` is the
+schema `murph.hosted-runtime-retry.v1`, `double1` is the event count, and
+`double2` is the selected retry delay in milliseconds. The write is immediate,
+unawaited, best-effort, and absent from successful processing. Run
+[`scripts/runtime-retry-reasons.sql`](./scripts/runtime-retry-reasons.sql)
+through the private Cloudflare Analytics Engine SQL API or dashboard to get a
+sampling-corrected 24-hour reason breakdown.
+
+For the primary production control database, run the identifier-free cold-start
+report through the read-only helper:
+
+```sh
+murph-prod-psql-ro -f apps/cloudflare/scripts/cold-start-latency-report.sql
+```
+
+Pass `-v window_hours=6` (or another integer) before `-f` to change the UTC
+window. The report deduplicates causal rows by runtime attempt and keeps direct
+cold starts, direct existing-runtime wakes, Temporal recovery, Temporal-only,
+and unclassified samples separate. Its second table splits direct cold starts
+across Durable Object dispatch, consent locking, the existing health-data
+admission callback, and existing runner-state operations. It returns no member,
+mailbox, trace, or attempt identifiers.
+
 ## Runner Container Lifecycle
 
 The native Cloudflare container is a warm per-user shell. Successful workspace

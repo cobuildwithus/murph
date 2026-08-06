@@ -127,9 +127,11 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureReadyForProcessing = vi.fn();
+    const writeDataPoint = vi.fn();
     const { runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       readHealthDataConsentState: () => "revoked",
+      runtimeRetryAnalytics: { writeDataPoint },
     });
     await runner.bindUser(TEST_USER_ID);
 
@@ -141,7 +143,52 @@ describe("HostedUserRunner execution coordination", () => {
       retryAt: "2026-04-27T00:01:00.000Z",
     });
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(writeDataPoint).toHaveBeenCalledWith({
+      blobs: [
+        "murph.hosted-runtime-retry.v1",
+        "health_data_processing_disallowed",
+      ],
+      doubles: [1, 60_000],
+      indexes: ["health_data_processing_disallowed"],
+    });
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+  });
+
+  it("captures existing control-plane boundaries without writing retry analytics for an accepted start", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const writeDataPoint = vi.fn();
+    const { invoke, runner } = createRunnerHarness({
+      runtimeRetryAnalytics: { writeDataPoint },
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestration: {
+        cloudflareRouteReceivedAtEpochMs: Date.parse(FIXED_NOW) - 2,
+        userRunnerRpcStartedAtEpochMs: Date.parse(FIXED_NOW) - 1,
+      },
+      orchestrationAttemptId: "control-plane-timing-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+      cloudflareRouteReceivedAtEpochMs: Date.parse(FIXED_NOW) - 2,
+      userRunnerRpcStartedAtEpochMs: Date.parse(FIXED_NOW) - 1,
+      runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
+      healthDataAdmissionReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+      healthDataAdmissionReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
+      userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+      runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
+      runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
+      runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+      runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
+    });
+    expect(writeDataPoint).not.toHaveBeenCalled();
   });
 
   it("serializes withdrawal behind an admitted ensure and stops the stale start before acknowledging", async () => {
@@ -2304,7 +2351,14 @@ describe("HostedUserRunner execution coordination", () => {
           activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
           activeFenceTargetWasPriorVersion: false,
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
+          healthDataAdmissionReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+          healthDataAdmissionReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
         },
         processingMode: "default",
         userId: TEST_USER_ID,
@@ -2355,7 +2409,14 @@ describe("HostedUserRunner execution coordination", () => {
         activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
         activeFenceTargetWasPriorVersion: false,
         activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
+        runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
+        healthDataAdmissionReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+        healthDataAdmissionReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
         userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+        runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
+        runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
+        runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+        runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
       },
       processingMode: "default",
       userId: TEST_USER_ID,
@@ -4464,6 +4525,10 @@ describe("HostedUserRunner execution coordination", () => {
           activeFenceTargetWasPriorVersion: false,
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
         },
         processingMode: "default",
         userId: TEST_USER_ID,
@@ -5598,6 +5663,11 @@ function createRunnerHarness(input: {
   r2CutoverPhase?: "destination_active" | "source_active";
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
+  runtimeRetryAnalytics?: { writeDataPoint(dataPoint: {
+    blobs?: string[];
+    doubles?: number[];
+    indexes?: string[];
+  }): void };
   wakeRuntime?: HostedExecutionContainerStubLike["wakeRuntime"];
   workspace?: HostedWorkspaceState | null;
 } = {}) {
@@ -5749,6 +5819,7 @@ function createRunnerHarness(input: {
       ? namespace
       : input.runnerContainerNamespace,
     r2CutoverContext,
+    input.runtimeRetryAnalytics ?? null,
   );
 
   return {

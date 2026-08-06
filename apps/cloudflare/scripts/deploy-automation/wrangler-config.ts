@@ -159,6 +159,12 @@ export function buildHostedWranglerDeployConfig(
         preview_bucket_name: environment.bundlesEnamPreviewBucketName,
       },
     ],
+    analytics_engine_datasets: [
+      {
+        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
+        dataset: "murph_hosted_runtime_retries",
+      },
+    ],
     ai: {
       binding: "AI",
     },
