@@ -173,13 +173,13 @@ fi
 if [[ "$review_gpt_review_phase" == "final" ]] \
   && [[ "$review_gpt_round_number" =~ ^([2-9]|[1-9][0-9]+)$ ]]; then
   if [[ -n "$review_gpt_full_review_reason" ]]; then
-    : # A justified full-context correction starts a new ChatGPT conversation.
+    : # A full-patch audit starts a new ChatGPT conversation.
   else
     review_gpt_thread_url="${REVIEW_GPT_THREAD_URL:-}"
     case "$review_gpt_thread_url" in
       https://chatgpt.com/c/*)
         chatgpt_url="$review_gpt_thread_url"
-        review_gpt_pr_review_prompt_file="pr-correction-review.md"
+        review_gpt_pr_review_prompt_file="pr-followup-review.md"
         ;;
       *)
         echo "Error: later ReviewGPT rounds require REVIEW_GPT_THREAD_URL for the current context conversation." >&2
