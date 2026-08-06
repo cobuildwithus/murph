@@ -64,6 +64,9 @@ describe('focused public research questions', () => {
     expect(help).toContain('{"question":"..."}')
     expect(help).toContain('--input @file.json')
     expect(help).toContain('--input -')
+    expect(help).toContain(
+      'Preserve public study titles, researcher names, institutions, and other public entities',
+    )
   })
 
   it('gives actionable guidance for invalid focused-question input', () => {
