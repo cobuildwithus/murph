@@ -459,6 +459,27 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(productUpdatesRecord?.instructions).toContain('2-3 recently shipped Murph updates')
     expect(productUpdatesRecord?.instructions).toContain('2-3 things Murph can already do')
     expect(productUpdatesRecord?.instructions).toContain('Do not pad with weak matches')
+    expect(productUpdatesRecord?.instructions).toContain(
+      'member-facing product update, not a dump of release notes',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'member encountered the corresponding issue',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'Do not infer relevance merely from a connected provider',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'WHOOP sync should be more reliable now.',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'Omit implementation details such as retries, transient writes, artifacts, workers, checkpoints, migrations, or data plumbing',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'lower priority than exciting capabilities',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'if neither kind clears, skip',
+    )
     expect(productUpdatesRecord?.instructions).toContain('Drop items the user is already using')
     expect(productUpdatesRecord?.instructions).toContain('context already surfaced for ordinary assistance')
     expect(productUpdatesRecord?.instructions).toContain('Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used')

@@ -1539,6 +1539,8 @@ describe("hosted runtime control contracts", () => {
         scratchPrepareMs: 3,
         presignGetMs: 4,
         objectFetchMs: 5,
+        objectFetchResponseHeadersMs: 2,
+        objectFetchBodyReadMs: 3,
         decryptMs: 6,
         archiveExtractMs: 7,
         durableRootReplaceMs: 9,
@@ -1805,8 +1807,8 @@ describe("hosted runtime control contracts", () => {
         mailboxItemId: "mailbox_item_1",
         phaseBreakdown: {
           schemaVersion: 1,
-          // restore.decryptMs is a string, not a non-negative integer: malformed leaf.
-          restore: { decryptMs: "not-a-number" },
+          // Body-read duration is a string, not a non-negative integer: malformed leaf.
+          restore: { objectFetchBodyReadMs: "not-a-number" },
           boot: { restoreWasCold: true },
         },
         runnerJobAcceptedAt: "2026-04-26T00:00:00.100Z",
