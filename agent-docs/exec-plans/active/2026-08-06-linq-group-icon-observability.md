@@ -43,3 +43,6 @@ telemetry regression coverage are complete and locally verified. Final review
 round 2 found that transport exceptions were labeled as confirmed request
 failures even though the provider may already have accepted the PUT; the
 accepted correction records that state as request-unconfirmed without retrying.
+Final review round 3 found that the neutral label also covered completed HTTP
+rejections. The accepted three-way classification now records an accepted
+response, a structured HTTP rejection, or an ambiguous transport outcome.

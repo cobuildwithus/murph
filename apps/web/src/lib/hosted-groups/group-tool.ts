@@ -1402,7 +1402,13 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
     });
   } catch (error) {
     const providerDiagnostics = readHostedLinqAvatarProviderDiagnostics(error);
-    finishHostedOnboardingTiming(timing, "provider-request-unconfirmed", {
+    const requestOutcome =
+      isHostedOnboardingError(error)
+      && error.code === "LINQ_SEND_FAILED"
+      && error.details?.failureStage === "http"
+        ? "provider-request-rejected"
+        : "provider-request-unconfirmed";
+    finishHostedOnboardingTiming(timing, requestOutcome, {
       errorName: deriveHostedOnboardingTimingErrorName(error),
       providerErrorCode: providerDiagnostics?.providerErrorCode,
     });

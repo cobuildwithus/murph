@@ -2902,6 +2902,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       groupChatIconUrl:
         `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     });
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledOnce();
     expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
       "hosted-groups.set-chat-avatar",
       { chatIdSuffix: "roup_1" },
@@ -3022,13 +3023,22 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
   });
 
-  it("reports an unconfirmed group avatar request as structured unavailability", async () => {
-    mocks.updateHostedLinqChatAvatar.mockRejectedValue(hostedOnboardingError({
-      code: "LINQ_SEND_FAILED",
-      httpStatus: 502,
-      message: "Linq chat avatar update timed out.",
-      retryable: true,
-    }));
+  it.each([
+    {
+      error: new Error("network connection lost"),
+      label: "network failure",
+    },
+    {
+      error: hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        httpStatus: 502,
+        message: "Linq chat avatar update timed out.",
+        retryable: true,
+      }),
+      label: "transport timeout",
+    },
+  ])("reports an unconfirmed group avatar $label as structured unavailability", async ({ error }) => {
+    mocks.updateHostedLinqChatAvatar.mockRejectedValue(error);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -3049,10 +3059,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       expect.objectContaining({ step: "hosted-groups.set-chat-avatar" }),
       "provider-request-unconfirmed",
       {
-        errorName: "HostedOnboardingError",
+        errorName: error.name,
         providerErrorCode: undefined,
       },
     );
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledOnce();
   });
 
   it("preserves only validated HTTP provider diagnostics for group avatar failures", async () => {
@@ -3083,6 +3094,15 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({ step: "hosted-groups.set-chat-avatar" }),
+      "provider-request-rejected",
+      {
+        errorName: "HostedOnboardingError",
+        providerErrorCode: 5006,
+      },
+    );
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledOnce();
   });
 
   it.each([
