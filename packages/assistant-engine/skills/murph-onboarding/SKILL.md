@@ -60,10 +60,19 @@ decision:
   deferral evidence.
 
 For routing only, the six foundation areas are data sources, movement, current
-protocols, supplements, medical and safety context, and recent labs. When the
-resume snapshot resolves all six and contains a concrete aspiration, go
-directly to the return owner; do not reread the aspiration owner merely to
-revalidate completed earlier stages.
+protocols, supplements, medical and safety context, and recent labs. Go
+directly to the return owner only when the `Resume without repeating` evidence
+proves onboarding already began and the reflect-and-park transition occurred;
+the open thread is aspiration-ready under its owning rule (for each desired
+change, the outcome is known and its progress signal and reason are known or
+explicitly unknown or declined); any required bounded post-park legacy
+clarifiers are complete; and all six areas are resolved. An already-open
+resumed flow missing a progress signal or reason reads the aspiration owner for
+that bounded clarifier, not the return owner. A vague opener—including bare
+“Let’s continue” without a visible onboarding referent—and generic saved
+records—even a goal plus aspiration readiness and all six areas—do not
+establish onboarding stage. Once the return conditions are established, read
+the return owner rather than rereading aspiration merely to revalidate them.
 
 If one turn genuinely crosses a stage boundary, read each newly relevant owner.
 Do not preload the stage references. Do not read a later-stage reference merely

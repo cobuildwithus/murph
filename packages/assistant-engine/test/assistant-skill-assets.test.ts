@@ -1991,6 +1991,9 @@ describe('assistant skill assets', () => {
     expect(root.replace(/\s+/gu, ' ')).toContain(
       'persistence reference before handling any foundation answer that adds or confirms canonical context, including an explicit none or negative fact;',
     )
+    expect(root.replace(/\s+/gu, ' ')).toContain(
+      'A vague opener—including bare “Let’s continue” without a visible onboarding referent—and generic saved records—even a goal plus aspiration readiness and all six areas—do not establish onboarding stage.',
+    )
     for (const movedSection of [
       '## Delegating onboarding work',
       '### 3. Find one or two aspiration anchors',
@@ -2371,6 +2374,9 @@ How old are you and what's your gender?
     expect(raw).not.toContain('Explain that this prevents duplicate or conflicting suggestions.')
     expect(raw).toContain('4. **Supplements.**')
     expect(raw).toContain('5. **Medical and safety context.**')
+    expect(compact).toContain(
+      'Prescription or OTC medications, diagnosed conditions, injury history, allergies or intolerances, and pregnancy or nursing.',
+    )
     expect(raw).toContain('6. **Recent blood tests or lab panels.**')
     expect(compact).toContain(
       'You can type it out instead — either works just as well.',

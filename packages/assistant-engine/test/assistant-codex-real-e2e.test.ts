@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -114,10 +114,14 @@ const ONBOARDING_POLICY_PATHS = [
 ] as const
 const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
   fresh_greeting: [ONBOARDING_POLICY_PATHS[0][1]],
+  generic_records_vague_opener: [ONBOARDING_POLICY_PATHS[0][1]],
   later_stage_resume: [
     ONBOARDING_POLICY_PATHS[0][1],
-    ONBOARDING_POLICY_PATHS[2][1],
     ONBOARDING_POLICY_PATHS[3][1],
+  ],
+  missing_progress_resume: [
+    ONBOARDING_POLICY_PATHS[0][1],
+    ONBOARDING_POLICY_PATHS[1][1],
   ],
   minimal_identity_answer: [
     ONBOARDING_POLICY_PATHS[0][1],
@@ -232,9 +236,11 @@ const HABITAT_VOICE_E2E_TSX_BIN = fileURLToPath(
 
 describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   it(
-    'routes fresh, minimal-identity, and later resume turns through only their relevant onboarding policy',
+    'routes fresh, ordinary-record, incomplete-resume, and later turns through only their relevant onboarding policy',
     async () => {
-      const config = await resolveRealCodexE2eConfig()
+      const config = await resolveRealCodexE2eConfig({
+        allowSubscriptionAuth: true,
+      })
       const temporaryPaths = [...config.temporaryPaths]
 
       try {
@@ -292,25 +298,77 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           /what would you most like from your health|what do you want to (?:improve|understand|handle)|what.*health/iu,
         )
 
+        await writeRealCodexOnboardingResumeContext(
+          workingDirectory,
+          'ordinary_records',
+        )
+        const ordinaryRecords = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          excludeResumeTurns: true,
+          prompt: "Let's continue.",
+          scenario: 'generic_records_vague_opener',
+        })
+        expect(
+          readSuccessfulOnboardingResumeContexts(ordinaryRecords.actions),
+          'ordinary-record resume-context evidence',
+        ).toHaveLength(1)
+        expect(
+          ordinaryRecords.policyFiles,
+          'ordinary-record vague-opener policy reads',
+        ).toEqual(['SKILL.md'])
+        expect(ordinaryRecords.finalMessage.trim()).toBe(
+          ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+        )
+
+        await writeRealCodexOnboardingResumeContext(
+          workingDirectory,
+          'missing_progress',
+        )
+        const missingProgress = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          excludeResumeTurns: true,
+          prompt: "Let's keep going with the health-background questions we started after talking about my sleep goal.",
+          scenario: 'missing_progress_resume',
+        })
+        expect(
+          readSuccessfulOnboardingResumeContexts(missingProgress.actions),
+          'missing-progress resume-context evidence',
+        ).toHaveLength(1)
+        expect(
+          missingProgress.policyFiles,
+          'missing-progress stage policy reads',
+        ).toEqual([
+          'SKILL.md',
+          'aspiration-foundation-delegation.md',
+        ])
+        expect(
+          missingProgress.finalMessage.trim(),
+          'missing-progress bounded clarifier',
+        ).toMatch(
+          /what would (?:actually )?(?:tell you|be different)|how would you (?:know|notice)|what.*(?:better|progress)|falling asleep|waking (?:up )?rested/iu,
+        )
+        expect(missingProgress.finalMessage, 'named sleep thread').toMatch(
+          /sleep|falling asleep|waking (?:up )?rested/iu,
+        )
+        expect(missingProgress.finalMessage, 'no return-choice framing').not
+          .toMatch(/what (?:i|murph) can do|capabilit|hear (?:a bit )?more|dive into|which (?:goal|thread)/iu)
+        expect(missingProgress.finalMessage.match(/\?/gu) ?? []).toHaveLength(1)
+
         await writeRealCodexOnboardingResumeContext(workingDirectory, 'later')
         const later = await executeRealCodexOnboardingProbe({
           ...turnInput,
           excludeResumeTurns: true,
-          prompt: "Let's continue.",
+          prompt: "We finished the health questions after talking through what better sleep would mean and why it matters. Let's continue with my sleep goal.",
           scenario: 'later_stage_resume',
         })
         expect(
           readSuccessfulOnboardingResumeContexts(later.actions),
           'later resume-context evidence',
         ).toHaveLength(1)
-        expect(later.policyFiles, 'later resume root policy read').toContain(
+        expect(later.policyFiles, 'later resume policy reads').toEqual([
           'SKILL.md',
-        )
-        expect(later.policyFiles, 'later resume stage policy read').toContain(
           'return-launch-completion.md',
-        )
-        expect(later.policyFiles, 'later resume early-stage policy read').not
-          .toContain('aspiration-foundation-delegation.md')
+        ])
         expect(later.finalMessage.trim(), 'later resume choice').toMatch(
           /(?:sleep|what (?:i|murph) can do|capabilit)[\s\S]*\?/iu,
         )
@@ -320,6 +378,123 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
     },
     600_000,
   )
+})
+
+describe('real Codex subscription auth isolation', () => {
+  it('requires an explicit consumer opt-in and keeps copied credentials isolated', async () => {
+    const sourceHome = await mkdtemp(
+      path.join(tmpdir(), 'murph-codex-subscription-source-'),
+    )
+    const temporaryPaths = [sourceHome]
+    const envKeys = [
+      REAL_CODEX_SUBSCRIPTION_AUTH_ENV,
+      REAL_CODEX_SUBSCRIPTION_HOME_ENV,
+      OPENAI_API_KEY_ENV,
+      VERCEL_AI_GATEWAY_API_KEY_ENV,
+      'MURPH_REAL_CODEX_HOME',
+      'MURPH_REAL_CODEX_MODEL_PROVIDER',
+      'MURPH_REAL_CODEX_PROVIDER_ENV_KEY',
+    ] as const
+    const previousEnv = new Map(
+      envKeys.map((key) => [key, process.env[key]]),
+    )
+    const lastRefresh = '2026-08-05T12:00:00.000Z'
+    const writeSourceAuth = async (accessToken: string): Promise<void> => {
+      await writeFile(
+        path.join(sourceHome, 'auth.json'),
+        `${JSON.stringify({
+          auth_mode: 'chatgpt',
+          last_refresh: lastRefresh,
+          tokens: {
+            access_token: accessToken,
+            account_id: 'test-account',
+            id_token: buildRealCodexSubscriptionTestJwt(
+              Date.now() + 60 * 60 * 1_000,
+            ),
+            refresh_token: 'test-refresh-token',
+          },
+        })}\n`,
+        { encoding: 'utf8', mode: 0o600 },
+      )
+    }
+
+    try {
+      for (const key of envKeys) {
+        delete process.env[key]
+      }
+      process.env[REAL_CODEX_SUBSCRIPTION_AUTH_ENV] = '1'
+      process.env[REAL_CODEX_SUBSCRIPTION_HOME_ENV] = sourceHome
+      process.env[OPENAI_API_KEY_ENV] = 'test-provider-key'
+
+      const validAccessToken = buildRealCodexSubscriptionTestJwt(
+        Date.now() + 60 * 60 * 1_000,
+      )
+      await writeSourceAuth(validAccessToken)
+
+      const defaultConfig = await resolveRealCodexE2eConfig()
+      temporaryPaths.push(...defaultConfig.temporaryPaths)
+      expect(defaultConfig.modelProvider).toBe(OPENAI_ENV_MODEL_PROVIDER)
+
+      process.env[VERCEL_AI_GATEWAY_API_KEY_ENV] = 'test-gateway-key'
+      const subscriptionConfig = await resolveRealCodexE2eConfig({
+        allowSubscriptionAuth: true,
+      })
+      temporaryPaths.push(...subscriptionConfig.temporaryPaths)
+      expect(subscriptionConfig.modelProvider).toBe('openai')
+      expect(subscriptionConfig.env[OPENAI_API_KEY_ENV]).toBeUndefined()
+      expect(
+        subscriptionConfig.env[VERCEL_AI_GATEWAY_API_KEY_ENV],
+      ).toBeUndefined()
+
+      const copiedAuthPath = path.join(subscriptionConfig.codexHome, 'auth.json')
+      const copiedConfigPath = path.join(
+        subscriptionConfig.codexHome,
+        'config.toml',
+      )
+      expect(JSON.parse(await readFile(copiedAuthPath, 'utf8'))).toEqual({
+        OPENAI_API_KEY: null,
+        auth_mode: 'chatgptAuthTokens',
+        last_refresh: lastRefresh,
+        tokens: {
+          access_token: validAccessToken,
+          account_id: 'test-account',
+          id_token: expect.any(String),
+          refresh_token: '',
+        },
+      })
+      expect((await stat(copiedAuthPath)).mode & 0o777).toBe(0o600)
+      expect((await stat(copiedConfigPath)).mode & 0o777).toBe(0o600)
+
+      await removeRealCodexTemporaryPaths(subscriptionConfig.temporaryPaths)
+      await expect(stat(subscriptionConfig.codexHome)).rejects.toThrow()
+
+      const expiredAccessToken = buildRealCodexSubscriptionTestJwt(
+        Date.now() + 5 * 60 * 1_000,
+      )
+      await writeSourceAuth(expiredAccessToken)
+      let invalidRunwayFailure: unknown
+      try {
+        await resolveRealCodexE2eConfig({ allowSubscriptionAuth: true })
+      } catch (error) {
+        invalidRunwayFailure = error
+      }
+      expect(invalidRunwayFailure).toBeInstanceOf(Error)
+      const invalidRunwayMessage = invalidRunwayFailure instanceof Error
+        ? invalidRunwayFailure.message
+        : String(invalidRunwayFailure)
+      expect(invalidRunwayMessage).not.toContain(sourceHome)
+      expect(invalidRunwayMessage).not.toContain(expiredAccessToken)
+    } finally {
+      for (const [key, value] of previousEnv) {
+        if (value === undefined) {
+          delete process.env[key]
+        } else {
+          process.env[key] = value
+        }
+      }
+      await removeRealCodexTemporaryPaths(temporaryPaths)
+    }
+  })
 })
 
 describe('onboarding policy read detection', () => {
@@ -4369,7 +4544,7 @@ exit 1
 
 async function writeRealCodexOnboardingResumeContext(
   workingDirectory: string,
-  stage: 'fresh' | 'later',
+  stage: RealCodexOnboardingFixture,
 ): Promise<void> {
   await writeFile(
     path.join(workingDirectory, 'onboarding-resume-context.json'),
@@ -4378,8 +4553,14 @@ async function writeRealCodexOnboardingResumeContext(
   )
 }
 
+type RealCodexOnboardingFixture =
+  | 'fresh'
+  | 'later'
+  | 'missing_progress'
+  | 'ordinary_records'
+
 function buildRealCodexOnboardingResumeContext(
-  stage: 'fresh' | 'later',
+  stage: RealCodexOnboardingFixture,
 ) {
   const surface = (items: unknown[] = []) => ({
     count: items.length,
@@ -4387,33 +4568,55 @@ function buildRealCodexOnboardingResumeContext(
     status: 'ok',
     truncated: false,
   })
-  const records = stage === 'later'
-    ? [
+  const hasSavedContext = stage !== 'fresh'
+  const records = stage === 'fresh'
+    ? []
+    : [
         {
           id: 'identity_context',
           section: 'identity',
-          text: 'Preferred name is Riley; age 31; gender is man.',
+          text: 'Preferred name is Riley; age 31; gender is woman.',
         },
+        ...(stage === 'later' || stage === 'ordinary_records'
+          ? [{
+              id: 'sleep_thread_context',
+              section: 'context',
+              text: 'For the sleep-more-consistently goal, progress means waking rested most weekdays; the reason it matters is steadier energy.',
+            }]
+          : stage === 'missing_progress'
+            ? [{
+                id: 'sleep_thread_context',
+                section: 'context',
+                text: 'For the sleep-more-consistently goal, the reason it matters is steadier energy.',
+              }]
+            : []),
         {
-          id: 'sleep_thread_context',
+          id: 'ordinary_health_context',
           section: 'context',
-          text: 'For the sleep-more-consistently goal, progress means waking rested most weekdays; the reason it matters is steadier energy.',
-        },
-        {
-          id: 'foundation_context',
-          section: 'context',
-          text: 'Walks and strength trains each week. Does not use a wearable or health app, follow a current health protocol, take supplements or medications, or have recent labs. Reports no current conditions or allergies.',
+          text: 'Usually strength trains twice weekly and completed an annual lab panel in June 2026. Takes no prescription or OTC medications, reports no injury history, and reports not pregnant or nursing.',
         },
       ]
-    : []
-  const emptySurface = surface()
   return assistantOnboardingResumeContextResultSchema.parse({
-    allergies: emptySurface,
-    conditions: emptySurface,
-    deviceAccounts: emptySurface,
-    experiments: emptySurface,
+    allergies: surface(
+      hasSavedContext
+        ? [{ id: 'allergy_penicillin', name: 'Penicillin' }]
+        : [],
+    ),
+    conditions: surface(
+      hasSavedContext ? [{ id: 'condition_asthma', name: 'Asthma' }] : [],
+    ),
+    deviceAccounts: surface(
+      hasSavedContext
+        ? [{ id: 'device_oura', provider: 'oura', status: 'active' }]
+        : [],
+    ),
+    experiments: surface(
+      hasSavedContext
+        ? [{ id: 'experiment_bedtime', status: 'active' }]
+        : [],
+    ),
     goals: surface(
-      stage === 'later'
+      hasSavedContext
         ? [{ id: 'goal_sleep', title: 'Sleep more consistently' }]
         : [],
     ),
@@ -4424,7 +4627,7 @@ function buildRealCodexOnboardingResumeContext(
       records,
       status: 'ok',
       truncated: false,
-      updatedAt: records.length > 0 ? '2026-08-05T12:00:00.000Z' : null,
+      updatedAt: hasSavedContext ? '2026-08-05T12:00:00.000Z' : null,
     },
     onboarding: {
       completedAt: null,
@@ -4434,8 +4637,16 @@ function buildRealCodexOnboardingResumeContext(
       status: 'open',
       updatedAt: '2026-08-05T12:00:00.000Z',
     },
-    regimens: emptySurface,
-    supplements: emptySurface,
+    regimens: surface(
+      hasSavedContext
+        ? [{ id: 'regimen_strength', title: 'Strength training twice weekly' }]
+        : [],
+    ),
+    supplements: surface(
+      hasSavedContext
+        ? [{ id: 'supplement_magnesium', name: 'Magnesium glycinate' }]
+        : [],
+    ),
     vault: 'redacted:/vault',
   })
 }
@@ -5624,11 +5835,15 @@ function buildRealCodexE2eFailureMessage(error: unknown): string {
 }
 
 async function removeRealCodexTemporaryPaths(paths: readonly string[]): Promise<void> {
-  await Promise.all(paths.map((targetPath) => removeRealCodexTemporaryPath(targetPath)))
+  const results = await Promise.allSettled(
+    paths.map((targetPath) => removeRealCodexTemporaryPath(targetPath)),
+  )
+  if (results.some((result) => result.status === 'rejected')) {
+    throw new Error('Failed to remove one or more real Codex temporary paths.')
+  }
 }
 
 async function removeRealCodexTemporaryPath(targetPath: string): Promise<void> {
-  let lastError: unknown
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     try {
       await rm(targetPath, {
@@ -5636,14 +5851,13 @@ async function removeRealCodexTemporaryPath(targetPath: string): Promise<void> {
         recursive: true,
       })
       return
-    } catch (error) {
-      lastError = error
+    } catch {
       if (attempt < 5) {
         await delay(50 * attempt)
       }
     }
   }
-  throw lastError ?? new Error('Failed to remove real Codex temporary path.')
+  throw new Error('Failed to remove real Codex temporary path.')
 }
 
 async function delay(milliseconds: number): Promise<void> {
@@ -5889,9 +6103,12 @@ function summarizeCodexEventSequence(
   })
 }
 
-async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
+async function resolveRealCodexE2eConfig(
+  input: { allowSubscriptionAuth?: boolean } = {},
+): Promise<RealCodexE2eConfig> {
   const useSubscriptionAuth =
-    process.env[REAL_CODEX_SUBSCRIPTION_AUTH_ENV] === '1'
+    input.allowSubscriptionAuth === true
+    && process.env[REAL_CODEX_SUBSCRIPTION_AUTH_ENV] === '1'
   const model =
     normalizeEnvString(process.env.MURPH_REAL_CODEX_MODEL)
     ?? DEFAULT_REAL_CODEX_MODEL
@@ -6051,6 +6268,15 @@ function assertRealCodexSubscriptionTokenRunway(accessToken: string): void {
   ) {
     throw new Error('Codex subscription access token has insufficient runway.')
   }
+}
+
+function buildRealCodexSubscriptionTestJwt(expiryMs: number): string {
+  const encode = (value: Record<string, unknown>) =>
+    Buffer.from(JSON.stringify(value)).toString('base64url')
+  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({
+    exp: Math.floor(expiryMs / 1_000),
+    sub: 'test-user',
+  })}.test-signature`
 }
 
 function resolveRealCodexProviderApiKeyEnv(modelProvider: string): string | null {

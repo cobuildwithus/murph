@@ -353,10 +353,11 @@ the supplied facts before replying and leaves optional label details unknown.
    bookkeeping such as "user-reported product names," "verified ingredient
    panel," or record status to the user.
 5. **Medical and safety context.** Prescription or OTC medications, diagnosed
-   conditions, allergies or intolerances, and pregnancy or nursing. This helps
-   Murph avoid unsafe or irrelevant suggestions. The medical-basics bullet in
-   the brain-dump memo above covers it; only ask on its own if that memo left
-   it open, once as one checkpoint, not as four separate turns. When a V2 spawn
+   conditions, injury history, allergies or intolerances, and pregnancy or
+   nursing. This helps Murph avoid unsafe or irrelevant suggestions. The
+   medical-basics bullet in the brain-dump memo above covers it; only ask on its
+   own if that memo left it open, once as one checkpoint, not as separate turns.
+   When a V2 spawn
    tool is available, always start the medical-and-safety child immediately
    from the user's exact words. It owns every supported fact and negative
    clinical assertion across the named medical owners, schema-correct record
