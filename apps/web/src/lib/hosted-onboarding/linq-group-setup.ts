@@ -16,6 +16,44 @@ export const HOSTED_LINQ_GROUP_SETUP_TEMPLATE = "group_setup";
 export const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE =
   "group_email_recovery";
 
+const HOSTED_LINQ_GROUP_INACTIVE_SENDER_URL_PLACEHOLDER =
+  "{groupSetupUrl}";
+
+const HOSTED_LINQ_GROUP_INACTIVE_SENDER_STATUS_VARIANTS = [
+  "Your Murph access isn't active right now.",
+  "Your Murph access is currently inactive.",
+  "Murph isn't active for you right now.",
+  "It looks like your Murph access is inactive right now.",
+  "Your Murph account is already set up, but its access isn't active right now.",
+  "I found your Murph account, but its access is inactive right now.",
+  "Murph is inactive for your account at the moment.",
+  "Your existing Murph setup is recognized, but access is inactive.",
+  "I recognize your Murph account, but its access isn't active right now.",
+  "Your Murph access is inactive, so I can't start the group from your message yet.",
+] as const;
+
+const HOSTED_LINQ_GROUP_INACTIVE_SENDER_ACTION_VARIANTS = [
+  "Someone in this chat with active Murph access can message me here next.",
+  "A person here with active Murph access can send me the next message.",
+  "This group can start when someone here with active Murph access messages me.",
+  "An active Murph member in this chat can message me to continue.",
+  "Have someone in this group with active Murph access message me here.",
+] as const;
+
+const HOSTED_LINQ_GROUP_INACTIVE_SENDER_RECOVERY =
+  "Otherwise, use this link to activate or finish setting up Murph, "
+  + `then message me here again: ${HOSTED_LINQ_GROUP_INACTIVE_SENDER_URL_PLACEHOLDER}`;
+
+const HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANTS =
+  HOSTED_LINQ_GROUP_INACTIVE_SENDER_STATUS_VARIANTS.flatMap((status) =>
+    HOSTED_LINQ_GROUP_INACTIVE_SENDER_ACTION_VARIANTS.map((action) =>
+      `${status} ${action} ${HOSTED_LINQ_GROUP_INACTIVE_SENDER_RECOVERY}`
+    )
+  );
+
+export const HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANT_COUNT =
+  HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANTS.length;
+
 const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_PREFIX =
   "murph_linq_group_email_v1.";
 const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_DOMAIN =
@@ -120,6 +158,25 @@ export function buildHostedLinqGroupSetupMessage(): string {
     "then message me here again:",
     buildHostedLinqGroupSetupUrl(),
   ].join(" ");
+}
+
+export function readHostedLinqGroupInactiveSenderVariantTemplates():
+  readonly string[] {
+  return HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANTS;
+}
+
+export function buildHostedLinqGroupInactiveSenderMessage(input: {
+  seed: string;
+}): string {
+  const digest = sha256Hex(`group-inactive-sender-message:${input.seed}`);
+  const variantIndex = Number.parseInt(digest.slice(0, 8), 16)
+    % HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANTS.length;
+  const template = HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANTS[variantIndex];
+
+  return template.replace(
+    HOSTED_LINQ_GROUP_INACTIVE_SENDER_URL_PLACEHOLDER,
+    buildHostedLinqGroupSetupUrl(),
+  );
 }
 
 export function buildHostedLinqGroupEmailRecoveryMessage(input: {

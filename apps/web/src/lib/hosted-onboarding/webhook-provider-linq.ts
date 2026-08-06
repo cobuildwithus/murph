@@ -3066,6 +3066,9 @@ async function planHostedLinqGroupChatWebhook(input: {
           && isHostedLinqIMessageService(messageEvent.data.service)
             ? { participantEmail: participantContact.value }
             : {}),
+        reason: inactiveSender
+          ? "sender-inactive"
+          : "sender-identity-unresolved",
         recipientPhone: incomingRecipientPhone,
         sourceEventId: input.event.event_id,
       }),

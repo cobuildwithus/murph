@@ -3,9 +3,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildHostedLinqGroupEmailRecoveryEffectId,
   buildHostedLinqGroupEmailRecoveryMessage,
+  buildHostedLinqGroupInactiveSenderMessage,
   buildHostedLinqGroupSetupEffectId,
+  HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANT_COUNT,
   issueHostedLinqGroupEmailRecoveryToken,
   openHostedLinqGroupEmailRecoveryToken,
+  readHostedLinqGroupInactiveSenderVariantTemplates,
 } from "../src/lib/hosted-onboarding/linq-group-setup";
 
 const TEST_SESSION_KEY = Buffer.alloc(32, 7).toString("base64url");
@@ -30,6 +33,50 @@ describe("Hosted Linq group setup", () => {
     } else {
       process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = previousPublicBaseUrl;
     }
+  });
+
+  it("keeps 50 reviewed inactive-sender variants on one privacy-safe action contract", () => {
+    const variants = readHostedLinqGroupInactiveSenderVariantTemplates();
+
+    expect(HOSTED_LINQ_GROUP_INACTIVE_SENDER_VARIANT_COUNT).toBe(50);
+    expect(variants).toHaveLength(50);
+    expect(new Set(variants).size).toBe(50);
+    for (const variant of variants) {
+      expect(countOccurrences(variant, "{groupSetupUrl}")).toBe(1);
+      expect(variant).toMatch(/\b(?:you|your)\b/iu);
+      expect(variant).toMatch(
+        /\b(?:inactive|isn't active)\b/iu,
+      );
+      expect(variant).toMatch(
+        /\b(?:active Murph|Murph access is active)\b/iu,
+      );
+      expect(variant).toContain("message");
+      expect(variant).toMatch(
+        /activate or finish setting up Murph, then message me here again:/u,
+      );
+      expect(variant).not.toMatch(/\b(?:billing|payment|subscription|trial)\b/iu);
+      expect(variant).not.toMatch(/https?:\/\//iu);
+    }
+  });
+
+  it("selects inactive-sender copy deterministically with broad rotation", () => {
+    const first = buildHostedLinqGroupInactiveSenderMessage({
+      seed: "linq-group-setup:stable-seed",
+    });
+    const rotated = new Set(
+      Array.from({ length: 500 }, (_, index) =>
+        buildHostedLinqGroupInactiveSenderMessage({
+          seed: `linq-group-setup:seed-${index}`,
+        })
+      ),
+    );
+
+    expect(buildHostedLinqGroupInactiveSenderMessage({
+      seed: "linq-group-setup:stable-seed",
+    })).toBe(first);
+    expect(rotated.size).toBe(50);
+    expect(countOccurrences(first, "https://murph.example/groups/start")).toBe(1);
+    expect(first).not.toContain("{groupSetupUrl}");
   });
 
   it("round-trips one private email recovery token", () => {
@@ -173,3 +220,7 @@ describe("Hosted Linq group setup", () => {
     })).toThrow(TypeError);
   });
 });
+
+function countOccurrences(value: string, needle: string): number {
+  return value.split(needle).length - 1;
+}

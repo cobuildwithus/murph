@@ -5129,6 +5129,9 @@ describe("Linq group chat auto-provision", () => {
     });
     expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
       .toEqual(["group_setup"]);
+    expect(plan.desiredSideEffects[0]?.payload).toMatchObject({
+      groupSetupReason: "sender-identity-unresolved",
+    });
     expect(plan.firstContactAdmissionRequest).toBeUndefined();
   });
 
@@ -5206,6 +5209,9 @@ describe("Linq group chat auto-provision", () => {
     });
     expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
       .toEqual(["group_setup"]);
+    expect(plan.desiredSideEffects[0]?.payload).toMatchObject({
+      groupSetupReason: "sender-identity-unresolved",
+    });
     expect(plan.firstContactAdmissionRequest).toBeUndefined();
   });
 
@@ -5238,6 +5244,9 @@ describe("Linq group chat auto-provision", () => {
     });
     expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
       .toEqual(["group_setup"]);
+    expect(plan.desiredSideEffects[0]?.payload).toMatchObject({
+      groupSetupReason: "sender-inactive",
+    });
     expect(plan.firstContactAdmissionRequest).toBeUndefined();
   });
 
@@ -7099,14 +7108,17 @@ describe("Linq group chat auto-provision", () => {
         prisma: prisma as never,
       });
 
-      // A member whose access lapsed is treated like any other sender who has
-      // not finished setup: one setup link, and no provisioning.
+      // A member whose access lapsed receives one reason-specific setup link
+      // without exposing the private access reason or provisioning the group.
       expect(plan.response).toMatchObject({
         ok: true,
         reason: "sent-group-setup",
       });
       expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
         .toEqual(["group_setup"]);
+      expect(plan.desiredSideEffects[0]?.payload).toMatchObject({
+        groupSetupReason: "sender-inactive",
+      });
       expect(memberRoutingStore.readHostedMemberRoutingState).not.toHaveBeenCalled();
       expect(prisma.hostedLinqLine.findFirst).not.toHaveBeenCalled();
       expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();

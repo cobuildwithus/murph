@@ -138,12 +138,14 @@ export function buildGroupSetupRequiredResponse(input: {
   messageId: string;
   occurredAt: string;
   participantEmail?: string | null;
+  reason: "sender-inactive" | "sender-identity-unresolved";
   recipientPhone: string;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   const desiredSideEffects: HostedLinqMessageSideEffect[] = [
     createHostedWebhookLinqMessageSideEffect({
       chatId: input.chatId,
+      groupSetupReason: input.reason,
       occurredAt: input.occurredAt,
       replyToMessageId: input.messageId,
       sourceEventId: input.sourceEventId,
