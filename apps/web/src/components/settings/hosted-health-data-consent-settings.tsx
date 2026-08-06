@@ -278,7 +278,7 @@ export function HostedHealthDataConsentControl({
           paused
             ? "w-full sm:col-span-2"
             : active
-              ? "-mt-1 ml-[18px] justify-self-start sm:mt-0 sm:ml-0 sm:justify-self-end"
+              ? "-mt-1 ml-[18px] justify-self-start border-destructive/30 bg-transparent hover:border-destructive/40 hover:bg-destructive/[0.05] focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-transparent dark:hover:bg-destructive/[0.05] dark:focus-visible:ring-ring/50 sm:mt-0 sm:ml-0 sm:justify-self-end"
               : "w-full sm:w-auto sm:self-start"
         }
         disabled={pending}
