@@ -62,9 +62,24 @@ reference-safe grace window.
 - Added direct proof for pre-write registration, publish conflicts, the
   65-minute grace window, current-ref preservation, namespace enforcement,
   mixed snapshot/replica cleanup, and R2 deletion retries.
+- Corrected the alarm race identified by preliminary specialist review: the
+  Durable Object now re-reads a candidate after deletion and removes its
+  storage record only when the same candidate is still current.
 - Focused Cloudflare and assistant-runtime tests and both affected package
-  typechecks pass. Exact-head CI and the required ReviewGPT stages remain.
+  typechecks pass after merging the latest base branch.
+- Full production acceptance passes, including repository guards, package
+  coverage and boundaries, Web lint/tests/production build, and Cloudflare
+  Node and Workers suites.
+- Preliminary specialist ReviewGPT and both final ReviewGPT rounds completed
+  with no unresolved findings. The final correction-verification round passed
+  on the corrected behavior-bearing head.
+- The final documentation-only head remains gated on required exact-head CI
+  before merge and protected production deployment.
 
 ## State
 
-Active.
+Implementation and local/review proof are complete. Exact-head CI, merge, and
+the protected production deployment remain required operational gates.
+Status: completed
+Updated: 2026-08-06
+Completed: 2026-08-06
