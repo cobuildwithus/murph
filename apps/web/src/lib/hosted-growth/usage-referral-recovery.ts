@@ -11,6 +11,7 @@ import {
 } from "./signup-referral-policy";
 import {
   recoverPendingHostedSignupReferralRewards,
+  type HostedSignupReferralRewardRecoveryResult,
 } from "./signup-referral-reward";
 import {
   reconcileHostedUsageReferralRewardAfterCommit,
@@ -37,9 +38,7 @@ export async function recoverPendingHostedUsageReferrals(input: {
   prisma?: PrismaClient;
 } = {}): Promise<HostedUsageReferralRecoveryResult> {
   const prisma = input.prisma ?? getPrisma();
-  const signupRewards = await recoverPendingHostedSignupReferralRewards({
-    prisma,
-  });
+  const signupRewards = await recoverHostedSignupReferralRewardsSafely(prisma);
   const [referrals, unconsumedCelebrations] = await Promise.all([
     prisma.hostedUsageReferral.findMany({
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
@@ -144,4 +143,21 @@ export async function recoverPendingHostedUsageReferrals(input: {
       + referrals.length
       + unconsumedCelebrations.length,
   };
+}
+
+async function recoverHostedSignupReferralRewardsSafely(
+  prisma: PrismaClient,
+): Promise<HostedSignupReferralRewardRecoveryResult> {
+  try {
+    return await recoverPendingHostedSignupReferralRewards({ prisma });
+  } catch (error) {
+    console.error("Hosted signup referral recovery failed.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    return {
+      failed: 1,
+      rewarded: 0,
+      scanned: 0,
+    };
+  }
 }
