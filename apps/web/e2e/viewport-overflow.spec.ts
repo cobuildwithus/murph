@@ -146,6 +146,103 @@ for (const route of ROUTES) {
   }
 }
 
+test("health-data consent actions stay inline and contained", async ({ page }) => {
+  test.setTimeout(300_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto("/design?tab=components", {
+    waitUntil: "load",
+  });
+  expect(response?.status(), "health-data consent study should respond 200").toBe(
+    200,
+  );
+
+  const activeState = page.locator(
+    '[data-design-component="health-data-consent-settings"] ' +
+      '[data-design-state="active-source-and-consent-controls"]',
+  );
+  await expect(activeState).toHaveCount(1);
+  await expect(activeState).toBeVisible();
+
+  for (const width of [320, 390, 1440] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(async () => {
+      await document.fonts?.ready;
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+    });
+
+    const layout = await activeState.evaluate((state) => {
+      const link = state.querySelector<HTMLAnchorElement>('a[href="/connect"]');
+      const button = Array.from(state.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.trim() === "Withdraw consent",
+      );
+      const group = link?.parentElement;
+      if (!link || !button || !group || button.parentElement !== group) {
+        throw new Error("Active health-data consent actions are missing.");
+      }
+
+      const stateRect = state.getBoundingClientRect();
+      const groupRect = group.getBoundingClientRect();
+      const linkRect = link.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      return {
+        buttonHeight: buttonRect.height,
+        buttonLeft: buttonRect.left,
+        buttonTop: buttonRect.top,
+        groupLeft: groupRect.left,
+        groupRight: groupRect.right,
+        linkHeight: linkRect.height,
+        linkLeft: linkRect.left,
+        linkTop: linkRect.top,
+        stateClientWidth: state.clientWidth,
+        stateLeft: stateRect.left,
+        stateRight: stateRect.right,
+        stateScrollWidth: state.scrollWidth,
+      };
+    });
+
+    expect(
+      Math.abs(layout.linkTop - layout.buttonTop),
+      `actions should share one row at ${width}px`,
+    ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+    expect(
+      layout.linkLeft,
+      `source management should stay first at ${width}px`,
+    ).toBeLessThan(layout.buttonLeft);
+    expect(
+      layout.linkHeight,
+      `source target should stay touchable at ${width}px`,
+    ).toBeGreaterThanOrEqual(40);
+    expect(
+      layout.buttonHeight,
+      `withdrawal target should stay touchable at ${width}px`,
+    ).toBeGreaterThanOrEqual(40);
+    expect(
+      layout.groupLeft,
+      `active action group should stay inside its frame at ${width}px`,
+    ).toBeGreaterThanOrEqual(layout.stateLeft - OVERFLOW_TOLERANCE_PX);
+    expect(
+      layout.groupRight,
+      `active action group should stay inside its frame at ${width}px`,
+    ).toBeLessThanOrEqual(layout.stateRight + OVERFLOW_TOLERANCE_PX);
+    expect(
+      layout.stateScrollWidth,
+      `active consent state should not overflow at ${width}px`,
+    ).toBeLessThanOrEqual(
+      layout.stateClientWidth + OVERFLOW_TOLERANCE_PX,
+    );
+  }
+});
+
 test("home onboarding steps keep equal cards across dashboard widths", async ({
   page,
 }) => {

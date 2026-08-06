@@ -286,7 +286,7 @@ export function HostedHealthDataConsentControl({
             Manage sources
           </Link>
           <Button
-            className="min-h-10"
+            className="min-h-10 border-destructive/30 bg-transparent hover:border-destructive/40 hover:bg-destructive/[0.05] focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-transparent dark:hover:bg-destructive/[0.05] dark:focus-visible:ring-ring/50"
             disabled={pending}
             onClick={onAction}
             size="sm"

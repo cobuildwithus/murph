@@ -131,7 +131,10 @@ test("renders separate active and paused consent controls", async () => {
   );
   const withdrawButton = findButton(active.container, "Withdraw consent");
   expect(withdrawButton.parentElement).toBe(sourceReviewLink?.parentElement);
-  expect(withdrawButton.className).toContain("bg-destructive/10");
+  expect(withdrawButton.className).toContain("bg-transparent");
+  expect(withdrawButton.className).toContain("border-destructive/30");
+  expect(withdrawButton.className).toContain("hover:bg-destructive/[0.05]");
+  expect(withdrawButton.className).toContain("focus-visible:ring-ring/50");
   expect(withdrawButton.className).toContain("h-7");
   expect(withdrawButton.className).toContain("min-h-10");
 
