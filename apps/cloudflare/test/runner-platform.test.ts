@@ -1815,6 +1815,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           },
           runtimeAttemptId: "runtime_write_123",
         },
+        workspaceWriteFenceGeneration: "1",
       })).toThrow("recovered workspace snapshot restore");
       const serializedLogs = JSON.stringify(readWorkspaceSnapshotDiagnosticLogs());
       expect(serializedLogs).not.toContain(objectKey);

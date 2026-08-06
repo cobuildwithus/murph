@@ -73,6 +73,7 @@ describe("hosted local cold-start benchmark integrity", () => {
         phaseBreakdown: validRestoreBreakdown,
         runtimeAttemptId: "attempt-success",
       },
+      workspaceWriteFenceGeneration: "1",
     })).not.toThrow();
   });
 
@@ -92,7 +93,22 @@ describe("hosted local cold-start benchmark integrity", () => {
         },
         runtimeAttemptId: "attempt-success",
       },
+      workspaceWriteFenceGeneration: "1",
     })).toThrow("recovered workspace snapshot restore");
+  });
+
+  it("rejects a successful runtime after an earlier fresh generation", () => {
+    expect(() => assertEstablishedR2ColdStartAttempt({
+      expectedEncryptedBytes: 128,
+      expectedPlainBytes: 512,
+      runtimeLogs: validMeasuredRuntimeLogs,
+      successfulAttemptId: "attempt-success",
+      trace: {
+        phaseBreakdown: validRestoreBreakdown,
+        runtimeAttemptId: "attempt-success",
+      },
+      workspaceWriteFenceGeneration: "2",
+    })).toThrow("recovered fresh runtime generation");
   });
 
   it("rejects a missing cold restore trace", () => {
@@ -105,6 +121,7 @@ describe("hosted local cold-start benchmark integrity", () => {
         phaseBreakdown: null,
         runtimeAttemptId: "attempt-success",
       },
+      workspaceWriteFenceGeneration: "1",
     })).toThrow("did not prove a cold restore");
   });
 
@@ -118,6 +135,7 @@ describe("hosted local cold-start benchmark integrity", () => {
         phaseBreakdown: validRestoreBreakdown,
         runtimeAttemptId: "attempt-other",
       },
+      workspaceWriteFenceGeneration: "1",
     })).toThrow("belongs to another runtime attempt");
   });
 
@@ -140,6 +158,7 @@ describe("hosted local cold-start benchmark integrity", () => {
         phaseBreakdown: validRestoreBreakdown,
         runtimeAttemptId: "attempt-success",
       },
+      workspaceWriteFenceGeneration: "1",
     })).toThrow("more than one runtime attempt");
   });
 });

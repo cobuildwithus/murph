@@ -45,6 +45,7 @@ export function assertEstablishedR2ColdStartAttempt(input: {
   runtimeLogs: readonly ColdStartRuntimeLog[];
   successfulAttemptId: string;
   trace: ColdStartLatencyTrace;
+  workspaceWriteFenceGeneration: string;
 }): void {
   assertSingleSuccessfulColdStartAttempt(
     input.runtimeLogs,
@@ -75,5 +76,7 @@ export function assertEstablishedR2ColdStartAttempt(input: {
       `Cold-start benchmark observed a recovered workspace snapshot restore (replaySafeReadMaxAttempt=${observedAttempt}).`,
     );
   }
-
+  if (input.workspaceWriteFenceGeneration !== "1") {
+    throw new Error("Cold-start benchmark observed a recovered fresh runtime generation.");
+  }
 }

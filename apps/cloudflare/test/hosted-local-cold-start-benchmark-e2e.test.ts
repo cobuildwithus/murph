@@ -437,14 +437,15 @@ async function runColdStartTrial(
   if (!trace) {
     throw new Error("Expected the established-workspace latency trace.");
   }
+  const preparation = readPreparedSnapshotRestoreLog(runtimeAttemptId);
   assertEstablishedR2ColdStartAttempt({
     expectedEncryptedBytes: establishedSnapshotRef.archive.encryptedByteSize,
     expectedPlainBytes: establishedSnapshotRef.archive.totalPlainBytes,
     runtimeLogs,
     successfulAttemptId: runtimeAttemptId,
     trace,
+    workspaceWriteFenceGeneration: preparation.workspaceWriteFenceGeneration,
   });
-  const preparedRestore = readPreparedSnapshotRestoreLog(runtimeAttemptId);
   const phaseBreakdown = requirePhaseBreakdown(trace.phaseBreakdown);
   const restore = requireRestoreBreakdown(phaseBreakdown);
   const importBreakdown = phaseBreakdown.import;
@@ -484,7 +485,7 @@ async function runColdStartTrial(
     extractMs: requireTiming(restore.extractMs, "extractMs"),
     nodeStartupMs: requireTiming(phaseBreakdown.boot?.nodeStartupMs, "nodeStartupMs"),
     objectFetchMs: requireTiming(restore.objectFetchMs, "objectFetchMs"),
-    preparedRestore,
+    preparedRestore: preparation.preparedSnapshotRestorePresent,
     presignGetMs: requireTiming(restore.presignGetMs, "presignGetMs"),
     providerPreProviderSetupMs: requireTiming(
       phaseBreakdown.provider?.preProviderSetupMs,
@@ -791,7 +792,10 @@ async function waitForMeasuredRuntimeLogs(input: {
   );
 }
 
-function readPreparedSnapshotRestoreLog(runtimeAttemptId: string): boolean {
+function readPreparedSnapshotRestoreLog(runtimeAttemptId: string): {
+  preparedSnapshotRestorePresent: boolean;
+  workspaceWriteFenceGeneration: string;
+} {
   const matches = readStructuredLogRecords().filter((record) =>
     record.message === "Hosted runner prepared workspace invocation."
     && record.details?.workspaceAttemptId === runtimeAttemptId
@@ -803,7 +807,14 @@ function readPreparedSnapshotRestoreLog(runtimeAttemptId: string): boolean {
   if (typeof prepared !== "boolean") {
     throw new Error("Runner preparation record omitted prepared restore state.");
   }
-  return prepared;
+  const generation = matches[0]?.details?.workspaceWriteFenceGeneration;
+  if (typeof generation !== "string") {
+    throw new Error("Runner preparation record omitted its write-fence generation.");
+  }
+  return {
+    preparedSnapshotRestorePresent: prepared,
+    workspaceWriteFenceGeneration: generation,
+  };
 }
 
 function readStructuredLogRecords(): Array<{
