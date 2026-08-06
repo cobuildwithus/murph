@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/src/components/ui/button";
 
@@ -13,33 +13,49 @@ type CopyState =
   | "ready";
 
 export function HostedSignupReferralLinkButton(props: {
+  identityKey: string;
   signupUrl?: string | null;
 }) {
+  const requestGeneration = useRef(0);
   const [signupUrl, setSignupUrl] = useState(props.signupUrl ?? null);
   const [state, setState] = useState<CopyState>(
     props.signupUrl ? "ready" : "loading",
   );
 
   useEffect(() => {
+    const generation = ++requestGeneration.current;
     if (props.signupUrl) {
       setSignupUrl(props.signupUrl);
       setState("ready");
       return;
     }
 
+    setSignupUrl(null);
+    setState("loading");
     const controller = new AbortController();
     void loadHostedSettingsSignupReferralLink(controller.signal)
       .then((url) => {
+        if (
+          controller.signal.aborted
+          || generation !== requestGeneration.current
+        ) {
+          return;
+        }
         setSignupUrl(url);
         setState("ready");
       })
-      .catch((error) => {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
-          setState("load_error");
+      .catch(() => {
+        if (
+          controller.signal.aborted
+          || generation !== requestGeneration.current
+        ) {
+          return;
         }
+        setSignupUrl(null);
+        setState("load_error");
       });
     return () => controller.abort();
-  }, [props.signupUrl]);
+  }, [props.identityKey, props.signupUrl]);
 
   async function handleAction() {
     if (state === "loading" || state === "copying") {
@@ -47,23 +63,37 @@ export function HostedSignupReferralLinkButton(props: {
     }
 
     if (!signupUrl) {
+      const generation = ++requestGeneration.current;
+      setSignupUrl(null);
       setState("loading");
       try {
         const url = await loadHostedSettingsSignupReferralLink();
+        if (generation !== requestGeneration.current) {
+          return;
+        }
         setSignupUrl(url);
         setState("ready");
       } catch {
+        if (generation !== requestGeneration.current) {
+          return;
+        }
+        setSignupUrl(null);
         setState("load_error");
       }
       return;
     }
 
+    const generation = requestGeneration.current;
     setState("copying");
     try {
       await navigator.clipboard.writeText(signupUrl);
-      setState("copied");
+      if (generation === requestGeneration.current) {
+        setState("copied");
+      }
     } catch {
-      setState("copy_error");
+      if (generation === requestGeneration.current) {
+        setState("copy_error");
+      }
     }
   }
 
