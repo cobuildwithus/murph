@@ -5,8 +5,8 @@
 Active implementation contract for earned usage rewards. Web owns attribution,
 qualification, receipts, caps, and credit accounting. Linq and Telegram
 normalize conversational mission evidence into the same provider-neutral state
-machine. Shareable signup links reuse that accounting system but do not invent a
-second mission lifecycle.
+machine. Shareable signup links reuse the same receipt, cap, and credit-ledger
+primitives without inventing a second mission lifecycle.
 
 There are two independent rollout gates:
 
@@ -68,6 +68,12 @@ state. An explicit same-origin `POST /r/<token>/claim` creates a fresh ordinary
 `/join/<inviteCode>` invite and placeholder member. Every claimant receives
 isolated onboarding state, while `HostedInvite.referrerMemberId` remains attached
 to that invite throughout ordinary onboarding.
+
+Claims reuse the referrer's existing member-row lock and the `HostedInvite`
+table. At most 50 `signup-referral` invites may be created for one referrer in a
+rolling hour. The count is checked under that lock and before creating a
+placeholder member, so a shared link cannot produce unbounded abandoned accounts
+without adding another rate-limit service or persistence owner.
 
 Existing recipient-bound `/join/<inviteCode>` URLs remain valid. The browser
 never selects the referrer, reward, policy, destination, or accounting amount.
@@ -194,26 +200,28 @@ scheduler. Each bounded pass:
 1. scans up to 50 recent attributed `member.activated` events when signup-link
    rewards are enabled;
 2. atomically settles eligible signup-link receipts and grants;
-3. reconciles up to 50 ordinary qualified missions or rewarded referrals with
-   an eligible frozen source conversation;
+3. reconciles up to 50 ordinary qualified missions or ordinary rewarded
+   referrals awaiting a source celebration;
 4. re-signals up to 50 oldest unconsumed referral-celebration mailbox items.
 
-No signup-specific queue, scheduler, outbox, or grant worker exists.
+No signup-specific queue, scheduler, outbox, grant worker, or notification path
+exists.
 
-Conversational mission completion is celebrated in its frozen source
+Conversational mission completion remains celebrated in its frozen source
 conversation. Group notifications carry live external-thread authority. Personal
 notifications require the frozen direct thread and never move to a newer home
 conversation.
 
-For a signup-link reward, source routing is best-effort and must never delay or
-reverse credit. When settlement can freeze a direct Linq or Telegram source, the
-ordinary celebration machinery may use it. An email-only or currently unrouted
-member still receives usage, but no synthetic conversation or false
-`celebrationQueuedAt` marker is created.
+Signup-link rewards are deliberately notification-free in the first version.
+They create no source-conversation record, no synthetic "challenge complete"
+message, and no false `celebrationQueuedAt` marker. The member receives the
+usage immediately and sees the completed `Invite someone to Murph` entry in
+Settings history. Notification delivery therefore cannot delay, reverse, or
+duplicate a signup-link reward.
 
-A failed notification cannot duplicate or claw back the reward. Once a mailbox
-item is durable, failed signaling leaves that same item eligible for the next
-bounded pass.
+A failed conversational notification cannot duplicate or claw back its reward.
+Once a mailbox item is durable, failed signaling leaves that same item eligible
+for the next bounded pass.
 
 ## Settings projection
 
@@ -271,12 +279,11 @@ enabling it:
    balance increment, and accurate Settings history;
 4. replay the activation/recovery pass and confirm no second grant;
 5. smoke one cap rejection and one self-referral rejection;
-6. optionally smoke a routed completion celebration without making notification
-   delivery a condition of earning usage.
+6. exercise the 50-claims-per-hour boundary and confirm the rejected claim
+   creates no placeholder member or invite.
 
 Disabling the signup-reward gate immediately stops new activation scans. It does
-not revoke stable links, hide prior history, claw back existing credit, or
-suppress a celebration already represented by a durable mailbox item.
+not revoke stable links, hide prior history, or claw back existing credit.
 
 Once the first signup-link referral grant exists, Web must not roll back below a
 version that understands referral-backed entries and the signup policy version.
