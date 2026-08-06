@@ -2527,6 +2527,659 @@ describe("hostedRunnerIntercept", () => {
     });
   });
 
+  it("persists redacted Venice memory-request routing and correlation diagnostics", async () => {
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const sensitiveProviderResponse = "private-provider-response-segment";
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        return Response.json({ loggedCount: 1 });
+      }
+      return new Response(sensitiveProviderResponse, {
+        headers: {
+          "cf-ray": "230b030023ae2822-SJC",
+          "content-type": "text/event-stream; charset=utf-8",
+          "x-retry-count": "2",
+          "x-venice-balance-usd": "private-balance-header",
+          "x-venice-host-name": "private-provider-host-header",
+          "x-venice-model-id": "openai-gpt-56-terra",
+          "x-venice-model-name": "private-provider-model-name",
+          "x-venice-model-router": "private-provider-router-header",
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
+      providerKind: string;
+      runnerContainerName: string;
+      userId: string;
+    }) => createProviderEgressCredentialValidationResult(input));
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+    const sensitiveSessionId = "session-sensitive-memory-diagnostic-id";
+    const sensitiveThreadId = "thread-sensitive-memory-diagnostic-id";
+    const sensitiveTurnId = "turn-sensitive-memory-diagnostic-id";
+    const sensitiveWindowId = "window-sensitive-memory-diagnostic-id";
+    const sensitiveCacheKey = "cache-sensitive-memory-diagnostic-key";
+    const sensitivePromptText = "private-memory-prompt-segment ".repeat(240);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: JSON.stringify({
+          generate: false,
+          input: [{
+            content: [{ text: sensitivePromptText, type: "input_text" }],
+            role: "user",
+            type: "message",
+          }],
+          model: "gpt-5.6-terra",
+          prompt_cache_key: sensitiveCacheKey,
+          stream: true,
+        }),
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({
+            request_kind: "memory",
+            session_id: sensitiveSessionId,
+            thread_id: sensitiveThreadId,
+            turn_id: sensitiveTurnId,
+            window_id: sensitiveWindowId,
+          }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-fingerprint-secret",
+        VENICE_API_KEY: "venice-worker-secret",
+        validateRuntimeProviderEgressCredential,
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: "opaque-container-id",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(Promise.resolve(promise));
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(waitUntilPromises).toHaveLength(1);
+    await Promise.all(waitUntilPromises);
+
+    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
+    expect(runtimeLogCall).toBeDefined();
+    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
+      entries?: Array<{
+        eventCode?: string;
+        level?: string;
+        redactedJson?: Record<string, unknown>;
+      }>;
+    };
+    expect(parseHostedRuntimeLogRequest(runtimeLogBody).entries).toHaveLength(1);
+    const entry = runtimeLogBody.entries?.[0];
+    expect(entry?.eventCode).toBe(HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE);
+    expect(entry?.level).toBe("debug");
+    expect(entry?.redactedJson).toEqual(expect.objectContaining({
+      codexRequestKind: "memory",
+      codexSessionFingerprintPresent: true,
+      codexThreadFingerprintPresent: true,
+      codexTurnFingerprintPresent: true,
+      codexTurnMetadataStatus: "valid",
+      codexWindowFingerprintPresent: true,
+      diagnosticVersion: 2,
+      endpointKind: "responses",
+      modelKind: "gpt-5.6-terra",
+      providerKind: "venice",
+      providerResponseCloudflareRay: "230b030023ae2822-SJC",
+      providerResponseContentKind: "text",
+      providerResponseModelKind: "openai-gpt-56-terra",
+      providerResponseModelMatchesRequest: true,
+      providerResponseOk: true,
+      providerResponseOutcomeKind: "accepted",
+      providerResponseRetryCount: 2,
+      providerResponseStatus: 200,
+      upstreamModelKind: "openai-gpt-56-terra",
+    }));
+    expect(entry?.redactedJson?.providerResponseTtfbMs)
+      .toEqual(expect.any(Number));
+    expect(entry?.redactedJson?.codexSessionFingerprint)
+      .toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
+    expect(entry?.redactedJson?.codexThreadFingerprint)
+      .toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
+    expect(entry?.redactedJson?.codexTurnFingerprint)
+      .toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
+    expect(entry?.redactedJson?.codexWindowFingerprint)
+      .toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
+    expect(Object.keys(entry?.redactedJson ?? {}).length).toBeLessThanOrEqual(96);
+    const captureCall = mocks.emitHostedExecutionStructuredLog.mock.calls.find(([log]) =>
+      log.message === "Hosted runner provider request diagnostic captured."
+    );
+    expect(captureCall?.[0].details).toEqual(expect.objectContaining({
+      providerKind: "venice",
+      runtimeLogScheduled: true,
+    }));
+
+    const serializedLogs = JSON.stringify(runtimeLogBody);
+    expect(serializedLogs).not.toContain(sensitiveSessionId);
+    expect(serializedLogs).not.toContain(sensitiveThreadId);
+    expect(serializedLogs).not.toContain(sensitiveTurnId);
+    expect(serializedLogs).not.toContain(sensitiveWindowId);
+    expect(serializedLogs).not.toContain(sensitiveCacheKey);
+    expect(serializedLogs).not.toContain("private-memory-prompt-segment");
+    expect(serializedLogs).not.toContain(sensitiveProviderResponse);
+    expect(serializedLogs).not.toContain("private-balance-header");
+    expect(serializedLogs).not.toContain("private-provider-host-header");
+    expect(serializedLogs).not.toContain("private-provider-model-name");
+    expect(serializedLogs).not.toContain("private-provider-router-header");
+    expect(serializedLogs).not.toContain("diagnostic-fingerprint-secret");
+    expect(serializedLogs).not.toContain("venice-worker-secret");
+  });
+
+  it("returns rejected Venice memory responses unchanged and persists bounded warning metadata", async () => {
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const rejectedBody = "synthetic provider rejection";
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        return Response.json({ loggedCount: 1 });
+      }
+      return new Response(rejectedBody, {
+        headers: {
+          "cf-ray": "not-a-valid-ray",
+          "content-type": "application/json",
+          "x-retry-count": "101",
+          "x-venice-model-id": "unallowlisted-provider-model",
+        },
+        status: 429,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: JSON.stringify({
+          input: "synthetic memory request",
+          model: "gpt-5.6-terra",
+          stream: true,
+        }),
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        VENICE_API_KEY: "venice-worker-secret",
+        validateRuntimeProviderEgressCredential: async (input) =>
+          createProviderEgressCredentialValidationResult(input),
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: "opaque-container-id",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(Promise.resolve(promise));
+        },
+      },
+    );
+
+    expect(response.status).toBe(429);
+    expect(await response.text()).toBe(rejectedBody);
+    expect(waitUntilPromises).toHaveLength(1);
+    await Promise.all(waitUntilPromises);
+    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
+    expect(runtimeLogCall).toBeDefined();
+    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
+      entries?: Array<{
+        level?: string;
+        redactedJson?: Record<string, unknown>;
+      }>;
+    };
+    expect(parseHostedRuntimeLogRequest(runtimeLogBody).entries).toHaveLength(1);
+    expect(runtimeLogBody.entries?.[0]).toEqual(expect.objectContaining({
+      level: "warn",
+      redactedJson: expect.objectContaining({
+        providerKind: "venice",
+        providerResponseContentKind: "json",
+        providerResponseModelKind: "other",
+        providerResponseOk: false,
+        providerResponseOutcomeKind: "rejected",
+        providerResponseStatus: 429,
+      }),
+    }));
+    expect(runtimeLogBody.entries?.[0]?.redactedJson)
+      .not.toHaveProperty("providerResponseCloudflareRay");
+    expect(runtimeLogBody.entries?.[0]?.redactedJson)
+      .not.toHaveProperty("providerResponseRetryCount");
+    expect(JSON.stringify(runtimeLogBody)).not.toContain("unallowlisted-provider-model");
+  });
+
+  it("keeps successful Venice memory responses intact when background diagnostic persistence fails", async () => {
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      return url.hostname === "web.example.test"
+        ? new Response("unavailable", { status: 500 })
+        : new Response("provider response", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: JSON.stringify({
+          generate: false,
+          input: "synthetic memory request",
+          model: "gpt-5.6-luna",
+          stream: true,
+        }),
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        VENICE_API_KEY: "venice-worker-secret",
+        validateRuntimeProviderEgressCredential: async (input) =>
+          createProviderEgressCredentialValidationResult(input),
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: "opaque-container-id",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(Promise.resolve(promise));
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("provider response");
+    expect(waitUntilPromises).toHaveLength(1);
+    await Promise.all(waitUntilPromises);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({ providerKind: "venice" }),
+        level: "warn",
+        message: "Hosted runner provider request diagnostic runtime-log write failed.",
+      }),
+    );
+  });
+
+  it("returns Venice memory responses before detached diagnostic persistence settles", async () => {
+    let markRuntimeLogStarted: (() => void) | undefined;
+    const runtimeLogStarted = new Promise<void>((resolve) => {
+      markRuntimeLogStarted = resolve;
+    });
+    let finishRuntimeLog: ((response: Response) => void) | undefined;
+    let runtimeLogSettled = false;
+    const pendingRuntimeLog = new Promise<Response>((resolve) => {
+      finishRuntimeLog = (response) => {
+        runtimeLogSettled = true;
+        resolve(response);
+      };
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        markRuntimeLogStarted?.();
+        return await pendingRuntimeLog;
+      }
+      return new Response("provider response", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const response = await Promise.race([
+        hostedRunnerIntercept(
+          new Request("https://api.venice.ai/api/v1/responses", {
+            body: JSON.stringify({
+              generate: false,
+              input: "synthetic memory request",
+              model: "gpt-5.6-terra",
+              stream: true,
+            }),
+            headers: {
+              authorization: `Bearer ${credential}`,
+              "content-type": "application/json",
+              "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+            },
+            method: "POST",
+          }),
+          createInterceptEnv({
+            VENICE_API_KEY: "venice-worker-secret",
+            validateRuntimeProviderEgressCredential: async (input) =>
+              createProviderEgressCredentialValidationResult(input),
+            validateRuntimeWriteFence: async () => true,
+          }),
+          { containerId: "opaque-container-id" },
+        ),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("Venice response delivery waited for diagnostic persistence"));
+          }, 1_000);
+        }),
+      ]);
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("provider response");
+      expect(runtimeLogSettled).toBe(false);
+      await runtimeLogStarted;
+      expect(runtimeLogSettled).toBe(false);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      finishRuntimeLog?.(Response.json({ loggedCount: 1 }));
+    }
+    await pendingRuntimeLog;
+    await Promise.resolve();
+  });
+
+  it("propagates Venice transport errors before detached diagnostic persistence settles", async () => {
+    const privateTransportDetail = "private Venice transport ordering detail";
+    let markRuntimeLogStarted: (() => void) | undefined;
+    const runtimeLogStarted = new Promise<void>((resolve) => {
+      markRuntimeLogStarted = resolve;
+    });
+    let finishRuntimeLog: ((response: Response) => void) | undefined;
+    let runtimeLogSettled = false;
+    const pendingRuntimeLog = new Promise<Response>((resolve) => {
+      finishRuntimeLog = (response) => {
+        runtimeLogSettled = true;
+        resolve(response);
+      };
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        markRuntimeLogStarted?.();
+        return await pendingRuntimeLog;
+      }
+      throw new Error(privateTransportDetail);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const outcome = await Promise.race([
+        hostedRunnerIntercept(
+          new Request("https://api.venice.ai/api/v1/responses", {
+            body: JSON.stringify({
+              input: "synthetic memory request",
+              model: "gpt-5.6-luna",
+              stream: true,
+            }),
+            headers: {
+              authorization: `Bearer ${credential}`,
+              "content-type": "application/json",
+              "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+            },
+            method: "POST",
+          }),
+          createInterceptEnv({
+            VENICE_API_KEY: "venice-worker-secret",
+            validateRuntimeProviderEgressCredential: async (input) =>
+              createProviderEgressCredentialValidationResult(input),
+            validateRuntimeWriteFence: async () => true,
+          }),
+          { containerId: "opaque-container-id" },
+        ).then(
+          () => ({ error: null, kind: "resolved" as const }),
+          (error: unknown) => ({ error, kind: "rejected" as const }),
+        ),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("Venice transport error waited for diagnostic persistence"));
+          }, 1_000);
+        }),
+      ]);
+
+      expect(outcome.kind).toBe("rejected");
+      if (!(outcome.error instanceof Error)) {
+        throw new TypeError("Expected the Venice transport failure to remain an Error.");
+      }
+      expect(outcome.error.message).toBe(privateTransportDetail);
+      expect(runtimeLogSettled).toBe(false);
+      await runtimeLogStarted;
+      expect(runtimeLogSettled).toBe(false);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      finishRuntimeLog?.(Response.json({ loggedCount: 1 }));
+    }
+    await pendingRuntimeLog;
+    await Promise.resolve();
+  });
+
+  it("measures Venice response-header latency from upstream dispatch", async () => {
+    const waitUntilPromises: Promise<unknown>[] = [];
+    let nowMs = 1_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        return Response.json({ loggedCount: 1 });
+      }
+      nowMs += 37;
+      return new Response("provider response", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+
+    try {
+      const response = await hostedRunnerIntercept(
+        new Request("https://api.venice.ai/api/v1/responses", {
+          body: JSON.stringify({
+            generate: false,
+            input: "synthetic memory request",
+            model: "gpt-5.6-terra",
+            stream: true,
+          }),
+          headers: {
+            authorization: `Bearer ${credential}`,
+            "content-type": "application/json",
+            "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+          },
+          method: "POST",
+        }),
+        createInterceptEnv({
+          VENICE_API_KEY: "venice-worker-secret",
+          validateRuntimeProviderEgressCredential: async (input) => {
+            nowMs += 5_000;
+            return createProviderEgressCredentialValidationResult(input);
+          },
+          validateRuntimeWriteFence: async () => true,
+        }),
+        {
+          containerId: "opaque-container-id",
+          waitUntil: (promise) => {
+            waitUntilPromises.push(Promise.resolve(promise));
+          },
+        },
+      );
+
+      expect(response.status).toBe(200);
+      await Promise.all(waitUntilPromises);
+      const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
+      const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
+        entries?: Array<{ redactedJson?: Record<string, unknown> }>;
+      };
+      expect(runtimeLogBody.entries?.[0]?.redactedJson?.providerResponseTtfbMs)
+        .toBe(37);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("does not attribute Murph-local AI usage denial to Venice", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: JSON.stringify({
+          input: "synthetic memory request",
+          model: "gpt-5.6-terra",
+          stream: true,
+        }),
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        VENICE_API_KEY: "venice-worker-secret",
+        validateRuntimeProviderEgressCredential: async (input) => ({
+          ...createProviderEgressCredentialValidationResult(input),
+          platformAiUsageAllowed: false,
+        }),
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(402);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "HOSTED_PLATFORM_AI_USAGE_DENIED" },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("persists a warning diagnostic when Venice memory egress fails in transport", async () => {
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const privateTransportDetail = "private Venice socket failure detail";
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        return Response.json({ loggedCount: 1 });
+      }
+      throw new Error(privateTransportDetail);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+
+    await expect(hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: JSON.stringify({
+          input: "synthetic memory request",
+          model: "gpt-5.6-luna",
+          stream: true,
+        }),
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        VENICE_API_KEY: "venice-worker-secret",
+        validateRuntimeProviderEgressCredential: async (input) =>
+          createProviderEgressCredentialValidationResult(input),
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: "opaque-container-id",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(Promise.resolve(promise));
+        },
+      },
+    )).rejects.toThrow(privateTransportDetail);
+
+    expect(waitUntilPromises).toHaveLength(1);
+    await Promise.all(waitUntilPromises);
+    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
+    expect(runtimeLogCall).toBeDefined();
+    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
+      entries?: Array<{
+        level?: string;
+        redactedJson?: Record<string, unknown>;
+      }>;
+    };
+    expect(parseHostedRuntimeLogRequest(runtimeLogBody).entries).toHaveLength(1);
+    expect(runtimeLogBody.entries?.[0]).toEqual(expect.objectContaining({
+      level: "warn",
+      redactedJson: expect.objectContaining({
+        codexRequestKind: "memory",
+        modelKind: "gpt-5.6-luna",
+        providerKind: "venice",
+        providerResponseOutcomeKind: "transport_error",
+        upstreamModelKind: "openai-gpt-56-luna",
+      }),
+    }));
+    expect(runtimeLogBody.entries?.[0]?.redactedJson)
+      .not.toHaveProperty("providerResponseTtfbMs");
+    expect(JSON.stringify(runtimeLogBody)).not.toContain(privateTransportDetail);
+  });
+
+  it.each([
+    ["foreground", JSON.stringify({ request_kind: "turn" })],
+    ["untagged", null],
+  ])("does not persist Venice provider diagnostics for %s turns", async (_kind, metadata) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+    const headers = new Headers({
+      authorization: `Bearer ${credential}`,
+      "content-type": "application/json",
+    });
+    if (metadata) {
+      headers.set("x-codex-turn-metadata", metadata);
+    }
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: JSON.stringify({
+          input: "synthetic foreground request",
+          model: "gpt-5.6-sol",
+          stream: true,
+        }),
+        headers,
+        method: "POST",
+      }),
+      createInterceptEnv({
+        VENICE_API_KEY: "venice-worker-secret",
+        validateRuntimeProviderEgressCredential: async (input) =>
+          createProviderEgressCredentialValidationResult(input),
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(readFetchTargetUrl(fetchMock.mock.calls[0]?.[0])).hostname)
+      .toBe("api.venice.ai");
+  });
+
   it("normalizes Responses Lite tools and marks the stable Venice cache prefix", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
@@ -3538,93 +4191,6 @@ describe("hostedRunnerIntercept", () => {
     expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 
-  it.each([
-    {
-      headers: {
-        ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-        "content-type": "application/json",
-        "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
-      },
-      method: "POST",
-      name: "HTTP extraction",
-    },
-    {
-      headers: {
-        ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-        ...OPENAI_WEBSOCKET_HANDSHAKE_HEADERS,
-        "x-openai-memgen-request": "true",
-      },
-      method: "GET",
-      name: "WebSocket consolidation",
-    },
-  ])("rejects disabled Codex-native memory $name before OpenAI upstream egress", async ({
-    headers,
-    method,
-  }) => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses", {
-        ...(method === "POST"
-          ? { body: JSON.stringify({ model: "gpt-5.6-terra", stream: true }) }
-          : {}),
-        headers,
-        method,
-      }),
-      createInterceptEnv({
-        OPENAI_API_KEY: "openai-worker-secret",
-        validateRuntimeWriteFence,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(403);
-    await expect(response.text()).resolves.toBe("Codex-native memory is disabled.");
-    expect(validateRuntimeWriteFence).toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects disabled Codex-native memory before Venice upstream egress", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
-    const credential = await createTestProviderEgressCredential({
-      providerKind: "venice",
-    });
-    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
-      providerKind: string;
-      runnerContainerName: string;
-      userId: string;
-    }) => createProviderEgressCredentialValidationResult(input));
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.venice.ai/api/v1/responses", {
-        body: JSON.stringify({
-          input: "synthetic request",
-          model: "gpt-5.6-terra",
-          stream: true,
-        }),
-        headers: {
-          authorization: `Bearer ${credential}`,
-          "content-type": "application/json",
-          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
-        },
-        method: "POST",
-      }),
-      createInterceptEnv({
-        VENICE_API_KEY: "venice-worker-secret",
-        validateRuntimeProviderEgressCredential,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(403);
-    await expect(response.text()).resolves.toBe("Codex-native memory is disabled.");
-    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it("rejects OpenAI credential injection without a valid runtime write fence", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
@@ -4054,12 +4620,12 @@ describe("hostedRunnerIntercept", () => {
       .not.toContain(sensitiveThreadId);
   });
 
-  it("groups repeated Codex turns with stable keyed fingerprints", async () => {
-    const sharedSessionId = "session-shared-turn-correlation-id";
-    const sharedThreadId = "thread-shared-turn-correlation-id";
-    const firstTurnId = "turn-first-correlation-id";
-    const secondTurnId = "turn-second-correlation-id";
-    const otherThreadId = "thread-other-turn-correlation-id";
+  it("groups repeated Codex memory requests with stable keyed fingerprints", async () => {
+    const sharedSessionId = "session-shared-memory-correlation-id";
+    const sharedThreadId = "thread-shared-memory-correlation-id";
+    const firstTurnId = "turn-first-memory-correlation-id";
+    const secondTurnId = "turn-second-memory-correlation-id";
+    const otherThreadId = "thread-other-memory-correlation-id";
     const requestBytes = TEST_TEXT_ENCODER.encode(JSON.stringify({
       input: [],
       model: "gpt-5.6-terra",
@@ -4073,7 +4639,7 @@ describe("hostedRunnerIntercept", () => {
       method: "POST",
       requestBytes,
       turnMetadataHeader: JSON.stringify({
-        request_kind: "turn",
+        request_kind: "memory",
         session_id: sharedSessionId,
         thread_id: input.threadId,
         turn_id: input.turnId,
@@ -4094,7 +4660,7 @@ describe("hostedRunnerIntercept", () => {
       turnId: secondTurnId,
     });
 
-    expect(first.codexRequestKind).toBe("turn");
+    expect(first.codexRequestKind).toBe("memory");
     expect(first.codexSessionFingerprint).toBe(second.codexSessionFingerprint);
     expect(first.codexThreadFingerprint).toBe(second.codexThreadFingerprint);
     expect(first.codexThreadFingerprint).not.toBe(other.codexThreadFingerprint);
@@ -4770,6 +5336,389 @@ describe("hostedRunnerIntercept", () => {
     );
     expect(tooLargeDiagnostic.inputType).toBeUndefined();
     expect(tooLargeDiagnostic.inputNestedMetricBytes).toBeUndefined();
+  });
+
+  it.each([
+    ["response.completed", "succeeded"],
+    ["response.incomplete", "partial"],
+    ["response.failed", "failed"],
+  ] as const)("records exact native Codex memory usage for %s", async (
+    terminalType,
+    expectedOutcome,
+  ) => {
+    const providerCreatedAt = 1_775_000_000;
+    const completedEvent = `data: ${JSON.stringify({
+      response: {
+        created_at: providerCreatedAt,
+        id: "resp_memory_123",
+        model: "gpt-5.6-terra-2026-07-30",
+        service_tier: "flex",
+        usage: {
+          input_tokens: 1_500,
+          input_tokens_details: {
+            cache_write_tokens: 50,
+            cached_tokens: 700,
+          },
+          output_tokens: 180,
+          output_tokens_details: { reasoning_tokens: 40 },
+          total_tokens: 1_680,
+        },
+      },
+      type: terminalType,
+    })}\n\n`;
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return url.startsWith("https://api.openai.com/")
+        ? new Response(completedEvent, {
+            headers: { "content-type": "text/event-stream" },
+            status: 200,
+          })
+        : Response.json({
+            recorded: true,
+            usageId: "usage_memory_1",
+          });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          input: "extract durable operator memories",
+          model: "gpt-5.6-terra",
+          service_tier: "flex",
+          stream: true,
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    await expect(response.text()).resolves.toBe(completedEvent);
+    const usageCall = fetchMock.mock.calls.find(([request]) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return url.endsWith("/api/internal/hosted-execution/usage/record");
+    });
+    expect(usageCall).toBeDefined();
+    const payload = JSON.parse(String(usageCall?.[1]?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    expect(payload.usage).toEqual(expect.objectContaining({
+      cacheWriteTokens: 50,
+      cachedInputTokens: 700,
+      credentialSource: "platform",
+      featureKey: "codex-native-memory",
+      inputTokens: 1_500,
+      memberId: "member_123",
+      occurredAt: new Date(providerCreatedAt * 1_000).toISOString(),
+      outputTokens: 180,
+      provider: "codex-cli",
+      providerName: "hosted-openai",
+      providerRequestId: "resp_memory_123",
+      providerRequestOutcome: expectedOutcome,
+      reasoningTokens: 40,
+      requestedModel: "gpt-5.6-terra",
+      servedModel: "gpt-5.6-terra-2026-07-30",
+      tokenPricingBasis: "openai-flex",
+      totalTokens: 1_680,
+      triggerKind: "codex-native-memory",
+    }));
+    expect(payload.usage.rawUsageJson).toEqual({
+      input_tokens: 1_500,
+      input_tokens_details: {
+        cache_write_tokens: 50,
+        cached_tokens: 700,
+      },
+      output_tokens: 180,
+      output_tokens_details: { reasoning_tokens: 40 },
+      total_tokens: 1_680,
+    });
+  });
+
+  it("records Venice native-memory usage with provider-specific accounting metadata", async () => {
+    const providerCreatedAt = 1_775_000_000;
+    const completedEvent = `data: ${JSON.stringify({
+      response: {
+        created_at: providerCreatedAt,
+        id: "resp_venice_memory_123",
+        model: "openai-gpt-56-terra",
+        service_tier: "flex",
+        usage: {
+          input_tokens: 900,
+          input_tokens_details: {
+            cache_write_tokens: 30,
+            cached_tokens: 400,
+          },
+          output_tokens: 110,
+          output_tokens_details: { reasoning_tokens: 25 },
+          total_tokens: 1_010,
+        },
+      },
+      type: "response.completed",
+    })}\n\n`;
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = request instanceof Request ? request.url : String(request);
+      if (url.startsWith("https://api.venice.ai/")) {
+        return new Response(completedEvent, {
+          headers: { "content-type": "text/event-stream" },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/api/internal/hosted-execution/usage/record")) {
+        return Response.json({ recorded: true, usageId: "usage_venice_memory_1" });
+      }
+      return Response.json({ loggedCount: 1 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: JSON.stringify({
+          generate: true,
+          input: "extract durable operator memories",
+          model: "gpt-5.6-terra",
+          service_tier: "flex",
+          stream: true,
+        }),
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        VENICE_API_KEY: "venice-worker-secret",
+        validateRuntimeProviderEgressCredential: async (input) =>
+          createProviderEgressCredentialValidationResult(input),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    await expect(response.text()).resolves.toBe(completedEvent);
+    const usageCall = fetchMock.mock.calls.find(([request]) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return url.endsWith("/api/internal/hosted-execution/usage/record");
+    });
+    expect(usageCall).toBeDefined();
+    const payload = JSON.parse(String(usageCall?.[1]?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    expect(payload.usage).toEqual(expect.objectContaining({
+      apiKeyEnv: "VENICE_API_KEY",
+      baseUrl: "https://api.venice.ai/api/v1",
+      cacheWriteTokens: 30,
+      cachedInputTokens: 400,
+      credentialSource: "platform",
+      featureKey: "codex-native-memory",
+      inputTokens: 900,
+      memberId: "member_123",
+      occurredAt: new Date(providerCreatedAt * 1_000).toISOString(),
+      outputTokens: 110,
+      provider: "codex-cli",
+      providerName: "venice",
+      providerRequestId: "resp_venice_memory_123",
+      providerRequestOutcome: "succeeded",
+      reasoningTokens: 25,
+      requestedModel: "gpt-5.6-terra",
+      servedModel: null,
+      tokenPricingBasis: "standard",
+      totalTokens: 1_010,
+      triggerKind: "codex-native-memory",
+    }));
+    expect(payload.usage.rawUsageJson).toEqual({
+      input_tokens: 900,
+      input_tokens_details: {
+        cache_write_tokens: 30,
+        cached_tokens: 400,
+      },
+      output_tokens: 110,
+      output_tokens_details: { reasoning_tokens: 25 },
+      total_tokens: 1_010,
+    });
+  });
+
+  it.each([
+    {
+      name: "absent terminal usage",
+      usage: undefined,
+    },
+    {
+      name: "malformed terminal usage",
+      usage: {
+        input_tokens: "10",
+        output_tokens: 2,
+        total_tokens: 12,
+      },
+    },
+  ])("fails native-memory HTTP completion closed for $name", async ({ usage }) => {
+    const completedEvent = `data: ${JSON.stringify({
+      response: {
+        created_at: 1_775_000_000,
+        id: "resp_memory_unmetered",
+        model: "gpt-5.6-luna",
+        ...(usage === undefined ? {} : { usage }),
+      },
+      type: "response.completed",
+    })}\n\n`;
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return url.startsWith("https://api.openai.com/")
+        ? new Response(completedEvent, { status: 200 })
+        : Response.json({ recorded: true, usageId: "unexpected_usage" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          generate: true,
+          model: "gpt-5.6-luna",
+          stream: true,
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.text()).resolves.not.toContain("resp_memory_unmetered");
+    expect(fetchMock.mock.calls.some(([request]) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return url.endsWith("/api/internal/hosted-execution/usage/record");
+    })).toBe(false);
+  });
+
+  it("passes through explicitly usage-free native-memory HTTP completion", async () => {
+    const completedEvent = `data: ${JSON.stringify({
+      response: {
+        created_at: 1_775_000_000,
+        id: "resp_memory_usage_free",
+        model: "gpt-5.6-luna",
+      },
+      type: "response.completed",
+    })}\n\n`;
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return url.startsWith("https://api.openai.com/")
+        ? new Response(completedEvent, { status: 200 })
+        : Response.json({ recorded: true, usageId: "unexpected_usage" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          generate: false,
+          model: "gpt-5.6-luna",
+          stream: true,
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe(completedEvent);
+    expect(fetchMock.mock.calls.some(([request]) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return url.endsWith("/api/internal/hosted-execution/usage/record");
+    })).toBe(false);
+  });
+
+  it("preserves native-memory completion when durable usage recording fails", async () => {
+    const providerCompletion = `data: ${JSON.stringify({
+      response: {
+        created_at: 1_775_000_000,
+        id: "resp_memory_failed_record",
+        model: "gpt-5.6-luna",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 2,
+          total_tokens: 12,
+        },
+      },
+      type: "response.completed",
+    })}\n\n`;
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = request instanceof Request ? request.url : String(request);
+      if (url.startsWith("https://api.openai.com/")) {
+        return new Response(providerCompletion, { status: 200 });
+      }
+      return new Response("unavailable", { status: 503 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          model: "gpt-5.6-luna",
+          stream: true,
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe(providerCompletion);
+    const accountingLogCall = mocks.emitHostedExecutionStructuredLog.mock.calls.find(
+      ([entry]) => entry.message === "Hosted Codex memory usage accounting failed.",
+    );
+    expect(accountingLogCall?.[0]).toEqual(expect.objectContaining({
+      details: expect.objectContaining({
+        errorCode: expect.any(String),
+        memoryKind: "extraction",
+        providerKind: "hosted-openai_codex_memory",
+        reason: "persistence_failed",
+      }),
+      level: "warn",
+      message: "Hosted Codex memory usage accounting failed.",
+    }));
+    expect(JSON.stringify(accountingLogCall)).not.toContain("unavailable");
   });
 
   it("does not double-record ordinary OpenAI turns at egress", async () => {
