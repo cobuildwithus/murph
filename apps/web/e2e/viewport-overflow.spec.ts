@@ -418,9 +418,10 @@ for (const width of [768, 1280] as const) {
     await expect(historyPreview).toHaveCount(1);
     await expect(
       historyPreview.getByText(
-        "Earn usage by inviting friends or adding Murph to a groupchat",
+        "Invite friends to Murph or ask about referral missions.",
       ),
     ).toBeVisible();
+    await expect(historyPreview.getByText("Copy link", { exact: true })).toBeVisible();
     await expect(historyPreview.getByText("Ask Murph", { exact: true })).toBeVisible();
     expect(
       await historyPreview.evaluate((element) =>
@@ -441,7 +442,7 @@ for (const width of [768, 1280] as const) {
       historyPreview.locator(
         'a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])',
       ),
-    ).toHaveCount(2);
+    ).toHaveCount(3);
 
     const currentReferrals = referralDetailsPreview.getByRole("list", {
       name: "Current usage referrals",
