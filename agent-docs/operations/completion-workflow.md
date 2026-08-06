@@ -95,6 +95,15 @@ ordering, retries, concurrency, or idempotency. It also does not apply to broad
 refactors or cross-owner changes. When any of those conditions are present, or
 the user explicitly requests ReviewGPT, run the normal PR loop.
 
+Every PR that enters the final ReviewGPT loop must contain exactly one
+machine-readable `ReviewGPT context sensitivity: routine` or
+`ReviewGPT context sensitivity: sensitive` line. Classify it as `sensitive`
+when any exemption-disqualifying condition above or cross-cutting condition
+below applies, even when the patch is tiny. A cosmetic change or small bug fix
+is `routine` only when none of those conditions apply. The packager treats a
+missing, malformed, or duplicate declaration as `undeclared` and re-sends the
+full guarded snapshot rather than assuming the PR is routine.
+
 Skipping the final ReviewGPT gate does not skip the preliminary specialist
 ReviewGPT pass, a required local `deep-review`, the parent final review, scoped
 verification, CI, merge-conflict proof, or the normal commit and PR
@@ -151,10 +160,10 @@ product-decision owners.
 7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the intent, applicable lens declarations, verification evidence, rendered-evidence manifest, and change-shape contract below.
 8. Prepare exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant product-experience, prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not four audits.
 9. When the final ReviewGPT gate is selected, establish its immutable round-one baseline on the same exact pushed candidate head and launch the preliminary pass and final round 1 concurrently. When the final gate does not apply, launch the preliminary pass by itself. The candidate must already have focused local proof and a parent candidate review, but preliminary findings, plan closure, and the parent's final review do not need to finish before both ReviewGPT jobs start. Run both jobs concurrently with CI and keep their outputs and state separate.
-10. Triage every finding from both ReviewGPT stages locally. Download a returned `reviewgpt-coverage.patch` only from the exact owned specialist thread, inspect its full contents and paths, prove it touches only tests/fixtures/direct-proof scaffolding, run `git apply --check`, then apply it deliberately if accepted. Never pipe a downloaded artifact directly into `git apply`. Implement accepted findings in the parent, rerun focused proof, commit, and push one combined corrected candidate. When accepted product-experience remediation materially changes a product-owned dimension, the parent must reapply `agent-docs/prompts/product-experience-review.md` to that corrected pushed head and updated direct journey evidence, then record the refreshed product purpose verdict. This is a bounded parent revalidation, not another subagent or ReviewGPT invocation. Do not rerun the preliminary pass after a substantive result; use the final gate's correction-delta rounds to verify all behavior-bearing remediation, including specialist-driven fixes.
+10. Triage every finding from both ReviewGPT stages locally. Download a returned `reviewgpt-coverage.patch` only from the exact owned specialist thread, inspect its full contents and paths, prove it touches only tests/fixtures/direct-proof scaffolding, run `git apply --check`, then apply it deliberately if accepted. Never pipe a downloaded artifact directly into `git apply`. Implement accepted findings in the parent, rerun focused proof, commit, and push one combined corrected candidate. When accepted product-experience remediation materially changes a product-owned dimension, the parent must reapply `agent-docs/prompts/product-experience-review.md` to that corrected pushed head and updated direct journey evidence, then record the refreshed product purpose verdict. This is a bounded parent revalidation, not another subagent or ReviewGPT invocation. Do not rerun the preliminary pass after a substantive result; use the final gate's next substantive round to verify all behavior-bearing remediation, including specialist-driven fixes. The final-gate packager chooses a fresh full audit for a sensitive, undeclared, or large current PR and a same-thread correction delta only for an explicitly routine PR below both size cutoffs.
 11. Enter the review-resolution loop below. Completion means there are no unresolved accepted/actionable findings, not merely that both jobs ran. The applicable specialist result must be `SPECIALIST_OUTCOME: PASS` or have every accepted finding resolved, and the final gate must reach `ROUND_OUTCOME: PASS` with zero accepted findings.
 12. Rerun the focused local checks affected by remediation, then push so required CI evaluates the exact new PR head. If CI fails, diagnose from the narrowest reproducer outward. For a direct shared-default push, rerun `pnpm verify:acceptance` against the final reconciled candidate.
-13. Run the final review locally as the parent agent after findings from both ReviewGPT stages are resolved: re-read the full diff with fresh eyes, walk changed call paths, inspect any applied coverage patch in context, and check for remaining proof gaps, residual risks, and handoff completeness. Do not spawn a final-review subagent. If that review causes a behavior-bearing change, push it and run the required final correction-delta round.
+13. Run the final review locally as the parent agent after findings from both ReviewGPT stages are resolved: re-read the full diff with fresh eyes, walk changed call paths, inspect any applied coverage patch in context, and check for remaining proof gaps, residual risks, and handoff completeness. Do not spawn a final-review subagent. If that review causes a behavior-bearing change, push it and run the required next final-gate round.
 14. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the plan is archived. If overlapping dirty work blocks safe closure, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
 15. For PR-lane work, the task is not complete until the PR branch has no merge conflicts with `main` or its configured base branch. Before final handoff, fetch the latest `main`/base branch and prove the PR head can merge cleanly, or update the branch by a normal merge/rebase, resolve any conflicts, rerun the required checks for the touched surfaces, and push the resolved head. Follow the ReviewGPT loop's base-update and patch-change rerun rules.
 16. An open PR remains active, so preserve its task worktree. If the current turn includes confirmed PR merge or closure, run `scripts/retire-worktree <path>` from another checkout before final handoff. The command is the mandatory task-worktree retirement gate defined in `agent-docs/operations/agent-workflow-routing.md`; preserve and report the checkout when it fails closed.
@@ -248,6 +257,14 @@ Required:
   lens does not trigger. Do not add the immutable `ReviewGPT first-reviewed
   head` line until preliminary findings are resolved and the separate final
   gate is ready to start.
+- **ReviewGPT context sensitivity.** Before the final gate starts, add exactly
+  one machine-readable `ReviewGPT context sensitivity: routine` or
+  `ReviewGPT context sensitivity: sensitive` line and one short classification
+  reason. Use `sensitive` for every product-critical, auth, privacy, security,
+  billing, health-safety, persisted-state, public-API, runtime/deploy,
+  ordering/retry/concurrency/idempotency, broad-refactor, cross-owner,
+  external-boundary, or other cross-cutting change. Small cosmetic changes and
+  narrow bug fixes may use `routine` only when none of those conditions apply.
 - **Change-shape breakdown.** Added and deleted lines from the base-to-head diff,
   classified as source, tests/fixtures, docs, config/tooling, and
   generated/other. State the classification rule, note binary files, and keep
