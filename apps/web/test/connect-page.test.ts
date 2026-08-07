@@ -203,33 +203,33 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       name: "Apple Health",
     },
     {
-      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      assetPath: "/brand-logos/connect/zepp.png",
       description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
       name: "Zepp / Amazfit",
     },
     {
-      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      assetPath: "/brand-logos/connect/mi-fitness.png",
       description:
         "Mi Band, Xiaomi Smart Band, and Redmi Watch activity, sleep, heart rate, and workouts through Apple Health.",
       name: "Xiaomi / Mi Fitness",
     },
     {
-      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      assetPath: "/brand-logos/connect/ringconn.png",
       description: "Smart-ring sleep, activity, heart rate, and supported data through Apple Health.",
       name: "RingConn",
     },
     {
-      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      assetPath: "/brand-logos/connect/coros.png",
       description: "Activity, sleep, heart rate, and supported workouts through Apple Health.",
       name: "COROS",
     },
     {
-      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      assetPath: "/brand-logos/connect/suunto.png",
       description: "Activity, sleep, heart rate, and supported workouts through Apple Health.",
       name: "Suunto",
     },
     {
-      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      assetPath: "/brand-logos/connect/huawei-health.png",
       description: "Selected watch and band data through Apple Health, where supported.",
       name: "Huawei Health",
     },
@@ -402,16 +402,16 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.ok(sourceHeadingIndex(markup, "Apple Health") < sourceHeadingIndex(markup, "Garmin"));
   assert.ok(sourceHeadingIndex(markup, "Garmin") < sourceHeadingIndex(markup, "Fitbit"));
   assert.ok(sourceHeadingIndex(markup, "Fitbit") < sourceHeadingIndex(markup, "Google Fit"));
-  assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Xiaomi / Mi Fitness"));
+  assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Huawei Health"));
+  assert.ok(sourceHeadingIndex(markup, "Huawei Health") < sourceHeadingIndex(markup, "Xiaomi / Mi Fitness"));
   assert.ok(sourceHeadingIndex(markup, "Xiaomi / Mi Fitness") < sourceHeadingIndex(markup, "Zepp / Amazfit"));
-  assert.ok(sourceHeadingIndex(markup, "Zepp / Amazfit") < sourceHeadingIndex(markup, "RingConn"));
-  assert.ok(sourceHeadingIndex(markup, "RingConn") < sourceHeadingIndex(markup, "COROS"));
-  assert.ok(sourceHeadingIndex(markup, "COROS") < sourceHeadingIndex(markup, "Suunto"));
-  assert.ok(sourceHeadingIndex(markup, "Suunto") < sourceHeadingIndex(markup, "Huawei Health"));
-  assert.ok(sourceHeadingIndex(markup, "Huawei Health") < sourceHeadingIndex(markup, "Withings"));
+  assert.ok(sourceHeadingIndex(markup, "Zepp / Amazfit") < sourceHeadingIndex(markup, "Withings"));
   assert.ok(sourceHeadingIndex(markup, "Withings") < sourceHeadingIndex(markup, "Oura"));
   assert.ok(sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"));
-  assert.ok(sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "Dexcom"));
+  assert.ok(sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "COROS"));
+  assert.ok(sourceHeadingIndex(markup, "COROS") < sourceHeadingIndex(markup, "Suunto"));
+  assert.ok(sourceHeadingIndex(markup, "Suunto") < sourceHeadingIndex(markup, "RingConn"));
+  assert.ok(sourceHeadingIndex(markup, "RingConn") < sourceHeadingIndex(markup, "Dexcom"));
   assert.ok(
     sourceHeadingIndex(markup, "Dexcom (G6 and older)") < sourceHeadingIndex(markup, "Freestyle Libre"),
   );
@@ -675,6 +675,42 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
       description: "Workouts.",
       logo,
     },
+    {
+      id: "ringconn",
+      name: "RingConn",
+      description: "Sleep.",
+      logo,
+    },
+    {
+      id: "huawei-health",
+      name: "Huawei Health",
+      description: "Activity.",
+      logo,
+    },
+    {
+      id: "coros",
+      name: "COROS",
+      description: "Training.",
+      logo,
+    },
+    {
+      id: "withings",
+      name: "Withings",
+      description: "Health.",
+      logo,
+    },
+    {
+      id: "xiaomi-mi-fitness",
+      name: "Xiaomi / Mi Fitness",
+      description: "Activity.",
+      logo,
+    },
+    {
+      id: "suunto",
+      name: "Suunto",
+      description: "Training.",
+      logo,
+    },
   ];
 
   assert.deepEqual(
@@ -685,8 +721,14 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
       "fitbit",
       "google-fit",
       "strava",
+      "huawei-health",
+      "xiaomi-mi-fitness",
       "zepp",
+      "withings",
       "whoop",
+      "coros",
+      "suunto",
+      "ringconn",
       "dexcom",
       "dexcom-g6-and-older",
       "freestyle-libre",
@@ -719,10 +761,10 @@ test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claimin
         historicalResetIncomplete: true,
         id: "zepp",
         logo: {
-          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-          height: 40,
-          src: "/brand-logos/connect/wearable-relay.svg",
-          width: 64,
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/zepp.png",
+          width: 44,
         },
         name: "Zepp / Amazfit",
         recoveryKind: "connection_reset",
@@ -788,10 +830,10 @@ test("ConnectSourcesGrid opens a reusable Xiaomi Apple Health setup guide", asyn
           "Mi Band, Xiaomi Smart Band, and Redmi Watch activity, sleep, heart rate, and workouts through Apple Health.",
         id: "xiaomi-mi-fitness",
         logo: {
-          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-          height: 40,
-          src: "/brand-logos/connect/wearable-relay.svg",
-          width: 64,
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/mi-fitness.png",
+          width: 44,
         },
         name: "Xiaomi / Mi Fitness",
         setupGuideActionLabel: "Set up sync",
@@ -831,10 +873,10 @@ test("ConnectSourcesGrid requires account authentication before opening the Zepp
         description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
         id: "zepp",
         logo: {
-          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-          height: 40,
-          src: "/brand-logos/connect/wearable-relay.svg",
-          width: 64,
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/zepp.png",
+          width: 44,
         },
         name: "Zepp / Amazfit",
         setupGuideActionLabel: "Set up sync",
