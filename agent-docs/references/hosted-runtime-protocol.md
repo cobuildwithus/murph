@@ -1674,6 +1674,18 @@ the fence regardless of whether a status read appears to show progress. Exact
 successful completion clears the fence only by the matching attempt identity.
 This prevents duplicate replacement while a live child may still be running and
 leaves replacement ownership in the exact identity-aware wake path.
+After RunnerContainer receives and parses a successful invocation result, and
+only after its exact active-operation record has been removed, it sends the
+per-user UserRunner a best-effort completion receipt carrying that result plus
+the attempt and generation. UserRunner re-reads the current runtime fence and
+uses the existing full-token completion compare-and-swap; a stale, duplicate,
+wrong-user, or wrong-generation receipt is a no-op. The compare-and-swap winner
+alone may emit the existing owner-release callback. Receipt failure cannot
+change the completed runner result; RunnerContainer stops waiting after one
+second, consumes any late rejection, and lets the original outer UserRunner
+continuation remain the mixed-version and callback-loss fallback. The receipt
+does not make checkpoint success, idle expiry, container stop, or elapsed time
+completion authority.
 When the outer RunnerContainer active-operation pointer is missing, a container
 wake response must carry explicit identity-checked wake metadata before an
 accepted wake is trusted; identity-blind accepted responses from deploy-skewed

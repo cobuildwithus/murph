@@ -136,11 +136,11 @@ Decision: continue the complete catalog/runtime separation as one change.
 
 ## Verification
 
-- Production runner assembly passed: entry 1,729,822 B; static closure
-  8,423,496 B; total output 10,298,233 B. Against the exact clean-main baseline,
-  the static closure is 172,747 B smaller while the lazy split adds 15,679 B to
-  total output. The static byte budget is ratcheted to the new measurement and
-  rejects `dynamic-tools.js` if it re-enters the boot closure.
+- Production runner assembly passed on current main: entry 1,641,254 B; static
+  closure 7,885,509 B; total output 9,902,746 B. Against the exact merged-main
+  baseline, the static closure is 168,095 B smaller while the lazy split adds
+  17,669 B to total output. The static byte budget is ratcheted to the new
+  measurement and rejects `dynamic-tools.js` if it re-enters the boot closure.
 - Twenty alternating Docker amd64-emulation samples per arm measured baseline
   versus candidate p50 1,126.0/1,079.5 ms and p90 1,202.1/1,195.0 ms; paired
   median delta was -27.3 ms. Excluding the candidate image's first layer-cold

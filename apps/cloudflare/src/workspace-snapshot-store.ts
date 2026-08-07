@@ -13,8 +13,6 @@ import {
   parseHostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/parsers";
 
-import type { HostedR2BucketRole } from "./r2-cutover.ts";
-
 export const HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE = "application/octet-stream";
 export const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA =
   "murph.hosted-workspace-snapshot-upload.v1";
@@ -52,7 +50,6 @@ export interface HostedWorkspaceSnapshotUploadSession {
   expiresAt: string;
   leaseGeneration: string;
   objectKey: string;
-  r2BucketRole?: HostedR2BucketRole;
   r2PutDrainUntil?: string;
   r2PutExpiresAt?: string;
   replacedSnapshotRef?: NonNullable<HostedExecutionSnapshotRef>;
@@ -110,12 +107,6 @@ export function parseHostedWorkspaceSnapshotUploadSession(
     }
     replacedSnapshotRef = parsedReplacedSnapshotRef;
   }
-  const r2BucketRole = record.r2BucketRole === undefined
-    ? null
-    : requireString(record.r2BucketRole, `${label}.r2BucketRole`);
-  if (r2BucketRole !== null && r2BucketRole !== "source" && r2BucketRole !== "destination") {
-    throw new TypeError(`${label}.r2BucketRole must be source or destination.`);
-  }
   const r2PutExpiresAt = record.r2PutExpiresAt === undefined
     ? null
     : requireIsoString(record.r2PutExpiresAt, `${label}.r2PutExpiresAt`);
@@ -149,7 +140,6 @@ export function parseHostedWorkspaceSnapshotUploadSession(
     expiresAt: requireIsoString(record.expiresAt, `${label}.expiresAt`),
     leaseGeneration: requireString(record.leaseGeneration, `${label}.leaseGeneration`),
     objectKey: requireString(record.objectKey, `${label}.objectKey`),
-    ...(r2BucketRole === null ? {} : { r2BucketRole }),
     ...(r2PutExpiresAt === null ? {} : { r2PutExpiresAt }),
     ...(r2PutDrainUntil === null ? {} : { r2PutDrainUntil }),
     ...(replacedSnapshotRef ? { replacedSnapshotRef } : {}),
@@ -158,12 +148,6 @@ export function parseHostedWorkspaceSnapshotUploadSession(
     userId: requireString(record.userId, `${label}.userId`),
     workspaceVersion: requireString(record.workspaceVersion, `${label}.workspaceVersion`),
   };
-}
-
-export function readHostedWorkspaceSnapshotR2BucketRole(
-  session: HostedWorkspaceSnapshotUploadSession,
-): HostedR2BucketRole {
-  return session.r2BucketRole ?? "source";
 }
 
 export function parseHostedWorkspaceSnapshotOrphanCandidate(

@@ -157,6 +157,12 @@ import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
 } from './assistant/provider-traces.js'
+import {
+  completeAssistantProviderStartCriticalPath,
+  readAssistantProviderStartMonotonicTickMs,
+  stampAssistantProviderStartCriticalPath,
+  type AssistantProviderStartCriticalPathContext,
+} from './assistant/provider-start-critical-path.js'
 import type {
   AssistantProgressDelivery,
   AssistantProgressDeliveryResult,
@@ -507,6 +513,7 @@ export interface CodexAppServerTurnInput {
   progressDelivery?: AssistantProgressDelivery | null
   hostedToolContext?: AssistantHostedToolContext | null
   providerRequestOrdinal?: number | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   publicInternetFetch?: typeof fetch | null
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
@@ -676,6 +683,10 @@ function appendRequiredVaultFileApprovalUrls(
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    input.providerStartCriticalPath,
+    'codexAppServerTurnStartedAtMonotonicMs',
+  )
   assertCodexAppServerPermissionRequest(input)
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
   if (
@@ -694,6 +705,7 @@ export async function executeCodexAppServerTurn(
     ...input,
     approvalPolicy,
     configOverrides: processInput.configOverrides,
+    ...(providerStartCriticalPath ? { providerStartCriticalPath } : {}),
     runtimeWorkspaceRoots: input.runtimeWorkspaceRoots?.map((root) =>
       path.resolve(root),
     ),
@@ -3134,6 +3146,10 @@ async function runCodexAppServerTurnOnProcess(
   codexProcess: CodexAppServerProcess,
   input: CodexAppServerPreparedTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    input.providerStartCriticalPath,
+    'codexAppServerProcessTurnStartedAtMonotonicMs',
+  )
   const hostedCanonicalWritePort = readHostedCanonicalWritePort()
   let stdout = ''
   let stderr = ''
@@ -3711,13 +3727,24 @@ async function runCodexAppServerTurnOnProcess(
     trailingSteerCandidate = null
   }
 
-  const notifyProviderRequestStarted = () => {
+  const notifyProviderRequestStarted = (
+    providedStartedAtMonotonicMs?: number,
+  ) => {
     if (providerRequestStartedNotified) {
       return
     }
     providerRequestStartedNotified = true
+    const providerStartedAtMonotonicMs = providedStartedAtMonotonicMs
+      ?? readAssistantProviderStartMonotonicTickMs()
     const startedAtMs = Date.now()
     codexProviderRequestStartedAtMs = startedAtMs
+    const completedProviderStartCriticalPath =
+      input.providerRequestOrdinal === 0
+        ? completeAssistantProviderStartCriticalPath(
+            providerStartCriticalPath,
+            providerStartedAtMonotonicMs,
+          )
+        : null
     notifyCodexAppServerProviderRequestStartedBestEffort({
       hook: input.onProviderRequestStarted ?? null,
       startedAt: new Date(startedAtMs).toISOString(),
@@ -3727,6 +3754,9 @@ async function runCodexAppServerTurnOnProcess(
           0,
           startedAtMs - codexAppServerTurnStartedAt,
         ),
+        ...(completedProviderStartCriticalPath
+          ? { providerStartCriticalPath: completedProviderStartCriticalPath }
+          : {}),
       },
     })
   }
@@ -5278,11 +5308,13 @@ async function runCodexAppServerTurnOnProcess(
         codexThreadId,
       }),
     )
+    const providerStartedAtMonotonicMs =
+      readAssistantProviderStartMonotonicTickMs()
     // The child can begin executing (including side-effecting commands) as
     // soon as the turn/start request is written, so the provider-start
     // barrier arms here rather than at the acknowledgement. A death between
     // write and response must never be classified as pre-provider work.
-    notifyProviderRequestStarted()
+    notifyProviderRequestStarted(providerStartedAtMonotonicMs)
     const turnResult = await withCodexRpcTimeout(
       turnStartRequest,
       CODEX_RPC_DEFAULT_TIMEOUT_MS,

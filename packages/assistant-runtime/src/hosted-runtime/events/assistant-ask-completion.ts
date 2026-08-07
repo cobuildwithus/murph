@@ -30,6 +30,9 @@ import {
   createNoopMailboxEffect,
   type HostedMailboxOutcome,
 } from "./mailbox-outcome.ts";
+import {
+  HostedAssistantAskCompletionPreemptedError,
+} from "./assistant-ask-completion-errors.ts";
 
 export const HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE =
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE;
@@ -410,21 +413,6 @@ export function buildHostedAssistantAskCompletionDeliveryKey(input: {
     .digest("hex")
     .slice(0, 48);
   return `assistant-ask-completion:${digest}`;
-}
-
-export class HostedAssistantAskCompletionPreemptedError extends Error {
-  readonly code = "ASSISTANT_ASK_COMPLETION_PREEMPTED";
-
-  constructor(options?: ErrorOptions) {
-    super("Assistant ask completion yielded to foreground input.", options);
-    this.name = "HostedAssistantAskCompletionPreemptedError";
-  }
-}
-
-export function isHostedAssistantAskCompletionPreemptedError(
-  error: unknown,
-): error is HostedAssistantAskCompletionPreemptedError {
-  return error instanceof HostedAssistantAskCompletionPreemptedError;
 }
 
 function escapeHostedAssistantAskQuotedData(value: string): string {

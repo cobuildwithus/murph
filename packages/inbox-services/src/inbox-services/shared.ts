@@ -1,6 +1,6 @@
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { z } from 'zod'
+import type * as z from '@murphai/contracts/zod-runtime'
 import {
   inboxDoctorCheckSchema,
   type InboxConnectorConfig,

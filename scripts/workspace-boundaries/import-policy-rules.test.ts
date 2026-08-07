@@ -101,6 +101,36 @@ import /* keep */ {
     expect(failure).toBeNull();
   });
 
+  it.each([
+    ["zod", "packages/inbox-services"],
+    ["zod/v4", "packages/assistant-engine"],
+  ])("rejects non-owner direct %s imports", (specifier, sourceMember) => {
+    const filePath = path.join(repoRoot, sourceMember, "test/example.test.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: `const module = await import(${JSON.stringify(specifier)});`,
+      sourceMember,
+      specifier,
+    });
+
+    expect(failure).toContain("@murphai/contracts/zod-runtime");
+  });
+
+  it.each([
+    ["zod", "packages/contracts"],
+    ["zod/v4", "packages/gateway-core"],
+  ])("allows the %s owner in %s", (specifier, sourceMember) => {
+    const filePath = path.join(repoRoot, sourceMember, "src/example.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: `import * as z from ${JSON.stringify(specifier)};`,
+      sourceMember,
+      specifier,
+    });
+
+    expect(failure).toBeNull();
+  });
+
   it("allows the runner bundle health commons import without pathological scanning", () => {
     const filePath = path.join(
       repoRoot,

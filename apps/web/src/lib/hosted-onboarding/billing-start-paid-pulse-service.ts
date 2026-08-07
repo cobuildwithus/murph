@@ -65,7 +65,6 @@ import {
 } from "./stripe-error-log";
 import {
   hasHostedStripeSubscriptionPaymentMethod,
-  readHostedStripeSubscriptionPaymentMethodId,
 } from "./stripe-subscription-payment-method";
 
 const START_PAID_PULSE_PLAN = "launch_monthly";
@@ -108,7 +107,7 @@ const PULSE_TRIAL_EXTENSION_TARGET_METADATA_KEY =
 
 type HostedPulseTrialStartPaidIdempotencyOperation =
   | "active-trial-end-now-v2"
-  | "paused-resume-v1";
+  | "paused-resume-v2";
 
 export type HostedTrialPaidPlanCode = Extract<
   HostedBillingPlanCode,
@@ -968,17 +967,18 @@ async function updateHostedPulseTrialStartPaidSubscription<
           prisma: tx,
           targetPlanCode: input.targetPlanCode,
         });
+        const updateParams: Stripe.SubscriptionUpdateParams = {
+          expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
+          metadata: { murphTrialExtensionTargetTrialEnd: "" },
+          payment_behavior: "allow_incomplete",
+          trial_end: "now",
+        };
+        if (input.transitionItems.length > 0) {
+          updateParams.items = input.transitionItems;
+        }
         const subscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.update.trial-end-now",
-          () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
-            expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
-            ...(input.transitionItems.length > 0
-              ? { items: input.transitionItems }
-              : {}),
-            metadata: { murphTrialExtensionTargetTrialEnd: "" },
-            payment_behavior: "allow_incomplete",
-            trial_end: "now",
-          }, {
+          () => input.stripe.subscriptions.update(input.stripeSubscriptionId, updateParams, {
             idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
               memberId: input.memberId,
               operation: "active-trial-end-now-v2",
@@ -1125,23 +1125,22 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
           prisma: tx,
           targetPlanCode: input.targetPlanCode,
         });
+        const cleanupParams: Stripe.SubscriptionUpdateParams = {
+          expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
+          metadata: {
+            [PULSE_TRIAL_EXTENSION_TARGET_METADATA_KEY]: "",
+          },
+        };
+        if (input.transitionItems.length > 0) {
+          cleanupParams.items = input.transitionItems;
+          cleanupParams.proration_behavior = "none";
+        }
         const cleanedSubscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.update.paused-pre-resume-cleanup",
           // Stripe rejects `proration_behavior` on a paused subscription unless
           // this request also changes the plan item. A same-plan resume keeps the
           // existing metadata-only cleanup shape.
-          () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
-            expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
-            ...(input.transitionItems.length > 0
-              ? {
-                items: input.transitionItems,
-                proration_behavior: "none" as const,
-              }
-              : {}),
-            metadata: {
-              [PULSE_TRIAL_EXTENSION_TARGET_METADATA_KEY]: "",
-            },
-          }, {
+          () => input.stripe.subscriptions.update(input.stripeSubscriptionId, cleanupParams, {
             idempotencyKey:
               buildHostedPulseTrialStartPaidCleanupIdempotencyKey(),
           }),
@@ -1154,24 +1153,15 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
           return cleanedSubscription;
         }
 
-        const resumePaymentMethodId =
-          readHostedStripeSubscriptionPaymentMethodId(cleanedSubscription) ??
-          readHostedStripeSubscriptionPaymentMethodId(input.subscription);
         const subscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.resume.paused-trial",
           () => input.stripe.subscriptions.resume(input.stripeSubscriptionId, {
             billing_cycle_anchor: "now",
-            // Carry the card onto the subscription. Without it the cycle invoice
-            // this resume creates has nothing to charge, so it stalls the whole
-            // resume in `pending_update` and Stripe voids it minutes later.
-            ...(resumePaymentMethodId
-              ? { default_payment_method: resumePaymentMethodId }
-              : {}),
             expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
           }, {
             idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
               memberId: input.memberId,
-              operation: "paused-resume-v1",
+              operation: "paused-resume-v2",
               priceId: input.priceId,
               stripeSubscriptionId: input.stripeSubscriptionId,
               trialEnd: input.trialEnd,

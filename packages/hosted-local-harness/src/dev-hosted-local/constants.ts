@@ -24,11 +24,8 @@ const HOSTED_WORKER_REQUIRED_VAR_NAMES = [
   "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
   "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
   "HOSTED_CRYPTO_ENV",
-  "HOSTED_R2_CUTOVER_PHASE",
-  "HOSTED_R2_WRITE_ADMISSION",
   "HOSTED_R2_PRESIGN_ACCOUNT_ID",
   "HOSTED_R2_PRESIGN_BUCKET_NAME",
-  "HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME",
 ] as const;
 
 const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
@@ -142,7 +139,6 @@ export const WRANGLER_LOCAL_ENV_FILE_ONLY_NAMES = [
 export const HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID = "hosted-local-r2-access-key";
 export const HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID = "hosted-local-r2-account";
 export const HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME = "hosted-local-r2-bundles";
-export const HOSTED_LOCAL_R2_PRESIGN_ENAM_BUCKET_NAME = "hosted-local-r2-bundles-enam";
 export const HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY = "hosted-local-r2-secret-key";
 
 // Persisted for interactive hosted-local state even when the value is web-only
