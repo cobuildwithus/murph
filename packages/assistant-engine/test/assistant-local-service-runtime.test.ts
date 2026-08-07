@@ -2371,8 +2371,18 @@ test('sendAssistantMessageLocal reports thrown preceding delivery when no final 
 
 test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProviderRequestStarted', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
+  let providerStartCriticalPath:
+    | {
+        assistantServiceStartedAtMonotonicMs?: number
+        assistantTurnLockAcquiredAtMonotonicMs?: number
+        assistantTurnLockWaitStartedAtMonotonicMs?: number
+        preProviderSetupDoneAtMonotonicMs?: number
+      }
+    | null
+    | undefined
 
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    providerStartCriticalPath = providerInput.providerStartCriticalPath
     await providerInput.onProviderRequestStarted?.({
       codexAppServerInitializeMs: 7,
       codexAppServerPreProviderMs: 17,
@@ -2399,11 +2409,37 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
   await sendAssistantMessageLocal({
     deliverResponse: false,
     onProviderRequestStarted: providerRequestStarted,
+    providerStartCriticalPath: {
+      assistantPhaseStartedAtMonotonicMs: 0,
+      automationLaneStartedAtMonotonicMs: 0,
+      mailboxImportDoneAtMonotonicMs: 0,
+    },
     prompt: 'Measure setup split',
     vault: '/vaults/test',
   })
 
   expect(providerRequestStarted).toHaveBeenCalledTimes(1)
+  expect(providerStartCriticalPath).toEqual(expect.objectContaining({
+    assistantServiceStartedAtMonotonicMs: expect.any(Number),
+    assistantTurnLockAcquiredAtMonotonicMs: expect.any(Number),
+    assistantTurnLockWaitStartedAtMonotonicMs: expect.any(Number),
+    preProviderSetupDoneAtMonotonicMs: expect.any(Number),
+  }))
+  expect(
+    providerStartCriticalPath?.assistantTurnLockWaitStartedAtMonotonicMs ?? -1,
+  ).toBeGreaterThanOrEqual(
+    providerStartCriticalPath?.assistantServiceStartedAtMonotonicMs ?? 0,
+  )
+  expect(
+    providerStartCriticalPath?.assistantTurnLockAcquiredAtMonotonicMs ?? -1,
+  ).toBeGreaterThanOrEqual(
+    providerStartCriticalPath?.assistantTurnLockWaitStartedAtMonotonicMs ?? 0,
+  )
+  expect(
+    providerStartCriticalPath?.preProviderSetupDoneAtMonotonicMs ?? -1,
+  ).toBeGreaterThanOrEqual(
+    providerStartCriticalPath?.assistantTurnLockAcquiredAtMonotonicMs ?? 0,
+  )
   expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledWith(
     expect.objectContaining({
       occurredAt: '2026-06-09T00:00:00.000Z',

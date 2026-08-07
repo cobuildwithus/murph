@@ -27,6 +27,9 @@
       "@murphai/contracts/schemas": [
         "./packages/contracts/src/schemas.ts"
       ],
+      "@murphai/contracts/zod-runtime": [
+        "./packages/contracts/src/zod-runtime.ts"
+      ],
       "@murphai/clinical-records": [
         "./packages/clinical-records/src/index.ts"
       ],

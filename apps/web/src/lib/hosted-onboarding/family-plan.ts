@@ -1451,7 +1451,11 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
     return null;
   }
 
-  await lockHostedMemberRow(input.tx, group.ownerMemberId);
+  await lockHostedFamilyAccessMemberRowsTx({
+    groupId: group.id,
+    ownerMemberId: group.ownerMemberId,
+    tx: input.tx,
+  });
   const currentGroup = await input.tx.hostedAccountGroup.findUnique({
     select: {
       owner: {
@@ -2219,30 +2223,29 @@ async function createOrResumeHostedFamilyBillingCheckout(
     return existingCheckout;
   }
 
-  const metadata = {
-    ...buildHostedFamilyStripeMetadata(checkoutInput.group),
-    checkoutAttemptId: checkoutInput.checkoutAttemptId,
+  const metadata = buildHostedFamilyStripeMetadata(checkoutInput.group);
+  metadata.checkoutAttemptId = checkoutInput.checkoutAttemptId;
+  const checkoutParams: Stripe.Checkout.SessionCreateParams = {
+    cancel_url: `${checkoutInput.publicBaseUrl}/settings`,
+    client_reference_id: checkoutInput.group.id,
+    line_items: [{
+      price: checkoutInput.priceId,
+      quantity: checkoutInput.seatCount,
+    }],
+    metadata,
+    mode: "subscription",
+    payment_method_types: ["card"],
+    subscription_data: {
+      metadata,
+    },
+    success_url: `${checkoutInput.publicBaseUrl}/join?family_checkout=success&session_id={CHECKOUT_SESSION_ID}`,
   };
+  if (checkoutInput.stripeCustomerId) {
+    checkoutParams.customer = checkoutInput.stripeCustomerId;
+  }
   const checkoutSession = await withHostedStripeFailureLog(
     "checkout.sessions.create.family",
-    () => stripe.checkout.sessions.create({
-      cancel_url: `${checkoutInput.publicBaseUrl}/settings`,
-      client_reference_id: checkoutInput.group.id,
-      ...(checkoutInput.stripeCustomerId
-        ? { customer: checkoutInput.stripeCustomerId }
-        : {}),
-      line_items: [{
-        price: checkoutInput.priceId,
-        quantity: checkoutInput.seatCount,
-      }],
-      metadata,
-      mode: "subscription",
-      payment_method_types: ["card"],
-      subscription_data: {
-        metadata,
-      },
-      success_url: `${checkoutInput.publicBaseUrl}/join?family_checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-    }, {
+    () => stripe.checkout.sessions.create(checkoutParams, {
       idempotencyKey: buildHostedFamilyCheckoutIdempotencyKey({
         attemptId: checkoutInput.checkoutAttemptId,
         groupId: checkoutInput.group.id,
@@ -2648,20 +2651,17 @@ async function normalizeHostedFamilyDirectPaidSubscriptionMetadata(input: {
 function buildHostedFamilyDirectPaidSubscriptionMetadata(
   group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">,
 ): Stripe.MetadataParam {
-  return {
-    ...buildHostedFamilyStripeMetadata(group),
-    ...buildHostedFamilyStripeMetadataUnsetFields([
-      "checkoutOffer",
-      "memberId",
-      "trialDurationDays",
-      "trialPolicyVersion",
-      "trialUsageLimitUsdMicros",
-    ]),
-  };
-}
-
-function buildHostedFamilyStripeMetadataUnsetFields(keys: readonly string[]): Stripe.MetadataParam {
-  return Object.fromEntries(keys.map((key) => [key, ""]));
+  const metadata: Stripe.MetadataParam = buildHostedFamilyStripeMetadata(group);
+  for (const key of [
+    "checkoutOffer",
+    "memberId",
+    "trialDurationDays",
+    "trialPolicyVersion",
+    "trialUsageLimitUsdMicros",
+  ]) {
+    metadata[key] = "";
+  }
+  return metadata;
 }
 
 function isHostedFamilyDirectPaidSubscriptionMetadataNormalized(input: {
@@ -3041,27 +3041,28 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
 
   const increase = calculateHostedFamilyMonthlyAmountUsdCents(input.target) >
     calculateHostedFamilyMonthlyAmountUsdCents(stripeState.capacities);
+  const updateParams: Stripe.SubscriptionUpdateParams = {
+    expand: ["items.data.price"],
+    items: buildHostedFamilyStripeCapacityUpdateItems({
+      current: stripeState,
+      priceIdsByPlan,
+      target: input.target,
+    }),
+  };
+  if (input.memberTransition) {
+    updateParams.proration_behavior = "create_prorations";
+    updateParams.proration_date = input.memberTransition.prorationDate;
+  } else {
+    updateParams.proration_behavior = "always_invoice";
+    if (increase) {
+      updateParams.payment_behavior = "error_if_incomplete";
+    }
+  }
   const updated = await withHostedStripeFailureLog(
     "subscription.update.family-capacity",
     () => stripe.subscriptions.update(
       stripeSubscriptionId,
-      {
-        expand: ["items.data.price"],
-        items: buildHostedFamilyStripeCapacityUpdateItems({
-          current: stripeState,
-          priceIdsByPlan,
-          target: input.target,
-        }),
-        ...(input.memberTransition
-          ? {
-              proration_behavior: "create_prorations" as const,
-              proration_date: input.memberTransition.prorationDate,
-            }
-          : {
-              ...(increase ? { payment_behavior: "error_if_incomplete" as const } : {}),
-              proration_behavior: "always_invoice" as const,
-            }),
-      },
+      updateParams,
       {
         idempotencyKey: input.memberTransition?.idempotencyKey ??
           `family-capacity:${input.groupId}:${input.billingRef.updatedAt.getTime()}:${input.target.pulse}:${input.target.edge}`,
@@ -5794,7 +5795,11 @@ async function lockHostedFamilyBillingReconciliationTx(input: {
   group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
-  await lockHostedMemberRow(input.tx, input.group.ownerMemberId);
+  await lockHostedFamilyAccessMemberRowsTx({
+    groupId: input.group.id,
+    ownerMemberId: input.group.ownerMemberId,
+    tx: input.tx,
+  });
   const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
     select: {
       lastStripeEventCreatedAt: true,
@@ -5808,6 +5813,28 @@ async function lockHostedFamilyBillingReconciliationTx(input: {
     billingRef,
     eventCreatedAt: input.eventCreatedAt,
   });
+}
+
+async function lockHostedFamilyAccessMemberRowsTx(input: {
+  groupId: string;
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await lockHostedMemberRow(input.tx, input.ownerMemberId);
+  const memberships = await input.tx.hostedAccountGroupMembership.findMany({
+    orderBy: { memberId: "asc" },
+    select: { memberId: true },
+    where: {
+      groupId: input.groupId,
+      status: "active",
+    },
+  });
+  const memberIds = [...new Set(memberships.map(({ memberId }) => memberId))]
+    .filter((memberId) => memberId !== input.ownerMemberId)
+    .sort();
+  for (const memberId of memberIds) {
+    await lockHostedMemberRow(input.tx, memberId);
+  }
 }
 
 function isHostedFamilyStripeEventStale(input: {

@@ -1,6 +1,6 @@
-import { z } from 'zod'
+import { string as zString } from 'zod/v4'
 
-const offsetIsoTimestampSchema = z.string().datetime({ offset: true })
+const offsetIsoTimestampSchema = zString().datetime({ offset: true })
 
 export function normalizeNullableString(value: string | null | undefined): string | null {
   if (typeof value !== 'string') {
@@ -23,8 +23,7 @@ export function parseGatewayTimestampMs(value: string): number {
   return Date.parse(value)
 }
 
-export const isoTimestampSchema = z
-  .string()
+export const isoTimestampSchema = zString()
   .min(1)
   .refine(isGatewayIsoTimestamp, {
     message: 'Expected an ISO timestamp with an explicit offset.',

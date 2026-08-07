@@ -8,7 +8,7 @@ import {
   clinicalIsoDateTimeSchema,
   clinicalSourceSystemSchema,
 } from "@murphai/clinical-records";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 import {
   HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
   HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
