@@ -1,7 +1,7 @@
 # Measured Biomarker Index
 
 Status: Implemented
-Last verified: 2026-07-22
+Last verified: 2026-08-07
 
 ## Purpose
 
@@ -66,10 +66,11 @@ member-facing biomarker.
   and never become invented points.
 - When the latest result belongs to the normalized comparable series and has a
   numeric source range, show that range as quiet dashed boundary rules labeled
-  `Latest lab range`. Preserve exact one-sided source comparators. Clip the
-  two-sided rules to the data-focused vertical scale rather than compressing the
-  historical trend; extend that scale only enough to keep a one-sided limit
-  visible. Do not imply that older labs used the same range.
+  `Latest lab range`. Preserve exact one-sided source comparators. Fit the
+  vertical scale to the union of the comparable results and available range
+  bounds, then shade the in-range region with very light sage and the visible
+  below/above regions with very light sienna. Keep the label and dashed rules as
+  non-color cues, and do not imply that older labs used the same range.
 - When that latest comparable result has no usable numeric source range, an
   exact-unit authored Health Commons range may appear only as a named published
   adult comparator when the imported result has an explicitly eligible coarse
@@ -201,8 +202,8 @@ interchangeable assays, or shared reference guidance.
   status filters, flagged-first ordering, the one-row notebook shape,
   full-row links, the absence of `Other`, and the saved-but-unclassified empty
   state. Detail tests cover exact comparators, qualitative history, latest-range
-  band eligibility, missing or qualified range withholding, responsive ledger
-  structure, and Commons summary fallback.
+  band geometry and domain inclusion, missing or qualified range withholding,
+  responsive ledger structure, and Commons summary fallback.
 - Health Commons coverage tests resolve every requested lab and device identity,
   enforce the deliberate aliases and non-equivalences, validate one-sentence
   summaries and source locators, and lock the guidance-classification counts.
