@@ -565,20 +565,45 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       matcher: replyMatcher,
       replyPath,
     });
-    await expect(
-      requireScenario().harness.beginShutdownCheckpointGracefulStopForTest(
+    // Observe convergence without stopping the live owner. A graceful stop can
+    // legitimately release an immediate recheck, which starts a later owner
+    // and turns this ownership proof into a lifecycle-timing assertion.
+    await expect.poll(async () => {
+      const status = await requireScenario().harness.readUserStatus(
         identity.userId,
-      ),
-    ).resolves.toEqual({ ok: true });
-    const finalStatus = await requireScenario().waitForHostedCompletion(
-      identity.userId,
-      { timeoutMs: 60_000 },
-    );
-    expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(finalStatus.workspace?.redactedStatus).toMatchObject({
-      hostedMailboxSystemHandledThroughSeq: activationAppend.wake.seq,
-      hostedMailboxSystemImportedSeq: activationAppend.wake.seq,
+      );
+      const consumedConversation = await readHostedMailboxItemForTest({
+        dedupeKey: inboundEventId,
+        environment: requireScenario().runtimeEnv,
+        userId: identity.userId,
+      });
+      return {
+        activeFence: await readActiveRuntimeFenceForTest(identity.userId),
+        conversationConsumed: consumedConversation.consumedAt !== null,
+        lastErrorCode: status.lastErrorCode ?? null,
+        mailboxCaughtUp: status.mailboxLag.every((lane) => lane.lag === "0"),
+        systemHandledThroughSeq:
+          status.workspace?.redactedStatus?.hostedMailboxSystemHandledThroughSeq
+            ?? null,
+        systemImportedSeq:
+          status.workspace?.redactedStatus?.hostedMailboxSystemImportedSeq
+            ?? null,
+      };
+    }, {
+      interval: 250,
+      timeout: 60_000,
+    }).toEqual({
+      activeFence: initialFence,
+      conversationConsumed: true,
+      lastErrorCode: null,
+      mailboxCaughtUp: true,
+      systemHandledThroughSeq: activationAppend.wake.seq,
+      systemImportedSeq: activationAppend.wake.seq,
+    });
+    await assertExactlyOneAcceptedReplyAfterBoundary({
+      identity,
+      label: "post-enrollment default owner",
+      replyText,
     });
 
     await expect(readHostedMailboxItemForTest({
@@ -616,7 +641,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     expect(requireLinqStub().countAcceptedSends(replyPath, replyMatcher)).toBe(
       replyBaseline + 1,
     );
-
+    await requireScenario().assertHealthyHostedRun(identity.userId);
   }, 600_000);
 
   it("pages one operator incident through the real cron, database, and Resend boundary", async () => {
