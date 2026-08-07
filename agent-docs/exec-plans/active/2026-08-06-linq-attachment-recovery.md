@@ -126,6 +126,14 @@ Updated: 2026-08-06
   prepared intent; after reservation, the occurrence fails closed rather than
   risking a duplicate attachment. No user-facing failure notice, regeneration,
   or new recovery surface is introduced.
+- Accept final round 3's direct-materialization provenance finding. The existing
+  redacted-target recovery wrapper converted every transport-shaped error to
+  generic confirmation-pending state and erased the transient cumulative
+  reservation marker. Rethrow only that marked error unchanged before the
+  generic conversion, preserving the existing metadata and outbox ambiguity
+  owner while leaving all unmarked direct-thread recovery behavior intact.
+  ReviewGPT's production hunk is unchanged; parent validation narrowed its
+  total-fetch assertion to ignore the existing best-effort typing cleanup.
 
 ## Verification
 
@@ -181,3 +189,11 @@ Updated: 2026-08-06
   outbox/retry/cron 306/306 passed.
 - Final package typechecks for operator-config, assistant-engine, and
   assistant-runtime passed.
+- Direct-materialization remediation proof: hosted provider effects 20/20 and
+  the real hosted Linq outbox matrix 8/8 passed, including the redacted target,
+  proved same-wake routes, one reservation/PUT, no final `/chats` request, and
+  no later successor reservation.
+- Post-remediation owner suites passed again: hosted callbacks 215/215, Linq
+  transport 57/57, and assistant-engine outbox/retry/cron 306/306.
+- Post-remediation package typechecks for operator-config, assistant-engine,
+  and assistant-runtime passed.

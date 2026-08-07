@@ -273,23 +273,42 @@ it("terminalizes a two-image hosted Linq delivery when a later reservation yield
 
 it.each([
   {
+    homeRoute: null,
+    key: "post-upload-vault_image",
     label: "private image",
     mediaKind: "vault_image",
+    target: "linq_chat_hosted_post-upload-vault_image",
   },
   {
+    homeRoute: null,
+    key: "post-upload-vault_file",
     label: "private file",
     mediaKind: "vault_file",
+    target: "linq_chat_hosted_post-upload-vault_file",
+  },
+  {
+    homeRoute: {
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+    },
+    key: "redacted-direct-post-upload",
+    label: "redacted direct-materialization private image",
+    mediaKind: "vault_image",
+    target: "h1_111111111111111111111111",
   },
 ] as const)("terminalizes a hosted Linq $label delivery when foreground input arrives after upload but before the message send", async ({
+  homeRoute,
+  key,
   mediaKind,
+  target,
 }) => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
-  const key = `post-upload-${mediaKind}`;
   const fixture = await createHostedLinqAttachmentFixture({
+    ...(homeRoute ? { homeRoute } : {}),
     key,
     mediaKind,
-    target: `linq_chat_hosted_${key}`,
+    target,
   });
   const providerFetch = vi.fn<typeof fetch>(async (request) => {
     const url = String(request);
@@ -326,6 +345,17 @@ it.each([
   expect(preparation.preparedDispatches).toHaveLength(
     mediaKind === "vault_image" ? 1 : 0,
   );
+  if (homeRoute) {
+    expect(fixture.intent).toMatchObject({
+      actorId: homeRoute.directRecipientPhoneNumber,
+      bindingDelivery: { kind: "thread", target },
+      deliverySource: {
+        fromPhoneNumber: homeRoute.fromPhoneNumber,
+        kind: "linq",
+      },
+      explicitTarget: null,
+    });
+  }
   const onBackgroundDeliveryYield = vi.fn();
   let postUploadYieldRequested = false;
 
@@ -360,7 +390,9 @@ it.each([
     String(request).endsWith("/attachments")
   )).toHaveLength(1);
   expect(providerFetch.mock.calls.filter(([request]) =>
-    String(request).endsWith(`/chats/${fixture.target}/messages`)
+    String(request).endsWith(
+      homeRoute ? "/chats" : `/chats/${fixture.target}/messages`,
+    )
   )).toHaveLength(0);
   expect(publicInternetFetch).toHaveBeenCalledTimes(1);
   await expect(readAssistantOutboxIntent(
@@ -368,6 +400,7 @@ it.each([
     fixture.intent.intentId,
   )).resolves.toMatchObject({
     intentId: fixture.intent.intentId,
+    lastError: { code: "ASSISTANT_DELIVERY_AMBIGUOUS" },
     nextAttemptAt: null,
     status: "abandoned",
   });
@@ -396,7 +429,9 @@ it.each([
     String(request).endsWith("/attachments")
   )).toHaveLength(1);
   expect(providerFetch.mock.calls.filter(([request]) =>
-    String(request).endsWith(`/chats/${fixture.target}/messages`)
+    String(request).endsWith(
+      homeRoute ? "/chats" : `/chats/${fixture.target}/messages`,
+    )
   )).toHaveLength(0);
   expect(publicInternetFetch).toHaveBeenCalledTimes(1);
   await expect(listAssistantOutboxIntents(fixture.vaultRoot)).resolves.toEqual([
@@ -529,6 +564,10 @@ it.each([
 });
 
 async function createHostedLinqAttachmentFixture(input: {
+  homeRoute?: {
+    directRecipientPhoneNumber: string;
+    fromPhoneNumber: string;
+  };
   imageCount?: number;
   key: string;
   mediaKind?: "vault_file" | "vault_image";
@@ -599,10 +638,20 @@ async function createHostedLinqAttachmentFixture(input: {
     }
   }
   const intent = await createAssistantOutboxIntent({
-    actorId: `actor_${input.key}`,
+    actorId:
+      input.homeRoute?.directRecipientPhoneNumber ?? `actor_${input.key}`,
+    ...(input.homeRoute
+      ? {
+          bindingDelivery: { kind: "thread" as const, target: input.target },
+          deliverySource: {
+            fromPhoneNumber: input.homeRoute.fromPhoneNumber,
+            kind: "linq" as const,
+          },
+          explicitTarget: null,
+        }
+      : { explicitTarget: input.target }),
     channel: "linq",
     dedupeToken: input.key,
-    explicitTarget: input.target,
     identityId: `identity_${input.key}`,
     media,
     message: "Private generated image",
@@ -622,8 +671,10 @@ async function createHostedLinqAttachmentFixture(input: {
       bindingDeliveryKind: "thread",
       bindingDeliveryTarget: input.target,
       channel: "linq",
-      deliverySourceKey: null,
-      explicitTarget: input.target,
+      deliverySourceKey: input.homeRoute
+        ? `linq:${input.homeRoute.fromPhoneNumber}`
+        : null,
+      explicitTarget: input.homeRoute ? null : input.target,
       idempotencyKey:
         intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
       identityId: intent.identityId,
@@ -639,8 +690,9 @@ async function createHostedLinqAttachmentFixture(input: {
     },
   });
   const linqDeliveryContext = {
-    directRecipientPhoneNumber: null,
-    fromPhoneNumber: null,
+    directRecipientPhoneNumber:
+      input.homeRoute?.directRecipientPhoneNumber ?? null,
+    fromPhoneNumber: input.homeRoute?.fromPhoneNumber ?? null,
     replyToMessageId: null,
     routeAuthority: null,
     service: "iMessage" as const,

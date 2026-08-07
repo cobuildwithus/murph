@@ -832,6 +832,42 @@ describe("hosted provider effects", () => {
     expect(createChatCalls).toHaveLength(1);
   });
 
+  it("preserves attachment-reservation ambiguity through direct-thread materialization", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async () => {
+      throw Object.assign(new Error("Fresh input preempted the final Linq request."), {
+        linqAttachmentReservationMayHaveSucceeded: true as const,
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
+      message: "hello",
+      target: "h1_111111111111111111111111",
+      targetKind: "thread",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation,
+    })).rejects.toMatchObject({
+      code: "LINQ_API_REQUEST_FAILED",
+      context: expect.objectContaining({
+        failureStage: "transport",
+        operation: "create_chat",
+        retryable: false,
+      }),
+      linqAttachmentReservationMayHaveSucceeded: true,
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+    assert.equal(
+      String(fetchImplementation.mock.calls[0]?.[0]),
+      "https://api.linqapp.com/api/partner/v3/chats",
+    );
+  });
+
   it("does not materialize or send redacted Linq direct targets without an explicit sender", async () => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>

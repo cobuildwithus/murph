@@ -422,6 +422,14 @@ async function materializeHostedProviderLinqDirectThread(input: {
     if (isHostedProviderDeliveryConfirmationPendingError(error)) {
       throw error;
     }
+    if (
+      typeof error === "object"
+      && error !== null
+      && "linqAttachmentReservationMayHaveSucceeded" in error
+      && error.linqAttachmentReservationMayHaveSucceeded === true
+    ) {
+      throw error;
+    }
     if (isPotentiallyAcceptedLinqDirectThreadRecoveryError(error)) {
       throw createHostedProviderDeliveryConfirmationPendingError(
         "Recovered iMessage direct delivery could not be confirmed safely.",
