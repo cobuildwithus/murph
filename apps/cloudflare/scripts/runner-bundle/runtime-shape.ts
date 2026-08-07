@@ -1,6 +1,8 @@
 import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { RUNNER_BUNDLE_PRUNED_AFTER_BUNDLING_PACKAGE_NAMES } from "./bundle-shared.js";
+
 export async function pruneRunnerBundle(bundleDir: string): Promise<void> {
   await Promise.all([
     removeBundlePathIfPresent(path.join(bundleDir, "README.md")),
@@ -8,6 +10,18 @@ export async function pruneRunnerBundle(bundleDir: string): Promise<void> {
     removeBundlePathIfPresent(path.join(bundleDir, "LICENSE")),
   ]);
   await pruneNonRuntimeFiles(bundleDir);
+}
+
+export async function pruneBundledRunnerDependencies(
+  bundleDir: string,
+): Promise<void> {
+  await Promise.all(
+    RUNNER_BUNDLE_PRUNED_AFTER_BUNDLING_PACKAGE_NAMES.map((packageName) =>
+      removeBundlePathIfPresent(
+        path.join(bundleDir, "node_modules", ...packageName.split("/")),
+      ),
+    ),
+  );
 }
 
 async function pruneNonRuntimeFiles(rootDir: string): Promise<void> {

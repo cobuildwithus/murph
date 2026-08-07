@@ -1,10 +1,21 @@
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  access,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { assertPrunedRunnerDependenciesAreBundled } from "../scripts/runner-bundle/bundle-shared.js";
 import {
+  pruneBundledRunnerDependencies,
   rewriteRuntimeBinWrappers,
   rewriteRuntimePackageManifest,
 } from "../scripts/runner-bundle/runtime-shape.js";
@@ -17,6 +28,62 @@ afterEach(async () => {
       rm(directory, { force: true, recursive: true }),
     ),
   );
+});
+
+describe("post-bundle dependency pruning", () => {
+  it("removes the installed Junction SDK without touching sibling packages", async () => {
+    const bundleDir = await mkdtemp(path.join(tmpdir(), "murph-runner-runtime-shape-"));
+    const junctionPackageDir = path.join(
+      bundleDir,
+      "node_modules",
+      "@junction-api",
+      "sdk",
+    );
+    const siblingPackageJsonPath = path.join(
+      bundleDir,
+      "node_modules",
+      "@junction-api",
+      "retained",
+      "package.json",
+    );
+
+    temporaryDirectories.push(bundleDir);
+    await mkdir(junctionPackageDir, { recursive: true });
+    await mkdir(path.dirname(siblingPackageJsonPath), { recursive: true });
+    await writeFile(
+      path.join(junctionPackageDir, "package.json"),
+      JSON.stringify({ name: "@junction-api/sdk", version: "1.2.0" }),
+      "utf8",
+    );
+    await writeFile(
+      siblingPackageJsonPath,
+      JSON.stringify({ name: "@junction-api/retained", version: "1.0.0" }),
+      "utf8",
+    );
+
+    await pruneBundledRunnerDependencies(bundleDir);
+
+    await expect(access(junctionPackageDir)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(readFile(siblingPackageJsonPath, "utf8")).resolves.toContain(
+      "@junction-api/retained",
+    );
+  });
+
+  it("rejects an emitted bundle that still resolves the pruned SDK", () => {
+    expect(() =>
+      assertPrunedRunnerDependenciesAreBundled([
+        "./chunk.js",
+        "node:fs",
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      assertPrunedRunnerDependenciesAreBundled([
+        "@junction-api/sdk/serialization",
+      ]),
+    ).toThrow(/leaves @junction-api\/sdk\/serialization unresolved/);
+  });
 });
 
 describe("runner bundle runtime manifest rewriting", () => {
