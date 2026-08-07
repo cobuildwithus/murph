@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { findStripeRequestSpreadMatches } from "./check-stripe-request-spreads.ts";
+import {
+  findStripeRequestSpreadMatches,
+  stripeRequestScanRoots,
+} from "./check-stripe-request-spreads.ts";
 
 function blockedLines(source: string): number[] {
   return findStripeRequestSpreadMatches("apps/web/src/example.ts", source).map(
@@ -9,6 +12,21 @@ function blockedLines(source: string): number[] {
 }
 
 describe("check-stripe-request-spreads", () => {
+  it("scans App Router Stripe request owners", () => {
+    expect(stripeRequestScanRoots).toContain("apps/web/app");
+    expect(
+      findStripeRequestSpreadMatches(
+        "apps/web/app/api/settings/billing/portal/route.ts",
+        [
+          "stripe.billingPortal.sessions.create({",
+          "  ...(configuration ? { configuration } : {}),",
+          "  customer,",
+          "});",
+        ].join("\n"),
+      ).map((match) => match.line),
+    ).toEqual([2]);
+  });
+
   it("blocks direct and nested object spreads in Stripe request arguments", () => {
     expect(blockedLines([
       "stripe.checkout.sessions.create({",

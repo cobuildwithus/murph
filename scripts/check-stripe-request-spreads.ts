@@ -23,7 +23,11 @@ import {
 } from "@babel/types";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const scanRoots = ["apps/web/src", "apps/web/scripts"] as const;
+export const stripeRequestScanRoots = [
+  "apps/web/app",
+  "apps/web/scripts",
+  "apps/web/src",
+] as const;
 const sourceExtensions = new Set([".cts", ".mts", ".ts", ".tsx"]);
 const skippedDirectoryNames = new Set([
   ".next",
@@ -71,7 +75,7 @@ export interface StripeRequestSpreadMatch {
 
 export async function collectStripeRequestSpreadMatches(): Promise<StripeRequestSpreadMatch[]> {
   const matches: StripeRequestSpreadMatch[] = [];
-  for (const root of scanRoots) {
+  for (const root of stripeRequestScanRoots) {
     await scanDirectory(root, matches);
   }
   return matches;
