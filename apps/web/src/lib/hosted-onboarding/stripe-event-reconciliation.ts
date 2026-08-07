@@ -1415,9 +1415,15 @@ async function executeHostedLegacySyntheticFamilyCleanup(input: {
   if (!payment) {
     throw new Error("Legacy Family refund requires an exact paid invoice payment.");
   }
+  const refundListParams: Stripe.RefundListParams = { limit: 100 };
+  if ("payment_intent" in payment) {
+    refundListParams.payment_intent = payment.payment_intent;
+  } else {
+    refundListParams.charge = payment.charge;
+  }
   const refunds = await withHostedStripeFailureLog(
     "refunds.list.legacy-family-cleanup",
-    () => stripe.refunds.list({ ...payment, limit: 100 }),
+    () => stripe.refunds.list(refundListParams),
   );
   const matchingRefunds = refunds.data.filter((refund) =>
     refund.metadata?.[HOSTED_LEGACY_FAMILY_REFUND_INVOICE_METADATA_KEY] === input.invoice?.id
@@ -1433,14 +1439,19 @@ async function executeHostedLegacySyntheticFamilyCleanup(input: {
   }
 
   const refundInvoiceId = input.invoice.id;
+  const refundCreateParams: Stripe.RefundCreateParams = {
+    metadata: {
+      [HOSTED_LEGACY_FAMILY_REFUND_INVOICE_METADATA_KEY]: refundInvoiceId,
+    },
+  };
+  if ("payment_intent" in payment) {
+    refundCreateParams.payment_intent = payment.payment_intent;
+  } else {
+    refundCreateParams.charge = payment.charge;
+  }
   const refund = await withHostedStripeFailureLog(
     "refunds.create.legacy-family-cleanup",
-    () => stripe.refunds.create({
-      ...payment,
-      metadata: {
-        [HOSTED_LEGACY_FAMILY_REFUND_INVOICE_METADATA_KEY]: refundInvoiceId,
-      },
-    }, {
+    () => stripe.refunds.create(refundCreateParams, {
       idempotencyKey: `hosted-family-legacy-refund:${refundInvoiceId}`,
     }),
   );

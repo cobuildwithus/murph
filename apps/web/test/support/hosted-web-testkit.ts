@@ -29,7 +29,13 @@ import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/con
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
 import type { HostedAssistantProvider } from "@murphai/hosted-execution/assistant-model";
-import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+import {
+  parseHostedExecutionWake,
+  parseHostedRuntimeLatencyTraceEvent,
+} from "@murphai/hosted-execution/parsers";
+import type {
+  HostedRuntimeLatencyPhaseBreakdown,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
@@ -170,6 +176,20 @@ interface HostedIngressLatencyForTestPrismaClient {
         acceptedAt: Date;
       } | null;
     } | null>;
+    findUniqueOrThrow(args: unknown): Promise<{
+      acceptedAt: Date;
+      assistantInputId: string | null;
+      assistantInputStagedAt: Date | null;
+      mailboxImportDoneAt: Date | null;
+      mailboxItemId: string;
+      phaseBreakdownJson: unknown;
+      providerStartAt: Date | null;
+      runnerJobAcceptedAt: Date | null;
+      runtimeAttemptId: string | null;
+      runtimePhaseStartedAt: Date | null;
+      source: string;
+      workspaceRestoreDoneAt: Date | null;
+    }>;
     update(args: unknown): Promise<{
       acceptedAt: Date;
       id: string;
@@ -675,6 +695,7 @@ export interface HostedAiUsageForTestRow {
 
 interface HostedRuntimeLogForTestPrismaRow {
   at: Date;
+  attemptId: string | null;
   component: string;
   eventCode: string;
   level: string;
@@ -684,11 +705,24 @@ interface HostedRuntimeLogForTestPrismaRow {
 
 export interface HostedRuntimeLogForTestRow {
   at: string;
+  attemptId: string | null;
   component: string;
   eventCode: string;
   level: string;
   phase: string;
   redactedJson: Record<string, unknown> | null;
+}
+
+export interface HostedIngressLatencyTraceForTest {
+  acceptedAt: string;
+  assistantInputStagedAt: string;
+  mailboxImportDoneAt: string | null;
+  phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown | null;
+  providerStartAt: string | null;
+  runnerJobAcceptedAt: string | null;
+  runtimeAttemptId: string | null;
+  runtimePhaseStartedAt: string | null;
+  workspaceRestoreDoneAt: string | null;
 }
 
 export async function appendHostedExecutionWakeForTest(input: {
@@ -1496,28 +1530,82 @@ export async function completeHostedComputerHandoffForTest(input: {
 
 export async function listHostedRuntimeLogsForTest(input: {
   environment?: NodeJS.ProcessEnv;
+  fromAt?: Date | string | null;
   limit?: number;
   userId: string;
 }): Promise<HostedRuntimeLogForTestRow[]> {
   return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const fromAt = input.fromAt ? new Date(input.fromAt) : null;
+    if (fromAt && !Number.isFinite(fromAt.getTime())) {
+      throw new TypeError("Hosted runtime log test lower bound must be a valid date.");
+    }
     const rows = await deps.prisma.hostedRuntimeLog.findMany({
       orderBy: {
         at: "asc",
       },
       take: normalizeHostedTestingLimit(input.limit ?? 1_000),
       where: {
+        ...(fromAt ? { at: { gte: fromAt } } : {}),
         userId: input.userId,
       },
     });
 
     return rows.map((row) => ({
       at: row.at.toISOString(),
+      attemptId: row.attemptId,
       component: row.component,
       eventCode: row.eventCode,
       level: row.level,
       phase: row.phase,
       redactedJson: normalizeHostedTestingRedactedJson(row.redactedJson),
     }));
+  });
+}
+
+export async function readHostedIngressLatencyTraceForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  mailboxItemId: string;
+  userId: string;
+}): Promise<HostedIngressLatencyTraceForTest> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const row = await deps.prisma.hostedIngressLatencyTrace.findUniqueOrThrow({
+      where: {
+        userId_mailboxItemId: {
+          mailboxItemId: input.mailboxItemId,
+          userId: input.userId,
+        },
+      },
+    });
+    if (!row.assistantInputId || !row.assistantInputStagedAt) {
+      throw new Error("Hosted latency trace is missing its staged assistant input.");
+    }
+    const parsed = parseHostedRuntimeLatencyTraceEvent({
+      assistantInputId: row.assistantInputId,
+      at: row.assistantInputStagedAt.toISOString(),
+      mailboxItemId: row.mailboxItemId,
+      phaseBreakdown: row.phaseBreakdownJson,
+      runnerJobAcceptedAt: row.runnerJobAcceptedAt?.toISOString() ?? null,
+      runtimeAttemptId: row.runtimeAttemptId,
+      runtimePhaseStartedAt: row.runtimePhaseStartedAt?.toISOString() ?? null,
+      source: row.source,
+      type: "assistant_input_staged",
+      workspaceRestoreDoneAt: row.workspaceRestoreDoneAt?.toISOString() ?? null,
+    });
+    if (parsed.type !== "assistant_input_staged") {
+      throw new Error("Hosted latency trace parser returned the wrong event type.");
+    }
+
+    return {
+      acceptedAt: row.acceptedAt.toISOString(),
+      assistantInputStagedAt: row.assistantInputStagedAt.toISOString(),
+      mailboxImportDoneAt: row.mailboxImportDoneAt?.toISOString() ?? null,
+      phaseBreakdown: parsed.phaseBreakdown ?? null,
+      providerStartAt: row.providerStartAt?.toISOString() ?? null,
+      runnerJobAcceptedAt: parsed.runnerJobAcceptedAt ?? null,
+      runtimeAttemptId: parsed.runtimeAttemptId ?? null,
+      runtimePhaseStartedAt: parsed.runtimePhaseStartedAt ?? null,
+      workspaceRestoreDoneAt: parsed.workspaceRestoreDoneAt ?? null,
+    };
   });
 }
 
