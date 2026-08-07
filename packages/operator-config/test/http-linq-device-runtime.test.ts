@@ -2054,6 +2054,31 @@ test.each([
       upload_url: 'https://uploads.example.test/upload/report',
     },
   },
+  {
+    label: 'empty required headers',
+    payload: {
+      attachment_id: 'attachment_empty_headers',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {},
+      detail: 'reservation-secret-value',
+      upload_url: 'https://uploads.example.test/upload/report',
+    },
+  },
+  {
+    label: 'all-blank required headers',
+    payload: {
+      attachment_id: 'attachment_blank_headers',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        '   ': '   ',
+        'content-type': '   ',
+      },
+      detail: 'reservation-secret-value',
+      upload_url: 'https://uploads.example.test/upload/report',
+    },
+  },
 ])('linq runtime marks a successful reservation with $label as post-reservation ambiguity', async ({ payload }) => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test/custom/',

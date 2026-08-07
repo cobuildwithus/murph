@@ -1921,9 +1921,9 @@ function parseLinqAttachmentUploadResponse(
   const expiresAt = normalizeNullableString(readStringField(record, 'expires_at'))
   const downloadUrl = normalizeNullableString(readStringField(record, 'download_url'))
   const httpMethod = normalizeNullableString(readStringField(record, 'http_method'))
-  const requiredHeaders = readStringRecord(record?.required_headers)
+  const rawRequiredHeaders = readStringRecord(record?.required_headers)
 
-  if (!attachmentId || !rawUploadUrl || !expiresAt || !requiredHeaders) {
+  if (!attachmentId || !rawUploadUrl || !expiresAt || !rawRequiredHeaders) {
     throw createLinqAttachmentReservationResponseError({
       message: 'Linq attachment upload response was missing required fields.',
       payload: value,
@@ -1933,6 +1933,19 @@ function parseLinqAttachmentUploadResponse(
   if (httpMethod && httpMethod.toUpperCase() !== 'PUT') {
     throw createLinqAttachmentReservationResponseError({
       message: 'Linq attachment upload response returned an unsupported upload method.',
+      payload: value,
+      status,
+    })
+  }
+
+  let requiredHeaders: Record<string, string>
+  try {
+    requiredHeaders = normalizeLinqRequiredHeaders(rawRequiredHeaders)
+  } catch (error) {
+    throw createLinqAttachmentReservationResponseError({
+      message: error instanceof VaultCliError
+        ? error.message
+        : 'Linq attachment upload response returned invalid upload headers.',
       payload: value,
       status,
     })

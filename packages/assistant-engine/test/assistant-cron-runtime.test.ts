@@ -11461,6 +11461,16 @@ describe('assistant cron runtime orchestration', () => {
         upload_url: 'https://uploads.example.test/private/required-unsupported-method',
       },
     },
+    {
+      label: 'empty required headers',
+      payload: {
+        attachment_id: 'attachment_required_empty_headers',
+        expires_at: '2026-08-06T21:00:00.000Z',
+        http_method: 'PUT',
+        required_headers: {},
+        upload_url: 'https://uploads.example.test/private/required-empty-headers',
+      },
+    },
   ])('consumes a finite required-send occurrence after a 2xx reservation with $label', async ({
     label,
     payload,
@@ -11527,6 +11537,33 @@ describe('assistant cron runtime orchestration', () => {
 
     const intents = await listAssistantOutboxIntents(fixture.vaultRoot)
     expect(intents.map((candidate) => candidate.intentId)).toEqual([
+      fixture.intent.intentId,
+    ])
+    expect(reservationFetch).toHaveBeenCalledTimes(1)
+    expect(uploadFetch).not.toHaveBeenCalled()
+    expect(sendLinq).toHaveBeenCalledTimes(1)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+
+    vi.setSystemTime(new Date('2026-08-06T20:11:00.000Z'))
+    const staleWake = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      intentId: fixture.intent.intentId,
+      now: new Date('2026-08-06T20:11:00.000Z'),
+      vault: fixture.vaultRoot,
+    })
+    expect(staleWake.intent).toMatchObject({
+      intentId: fixture.intent.intentId,
+      lastError: { code: 'ASSISTANT_DELIVERY_AMBIGUOUS' },
+      status: 'abandoned',
+    })
+    await expect(processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      limit: 1,
+      vault: fixture.vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 0, succeeded: 0 })
+
+    const staleHorizonIntents = await listAssistantOutboxIntents(fixture.vaultRoot)
+    expect(staleHorizonIntents.map((candidate) => candidate.intentId)).toEqual([
       fixture.intent.intentId,
     ])
     expect(reservationFetch).toHaveBeenCalledTimes(1)

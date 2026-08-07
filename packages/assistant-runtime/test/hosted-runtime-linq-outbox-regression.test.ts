@@ -514,6 +514,17 @@ it.each([
     },
   },
   {
+    key: "empty-headers",
+    label: "empty required headers",
+    payload: {
+      attachment_id: "attachment_empty_headers",
+      expires_at: "2026-08-06T21:00:00.000Z",
+      http_method: "PUT",
+      required_headers: {},
+      upload_url: "https://uploads.example.test/private/empty-headers",
+    },
+  },
+  {
     key: "malformed-json",
     label: "malformed JSON",
     payload: null,
@@ -541,6 +552,7 @@ it.each([
   });
   const publicInternetFetch = vi.fn<typeof fetch>(async () =>
     new Response(null, { status: 204 }));
+  const onBackgroundDeliveryYield = vi.fn();
   const drainInput = buildHostedLinqDrainInput({
     fixture,
     providerFetch,
@@ -549,6 +561,7 @@ it.each([
 
   const outcomes = await drainHostedPreparedAssistantDeliveries({
     ...drainInput,
+    onBackgroundDeliveryYield,
     shouldYieldBackgroundDelivery: () => false,
   });
 
@@ -563,13 +576,19 @@ it.each([
   expect(providerFetch.mock.calls.filter(([request]) =>
     String(request).endsWith("/attachments")
   )).toHaveLength(1);
+  expect(providerFetch.mock.calls.filter(([request]) =>
+    String(request).endsWith(`/chats/${fixture.target}/messages`)
+  )).toHaveLength(0);
   expect(publicInternetFetch).not.toHaveBeenCalled();
+  expect(onBackgroundDeliveryYield).not.toHaveBeenCalled();
   await expect(readAssistantOutboxIntent(
     fixture.vaultRoot,
     fixture.intent.intentId,
   )).resolves.toMatchObject({
     intentId: fixture.intent.intentId,
+    lastError: { code: "ASSISTANT_DELIVERY_AMBIGUOUS" },
     nextAttemptAt: null,
+    preparedDispatchToken: null,
     status: "abandoned",
   });
 
@@ -596,7 +615,11 @@ it.each([
   expect(providerFetch.mock.calls.filter(([request]) =>
     String(request).endsWith("/attachments")
   )).toHaveLength(1);
+  expect(providerFetch.mock.calls.filter(([request]) =>
+    String(request).endsWith(`/chats/${fixture.target}/messages`)
+  )).toHaveLength(0);
   expect(publicInternetFetch).not.toHaveBeenCalled();
+  expect(onBackgroundDeliveryYield).not.toHaveBeenCalled();
   await expect(listAssistantOutboxIntents(fixture.vaultRoot)).resolves.toEqual([
     expect.objectContaining({
       intentId: fixture.intent.intentId,
