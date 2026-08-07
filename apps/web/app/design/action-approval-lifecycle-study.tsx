@@ -10,7 +10,7 @@ import { Button } from "@/src/components/ui/button";
 export function ActionApprovalLifecycleStudy() {
   return (
     <div
-      className="grid gap-8 lg:grid-cols-3 [&_main]:min-h-0 [&_main]:bg-transparent [&_main]:p-0 [&_section]:min-h-0"
+      className="grid gap-8 xl:grid-cols-3 [&_main]:min-h-0 [&_main]:min-w-0 [&_main]:bg-transparent [&_main]:p-0 [&_section]:min-h-0 [&_section]:min-w-0"
       data-design-section="action-approval-lifecycle"
     >
       <div inert>
@@ -21,7 +21,7 @@ export function ActionApprovalLifecycleStudy() {
           title="Send this file?"
         >
           <div className="mt-7 border-t border-[#c4a882]/25 pt-6">
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex flex-col gap-3">
               <Button size="lg">Approve with passkey</Button>
               <Button size="lg" variant="ghost">Deny</Button>
             </div>
@@ -53,7 +53,7 @@ function DecisionFallbackStudy({
       title="Send this file?"
     >
       <div className="mt-7 border-t border-[#c4a882]/25 pt-6">
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="flex flex-col gap-3">
           <Button disabled size="lg">Approve with passkey</Button>
           <Button disabled size="lg" variant="ghost">Deny</Button>
         </div>
