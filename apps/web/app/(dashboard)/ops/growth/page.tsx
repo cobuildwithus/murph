@@ -92,7 +92,7 @@ export default async function HostedOpsGrowthPage() {
 
       <section aria-labelledby="growth-revenue-title" className="flex flex-col gap-4">
         <SectionHeading
-          description="Recurring plan MRR comes from active paid plan definitions. Sponsorship is shown separately below because it is usage-backed rather than contracted recurring revenue. The tracked top-up total starts with retained fulfilled history at cutover, adds each new first fulfillment, and may omit purchases deleted before tracking began."
+          description="Recurring plan MRR comes from active paid plan definitions. Sponsorship stays separate because it is usage-backed rather than contracted recurring revenue. The tracked top-up count covers every fulfilled usage-credit purchase, including sponsorship charges, so it overlaps the sponsorship counts below and is not additive. It starts with retained fulfilled history at cutover, adds each new first fulfillment, and may omit purchases deleted before tracking began."
           id="growth-revenue-title"
           title="Revenue mix"
         />
@@ -134,11 +134,11 @@ export default async function HostedOpsGrowthPage() {
                 </TableCell>
               </TableRow>
               <TableRow>
-                <TableCell>Tracked fulfilled usage top-ups</TableCell>
+                <TableCell>All tracked fulfilled usage-credit purchases</TableCell>
                 <TableCell className="text-right">
                   {formatInteger(dashboard.usageTopUps.trackedFulfilled)}
                 </TableCell>
-                <TableCell className="text-right">One-time</TableCell>
+                <TableCell className="text-right">Not MRR</TableCell>
               </TableRow>
               <TableRow>
                 <TableCell>Unpriced paid members</TableCell>
