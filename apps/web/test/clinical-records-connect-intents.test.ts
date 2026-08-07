@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   deleteMany: vi.fn(),
+  executeRaw: vi.fn(),
   findUnique: vi.fn(),
   oauthUpdateMany: vi.fn(),
   resolveClinicalProviderDirectoryEntry: vi.fn(),
@@ -23,7 +24,9 @@ vi.mock("@/src/lib/prisma", () => ({
     };
     return {
       clinicalRecordConnectIntent,
+      $executeRaw: mocks.executeRaw,
       $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+        $executeRaw: mocks.executeRaw,
         clinicalRecordConnectIntent,
         clinicalRecordOauthSession: { updateMany: mocks.oauthUpdateMany },
       }),
@@ -44,6 +47,8 @@ describe("Clinical Records connect intents", () => {
     vi.clearAllMocks();
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.oauthUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.executeRaw.mockResolvedValue(0);
+    mocks.findUnique.mockResolvedValue(null);
     mocks.resolveClinicalProviderDirectoryEntry.mockImplementation((id: string) => ({ id }));
     mocks.updateMany.mockResolvedValue({ count: 1 });
   });

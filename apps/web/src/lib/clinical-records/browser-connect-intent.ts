@@ -1,4 +1,6 @@
 const CLINICAL_RECORDS_CONNECT_PATH = "/records/connect";
+const CLINICAL_RECORDS_LAUNCH_PARAM = "launch";
+const CLINICAL_RECORDS_LAUNCH_VALUE = "clinical-records";
 const CLINICAL_RECORDS_INTENT_HASH_KEY = "clinicalRecordsIntent";
 const CLINICAL_RECORDS_INTENT_HISTORY_KEY = "__murphClinicalRecordsConnectIntent";
 const CLINICAL_RECORDS_INTENT_PATTERN = /^cr_[A-Za-z0-9_-]{32}$/u;
@@ -60,6 +62,45 @@ export function hasStagedClinicalRecordsConnectIntentForCurrentPath(): boolean {
     typeof window !== "undefined"
     && window.location.pathname === CLINICAL_RECORDS_CONNECT_PATH
     && readStagedClinicalRecordsConnectIntent(),
+  );
+}
+
+export function isClinicalRecordsConnectLauncherForCurrentPath(): boolean {
+  if (
+    typeof window === "undefined"
+    || window.location.pathname !== CLINICAL_RECORDS_CONNECT_PATH
+  ) {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return params.size === 1
+    && params.getAll(CLINICAL_RECORDS_LAUNCH_PARAM).length === 1
+    && params.get(CLINICAL_RECORDS_LAUNCH_PARAM)
+      === CLINICAL_RECORDS_LAUNCH_VALUE;
+}
+
+export function stageClinicalRecordsConnectIntentInBrowser(claim: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const normalizedClaim = normalizeClinicalRecordsConnectIntentClaim(claim);
+  const url = readCurrentUrl();
+  if (!normalizedClaim || !url) {
+    throw new TypeError("Clinical Records connect intent claim is invalid.");
+  }
+
+  const hashParams = readHashParams(url.hash);
+  hashParams.delete(CLINICAL_RECORDS_INTENT_HASH_KEY);
+  url.hash = hashParams.toString();
+  window.history.replaceState(
+    withStagedClinicalRecordsConnectIntent(
+      window.history.state,
+      normalizedClaim,
+    ),
+    "",
+    url.toString(),
   );
 }
 

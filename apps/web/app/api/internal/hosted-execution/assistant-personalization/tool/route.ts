@@ -2,6 +2,7 @@ import {
   HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
   parseHostedRuntimeAssistantPersonalizationToolAuthority,
   parseHostedRuntimeAssistantPersonalizationToolRequest,
+  type HostedRuntimeAssistantPersonalizationToolAuthority,
 } from "@murphai/hosted-execution/assistant-personalization";
 import { after } from "next/server";
 
@@ -21,7 +22,7 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
   });
-  const authority = readAssistantInputAuthority(request);
+  const authority = readAssistantUpdateAuthority(request);
   if (isAssistantPreferenceCausalSeqRequest(payload)) {
     throw new TypeError(
       "Direct-vault assistant preference sequence resolution is retired.",
@@ -36,7 +37,7 @@ export const POST = withJsonError(async (request: Request) => {
     && authority === null
   ) {
     throw new TypeError(
-      "Assistant personalization update requires assistant input authority.",
+      "Assistant personalization update requires accepted-input or scheduled-occurrence authority.",
     );
   }
 
@@ -55,18 +56,50 @@ function isAssistantPreferenceCausalSeqRequest(value: unknown): boolean {
     && value.action === RETIRED_PREFERENCE_CAUSAL_SEQ_ACTION;
 }
 
-function readAssistantInputAuthority(request: Request): {
-  authority: { assistantInputId: string };
-} | null {
-  const value = new URL(request.url).searchParams.get("assistantInputId");
-  if (value === null) {
+function readAssistantUpdateAuthority(request: Request):
+  | { authority: HostedRuntimeAssistantPersonalizationToolAuthority }
+  | null {
+  const search = new URL(request.url).searchParams;
+  const assistantInputId = search.get("assistantInputId");
+  const automationId = search.get("automationId");
+  const occurrenceAt = search.get("occurrenceAt");
+  const toolCallId = search.get("toolCallId");
+  if (
+    assistantInputId === null
+    && automationId === null
+    && occurrenceAt === null
+    && toolCallId === null
+  ) {
     return null;
   }
-  return {
-    authority: parseHostedRuntimeAssistantPersonalizationToolAuthority({
-      assistantInputId: value,
-    }),
-  };
+  if (
+    assistantInputId !== null
+    && automationId === null
+    && occurrenceAt === null
+  ) {
+    return {
+      authority: parseHostedRuntimeAssistantPersonalizationToolAuthority({
+        assistantInputId,
+        ...(toolCallId ? { toolCallId } : {}),
+      }),
+    };
+  }
+  if (
+    assistantInputId === null
+    && automationId !== null
+    && occurrenceAt !== null
+  ) {
+    return {
+      authority: parseHostedRuntimeAssistantPersonalizationToolAuthority({
+        automationId,
+        occurrenceAt,
+        ...(toolCallId ? { toolCallId } : {}),
+      }),
+    };
+  }
+  throw new TypeError(
+    "Hosted assistant personalization action authority is invalid.",
+  );
 }
 
 function scheduleMailboxWakeAfterResponse(input: {
