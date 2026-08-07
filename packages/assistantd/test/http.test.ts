@@ -880,7 +880,6 @@ test('assistantd http server enforces bearer auth, validates requests, and route
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        prompt: 'start over assistantd',
         vault: '/tmp/vault',
       }),
     })
@@ -1259,6 +1258,35 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     )
     assert.equal(invalidCronRunsJob.status, 400)
     assert.match(await invalidCronRunsJob.text(), /cron job id/u)
+
+    for (const engineOwnedField of [
+      { actorId: 'stale-actor' },
+      { allowBindingRebind: true },
+    ]) {
+      const invalidEngineOwnedField = await fetch(
+        `${handle.address.baseUrl}/message`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${controlToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ...engineOwnedField,
+            participantId: 'intended-participant',
+            prompt: 'hello over assistantd',
+            sessionId: TEST_SESSION.sessionId,
+            vault: '/tmp/vault',
+          }),
+        },
+      )
+      assert.equal(invalidEngineOwnedField.status, 400)
+      assert.match(
+        await invalidEngineOwnedField.text(),
+        /field .* is not supported/u,
+      )
+    }
+    assert.equal(sendMessage.mock.calls.length, 1)
 
     const invalidConversationField = await fetch(`${handle.address.baseUrl}/message`, {
       method: 'POST',

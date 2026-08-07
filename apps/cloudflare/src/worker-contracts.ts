@@ -23,6 +23,14 @@ export interface WorkerAiBindingLike {
   run(model: string, input: Record<string, unknown>): Promise<unknown>;
 }
 
+export interface WorkerAnalyticsEngineDatasetLike {
+  writeDataPoint(dataPoint: {
+    blobs?: string[];
+    doubles?: number[];
+    indexes?: string[];
+  }): void;
+}
+
 export type WorkerProviderEgressTokenValidationRejectReason =
   | "missing_provider_egress_token"
   | "missing_runner_state"
@@ -215,6 +223,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN?: string;
   HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID?: string;
   HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET?: string;
+  HOSTED_RUNTIME_RETRY_ANALYTICS?: WorkerAnalyticsEngineDatasetLike;
   HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS?: string;
   HOSTED_AI_USAGE_REPORTING_SECRET?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
