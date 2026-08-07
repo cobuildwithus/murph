@@ -296,6 +296,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(onTiming).toHaveBeenCalledWith({
       directEnsureRequestStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       directEnsureResponseReceivedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
+      orchestrationAttemptId: "web-ingress-attempt-test",
       tokenAcquiredAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       tokenAcquireStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.000Z"),
     });
@@ -390,6 +391,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(onTiming).toHaveBeenCalledWith({
       directEnsureRequestStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       directEnsureResponseReceivedAtEpochMs: Date.parse("2026-07-06T12:00:00.025Z"),
+      orchestrationAttemptId: "web-ingress-attempt-test",
       tokenAcquiredAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       tokenAcquireStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.000Z"),
     });
