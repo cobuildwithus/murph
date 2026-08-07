@@ -500,9 +500,6 @@ importers:
       '@cfworker/json-schema':
         specifier: ^4.1.1
         version: 4.1.1
-      '@junction-api/sdk':
-        specifier: 1.2.0
-        version: 1.2.0
       '@modelcontextprotocol/server':
         specifier: ^2.0.0-alpha.2
         version: 2.0.0-alpha.2(@cfworker/json-schema@4.1.1)
@@ -646,9 +643,6 @@ importers:
 
   packages/device-syncd:
     dependencies:
-      '@junction-api/sdk':
-        specifier: 1.2.0
-        version: 1.2.0
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -658,6 +652,10 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
+    devDependencies:
+      '@junction-api/sdk':
+        specifier: 1.2.0
+        version: 1.2.0
 
   packages/exercise-library:
     devDependencies:
@@ -713,9 +711,6 @@ importers:
 
   packages/hosted-execution:
     dependencies:
-      '@junction-api/sdk':
-        specifier: 1.2.0
-        version: 1.2.0
       '@murphai/clinical-records':
         specifier: workspace:*
         version: link:../clinical-records
