@@ -3,7 +3,10 @@ import "server-only";
 import type { PrismaClient } from "@prisma/client";
 import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 
-import { readHostedGroupFundingRecoveryStatus } from "../hosted-groups/group-usage-funding";
+import {
+  buildHostedGroupUsageFundingLocatorForRuntimeMember,
+  buildHostedGroupUsageFundingUrl,
+} from "../hosted-groups/group-usage-funding";
 import type { HostedAiUsageLimitNoticeCode } from "./usage-allowance";
 import { readHostedPersonalAiUsageStatus } from "./usage-status";
 
@@ -12,7 +15,7 @@ const HOSTED_GROUP_USAGE_LIMIT_RECOVERY_MESSAGE =
 
 /**
  * Adds or replaces delivery copy only from current delivery-time authority.
- * Any projection failure leaves the canonical notice unchanged.
+ * A group exhaustion notice is not sendable without its mandatory action.
  */
 export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
   memberId: string;
@@ -22,22 +25,25 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
 }): Promise<string> {
   try {
     if (input.noticeCode === "thread_usage_limit_reached") {
-      const status = await readHostedGroupFundingRecoveryStatus({
-        prisma: input.prisma,
-        runtimeMemberId: input.memberId,
-      });
-      if (
-        !status?.fundingNeeded
-        || !status.fundingUrl
-      ) {
-        return input.message;
+      const locator = buildHostedGroupUsageFundingLocatorForRuntimeMember(
+        input.memberId,
+      );
+      const projectedUrl = locator
+        ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
+        : null;
+      if (!projectedUrl) {
+        throw new TypeError(
+          "Hosted group usage-limit recovery URL is unavailable.",
+        );
       }
       const fundingUrl = new URL(
-        status.fundingUrl,
+        projectedUrl,
         `${MURPH_PRODUCT_ORIGIN}/`,
       );
       if (fundingUrl.origin !== MURPH_PRODUCT_ORIGIN) {
-        return input.message;
+        throw new TypeError(
+          "Hosted group usage-limit recovery URL is not first-party.",
+        );
       }
       return `${HOSTED_GROUP_USAGE_LIMIT_RECOVERY_MESSAGE}\n${fundingUrl.toString()}`;
     }
@@ -57,7 +63,10 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
     }
 
     return `${input.message}\n\n${action.label}: ${actionUrl.toString()}`;
-  } catch {
+  } catch (cause) {
+    if (input.noticeCode === "thread_usage_limit_reached") {
+      throw cause;
+    }
     return input.message;
   }
 }

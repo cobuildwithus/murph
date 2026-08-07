@@ -466,7 +466,10 @@ immediate-restoration promise or payer pressure. Opening the link must still
 preserve the single-automatic-sponsor invariant and show the payment options
 appropriate to the authenticated payer. Also smoke an explicit funding request
 in a healthy room and confirm Murph returns the first-party link without
-claiming the room needs funding.
+claiming the room needs funding. Finally, make mandatory-link projection fail
+before a denied-gate attempt, confirm no Linq or Telegram claim/provider send is
+made with linkless copy, restore the projection, and confirm the same capacity
+epoch sends the validated linked notice.
 
 ## Thread Usage Crossing Notice Rollout
 

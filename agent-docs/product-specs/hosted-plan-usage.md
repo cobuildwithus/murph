@@ -514,16 +514,22 @@ or a post-action confirmation requires it. A deterministic group exhaustion
 notice may use only the exact originating external-thread target after Web
 re-authorizes its persisted thread authority; no personal-home fallback is
 valid for an accepted group conversation. At delivery time Web rechecks the
-exhausted state and sends the group's funding link with one neutral group pause
-contract, using the owner join code when one exists or the signed funding-only
-locator when none does. This notice has one behavior regardless of current
+exhausted state in the existing notice claim and sends the group's funding link
+with one neutral group pause contract. The mandatory action URL uses a signed
+funding-only locator derived from the runtime member, so private sponsor state,
+group display data, join-code preference, and access lookups cannot remove it
+before the claim. This notice has one behavior regardless of current
 funding setup: it says Murph is paused, identifies the link as private options
 to add more time, and says the room may instead wait for reset. It does not use
 rotating payer-pressure copy or promise immediate restoration. The funding page
 separately preserves any active automatic
 sponsor and the single-sponsor billing invariant. The notice does not expose
 payment setup, name a payer, amount, cap, balance, or refill, claim that payment
-occurred, or add a separate scheduler or money-prompt lifecycle.
+occurred, or add a separate scheduler or money-prompt lifecycle. If the
+mandatory locator, first-party origin, or signing configuration is unavailable,
+delivery fails before the capacity-epoch claim/provider path instead of sending
+linkless fallback copy. The existing denied-gate retry reprojects that same
+epoch after recovery.
 
 ## Non-Goals
 

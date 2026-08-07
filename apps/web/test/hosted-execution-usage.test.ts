@@ -125,6 +125,7 @@ describe("recordHostedAiUsageRecords", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -274,6 +275,59 @@ describe("recordHostedAiUsageRecords", () => {
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread)
       .not.toHaveBeenCalled();
     expect(routingMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      channel: "linq" as const,
+      replyToMessageId: "linq_message_usage_origin",
+      routeAuthority: {
+        channel: "linq" as const,
+        containerMemberId: "container_member_usage_origin",
+        threadId: "linq_thread_usage_origin",
+      },
+      target: "linq_chat_usage_origin",
+    },
+    {
+      channel: "telegram" as const,
+      replyToMessageId: "telegram_message_usage_origin",
+      target: "telegram_thread_usage_origin",
+    },
+  ])("never claims a linkless $channel thread crossing notice", async (
+    noticeDeliveryTarget,
+  ) => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const hostedAiUsageUpsert = vi.fn(
+      async (args: { create: Record<string, unknown> }) => args.create,
+    );
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate({
+        noticeCode: "thread_usage_limit_reached",
+        noticeMessage: "This thread has reached its Murph AI limit for now.",
+      }),
+    );
+    noticeMocks.projectHostedAiUsageLimitNoticeForDelivery.mockRejectedValueOnce(
+      new Error("mandatory recovery URL unavailable"),
+    );
+
+    await recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      noticeDeliveryTarget,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    });
+
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .not.toHaveBeenCalled();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread)
+      .not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(
+      "Hosted AI usage-limit notice delivery failed.",
+      expect.objectContaining({ noticeCode: "thread_usage_limit_reached" }),
+    );
+    warning.mockRestore();
   });
 
   it("sends a crossing notice to an originating personal Linq home thread", async () => {

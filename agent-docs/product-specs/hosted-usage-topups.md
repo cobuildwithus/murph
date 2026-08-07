@@ -479,13 +479,17 @@ signal was returned, and uses the same warning and follow-up contract for every
 room. Referral eligibility uses the ordinary runtime access gate and does not
 invoke this funding projection.
 
-For a group exhaustion notice, delivery re-reads the current group usage
-recovery projection and always sends its current first-party funding link with
-one deterministic neutral pause message. The message identifies private options
-and waiting for reset without pressuring a payer or promising instant recovery.
-The delivery-critical read is separate from funding-page sponsor state. This is
-one branchless message contract; it exposes no payment setup, payer, cap,
-amount, balance, purchase, or refill facts.
+For a group exhaustion notice, the existing claim rechecks current group usage
+and delivery always sends a first-party signed funding-only link with one
+deterministic neutral pause message. The message identifies private options and
+waiting for reset without pressuring a payer or promising instant recovery.
+The mandatory URL is derived only from the runtime member and server
+configuration; funding-page sponsor state, group display data, and join-code
+preference are not delivery dependencies. Missing or invalid mandatory action
+data fails before claim/provider work and never becomes terminal linkless copy.
+The existing denied-gate retry can reproject the same capacity epoch after
+recovery. This is one branchless message contract; it exposes no payment setup,
+payer, cap, amount, balance, purchase, or refill facts.
 
 Immediately before both the exhaustion crossing send and a later denied-gate
 retry, delivery re-reads the current personal usage-status projection. It
