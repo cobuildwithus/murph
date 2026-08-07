@@ -800,6 +800,123 @@ test("shared oauth helper flows cover auth-code exchange, refresh rotation, bear
   );
 });
 
+test("shared oauth helpers reject extension parameters that override protocol-owned fields", async () => {
+  let exchangeRequests = 0;
+  await assert.rejects(
+    () => exchangeOAuthAuthorizationCode({
+      async postTokenRequest() {
+        exchangeRequests += 1;
+        return {
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+        };
+      },
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      callbackUrl: "https://sync.example.test/oauth/callback",
+      code: "auth-code",
+      tokenResponseToAuthTokens(payload) {
+        return tokenResponseToAuthTokens(payload, () => new Error("missing access token"));
+      },
+      buildMissingRefreshTokenError: () => new Error("missing refresh token"),
+      extraParameters: dynamicStringRecord("client_id", "override-client-id"),
+    }),
+    /must not override protocol-owned field client_id/u,
+  );
+  assert.equal(exchangeRequests, 0);
+
+  await assert.rejects(
+    () => exchangeOAuthAuthorizationCode({
+      async postTokenRequest() {
+        exchangeRequests += 1;
+        return {
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+        };
+      },
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      callbackUrl: "https://sync.example.test/oauth/callback",
+      code: "auth-code",
+      tokenResponseToAuthTokens(payload) {
+        return tokenResponseToAuthTokens(payload, () => new Error("missing access token"));
+      },
+      buildMissingRefreshTokenError: () => new Error("missing refresh token"),
+      extraParameters: dynamicStringRecord(
+        "refresh_token",
+        "unexpected-refresh-token",
+      ),
+    }),
+    /must not override protocol-owned field refresh_token/u,
+  );
+  assert.equal(exchangeRequests, 0);
+
+  let refreshRequests = 0;
+  await assert.rejects(
+    () => refreshOAuthTokens({
+      async postTokenRequest() {
+        refreshRequests += 1;
+        return {
+          access_token: "refreshed-access-token",
+          refresh_token: "rotated-refresh-token",
+        };
+      },
+      account: createAccount(),
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      tokenResponseToAuthTokens(payload) {
+        return tokenResponseToAuthTokens(payload, () => new Error("missing access token"));
+      },
+      buildMissingRefreshTokenError: () => new Error("missing refresh token"),
+      extraParameters: dynamicStringRecord(
+        "refresh_token",
+        "override-refresh-token",
+      ),
+    }),
+    /must not override protocol-owned field refresh_token/u,
+  );
+  assert.equal(refreshRequests, 0);
+
+  await assert.rejects(
+    () => refreshOAuthTokens({
+      async postTokenRequest() {
+        refreshRequests += 1;
+        return {
+          access_token: "refreshed-access-token",
+          refresh_token: "rotated-refresh-token",
+        };
+      },
+      account: createAccount(),
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      tokenResponseToAuthTokens(payload) {
+        return tokenResponseToAuthTokens(payload, () => new Error("missing access token"));
+      },
+      buildMissingRefreshTokenError: () => new Error("missing refresh token"),
+      extraParameters: dynamicStringRecord("code", "unexpected-code"),
+    }),
+    /must not override protocol-owned field code/u,
+  );
+  assert.equal(refreshRequests, 0);
+
+  assert.throws(
+    () => buildOAuthConnectUrl({
+      baseUrl: "https://provider.test",
+      authorizePath: "/oauth/authorize",
+      clientId: "client-id",
+      callbackUrl: "https://sync.example.test/oauth/callback",
+      scopes: ["offline"],
+      state: "state-1",
+      extraSearchParams: dynamicStringRecord("state", "override-state"),
+    }),
+    /must not override protocol-owned field state/u,
+  );
+});
+
+function dynamicStringRecord(key: string, value: string): Record<string, string> {
+  return Object.fromEntries([[key, value]]);
+}
+
 test("shared oauth adapter exposes nested oauthAdapter and routes refresh and revoke through connectionHandler", async () => {
   const refreshTokens = vi.fn(async () => ({
     accessToken: "refreshed-access-token",
