@@ -2045,6 +2045,101 @@ describe('assistant Codex turn planning', () => {
     )).resolves.not.toContain('attach_response_card')
   })
 
+  it('offers scheduled image generation only on routes that can deliver vault images', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const common = {
+      executionContext: null,
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-28',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+    } satisfies Omit<
+      Parameters<typeof resolveAssistantRouteTurnPlan>[0],
+      'input' | 'sharedPlan'
+    >
+    const toolNames = async (input: {
+      channel: 'email' | 'linq' | 'telegram'
+      scheduled: boolean
+      threadIsDirect: boolean
+    }) => {
+      const occurrenceAt = '2026-07-28T21:00:00.000-04:00'
+      const plan = await resolveAssistantRouteTurnPlan({
+        ...common,
+        input: {
+          ...createMessageInput(),
+          channel: input.channel,
+          ...(input.scheduled
+            ? {
+                scheduledInvocationAuthority: {
+                  automationId: 'automation_image',
+                  occurrenceAt,
+                },
+                scheduledOccurrenceAt: occurrenceAt,
+                turnTrigger: 'automation-cron' as const,
+              }
+            : {}),
+          threadId: `${input.channel}-thread`,
+          threadIsDirect: input.threadIsDirect,
+        },
+        sharedPlan: createSharedPlan({}, {
+          channel: input.channel,
+          effectiveThreadIsDirect: input.threadIsDirect,
+          threadId: `${input.channel}-thread`,
+          threadIsDirect: input.threadIsDirect,
+        }),
+      })
+      return {
+        systemPrompt: plan.systemPrompt,
+        toolNames: plan.dynamicTools.map((tool) => tool.name),
+      }
+    }
+
+    for (const threadIsDirect of [true, false]) {
+      const email = await toolNames({
+        channel: 'email',
+        scheduled: true,
+        threadIsDirect,
+      })
+      expect(email.toolNames).not.toContain('generate_image')
+      expect(email.systemPrompt).toContain('The bound outbound channel is email.')
+      expect(email.systemPrompt).toContain('`text` is the single final user-facing message.')
+    }
+    await expect(toolNames({
+      channel: 'linq',
+      scheduled: true,
+      threadIsDirect: true,
+    })).resolves.toMatchObject({
+      toolNames: expect.arrayContaining(['generate_image']),
+    })
+    await expect(toolNames({
+      channel: 'telegram',
+      scheduled: true,
+      threadIsDirect: true,
+    })).resolves.toMatchObject({
+      toolNames: expect.arrayContaining(['generate_image']),
+    })
+    await expect(toolNames({
+      channel: 'email',
+      scheduled: false,
+      threadIsDirect: true,
+    })).resolves.toMatchObject({
+      toolNames: expect.arrayContaining(['generate_image']),
+    })
+  })
+
   it('exposes private style settings to email turns only with exact-turn sender authority', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

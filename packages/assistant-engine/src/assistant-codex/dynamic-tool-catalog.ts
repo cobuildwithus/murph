@@ -1312,6 +1312,7 @@ export interface MurphDynamicToolAvailability {
   labsAvailable?: boolean | null
   planUsageAvailable?: boolean | null
   imessageContactAvailable?: boolean | null
+  imageGenerationAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
   groupAssistantConfigurationAvailable?: boolean | null
@@ -1370,6 +1371,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
+    [MURPH_GENERATE_IMAGE_TOOL, defaultOn((a) => a.imageGenerationAvailable)],
     [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],

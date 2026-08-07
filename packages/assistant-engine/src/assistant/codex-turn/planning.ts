@@ -97,6 +97,7 @@ import type {
   AssistantProviderConversationMessage,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
 } from '../providers/types.js'
+import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import {
   assistantConversationHistoryUtf8Bytes,
   limitAssistantConversationHistoryTextBytes,
@@ -808,6 +809,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
       session: input.session,
       sharedPlan: input.sharedPlan,
     })
+  const imageGenerationAvailable =
+    scheduledInvocationScope === null ||
+    getAssistantChannelAdapter(
+      currentAudienceDeliveryFields.channel,
+    )?.supportedResponseMediaKinds.includes('vault_image') === true
   const messageTargetingAvailable =
     input.messageTargetAuthorizerAvailable === true &&
     supportsAssistantAcceptedMessageTargetingRoute({
@@ -839,6 +845,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : resolveMurphDynamicTools({
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
+        imageGenerationAvailable,
         messageTargetingAvailable,
         assistantConfigurationAvailable:
           privateInteractiveAudience &&

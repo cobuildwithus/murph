@@ -2405,8 +2405,11 @@ occurrence is authority in its own right and is never represented as a message.
 
 Response cards, private Clinical Records connect links, route-eligible
 style/personalization, and synchronous image generation may use that exact
-occurrence authority. Their existing owners remain unchanged: Web owns Clinical
-Records intents and durable personalization writes. A Clinical Records occurrence
+occurrence authority. Synchronous image generation is exposed only when the
+resolved delivery adapter supports `vault_image`; scheduled email remains text-only
+instead of generating media that delivery would discard. Their existing owners
+remain unchanged: Web owns Clinical Records intents and durable personalization
+writes. A Clinical Records occurrence
 returns one stable authenticated launcher; the browser creates the short-lived intent
 only after current human navigation, stages its claim in the existing private history
 state, and can retry a transient intent-creation failure. Its deterministic scheduled

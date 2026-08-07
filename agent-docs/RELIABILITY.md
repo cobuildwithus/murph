@@ -929,9 +929,11 @@ Last verified: 2026-08-06
 Canonical scheduled turns receive composable tools through one exact-occurrence
 resolver rather than per-tool cron exceptions. Each owner derives a deterministic
 retry key from the exact occurrence and operation without fabricating an assistant
-input. Scheduled images run synchronously; background image and physical-note
-continuation stays message-authorized. Existing Web owners still decide whether a
-write is saved, unchanged, unavailable, or ambiguous.
+input. Scheduled images run synchronously only when the resolved channel adapter
+supports `vault_image`; the planner omits image generation for text-only email so
+the provider cannot produce media that delivery would silently discard. Background
+image and physical-note continuation stays message-authorized. Existing Web owners
+still decide whether a write is saved, unchanged, unavailable, or ambiguous.
 
 Every hosted preference origin participates in one Web-owned field-local
 lexicographic order: the trusted source `occurredAt`, then its durable source causal

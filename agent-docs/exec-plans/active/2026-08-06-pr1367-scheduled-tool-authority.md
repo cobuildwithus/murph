@@ -90,6 +90,11 @@ message-bound effects.
   for the non-mutating scheduled request-key branch, keeps accepted-message claim
   creation single-attempt, shares in-flight and successful requests, and clears only
   the exact rejected request so a later explicit invocation can retry.
+- Final ReviewGPT round 6 found that scheduled email could invoke synchronous image
+  generation even though the email adapter cannot deliver response media. The
+  planner now derives scheduled image availability from the existing channel
+  descriptor, omitting the tool for direct and group email while retaining it for
+  Linq and Telegram. Accepted-message tool availability is unchanged.
 - Focused owner suites pass, including 278 assistant-runtime phase tests and a
   Strict Mode launcher replay test. The full-stack scheduled-image scenario
   observed the expected image upload, attachment, and Linq delivery, then timed
