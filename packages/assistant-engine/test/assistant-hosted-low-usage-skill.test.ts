@@ -208,6 +208,9 @@ describe('assistant hosted low-usage skill', () => {
       '`fundingNeeded` is the sole server-owned urgency signal',
     )
     expect(normalizedSkill).toContain(
+      'When it is false, skip the heads-up entirely and do not infer or explain why',
+    )
+    expect(normalizedSkill).toContain(
       'do not name or count earned, sponsored, paid, funding, or referral paths',
     )
     expect(normalizedSkill).toContain(

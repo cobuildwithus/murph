@@ -471,13 +471,21 @@ sponsor, the page preserves that single-sponsor invariant and offers the
 additional payer only a one-time contribution. Murph does not imply the room
 needs funding when `fundingNeeded` is false or disclose private sponsor facts.
 For low capacity, Web sets that boolean only when no automatic refill is
-available or pending. The assistant receives no sponsorship-status field and
-uses the same warning and follow-up contract for every room.
+available or pending. An unresolved current-period refill payment remains
+pending recovery even if its authorization has since paused, entered recovery,
+or been canceled; terminal purchases do not suppress the warning. The
+assistant receives no sponsorship-status field, does not infer why a false
+signal was returned, and uses the same warning and follow-up contract for every
+room. Referral eligibility uses the ordinary runtime access gate and does not
+invoke this funding projection.
 
 For a group exhaustion notice, delivery re-reads the current group usage
-projection and always appends the current first-party funding link to the
-ordinary group pause copy. This is one branchless message contract; it exposes
-no payment setup, payer, cap, amount, balance, purchase, or refill facts.
+recovery projection and always sends its current first-party funding link with
+one deterministic neutral pause message. The message identifies private options
+and waiting for reset without pressuring a payer or promising instant recovery.
+The delivery-critical read is separate from funding-page sponsor state. This is
+one branchless message contract; it exposes no payment setup, payer, cap,
+amount, balance, purchase, or refill facts.
 
 Immediately before both the exhaustion crossing send and a later denied-gate
 retry, delivery re-reads the current personal usage-status projection. It

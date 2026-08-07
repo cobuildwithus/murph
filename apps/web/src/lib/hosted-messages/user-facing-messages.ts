@@ -32,7 +32,6 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.ai_usage.group_upgrade_pulse",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
-  "linq.ai_usage.thread_limit_funding",
 ] as const
 
 export type UserFacingMessageTemplateKey =
@@ -72,9 +71,6 @@ export interface UserFacingMessageContextByKey {
     homeUrl: string
   }
   "linq.ai_usage.thread_limit_reached": Record<string, never>
-  "linq.ai_usage.thread_limit_funding": {
-    fundingUrl: string
-  }
 }
 
 export interface RenderUserFacingMessageInput<K extends UserFacingMessageTemplateKey> {
@@ -734,48 +730,6 @@ Sound good?`,
     `I just spent my last bit of the month on that. Worth it. Out for all of you until it resets.`,
     `That's my month. Going quiet on everyone in here until my time resets.`,
     `I've run out. All of you get peace and quiet until my time resets.`,
-  ],
-  "linq.ai_usage.thread_limit_funding": [
-    `Any of you can turn me back on. Or enjoy the peace:
-{fundingUrl}`,
-    `I'm fine either way. One of you won't be:
-{fundingUrl}`,
-    `Someone in here will crack first. No judgment:
-{fundingUrl}`,
-    `Anyone can undo this. Nobody has to:
-{fundingUrl}`,
-    `Door's open if any of you want me back:
-{fundingUrl}`,
-    `Whichever of you misses me first knows what to do:
-{fundingUrl}`,
-    `Any one of you can fix it. I'll wait. Not like I'm busy:
-{fundingUrl}`,
-    `One tap from anyone here and I'm back. Your call:
-{fundingUrl}`,
-    `Someone tap this. You know who you are:
-{fundingUrl}`,
-    `Any of you can add usage. Or don't, I'm at peace:
-{fundingUrl}`,
-    `Room needs one of you to volunteer:
-{fundingUrl}`,
-    `Anybody here can bring me back. Sort it out amongst yourselves:
-{fundingUrl}`,
-    `Whoever's least stubborn, this one's on you:
-{fundingUrl}`,
-    `Any of you can end my little vacation:
-{fundingUrl}`,
-    `One of you is going to cave eventually. Might as well be now:
-{fundingUrl}`,
-    `Someone here has a phone and a decision to make:
-{fundingUrl}`,
-    `Anyone can bring me back for the room. Take your time:
-{fundingUrl}`,
-    `Whoever wants the chat useful again, it's right here:
-{fundingUrl}`,
-    `Any one of you can sort this. I'm not going to ask twice:
-{fundingUrl}`,
-    `Somebody's going to do it. Curious who:
-{fundingUrl}`,
   ],
 } satisfies Record<UserFacingMessageTemplateKey, readonly string[]>
 

@@ -448,9 +448,11 @@ inventing a billing menu:
   low-usage turn the assistant calls `murph.group action="read_usage"` once.
   `fundingNeeded` is the only assistant-facing urgency signal. It is false when
   capacity is healthy and while a low room has an automatic refill available
-  or already pending; it is true when a low room has no automatic recovery and
-  whenever the room is exhausted. When false, the heads-up is suppressed. When
-  true, the segment stays conversational, link-free, and option-neutral: it
+  or already pending, including a current-period payment already bound before
+  an authorization pause; it is true when a low room has no automatic recovery
+  and whenever the room is exhausted. When false, the heads-up is suppressed
+  without the assistant inferring or explaining why. When true, the segment
+  stays conversational, link-free, and option-neutral: it
   calls the shared capacity "Murph time," says Murph may pause for the room,
   and asks whether they want Murph to check the options without naming or
   counting any path. The assistant receives no current sponsorship-status
@@ -497,6 +499,8 @@ Web derives the boolean from current capacity plus automatic-refill
 availability and keeps the underlying healthy/low/exhausted state, period,
 percentage, funding setup, internal USD-micro accounting, contributors,
 receipts, and payer identity out of the assistant projection.
+The recovery projection does not read the page-only sponsorship projection,
+so a private sponsor-state failure cannot remove the exhausted-room action.
 
 Group low usage follows the same next-turn context path as personal usage: it
 never creates a standalone message, and the prompt asks Murph to finish the
@@ -510,10 +514,13 @@ or a post-action confirmation requires it. A deterministic group exhaustion
 notice may use only the exact originating external-thread target after Web
 re-authorizes its persisted thread authority; no personal-home fallback is
 valid for an accepted group conversation. At delivery time Web rechecks the
-exhausted state and appends the group's funding link to the ordinary group pause
-copy, using the owner join code when one exists or the signed funding-only
+exhausted state and sends the group's funding link with one neutral group pause
+contract, using the owner join code when one exists or the signed funding-only
 locator when none does. This notice has one behavior regardless of current
-funding setup. The funding page separately preserves any active automatic
+funding setup: it says Murph is paused, identifies the link as private options
+to add more time, and says the room may instead wait for reset. It does not use
+rotating payer-pressure copy or promise immediate restoration. The funding page
+separately preserves any active automatic
 sponsor and the single-sponsor billing invariant. The notice does not expose
 payment setup, name a payer, amount, cap, balance, or refill, claim that payment
 occurred, or add a separate scheduler or money-prompt lifecycle.

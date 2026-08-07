@@ -41,12 +41,15 @@ export interface HostedGroupUsageFundingTarget {
 }
 
 export interface HostedGroupUsageStatus {
+  /** Private Web state for the funding page; runtime serializers must omit it. */
+  sponsorshipStatus: "not_sponsored" | "sponsored";
+}
+
+export interface HostedGroupFundingRecoveryStatus {
   /** Whether an assistant-initiated low-capacity funding prompt is timely. */
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
-  /** Private Web state for the funding page; runtime serializers must omit it. */
-  sponsorshipStatus: "not_sponsored" | "sponsored";
 }
 
 // Accepts the full funding-locator namespace: an owner-created join code or
@@ -101,10 +104,21 @@ export async function readHostedGroupUsageFundingTargetByJoinCode(input: {
 export async function readHostedGroupUsageStatus(input: {
   prisma?: HostedGroupUsageFundingClient;
   runtimeMemberId: string;
-}): Promise<HostedGroupUsageStatus | null> {
+}): Promise<HostedGroupUsageStatus> {
   const prisma = input.prisma ?? getPrisma();
-  // Usage-referral snapshots call this with an interactive-transaction client,
-  // whose pg adapter permits only one query at a time on its connection.
+  return {
+    sponsorshipStatus: await readHostedGroupSponsorshipPublicState({
+      beneficiaryMemberId: input.runtimeMemberId,
+      prisma,
+    }),
+  };
+}
+
+export async function readHostedGroupFundingRecoveryStatus(input: {
+  prisma?: HostedGroupUsageFundingClient;
+  runtimeMemberId: string;
+}): Promise<HostedGroupFundingRecoveryStatus | null> {
+  const prisma = input.prisma ?? getPrisma();
   const decision = await readHostedAiUsageGate({
     memberId: input.runtimeMemberId,
     prisma,
@@ -145,11 +159,6 @@ export async function readHostedGroupUsageStatus(input: {
     : false;
   const fundingNeeded = capacityState === "exhausted" ||
     (capacityState === "low" && !automaticRefillAvailable);
-  const sponsorshipStatus = await readHostedGroupSponsorshipPublicState({
-    beneficiaryMemberId: input.runtimeMemberId,
-    prisma,
-  });
-
   // A group without an owner-created join code (including one with no
   // HostedGroup row at all) still gets a funding URL through the signed
   // funding-only locator.
@@ -161,7 +170,6 @@ export async function readHostedGroupUsageStatus(input: {
     fundingUrl: locator
       ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
       : null,
-    sponsorshipStatus,
   };
 }
 

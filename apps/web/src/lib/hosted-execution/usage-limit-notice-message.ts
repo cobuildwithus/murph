@@ -3,10 +3,12 @@ import "server-only";
 import type { PrismaClient } from "@prisma/client";
 import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 
-import { readHostedGroupUsageStatus } from "../hosted-groups/group-usage-funding";
-import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
+import { readHostedGroupFundingRecoveryStatus } from "../hosted-groups/group-usage-funding";
 import type { HostedAiUsageLimitNoticeCode } from "./usage-allowance";
 import { readHostedPersonalAiUsageStatus } from "./usage-status";
+
+const HOSTED_GROUP_USAGE_LIMIT_RECOVERY_MESSAGE =
+  "Murph is paused in this chat right now. Private options to add more Murph time are here, or the room can wait for its allowance to reset:";
 
 /**
  * Adds or replaces delivery copy only from current delivery-time authority.
@@ -20,7 +22,7 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
 }): Promise<string> {
   try {
     if (input.noticeCode === "thread_usage_limit_reached") {
-      const status = await readHostedGroupUsageStatus({
+      const status = await readHostedGroupFundingRecoveryStatus({
         prisma: input.prisma,
         runtimeMemberId: input.memberId,
       });
@@ -37,12 +39,7 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
       if (fundingUrl.origin !== MURPH_PRODUCT_ORIGIN) {
         return input.message;
       }
-      const funding = renderUserFacingMessage({
-        context: { fundingUrl: fundingUrl.toString() },
-        key: "linq.ai_usage.thread_limit_funding",
-        seed: input.memberId,
-      });
-      return `${input.message}\n\n${funding.text}`;
+      return `${HOSTED_GROUP_USAGE_LIMIT_RECOVERY_MESSAGE}\n${fundingUrl.toString()}`;
     }
 
     const usageStatus = await readHostedPersonalAiUsageStatus({

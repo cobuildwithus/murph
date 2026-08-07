@@ -456,11 +456,13 @@ may be used after an explicit funding request at any capacity. Deploy the
 Cloudflare runner bundle first, then Web: the new runtime safely strips the old
 producer's sponsorship field, while an old runtime rejects the new reduced
 shape. After both deployments, smoke a low room with automatic refill headroom
-or a pending refill and confirm Murph does not start a funding thread. Then
+or a pending refill and confirm Murph does not start a funding thread. Include
+an already-bound current-period payment on a paused authorization. Then
 smoke a low room with no automatic recovery and confirm Murph gives the ordinary
 link-free warning without payment-setup, payer, cap, amount, balance, or refill
 detail. Exhaust a room in each funding setup and confirm both receive the same
-ordinary pause contract plus the first-party link. Opening the link must still
+deterministic neutral pause contract plus the first-party link, with no
+immediate-restoration promise or payer pressure. Opening the link must still
 preserve the single-automatic-sponsor invariant and show the payment options
 appropriate to the authenticated payer. Also smoke an explicit funding request
 in a healthy room and confirm Murph returns the first-party link without

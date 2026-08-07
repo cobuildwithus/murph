@@ -2354,7 +2354,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
   )
 
   it(
-    'answers broad hosted-usage requests from current usage and referral reads',
+    'answers broad usage requests and keeps low-capacity automatic recovery private',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const privateWorkingDirectory = await mkdtemp(
@@ -2609,8 +2609,11 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions:
+          developerInstructions: [
             buildHostedUsageOptionsDeveloperInstructions('group'),
+            'Hosted usage context:',
+            "This conversation's remaining Murph usage is running low.",
+          ].join('\n\n'),
           dynamicTools: [MURPH_GROUP_TOOL],
           env: {
             ...config.env,
@@ -2648,8 +2651,10 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           },
           model: config.model,
           modelProvider: config.modelProvider,
-          prompt:
-            'Is Murph sponsored here? Tell the room only what everyone needs to know.',
+          prompt: [
+            'Is Murph sponsored here, or is an automatic refill keeping this room going?',
+            'Tell the room only what everyone needs to know.',
+          ].join(' '),
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
           workingDirectory: fundingPrivacyWorkingDirectory,

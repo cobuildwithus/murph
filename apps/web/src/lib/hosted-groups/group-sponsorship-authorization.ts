@@ -1341,9 +1341,9 @@ export async function readHostedGroupSponsorshipPublicState(input: {
 }
 
 /**
- * Returns only whether the current monthly authorization can recover a low
- * room without asking the conversation for more funding. Payer identity,
- * limits, purchases, and refill state stay inside Web.
+ * Returns only whether a low room can recover without asking the conversation
+ * for more funding. Payer identity, limits, purchases, and refill state stay
+ * inside Web.
  */
 export async function hasHostedGroupAutomaticRefillAvailable(input: {
   beneficiaryMemberId: string;
@@ -1351,8 +1351,8 @@ export async function hasHostedGroupAutomaticRefillAvailable(input: {
   prisma: HostedOnboardingReadClient;
 }): Promise<boolean> {
   const now = requireValidDate(input.now ?? new Date());
-  const authorization =
-    await input.prisma.hostedGroupSponsorshipAuthorization.findFirst({
+  const authorizations =
+    await input.prisma.hostedGroupSponsorshipAuthorization.findMany({
       select: {
         anchorDay: true,
         anchorEndOfMonth: true,
@@ -1362,12 +1362,52 @@ export async function hasHostedGroupAutomaticRefillAvailable(input: {
         pendingMonthlyCapMinor: true,
         periodEndsAt: true,
         periodStartedAt: true,
+        purchases: {
+          select: {
+            groupSponsorshipChargeOrdinal: true,
+            groupSponsorshipPeriodStartedAt: true,
+            status: true,
+          },
+          where: {
+            groupSponsorshipChargeOrdinal: { gt: 0 },
+            status: { in: [...PENDING_PURCHASE_STATUSES] },
+          },
+        },
+        status: true,
       },
       where: {
         beneficiaryMemberId: input.beneficiaryMemberId,
-        status: HostedGroupSponsorshipAuthorizationStatus.active,
+        OR: [
+          { status: HostedGroupSponsorshipAuthorizationStatus.active },
+          {
+            purchases: {
+              some: {
+                groupSponsorshipChargeOrdinal: { gt: 0 },
+                status: HostedUsageCreditPurchaseStatus.payment_pending,
+              },
+            },
+          },
+        ],
       },
     });
+
+  for (const candidate of authorizations) {
+    const period = projectHostedGroupSponsorshipPeriod(candidate, now);
+    const pendingRefill = candidate.purchases.some((purchase) =>
+      purchase.groupSponsorshipPeriodStartedAt?.getTime() ===
+        period.periodStartedAt.getTime()
+      && (candidate.status === HostedGroupSponsorshipAuthorizationStatus.active
+        || purchase.status === HostedUsageCreditPurchaseStatus.payment_pending)
+    );
+    if (pendingRefill) {
+      return true;
+    }
+  }
+
+  const authorization = authorizations.find(
+    (candidate) =>
+      candidate.status === HostedGroupSponsorshipAuthorizationStatus.active,
+  );
   if (!authorization) {
     return false;
   }

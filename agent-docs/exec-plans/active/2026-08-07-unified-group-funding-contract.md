@@ -33,7 +33,11 @@ Updated: 2026-08-07
 2. Risk: sponsorship privacy leaks through the unified copy.
    Mitigation: remove sponsorship status from the assistant projection and keep all quantitative and payer facts server-side.
 3. Risk: a malformed or foreign URL removes the pause notice.
-   Mitigation: retain the ordinary pause sentence and append a link only after first-party validation.
+   Mitigation: keep the canonical pause notice unchanged unless a current first-party link validates.
+4. Risk: a private funding-page sponsor lookup fails after the recovery URL is available.
+   Mitigation: keep the delivery-critical recovery projection separate from the page-only sponsorship projection.
+5. Risk: a refill already bound to its payment intent settles after its authorization is paused or canceled.
+   Mitigation: treat an unresolved current-period payment as available recovery before testing whether a new refill may be admitted.
 
 ## Tasks
 
@@ -48,6 +52,17 @@ Updated: 2026-08-07
 
 - “Ask for sponsorship again” uses the existing group funding ask and funding page; this change does not add multiple concurrent monthly sponsors.
 - Exhaustion always exposes the current funding link even if an automatic refill is pending, because the group is already paused.
+- Exhaustion uses one deterministic neutral message: Murph is paused, the link contains private ways to add time, and the room may instead wait for reset. The rotating payer-pressure corpus is deleted.
+- Referral source access is an access decision, not a funding decision, so it uses the runtime access owner directly.
+- The assistant treats `fundingNeeded: false` as a command to stay quiet and does not infer why.
+
+## Review remediation
+
+- Separate the public recovery projection from private funding-page sponsor state so sponsor-read failures cannot remove the exhausted-room link.
+- Check current-period pending refills before reusable payment authority, including already-bound payments on paused, recovery-required, or canceled authorizations.
+- Delete randomized exhaustion funding prompts and their template machinery.
+- Remove group funding reads from referral eligibility.
+- Add direct privacy, pending-state, deterministic-copy, and prompt-contract coverage.
 
 ## Verification
 

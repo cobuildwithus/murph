@@ -40,7 +40,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId: vi.fn(),
-  readHostedGroupUsageStatus: vi.fn(),
+  readHostedGroupFundingRecoveryStatus: vi.fn(),
   readHostedGroupSharedDataByRuntimeMemberId: vi.fn(),
   readHostedOwnerAddressBookAdvisoryNames: vi.fn(),
   readHostedPendingGroupSetup: vi.fn(),
@@ -229,7 +229,8 @@ vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
     joinCode: string;
     publicBaseUrl: string;
   }) => `${input.publicBaseUrl}/groups/fund/${input.joinCode}`,
-  readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
+  readHostedGroupFundingRecoveryStatus:
+    mocks.readHostedGroupFundingRecoveryStatus,
 }));
 
 vi.mock("@/src/lib/hosted-address-book/projection", () => ({
@@ -441,7 +442,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       }],
       truncated: false,
     });
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+    mocks.readHostedGroupFundingRecoveryStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
       sponsorshipStatus: "sponsored",
@@ -706,7 +707,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         },
       },
     });
-    expect(mocks.readHostedGroupUsageStatus).toHaveBeenCalledWith({
+    expect(mocks.readHostedGroupFundingRecoveryStatus).toHaveBeenCalledWith({
       runtimeMemberId: "member_group_runtime",
     });
   });

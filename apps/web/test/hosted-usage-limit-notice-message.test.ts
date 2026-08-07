@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  readHostedGroupFundingRecoveryStatus: vi.fn(),
   readHostedGroupUsageStatus: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
 }));
@@ -12,6 +13,8 @@ vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
+  readHostedGroupFundingRecoveryStatus:
+    mocks.readHostedGroupFundingRecoveryStatus,
   readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
 }));
 
@@ -22,9 +25,9 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
     vi.clearAllMocks();
   });
 
-  it("asks the room to fund the group while it is exhausted", async () => {
+  it("always gives an exhausted room a neutral private recovery link", async () => {
     const prisma = { kind: "prisma" } as never;
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+    mocks.readHostedGroupFundingRecoveryStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
@@ -37,32 +40,15 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
       prisma,
     });
 
-    expect(projected.startsWith("Murph usage is paused for this chat.\n\n")).toBe(true);
-    expect(projected.endsWith(
-      "\nhttps://www.withmurph.ai/groups/fund/group_join_code_1234",
-    )).toBe(true);
-    expect(projected).toMatch(
-      /anyone|anybody|any one|any of you|one of you|someone|somebody|whoever|whichever|which of you|one person/iu,
+    expect(projected).toBe(
+      "Murph is paused in this chat right now. "
+      + "Private options to add more Murph time are here, or the room can wait "
+      + "for its allowance to reset:\n"
+      + "https://www.withmurph.ai/groups/fund/group_join_code_1234",
     );
+    expect(projected).not.toMatch(/one tap|turn me back on|bring me back|volunteer/iu);
+    expect(mocks.readHostedGroupUsageStatus).not.toHaveBeenCalled();
     expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
-  });
-
-  it("keeps the group funding ask deterministic without exposing a period", async () => {
-    const message = "I'm out for the whole room until my time resets.";
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
-      fundingNeeded: true,
-      fundingUrl:
-        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-    });
-
-    const project = async () => projectHostedAiUsageLimitNoticeForDelivery({
-      memberId: "member_group_runtime",
-      message,
-      noticeCode: "thread_usage_limit_reached",
-      prisma: {} as never,
-    });
-
-    expect(await project()).toBe(await project());
   });
 
   it.each([
@@ -70,7 +56,7 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
     "https://[invalid",
   ])("rejects a non-canonical group funding URL: %s", async (fundingUrl) => {
     const message = "I'm out for the whole room until my time resets.";
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+    mocks.readHostedGroupFundingRecoveryStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl,
     });
@@ -84,7 +70,7 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
   });
 
   it("leaves a stale group notice unchanged after capacity recovers", async () => {
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+    mocks.readHostedGroupFundingRecoveryStatus.mockResolvedValue({
       fundingNeeded: false,
       fundingUrl: null,
     });

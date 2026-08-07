@@ -54,24 +54,50 @@ function createAutomaticRefillReadHarness(input: {
   purchases?: Array<{
     cashAmountMinor: number;
     groupSponsorshipChargeOrdinal: number;
+    groupSponsorshipPeriodStartedAt?: Date | null;
     status: HostedUsageCreditPurchaseStatus;
   }>;
   activation?: ReturnType<typeof buildActivationPurchase> | null;
 }) {
-  const findMany = vi.fn(async () => input.purchases ?? []);
+  const purchases = input.purchases ?? [];
+  const authorizationFindMany = vi.fn(async () => {
+    if (!input.authorization) {
+      return [];
+    }
+    return [{
+      ...input.authorization,
+      purchases: purchases
+        .filter((purchase) =>
+          purchase.groupSponsorshipChargeOrdinal > 0
+          && (purchase.status === HostedUsageCreditPurchaseStatus.created
+            || purchase.status === HostedUsageCreditPurchaseStatus.checkout_open
+            || purchase.status ===
+              HostedUsageCreditPurchaseStatus.payment_pending)
+        )
+        .map((purchase) => ({
+          groupSponsorshipChargeOrdinal:
+            purchase.groupSponsorshipChargeOrdinal,
+          groupSponsorshipPeriodStartedAt:
+            purchase.groupSponsorshipPeriodStartedAt ?? PERIOD_START,
+          status: purchase.status,
+        })),
+    }];
+  });
+  const purchaseFindMany = vi.fn(async () => purchases);
   const findFirstPurchase = vi.fn(async () =>
     input.activation === undefined ? buildActivationPurchase() : input.activation
   );
   return {
-    findMany,
+    authorizationFindMany,
     findFirstPurchase,
+    purchaseFindMany,
     prisma: {
       hostedGroupSponsorshipAuthorization: {
-        findFirst: vi.fn(async () => input.authorization),
+        findMany: authorizationFindMany,
       },
       hostedUsageCreditPurchase: {
         findFirst: findFirstPurchase,
-        findMany,
+        findMany: purchaseFindMany,
       },
     },
   };
@@ -132,29 +158,85 @@ describe("automatic group sponsorship refill availability", () => {
     })).resolves.toBe(true);
   });
 
-  it("treats an in-flight automatic refill as available recovery", async () => {
-    const harness = createAutomaticRefillReadHarness({
-      authorization: buildAuthorization(),
-      purchases: [
-        {
-          cashAmountMinor: 500,
-          groupSponsorshipChargeOrdinal: 0,
-          status: HostedUsageCreditPurchaseStatus.fulfilled,
+  it.each([
+    [
+      HostedUsageCreditPurchaseStatus.created,
+      HostedGroupSponsorshipAuthorizationStatus.active,
+    ],
+    [
+      HostedUsageCreditPurchaseStatus.checkout_open,
+      HostedGroupSponsorshipAuthorizationStatus.active,
+    ],
+    [
+      HostedUsageCreditPurchaseStatus.payment_pending,
+      HostedGroupSponsorshipAuthorizationStatus.active,
+    ],
+    [
+      HostedUsageCreditPurchaseStatus.payment_pending,
+      HostedGroupSponsorshipAuthorizationStatus.paused,
+    ],
+    [
+      HostedUsageCreditPurchaseStatus.payment_pending,
+      HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+    ],
+    [
+      HostedUsageCreditPurchaseStatus.payment_pending,
+      HostedGroupSponsorshipAuthorizationStatus.canceled,
+    ],
+  ])(
+    "treats a current-period %s refill as available for a %s authorization",
+    async (purchaseStatus, status) => {
+      const harness = createAutomaticRefillReadHarness({
+        activation: {
+          ...buildActivationPurchase(),
+          stripeCustomerIdEncrypted: "",
         },
-        {
+        authorization: buildAuthorization({ status }),
+        purchases: [{
           cashAmountMinor: 500,
           groupSponsorshipChargeOrdinal: 1,
-          status: HostedUsageCreditPurchaseStatus.payment_pending,
-        },
-      ],
-    });
+          status: purchaseStatus,
+        }],
+      });
 
-    await expect(hasHostedGroupAutomaticRefillAvailable({
-      beneficiaryMemberId: "member_group_runtime",
-      now: NOW,
-      prisma: harness.prisma as never,
-    })).resolves.toBe(true);
-  });
+      await expect(hasHostedGroupAutomaticRefillAvailable({
+        beneficiaryMemberId: "member_group_runtime",
+        now: NOW,
+        prisma: harness.prisma as never,
+      })).resolves.toBe(true);
+      expect(harness.findFirstPurchase).not.toHaveBeenCalled();
+      expect(harness.purchaseFindMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    HostedGroupSponsorshipAuthorizationStatus.active,
+    HostedGroupSponsorshipAuthorizationStatus.paused,
+    HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+    HostedGroupSponsorshipAuthorizationStatus.canceled,
+  ])(
+    "does not treat a terminal refill as available for a %s authorization",
+    async (status) => {
+      const harness = createAutomaticRefillReadHarness({
+        activation: {
+          ...buildActivationPurchase(),
+          stripeCustomerIdEncrypted: "",
+        },
+        authorization: buildAuthorization({ status }),
+        purchases: [{
+          cashAmountMinor: 500,
+          groupSponsorshipChargeOrdinal: 1,
+          status: HostedUsageCreditPurchaseStatus.fulfilled,
+        }],
+      });
+
+      await expect(hasHostedGroupAutomaticRefillAvailable({
+        beneficiaryMemberId: "member_group_runtime",
+        now: NOW,
+        prisma: harness.prisma as never,
+      })).resolves.toBe(false);
+    },
+  );
 
   it("reports no automatic recovery after the current cap is fulfilled", async () => {
     const harness = createAutomaticRefillReadHarness({
@@ -210,7 +292,7 @@ describe("automatic group sponsorship refill availability", () => {
       now: NOW,
       prisma: harness.prisma as never,
     })).resolves.toBe(false);
-    expect(harness.findMany).not.toHaveBeenCalled();
+    expect(harness.purchaseFindMany).not.toHaveBeenCalled();
   });
 
   it("uses the next period and its pending cap after a lazy rollover", async () => {
@@ -230,7 +312,7 @@ describe("automatic group sponsorship refill availability", () => {
       now: NOW,
       prisma: harness.prisma as never,
     })).resolves.toBe(true);
-    expect(harness.findMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(harness.purchaseFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         groupSponsorshipPeriodStartedAt: expiredPeriodEnd,
       }),
