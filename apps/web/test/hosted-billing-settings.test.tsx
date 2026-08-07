@@ -1138,7 +1138,7 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Upgrade to Edge/);
   });
 
-  test("shows the authorized recovery action for a paused Pulse trial", async () => {
+  test("shows only the authorized Pulse recovery action for a paused Pulse trial", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const recoveryProps = {
@@ -1152,6 +1152,8 @@ describe("HostedBillingSettings", () => {
     const eligibleMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       ...recoveryProps,
       canStartPaidPulse: true,
+      canSwitchToGroup: false,
+      showGroupPlan: true,
     }));
     const ineligibleMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       ...recoveryProps,
@@ -1159,6 +1161,7 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(eligibleMarkup, /Start Pulse plan/);
+    assert.doesNotMatch(eligibleMarkup, />Start Core<\/button>/);
     assert.doesNotMatch(eligibleMarkup, />Choose Pulse<\/button>/);
     assert.doesNotMatch(ineligibleMarkup, /Start Pulse plan/);
     assert.match(ineligibleMarkup, />Choose Pulse<\/button>/);
