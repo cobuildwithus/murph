@@ -76,10 +76,12 @@ member-facing biomarker.
   adult comparator when the imported result has an explicitly eligible coarse
   specimen kind and the source covers the full adult population. Label it
   `Published adult comparator`, retain its exact source, and state that it is not
-  the reporting lab's range. Keep the imported source flag authoritative and
-  fail closed when the specimen is missing or when age, sex, pregnancy, fasting,
-  treatment, or risk context is required. A qualified source range stays exact
-  in the ledger and is not replaced by a comparator.
+  the reporting lab's range. Keep its boundary rules neutral and dashed-only;
+  do not reuse the sage/sienna lab-range bands or let it imply source status.
+  Keep the imported source flag authoritative and fail closed when the specimen
+  is missing or when age, sex, pregnancy, fasting, treatment, or risk context is
+  required. A qualified source range stays exact in the ledger and is not
+  replaced by a comparator.
 - The initial reviewed comparator catalog is intentionally sparse: named Mayo
   Clinic Laboratories adult serum intervals are authored for chloride, LDH,
   phosphate, and total protein only. They provide published context, never an
@@ -202,8 +204,9 @@ interchangeable assays, or shared reference guidance.
   status filters, flagged-first ordering, the one-row notebook shape,
   full-row links, the absence of `Other`, and the saved-but-unclassified empty
   state. Detail tests cover exact comparators, qualitative history, latest-range
-  band geometry and domain inclusion, missing or qualified range withholding,
-  responsive ledger structure, and Commons summary fallback.
+  band geometry and domain inclusion, neutral published-comparator context,
+  malformed-range omission, missing or qualified range withholding, responsive
+  ledger structure, and Commons summary fallback.
 - Health Commons coverage tests resolve every requested lab and device identity,
   enforce the deliberate aliases and non-equivalences, validate one-sentence
   summaries and source locators, and lock the guidance-classification counts.
