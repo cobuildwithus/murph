@@ -1,6 +1,6 @@
 # Sponsored group funding recovery
 
-Status: active
+Status: completed
 Created: 2026-08-07
 Updated: 2026-08-07
 
@@ -50,9 +50,9 @@ Updated: 2026-08-07
    with the requested sponsored-group recovery behavior.
 2. [completed] Update assistant policy, durable docs, and focused regressions.
 3. [completed] Run focused tests, relevant type proof, and candidate diff review.
-4. [in progress] Push the exact candidate, open the PR, and run preliminary and
+4. [completed] Push the exact candidate, open the PR, and run preliminary and
    final ReviewGPT concurrently with CI.
-5. [pending] Resolve accepted findings, close the plan through the scoped final
+5. [completed] Resolve accepted findings, close the plan through the scoped final
    commit path, and report the production RCA without identifiers.
 
 ## Decisions
@@ -65,11 +65,20 @@ Updated: 2026-08-07
   URL becomes necessary.
 - Keep monthly sponsorship singular. When a sponsor already exists, the
   funding page and assistant describe only an additional one-time contribution.
+- Keep sponsored exhaustion factual and deterministic: the neutral pause is
+  followed by one fixed private-recovery line and the validated first-party
+  URL. The sponsored branch never uses the randomized unsponsored funding
+  corpus, nominates a payer, or promises immediate restoration.
 
 ## Verification
 
 - Focused Web Vitest: 30 tests passed across the group-usage projection and
   exhaustion notice projection.
+- Review remediation Vitest passed 111 tests across the exact notice, message
+  corpus, sponsored funding page, verified Stripe grant, and runtime recheck.
+  Six stable-owner recovery suites passed 173 tests covering crossing
+  accounting, exact-route notice delivery and claiming, denied-gate retries,
+  the sponsored one-time page, verified grants, and mandatory runtime rechecks.
 - Focused Assistant Engine Vitest: 13 hosted low-usage skill contract tests
   passed.
 - Web and Assistant Engine typechecks passed after generating the ignored
@@ -98,3 +107,22 @@ Updated: 2026-08-07
   delta). The changed skill body is read after that initial request and is not
   eagerly included in it; the authored delta is isolated to
   `hosted-low-usage/SKILL.md` and its focused prompt contract.
+- A sponsored-low real Codex two-turn scenario now exercises current-task-first
+  warning behavior and the broad-options follow-up. Its opt-in live run was
+  blocked before model execution because neither supported provider-key
+  environment is configured locally; static collection and Assistant Engine
+  typecheck passed.
+- Preliminary ReviewGPT found the same randomized-copy defect plus the missing
+  real-model sponsored-low scenario. Both were remediated. Its request for one
+  authentication-through-Stripe-through-Temporal mega-test was rejected after
+  ownership tracing because those unchanged owners already have stronger
+  stable-boundary proof and a single test would only restub them or create
+  external side effects.
+- Final ReviewGPT round 1 found the randomized sponsored copy and malformed-URL
+  fallback defects. The remediation uses fixed factual copy and preserves the
+  sponsored neutral fallback. Final round 2 passed the remediation with no
+  qualifying unresolved finding.
+- Required GitHub Actions passed on both implementation heads. The final
+  plan-archive-only head retains the same reviewed code and must rerun CI, but
+  does not require another ReviewGPT round.
+Completed: 2026-08-07
