@@ -157,6 +157,13 @@ export async function sendHostedProviderLinqMessage(
   if (persistAppCardTextFallback) {
     context.persistAppCardTextFallback = async (input) => {
       await persistAppCardTextFallback(input);
+      if (
+        context.appCardTextFallbackFetchImplementation
+        && input.idempotencyKey !== effectiveRequest.idempotencyKey
+      ) {
+        context.fetchImplementation =
+          context.appCardTextFallbackFetchImplementation;
+      }
       effectiveRequest = {
         ...effectiveRequest,
         card: null,

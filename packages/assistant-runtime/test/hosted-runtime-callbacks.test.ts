@@ -9222,6 +9222,109 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("uses the persisted text fallback immediately after the first capability rate limit", async () => {
+    vi.useFakeTimers();
+    try {
+      const idempotencyKey = "assistant-outbox:card-capability-rate-limited";
+      const events: string[] = [];
+      let capabilityRequestCount = 0;
+      const assertRecentInbound = vi.fn(async (request: {
+        authorityCheckOnly: boolean;
+        idempotencyKey?: string | null;
+      }) => {
+        events.push(
+          "authority:"
+          + (request.authorityCheckOnly ? "read" : "claim")
+          + ":"
+          + (request.idempotencyKey ?? "none"),
+        );
+        return buildClaimedLinqEngagementResult(request);
+      });
+      const recordDeliveryOutcome = vi.fn(async (request: {
+        acceptedAt?: string | null;
+        idempotencyKey?: string | null;
+      }) => {
+        events.push(
+          "outcome:"
+          + (request.acceptedAt ? "accepted" : "failed")
+          + ":"
+          + (request.idempotencyKey ?? "none"),
+        );
+      });
+      const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+        const url = new URL(String(request));
+        if (url.pathname.endsWith("/capability/check_imessage")) {
+          capabilityRequestCount += 1;
+          events.push("provider:capability");
+          return new Response(JSON.stringify({ code: "RATE_LIMITED" }), {
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "30",
+            },
+            status: 429,
+          });
+        }
+        const body = JSON.parse(String(init?.body)) as {
+          message?: { idempotency_key?: string; parts?: Array<{ type?: string }> };
+        };
+        events.push("provider:text:" + (body.message?.idempotency_key ?? "none"));
+        expect(body.message?.parts?.some((part) => part.type === "imessage_app"))
+          .toBe(false);
+        return new Response(JSON.stringify({ message: { id: "linq_text_1" } }), {
+          headers: { "content-type": "application/json" },
+        });
+      });
+      const persistAppCardTextFallback = vi.fn(async (fallback: {
+        idempotencyKey: string;
+      }) => {
+        events.push("persist:" + fallback.idempotencyKey);
+      });
+      const dependencies = createHostedAssistantProgressDeliveryDependencies({
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+          recordLinqDeliveryOutcome: recordDeliveryOutcome,
+        }),
+        forwardedEnv: {
+          LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+          LINQ_API_TOKEN: "linq-actual-runtime-token",
+        },
+        providerFetch,
+      });
+      assert.ok(dependencies.sendLinq);
+
+      const delivery = dependencies.sendLinq({
+        card: HOSTED_LINQ_RESPONSE_CARD,
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        idempotencyKey,
+        message: "Nutrition summary",
+        persistAppCardTextFallback,
+        target: "linq_chat_123",
+        targetKind: "thread",
+        threadIsDirect: true,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(capabilityRequestCount).toBe(1);
+      expect(vi.getTimerCount()).toBe(0);
+      await expect(delivery).resolves.toMatchObject({
+        idempotencyKey,
+        providerMessageId: "linq_text_1",
+      });
+      await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+      expect(events).toEqual([
+        "authority:read:" + idempotencyKey,
+        "provider:capability",
+        "persist:" + idempotencyKey,
+        "authority:claim:" + idempotencyKey,
+        "provider:text:" + idempotencyKey,
+        "outcome:accepted:" + idempotencyKey,
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("settles a rejected Linq card before claiming and sending its fallback identity", async () => {
     const idempotencyKey = "assistant-outbox:card-rejected";
     const fallbackIdempotencyKey = `${idempotencyKey}:fallback`;
@@ -9345,6 +9448,175 @@ describe("hosted runtime callbacks", () => {
         idempotencyKey: fallbackIdempotencyKey,
       }),
     ]);
+  });
+
+  it("recovers a classified stale app-card chat under the promoted fallback identity", async () => {
+    const idempotencyKey = "assistant-outbox:stale-card-chat";
+    const fallbackIdempotencyKey = idempotencyKey + ":fallback";
+    const events: string[] = [];
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_stale",
+      card: HOSTED_LINQ_RESPONSE_CARD,
+      channel: "linq",
+      idempotencyKey,
+      message: "Nutrition summary",
+      threadIsDirect: true,
+      transportIdempotent: false,
+    });
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+      idempotencyKey?: string | null;
+    }) => {
+      events.push(
+        "authority:"
+        + (request.authorityCheckOnly ? "read" : "claim")
+        + ":"
+        + (request.idempotencyKey ?? "none"),
+      );
+      return buildClaimedLinqEngagementResult(request);
+    });
+    const recordDeliveryOutcome = vi.fn(async (request: {
+      acceptedAt?: string | null;
+      failureCode?: string | null;
+      idempotencyKey?: string | null;
+    }) => {
+      events.push(
+        "outcome:"
+        + (request.acceptedAt ? "accepted" : "failed")
+        + ":"
+        + (request.idempotencyKey ?? "none"),
+      );
+    });
+    const persistAppCardTextFallback = vi.fn(async (fallback: {
+      idempotencyKey: string;
+    }) => {
+      events.push("persist:" + fallback.idempotencyKey);
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+      const url = new URL(String(request));
+      if (url.pathname.endsWith("/capability/check_imessage")) {
+        events.push("provider:capability");
+        return new Response(JSON.stringify({
+          address: "+15550001",
+          available: true,
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const body = JSON.parse(String(init?.body)) as {
+        message?: { idempotency_key?: string; parts?: Array<{ type?: string }> };
+      };
+      if (url.pathname.endsWith("/chats")) {
+        events.push(
+          "provider:create:" + (body.message?.idempotency_key ?? "none"),
+        );
+        return new Response(JSON.stringify({
+          chat: {
+            id: "linq_chat_recovered",
+            message: { id: "linq_text_recovered" },
+          },
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const isCard = body.message?.parts?.some((part) =>
+        part.type === "imessage_app"
+      ) === true;
+      events.push(
+        "provider:"
+        + (isCard ? "card" : "text")
+        + ":"
+        + (body.message?.idempotency_key ?? "none"),
+      );
+      return new Response(JSON.stringify({
+        code: isCard ? "CHAT_NOT_FOUND" : "chat_not_found",
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 404,
+      });
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        const delivery = await dependencies.sendLinq({
+          card: HOSTED_LINQ_RESPONSE_CARD,
+          directRecipientPhoneNumber: "+15550001",
+          fromPhoneNumber: "+15550002",
+          homeRouteFallbackAllowed: true,
+          idempotencyKey,
+          message: "Nutrition summary",
+          persistAppCardTextFallback,
+          target: "linq_chat_stale",
+          targetKind: "thread",
+          threadIsDirect: true,
+        });
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            idempotencyKey: delivery.idempotencyKey,
+            providerMessageId: delivery.providerMessageId,
+            providerThreadId: delivery.providerThreadId,
+            target: delivery.target,
+            targetKind: delivery.targetKind ?? "thread",
+          }),
+          status: "sent",
+        });
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+        LINQ_API_TOKEN: "linq-actual-runtime-token",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        providerMessageId: "linq_text_recovered",
+        providerThreadId: "linq_chat_recovered",
+      }),
+    ]);
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+
+    expect(events).toEqual([
+      "authority:read:" + idempotencyKey,
+      "authority:read:" + idempotencyKey,
+      "provider:capability",
+      "authority:claim:" + idempotencyKey,
+      "provider:card:" + idempotencyKey,
+      "outcome:failed:" + idempotencyKey,
+      "persist:" + fallbackIdempotencyKey,
+      "authority:claim:" + fallbackIdempotencyKey,
+      "provider:text:" + fallbackIdempotencyKey,
+      "provider:create:" + fallbackIdempotencyKey,
+      "outcome:accepted:" + fallbackIdempotencyKey,
+    ]);
+    expect(recordDeliveryOutcome).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        failureCode: "ASSISTANT_LINQ_APP_CARD_REJECTED",
+        idempotencyKey,
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(recordDeliveryOutcome).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        acceptedAt: expect.stringMatching(/Z$/u),
+        idempotencyKey: fallbackIdempotencyKey,
+        providerMessageId: "linq_text_recovered",
+        providerThreadId: "linq_chat_recovered",
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it("preserves the accepted Linq primary checkpoint when yield blocks the rich-link request", async () => {

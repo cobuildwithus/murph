@@ -468,6 +468,35 @@ test('linq iMessage capability requires a literal available true response', asyn
   }
 })
 
+test('linq iMessage capability does not wait or retry after rate limiting', async () => {
+  vi.useFakeTimers()
+  const env = { LINQ_API_TOKEN: 'linq-token' } satisfies NodeJS.ProcessEnv
+  const fetchImplementation = vi.fn(async () =>
+    createJsonResponse({ code: 'RATE_LIMITED' }, {
+      headers: { 'Retry-After': '30' },
+      status: 429,
+    }))
+  try {
+    const rejection = expect(checkLinqIMessageCapability({
+      address: '+15550001',
+    }, { env, fetchImplementation })).rejects.toMatchObject({
+      code: 'LINQ_API_REQUEST_FAILED',
+      context: expect.objectContaining({
+        operation: 'check_imessage_capability',
+        retryable: false,
+        status: 429,
+      }),
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+    await rejection
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 test('linq app-card failure diagnostics do not expose nutrition values', async () => {
   await assert.rejects(
     () => sendLinqIMessageAppCard({
@@ -503,11 +532,14 @@ test('linq app-card rejection classification permits only definitive pre-accepta
   const createError = (
     status: number,
     retryable: boolean,
+    linqFailureKind?: 'chat_not_found',
+    failureStage: 'http' | 'transport' = 'http',
   ): VaultCliError => new VaultCliError(
     'LINQ_API_REQUEST_FAILED',
     'Linq rejected the iMessage app card.',
     {
-      failureStage: 'http',
+      failureStage,
+      ...(linqFailureKind ? { linqFailureKind } : {}),
       method: 'POST',
       operation: 'send_imessage_app_card',
       path: '/chats/[chat]/messages',
@@ -522,11 +554,17 @@ test('linq app-card rejection classification permits only definitive pre-accepta
       createError(status, false),
     )).toBe(true)
   }
+  expect(isDefinitiveLinqIMessageAppCardRejection(
+    createError(404, false, 'chat_not_found'),
+  )).toBe(true)
   for (const status of [404, 408, 429, 500]) {
     expect(isDefinitiveLinqIMessageAppCardRejection(
       createError(status, status !== 404),
     )).toBe(false)
   }
+  expect(isDefinitiveLinqIMessageAppCardRejection(
+    createError(0, true, undefined, 'transport'),
+  )).toBe(false)
 })
 
 test('linq runtime serializes reply targets only for marked native replies', async () => {

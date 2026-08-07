@@ -26,6 +26,10 @@ Updated: 2026-08-07
     durable outbox identity, including a promoted card fallback identity.
   - A rich-link primary accepted before a later request yields must retain the
     existing partial-delivery checkpoint and deterministic recovery path.
+  - A capability HTTP 429 must skip capability retry delay and enter the
+    deterministic text fallback immediately.
+  - A provider-classified app-card `chat_not_found` must settle the card,
+    promote the fallback identity, and retain existing stale-direct recovery.
   - Real hosted Telegram client calls for `sendMessage`, `sendPhoto`,
     `sendVoice`, `sendChatAction`, `deleteMessages`,
     `deleteBusinessMessages`, `setMessageReaction`, `getFile`, and the
@@ -60,6 +64,11 @@ Updated: 2026-08-07
 - Preserve pre-provider authority and yield errors as typed failures with
   `deliveryMayHaveSucceeded: false`; do not translate them into provider
   responses or let the card runtime convert them into text fallback.
+- Disable only rate-limit retries for the optional capability lookup. Message
+  mutation retry behavior remains unchanged.
+- Treat only an exact classified app-card HTTP 404 `chat_not_found` as a
+  definitive no-effect rejection; generic 404, timeout, rate-limit, transport,
+  and server failures remain outside the fallback path.
 
 ## Review retrospective
 
@@ -74,6 +83,12 @@ Updated: 2026-08-07
   persistence, rejected-card settlement followed by fallback persistence and
   pre-fallback reset, and primary-rich-link acceptance followed by pre-link
   yield and checkpoint recording.
+- Round three found two original-PR UX gaps. Both were accepted: capability 429
+  retry delay could postpone the ready text fallback, and a classified stale
+  app-card chat could bypass direct-thread recovery. The correction disables
+  capability rate-limit retries and switches the existing local provider
+  context to the promoted fallback boundary before stale-chat materialization.
+  No retry or recovery owner was added.
 
 ## Verification
 
@@ -84,6 +99,7 @@ Updated: 2026-08-07
 - Hosted-runtime regressions for authority revocation during capability lookup,
   capability-unavailable fallback ordering, definitive card rejection
   settlement and replacement-identity claim, pre-provider abort reset,
-  promoted-identity reset, and rich-link partial delivery.
+  promoted-identity reset, rich-link partial delivery, immediate capability-429
+  fallback, and classified stale-card recovery under the fallback identity.
 - Documentation drift/gardening and `git diff --check`.
 - Exact-head required GitHub Actions and final review before closing this plan.
