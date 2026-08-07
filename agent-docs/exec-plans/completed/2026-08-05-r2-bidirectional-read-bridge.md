@@ -1,8 +1,8 @@
 # Complete the R2 live-cutover read bridge
 
-Status: active
+Status: completed
 Created: 2026-08-05
-Updated: 2026-08-05
+Updated: 2026-08-06
 
 ## Goal
 
@@ -62,3 +62,4 @@ Updated: 2026-08-05
 - `pnpm --filter @murphai/cloudflare-runner typecheck`, `pnpm docs:drift`, and
   `git diff --check` passed on the final candidate.
 - Updated exact-head CI and the ReviewGPT remediation round are pending.
+Completed: 2026-08-06

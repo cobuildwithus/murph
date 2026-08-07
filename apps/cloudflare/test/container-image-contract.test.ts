@@ -42,8 +42,6 @@ function createDeployEnvironment() {
   return {
     allowedRunnerSecretKeys: null,
     bundlesBucketName: "bundles",
-    bundlesEnamBucketName: "bundles-enam",
-    bundlesEnamPreviewBucketName: "bundles-enam-preview",
     bundlesPreviewBucketName: "bundles-preview",
     platformEnvelopeKeyId: "v1",
     compatibilityDate: "2026-03-27",
@@ -63,9 +61,7 @@ function createDeployEnvironment() {
     webControlTimeoutMs: "30000",
     workerName: "murph-hosted",
     workerVars: {
-      HOSTED_R2_CUTOVER_PHASE: "source_active",
       HOSTED_R2_PRESIGN_BUCKET_NAME: "bundles",
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles-enam",
     },
   }
 }

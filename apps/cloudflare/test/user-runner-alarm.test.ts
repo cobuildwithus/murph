@@ -39,7 +39,6 @@ import {
 import {
   HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
 } from "../src/browser-vault-store.ts";
-import { resolveHostedR2CutoverContext } from "../src/r2-cutover.ts";
 import {
   hostedArtifactUserPrefix,
   hostedBrowserVaultReplicaUserPrefix,
@@ -1384,54 +1383,6 @@ describe("HostedUserRunner execution coordination", () => {
       }),
     );
   });
-
-  it.each(["source_active", "destination_active"] as const)(
-    "dispatches %s cutover restores through the role-aware fenced control plane",
-    async (cutoverPhase) => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date(FIXED_NOW));
-      const snapshotId = `snapshot_${cutoverPhase}`;
-      const snapshotRef = await createWorkspaceSnapshotV2RefWithRuntimeRootForTest({
-        objectKey: await hostedWorkspaceSnapshotObjectKey({
-          snapshotId,
-          userId: TEST_USER_ID,
-        }),
-        snapshotId,
-      });
-      const { invoke, runner } = createRunnerHarness({
-        runnerRuntimeEnvSource: {
-          ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
-          HOSTED_R2_CUTOVER_PHASE: cutoverPhase,
-          HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "test-access-key",
-          HOSTED_R2_PRESIGN_ACCOUNT_ID: "account123",
-          HOSTED_R2_PRESIGN_BUCKET_NAME: "murph-test",
-          HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "murph-test-enam",
-          HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "test-secret-key",
-        },
-        workspace: createWorkspaceState({
-          snapshotRef,
-          version: "5",
-        }),
-      });
-      await runner.bindUser(TEST_USER_ID);
-
-      await expect(runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "test-orchestration-attempt",
-        userId: TEST_USER_ID,
-      })).resolves.toMatchObject({
-        action: "started",
-        kind: "runtime_processing_accepted",
-      });
-
-      await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-      expect(invoke.mock.calls[0]?.[0].job).not.toHaveProperty("preparedSnapshotRestore");
-      expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: "Hosted workspace snapshot restore preparation unavailable.",
-        }),
-      );
-    },
-  );
 
   it("reuses cached runner stores when applying a caller command budget", async () => {
     vi.useFakeTimers();
@@ -4828,43 +4779,6 @@ describe("HostedUserRunner execution coordination", () => {
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 
-  it("reports the destination-active bridge and deletes both fixed-role buckets", async () => {
-    const sourceBucket = new ListableMemoryEncryptedR2Bucket();
-    const destinationBucket = new ListableMemoryEncryptedR2Bucket();
-    const bundlePrefix = await hostedBundleUserPrefix({ userId: TEST_USER_ID });
-    const sourceKey = `${bundlePrefix}source.bundle.json`;
-    const destinationKey = `${bundlePrefix}destination.bundle.json`;
-    await sourceBucket.put(sourceKey, "source-data");
-    await destinationBucket.put(destinationKey, "destination-data");
-    const { runner, sql } = createRunnerHarness({
-      bucket: sourceBucket,
-      destinationBucket,
-      r2CutoverPhase: "destination_active",
-    });
-    await runner.bindUser(TEST_USER_ID);
-
-    await expect(runner.runnerStatus()).resolves.toMatchObject({
-      r2Cutover: {
-        coexisting: true,
-        phase: "destination_active",
-        protocolVersion: "r2-oc-enam-v2",
-      },
-    });
-    await expect(runner.deleteHostedUserData(TEST_USER_ID)).resolves.toMatchObject({
-      ok: true,
-      r2: {
-        deletedObjectCount: 2,
-        skippedUserScopedPrefixes: false,
-        supported: true,
-      },
-      userId: TEST_USER_ID,
-    });
-
-    expect(sourceBucket.objects.has(sourceKey)).toBe(false);
-    expect(destinationBucket.objects.has(destinationKey)).toBe(false);
-    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
-  });
-
   it("does not sweep R2 when active runner container teardown fails during user deletion", async () => {
     const bucket = new ListableMemoryEncryptedR2Bucket();
     const bundleKey = `${await hostedBundleUserPrefix({ userId: TEST_USER_ID })}bundle.bundle.json`;
@@ -5852,7 +5766,6 @@ function createRunnerHarness(input: {
   alarmDeleteError?: Error;
   abortWorkspaceInvocation?: HostedExecutionContainerStubLike["abortWorkspaceInvocation"];
   bucket?: MemoryEncryptedR2Bucket;
-  destinationBucket?: MemoryEncryptedR2Bucket;
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
   runnerContainerStubForName?: (
     name: string,
@@ -5876,7 +5789,6 @@ function createRunnerHarness(input: {
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   ownerReleaseResponse?: () => Promise<Response> | Response;
   runtimeLogResponse?: () => Promise<Response> | Response;
-  r2CutoverPhase?: "destination_active" | "source_active";
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
   wakeRuntime?: HostedExecutionContainerStubLike["wakeRuntime"];
@@ -6008,15 +5920,7 @@ function createRunnerHarness(input: {
     ownerReleaseResponse: input.ownerReleaseResponse,
   });
 
-  const sourceBucket = input.bucket ?? new MemoryEncryptedR2Bucket();
-  const r2CutoverContext = input.destinationBucket
-    ? resolveHostedR2CutoverContext({
-        BUNDLES: sourceBucket,
-        BUNDLES_ENAM: input.destinationBucket,
-        HOSTED_R2_CUTOVER_PHASE:
-          input.r2CutoverPhase ?? "destination_active",
-      })
-    : null;
+  const bucket = input.bucket ?? new MemoryEncryptedR2Bucket();
   const runner = new HostedUserRunnerWithTestControls(
     durable.state,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
@@ -6024,12 +5928,11 @@ function createRunnerHarness(input: {
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
     })),
-    r2CutoverContext?.bucket ?? sourceBucket,
+    bucket,
     input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,
     input.runnerContainerNamespace === undefined
       ? namespace
       : input.runnerContainerNamespace,
-    r2CutoverContext,
   );
 
   return {
