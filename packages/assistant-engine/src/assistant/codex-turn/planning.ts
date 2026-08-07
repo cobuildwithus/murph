@@ -482,11 +482,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
       channel: resolvedChannel,
       threadIsDirect: false,
     })
-  const deliveredGroupPhoneCallPreviewAvailable =
-    authenticatedGroupChatRuntime &&
-    input.hostedToolContext?.phoneCalls != null &&
-    await input.hostedToolContext
-      .currentGroupPhoneCallPreviewAuthority?.() != null
   const hostedGroupStyleSettingsAvailable =
     hostedGroupRuntime &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&
@@ -933,11 +928,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
           (
             scheduledPhoneCallScope !== null ||
             (
+              userActionAcceptedInputIds.length > 0 &&
               (
-                privateInteractiveAudience
-                || deliveredGroupPhoneCallPreviewAvailable
-              ) &&
-              userActionAcceptedInputIds.length > 0
+                privateInteractiveAudience ||
+                (
+                  hostedGroupRuntime &&
+                  messageTargetingAvailable
+                )
+              )
             )
           ),
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,

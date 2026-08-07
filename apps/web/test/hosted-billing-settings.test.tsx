@@ -1138,6 +1138,35 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Upgrade to Edge/);
   });
 
+  test("shows only the authorized Pulse recovery action for a paused Pulse trial", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const recoveryProps = {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      billingStatus: "paused",
+      currentBillingPhase: "trial",
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentBillingPlanCode: "launch_monthly",
+    } as const;
+    const eligibleMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      ...recoveryProps,
+      canStartPaidPulse: true,
+      canSwitchToGroup: false,
+      showGroupPlan: true,
+    }));
+    const ineligibleMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      ...recoveryProps,
+      canStartPaidPulse: false,
+    }));
+
+    assert.match(eligibleMarkup, /Start Pulse plan/);
+    assert.doesNotMatch(eligibleMarkup, />Start Core<\/button>/);
+    assert.doesNotMatch(eligibleMarkup, />Choose Pulse<\/button>/);
+    assert.doesNotMatch(ineligibleMarkup, /Start Pulse plan/);
+    assert.match(ineligibleMarkup, />Choose Pulse<\/button>/);
+  });
+
   test("suppresses every Start Pulse action with action-neutral copy while continuation is pending", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
     const usageStatus = buildUsageStatus({

@@ -330,6 +330,46 @@ Last verified: 2026-08-06
   Stripe webhooks remain the retry and local-reconciliation owner after the
   customer confirms the change; the unsigned return query is display/polling
   context only and never entitlement authority.
+- Stripe failure email reuses the shared operational Resend transport as a
+  best-effort projection, never a retry or billing owner. Only an action owner
+  schedules a metadata-only operation alert when a Stripe rejection actually
+  aborts the complete billing action. Checkout owners cover mandatory price
+  lookup, customer provisioning, saved-card preparation, and Checkout Session
+  creation/resume; paid-plan upgrades, paid-trial transitions, and scheduled
+  plan switches likewise report only after the complete provider-backed action
+  fails. No individual provider call is a separate alert occurrence. Family
+  replacement attempts rebind alert identity to the current
+  attempt, while direct paid upgrades include the complete current-plan,
+  current-Price, target-Price, and seat-count provider effect. Paid Family
+  capacity changes reuse the exact Stripe capacity-update idempotency identity,
+  and member-tier swaps reuse their persisted transition identity. Their
+  already-applied, successful, and domain-only outcomes remain silent. An
+  explicit
+  group-sponsorship recovery owns a terminal provider rejection, but a
+  no-charge capacity reactivation remains silent. The final Murph-owned Family
+  redirect reports a blocking Session-read rejection only when the unique blind
+  Session binding still names a current attempt; unknown, cleared, or stale
+  public IDs remain log-only. The central diagnostic
+  logger remains log-only because it also
+  observes recovered reads and cleanup races. Provider adapters that translate
+  a terminal Stripe rejection retain only the validated opaque request id in a
+  frozen non-serialized correlation record,
+  so distinct provider requests do not collapse onto the action fallback key;
+  the client-visible hosted error still exposes presence only. The pure
+  correlation parser introduces no Next or alert-delivery dependency into the
+  general onboarding runtime used by production line sync and standalone Stripe
+  tooling. Newly recorded, verified `checkout.session.async_payment_failed`,
+  `payment_intent.payment_failed`, `invoice.payment_failed`, and
+  `invoice.finalization_failed` receipts schedule event-scoped alerts; and only
+  the first failed local reconciliation attempt schedules a reconciliation
+  alert. Stable opaque operation-attempt and event-derived keys provide
+  provider replay defense inside Resend's external idempotency window.
+  Duplicate webhook receipts do not
+  schedule another payment alert, later local reconciliation attempts do not
+  schedule another reconciliation alert, and missing configuration or send
+  failure cannot change the original checkout, webhook, retry, poison, or
+  entitlement outcome. There is no new queue, cursor, retry loop, or persisted
+  alert state.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.
@@ -919,6 +959,25 @@ Last verified: 2026-08-06
 - Cloudflare container and Durable Object RPC methods must be invoked directly on the platform stub, not detached, bound, wrapped, or passed around as ordinary callbacks. Test doubles for hosted runner/container seams should model that direct-call contract so local coverage catches receiver/proxy mistakes before they become accepted-but-stuck runtime work.
 - Assistant turns and outbound sends should prefer system-emitted receipts plus idempotent outbox intents over model-authored logs. The receipt trail must stay non-canonical, compact, and safe to inspect through `murph status` / `murph doctor` even when transcripts are partially corrupted.
 - Assistant observability and recovery surfaces should stay persisted and replay-safe: diagnostics/status snapshots must tolerate missing files, and fault-injection coverage should exercise retryable provider/delivery/automation failure paths before those recovery hooks are trusted.
+- Hosted growth activity history reuses the authenticated daily growth snapshot
+  cron and its UTC-date upsert; it has no second scheduler or retry owner. Each
+  run computes the completed prior-day and trailing-seven-day distinct-sender
+  windows from direct and attributable group messages by durable mailbox receipt
+  time, not provider event time. A provider delivery that arrives after capture
+  therefore belongs to the open receipt window instead of mutating a closed day.
+  A same-date rerun may
+  replace the aggregate, but retired group evidence makes the affected value
+  null rather than silently freezing or lowering it, and charts retain that gap.
+  An activity-query, decrypt, or identity-resolution failure is reported and
+  creates null activity only for a first same-date row. A later failed retry
+  leaves existing activity fields untouched while still updating the daily
+  revenue, member, and message snapshot fields. After that write, the cron
+  returns non-success so monitoring exposes the missed activity capture and the
+  same authenticated endpoint can be manually rerun for that UTC date; Vercel
+  does not retry a failed cron invocation automatically. An ops-page read is an
+  additional same-date recovery attempt but is not the cron's retry guarantee.
+  A successful attribution pass remains authoritative and may replace unknown
+  values or write null when it proves retained sender evidence incomplete.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an
