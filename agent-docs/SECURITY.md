@@ -452,6 +452,18 @@ Last verified: 2026-08-06
   redirects, or client-safe connection projections. Runtime requests require a
   callback signature bound to the member plus Cloudflare's active attempt,
   lease-generation, and workspace-version fence.
+- Hosted domain-root key rotation must be reader-first. Keep the required
+  single-key authority and Cloudflare automation variables as the active
+  generation while optional keyrings add only `verify_only`, `decrypt_only`,
+  or `disabled` compatibility entries. Authority private signing material must
+  remain non-exportable in GCP KMS; an exportable Cloudflare private JWK may
+  exist only in approved secret stores and secret provider inputs, never in
+  arguments, files, logs, or review artifacts. A standby preload must not
+  mutate envelope key references. Activation, re-signing, rewrapping, and
+  retirement require an explicit production mutation owner, a reader-complete
+  compatibility window that retains the current Cloudflare private key, and
+  aggregate proof of zero old active or `decrypt_only` references before old
+  material is disabled or removed.
 - Clinical provider egress is allowlist-derived, never caller-URL-derived. The
   committed directory and SMART discovery pin HTTPS origins; FHIR continuation
   URLs must retain the exact origin and resource-family path, redirects are

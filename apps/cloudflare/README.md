@@ -162,6 +162,17 @@ Required worker vars:
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
 
+Optional hosted crypto compatibility inputs:
+
+- GitHub Environment variable
+  `HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON`
+- GitHub Environment secret
+  `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON`
+
+These inputs add non-active verification/decryption material; the required
+single-key variables remain the active generation. Follow the reader-first
+standby preload and future activation boundary in `DEPLOY.md`.
+
 `HOSTED_WEB_BASE_URL` must be an origin-only hosted web URL. Do not configure a
 subpath such as `https://example.test/app`; the worker appends its own internal
 callback routes to that origin.
