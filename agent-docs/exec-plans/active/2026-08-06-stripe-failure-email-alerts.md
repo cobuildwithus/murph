@@ -146,3 +146,12 @@ Updated: 2026-08-06
   request-id-free failure, distinct two-seat and three-seat direct provider
   effects with stable replay, explicit group recovery failing during mandatory
   Price read or Session creation, and passive no-charge recovery.
+- Final round 4 found that every successful Family checkout returns a
+  Murph-owned redirect whose mandatory Session read was still log-only. The
+  redirect now reports a real provider rejection only after the submitted
+  Session's unique blind binding resolves to a current checkout attempt; an
+  unknown, cleared, or stale public ID remains silent, and the retryable 409 is
+  unchanged.
+- Added real Resend transport proof for a request-id-free current redirect
+  failure with stable replay, an unbound valid Session ID with zero email, and
+  a successful open Session with zero email.

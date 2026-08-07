@@ -1073,7 +1073,9 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   action; recovered reads, replays, and cleanup races remain diagnostic logs.
   Family retries bind alerts to the current replacement attempt, and explicit
   group-sponsorship recovery reports only when its own provider-backed checkout
-  terminates; a no-charge reactivation stays silent.
+  terminates; a no-charge reactivation stays silent. The final Family redirect
+  Session read reports a provider rejection only for a still-current blind
+  Session binding, keeping unknown or stale public IDs silent.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep

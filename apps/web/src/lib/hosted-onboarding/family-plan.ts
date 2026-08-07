@@ -137,6 +137,7 @@ import {
   describeHostedStripeErrorDetails,
   isHostedStripeProviderError,
   logHostedStripeFailure,
+  reportHostedStripeOperationFailure,
   withHostedStripeFailureLog,
   withHostedStripeActionFailureAlert,
 } from "./stripe-error-log";
@@ -3253,14 +3254,36 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
     });
   }
 
-  const stripe = requireHostedStripeApi();
+  const prisma = input.prisma ?? getPrisma();
+  const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
   let session: Stripe.Checkout.Session;
   try {
-    session = await withHostedStripeFailureLog(
-      "checkout.sessions.retrieve.family-redirect",
-      () => stripe.checkout.sessions.retrieve(sessionId),
-    );
-  } catch {
+    session = await stripe.checkout.sessions.retrieve(sessionId);
+  } catch (error) {
+    let checkoutAttemptId: string | null = null;
+    if (isHostedStripeProviderError(error)) {
+      try {
+        checkoutAttemptId = await readHostedFamilyCheckoutRedirectAttemptId({
+          prisma,
+          sessionId,
+        });
+      } catch {
+        console.error("Hosted Family checkout alert binding read failed.");
+      }
+    }
+    if (checkoutAttemptId) {
+      reportHostedStripeOperationFailure({
+        error,
+        operationIdentity: checkoutAttemptId,
+        operationName: "family.billing.checkout-redirect",
+        stripeLiveMode,
+      });
+    } else {
+      logHostedStripeFailure({
+        error,
+        operationName: "checkout.sessions.retrieve.family-redirect",
+      });
+    }
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
       httpStatus: 409,
@@ -3276,7 +3299,6 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
     });
   }
 
-  const prisma = input.prisma ?? getPrisma();
   const group = await findHostedAccountGroupForStripeCheckoutSession({
     prisma,
     session,
@@ -3334,6 +3356,22 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
     message: "Family checkout is still syncing. Try again shortly.",
     retryable: true,
   });
+}
+
+async function readHostedFamilyCheckoutRedirectAttemptId(input: {
+  prisma: PrismaClient;
+  sessionId: string;
+}): Promise<string | null> {
+  const stripeCheckoutSessionLookupKey =
+    createHostedStripeCheckoutSessionLookupKey(input.sessionId);
+  if (!stripeCheckoutSessionLookupKey) {
+    return null;
+  }
+  const billingRef = await input.prisma.hostedAccountGroupBillingRef.findUnique({
+    select: { checkoutAttemptId: true },
+    where: { stripeCheckoutSessionLookupKey },
+  });
+  return normalizeNullableString(billingRef?.checkoutAttemptId);
 }
 
 export async function createHostedAccountGroupForOwner(input: {

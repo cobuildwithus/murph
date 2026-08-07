@@ -6103,6 +6103,127 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
   });
 
+  it("alerts for a provider failure that blocks a currently bound Family redirect", async () => {
+    const sessionId = "cs_test_familyRedirectFailure123";
+    const tx = createTxMock({ billedSeatCount: null });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
+      checkoutAttemptId: "hbfca_redirect_current",
+    });
+    const retrieve = vi.fn().mockRejectedValue(
+      buildFamilyStripeConnectionErrorWithoutRequestId(),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: { sessions: { retrieve } },
+    });
+    const fetchMock = stubFamilyStripeAlertEmailDelivery();
+    const consoleErrorMock = vi.spyOn(console, "error").mockImplementation(
+      () => {},
+    );
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(resolveHostedFamilyCheckoutRedirectUrl({
+        prisma: tx as never,
+        sessionId,
+      })).rejects.toMatchObject({
+        code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
+        httpStatus: 409,
+        retryable: true,
+      });
+      await runOnlyScheduledFamilyStripeAlert();
+      if (attempt === 0) {
+        nextServerMocks.after.mockClear();
+      }
+    }
+    consoleErrorMock.mockRestore();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(readResendIdempotencyKey(fetchMock, 0)).toBe(
+      readResendIdempotencyKey(fetchMock, 1),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
+      fetchMock.mock.calls[1]?.[1]?.body,
+    );
+    expect(String(fetchMock.mock.calls[0]?.[1]?.body)).toContain(
+      "family.billing.checkout-redirect",
+    );
+    expect(tx.hostedAccountGroupBillingRef.findUnique).toHaveBeenCalledWith({
+      select: { checkoutAttemptId: true },
+      where: {
+        stripeCheckoutSessionLookupKey: expect.stringMatching(
+          /^hbidx:stripe-checkout-session:v1:/u,
+        ),
+      },
+    });
+  });
+
+  it("keeps an unbound Family redirect provider failure alert-silent", async () => {
+    const sessionId = "cs_test_familyRedirectUnknown123";
+    const tx = createTxMock({ billedSeatCount: null });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
+    const retrieve = vi.fn().mockRejectedValue(
+      buildFamilyStripeConnectionErrorWithoutRequestId(),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: { sessions: { retrieve } },
+    });
+    const fetchMock = stubFamilyStripeAlertEmailDelivery();
+    const consoleErrorMock = vi.spyOn(console, "error").mockImplementation(
+      () => {},
+    );
+
+    await expect(resolveHostedFamilyCheckoutRedirectUrl({
+      prisma: tx as never,
+      sessionId,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
+      httpStatus: 409,
+      retryable: true,
+    });
+    consoleErrorMock.mockRestore();
+
+    expect(nextServerMocks.after).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a successful current Family redirect alert-silent", async () => {
+    const sessionId = "cs_test_familyRedirectOpen123";
+    const checkoutUrl = `https://checkout.stripe.com/c/pay/${sessionId}`;
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({ billedSeatCount: null, group });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
+      ...createBillingRefMock({
+        checkoutAttemptId: "hbfca_redirect_current",
+        checkoutSeatCount: 2,
+        group,
+        stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    });
+    const retrieve = vi.fn().mockResolvedValue(makeFamilyStripeCheckoutSession({
+      checkoutAttemptId: "hbfca_redirect_current",
+      sessionId,
+      status: "open",
+      subscriptionId: null,
+      url: checkoutUrl,
+    }));
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: { sessions: { retrieve } },
+    });
+
+    await expect(resolveHostedFamilyCheckoutRedirectUrl({
+      prisma: tx as never,
+      sessionId,
+    })).resolves.toBe(checkoutUrl);
+
+    expect(nextServerMocks.after).not.toHaveBeenCalled();
+  });
+
   it("routes a completed URL-less Family Session to verified success without clearing it", async () => {
     const sessionId = "cs_test_unavailable123";
     const checkoutCreatedAt = new Date("2026-07-28T12:00:00.000Z");

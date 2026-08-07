@@ -57,8 +57,9 @@ That contract is jointly specified by `ARCHITECTURE.md`,
 `apps/cloudflare/R2_BUNDLES_ENAM_MIGRATION.md`.
 
 Metadata-only Stripe failure email ownership, current-attempt/provider-effect
-identity, explicit recovery ownership, replay defense, and the rule that alerts
-never become billing or retry authority are jointly specified by
+identity, blind-bound public redirect ownership, explicit recovery ownership,
+replay defense, and the rule that alerts never become billing or retry
+authority are jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `apps/web/README.md`.
 

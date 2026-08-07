@@ -331,7 +331,10 @@ Last verified: 2026-08-05
   attempt, while direct paid upgrades include the complete current-plan,
   current-Price, target-Price, and seat-count provider effect. An explicit
   group-sponsorship recovery owns a terminal provider rejection, but a
-  no-charge capacity reactivation remains silent. The central diagnostic
+  no-charge capacity reactivation remains silent. The final Murph-owned Family
+  redirect reports a blocking Session-read rejection only when the unique blind
+  Session binding still names a current attempt; unknown, cleared, or stale
+  public IDs remain log-only. The central diagnostic
   logger remains log-only because it also
   observes recovered reads and cleanup races. New
   verified `checkout.session.async_payment_failed`,
