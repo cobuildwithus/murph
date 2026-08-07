@@ -1,6 +1,6 @@
 # Prune unused Zod surfaces from the hosted runner
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-07
 
@@ -54,7 +54,7 @@ Updated: 2026-08-07
 1. [x] Measure the installed package and falsify unsafe full removal.
 2. [x] Implement the retained-runtime prune and focused tests.
 3. [x] Run typecheck, focused tests, production assembly, and Docker proof.
-4. [ ] Commit, push, update the PR, complete exact-head CI/reviews, and close the
+4. [x] Commit, push, update the PR, complete exact-head CI/reviews, and close the
    plan with `scripts/finish-task`.
 
 ## Verification
@@ -73,3 +73,4 @@ Updated: 2026-08-07
   package and retained Zod root/v4 surfaces import successfully as uid 1001;
   every selected source/v3/mini path is absent. Bundled CLI help, LLM metadata,
   and schema commands all exit successfully.
+Completed: 2026-08-07
