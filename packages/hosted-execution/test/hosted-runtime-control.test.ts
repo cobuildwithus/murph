@@ -1539,6 +1539,8 @@ describe("hosted runtime control contracts", () => {
         scratchPrepareMs: 3,
         presignGetMs: 4,
         objectFetchMs: 5,
+        objectFetchResponseHeadersMs: 2,
+        objectFetchBodyReadMs: 3,
         decryptMs: 6,
         archiveExtractMs: 7,
         durableRootReplaceMs: 9,
@@ -1585,12 +1587,16 @@ describe("hosted runtime control contracts", () => {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
       },
       preProvider: {
+        mailboxImportDoneToAssistantPhaseMs: 29,
         workspaceAssistantPreAutomationMs: 11,
+        automationLaneToAssistantServiceMs: 7,
         executionTargetHydrateMs: 2,
         systemMailboxMaintenanceMs: 3,
         memberPreferencesPrePlanningMs: 4,
         automationBootstrapMs: 5,
+        outboxScanBytesRead: 8_192,
         outboxScanElapsedMs: 23,
+        outboxScanFilesRead: 10,
         outboxScanPerformed: true,
         receiptScanBytesRead: 4_096,
         receiptScanElapsedMs: 19,
@@ -1603,17 +1609,20 @@ describe("hosted runtime control contracts", () => {
         terminalNonReplyCommittedAtEpochMs: 1_777_000_000_125,
       },
       provider: {
+        assistantServicePreLockMs: 5,
         codexAppServerInitializeMs: 7,
         codexAppServerPreProviderMs: 17,
         codexAppServerSpawnReadyMs: 1,
         codexAppServerThreadResumeMs: 9,
         codexAppServerThreadStartMs: 0,
         codexAppServerWarmReuseMs: 0,
+        codexProcessPreparationMs: 3,
         turnLockWaitMs: 1,
         sessionResolveMs: 2,
         promptBuildMs: 3,
         admissionMs: 4,
         preProviderSetupMs: 5,
+        providerPlanAndGateMs: 13,
         linqEgressGuardMs: 6,
       },
     };
@@ -1647,6 +1656,7 @@ describe("hosted runtime control contracts", () => {
       { sessionResolveMs: { secret: 1 } }, // object leaf
       { sessionResolveMs: [1, 2, 3] }, // array leaf
       { codexAppServerWarmReuseMs: "0" }, // numeric leaf must stay numeric
+      { providerPlanAndGateMs: 1.5 }, // durations must stay integer milliseconds
       { networkToken: 1 }, // unknown sub key
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({
@@ -1685,8 +1695,10 @@ describe("hosted runtime control contracts", () => {
 
     for (const unsafePreProvider of [
       { receiptScanPerformed: 1 }, // boolean leaf must stay boolean
+      { outboxScanBytesRead: -1 }, // counts must be non-negative
       { receiptScanBytesRead: -1 }, // counts must be non-negative
       { outboxScanElapsedMs: "23" }, // durations must stay numeric
+      { mailboxImportDoneToAssistantPhaseMs: -1 }, // durations must be non-negative
       { receiptScanFilesRead: 12, receiptScanPath: 1 }, // arbitrary metadata is forbidden
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({
@@ -1806,8 +1818,8 @@ describe("hosted runtime control contracts", () => {
         mailboxItemId: "mailbox_item_1",
         phaseBreakdown: {
           schemaVersion: 1,
-          // restore.decryptMs is a string, not a non-negative integer: malformed leaf.
-          restore: { decryptMs: "not-a-number" },
+          // Body-read duration is a string, not a non-negative integer: malformed leaf.
+          restore: { objectFetchBodyReadMs: "not-a-number" },
           boot: { restoreWasCold: true },
         },
         runnerJobAcceptedAt: "2026-04-26T00:00:00.100Z",
@@ -1959,6 +1971,7 @@ describe("hosted runtime control contracts", () => {
       existing: {
         schemaVersion: 1,
         preProvider: {
+          outboxScanBytesRead: -1,
           outboxScanPerformed: true,
           receiptScanBytesRead: -1,
           receiptScanPath: 1,
@@ -1968,6 +1981,8 @@ describe("hosted runtime control contracts", () => {
       incoming: {
         schemaVersion: 1,
         preProvider: {
+          outboxScanBytesRead: 8_192,
+          outboxScanFilesRead: 10,
           outboxScanPerformed: false,
           receiptScanBytesRead: 4_096,
           receiptScanFilesRead: 12,
@@ -1978,6 +1993,8 @@ describe("hosted runtime control contracts", () => {
     });
 
     expect(historyMerged.value.preProvider).toEqual({
+      outboxScanBytesRead: 8_192,
+      outboxScanFilesRead: 10,
       outboxScanPerformed: true,
       receiptScanBytesRead: 4_096,
       receiptScanFilesRead: 12,

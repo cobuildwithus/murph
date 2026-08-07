@@ -519,12 +519,20 @@ async function runHostedBillingCheckoutAttempt(input: {
     return { kind: "restart" };
   }
 
+  const offerMetadata = input.prepared.resolvedOffer === HOSTED_PULSE_TRIAL_OFFER
+    ? buildHostedBillingOfferMetadata({
+        billingPlanCode: input.billingPlanCode,
+        checkoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+        memberId: input.memberId,
+        pulseTrialStartSource: "web_onboarding",
+      })
+    : buildHostedBillingOfferMetadata({
+        billingPlanCode: input.billingPlanCode,
+        checkoutOffer: HOSTED_STANDARD_CHECKOUT_OFFER,
+        memberId: input.memberId,
+      });
   const checkoutMetadata = {
-    ...buildHostedBillingOfferMetadata({
-      billingPlanCode: input.billingPlanCode,
-      checkoutOffer: input.prepared.resolvedOffer,
-      memberId: input.memberId,
-    }),
+    ...offerMetadata,
     checkoutAttemptId: currentAttempt.attemptId,
     checkoutIntentHash: currentAttempt.intentHash,
   };

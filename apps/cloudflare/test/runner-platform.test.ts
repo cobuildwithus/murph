@@ -1487,6 +1487,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       const encryptedBytes = await readFile(encrypted.encryptedFilePath);
       await rm(snapshotScratchRoot, { force: true, recursive: true });
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
       const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot restore fetch");
@@ -1516,8 +1518,19 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           );
         }
         if (request.url === getUrl) {
-          await delayWithAbort(25, request.signal);
-          return new Response(encryptedBytes, {
+          vi.setSystemTime(new Date(Date.now() + 25));
+          let bodySent = false;
+          return new Response(new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (bodySent) {
+                return;
+              }
+              bodySent = true;
+              vi.setSystemTime(new Date(Date.now() + 30));
+              controller.enqueue(encryptedBytes);
+              controller.close();
+            },
+          }, { highWaterMark: 0 }), {
             headers: {
               "content-length": String(encrypted.encryptedByteSize),
               "content-type": "application/octet-stream",
@@ -1573,6 +1586,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "dataKeyUnwrapMs",
         "presignGetMs",
         "objectFetchMs",
+        "objectFetchResponseHeadersMs",
+        "objectFetchBodyReadMs",
         "decryptMs",
         "archiveExtractMs",
         "durableRootReplaceMs",
@@ -1586,6 +1601,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(restoreTimings?.encryptedBytes).toBe(encrypted.encryptedByteSize);
       expect(restoreTimings?.plainBytes).toBe(encrypted.totalPlainBytes);
       expect(restoreTimings?.replaySafeReadMaxAttempt).toBe(1);
+      expect(restoreTimings?.objectFetchResponseHeadersMs).toBe(25);
+      expect(restoreTimings?.objectFetchBodyReadMs).toBe(30);
+      expect(
+        (restoreTimings?.objectFetchResponseHeadersMs ?? 0)
+          + (restoreTimings?.objectFetchBodyReadMs ?? 0),
+      ).toBeLessThanOrEqual(restoreTimings?.decryptMs ?? 0);
 
       expect(fetchMock).toHaveBeenCalledTimes(3);
       const restoreRequests = fetchMock.mock.calls.map((call) =>
@@ -1649,6 +1670,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain("note.md");
       expect(serializedLogs).not.toContain("restored through direct r2");
     } finally {
+      vi.useRealTimers();
       dataKey.fill(0);
       await rm(tempRoot, {
         force: true,
@@ -1692,6 +1714,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         outputDir: scratchRoot,
       });
       const encryptedBytes = await readFile(encrypted.encryptedFilePath);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
       const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
       let objectFetchCount = 0;
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
@@ -1718,17 +1742,19 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         if (request.url === getUrl) {
           objectFetchCount += 1;
           if (objectFetchCount === 1) {
+            vi.setSystemTime(new Date(Date.now() + 80));
             let prefixSent = false;
             return new Response(new ReadableStream<Uint8Array>({
               pull(controller) {
                 if (!prefixSent) {
                   prefixSent = true;
+                  vi.setSystemTime(new Date(Date.now() + 70));
                   controller.enqueue(encryptedBytes.subarray(0, 32));
                   return;
                 }
                 controller.error(new TypeError("connection reset"));
               },
-            }), {
+            }, { highWaterMark: 0 }), {
               headers: {
                 "content-length": String(encrypted.encryptedByteSize),
                 "content-type": "application/octet-stream",
@@ -1736,7 +1762,19 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               status: 200,
             });
           }
-          return new Response(encryptedBytes, {
+          vi.setSystemTime(new Date(Date.now() + 7));
+          let bodySent = false;
+          return new Response(new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (bodySent) {
+                return;
+              }
+              bodySent = true;
+              vi.setSystemTime(new Date(Date.now() + 11));
+              controller.enqueue(encryptedBytes);
+              controller.close();
+            },
+          }, { highWaterMark: 0 }), {
             headers: {
               "content-length": String(encrypted.encryptedByteSize),
               "content-type": "application/octet-stream",
@@ -1751,7 +1789,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      const restoreTiming = await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+      const restoreTimings = await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot,
         ref: {
           archive: {
@@ -1780,6 +1818,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
 
       expect(objectFetchCount).toBe(2);
+      expect(restoreTimings?.objectFetchResponseHeadersMs).toBe(7);
+      expect(restoreTimings?.objectFetchBodyReadMs).toBe(11);
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
       await expect(
         readdir(tempRoot).then((entries) =>
@@ -1797,7 +1837,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         workspaceSnapshotRestoreAttempt: 1,
         workspaceSnapshotRestoreStep: "object_fetch",
       }));
-      expect(restoreTiming).toMatchObject({ replaySafeReadMaxAttempt: 2 });
+      expect(restoreTimings).toMatchObject({ replaySafeReadMaxAttempt: 2 });
       expect(() => assertEstablishedR2ColdStartAttempt({
         expectedEncryptedBytes: encrypted.encryptedByteSize,
         expectedPlainBytes: encrypted.totalPlainBytes,
@@ -1811,7 +1851,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           phaseBreakdown: {
             schemaVersion: 1,
             boot: { restoreWasCold: true },
-            restore: restoreTiming ?? {},
+            restore: restoreTimings ?? {},
           },
           runtimeAttemptId: "runtime_write_123",
         },
@@ -1825,6 +1865,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain(dataKeyBase64);
       expect(serializedLogs).not.toContain(tempRoot);
     } finally {
+      vi.useRealTimers();
       dataKey.fill(0);
       await rm(tempRoot, {
         force: true,
@@ -6716,6 +6757,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     };
     const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
+    const replacedReplicaRef = createBrowserVaultReplicaRef("a".repeat(64));
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ replicaRef }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -6735,7 +6777,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     });
 
-    const result = await platform.browserVaultReplicaPort!.write({ replica });
+    const result = await platform.browserVaultReplicaPort!.write({
+      replica,
+      replacedReplicaRef,
+    });
 
     expect(result).toEqual(replicaRef);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -6746,7 +6791,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
-    await expect(request.json()).resolves.toEqual({ replica });
+    await expect(request.json()).resolves.toEqual({
+      replica,
+      replacedReplicaRef,
+    });
   });
 
   it("exposes callback-only browser-vault writes without legacy provider delivery effects", async () => {

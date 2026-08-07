@@ -49,6 +49,9 @@ import {
   HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from '@murphai/hosted-execution/assistant-model'
+import type {
+  HostedPhoneCallBrief,
+} from '@murphai/hosted-execution/phone-calls'
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
@@ -230,6 +233,7 @@ import {
 } from './dynamic-tools/generate-voice-memo.js'
 import {
   createPhoneCallRequestKey,
+  createScheduledPhoneCallRequestKey,
   MURPH_CREATE_PHONE_CALL_TOOL,
   normalizePhoneCallBriefForConversationScope,
   readPhoneCallDynamicToolRequest,
@@ -273,7 +277,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send one brief user-visible progress update to the current conversation. Call only before a real reply-critical wait, then continue work immediately. Success means this milestone update was sent; do not repeat it. This is not a final answer.',
+    'Send a brief user-visible update to the current conversation before reply-critical work likely to keep the member waiting, then continue immediately. A successful call means this update was sent. This is not a final answer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -282,7 +286,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
         type: 'string',
         minLength: 1,
         description:
-          'One short natural sentence about verified current progress and the immediate next step; no final conclusions or unverified claims.',
+          'One short natural sentence orienting the member to the work and immediate next step; no final conclusions or unverified result claims.',
       },
     },
     required: ['text'],
@@ -1252,7 +1256,7 @@ export const MURPH_COMPUTER_OPEN_TOOL = {
   namespace: 'murph',
   name: 'computer_open',
   description:
-    'Open or reuse the current authorized Kernel browser run and return runId, URL, title, and visible text. Call before browser work and after user handoff or any unknown browser outcome. This read does not prove a prior effect failed.',
+    'Open/reuse authorized browser; reopen after handoff/uncertainty. Returns runId, URL, title, text; prior outcome stays unknown. Before multi-step browsing each turn, call send_progress_update if available; prior-turn progress does not count.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1328,7 +1332,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Execute one bounded Playwright macro-step in the current authorized run. Call only while no missing or sensitive user input or final confirmation is required. Return compact state. A transport or browser failure may have an unknown outcome; call computer_open before retrying or acting again.',
+    'One bounded Playwright macro-step in current authorized run; returns state. No missing or sensitive input or final confirmation. Before browser call two this turn, call send_progress_update if available and not yet sent. Failure leaves outcome uncertain; call computer_open before retry/next action.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
@@ -3551,28 +3555,51 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
 
-      const requestKeyScope =
+      const userActionScope =
         hostedToolContext.currentUserActionScope?.() ?? null
-      if (!requestKeyScope) {
+      const scheduledScope = userActionScope
+        ? null
+        : hostedToolContext.currentScheduledPhoneCallScope?.() ?? null
+      const phoneCallAuthority = userActionScope
+        ? {
+            originSessionId: userActionScope.originSessionId,
+            requestKey: (brief: HostedPhoneCallBrief) =>
+              createPhoneCallRequestKey({
+                brief,
+                scope: userActionScope,
+              }),
+          }
+        : scheduledScope
+          ? {
+              originSessionId: scheduledScope.originSessionId,
+              requestKey: (_brief: HostedPhoneCallBrief) =>
+                createScheduledPhoneCallRequestKey({
+                  scope: scheduledScope,
+                }),
+            }
+          : null
+      if (!phoneCallAuthority) {
         return toolTextResult(
           false,
-          'phone calling requires user-sourced input for this turn',
+          'phone calling requires user-sourced input or direct scheduled automation authority for this turn',
         )
       }
 
       try {
+        const conversationScope =
+          userActionScope?.conversationScope ?? 'direct'
         const brief = normalizePhoneCallBriefForConversationScope({
           brief: input.request.brief,
-          conversationScope: requestKeyScope.conversationScope,
+          conversationScope,
         })
-        const groupRequester = requestKeyScope.conversationScope === 'group'
+        const groupRequester = conversationScope === 'group'
           ? await authorizeDynamicToolParticipant({
               authorizer: input.authorizeAcceptedMessageTarget ?? null,
               deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
               messageRef: input.request.messageRef ?? '',
             })
           : null
-        if (requestKeyScope.conversationScope === 'group') {
+        if (conversationScope === 'group') {
           const confirmationInputId = input.request.messageRef
           if (!groupRequester) {
             return toolTextResult(
@@ -3597,11 +3624,8 @@ export async function executeMurphDynamicToolRequest(input: {
         const result = await phoneCalls.start({
           brief,
           ...(groupRequester ? { groupRequester } : {}),
-          originSessionId: requestKeyScope.originSessionId,
-          requestKey: createPhoneCallRequestKey({
-            brief,
-            scope: requestKeyScope,
-          }),
+          originSessionId: phoneCallAuthority.originSessionId,
+          requestKey: phoneCallAuthority.requestKey(brief),
         }, {
           signal: input.abortSignal ?? null,
         })
@@ -3620,12 +3644,25 @@ export async function executeMurphDynamicToolRequest(input: {
             : `phone call attempt was unsuccessful: ${result.phoneCallId}`,
         )
       } catch (error) {
-        return isHostedGroupPhoneCallRequesterActivationRequiredError(error)
-          ? toolTextResult(
+        if (isHostedGroupPhoneCallRequesterActivationRequiredError(error)) {
+          return toolTextResult(
+            false,
+            'the group phone call could not be started for the selected participant',
+          )
+        }
+        if (scheduledScope) {
+          if (isHostedPhoneCallReconciliationWorkflowStartRetryRequiredError(error)) {
+            return toolTextResult(
               false,
-              'the group phone call could not be started for the selected participant',
+              'no phone call was started for this scheduled occurrence because start reconciliation was temporarily unavailable. Do not retry automatically; ask the requester to reschedule the call.',
             )
-          : toolTextResult(false, 'phone call could not be started')
+          }
+          return toolTextResult(
+            false,
+            'phone call start could not be confirmed for this scheduled occurrence. Do not retry automatically or claim that a call did or did not occur; a later result may arrive, but it is not guaranteed.',
+          )
+        }
+        return toolTextResult(false, 'phone call could not be started')
       }
     }
     case 'create-clinical-records-connect-link': {
@@ -6261,6 +6298,8 @@ function safeToolPayloadText(payload: unknown): string {
 // than importing across the boundary.
 const HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED_CODE =
   'HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED'
+const HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED_CODE =
+  'HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED'
 
 function isHostedGroupPhoneCallRequesterActivationRequiredError(
   error: unknown,
@@ -6270,6 +6309,16 @@ function isHostedGroupPhoneCallRequesterActivationRequiredError(
   }
   const code = (error as { code?: unknown }).code
   return code === HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED_CODE
+}
+
+function isHostedPhoneCallReconciliationWorkflowStartRetryRequiredError(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const code = (error as { code?: unknown }).code
+  return code === HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED_CODE
 }
 
 function toolTextResult(

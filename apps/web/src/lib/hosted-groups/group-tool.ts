@@ -54,7 +54,9 @@ import {
 import { createHostedLinqParticipantContactLookupKey } from "../hosted-onboarding/linq-participant-contact";
 import {
   deriveHostedOnboardingTimingErrorName,
+  finishHostedOnboardingTiming,
   sanitizeHostedOnboardingStructuredLogDetails,
+  startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
 } from "../hosted-onboarding/logging";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
@@ -118,6 +120,7 @@ import {
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
 import {
+  normalizeHostedGroupAccessOfferProjectionScopes,
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
 } from "./join-policy";
@@ -1008,7 +1011,7 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
       return { kind: ownerAccess.unavailableReason };
     }
     const requestedVaultShareProjectionScopes =
-      normalizeHostedVaultShareProjectionScopes(
+      normalizeHostedGroupAccessOfferProjectionScopes(
         input.joinLink?.requestedVaultShareProjectionScopes
           ?? input.joinLink?.requestedVaultShareProjectionKinds
           ?? [],
@@ -1214,7 +1217,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const projectionScopes = normalizeHostedVaultShareProjectionScopes(
+  const projectionScopes = normalizeHostedGroupAccessOfferProjectionScopes(
     input.joinOffer?.projectionScopes
       ?? input.joinOffer?.projectionKinds
       ?? [],
@@ -1389,17 +1392,33 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
     return unavailable("group_chat_icon_url_unavailable");
   }
 
+  const timing = startHostedOnboardingTiming("hosted-groups.set-chat-avatar", {
+    chatIdSuffix: toHostedOnboardingLogIdSuffix(access.chatId),
+  });
   try {
     await updateHostedLinqChatAvatar({
       chatId: access.chatId,
       groupChatIconUrl,
     });
   } catch (error) {
+    const providerDiagnostics = readHostedLinqAvatarProviderDiagnostics(error);
+    const requestOutcome =
+      isHostedOnboardingError(error)
+      && error.code === "LINQ_SEND_FAILED"
+      && error.details?.failureStage === "http"
+        ? "provider-request-rejected"
+        : "provider-request-unconfirmed";
+    finishHostedOnboardingTiming(timing, requestOutcome, {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      providerErrorCode: providerDiagnostics?.providerErrorCode,
+    });
     return unavailable(
       "provider_unavailable",
-      readHostedLinqAvatarProviderDiagnostics(error),
+      providerDiagnostics,
     );
   }
+
+  finishHostedOnboardingTiming(timing, "provider-request-accepted");
 
   return {
     action: "set_chat_avatar",

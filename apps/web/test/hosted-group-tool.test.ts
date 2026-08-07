@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
+  finishHostedOnboardingTiming: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
   getHostedLinqChatSummary: vi.fn(),
   getHostedTelegramGroupTitle: vi.fn(),
@@ -55,6 +56,13 @@ const mocks = vi.hoisted(() => ({
   resolveHostedAssistantNotificationDestination: vi.fn(),
   sendHostedLinqAttachmentMessage: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
+  startHostedOnboardingTiming: vi.fn(
+    (step: string, baseDetails: Record<string, unknown> = {}) => ({
+      baseDetails,
+      startedAtMs: 0,
+      step,
+    }),
+  ),
   updateHostedGroupDisplayNameByRuntimeMemberIdTx: vi.fn(),
   updateHostedLinqChatAvatar: vi.fn(),
   updateHostedLinqChatDisplayName: vi.fn(),
@@ -117,6 +125,18 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   updateHostedLinqChatAvatar: mocks.updateHostedLinqChatAvatar,
   updateHostedLinqChatDisplayName: mocks.updateHostedLinqChatDisplayName,
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/logging")
+  >("@/src/lib/hosted-onboarding/logging");
+
+  return {
+    ...actual,
+    finishHostedOnboardingTiming: mocks.finishHostedOnboardingTiming,
+    startHostedOnboardingTiming: mocks.startHostedOnboardingTiming,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/telegram-client", () => ({
   getHostedTelegramGroupTitle: mocks.getHostedTelegramGroupTitle,
@@ -270,6 +290,7 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 import {
   mergeHostedGroupJoinPolicy,
+  normalizeHostedGroupAccessOfferProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
   readHostedGroupJoinPolicy,
 } from "@/src/lib/hosted-groups/join-policy";
@@ -2534,6 +2555,60 @@ describe("hosted group join policy", () => {
     ]);
 
     expect(readHostedGroupJoinPolicy({
+      requestedVaultShareProjectionKinds: [
+        "deep-sleep-days.v0",
+        "rem-sleep-days.v0",
+      ],
+      schema: "murph.hosted-group.join-policy.v1",
+    }).requestedVaultShareProjectionScopes).toEqual([
+      DEEP_SLEEP_SCOPE,
+      REM_SLEEP_SCOPE,
+    ]);
+
+    expect(readHostedGroupJoinPolicy({
+      requestedVaultShareProjectionKinds: [
+        "deep-sleep-days.v0",
+        "deep-sleep-sources-days.v1",
+        "rem-sleep-days.v0",
+        "rem-sleep-sources-days.v1",
+      ],
+      schema: "murph.hosted-group.join-policy.v1",
+    }).requestedVaultShareProjectionScopes).toEqual([
+      DEEP_SLEEP_SCOPE,
+      DEEP_SLEEP_SOURCES_SCOPE,
+      REM_SLEEP_SCOPE,
+      REM_SLEEP_SOURCES_SCOPE,
+    ]);
+
+    expect(normalizeHostedGroupAccessOfferProjectionScopes([
+      DEEP_SLEEP_SCOPE,
+      REM_SLEEP_SCOPE,
+    ])).toEqual([
+      DEEP_SLEEP_SOURCES_SCOPE,
+      REM_SLEEP_SOURCES_SCOPE,
+    ]);
+
+    const mergedSleep = mergeHostedGroupJoinPolicy({
+      existing: {
+        requestedVaultShareProjectionKinds: [
+          "deep-sleep-days.v0",
+          "rem-sleep-days.v0",
+          "activity-days.v0",
+        ],
+        schema: "murph.hosted-group.join-policy.v1",
+      },
+      requestedVaultShareProjectionScopes: [DEEP_SLEEP_SCOPE],
+    }).requestedVaultShareProjectionScopes;
+    expect(mergedSleep).toHaveLength(4);
+    expect(mergedSleep).toEqual(expect.arrayContaining([
+      DEEP_SLEEP_SCOPE,
+      DEEP_SLEEP_SOURCES_SCOPE,
+      REM_SLEEP_SCOPE,
+      { projectionKind: "activity-days.v0" },
+    ]));
+    expect(mergedSleep).not.toContainEqual(REM_SLEEP_SOURCES_SCOPE);
+
+    expect(readHostedGroupJoinPolicy({
       requestedVaultShareProjectionKinds: ["all-health-data"],
       schema: "murph.hosted-group.join-policy.v1",
     }).requestedVaultShareProjectionKinds).toEqual([]);
@@ -2590,31 +2665,19 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "sleep-duration-days.v0",
       },
       {
-        description: "Shares your last 7 days of deep sleep minutes.",
-        label: "Deep sleep",
-        projectionKind: "deep-sleep-days.v0",
-        projectionScope: DEEP_SLEEP_SCOPE,
-        projectionScopeKey: "deep-sleep-days.v0",
-      },
-      {
         description:
           "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
-        label: "Deep sleep by source",
+        label: "Deep sleep",
+        legacyProjectionScope: DEEP_SLEEP_SCOPE,
         projectionKind: "deep-sleep-sources-days.v1",
         projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
         projectionScopeKey: "deep-sleep-sources-days.v1",
       },
       {
-        description: "Shares your last 7 days of REM sleep minutes.",
-        label: "REM sleep",
-        projectionKind: "rem-sleep-days.v0",
-        projectionScope: REM_SLEEP_SCOPE,
-        projectionScopeKey: "rem-sleep-days.v0",
-      },
-      {
         description:
           "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
-        label: "REM sleep by source",
+        label: "REM sleep",
+        legacyProjectionScope: REM_SLEEP_SCOPE,
         projectionKind: "rem-sleep-sources-days.v1",
         projectionScope: REM_SLEEP_SOURCES_SCOPE,
         projectionScopeKey: "rem-sleep-sources-days.v1",
@@ -2709,6 +2772,8 @@ describe("hosted group join policy", () => {
       HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
     ).map((entry) => entry.projectionScopeKey)).toEqual([
       ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES
+        .filter((scope) => scope.projectionKind !== "deep-sleep-days.v0"
+          && scope.projectionKind !== "rem-sleep-days.v0")
         .map((scope) => buildHostedVaultShareProjectionScopeKey(scope)),
     ]);
 
@@ -2837,6 +2902,17 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       groupChatIconUrl:
         `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     });
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledOnce();
+    expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+      "hosted-groups.set-chat-avatar",
+      { chatIdSuffix: "roup_1" },
+    );
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({ step: "hosted-groups.set-chat-avatar" }),
+      "provider-request-accepted",
+    );
+    expect(JSON.stringify(mocks.finishHostedOnboardingTiming.mock.calls))
+      .not.toContain("private-media");
   });
 
   it("keeps queryless public Images avatars compatible during the Web-first rollout", async () => {
@@ -2947,8 +3023,22 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
   });
 
-  it("reports group avatar provider failures as structured unavailability", async () => {
-    mocks.updateHostedLinqChatAvatar.mockRejectedValue(new Error("linq down"));
+  it.each([
+    {
+      error: new Error("network connection lost"),
+      label: "network failure",
+    },
+    {
+      error: hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        httpStatus: 502,
+        message: "Linq chat avatar update timed out.",
+        retryable: true,
+      }),
+      label: "transport timeout",
+    },
+  ])("reports an unconfirmed group avatar $label as structured unavailability", async ({ error }) => {
+    mocks.updateHostedLinqChatAvatar.mockRejectedValue(error);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -2965,6 +3055,15 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({ step: "hosted-groups.set-chat-avatar" }),
+      "provider-request-unconfirmed",
+      {
+        errorName: error.name,
+        providerErrorCode: undefined,
+      },
+    );
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledOnce();
   });
 
   it("preserves only validated HTTP provider diagnostics for group avatar failures", async () => {
@@ -2995,6 +3094,15 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({ step: "hosted-groups.set-chat-avatar" }),
+      "provider-request-rejected",
+      {
+        errorName: "HostedOnboardingError",
+        providerErrorCode: 5006,
+      },
+    );
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -3397,16 +3505,18 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   });
 
   it.each([
-    ["deep sleep", "deep-sleep-sources-days.v1", "deep sleep by source"],
-    ["REM sleep", "rem-sleep-sources-days.v1", "REM sleep by source"],
+    ["deep sleep", "deep-sleep-days.v0", "deep-sleep-sources-days.v1", "deep sleep"],
+    ["REM sleep", "rem-sleep-days.v0", "rem-sleep-sources-days.v1", "REM sleep"],
   ] as const)(
-    "discloses each source and its recorded time in the native %s offer",
-    async (_label, projectionKind, displayLabel) => {
+    "upgrades legacy %s requests and discloses each source in the native offer",
+    async (_label, requestedProjectionKind, offeredProjectionKind, displayLabel) => {
       await expect(handleHostedRuntimeGroupTool({
         memberId: "member_container",
         request: {
           action: "post_join_offer",
-          joinOffer: { projectionScopes: [{ projectionKind }] },
+          joinOffer: {
+            projectionScopes: [{ projectionKind: requestedProjectionKind }],
+          },
           linqThread: LINQ_THREAD,
         },
       })).resolves.toMatchObject({
@@ -3420,6 +3530,23 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
             `Like or heart this message if these default sharing choices look right: your Murph profile name and ${displayLabel} (by-source sleep includes every available source's value and name, plus when Murph recorded that source value). Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.`,
         }),
       );
+      const offeredScopes = [{ projectionKind: offeredProjectionKind }];
+      expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
+        .toHaveBeenCalledWith(expect.objectContaining({
+          requestedVaultShareProjectionScopes: offeredScopes,
+        }));
+      expect(mocks.prepareHostedGroupJoinOfferPostTx).toHaveBeenCalledWith({
+        groupId: GROUP_SUMMARY.id,
+        projectionScopes: offeredScopes,
+        tx: fakeTx,
+      });
+      expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+        groupId: GROUP_SUMMARY.id,
+        message: { channel: "linq", messageId: "msg_offer_1" },
+        postedAt: expect.any(Date),
+        projectionScopes: offeredScopes,
+        tx: fakeTx,
+      });
     },
   );
 

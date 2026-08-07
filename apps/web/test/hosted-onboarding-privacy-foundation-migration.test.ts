@@ -177,6 +177,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'currentPeriodEnd DateTime? @map("current_period_end")',
     'pulseTrialRedeemedAt DateTime? @map("pulse_trial_redeemed_at")',
     'pulseTrialPolicyVersion String? @map("pulse_trial_policy_version")',
+    'pulseTrialStartSource String? @map("pulse_trial_start_source")',
     'currentTrialStartedAt DateTime? @map("current_trial_started_at")',
     'currentTrialEndsAt DateTime? @map("current_trial_ends_at")',
     'checkoutAttemptId String? @map("checkout_attempt_id")',
@@ -1069,6 +1070,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260804223000_hosted_signup_referral_attribution",
       "20260805010000_rearm_generated_image_capture_retention",
       "20260805160000_hosted_usage_plan_reset_epoch",
+      "20260806170000_hosted_pulse_trial_start_source",
       "migration_lock.toml",
     ]);
     expect(hostedPendingGroupSetupMigrationSql).toContain(

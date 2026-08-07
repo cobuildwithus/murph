@@ -1289,6 +1289,116 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test.each([
+    {
+      expectedCriticalPath: false,
+      name: "a conversation import without a fresh assistant input",
+      outcome: "imported_without_input",
+    },
+    {
+      expectedCriticalPath: false,
+      name: "retryable blocked conversation work",
+      outcome: "retryable_blocked",
+    },
+    {
+      expectedCriticalPath: true,
+      name: "a fresh assistant input",
+      outcome: "fresh_input",
+    },
+  ] as const)("admits provider-start timing only for $name", async (scenario) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-start-timing-admission-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const conversationItem = createMailboxItem({
+      id: `mailbox_item_provider_start_timing_${scenario.outcome}`,
+      laneSeq: "1",
+    });
+    const observedCriticalPathPresence: boolean[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await stageAssistantInputEventForMailboxItem({
+        item: createMailboxItem({
+          id: `mailbox_item_provider_start_timing_background_${scenario.outcome}`,
+          laneSeq: "99",
+          occurredAt: "2026-04-26T23:59:59.000Z",
+        }),
+        threadId: `thread_provider_start_timing_background_${scenario.outcome}`,
+        vaultRoot,
+      });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: `attempt_provider_start_timing_${scenario.outcome}`,
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "5".repeat(64),
+                key: `users/bundles/member-synthetic/provider-start-timing-${scenario.outcome}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            if (scenario.outcome === "retryable_blocked") {
+              return {
+                reasonCode: "synthetic_retryable_conversation_import",
+                retryable: true,
+                status: "blocked" as const,
+              };
+            }
+            if (scenario.outcome === "fresh_input") {
+              return {
+                assistantInputId: await stageAssistantInputEventForMailboxItem({
+                  item: item.item,
+                  threadId: "thread_provider_start_timing_fresh",
+                  vaultRoot,
+                }),
+                status: "imported" as const,
+              };
+            }
+            return { status: "imported" as const };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [conversationItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            observedCriticalPathPresence.push(
+              input.providerStartCriticalPath !== null
+                && input.providerStartCriticalPath !== undefined,
+            );
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.ok(observedCriticalPathPresence.length > 0);
+      assert.equal(
+        observedCriticalPathPresence[0],
+        scenario.expectedCriticalPath,
+      );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("lets the first staged email veto later generic preparation", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -18869,6 +18979,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   phaseInput.imageGenerationLauncher ?? null;
                 assert.equal(
                   phaseInput.imageGenerationLauncher?.launch({
+                    continuationSessionId: "asst_image_evidence_retry",
                     operationId: "image_operation_evidence_retry_1",
                     originAssistantInputId: assistantInputId,
                     originAssistantInputIdExact: false,
@@ -18903,6 +19014,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 );
                 assert.equal(
                   phaseInput.imageGenerationLauncher?.launch({
+                    continuationSessionId: "asst_image_evidence_retry",
                     operationId: "image_operation_evidence_retry_2",
                     originAssistantInputId: assistantInputId,
                     originAssistantInputIdExact: false,
@@ -18928,6 +19040,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 );
                 assert.equal(
                   phaseInput.imageGenerationLauncher?.launch({
+                    continuationSessionId: "asst_image_evidence_retry",
                     operationId: "image_operation_evidence_retry_2",
                     originAssistantInputId: assistantInputId,
                     originAssistantInputIdExact: false,
@@ -25315,6 +25428,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 });
               assert.equal(
                 phaseInput.imageGenerationLauncher?.launch({
+                  continuationSessionId: "asst_foreground_shutdown_handoff",
                   operationId: "image_operation_foreground_shutdown_handoff",
                   originAssistantInputId: assistantInputId,
                   originAssistantInputIdExact: true,
@@ -31439,6 +31553,7 @@ describe("hosted runtime shutdown signal", () => {
               retentionWakeAt: synchronousWakeAt,
             });
             assert.equal(input.imageGenerationLauncher?.launch({
+              continuationSessionId: "asst_retention_wake",
               operationId: "image_operation_retention_wake_later",
               originAssistantInputId: originInputId,
               originAssistantInputIdExact: true,
@@ -31451,6 +31566,7 @@ describe("hosted runtime shutdown signal", () => {
                 }),
             }), "started");
             assert.equal(input.imageGenerationLauncher?.launch({
+              continuationSessionId: "asst_retention_wake",
               operationId: "image_operation_retention_wake_earlier",
               originAssistantInputId: originInputId,
               originAssistantInputIdExact: true,
@@ -31605,6 +31721,7 @@ describe("hosted runtime shutdown signal", () => {
             });
             assert.equal(
               phaseInput.imageGenerationLauncher?.launch({
+                continuationSessionId: "asst_image_shutdown_handoff",
                 operationId: "image_operation_shutdown_handoff",
                 originAssistantInputId: originInputId,
                 originAssistantInputIdExact: true,

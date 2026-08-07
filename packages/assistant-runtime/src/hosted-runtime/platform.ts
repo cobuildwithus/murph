@@ -209,6 +209,7 @@ export interface HostedRuntimeBrowserVaultReplicaPort {
   }): Promise<HostedBrowserVaultReplicaPublishResponse>;
   write(input: {
     replica: unknown;
+    replacedReplicaRef?: HostedBrowserVaultReplicaRef | null;
     signal?: AbortSignal | null;
   }): Promise<HostedBrowserVaultReplicaRef>;
 }
@@ -606,6 +607,8 @@ export interface HostedRuntimeWorkspaceSnapshotRestoreTimingDetails {
   dataKeyUnwrapMs?: number;
   presignGetMs?: number;
   objectFetchMs?: number;
+  objectFetchResponseHeadersMs?: number;
+  objectFetchBodyReadMs?: number;
   decryptMs?: number;
   archiveExtractMs?: number;
   durableRootReplaceMs?: number;

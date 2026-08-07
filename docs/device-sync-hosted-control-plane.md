@@ -165,6 +165,23 @@ UUID, and outbox bookkeeping never enter Postgres or the hosted workspace; only
 an individual strict six-field envelope is uploaded through the derived-data
 route. The UUID never uploads or enters logs.
 
+Native account admission is separate from both band enrollment and hosted
+device lifecycle authority. `POST /api/device-sync/companion/admission`
+accepts only an optional validated IANA time zone, reuses the canonical hosted
+member consent/trial/access owner, and returns only `{ "ok": true }`. Its
+public Android recovery boundary preserves the stable login, consent, access,
+suspension, and alternate-sign-in identity-conflict outcomes. All other
+retryable owner failures normalize to `COMPANION_ADMISSION_RETRYABLE`; all
+remaining terminal setup failures normalize to
+`COMPANION_ADMISSION_SUPPORT_REQUIRED`. The client may retry only the former
+and must stop automatic admission attempts on the latter, while internal
+hosted lifecycle codes remain private. The route's static dependency graph is
+kept outside device-sync public ingress, and this account-only caller uses the
+existing signup-welcome suppression policy. Admission therefore preserves
+trial activation and the internal `member.activated` fact without assigning a
+Linq home line, queueing or emailing a welcome, or creating, resuming,
+reactivating, or otherwise mutating a Junction connection.
+
 ### Cloudflare execution state
 
 Cloudflare storage keeps hosted execution coordination state only, such as encrypted hosted workspace bundles, opaque runner residue, and other execution-plane metadata described in `ARCHITECTURE.md`.
@@ -254,10 +271,14 @@ These are browser-initiated but lower-level than the settings surface. They must
 
 ### Hosted companion routes
 
+- `POST /api/device-sync/companion/admission`
 - `POST /api/device-sync/companion/sign-in-token`
 - `POST /api/device-sync/companion/hrv-rmssd`
 
-Both are Privy-bearer-authenticated and consent-gated. Sign-in honors the
+All are Privy-bearer-authenticated and consent-gated. Admission validates its
+complete bounded optional-time-zone body before canonical member mutation and
+suppresses signup-welcome routing and delivery without suppressing canonical
+trial activation; it does not enter device sync. Sign-in honors the
 resume, omitted-intent inference, and future explicit-connect authority split
 above. The derived route accepts only the closed overnight summary contract,
 reuses one active member-owned Junction connection, and never establishes or

@@ -4,6 +4,7 @@ import type {
 import type {
   HostedRuntimeNewsletterToolResponse,
   HostedRuntimeNewsletterScheduledAuthority,
+  HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
 import {
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
@@ -80,6 +81,11 @@ export interface AssistantHostedUserActionScope
   originSessionId: string
 }
 
+export interface AssistantHostedScheduledPhoneCallScope
+  extends HostedRuntimeScheduledAutomationAuthority {
+  originSessionId: string
+}
+
 export interface AssistantHostedInvocationScope {
   conversationScope: AssistantConversationScope | null
   origin: HostedExecutionAssistantAskOrigin
@@ -149,6 +155,7 @@ export interface AssistantHostedToolContext {
     originAssistantInputId: string
     usageDraft: AssistantProviderUsageDraft
   }): void
+  currentScheduledPhoneCallScope?(): AssistantHostedScheduledPhoneCallScope | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
@@ -192,6 +199,8 @@ export function createAssistantHostedToolContext(input: {
   const route = input.route ?? null
   const clinicalRecordsConnectLinkTool =
     executionContext?.clinicalRecordsConnectLinkTool ?? null
+  const imageGenerationLauncher =
+    executionContext?.imageGenerationLauncher ?? null
   const newsletterPort = input.messageInput.scheduledAutomationAuthority
     ? executionContext?.newsletterTool ?? null
     : null
@@ -247,6 +256,16 @@ export function createAssistantHostedToolContext(input: {
       originSessionId: deliveryContext.session.sessionId,
     }
   }
+  const readCurrentScheduledPhoneCallScope = () => {
+    const deliveryContext = readDeliveryContext()
+    return resolveAssistantHostedScheduledPhoneCallScope({
+      channel: deliveryContext.messageInput.channel,
+      conversationScope:
+        input.getConversationScope?.() ?? 'unverified-external',
+      messageInput: deliveryContext.messageInput,
+      originSessionId: deliveryContext.session.sessionId,
+    })
+  }
   let subscriptionActionClaimed = false
   let imessageContactActionClaimed = false
   let clinicalRecordsConnectLinkRequest: ReturnType<
@@ -276,7 +295,13 @@ export function createAssistantHostedToolContext(input: {
     groupTool: executionContext?.groupTool ?? null,
     imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
-    imageGenerationLauncher: executionContext?.imageGenerationLauncher ?? null,
+    imageGenerationLauncher: imageGenerationLauncher
+      ? bindAssistantHostedImageGenerationContinuation({
+          launcher: imageGenerationLauncher,
+          readContinuationSessionId: () =>
+            readDeliveryContext().session.sessionId,
+        })
+      : null,
     persistGeneratedImageCapture:
       executionContext?.persistGeneratedImageCapture ?? null,
     newsletterTool,
@@ -431,6 +456,7 @@ export function createAssistantHostedToolContext(input: {
     },
     closeNewsletterCapability: newsletterOutboxTool?.closeCapability,
     recordNewsletterSendResult: input.recordNewsletterSendResult,
+    currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,
     currentUserActionScope: readCurrentUserActionScope,
     currentProductFeedbackAcceptedInputIds: () =>
       input.getProductFeedbackAcceptedInputIds?.() ?? [],
@@ -438,6 +464,51 @@ export function createAssistantHostedToolContext(input: {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
     vaultFileSendAvailable: typeof input.sendVaultFile === 'function',
+  }
+}
+
+// The host, not the model or tool arguments, owns which durable session an
+// asynchronous image completion resumes. Binding it here keeps the caller's
+// `scopeId` (pending/queued coordination) and `readStatus` untouched.
+function bindAssistantHostedImageGenerationContinuation(input: {
+  launcher: AssistantHostedImageGenerationLauncher
+  readContinuationSessionId: () => string
+}): AssistantHostedImageGenerationLauncher {
+  return {
+    ...input.launcher,
+    launch(request) {
+      return input.launcher.launch({
+        ...request,
+        continuationSessionId: input.readContinuationSessionId(),
+      })
+    },
+  }
+}
+
+export function resolveAssistantHostedScheduledPhoneCallScope(input: {
+  channel: AssistantMessageInput['channel']
+  conversationScope: AssistantConversationScope
+  messageInput: Pick<
+    AssistantMessageInput,
+    'scheduledInvocationAuthority' | 'scheduledOccurrenceAt' | 'turnTrigger'
+  >
+  originSessionId: string
+}): AssistantHostedScheduledPhoneCallScope | null {
+  const authority = input.messageInput.scheduledInvocationAuthority ?? null
+  if (
+    input.channel?.trim().toLowerCase() !== 'linq'
+    || input.conversationScope !== 'direct'
+    || input.messageInput.turnTrigger !== 'automation-cron'
+    || authority === null
+    || authority.occurrenceAt !== input.messageInput.scheduledOccurrenceAt
+  ) {
+    return null
+  }
+
+  return {
+    automationId: authority.automationId,
+    occurrenceAt: authority.occurrenceAt,
+    originSessionId: input.originSessionId,
   }
 }
 

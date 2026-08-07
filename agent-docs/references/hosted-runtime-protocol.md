@@ -968,12 +968,29 @@ server-bound append checks. Web always awaits the applicable Temporal
 start the direct ensure. An access failure or Temporal acceptance failure starts
 no direct wake. One narrow prewarm exception exists: on the Linq instant-start
 path, the webhook handler fires one additional best-effort payloadless ensure
-immediately after the planner transaction creating the new member commits and
-before enrollment or any Temporal signal, so the container boot overlaps
-enrollment instead of following it. The same request then performs the ordinary
-Temporal-then-direct wake; the prewarm grants no authority, may be dropped, and
-a racing or duplicate ensure lands on the existing fence/active-wake path. This
-is a latency hint only, not a second durable wake authority:
+immediately after trial enrollment atomically activates the new member, before
+the active-member replan or conversation-mailbox Temporal signal. Enrollment
+returns the newly committed activation as an explicit per-request wake
+continuation instead of signaling it first. Web starts the direct ensure, then
+the replan durably appends the original conversation item and Web awaits that
+conversation-mailbox Temporal signal; the signal reconciles both the foreground
+conversation lane and the already-durable activation item. Web then runs the
+deferred activation continuation so the existing best-effort activation signal
+and pending group-join confirmation reconciliation remain intact. If replan,
+delivery, or the conversation wake fails after activation commits, Web runs the
+same continuation immediately. A process death between the activation commit
+and receiving that continuation cannot erase the activation mailbox item.
+Recovery from that window is provider-owned: Linq starts retrying only after its
+10-second webhook timeout, does not specify the first retry delay, and may take
+minutes to redeliver. That exact-event retry observes active access, and its
+ordinary active-member conversation signal imports the pending activation item.
+If the provider exhausts its retry campaign, only later member traffic provides
+another wake, with no finite application-owned recovery bound. Enrollment
+failure starts neither prewarm nor a continuation. The same successful request
+also performs the ordinary Temporal-then-direct wake; the prewarm grants no
+authority, may be dropped, and a racing or duplicate ensure lands on the
+existing fence/active-wake path. This is a latency hint only, not a second
+durable wake authority:
 accepted Linq reply delivery stamps `consumedAt` on the exact
 `HostedMailboxItem`, while Assistant Ask uses deterministic request/completion
 ids, mailbox dedupe, and idempotent continuation delivery. Do not add
@@ -996,7 +1013,16 @@ Hosted reply-latency telemetry records only boundaries observed by their owning
 process. Its ingress `acceptedAt` value copies the mailbox row's PostgreSQL
 `created_at`; because that default uses transaction-start time, the interval
 from `acceptedAt` includes the remainder of the append transaction and must not
-be labeled row-insert or commit latency. The web-owned `provider_started` field
+be labeled row-insert or commit latency. On a cold workspace restore,
+`restore.objectFetchMs` remains the retry-inclusive wall clock for the whole
+replay-safe object step. The final successful GET attempt also records
+`objectFetchResponseHeadersMs` from request start until Fetch resolves the
+response headers, and `objectFetchBodyReadMs` from validated headers until
+stream EOF. Body consumption overlaps streamed hash/decrypt work and its
+backpressure, so it is not pure network-transfer latency. These two bounded
+numbers are appended to the existing in-memory staged phase breakdown; they do
+not add a request, awaited reporting step, per-chunk timer, or separate log.
+The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
 `assistant_milestone` events for Linq typing request start/acceptance and the
@@ -1648,6 +1674,18 @@ the fence regardless of whether a status read appears to show progress. Exact
 successful completion clears the fence only by the matching attempt identity.
 This prevents duplicate replacement while a live child may still be running and
 leaves replacement ownership in the exact identity-aware wake path.
+After RunnerContainer receives and parses a successful invocation result, and
+only after its exact active-operation record has been removed, it sends the
+per-user UserRunner a best-effort completion receipt carrying that result plus
+the attempt and generation. UserRunner re-reads the current runtime fence and
+uses the existing full-token completion compare-and-swap; a stale, duplicate,
+wrong-user, or wrong-generation receipt is a no-op. The compare-and-swap winner
+alone may emit the existing owner-release callback. Receipt failure cannot
+change the completed runner result; RunnerContainer stops waiting after one
+second, consumes any late rejection, and lets the original outer UserRunner
+continuation remain the mixed-version and callback-loss fallback. The receipt
+does not make checkpoint success, idle expiry, container stop, or elapsed time
+completion authority.
 When the outer RunnerContainer active-operation pointer is missing, a container
 wake response must carry explicit identity-checked wake metadata before an
 accepted wake is trusted; identity-blind accepted responses from deploy-skewed
