@@ -57,6 +57,10 @@ vi.mock("@murphai/assistant-engine", () => ({
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA: "murph.assistant-turn-timing.v1",
   HOSTED_ASSISTANT_TURN_TIMING_TYPE: "assistant.turn.timing",
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
+  stampAssistantProviderStartCriticalPath: (
+    context: Record<string, number> | null | undefined,
+    boundary: string,
+  ) => context ? { ...context, [boundary]: 0 } : null,
 }));
 
 vi.mock("@murphai/inbox-services", () => ({
@@ -3710,7 +3714,9 @@ describe("runHostedAssistantAutomationLane", () => {
       mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
     automationPassInput.onProviderRequestStarted?.({
       autoReplyHistory: {
+        outboxScanBytesRead: 8_192,
         outboxScanElapsedMs: 23,
+        outboxScanFilesRead: 10,
         outboxScanPerformed: true,
         receiptScanBytesRead: 4_096,
         receiptScanElapsedMs: 19,
@@ -3724,6 +3730,17 @@ describe("runHostedAssistantAutomationLane", () => {
       codexAppServerSpawnReadyMs: 1,
       codexAppServerThreadResumeMs: 9,
       codexAppServerWarmReuseMs: 0,
+      providerStartCriticalPath: {
+        assistantServicePreLockMs: 5,
+        automationLaneToAssistantServiceMs: 7,
+        codexAppServerPreProviderMs: 19,
+        codexProcessPreparationMs: 3,
+        mailboxImportDoneToAssistantPhaseMs: 29,
+        preProviderSetupMs: 11,
+        providerPlanAndGateMs: 13,
+        turnLockWaitMs: 2,
+        workspaceAssistantPreAutomationMs: 17,
+      },
       providerRequestOrdinal: 0,
       source: "linq",
       startedAt: "2026-04-08T00:00:01.000Z",
@@ -3735,21 +3752,30 @@ describe("runHostedAssistantAutomationLane", () => {
         at: "2026-04-08T00:00:01.000Z",
         phaseBreakdown: {
           preProvider: {
+            outboxScanBytesRead: 8_192,
             outboxScanElapsedMs: 23,
+            outboxScanFilesRead: 10,
             outboxScanPerformed: true,
             receiptScanBytesRead: 4_096,
             receiptScanElapsedMs: 19,
             receiptScanFilesRead: 12,
             receiptScanLockWaitMs: 3,
             receiptScanPerformed: true,
-            workspaceAssistantPreAutomationMs: 11,
+            automationLaneToAssistantServiceMs: 7,
+            mailboxImportDoneToAssistantPhaseMs: 29,
+            workspaceAssistantPreAutomationMs: 17,
           },
           provider: {
+            assistantServicePreLockMs: 5,
             codexAppServerInitializeMs: 7,
-            codexAppServerPreProviderMs: 17,
+            codexAppServerPreProviderMs: 19,
             codexAppServerSpawnReadyMs: 1,
             codexAppServerThreadResumeMs: 9,
             codexAppServerWarmReuseMs: 0,
+            codexProcessPreparationMs: 3,
+            preProviderSetupMs: 11,
+            providerPlanAndGateMs: 13,
+            turnLockWaitMs: 2,
           },
           schemaVersion: 1,
         },

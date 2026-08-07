@@ -524,7 +524,7 @@ test('resolveAssistantSession rejects clearing a saved thread binding because th
   assert.equal(persisted.binding.delivery?.target, 'chat-1')
 })
 
-test('resolveAssistantSession preserves a saved participant binding when a system-authored resume has no actor', async () => {
+test('resolveAssistantSession preserves a saved participant binding when exact-session input has no actor', async () => {
   const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-clear-participant-conflict-')
 
   const created = await resolveAssistantSession({
@@ -533,7 +533,7 @@ test('resolveAssistantSession preserves a saved participant binding when a syste
     participantId: '+15551234567',
   })
 
-  const resumed = await resolveAssistantSession({
+  const resolved = await resolveAssistantSession({
     vault: vaultRoot,
     sessionId: created.session.sessionId,
     conversation: {
@@ -542,7 +542,10 @@ test('resolveAssistantSession preserves a saved participant binding when a syste
     createIfMissing: false,
   })
 
-  assert.equal(resumed.session.sessionId, created.session.sessionId)
+  assert.equal(resolved.created, false)
+  assert.equal(resolved.session.binding.actorId, '+15551234567')
+  assert.equal(resolved.session.binding.delivery?.kind, 'participant')
+  assert.equal(resolved.session.binding.delivery?.target, '+15551234567')
 
   const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
   assert.equal(persisted.binding.actorId, '+15551234567')

@@ -746,7 +746,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Keep this scheduled note text-only. Do not create, attach, or send images or response media.',
       '- The outbound note must be link-free. Never include URLs, Markdown links, bare domains, or link labels such as "read more".',
       '- Use exactly one bullet per selected item. Each bullet must be one sentence and no more than 28 words after the bullet marker, including the title. State the benefit directly; omit optional color and repeated personalization, but preserve required prerequisites, availability limits, and approval or confirmation boundaries.',
-      '- If the ledger page was missing before this run, open with one sentence of no more than 10 words saying Murph occasionally shares what is new or useful.',
+      '- Open every outbound note with one sentence of no more than 20 words before the first bullet. In Murph\'s first-person voice, explain that these occasional updates cover what is new or useful so the user can make use of it.',
       '- Close with one invitation sentence of no more than 12 words.',
       '- If sending nothing, return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}` and do not append to the ledger.',
       '',

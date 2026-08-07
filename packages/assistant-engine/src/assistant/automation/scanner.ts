@@ -10,6 +10,9 @@ import type {
   AssistantBeforeProviderAcceptedInputsHook,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
+import type {
+  AssistantProviderStartCriticalPathContext,
+} from '../provider-start-critical-path.js'
 import {
   type AssistantInputCandidate,
   type AssistantInputSource,
@@ -52,6 +55,7 @@ export async function scanAssistantAutomationOnce(input: {
   applyCanonicalWrites?: boolean
   allowSelfAuthored?: boolean
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
   operationScope?: AssistantAutomationOperationScope | null
@@ -84,6 +88,13 @@ export async function scanAssistantAutomationOnce(input: {
   const applyCanonicalWrites = input.applyCanonicalWrites ?? true
   const scanState = cloneAutomationScanState(input.state)
   let persistedState = cloneAutomationScanState(scanState)
+  let providerStartCriticalPath = input.providerStartCriticalPath ?? null
+  const onProviderRequestStarted: AssistantAutoReplyProviderRequestStartHook = (
+    event,
+  ) => {
+    providerStartCriticalPath = null
+    return input.onProviderRequestStarted?.(event)
+  }
   void input.vaultServices
   const replyChannels = applyCanonicalWrites
     ? scanState.autoReply.map((entry) => entry.channel)
@@ -180,6 +191,9 @@ export async function scanAssistantAutomationOnce(input: {
       ...(input.beforeProviderAcceptedInputs
         ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
         : {}),
+      ...(providerStartCriticalPath
+        ? { providerStartCriticalPath }
+        : {}),
       context,
       deliveryDispatchMode: input.deliveryDispatchMode,
       enabledChannels: replyChannels,
@@ -187,7 +201,10 @@ export async function scanAssistantAutomationOnce(input: {
       inboxServices: input.inboxServices,
       onEvent: input.onEvent,
       onProviderEvent: input.onProviderEvent ?? null,
-      onProviderRequestStarted: input.onProviderRequestStarted ?? null,
+      onProviderRequestStarted:
+        providerStartCriticalPath || input.onProviderRequestStarted
+          ? onProviderRequestStarted
+          : null,
       onTerminalNonReplyCommitted: input.onTerminalNonReplyCommitted ?? null,
       onTraceEvent: input.onTraceEvent,
       providerHeartbeatMs: input.providerHeartbeatMs,

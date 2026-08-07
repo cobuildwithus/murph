@@ -21,6 +21,7 @@ export type {
 } from './assistant/connected-apps-port.js'
 export * from './assistant/group-challenge-scorecard.js'
 export * from './assistant/group-challenge-scorecard-schema.js'
+export * from './assistant/provider-start-critical-path.js'
 export {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
