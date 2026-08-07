@@ -167,11 +167,15 @@ export function registerCommonsCommands(cli: Cli.Cli) {
     }],
     output: commonsKnowledgeSearchResultSchema,
     run({ args, options }) {
+      const focus = options.focus;
+      if (!focus) {
+        throw new Error("Health Commons knowledge search requires --focus.");
+      }
       try {
         return {
           available: true,
           ...searchGeneratedHealthCommonsKnowledge({
-            focus: options.focus,
+            focus,
             limit: options.limit,
             query: args.query,
           }),
@@ -181,7 +185,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         return {
           available: false,
           catalogHash: "",
-          focus: options.focus ?? null,
+          focus,
           items: [],
           query: args.query,
           safety: null,

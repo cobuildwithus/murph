@@ -159,7 +159,7 @@ export interface LoadGeneratedHealthCommonsWebArtifactOptions {
 }
 
 export interface SearchGeneratedHealthCommonsKnowledgeOptions {
-  focus?: string;
+  focus: string;
   knowledgeIndexPath?: string | URL;
   limit?: number;
   query: string;
