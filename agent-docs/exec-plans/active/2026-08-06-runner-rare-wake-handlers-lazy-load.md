@@ -93,3 +93,12 @@ Updated: 2026-08-06
 - Six focused Assistant Runtime test files passed (97 tests).
 - Cloudflare runner-bundle tests passed before the final baseline ratchet; rerun
   with workspace-boundary and package-cycle checks before the candidate commit.
+- Preliminary specialist review found that the direct handler test did not
+  prove the new lazy handler and eager serial mailbox shared preemption identity.
+  A production-shaped integration test now exercises the real prepare, dynamic
+  handler import, and mailbox retention path. It proves `preempted`, pending
+  status, no retry timestamp, and no persisted error metadata.
+- The remediation passes 13 focused Assistant Ask tests, 49 Cloudflare bundle
+  and image-contract tests, Assistant Runtime typecheck, and exact production
+  runner assembly. Emitted bytes remain 1,636,957B entry, 8,453,351B static
+  closure, and 10,291,322B total.
