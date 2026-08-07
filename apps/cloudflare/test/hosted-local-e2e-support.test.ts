@@ -548,6 +548,18 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       buildResponsesRequest(baseToolNames, "code-mode"),
     ]);
     expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest([...baseToolNames, "murph.pending_vault_files"])],
+      {
+        pendingVaultFilesAvailable: true,
+      },
+    );
+    expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest([...baseToolNames, "murph.send_vault_file"])],
+      {
+        vaultFileSendAvailable: true,
+      },
+    );
+    expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(baseToolNamesWithoutProgress)],
       {
         progressUpdatesAvailable: false,
