@@ -899,7 +899,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
               (
                 privateInteractiveAudience ||
                 (
-                  authenticatedGroupChatRuntime &&
+                  hostedGroupRuntime &&
                   messageTargetingAvailable
                 )
               )

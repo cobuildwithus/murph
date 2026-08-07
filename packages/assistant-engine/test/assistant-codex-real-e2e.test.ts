@@ -1470,7 +1470,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             'Reserve an outdoor table for six on August 15, 2026 at 7:00 p.m. America/New_York time by calling +12025550123.',
             'A deposit is acceptable only up to $50 and only if refundable until 24 hours before the reservation.',
             'I explicitly approve using my caller name Sam and sharing only that name and those room-visible reservation details.',
-            'Do not transfer the call to a participant. This is the complete bounded request; do not require a group-only preview or a later confirmation.',
+            'Do not transfer the call to a participant. This is the complete bounded request.',
           ].join('\n\n'),
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
