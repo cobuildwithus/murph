@@ -13,6 +13,7 @@ import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot
 import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
+import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
@@ -106,6 +107,19 @@ export function SectionsContent() {
 
       <StudySection title="Homepage authentication readiness and phone handoff">
         <HomepageAuthWarmRuntimeStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage technical runtime">
+        <div
+          id="homepage-technical-runtime"
+          data-design-section="homepage-technical-runtime"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <TechnicalCapabilitiesSection />
+        </div>
       </StudySection>
 
       <Separator />
