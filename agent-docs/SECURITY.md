@@ -230,12 +230,14 @@ Last verified: 2026-08-06
 - Account deletion must establish durable external-cleanup ownership before canonical member removal. The foreign-key-free retry receipt stores only KMS-encrypted runtime/vendor identifiers with receipt- and environment-bound authenticated data, remains pending for missing configuration, provider timeout, partial failure, or a legacy Cloudflare response without explicit `deleteAllCompleted` evidence, and is deleted only after Cloudflare, Stripe-customer, and Privy cleanup converge. Privy new-member resolution must first resolve any existing identity, then reject a pending deletion receipt, then require a bounded live-provider read; after binding, app-session issuance must lock and re-check the member so a missing or suspended deletion target cannot receive a session. Immediate and retention attempts have explicit target deadlines; the retention batch uses bounded concurrency so a stuck provider cannot become an unbounded response-path or sweep owner. Logs and the deleted member row are not retry owners.
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
-- Stripe request params, nested Stripe params, and per-request options must use
-  the installed official SDK types and must not contain object spread syntax.
-  Build the SDK-typed object first, then assign each optional field explicitly;
-  this preserves excess-property checking that TypeScript otherwise loses
-  across object spreads. `pnpm stripe-requests:guard` enforces the boundary in
-  hosted-web production code and Stripe-typed parameter builders. The opt-in
+- External provider request params, nested params, and per-request options must
+  use installed official SDK types and must not contain object spread syntax or
+  `Object.assign`. Build the SDK-typed object first, then assign each optional
+  field explicitly; this preserves excess-property checking that TypeScript
+  otherwise loses across composed objects. `pnpm provider-requests:guard`
+  enforces the registered Stripe, Kernel, Linq, Retell, Temporal, OpenAI, and
+  Junction boundaries across production apps, packages, and scripts. Register
+  each new official SDK boundary when it is introduced. The opt-in
   `pnpm --dir apps/web stripe:contract:resume` probe accepts only a dedicated
   test-mode secret key and calls the real resume endpoint with a synthetic
   missing Subscription, so parameter drift fails without creating, charging,

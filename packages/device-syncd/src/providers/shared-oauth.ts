@@ -35,6 +35,25 @@ import type {
 
 type ProviderApiErrorDiagnosticValue = boolean | number | string | null | undefined;
 
+type OAuthTokenRequestExtraParameters = Readonly<Record<string, string>> & {
+  client_id?: never;
+  client_secret?: never;
+  code?: never;
+  grant_type?: never;
+  redirect_uri?: never;
+  refresh_token?: never;
+};
+
+type OAuthAuthorizationExtraSearchParameters = Readonly<
+  Record<string, string | null | undefined>
+> & {
+  client_id?: never;
+  redirect_uri?: never;
+  response_type?: never;
+  scope?: never;
+  state?: never;
+};
+
 interface DeviceSyncOAuthProviderDefinition
   extends Omit<DeviceSyncProvider, "connectionHandler" | "webhookHandler" | "jobExecutor"> {
   buildConnectUrl(input: Parameters<DeviceSyncOAuthAdapter["buildConnectUrl"]>[0]): string;
@@ -399,19 +418,19 @@ export async function exchangeOAuthAuthorizationCode<T extends {
   code: string;
   tokenResponseToAuthTokens: (payload: T) => ProviderAuthTokens;
   buildMissingRefreshTokenError: () => Error;
-  extraParameters?: Record<string, string>;
+  extraParameters?: OAuthTokenRequestExtraParameters;
 }): Promise<{
   tokenPayload: T;
   tokens: ProviderAuthTokens;
 }> {
-  const tokenPayload = await input.postTokenRequest({
+  const parameters = appendOAuthTokenRequestExtraParameters({
     grant_type: "authorization_code",
     client_id: input.clientId,
     client_secret: input.clientSecret,
     redirect_uri: input.callbackUrl,
     code: input.code,
-    ...input.extraParameters,
-  });
+  }, input.extraParameters);
+  const tokenPayload = await input.postTokenRequest(parameters);
   const tokens = input.tokenResponseToAuthTokens(tokenPayload);
   tokens.refreshToken = requireRefreshToken(tokens.refreshToken, input.buildMissingRefreshTokenError);
 
@@ -436,19 +455,19 @@ export async function refreshOAuthTokens<T extends {
     currentRefreshToken: string;
     responseRefreshToken: string | null;
   }) => string;
-  extraParameters?: Record<string, string>;
+  extraParameters?: OAuthTokenRequestExtraParameters;
 }): Promise<ProviderAuthTokens> {
   const currentRefreshToken = requireRefreshToken(
     getDeviceSyncAccountOAuthTokens(input.account)?.refreshToken,
     input.buildMissingRefreshTokenError,
   );
-  const tokenPayload = await input.postTokenRequest({
+  const parameters = appendOAuthTokenRequestExtraParameters({
     grant_type: "refresh_token",
     refresh_token: currentRefreshToken,
     client_id: input.clientId,
     client_secret: input.clientSecret,
-    ...input.extraParameters,
-  });
+  }, input.extraParameters);
+  const tokenPayload = await input.postTokenRequest(parameters);
   const tokens = input.tokenResponseToAuthTokens(tokenPayload);
 
   if (input.resolveRefreshToken) {
@@ -459,6 +478,26 @@ export async function refreshOAuthTokens<T extends {
   }
 
   return tokens;
+}
+
+function appendOAuthTokenRequestExtraParameters(
+  parameters: Record<string, string>,
+  extraParameters: OAuthTokenRequestExtraParameters | undefined,
+): Record<string, string> {
+  for (const [key, value] of Object.entries(extraParameters ?? {})) {
+    if (Object.hasOwn(parameters, key)) {
+      throw new TypeError(
+        `OAuth token request extra parameters must not override protocol-owned field ${key}.`,
+      );
+    }
+    Object.defineProperty(parameters, key, {
+      configurable: true,
+      enumerable: true,
+      value,
+      writable: true,
+    });
+  }
+  return parameters;
 }
 
 export function createRefreshingApiSession(input: {
@@ -567,7 +606,7 @@ export function buildOAuthConnectUrl(input: {
   scopes: string[];
   state: string;
   scopeDelimiter?: string;
-  extraSearchParams?: Record<string, string | null | undefined>;
+  extraSearchParams?: OAuthAuthorizationExtraSearchParameters;
 }): string {
   const search = new URLSearchParams({
     client_id: input.clientId,
@@ -578,6 +617,11 @@ export function buildOAuthConnectUrl(input: {
   });
 
   for (const [key, rawValue] of Object.entries(input.extraSearchParams ?? {})) {
+    if (search.has(key)) {
+      throw new TypeError(
+        `OAuth authorization extra parameters must not override protocol-owned field ${key}.`,
+      );
+    }
     const value = normalizeString(rawValue ?? undefined);
 
     if (value) {
