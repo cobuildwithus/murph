@@ -1039,7 +1039,7 @@ export async function startHostedLocalDevStack(input: {
       try {
         const healthChecks = [
           waitForHealthyHttpEndpoint({
-            host: config.workerHost,
+            host: resolveHostedLocalClientWorkerHost(config.workerHost),
             label: "cloudflare",
             path: "/health",
             port: config.workerPort,

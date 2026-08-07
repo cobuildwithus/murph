@@ -1042,6 +1042,13 @@ describe("hosted local dev stack", () => {
     expect(webEnv.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
     expect(stack.processes.temporalServer).toBe(temporalServer);
     expect(stack.processes.temporalWorker).toBe(temporalWorker);
+    expect(waitForHealthyHttpEndpoint).toHaveBeenCalledWith({
+      host: "127.0.0.1",
+      label: "cloudflare",
+      path: "/health",
+      port: 8787,
+      protocol: "http",
+    });
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(4);
     expect(spawnSync.mock.calls.filter(([command]) => command === "pkill")).toEqual([]);
   });

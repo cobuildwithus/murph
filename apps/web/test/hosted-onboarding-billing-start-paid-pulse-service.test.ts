@@ -158,10 +158,10 @@ describe("startHostedPulseTrialPaidPlan", () => {
             trialEnd: null,
           })
           : makeSubscription({
-            defaultPaymentMethod: params.default_source
+            defaultPaymentMethod: params?.default_source
               ? null
-              : params.default_payment_method,
-            defaultSource: params.default_source,
+              : params?.default_payment_method,
+            defaultSource: params?.default_source,
             latestInvoice: null,
             status: "paused",
             trialEnd: null,
