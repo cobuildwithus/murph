@@ -3,11 +3,17 @@ import type { Prisma } from "@prisma/client";
 
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
+  findHostedMailboxItemByDedupeKeyTx: vi.fn(),
   lockHostedMemberRow: vi.fn(),
+  readHostedMailboxWakeByDedupeKey: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+  findHostedMailboxItemByDedupeKeyTx:
+    mocks.findHostedMailboxItemByDedupeKeyTx,
+  readHostedMailboxWakeByDedupeKey:
+    mocks.readHostedMailboxWakeByDedupeKey,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
@@ -29,7 +35,10 @@ import {
 describe("hosted member assistant preferences", () => {
   beforeEach(() => {
     mocks.appendHostedMailboxEnvelopeTx.mockReset();
+    mocks.findHostedMailboxItemByDedupeKeyTx.mockReset();
+    mocks.findHostedMailboxItemByDedupeKeyTx.mockResolvedValue(null);
     mocks.lockHostedMemberRow.mockReset();
+    mocks.readHostedMailboxWakeByDedupeKey.mockReset();
   });
 
   it("updates changed preferences and appends a member preferences wake", async () => {
@@ -46,14 +55,18 @@ describe("hosted member assistant preferences", () => {
       assistantVoice: null as string | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
-      dedupeConflict: false,
-      item: {
-        causalSeq: 1n,
-        id: "mailbox_item_123",
-      },
-    });
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 1n, occurredAt: new Date("2026-07-08T12:00:00.000Z") },
+    ]);
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        item: { causalSeq: 1n, id: "mailbox_item_123" },
+      })
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        item: { causalSeq: 2n, id: "mailbox_item_124" },
+      });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
       memberId: "member_123",
@@ -105,7 +118,7 @@ describe("hosted member assistant preferences", () => {
       assistantTone: "casual",
       assistantVoice: "warm",
       dispatch: {
-        mailboxItemId: "mailbox_item_123",
+        mailboxItemId: "mailbox_item_124",
       },
       updated: false,
     });
@@ -133,7 +146,9 @@ describe("hosted member assistant preferences", () => {
       assistantVoiceCausalSeq: null as bigint | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 1n, occurredAt: new Date("2026-07-08T11:59:00.000Z") },
+    ]);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: { causalSeq: 2n, id: "mailbox_item_123" },
@@ -165,14 +180,18 @@ describe("hosted member assistant preferences", () => {
       assistantVoice: null as string | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
-      dedupeConflict: false,
-      item: {
-        causalSeq: 1n,
-        id: "mailbox_item_123",
-      },
-    });
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 1n, occurredAt: new Date("2026-07-08T12:00:00.000Z") },
+    ]);
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        item: { causalSeq: 1n, id: "mailbox_item_123" },
+      })
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        item: { causalSeq: 2n, id: "mailbox_item_124" },
+      });
 
     await upsertHostedMemberAssistantPreferencesTx({
       memberId: "member_123",
@@ -209,6 +228,99 @@ describe("hosted member assistant preferences", () => {
     expect(member.assistantVoice).toBe("deep-calm");
   });
 
+  it("uses a deterministic mailbox identity and sequence for scheduled writes", async () => {
+    const member = {
+      assistantPersona: null as string | null,
+      assistantPersonaCausalSeq: null as bigint | null,
+      assistantDetail: null as number | null,
+      assistantDetailCausalSeq: null as bigint | null,
+      assistantHumor: null as number | null,
+      assistantHumorCausalSeq: null as bigint | null,
+      assistantPush: null as number | null,
+      assistantPushCausalSeq: null as bigint | null,
+      assistantTone: null as string | null,
+      assistantToneCausalSeq: null as bigint | null,
+      assistantVoice: null as string | null,
+      assistantVoiceCausalSeq: null as bigint | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: {
+        causalSeq: 12n,
+        id: "mailbox_scheduled_style",
+      },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-08-06T14:30:00.000Z",
+      preferences: { tone: "casual" },
+      prisma,
+      updateId: "scheduled_tone_voice_1",
+    })).resolves.toMatchObject({
+      assistantTone: "casual",
+      dispatch: { mailboxItemId: "mailbox_scheduled_style" },
+      updated: true,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId:
+          "member.preferences.updated:member_123:scheduled_tone_voice_1",
+        occurredAt: "2026-08-06T14:30:00.000Z",
+        preferences: { tone: "casual" },
+      }),
+      tx: prisma,
+    });
+    expect(member.assistantToneCausalSeq).toBe(12n);
+  });
+
+  it("does not let a retried scheduled write overwrite a newer preference", async () => {
+    const member = {
+      assistantPersona: null as string | null,
+      assistantPersonaCausalSeq: null as bigint | null,
+      assistantDetail: null as number | null,
+      assistantDetailCausalSeq: null as bigint | null,
+      assistantHumor: null as number | null,
+      assistantHumorCausalSeq: null as bigint | null,
+      assistantPush: null as number | null,
+      assistantPushCausalSeq: null as bigint | null,
+      assistantTone: "formal" as string | null,
+      assistantToneCausalSeq: 20n as bigint | null,
+      assistantVoice: null as string | null,
+      assistantVoiceCausalSeq: null as bigint | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      duplicate: true,
+      item: {
+        causalSeq: 12n,
+        id: "mailbox_scheduled_style",
+      },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-08-06T14:30:00.000Z",
+      preferences: { tone: "casual" },
+      prisma,
+      updateId: "scheduled_tone_voice_1",
+    })).resolves.toMatchObject({
+      assistantTone: "formal",
+      dispatch: { mailboxItemId: "mailbox_scheduled_style" },
+      updated: false,
+    });
+
+    expect(member.assistantTone).toBe("formal");
+    expect(member.assistantToneCausalSeq).toBe(20n);
+  });
+
   it("stale conversation intent no-ops field-locally behind newer Settings state", async () => {
     const member = {
       assistantPersona: null as string | null,
@@ -225,7 +337,10 @@ describe("hosted member assistant preferences", () => {
       assistantVoiceCausalSeq: 99n as bigint | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 99n, occurredAt: new Date("2026-07-08T12:00:00.000Z") },
+      { causalSeq: 101n, occurredAt: new Date("2026-07-08T12:00:00.000Z") },
+    ]);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: { causalSeq: 102n, id: "mailbox_item_123" },
@@ -238,6 +353,7 @@ describe("hosted member assistant preferences", () => {
       preferenceCausalSeq: "100",
       preferences: { tone: "casual", voice: "deep-calm" },
       prisma,
+      updateId: "accepted_source_100",
     })).resolves.toMatchObject({
       assistantTone: "formal",
       assistantVoice: "deep-calm",
@@ -260,6 +376,60 @@ describe("hosted member assistant preferences", () => {
     });
   });
 
+  it("replaces a legacy sequence barrier whose source row is no longer retained", async () => {
+    const member = {
+      assistantDetail: null as number | null,
+      assistantDetailCausalSeq: null as bigint | null,
+      assistantHumor: null as number | null,
+      assistantHumorCausalSeq: null as bigint | null,
+      assistantPush: null as number | null,
+      assistantPushCausalSeq: null as bigint | null,
+      assistantTone: "formal" as string | null,
+      assistantToneCausalSeq: 100n as bigint | null,
+      assistantVoice: null as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: { causalSeq: 102n, id: "mailbox_legacy_replacement" },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferenceCausalSeq: "90",
+      preferences: { tone: "casual" },
+      prisma,
+      updateId: "accepted_source_90",
+    })).resolves.toMatchObject({
+      appliedFields: [],
+      assistantTone: "formal",
+      dispatch: null,
+      updated: false,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferenceCausalSeq: "101",
+      preferences: { tone: "casual" },
+      prisma,
+      updateId: "accepted_source_101",
+    })).resolves.toMatchObject({
+      appliedFields: ["tone"],
+      assistantTone: "casual",
+      updated: true,
+    });
+    expect(member).toMatchObject({
+      assistantTone: "casual",
+      assistantToneCausalSeq: 101n,
+    });
+  });
+
   it("uses a same-value Settings save as a causal barrier", async () => {
     const member = {
       assistantPersona: null as string | null,
@@ -276,7 +446,10 @@ describe("hosted member assistant preferences", () => {
       assistantVoiceCausalSeq: 10n as bigint | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 10n, occurredAt: new Date("2026-07-08T11:59:00.000Z") },
+      { causalSeq: 20n, occurredAt: new Date("2026-07-08T12:00:00.000Z") },
+    ]);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: { causalSeq: 20n, id: "mailbox_settings_barrier" },
@@ -300,7 +473,7 @@ describe("hosted member assistant preferences", () => {
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
       memberId: "member_123",
-      occurredAt: "2026-07-08T12:01:00.000Z",
+      occurredAt: "2026-07-08T12:00:00.000Z",
       preferenceCausalSeq: "15",
       preferences: { tone: "casual" },
       prisma,
@@ -325,7 +498,10 @@ describe("hosted member assistant preferences", () => {
       assistantVoice: null as string | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 10n, occurredAt: new Date("2026-07-08T11:59:00.000Z") },
+      { causalSeq: 20n, occurredAt: new Date("2026-07-08T12:00:00.000Z") },
+    ]);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: { causalSeq: 20n, id: "mailbox_settings_personality_barrier" },
@@ -357,7 +533,7 @@ describe("hosted member assistant preferences", () => {
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
       memberId: "member_123",
-      occurredAt: "2026-07-08T12:01:00.000Z",
+      occurredAt: "2026-07-08T12:00:00.000Z",
       preferenceCausalSeq: "15",
       preferences: { personality: { humor: 2 } },
       prisma,
@@ -387,14 +563,18 @@ describe("hosted member assistant preferences", () => {
       assistantVoice: "warm" as string | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
-      dedupeConflict: false,
-      item: {
-        causalSeq: 1n,
-        id: "mailbox_item_123",
-      },
-    });
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 1n, occurredAt: new Date("2026-07-08T12:00:00.000Z") },
+    ]);
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        item: { causalSeq: 1n, id: "mailbox_item_123" },
+      })
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        item: { causalSeq: 2n, id: "mailbox_item_124" },
+      });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
       memberId: "member_123",
@@ -432,14 +612,18 @@ describe("hosted member assistant preferences", () => {
       assistantVoice: null as string | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
-      dedupeConflict: false,
-      item: {
-        causalSeq: 1n,
-        id: "mailbox_item_123",
-      },
-    });
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 1n, occurredAt: new Date("2026-07-08T12:00:00.000Z") },
+    ]);
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        item: { causalSeq: 1n, id: "mailbox_item_123" },
+      })
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        item: { causalSeq: 2n, id: "mailbox_item_124" },
+      });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
       memberId: "member_123",
@@ -518,7 +702,7 @@ describe("hosted member assistant preferences", () => {
         push: 6,
       },
       dispatch: {
-        mailboxItemId: "mailbox_item_123",
+        mailboxItemId: "mailbox_item_124",
       },
       updated: false,
     });
@@ -607,7 +791,9 @@ describe("hosted member assistant preferences", () => {
       assistantVoice: null as string | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 10n, occurredAt: new Date("2026-07-08T12:02:00.000Z") },
+    ]);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: {
@@ -665,7 +851,9 @@ describe("hosted member assistant preferences", () => {
       assistantVoice: null as string | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 15n, occurredAt: new Date("2026-07-08T12:03:00.000Z") },
+    ]);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: { causalSeq: 17n, id: "mailbox_personality_reset" },
@@ -758,7 +946,10 @@ describe("hosted member assistant preferences", () => {
       assistantVoice: null as string | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 10n, occurredAt: new Date("2026-07-08T12:04:00.000Z") },
+      { causalSeq: 40n, occurredAt: new Date("2026-07-08T12:05:00.000Z") },
+    ]);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: { causalSeq: 40n, id: "mailbox_settings_personality" },
@@ -780,7 +971,7 @@ describe("hosted member assistant preferences", () => {
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
       memberId: "member_123",
-      occurredAt: "2026-07-08T12:06:00.000Z",
+      occurredAt: "2026-07-08T12:04:00.000Z",
       preferenceCausalSeq: "35",
       preferences: { personality: { humor: 2 } },
       prisma,
@@ -798,6 +989,337 @@ describe("hosted member assistant preferences", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  it("keeps a newer human preference ahead of a delayed scheduled callback", async () => {
+    const member = {
+      assistantDetail: null as number | null,
+      assistantDetailCausalSeq: null as bigint | null,
+      assistantHumor: null as number | null,
+      assistantHumorCausalSeq: null as bigint | null,
+      assistantPush: null as number | null,
+      assistantPushCausalSeq: null as bigint | null,
+      assistantTone: "formal" as string | null,
+      assistantToneCausalSeq: 20n as bigint | null,
+      assistantVoice: null as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 20n, occurredAt: new Date("2026-07-08T12:05:00.000Z") },
+    ]);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: { causalSeq: 21n, id: "mailbox_delayed_schedule" },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: { tone: "casual" },
+      prisma,
+      updateId: "scheduled_tone",
+    })).resolves.toMatchObject({
+      appliedFields: [],
+      assistantTone: "formal",
+      dispatch: null,
+      updated: false,
+    });
+    expect(member).toMatchObject({
+      assistantTone: "formal",
+      assistantToneCausalSeq: 20n,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("lets a later accepted input supersede a scheduled callback with a higher sequence", async () => {
+    const member = {
+      assistantDetail: null as number | null,
+      assistantDetailCausalSeq: null as bigint | null,
+      assistantHumor: null as number | null,
+      assistantHumorCausalSeq: null as bigint | null,
+      assistantPush: null as number | null,
+      assistantPushCausalSeq: null as bigint | null,
+      assistantTone: null as string | null,
+      assistantToneCausalSeq: null as bigint | null,
+      assistantVoice: null as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 21n, occurredAt: new Date("2026-07-08T12:00:00.000Z") },
+    ]);
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        item: { causalSeq: 21n, id: "mailbox_scheduled_first" },
+      })
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        item: { causalSeq: 22n, id: "mailbox_human_followup" },
+      });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: { tone: "casual" },
+      prisma,
+      updateId: "scheduled_tone_first",
+    })).resolves.toMatchObject({
+      appliedFields: ["tone"],
+      assistantTone: "casual",
+      updated: true,
+    });
+    expect(member.assistantToneCausalSeq).toBe(21n);
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:05:00.000Z",
+      preferenceCausalSeq: "20",
+      preferences: { tone: "formal" },
+      prisma,
+    })).resolves.toMatchObject({
+      appliedFields: ["tone"],
+      assistantTone: "formal",
+      updated: true,
+    });
+    expect(member).toMatchObject({
+      assistantTone: "formal",
+      assistantToneCausalSeq: 20n,
+    });
+  });
+
+  it("keeps last-command-wins ordering for two approved calls from one accepted turn", async () => {
+    const member = {
+      assistantDetail: null as number | null,
+      assistantDetailCausalSeq: null as bigint | null,
+      assistantHumor: null as number | null,
+      assistantHumorCausalSeq: null as bigint | null,
+      assistantPush: null as number | null,
+      assistantPushCausalSeq: null as bigint | null,
+      assistantTone: null as string | null,
+      assistantVoice: null as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 60n, occurredAt: new Date("2026-07-08T12:05:00.000Z") },
+    ]);
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: false,
+        item: { causalSeq: 61n, id: "mailbox_command_one" },
+      })
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: false,
+        item: { causalSeq: 62n, id: "mailbox_command_two" },
+      });
+
+    await upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:05:00.000Z",
+      preferenceCausalSeq: "60",
+      preferences: { personality: { detail: 7 } },
+      prisma,
+      updateId: "accepted_call_one",
+    });
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:05:00.000Z",
+      preferenceCausalSeq: "60",
+      preferences: { personality: { detail: 9 } },
+      prisma,
+      updateId: "accepted_call_two",
+    })).resolves.toMatchObject({
+      appliedFields: ["detail"],
+      assistantPersonality: { detail: 9 },
+      updated: true,
+    });
+    expect(member).toMatchObject({
+      assistantDetail: 9,
+      assistantDetailCausalSeq: 60n,
+    });
+
+    const firstEventId = buildHostedMemberPreferencesUpdatedEventId({
+      memberId: "member_123",
+      updateId: "accepted_call_one",
+    });
+    mocks.findHostedMailboxItemByDedupeKeyTx.mockResolvedValue({
+      id: "mailbox_command_one",
+    });
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue({
+      causalOrigin: "turn",
+      eventId: firstEventId,
+      kind: "member.preferences.updated",
+      occurredAt: "2026-07-08T12:05:00.000Z",
+      preferenceCausalSeq: "60",
+      preferences: { personality: { detail: 7 } },
+      requestedFields: [],
+      userId: "member_123",
+    });
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:05:00.000Z",
+      preferenceCausalSeq: "60",
+      preferences: { personality: { detail: 7 } },
+      prisma,
+      updateId: "accepted_call_one",
+    })).resolves.toMatchObject({
+      appliedFields: [],
+      assistantPersonality: { detail: 9 },
+      dispatch: { mailboxItemId: "mailbox_command_one" },
+      updated: false,
+    });
+    expect(prisma.hostedMember.update).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+  });
+
+  it("orders scheduled preference fields by occurrence instead of callback time", async () => {
+    const member = {
+      assistantDetail: 3 as number | null,
+      assistantDetailCausalSeq: 30n as bigint | null,
+      assistantHumor: 4 as number | null,
+      assistantHumorCausalSeq: 31n as bigint | null,
+      assistantPush: null as number | null,
+      assistantPushCausalSeq: null as bigint | null,
+      assistantTone: null as string | null,
+      assistantVoice: null as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 30n, occurredAt: new Date("2026-07-08T11:55:00.000Z") },
+      { causalSeq: 31n, occurredAt: new Date("2026-07-08T12:05:00.000Z") },
+    ]);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: { causalSeq: 32n, id: "mailbox_scheduled_fields" },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: { personality: { detail: 7, humor: 8 } },
+      prisma,
+      updateId: "scheduled_personality",
+    })).resolves.toMatchObject({
+      appliedFields: ["detail"],
+      assistantPersonality: { detail: 7, humor: 4 },
+      updated: true,
+    });
+    expect(member).toMatchObject({
+      assistantDetail: 7,
+      assistantDetailCausalSeq: 32n,
+      assistantHumor: 4,
+      assistantHumorCausalSeq: 31n,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        preferences: { personality: { detail: 7 } },
+      }),
+      tx: prisma,
+    });
+  });
+
+  it("replays one approved scheduled wake without appending or projecting it twice", async () => {
+    const member = {
+      assistantDetail: null as number | null,
+      assistantDetailCausalSeq: null as bigint | null,
+      assistantHumor: 8 as number | null,
+      assistantHumorCausalSeq: 32n as bigint | null,
+      assistantPush: null as number | null,
+      assistantPushCausalSeq: null as bigint | null,
+      assistantTone: null as string | null,
+      assistantVoice: null as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 32n, occurredAt: new Date("2026-07-08T12:00:00.000Z") },
+    ]);
+    const eventId = buildHostedMemberPreferencesUpdatedEventId({
+      memberId: "member_123",
+      updateId: "scheduled_personality_replay",
+    });
+    mocks.findHostedMailboxItemByDedupeKeyTx.mockResolvedValue({
+      id: "mailbox_scheduled_replay",
+    });
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue({
+      causalOrigin: "turn",
+      eventId,
+      kind: "member.preferences.updated",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: { personality: { humor: 8 } },
+      requestedFields: [],
+      userId: "member_123",
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: { personality: { humor: 8 } },
+      prisma,
+      updateId: "scheduled_personality_replay",
+    })).resolves.toMatchObject({
+      appliedFields: [],
+      assistantPersonality: { humor: 8 },
+      dispatch: { mailboxItemId: "mailbox_scheduled_replay" },
+      updated: false,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a deterministic preference identity replays different bytes", async () => {
+    const member = {
+      assistantDetail: null as number | null,
+      assistantDetailCausalSeq: null as bigint | null,
+      assistantHumor: 8 as number | null,
+      assistantHumorCausalSeq: 32n as bigint | null,
+      assistantPush: null as number | null,
+      assistantPushCausalSeq: null as bigint | null,
+      assistantTone: null as string | null,
+      assistantVoice: null as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 32n, occurredAt: new Date("2026-07-08T12:00:00.000Z") },
+    ]);
+    const eventId = buildHostedMemberPreferencesUpdatedEventId({
+      memberId: "member_123",
+      updateId: "scheduled_personality_replay",
+    });
+    mocks.findHostedMailboxItemByDedupeKeyTx.mockResolvedValue({
+      id: "mailbox_scheduled_replay",
+    });
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue({
+      causalOrigin: "turn",
+      eventId,
+      kind: "member.preferences.updated",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: { personality: { humor: 8 } },
+      requestedFields: [],
+      userId: "member_123",
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: { personality: { humor: 9 } },
+      prisma,
+      updateId: "scheduled_personality_replay",
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_PREFERENCES_WAKE_DEDUPE_CONFLICT",
+      retryable: true,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+  });
+
   it("applies mixed personality intent field-locally when one dial is stale", async () => {
     const member = {
       assistantDetail: 6 as number | null,
@@ -810,7 +1332,10 @@ describe("hosted member assistant preferences", () => {
       assistantVoice: null as string | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 30n, occurredAt: new Date("2026-07-08T12:07:00.000Z") },
+      { causalSeq: 50n, occurredAt: new Date("2026-07-08T12:07:00.000Z") },
+    ]);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: { causalSeq: 51n, id: "mailbox_mixed_personality" },
@@ -866,7 +1391,9 @@ describe("hosted member assistant preferences", () => {
       assistantVoice: null as string | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 44n, occurredAt: new Date("2026-07-08T12:08:00.000Z") },
+    ]);
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
@@ -889,7 +1416,7 @@ describe("hosted member assistant preferences", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("applies a later same-sequence personality command when its value differs", async () => {
+  it("fails closed when one accepted input replays a personality field with different bytes", async () => {
     const member = {
       assistantDetail: 4 as number | null,
       assistantDetailCausalSeq: 60n as bigint | null,
@@ -901,15 +1428,14 @@ describe("hosted member assistant preferences", () => {
       assistantVoice: null as string | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 60n, occurredAt: new Date("2026-07-08T12:08:00.000Z") },
+      { causalSeq: 61n, occurredAt: new Date("2026-07-08T12:09:00.000Z") },
+    ]);
     mocks.appendHostedMailboxEnvelopeTx
       .mockResolvedValueOnce({
         dedupeConflict: false,
         item: { causalSeq: 61n, id: "mailbox_detail_first" },
-      })
-      .mockResolvedValueOnce({
-        dedupeConflict: false,
-        item: { causalSeq: 62n, id: "mailbox_detail_second" },
       });
 
     await upsertHostedMemberAssistantPreferencesTx({
@@ -923,22 +1449,22 @@ describe("hosted member assistant preferences", () => {
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
       memberId: "member_123",
-      occurredAt: "2026-07-08T12:09:01.000Z",
+      occurredAt: "2026-07-08T12:09:00.000Z",
       preferenceCausalSeq: "61",
       preferences: { personality: { detail: 9 } },
       prisma,
     })).resolves.toMatchObject({
-      appliedFields: ["detail"],
-      assistantPersonality: { detail: 9 },
-      dispatch: { mailboxItemId: "mailbox_detail_second" },
-      updated: true,
+      appliedFields: [],
+      assistantPersonality: { detail: 7 },
+      dispatch: null,
+      updated: false,
     });
     expect(member).toMatchObject({
-      assistantDetail: 9,
+      assistantDetail: 7,
       assistantDetailCausalSeq: 61n,
     });
-    expect(prisma.hostedMember.update).toHaveBeenCalledTimes(2);
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMember.update).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
   it("leaves personality value and watermark unchanged when the wake conflicts", async () => {
@@ -953,7 +1479,9 @@ describe("hosted member assistant preferences", () => {
       assistantVoice: null as string | null,
       id: "member_123",
     };
-    const prisma = createPreferencesPrismaDouble(member);
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 30n, occurredAt: new Date("2026-07-08T12:10:00.000Z") },
+    ]);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: true,
       item: { id: "mailbox_item_existing" },
@@ -1040,10 +1568,13 @@ function createPreferencesPrismaDouble(member: {
   assistantVoice: string | null;
   assistantVoiceCausalSeq?: bigint | null;
   id: string;
-}): Prisma.TransactionClient {
+}, mailboxItems: Array<{ causalSeq: bigint; occurredAt: Date }> = []): Prisma.TransactionClient {
   member.assistantUnhinged ??= null;
   member.assistantUnhingedCausalSeq ??= null;
   return {
+    hostedMailboxItem: {
+      findMany: vi.fn(async () => mailboxItems),
+    },
     hostedMember: {
       findUnique: vi.fn(async () => ({ ...member })),
       update: vi.fn(async (input: {
