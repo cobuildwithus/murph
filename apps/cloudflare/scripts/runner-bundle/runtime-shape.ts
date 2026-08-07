@@ -21,20 +21,14 @@ export async function pruneRunnerBundle(bundleDir: string): Promise<void> {
 export async function pruneBundledRunnerDependencies(
   bundleDir: string,
 ): Promise<void> {
-  await Promise.all([
-    assertRunnerUsesRetainedZodRuntimeSurfaces(bundleDir),
-    assertRunnerDoesNotImportJunctionSdk(bundleDir),
-  ]);
+  await assertRunnerUsesRetainedZodRuntimeSurfaces(bundleDir);
   const zodPackageDir = path.join(bundleDir, "node_modules", "zod");
 
-  await Promise.all([
-    ...ZOD_BUILD_ONLY_PATHS.map((relativePath) =>
+  await Promise.all(
+    ZOD_BUILD_ONLY_PATHS.map((relativePath) =>
       removeBundlePathIfPresent(path.join(zodPackageDir, relativePath)),
     ),
-    removeBundlePathIfPresent(
-      path.join(bundleDir, "node_modules", "@junction-api", "sdk"),
-    ),
-  ]);
+  );
 }
 
 async function assertRunnerUsesRetainedZodRuntimeSurfaces(
@@ -84,55 +78,6 @@ async function assertRunnerUsesRetainedZodRuntimeSurfaces(
       }
       throw new Error(
         `runner bundle imports ${specifier ?? "an unknown Zod surface"} from ${path.relative(bundleDir, entryPath)} even though that surface is removed from the production payload; retain the surface or move the caller to zod or zod/v4.`,
-      );
-    }
-  }
-}
-
-async function assertRunnerDoesNotImportJunctionSdk(
-  bundleDir: string,
-): Promise<void> {
-  const nodeModulesDir = path.join(bundleDir, "node_modules");
-  const installedPackageDirs = await listTopLevelInstalledPackages(nodeModulesDir);
-  const junctionConsumerPackageDirs = (
-    await Promise.all(
-      installedPackageDirs.map(async (packageDir) =>
-        await packageDeclaresDependency(packageDir, "@junction-api/sdk")
-          ? packageDir
-          : null
-      ),
-    )
-  ).filter((packageDir): packageDir is string => packageDir !== null);
-  const runtimeRoots = [
-    path.join(bundleDir, "dist"),
-    path.join(bundleDir, "dist-bundled"),
-    path.join(nodeModulesDir, "@murphai", "murph", ".bundle"),
-    ...junctionConsumerPackageDirs,
-  ];
-
-  await Promise.all(runtimeRoots.map(async (runtimeRoot) => {
-    try {
-      await walkBundleFiles(runtimeRoot, assertFileDoesNotImportJunctionSdk);
-    } catch (error) {
-      if (!isMissingFileError(error)) {
-        throw error;
-      }
-    }
-  }));
-
-  async function assertFileDoesNotImportJunctionSdk(
-    entryPath: string,
-  ): Promise<void> {
-    if (!/\.(?:c|m)?js$/u.test(entryPath)) {
-      return;
-    }
-    const source = await readFile(entryPath, "utf8");
-    const importPattern =
-      /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)["'](@junction-api\/sdk(?:\/[^"']*)?)["']/gu;
-
-    for (const match of source.matchAll(importPattern)) {
-      throw new Error(
-        `runner bundle imports ${match[1] ?? "@junction-api/sdk"} from ${path.relative(bundleDir, entryPath)} even though the SDK is removed from the production payload; remove the runtime import or retain the installed package.`,
       );
     }
   }
