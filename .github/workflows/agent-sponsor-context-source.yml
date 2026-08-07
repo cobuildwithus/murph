@@ -19,55 +19,26 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
+          ref: main
 
-      - name: Rebase export candidate onto current main
-        run: |
-          set -euo pipefail
-          git config user.name "murph-audit-export"
-          git config user.email "murph-audit-export@users.noreply.github.com"
-          git fetch --no-tags origin main
-          git rebase origin/main
-
-      - name: Package bounded source set
+      - name: Package bounded current-main source set
         run: |
           set -euo pipefail
           mkdir -p /tmp/sponsor-context-source
           cat > /tmp/sponsor-context-source/paths.txt <<'EOF'
           ARCHITECTURE.md
-          agent-docs/SECURITY.md
-          agent-docs/product-specs/hosted-usage-topups.md
-          apps/cloudflare/DEPLOY.md
-          apps/web/app/design/group-usage-funding-study.tsx
           apps/web/app/design/sections-content.tsx
-          apps/web/app/groups/fund/[joinCode]/page.tsx
           apps/web/prisma/schema.prisma
-          apps/web/scripts/run-prisma-migrate-deploy.ts
-          apps/web/src/components/hosted-groups/group-funding-supporters.tsx
-          apps/web/src/lib/hosted-groups/group-sponsorship-store.ts
-          apps/web/src/lib/hosted-groups/group-tool.ts
-          apps/web/test/hosted-group-funding-page.test.tsx
-          apps/web/test/hosted-group-sponsorship-migration.test.ts
-          apps/web/test/hosted-group-sponsorship-store.test.ts
-          apps/web/test/hosted-group-tool.test.ts
-          apps/web/test/production-migration-guard.test.ts
-          docs/contracts/00-invariants.md
-          packages/assistant-engine/src/assistant-codex/dynamic-tool-catalog.ts
           packages/assistant-engine/src/assistant-codex/dynamic-tools.ts
-          packages/assistant-engine/test/assistant-codex-group-tool.test.ts
-          packages/hosted-execution/src/parsers/runtime-control.ts
-          packages/hosted-execution/src/runtime-control.ts
-          packages/hosted-execution/test/parsers.test.ts
           EOF
           while IFS= read -r path; do
             mkdir -p "/tmp/sponsor-context-source/files/$(dirname "$path")"
             cp "$path" "/tmp/sponsor-context-source/files/$path"
           done < /tmp/sponsor-context-source/paths.txt
-          git rev-parse HEAD > /tmp/sponsor-context-source/rebased-head.txt
-          git rev-parse origin/main > /tmp/sponsor-context-source/main-head.txt
-          git rev-parse origin/main^{tree} > /tmp/sponsor-context-source/main-tree.txt
-          git diff --binary origin/main -- > /tmp/sponsor-context-source/existing-pr.patch
+          git rev-parse HEAD > /tmp/sponsor-context-source/main-head.txt
+          git rev-parse HEAD^{tree} > /tmp/sponsor-context-source/main-tree.txt
           tar -C /tmp/sponsor-context-source -czf /tmp/sponsor-context-source.tar.gz .
 
       - name: Upload source bundle
