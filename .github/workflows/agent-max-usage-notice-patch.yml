@@ -49,7 +49,7 @@ jobs:
             exit 1
           fi
 
-      - name: Normalize audit script for current helper boundaries
+      - name: Normalize audit script for current main
         shell: bash
         run: |
           set -euo pipefail
@@ -58,11 +58,92 @@ jobs:
 
           path = Path("scripts/agent-max-final-audit.py")
           text = path.read_text(encoding="utf-8")
-          old = "\\nfunction buildHostedTrialExpiredPendingBillingNotice("
-          new = "\\nfunction renderHostedAiUsageGateLimitNoticeMessage("
-          if text.count(old) != 1:
-              raise SystemExit(f"Expected one obsolete usage notice boundary, found {text.count(old)}")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          def replace_exact(old: str, new: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"Expected one audit-script pattern, found {count}: {old[:120]!r}"
+                  )
+              text = text.replace(old, new, 1)
+
+          replace_exact(
+              "\\nfunction buildHostedTrialExpiredPendingBillingNotice(",
+              "\\nfunction renderHostedAiUsageGateLimitNoticeMessage(",
+          )
+          replace_exact(
+              '''    "    HostedDirectBillingPlanCode;",
+              3,
+          )''',
+              '''    "    HostedDirectBillingPlanCode;",
+              4,
+          )''',
+          )
+          replace_exact(
+              '''replace_once(
+              usage_status,
+              "  recommendedPlanCode?:\\n"
+              "    | \\\"launch_group_monthly\\\"\\n"
+              "    | \\\"launch_monthly\\\"\\n"
+              "    | \\\"launch_edge_monthly\\\"\\n"
+              "    | \\\"launch_max_monthly\\\";\\n",
+              "  recommendedPlanCode?: HostedDirectBillingPlanCode;\\n",
+          )''',
+              '''replace_once(
+              usage_status,
+              "  recommendedPlanCode?:\\n"
+              "    HostedDirectBillingPlanCode;\\n",
+              "  recommendedPlanCode?: HostedDirectBillingPlanCode;\\n",
+          )''',
+          )
+          replace_exact(
+              '    "              ? <FamilyBillingChangeButton block targetPlanName=\\"Max\\" />\\n"',
+              '    "              ? null\\n"',
+          )
+          replace_exact(
+              '''replace_once(
+              settings,
+              '  targetPlanName: "Edge" | "Pulse";\\n',
+              '  targetPlanName: "Edge" | "Max" | "Pulse";\\n',
+          )
+          ''',
+              '',
+          )
+          replace_exact(
+              '''def neutralize_premium_templates(block: str) -> str:
+              block = block.replace("Edge's included usage", "Your included AI usage")
+              block = block.replace("Edge", "AI")
+              return block
+          ''',
+              '''def neutralize_premium_templates(block: str) -> str:
+              replacements = (
+                  ("Edge's included usage", "Your included AI usage"),
+                  ("Edge's included allowance", "your included AI allowance"),
+                  ("included Edge allowance", "included AI allowance"),
+                  ("included Edge usage", "included AI usage"),
+                  ("monthly Edge allowance", "monthly AI allowance"),
+                  ("monthly Edge usage", "monthly AI usage"),
+                  ("Edge allowance", "AI allowance"),
+                  ("Edge usage", "AI usage"),
+              )
+              for old, new in replacements:
+                  block = block.replace(old, new)
+              if "Edge" in block:
+                  raise RuntimeError("premium usage templates retained an Edge-specific label")
+              return block
+          ''',
+          )
+          replace_exact(
+              '''    '    title: "You\\'ve used 100% of this month\\'s included monthly AI usage",\\n',''',
+              '''    '    title: "You\\'ve used 100% of this month\\'s included AI usage",\\n',''',
+          )
+          replace_exact(
+              "    '  assert.match(markup, /included monthly AI usage/);\\n'",
+              "    '  assert.match(markup, /included AI usage/);\\n'",
+          )
+
+          path.write_text(text, encoding="utf-8")
           PY
 
       - name: Apply audited Max integration fixes
