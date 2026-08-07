@@ -47,6 +47,7 @@ export function buildHostedWorkspaceSnapshotRestoreLogDetails(input: {
 
 export async function runHostedWorkspaceSnapshotRestoreReplaySafeReadStep<T>(input: {
   details: HostedExecutionStructuredLogDetails;
+  onAttempt?(attempt: number): void;
   run(): Promise<T>;
   step: HostedWorkspaceSnapshotRestoreStep;
 }): Promise<T> {
@@ -57,6 +58,7 @@ export async function runHostedWorkspaceSnapshotRestoreReplaySafeReadStep<T>(inp
     attempt <= HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS;
     attempt += 1
   ) {
+    input.onAttempt?.(attempt);
     const attemptDetails = {
       ...input.details,
       workspaceSnapshotRestoreAttempt: attempt,

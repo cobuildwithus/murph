@@ -5761,6 +5761,11 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(restore, "extractMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "encryptedBytes", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "plainBytes", restoreLabel),
+      ...requireOptionalNonNegativeInteger(
+        restore,
+        "replaySafeReadMaxAttempt",
+        restoreLabel,
+      ),
     };
   }
 
