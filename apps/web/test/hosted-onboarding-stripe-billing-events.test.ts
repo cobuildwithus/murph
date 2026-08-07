@@ -405,17 +405,16 @@ describe("hosted onboarding stripe billing events", () => {
         stripeSubscriptionId: "sub_family_loser_123",
       })),
     ).resolves.toMatchObject({
-      cleanupStandardCheckoutStripeSubscriptionId: "sub_family_loser_123",
+      cleanupFamilySponsoredCheckout: {
+        checkoutSessionId: "cs_family_loser_123",
+        subscriptionId: "sub_family_loser_123",
+      },
       welcomeEmailMemberId: null,
     });
 
     expect(
       mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx,
-    ).toHaveBeenCalledWith({
-      memberId: "member_123",
-      sessionId: "cs_family_loser_123",
-      tx: {},
-    });
+    ).not.toHaveBeenCalled();
     expect(
       mocks.acceptHostedMemberStripeCheckoutCompletionTx,
     ).not.toHaveBeenCalled();

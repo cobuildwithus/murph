@@ -2,7 +2,7 @@
 
 Status: active — candidate implemented and locally verified; exact-head review gates pending
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Goal
 
@@ -104,6 +104,10 @@ Updated: 2026-08-06
   cap; post-commit placement alone is not retry evidence.
 - Treat the current sponsored personal-trial row as an operational follow-up;
   this code task will not mutate production Stripe state.
+- Serialize every Family-caused direct-subscription cleanup through the
+  existing Family owner lock before the sponsored member lock. Preserve a
+  conflicting Checkout attempt until that guarded cleanup commits so a Family
+  authority change can retry the receipt and bind direct billing instead.
 
 ## Verification
 
@@ -122,6 +126,12 @@ Updated: 2026-08-06
 - Production migration guard proof passes on the rebased candidate, where the
   nullable provenance constraint already uses its dedicated postdeploy
   migration instead of a predeploy exception.
+- ReviewGPT round 4 exposed a review-induced Family cleanup race. Its owner-first
+  correction passes 473 focused Stripe/Family unit tests, 9/9 PostgreSQL webhook
+  and lock-order tests on a fresh 165-migration database, Web typecheck, focused
+  ESLint, and diff checks. Production aggregate proof confirms every current
+  non-owner Family sponsorship has the paid active Family identity required by
+  the guard.
 - Remaining: push the candidate, run exact-head preliminary specialists and
   final ReviewGPT round 1 concurrently with GitHub Actions, resolve any accepted
   findings, then close this plan with final exact-head evidence.

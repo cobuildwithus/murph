@@ -25,8 +25,10 @@ import {
   applyStripeInvoicePaymentFailed,
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
-  cleanupHostedFamilySponsoredCheckoutSubscription,
+  cleanupHostedFamilySponsoredDirectSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
+  HostedStripeFamilySponsoredCleanupPendingError,
+  type HostedFamilySponsoredCheckoutCleanup,
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
   prepareHostedStripeCheckoutCompletion,
@@ -356,6 +358,7 @@ async function processHostedStripeEventRecord(
 ): Promise<{
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupFamilySponsoredCheckout: HostedFamilySponsoredCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
   cleanupStandardCheckoutStripeSubscriptionId: string | null;
@@ -892,6 +895,9 @@ async function processClaimedHostedStripeEvent(
     if (result.cleanupFamilySponsoredStripeSubscriptionId && !processingMemberId) {
       throw new Error("Family-sponsored cleanup requires a direct billing member.");
     }
+    if (result.cleanupFamilySponsoredCheckout && !processingMemberId) {
+      throw new Error("Family-sponsored Checkout cleanup requires a direct billing member.");
+    }
     if (legacyFamilySubscriptionId) {
       await executeHostedLegacySyntheticFamilyCleanup({
         invoice: stripeEvent.type === "invoice.paid"
@@ -924,11 +930,21 @@ async function processClaimedHostedStripeEvent(
       });
     }
     if (result.cleanupFamilySponsoredStripeSubscriptionId && processingMemberId) {
-      await cleanupHostedFamilySponsoredCheckoutSubscription({
+      await cleanupHostedFamilySponsoredDirectSubscription({
         memberId: processingMemberId,
         prisma,
         sourceEventId: `${claimed.eventId}:family-sponsored-cleanup`,
         subscriptionId: result.cleanupFamilySponsoredStripeSubscriptionId,
+      });
+    }
+    if (result.cleanupFamilySponsoredCheckout && processingMemberId) {
+      await cleanupHostedFamilySponsoredDirectSubscription({
+        checkoutSessionId: result.cleanupFamilySponsoredCheckout.checkoutSessionId,
+        memberId: processingMemberId,
+        prisma,
+        refundCheckoutPayment: true,
+        sourceEventId: `${claimed.eventId}:family-sponsored-checkout-cleanup`,
+        subscriptionId: result.cleanupFamilySponsoredCheckout.subscriptionId,
       });
     }
     if (result.cleanupPulseTrialStripeSubscriptionId && processingMemberId) {
@@ -1022,6 +1038,7 @@ async function processClaimedHostedStripeEvent(
     const poisoned = claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS &&
       !(error instanceof HostedLegacyFamilyCleanupPendingError) &&
       !(error instanceof HostedStripeCheckoutLoserCleanupPendingError) &&
+      !(error instanceof HostedStripeFamilySponsoredCleanupPendingError) &&
       !(error instanceof HostedStripeSubscriptionIdentityPendingError) &&
       !(error instanceof HostedStripeEventRetrieveRetryableError) &&
       !(error instanceof HostedStripeRuntimeRecheckPendingError) &&
@@ -1678,6 +1695,7 @@ function mapHostedStripeActivationOutcome(
   outcome: {
     activatedMemberId: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
+    cleanupFamilySponsoredCheckout?: HostedFamilySponsoredCheckoutCleanup | null;
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
     cleanupStandardCheckoutStripeSubscriptionId?: string | null;
@@ -1688,6 +1706,7 @@ function mapHostedStripeActivationOutcome(
 ): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupFamilySponsoredCheckout: HostedFamilySponsoredCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
   cleanupStandardCheckoutStripeSubscriptionId: string | null;
@@ -1699,6 +1718,8 @@ function mapHostedStripeActivationOutcome(
   return {
     activatedMemberId: outcome.activatedMemberId,
     activatedMembers: outcome.activatedMembers ?? [],
+    cleanupFamilySponsoredCheckout:
+      outcome.cleanupFamilySponsoredCheckout ?? null,
     cleanupFamilySponsoredStripeSubscriptionId:
       outcome.cleanupFamilySponsoredStripeSubscriptionId ?? null,
     cleanupPulseTrialStripeSubscriptionId:
@@ -1716,6 +1737,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   outcome: {
     activatedMemberId?: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
+    cleanupFamilySponsoredCheckout?: HostedFamilySponsoredCheckoutCleanup | null;
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
     cleanupStandardCheckoutStripeSubscriptionId?: string | null;
@@ -1727,6 +1749,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
 ): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupFamilySponsoredCheckout: HostedFamilySponsoredCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
   cleanupStandardCheckoutStripeSubscriptionId: string | null;
@@ -1738,6 +1761,8 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   return {
     activatedMemberId: outcome?.activatedMemberId ?? null,
     activatedMembers: outcome?.activatedMembers ?? [],
+    cleanupFamilySponsoredCheckout:
+      outcome?.cleanupFamilySponsoredCheckout ?? null,
     cleanupFamilySponsoredStripeSubscriptionId:
       outcome?.cleanupFamilySponsoredStripeSubscriptionId ?? null,
     cleanupPulseTrialStripeSubscriptionId:
@@ -1755,6 +1780,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
 function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupFamilySponsoredCheckout: HostedFamilySponsoredCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
   cleanupStandardCheckoutStripeSubscriptionId: string | null;
@@ -1766,6 +1792,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   return {
     activatedMemberId: null,
     activatedMembers: [],
+    cleanupFamilySponsoredCheckout: null,
     cleanupFamilySponsoredStripeSubscriptionId: null,
     cleanupPulseTrialStripeSubscriptionId: null,
     cleanupStandardCheckoutStripeSubscriptionId: null,

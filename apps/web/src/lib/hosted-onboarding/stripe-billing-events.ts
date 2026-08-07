@@ -38,7 +38,7 @@ import {
   assertHostedMemberNotSuspended,
   isHostedAccessBlockedBillingStatus,
 } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
+import { HostedOnboardingError, hostedOnboardingError } from "./errors";
 import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
@@ -46,6 +46,7 @@ import {
   acceptHostedMemberStripeCheckoutCompletionTx,
   clearHostedMemberStripeCheckoutAttemptForSessionTx,
   prepareHostedMemberStripeCheckoutCompletion,
+  readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
   writeAcceptedHostedMemberPulseTrialBillingTx,
   type PreparedHostedMemberStripeCheckoutCompletion,
@@ -99,19 +100,27 @@ import {
   HOSTED_FAMILY_BILLING_PLAN_CODE,
   HOSTED_FAMILY_STRIPE_METADATA_KIND,
   lookupHostedAccountGroupIdByStripeSubscriptionId,
+  readHostedAccountGroupStripeBillingRef,
   readHostedMemberFamilyBillingClaim,
   type PreparedHostedFamilyCryptoDomainRoots,
   type HostedFamilyStripeSubscriptionResult,
 } from "./family-plan";
 import { lockHostedMemberRow, normalizeNullableString } from "./shared";
+import { cleanupHostedStandardCheckoutLoser } from "./stripe-checkout-loser-cleanup";
 
 export type HostedStripeActivatedMemberOutcome = {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
 };
 
+export interface HostedFamilySponsoredCheckoutCleanup {
+  checkoutSessionId: string;
+  subscriptionId: string;
+}
+
 type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   activatedMembers?: HostedStripeActivatedMemberOutcome[];
+  cleanupFamilySponsoredCheckout?: HostedFamilySponsoredCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
   cleanupStandardCheckoutStripeSubscriptionId?: string | null;
@@ -342,17 +351,25 @@ export async function applyStripeCheckoutCompleted(
     tx: prisma,
   });
   if (familyClaimDisposition !== "none") {
-    await clearHostedMemberStripeCheckoutAttemptForSessionTx({
-      memberId: memberSnapshot.core.id,
-      sessionId: session.id,
-      tx: prisma,
-    });
+    if (familyClaimDisposition === "same_family_subscription") {
+      await clearHostedMemberStripeCheckoutAttemptForSessionTx({
+        memberId: memberSnapshot.core.id,
+        sessionId: session.id,
+        tx: prisma,
+      });
+    }
+    const conflictingSubscriptionId = familyClaimDisposition ===
+        "conflicting_family_subscription"
+      ? coerceStripeSubscriptionId(session.subscription)
+      : null;
     return {
       ...buildEmptyHostedStripeActivationOutcome(),
-      ...(familyClaimDisposition === "conflicting_family_subscription"
+      ...(conflictingSubscriptionId
         ? {
-            cleanupStandardCheckoutStripeSubscriptionId:
-              coerceStripeSubscriptionId(session.subscription),
+            cleanupFamilySponsoredCheckout: {
+              checkoutSessionId: session.id,
+              subscriptionId: conflictingSubscriptionId,
+            },
           }
         : {}),
     };
@@ -875,28 +892,76 @@ export function cancelHostedPulseTrialCheckoutLoserSubscription(input: {
   });
 }
 
-export async function cleanupHostedFamilySponsoredCheckoutSubscription(input: {
+export class HostedStripeFamilySponsoredCleanupPendingError
+  extends HostedOnboardingError {
+  constructor() {
+    super({
+      code: "HOSTED_FAMILY_SPONSORED_CLEANUP_PENDING",
+      httpStatus: 409,
+      message:
+        "Family billing changed while Stripe cleanup was waiting. Try again so billing can be reconciled safely.",
+      retryable: true,
+    });
+    this.name = "HostedStripeFamilySponsoredCleanupPendingError";
+  }
+}
+
+export async function cleanupHostedFamilySponsoredDirectSubscription(input: {
+  checkoutSessionId?: string;
   memberId: string;
   prisma: PrismaClient;
+  refundCheckoutPayment?: boolean;
   sourceEventId: string;
-  stripe?: Pick<Stripe, "subscriptions">;
+  stripe?: Stripe;
   subscriptionId: string;
 }): Promise<void> {
-  await withHostedMemberStripeMutationLock({
+  const candidateClaim = await readHostedMemberFamilyBillingClaim({
     memberId: input.memberId,
     prisma: input.prisma,
+  });
+  if (candidateClaim?.kind !== "active_sponsorship") {
+    throw new HostedStripeFamilySponsoredCleanupPendingError();
+  }
+
+  await withHostedMemberStripeMutationLock({
+    memberId: candidateClaim.ownerMemberId,
+    prisma: input.prisma,
     run: async (tx) => {
+      await lockHostedMemberRow(tx, input.memberId);
       const familyClaim = await readHostedMemberFamilyBillingClaim({
         memberId: input.memberId,
         prisma: tx,
       });
-      if (familyClaim?.kind !== "active_sponsorship") {
-        return;
+      if (
+        familyClaim?.kind !== "active_sponsorship"
+        || familyClaim.groupId !== candidateClaim.groupId
+        || familyClaim.ownerMemberId !== candidateClaim.ownerMemberId
+      ) {
+        throw new HostedStripeFamilySponsoredCleanupPendingError();
       }
 
+      const familyBillingRef = await readHostedAccountGroupStripeBillingRef({
+        groupId: familyClaim.groupId,
+        prisma: tx,
+      });
+      if (
+        familyBillingRef?.currentBillingPhase !== "paid"
+        || familyBillingRef.currentBillingPlanCode !== HOSTED_FAMILY_BILLING_PLAN_CODE
+        || !familyBillingRef.stripeSubscriptionId
+      ) {
+        throw new HostedStripeFamilySponsoredCleanupPendingError();
+      }
+
+      const directBillingRef = await readHostedMemberStripeBillingRef({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      const stripe = input.stripe ?? requireHostedStripeApi();
+      let subscription: Stripe.Subscription | null = null;
       try {
-        await (input.stripe ?? requireHostedStripeApi()).subscriptions.cancel(
-          input.subscriptionId,
+        subscription = await withHostedStripeFailureLog(
+          "subscription.retrieve.family-sponsored-cleanup",
+          () => stripe.subscriptions.retrieve(input.subscriptionId),
         );
       } catch (error) {
         if (
@@ -912,10 +977,66 @@ export async function cleanupHostedFamilySponsoredCheckoutSubscription(input: {
             cause: error,
             code: "HOSTED_FAMILY_SPONSORED_CHECKOUT_CLEANUP_FAILED",
             httpStatus: 502,
-            message: "Murph could not cancel a superseded Stripe subscription. Try again.",
+            message: "Murph could not inspect a superseded Stripe subscription. Try again.",
             retryable: true,
           });
         }
+      }
+
+      if (subscription) {
+        const metadataMemberId = normalizeNullableString(
+          subscription.metadata?.memberId,
+        );
+        const matchesDirectOwner = metadataMemberId === input.memberId
+          || directBillingRef?.stripeSubscriptionId === input.subscriptionId;
+        if (
+          subscription.id === familyBillingRef.stripeSubscriptionId
+          || subscription.metadata?.kind === HOSTED_FAMILY_STRIPE_METADATA_KIND
+          || !matchesDirectOwner
+        ) {
+          throw new HostedStripeFamilySponsoredCleanupPendingError();
+        }
+
+        if (input.refundCheckoutPayment) {
+          await cleanupHostedStandardCheckoutLoser({
+            stripe,
+            stripeSubscriptionId: input.subscriptionId,
+            subscription,
+          });
+        } else if (
+          subscription.status !== "canceled"
+          && subscription.status !== "incomplete_expired"
+        ) {
+          try {
+            await stripe.subscriptions.cancel(input.subscriptionId);
+          } catch (error) {
+            if (
+              !error
+              || typeof error !== "object"
+              || Reflect.get(error, "code") !== "resource_missing"
+            ) {
+              logHostedStripeFailure({
+                error,
+                operationName: "subscription.cancel.family-sponsored-checkout",
+              });
+              throw hostedOnboardingError({
+                cause: error,
+                code: "HOSTED_FAMILY_SPONSORED_CHECKOUT_CLEANUP_FAILED",
+                httpStatus: 502,
+                message: "Murph could not cancel a superseded Stripe subscription. Try again.",
+                retryable: true,
+              });
+            }
+          }
+        }
+      }
+
+      if (input.checkoutSessionId) {
+        await clearHostedMemberStripeCheckoutAttemptForSessionTx({
+          memberId: input.memberId,
+          sessionId: input.checkoutSessionId,
+          tx,
+        });
       }
 
       const eventCreatedAt = new Date();

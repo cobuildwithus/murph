@@ -76,6 +76,14 @@ import {
   readHostedPersonalAiUsageStatus,
 } from "@/src/lib/hosted-execution/usage-status";
 import {
+  removeHostedFamilyMemberTx,
+  writeHostedAccountGroupStripeBillingTx,
+} from "@/src/lib/hosted-onboarding/family-plan";
+import {
+  bindHostedMemberStripeCheckoutSessionTx,
+  prepareHostedMemberStripeCheckoutCompletion,
+  prepareHostedMemberStripeCheckoutSession,
+  reserveHostedMemberStripeCheckoutAttemptUnderLockTx,
   writeHostedMemberStripeBillingRefTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import {
@@ -86,8 +94,17 @@ import {
   terminalizeHostedFamilySponsoredDirectBillingTx,
 } from "@/src/lib/hosted-onboarding/stripe-billing-policy";
 import {
+  bindHostedStripeBillingRefsFromCheckoutSessionTx,
+  cleanupHostedFamilySponsoredDirectSubscription,
+  HostedStripeFamilySponsoredCleanupPendingError,
+} from "@/src/lib/hosted-onboarding/stripe-billing-events";
+import {
   readHostedOnboardingEnvironment,
 } from "@/src/lib/hosted-onboarding/env";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+} from "@/src/lib/hosted-onboarding/shared";
 import {
   processRecordedHostedStripeWebhookEvent,
 } from "@/src/lib/hosted-onboarding/stripe-webhook-reconciliation";
@@ -261,6 +278,172 @@ describe.skipIf(!runPostgresProof)(
       } finally {
         await prisma.hostedMember.deleteMany({ where: { id: memberId } });
         await prisma.$disconnect();
+      }
+    });
+
+    it("lets Family removal win before Checkout loser cleanup without touching Stripe", async () => {
+      const ownerClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const cleanupClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await seedFamilySponsoredDirectCleanupFixture(
+        ownerClient,
+        { pendingCheckout: true },
+      );
+      const ownerLocked = createDeferred();
+      const continueRemoval = createDeferred();
+      const cleanupPid = await readBackendPid(cleanupClient);
+      const stripe = buildFamilyCleanupStripe({
+        memberId: fixture.memberId,
+        subscriptionId: fixture.directSubscriptionId,
+      });
+
+      const removal = ownerClient.$transaction(async (tx) => {
+        await lockHostedMemberRow(tx, fixture.ownerMemberId);
+        ownerLocked.resolve();
+        await continueRemoval.promise;
+        return removeHostedFamilyMemberTx({
+          groupId: fixture.groupId,
+          memberId: fixture.memberId,
+          ownerMemberId: fixture.ownerMemberId,
+          tx,
+        });
+      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+      try {
+        await ownerLocked.promise;
+        const cleanup = cleanupHostedFamilySponsoredDirectSubscription({
+          checkoutSessionId: fixture.checkoutSessionId,
+          memberId: fixture.memberId,
+          prisma: cleanupClient,
+          refundCheckoutPayment: true,
+          sourceEventId: `evt_family_checkout_cleanup_${fixture.fixtureId}`,
+          stripe: stripe.client,
+          subscriptionId: fixture.directSubscriptionId,
+        });
+        await waitForBlockedBackend({ observer, pid: cleanupPid });
+        continueRemoval.resolve();
+
+        await expect(removal).resolves.toBe(true);
+        await expect(cleanup).rejects.toBeInstanceOf(
+          HostedStripeFamilySponsoredCleanupPendingError,
+        );
+
+        expect(stripe.retrieve).not.toHaveBeenCalled();
+        expect(stripe.cancel).not.toHaveBeenCalled();
+        expect(stripe.listInvoices).not.toHaveBeenCalled();
+        const preparedCompletion =
+          await prepareHostedMemberStripeCheckoutCompletion({
+            memberId: fixture.memberId,
+            prisma: cleanupClient,
+            stripeCustomerId: fixture.directCustomerId,
+            stripeSubscriptionId: fixture.directSubscriptionId,
+          });
+        await expect(cleanupClient.$transaction((tx) =>
+          bindHostedStripeBillingRefsFromCheckoutSessionTx({
+            dispatchContext: {
+              eventCreatedAt: new Date("2026-07-01T12:01:00.000Z"),
+              sourceEventId: `evt_family_checkout_replay_${fixture.fixtureId}`,
+            },
+            memberId: fixture.memberId,
+            preparedCompletion,
+            preparedStripeCheckoutEmail: null,
+            session: {
+              customer: fixture.directCustomerId,
+              id: fixture.checkoutSessionId,
+              metadata: {
+                checkoutAttemptId: fixture.checkoutAttemptId,
+                checkoutIntentHash: fixture.checkoutIntentHash,
+              },
+              subscription: fixture.directSubscriptionId,
+            } as never,
+            tx,
+          })
+        )).resolves.toBe(true);
+        await expect(readHostedMemberBillingSnapshot({
+          memberId: fixture.memberId,
+          prisma: observer,
+        })).resolves.toMatchObject({
+          billingRef: {
+            stripeSubscriptionId: fixture.directSubscriptionId,
+          },
+          core: { billingStatus: HostedBillingStatus.active },
+        });
+      } finally {
+        continueRemoval.resolve();
+        await Promise.allSettled([removal]);
+        await deleteFamilyCleanupFixture(observer, fixture);
+        await Promise.all([
+          ownerClient.$disconnect(),
+          cleanupClient.$disconnect(),
+          observer.$disconnect(),
+        ]);
+      }
+    });
+
+    it("holds the Family owner lock through Stripe cleanup and exact local terminalization", async () => {
+      const cleanupClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const removalClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await seedFamilySponsoredDirectCleanupFixture(cleanupClient);
+      const providerReached = createDeferred();
+      const continueProvider = createDeferred();
+      const removalPid = await readBackendPid(removalClient);
+      const stripe = buildFamilyCleanupStripe({
+        beforeRetrieve: async () => {
+          providerReached.resolve();
+          await continueProvider.promise;
+        },
+        memberId: fixture.memberId,
+        subscriptionId: fixture.directSubscriptionId,
+      });
+      const cleanup = cleanupHostedFamilySponsoredDirectSubscription({
+        memberId: fixture.memberId,
+        prisma: cleanupClient,
+        sourceEventId: `evt_family_subscription_cleanup_${fixture.fixtureId}`,
+        stripe: stripe.client,
+        subscriptionId: fixture.directSubscriptionId,
+      });
+
+      let removal: Promise<boolean> | null = null;
+      try {
+        await providerReached.promise;
+        removal = removalClient.$transaction((tx) =>
+          removeHostedFamilyMemberTx({
+            groupId: fixture.groupId,
+            memberId: fixture.memberId,
+            ownerMemberId: fixture.ownerMemberId,
+            tx,
+          }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+        await waitForBlockedBackend({ observer, pid: removalPid });
+        expect(stripe.cancel).not.toHaveBeenCalled();
+
+        continueProvider.resolve();
+        await expect(cleanup).resolves.toBeUndefined();
+        await expect(removal).resolves.toBe(true);
+
+        expect(stripe.retrieve).toHaveBeenCalledOnce();
+        expect(stripe.cancel).toHaveBeenCalledOnce();
+        await expect(readHostedMemberBillingSnapshot({
+          memberId: fixture.memberId,
+          prisma: observer,
+        })).resolves.toMatchObject({
+          billingRef: {
+            stripeSubscriptionId: fixture.directSubscriptionId,
+          },
+          core: { billingStatus: HostedBillingStatus.canceled },
+        });
+      } finally {
+        continueProvider.resolve();
+        await Promise.allSettled([
+          cleanup,
+          ...(removal ? [removal] : []),
+        ]);
+        await deleteFamilyCleanupFixture(observer, fixture);
+        await Promise.all([
+          cleanupClient.$disconnect(),
+          removalClient.$disconnect(),
+          observer.$disconnect(),
+        ]);
       }
     });
 
@@ -1716,6 +1899,220 @@ async function makeStripeReceiptImmediatelyRetryable(input: {
     data: { nextAttemptAt: new Date(0) },
     where: { eventId: input.eventId },
   });
+}
+
+interface FamilyCleanupFixture {
+  checkoutAttemptId: string;
+  checkoutIntentHash: string;
+  checkoutSessionId: string;
+  directCustomerId: string;
+  directSubscriptionId: string;
+  familySubscriptionId: string;
+  fixtureId: string;
+  groupId: string;
+  memberId: string;
+  ownerMemberId: string;
+}
+
+async function seedFamilySponsoredDirectCleanupFixture(
+  prisma: PrismaClient,
+  options: { pendingCheckout?: boolean } = {},
+): Promise<FamilyCleanupFixture> {
+  const fixtureId = randomUUID();
+  const fixture = {
+    checkoutAttemptId: `hbca_cleanup_${fixtureId}`,
+    checkoutIntentHash: `intent_cleanup_${fixtureId}`,
+    checkoutSessionId: `cs_cleanup_${fixtureId}`,
+    directCustomerId: `cus_direct_cleanup_${fixtureId}`,
+    directSubscriptionId: `sub_direct_cleanup_${fixtureId}`,
+    familySubscriptionId: `sub_family_authority_${fixtureId}`,
+    fixtureId,
+    groupId: `hbag_cleanup_${fixtureId}`,
+    memberId: `hbm_cleanup_member_${fixtureId}`,
+    ownerMemberId: `hbm_cleanup_owner_${fixtureId}`,
+  };
+  await prisma.hostedMember.createMany({
+    data: [
+      { billingStatus: HostedBillingStatus.active, id: fixture.ownerMemberId },
+      { billingStatus: HostedBillingStatus.active, id: fixture.memberId },
+    ],
+  });
+  await prisma.hostedAccountGroup.create({
+    data: {
+      billingStatus: HostedBillingStatus.active,
+      id: fixture.groupId,
+      memberships: {
+        create: [
+          {
+            id: `hbagm_cleanup_owner_${fixtureId}`,
+            joinedAt: new Date("2026-07-01T12:00:00.000Z"),
+            memberId: fixture.ownerMemberId,
+            planCode: "pulse",
+            role: "owner",
+            status: "active",
+          },
+          {
+            id: `hbagm_cleanup_member_${fixtureId}`,
+            joinedAt: new Date("2026-07-01T12:00:00.000Z"),
+            memberId: fixture.memberId,
+            planCode: "pulse",
+            role: "member",
+            status: "active",
+          },
+        ],
+      },
+      ownerMemberId: fixture.ownerMemberId,
+    },
+  });
+  await prisma.$transaction((tx) =>
+    writeHostedAccountGroupStripeBillingTx({
+      billedSeatCount: 2,
+      billingStatus: HostedBillingStatus.active,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_family_monthly",
+      groupId: fixture.groupId,
+      stripeCustomerId: `cus_family_authority_${fixtureId}`,
+      stripeSubscriptionId: fixture.familySubscriptionId,
+      tx,
+    })
+  );
+  if (options.pendingCheckout) {
+    await prisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, fixture.memberId);
+      await reserveHostedMemberStripeCheckoutAttemptUnderLockTx({
+        attemptId: fixture.checkoutAttemptId,
+        createdAt: new Date("2026-07-01T12:00:00.000Z"),
+        expectedBillingRef: null,
+        intentHash: fixture.checkoutIntentHash,
+        memberId: fixture.memberId,
+        tx,
+      });
+    });
+    const preparedSession = await prepareHostedMemberStripeCheckoutSession({
+      memberId: fixture.memberId,
+      prisma,
+      sessionId: fixture.checkoutSessionId,
+    });
+    await prisma.$transaction((tx) =>
+      bindHostedMemberStripeCheckoutSessionTx({
+        attemptId: fixture.checkoutAttemptId,
+        intentHash: fixture.checkoutIntentHash,
+        memberId: fixture.memberId,
+        preparedSession,
+        tx,
+      })
+    );
+  } else {
+    await prisma.$transaction((tx) =>
+      writeHostedMemberStripeBillingRefTx({
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "standard",
+        memberId: fixture.memberId,
+        stripeCustomerId: fixture.directCustomerId,
+        stripeSubscriptionId: fixture.directSubscriptionId,
+        tx,
+      })
+    );
+  }
+  return fixture;
+}
+
+async function deleteFamilyCleanupFixture(
+  prisma: PrismaClient,
+  fixture: FamilyCleanupFixture,
+): Promise<void> {
+  await prisma.hostedAccountGroup.deleteMany({
+    where: { id: fixture.groupId },
+  });
+  await prisma.hostedMember.deleteMany({
+    where: { id: { in: [fixture.memberId, fixture.ownerMemberId] } },
+  });
+}
+
+function buildFamilyCleanupStripe(input: {
+  beforeRetrieve?: () => Promise<void>;
+  memberId: string;
+  subscriptionId: string;
+}) {
+  const subscription: Stripe.Subscription = {
+    id: input.subscriptionId,
+    metadata: {
+      billingPlanCode: "launch_monthly",
+      checkoutOffer: "standard",
+      memberId: input.memberId,
+    },
+    status: "active",
+  } as never;
+  const retrieve = vi.fn(async () => {
+    await input.beforeRetrieve?.();
+    return subscription;
+  });
+  const cancel = vi.fn(async () => ({
+    ...subscription,
+    status: "canceled" as const,
+  }));
+  const listInvoices = vi.fn(async () => ({
+    data: [],
+    has_more: false,
+  }));
+  return {
+    cancel,
+    client: {
+      invoices: { list: listInvoices },
+      subscriptions: { cancel, retrieve },
+    } as never,
+    listInvoices,
+    retrieve,
+  };
+}
+
+interface Deferred {
+  promise: Promise<void>;
+  resolve(): void;
+}
+
+function createDeferred(): Deferred {
+  let resolvePromise: (() => void) | null = null;
+  const promise = new Promise<void>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return {
+    promise,
+    resolve() {
+      if (!resolvePromise) {
+        throw new Error("Deferred promise is not initialized.");
+      }
+      resolvePromise();
+    },
+  };
+}
+
+async function readBackendPid(prisma: PrismaClient): Promise<number> {
+  const rows = await prisma.$queryRaw<Array<{ pid: number }>>`
+    SELECT pg_backend_pid()::integer AS pid
+  `;
+  const pid = rows[0]?.pid;
+  if (typeof pid !== "number") {
+    throw new Error("Expected a PostgreSQL backend pid.");
+  }
+  return pid;
+}
+
+async function waitForBlockedBackend(input: {
+  observer: PrismaClient;
+  pid: number;
+}): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const rows = await input.observer.$queryRaw<Array<{ blocked: boolean }>>`
+      SELECT cardinality(pg_blocking_pids(${input.pid})) > 0 AS blocked
+    `;
+    if (rows[0]?.blocked === true) {
+      return;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Expected the Family billing transaction to wait on the owner lock.");
 }
 
 function isClearlyLocalPostgresUrl(value: string): boolean {
