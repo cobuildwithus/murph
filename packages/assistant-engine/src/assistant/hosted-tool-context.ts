@@ -224,6 +224,8 @@ export function createAssistantHostedToolContext(input: {
   const route = input.route ?? null
   const clinicalRecordsConnectLinkTool =
     executionContext?.clinicalRecordsConnectLinkTool ?? null
+  const imageGenerationLauncher =
+    executionContext?.imageGenerationLauncher ?? null
   const newsletterPort = input.messageInput.scheduledAutomationAuthority
     ? executionContext?.newsletterTool ?? null
     : null
@@ -362,7 +364,13 @@ export function createAssistantHostedToolContext(input: {
     groupTool: executionContext?.groupTool ?? null,
     imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
-    imageGenerationLauncher: executionContext?.imageGenerationLauncher ?? null,
+    imageGenerationLauncher: imageGenerationLauncher
+      ? bindAssistantHostedImageGenerationContinuation({
+          launcher: imageGenerationLauncher,
+          readContinuationSessionId: () =>
+            readDeliveryContext().session.sessionId,
+        })
+      : null,
     persistGeneratedImageCapture:
       executionContext?.persistGeneratedImageCapture ?? null,
     newsletterTool,
@@ -544,6 +552,24 @@ export function createAssistantHostedScheduledRequestKey(input: {
     }))
     .digest('hex')
   return `scheduled_${digest}`
+}
+
+// The host, not the model or tool arguments, owns which durable session an
+// asynchronous image completion resumes. Binding it here keeps the caller's
+// `scopeId` (pending/queued coordination) and `readStatus` untouched.
+function bindAssistantHostedImageGenerationContinuation(input: {
+  launcher: AssistantHostedImageGenerationLauncher
+  readContinuationSessionId: () => string
+}): AssistantHostedImageGenerationLauncher {
+  return {
+    ...input.launcher,
+    launch(request) {
+      return input.launcher.launch({
+        ...request,
+        continuationSessionId: input.readContinuationSessionId(),
+      })
+    },
+  }
 }
 
 export function resolveAssistantHostedScheduledPhoneCallScope(input: {

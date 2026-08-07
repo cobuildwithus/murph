@@ -2758,7 +2758,7 @@ describe('assistant Codex turn planning', () => {
     )
     expect(directProgressTool?.description.length).toBeLessThanOrEqual(260)
     expect(directProgressTool?.description).toContain(
-      'only before a real reply-critical wait',
+      'before reply-critical work likely to keep the member waiting',
     )
     expect(directProgressTool?.description).not.toContain(
       'current group',

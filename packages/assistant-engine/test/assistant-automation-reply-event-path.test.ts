@@ -2402,7 +2402,16 @@ describe('assistant auto-reply event-first path', () => {
       intentId: 'intent-history-reader',
       updatedAt: '2026-04-08T00:06:00.000Z',
     })]
-    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue(outboxIntents)
+    replyEventPathMocks.listAssistantOutboxIntents.mockImplementationOnce(async (
+      _vault: string,
+      onScan?: (metrics: { bytesRead: number; filesRead: number }) => void,
+    ) => {
+      onScan?.({
+        bytesRead: 8_192,
+        filesRead: 10,
+      })
+      return outboxIntents
+    })
     replyEventPathMocks.listAssistantTurnReceipts.mockImplementationOnce(async (
       _vault: string,
       _limit: number,
@@ -2435,7 +2444,9 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledOnce()
     expect(replyEventPathMocks.listAssistantTurnReceipts).toHaveBeenCalledOnce()
     expect(reader.readMetrics()).toEqual({
+      outboxScanBytesRead: 8_192,
       outboxScanElapsedMs: expect.any(Number),
+      outboxScanFilesRead: 10,
       outboxScanPerformed: true,
       receiptScanBytesRead: 4_096,
       receiptScanElapsedMs: 19,

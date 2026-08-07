@@ -1077,7 +1077,7 @@ it("calls the hosted-local activity-expiry route with bound user headers and a t
   }
 });
 
-it("calls the hosted-local active-operation drop route with bound user headers and a timeout", async () => {
+it("calls the hosted-local active-operation and completion-result loss route with bound user headers and a timeout", async () => {
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
     return Response.json({ ok: true });
   });
@@ -1094,11 +1094,13 @@ it("calls the hosted-local active-operation drop route with bound user headers a
   });
 
   try {
-    await expect(harness.dropRunnerActiveOperationForTest("member_drop")).resolves.toEqual({ ok: true });
+    await expect(harness.dropRunnerActiveOperationForTest("member_drop", {
+      loseCompletedInvocationResult: true,
+    })).resolves.toEqual({ ok: true });
 
     expect(fetch).toHaveBeenCalledTimes(1);
     const [request, init] = fetch.mock.calls[0]!;
-    expect(String(request)).toBe("http://127.0.0.1:8787/__test/users/member_drop/container-active-operation-drop");
+    expect(String(request)).toBe("http://127.0.0.1:8787/__test/users/member_drop/container-active-operation-drop?loseCompletedInvocationResult=1");
     const headers = new Headers(init?.headers);
     expect(headers.get("authorization")).toBe("Bearer oidc-token");
     expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_drop");

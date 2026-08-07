@@ -280,7 +280,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send one brief user-visible progress update to the current conversation. Call only before a real reply-critical wait, then continue work immediately. Success means this milestone update was sent; do not repeat it. This is not a final answer.',
+    'Send a brief user-visible update to the current conversation before reply-critical work likely to keep the member waiting, then continue immediately. A successful call means this update was sent. This is not a final answer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -289,7 +289,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
         type: 'string',
         minLength: 1,
         description:
-          'One short natural sentence about verified current progress and the immediate next step; no final conclusions or unverified claims.',
+          'One short natural sentence orienting the member to the work and immediate next step; no final conclusions or unverified result claims.',
       },
     },
     required: ['text'],
@@ -1259,7 +1259,7 @@ export const MURPH_COMPUTER_OPEN_TOOL = {
   namespace: 'murph',
   name: 'computer_open',
   description:
-    'Open or reuse the current authorized Kernel browser run and return runId, URL, title, and visible text. Call before browser work and after user handoff or any unknown browser outcome. This read does not prove a prior effect failed.',
+    'Open/reuse authorized browser; reopen after handoff/uncertainty. Returns runId, URL, title, text; prior outcome stays unknown. Before multi-step browsing each turn, call send_progress_update if available; prior-turn progress does not count.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1335,7 +1335,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Execute one bounded Playwright macro-step in the current authorized run. Call only while no missing or sensitive user input or final confirmation is required. Return compact state. A transport or browser failure may have an unknown outcome; call computer_open before retrying or acting again.',
+    'One bounded Playwright macro-step in current authorized run; returns state. No missing or sensitive input or final confirmation. Before browser call two this turn, call send_progress_update if available and not yet sent. Failure leaves outcome uncertain; call computer_open before retry/next action.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 

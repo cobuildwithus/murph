@@ -27,6 +27,7 @@ import {
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
 } from "./billing-plans";
+import type { HostedPulseTrialStartSource } from "./pulse-trial-start-source";
 
 type HostedUsagePlanTransitionWrite = {
   usagePlanTransitionAt: Date;
@@ -80,6 +81,7 @@ export async function writeHostedMemberStripeBillingTx(input: {
   member: HostedMemberBillingSnapshot;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
+  pulseTrialStartSource?: HostedPulseTrialStartSource | null;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
   suspendedAtOverride?: Date | null;
@@ -250,6 +252,7 @@ export async function writeHostedMemberStripeBillingTx(input: {
     currentTrialStartedAt: input.currentTrialStartedAt,
     pulseTrialPolicyVersion: input.pulseTrialPolicyVersion,
     pulseTrialRedeemedAt: input.pulseTrialRedeemedAt,
+    pulseTrialStartSource: input.pulseTrialStartSource,
     ...(appliedScheduledPlan
       ? {
           scheduledBillingEffectiveAt: null,

@@ -65,7 +65,6 @@ import {
 } from "./stripe-error-log";
 import {
   hasHostedStripeSubscriptionPaymentMethod,
-  readHostedStripeSubscriptionPaymentMethodId,
 } from "./stripe-subscription-payment-method";
 
 const START_PAID_PULSE_PLAN = "launch_monthly";
@@ -108,7 +107,7 @@ const PULSE_TRIAL_EXTENSION_TARGET_METADATA_KEY =
 
 type HostedPulseTrialStartPaidIdempotencyOperation =
   | "active-trial-end-now-v2"
-  | "paused-resume-v1";
+  | "paused-resume-v2";
 
 export type HostedTrialPaidPlanCode = Extract<
   HostedBillingPlanCode,
@@ -1154,24 +1153,15 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
           return cleanedSubscription;
         }
 
-        const resumePaymentMethodId =
-          readHostedStripeSubscriptionPaymentMethodId(cleanedSubscription) ??
-          readHostedStripeSubscriptionPaymentMethodId(input.subscription);
         const subscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.resume.paused-trial",
           () => input.stripe.subscriptions.resume(input.stripeSubscriptionId, {
             billing_cycle_anchor: "now",
-            // Carry the card onto the subscription. Without it the cycle invoice
-            // this resume creates has nothing to charge, so it stalls the whole
-            // resume in `pending_update` and Stripe voids it minutes later.
-            ...(resumePaymentMethodId
-              ? { default_payment_method: resumePaymentMethodId }
-              : {}),
             expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
           }, {
             idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
               memberId: input.memberId,
-              operation: "paused-resume-v1",
+              operation: "paused-resume-v2",
               priceId: input.priceId,
               stripeSubscriptionId: input.stripeSubscriptionId,
               trialEnd: input.trialEnd,
