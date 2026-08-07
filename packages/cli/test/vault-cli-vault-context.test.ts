@@ -6,7 +6,7 @@ import path from 'node:path'
 import { Cli } from 'incur'
 import { initializeVault } from '@murphai/core'
 import { afterEach, test } from 'vitest'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 import { createVaultCli } from '../src/vault-cli.js'
 import {

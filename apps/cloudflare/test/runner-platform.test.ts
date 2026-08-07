@@ -132,6 +132,9 @@ import {
 import {
   createEncryptedWorkspaceSnapshotFile,
 } from "../src/workspace-snapshot-local.ts";
+import {
+  assertEstablishedR2ColdStartAttempt,
+} from "./helpers/hosted-local-cold-start-benchmark.js";
 
 function requireFetchCallArgs(
   call: readonly unknown[] | undefined,
@@ -1597,6 +1600,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       expect(restoreTimings?.encryptedBytes).toBe(encrypted.encryptedByteSize);
       expect(restoreTimings?.plainBytes).toBe(encrypted.totalPlainBytes);
+      expect(restoreTimings?.replaySafeReadMaxAttempt).toBe(1);
       expect(restoreTimings?.objectFetchResponseHeadersMs).toBe(25);
       expect(restoreTimings?.objectFetchBodyReadMs).toBe(30);
       expect(
@@ -1833,6 +1837,26 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         workspaceSnapshotRestoreAttempt: 1,
         workspaceSnapshotRestoreStep: "object_fetch",
       }));
+      expect(restoreTimings).toMatchObject({ replaySafeReadMaxAttempt: 2 });
+      expect(() => assertEstablishedR2ColdStartAttempt({
+        expectedEncryptedBytes: encrypted.encryptedByteSize,
+        expectedPlainBytes: encrypted.totalPlainBytes,
+        runtimeLogs: [{
+          attemptId: "runtime_write_123",
+          level: "info",
+          phase: "idle",
+        }],
+        successfulAttemptId: "runtime_write_123",
+        trace: {
+          phaseBreakdown: {
+            schemaVersion: 1,
+            boot: { restoreWasCold: true },
+            restore: restoreTimings ?? {},
+          },
+          runtimeAttemptId: "runtime_write_123",
+        },
+        workspaceWriteFenceGeneration: "1",
+      })).toThrow("recovered workspace snapshot restore");
       const serializedLogs = JSON.stringify(readWorkspaceSnapshotDiagnosticLogs());
       expect(serializedLogs).not.toContain(objectKey);
       expect(serializedLogs).not.toContain(snapshotId);

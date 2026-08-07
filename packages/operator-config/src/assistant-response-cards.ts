@@ -10,7 +10,7 @@ import {
   type NutritionCardGoalStatus,
   type NutritionCardMetric,
 } from '@murphai/contracts'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 const NUTRITION_CARD_MONTHS = [
   'Jan',

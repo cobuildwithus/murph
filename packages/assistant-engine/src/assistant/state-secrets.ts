@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import type * as z from '@murphai/contracts/zod-runtime'
 import { readFile, rename, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'

@@ -619,6 +619,7 @@ export interface HostedRuntimeWorkspaceSnapshotRestoreTimingDetails {
   extractMs?: number;
   encryptedBytes?: number;
   plainBytes?: number;
+  replaySafeReadMaxAttempt?: number;
 }
 
 export interface HostedRuntimeWorkspaceSnapshotPort {

@@ -97,6 +97,9 @@ import {
   resolveAssistantCodexThreadScope,
 } from './codex-turn-runner.js'
 import {
+  stampAssistantProviderStartCriticalPath,
+} from './provider-start-critical-path.js'
+import {
   readCodexThreadCompatibilityFingerprint,
   readCodexThreadRouteFingerprint,
 } from './codex-thread-route.js'
@@ -466,6 +469,11 @@ export async function openAssistantConversationLocal(
 export async function sendAssistantMessageLocal(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> {
+  const providerStartAtAssistantService =
+    stampAssistantProviderStartCriticalPath(
+      input.providerStartCriticalPath,
+      'assistantServiceStartedAtMonotonicMs',
+    )
   await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
     inputs: input.acceptedTurnInput?.initialInputs ?? [],
     vault: input.vault,
@@ -499,11 +507,21 @@ export async function sendAssistantMessageLocal(
     defaults: await resolveAssistantOperatorDefaults(),
     executionContext,
   })
+  const providerStartAtTurnLockWait =
+    stampAssistantProviderStartCriticalPath(
+      providerStartAtAssistantService,
+      'assistantTurnLockWaitStartedAtMonotonicMs',
+    )
   const turnLockWaitStartedAt = Date.now()
   const runLockedTurn = () => withAssistantTurnLock({
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
+      const providerStartAtTurnLockAcquired =
+        stampAssistantProviderStartCriticalPath(
+          providerStartAtTurnLockWait,
+          'assistantTurnLockAcquiredAtMonotonicMs',
+        )
       const lockAcquiredAt = Date.now()
       const turnLockWaitMs = elapsedSince(turnLockWaitStartedAt)
       emitHostedAssistantContextTimingTrace({
@@ -1088,6 +1106,11 @@ export async function sendAssistantMessageLocal(
         // effects may reference any input already admitted into the provider
         // turn. Native replies and reactions remain exact to one ordinal.
         const admissionMs = elapsedSince(admissionStartedAt)
+        const providerStartAtPreProviderSetupDone =
+          stampAssistantProviderStartCriticalPath(
+            providerStartAtTurnLockAcquired,
+            'preProviderSetupDoneAtMonotonicMs',
+          )
         const preProviderSetupMs = elapsedSince(lockAcquiredAt)
         emitHostedAssistantContextTimingTrace({
           message: input,
@@ -1267,6 +1290,12 @@ export async function sendAssistantMessageLocal(
             threadScope,
           },
           providerRequestOrdinal,
+          ...(providerStartAtPreProviderSetupDone
+            ? {
+                providerStartCriticalPath:
+                  providerStartAtPreProviderSetupDone,
+              }
+            : {}),
           resolvedSession: currentSession,
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           progressDelivery,
