@@ -4663,10 +4663,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       };
       expect(body.authorityCheckOnly).toBe(responseCount === 1 ? false : true);
       expect(body.assistantAskFallback).toBe(
-        responseCount === 1 ? undefined : false,
+        responseCount === 2 ? false : undefined,
       );
       expect(body.assistantAskCompletionExpiresAt).toBe(
-        responseCount === 1 ? undefined : "2026-07-16T12:10:00.000Z",
+        responseCount === 2 ? "2026-07-16T12:10:00.000Z" : undefined,
       );
       return new Response(JSON.stringify({
         ...(body.assistantAskFallback === false
@@ -4679,15 +4679,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               providerDispatchClaimed: true,
             }
           : { providerDispatchStarted: true }),
-        ...(responseCount === 1
-          ? {}
-          : {
+        ...(responseCount === 2
+          ? {
               targetOverride: {
                 conversationThreadId: "hid_current_chat",
                 target: "chat_current",
                 targetKind: "thread",
               },
-            }),
+            }
+          : responseCount === 3
+            ? {
+                targetOverride: {
+                  fromPhoneNumber: "+15550000",
+                  target: "+15550001",
+                  targetKind: "participant",
+                },
+              }
+            : {}),
         threadIsDirect: responseCount === 1 ? false : true,
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
@@ -4735,8 +4743,22 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       threadIsDirect: true,
     });
+    await expect(assertLinqRecentInboundEngagement({
+      authorityCheckOnly: true,
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      target: "chat_current",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      providerDispatchStarted: true,
+      targetOverride: {
+        fromPhoneNumber: "+15550000",
+        target: "+15550001",
+        targetKind: "participant",
+      },
+      threadIsDirect: true,
+    });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     for (const [index, call] of fetchMock.mock.calls.entries()) {
       const request = requireFetchRequest(call, `direct Linq egress authority request ${index}`);
       expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`);

@@ -1736,6 +1736,68 @@ describe('assistant channels runtime seam', () => {
     )
   })
 
+  it('materializes a Web-authorized participant route after a stale exact-card replay', async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue({
+      fromPhoneNumber: '+15550000',
+      target: '+15550001',
+      targetKind: 'participant' as const,
+    })
+    runtimeMocks.sendLinqIMessageAppCard.mockRejectedValue(new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq rejected the replayed iMessage app card because the chat is gone.',
+      {
+        failureStage: 'http',
+        linqFailureKind: 'chat_not_found',
+        method: 'POST',
+        operation: 'send_imessage_app_card',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 404,
+      },
+    ))
+    runtimeMocks.createLinqChat.mockResolvedValue({
+      chatId: 'materialized-fallback-chat',
+      messageId: 'materialized-fallback-message',
+    })
+
+    await expect(sendLinqMessage({
+      card: NUTRITION_CARD,
+      idempotencyKey: 'card-replay-stale-chat',
+      linqAppCardReplay: true,
+      message: NUTRITION_CARD_TEXT,
+      target: 'stale-private-thread',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      idempotencyKey: 'card-replay-stale-chat:fallback',
+      providerMessageId: 'materialized-fallback-message',
+      providerThreadId: 'materialized-fallback-chat',
+      target: 'materialized-fallback-chat',
+    })
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: 'card-replay-stale-chat:fallback',
+      staleTargetRecoveryRequired: true,
+    })
+    expect(runtimeMocks.createLinqChat).toHaveBeenCalledWith({
+      from: '+15550000',
+      idempotencyKey: 'card-replay-stale-chat:fallback',
+      message: NUTRITION_CARD_TEXT,
+      to: ['+15550001'],
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: undefined,
+    })
+    expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+    expect(persistAppCardTextFallback.mock.invocationCallOrder[0]).toBeLessThan(
+      runtimeMocks.createLinqChat.mock.invocationCallOrder[0]!,
+    )
+  })
+
   it('falls back to deterministic ordinary text when Linq card capability is unavailable', async () => {
     const onAppCardFallbackError = vi.fn()
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)

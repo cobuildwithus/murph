@@ -11117,6 +11117,263 @@ describe("hosted runtime callbacks", () => {
       .toBeLessThan(observedOrder.indexOf("provider:current-text"));
   });
 
+  it("persists stale-card fallback before materializing a Web-authorized participant route", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "stale-direct-chat",
+      channel: "linq",
+      explicitTarget: "stale-direct-chat",
+      transportIdempotent: true,
+    });
+    const observedOrder: string[] = [];
+    const persistAppCardTextFallback = vi.fn(async () => {
+      observedOrder.push("persist-fallback");
+    });
+    const assertRecentInbound = vi.fn(async (request: {
+      answeredMailboxItemIds?: readonly string[] | null;
+      authorityCheckOnly: boolean;
+      directRecipientPhoneNumber?: string | null;
+      fromPhoneNumber?: string | null;
+      homeRouteFallbackAllowed?: boolean | null;
+      idempotencyKey?: string | null;
+      providerDispatchPredecessorIdempotencyKey?: string | null;
+      replyToMessageId?: string | null;
+      target?: string | null;
+      targetKind?: string | null;
+    }) => {
+      observedOrder.push(
+        `${request.authorityCheckOnly ? "authorize" : "claim"}:${request.idempotencyKey}:${request.targetKind}:${request.target}`,
+      );
+      if (request.authorityCheckOnly) {
+        expect(request).toEqual(expect.objectContaining({
+          directRecipientPhoneNumber: null,
+          homeRouteFallbackAllowed: true,
+          replyToMessageId: null,
+          target: "stale-direct-chat",
+          targetKind: "thread",
+        }));
+        expect(request).not.toHaveProperty("answeredMailboxItemIds");
+        return {
+          targetOverride: {
+            fromPhoneNumber: "+15550000",
+            target: "+15550001",
+            targetKind: "participant" as const,
+          },
+          threadIsDirect: true,
+        };
+      }
+      if (request.idempotencyKey?.endsWith(":fallback")) {
+        expect(request).toEqual(expect.objectContaining({
+          directRecipientPhoneNumber: "+15550001",
+          fromPhoneNumber: "+15550000",
+          providerDispatchPredecessorIdempotencyKey:
+            "assistant-outbox:intent_123",
+          target: "+15550001",
+          targetKind: "participant",
+        }));
+      }
+      return { providerDispatchClaimed: true };
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/chats/stale-direct-chat/messages")) {
+        observedOrder.push("provider:stale-card");
+        return new Response(JSON.stringify({
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 404,
+        });
+      }
+      if (url.endsWith("/chats")) {
+        const body = JSON.parse(String(init?.body)) as {
+          message?: { idempotency_key?: string; parts?: Array<{ type?: string }> };
+        };
+        expect(body.message).toMatchObject({
+          idempotency_key: "assistant-outbox:intent_123:fallback",
+          parts: [{ type: "text" }],
+        });
+        observedOrder.push("provider:materialize-text");
+        return new Response(JSON.stringify({
+          chat: {
+            id: "materialized-direct-chat",
+            message: { id: "materialized-fallback-message" },
+          },
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(null, { status: 500 });
+    });
+    mocks.useActualLinqMessage = true;
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        card: {
+          kind: "daily_nutrition",
+          localDate: "2026-07-31",
+          mealCount: 1,
+          totals: {
+            calories: { mealCount: 1, total: 500 },
+            carbsGrams: { mealCount: 1, total: 55 },
+            fatGrams: { mealCount: 1, total: 18 },
+            proteinGrams: { mealCount: 1, total: 35 },
+          },
+        },
+        homeRouteFallbackAllowed: true,
+        idempotencyKey: "assistant-outbox:intent_123",
+        linqAppCardReplay: true,
+        message: "Nutrition summary",
+        persistAppCardTextFallback,
+        replyToMessageId: "message-stale-direct-chat",
+        target: "stale-direct-chat",
+        targetKind: "thread",
+        threadIsDirect: true,
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: "thread",
+        }),
+        status: "sent",
+      });
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      staleTargetRecoveryRequired: true,
+    });
+    expect(JSON.stringify(persistAppCardTextFallback.mock.calls))
+      .not.toContain("+1555");
+    expect(observedOrder.indexOf("persist-fallback"))
+      .toBeLessThan(observedOrder.indexOf("provider:materialize-text"));
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          eventType:
+            "assistant.delivery.linq_app_card_stale_chat_recovery_authorized",
+          recoveryMode: "participant",
+        }),
+      }),
+    );
+  });
+
+  it("reacquires a participant route on every fresh fallback drain without persisted phone state", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "stale-direct-chat",
+      channel: "linq",
+      explicitTarget: "stale-direct-chat",
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+      directRecipientPhoneNumber?: string | null;
+      fromPhoneNumber?: string | null;
+      idempotencyKey?: string | null;
+      providerDispatchPredecessorIdempotencyKey?: string | null;
+      target?: string | null;
+      targetKind?: string | null;
+    }) => request.authorityCheckOnly
+      ? {
+          targetOverride: {
+            fromPhoneNumber: "+15550000",
+            target: "+15550001",
+            targetKind: "participant" as const,
+          },
+          threadIsDirect: true,
+        }
+      : { providerDispatchClaimed: true });
+    const providerKeys: string[] = [];
+    const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toMatch(/\/chats$/u);
+      const body = JSON.parse(String(init?.body)) as {
+        message?: { idempotency_key?: string };
+      };
+      providerKeys.push(body.message?.idempotency_key ?? "missing");
+      return new Response(JSON.stringify({
+        chat: {
+          id: "provider-deduplicated-chat",
+          message: { id: "provider-deduplicated-message" },
+        },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    mocks.useActualLinqMessage = true;
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        homeRouteFallbackAllowed: true,
+        idempotencyKey: "assistant-outbox:intent_123:fallback",
+        message: "Nutrition summary",
+        replyToMessageId: null,
+        target: "stale-direct-chat",
+        targetKind: "thread",
+        threadIsDirect: true,
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: "thread",
+        }),
+        status: "sent",
+      });
+    });
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+        }),
+        forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+        platformEnv: {},
+        providerFetch,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).resolves.toEqual([
+        expect.objectContaining({ deliveryStatus: "sent" }),
+      ]);
+    }
+
+    expect(providerKeys).toEqual([
+      "assistant-outbox:intent_123:fallback",
+      "assistant-outbox:intent_123:fallback",
+    ]);
+    const authorityChecks = assertRecentInbound.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.authorityCheckOnly);
+    expect(authorityChecks).toHaveLength(2);
+    for (const request of authorityChecks) {
+      expect(request).toEqual(expect.objectContaining({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_123:fallback",
+        target: "stale-direct-chat",
+        targetKind: "thread",
+      }));
+    }
+  });
+
   it("keeps stale-card state when no current direct thread is authorized", async () => {
     const effect = createEffect({
       bindingDeliveryTarget: "stale-direct-chat",

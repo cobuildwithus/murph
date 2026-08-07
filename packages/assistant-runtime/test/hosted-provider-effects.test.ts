@@ -537,7 +537,10 @@ describe("hosted provider effects", () => {
   ])("uses an authority-resolved thread for $execution replay fallback after structured stale-chat rejection", async ({
     directRecipientPhoneNumber,
   }) => {
-    const persistAppCardTextFallback = vi.fn(async () => ({
+    const persistAppCardTextFallback = vi.fn(async (_input: {
+      idempotencyKey: string;
+      staleTargetRecoveryRequired?: true;
+    }) => ({
       target: "current-direct-chat",
       targetKind: "thread" as const,
     }));
@@ -605,6 +608,98 @@ describe("hosted provider effects", () => {
       staleTargetRecoveryRequired: true,
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("materializes an authority-resolved participant after persisting stale-card fallback", async () => {
+    const persistAppCardTextFallback = vi.fn(async (_input: {
+      idempotencyKey: string;
+      staleTargetRecoveryRequired?: true;
+    }) => ({
+      fromPhoneNumber: "+15550000",
+      target: "+15550001",
+      targetKind: "participant" as const,
+    }));
+    const observedOrder: string[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/chats/stale-direct-chat/messages")) {
+        observedOrder.push("provider:stale-card");
+        return new Response(JSON.stringify({
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 404,
+        });
+      }
+      if (url.endsWith("/chats")) {
+        observedOrder.push("provider:materialize-text");
+        const body = JSON.parse(String(init?.body)) as {
+          from?: string;
+          message?: { idempotency_key?: string };
+          to?: string[];
+        };
+        expect(body).toMatchObject({
+          from: "+15550000",
+          message: {
+            idempotency_key: "same-home-stale-card:fallback",
+          },
+          to: ["+15550001"],
+        });
+        return new Response(JSON.stringify({
+          chat: {
+            id: "materialized-direct-chat",
+            message: { id: "materialized-fallback-message" },
+          },
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(null, { status: 500 });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-07-31",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      homeRouteFallbackAllowed: true,
+      idempotencyKey: "same-home-stale-card",
+      linqAppCardReplay: true,
+      message: "Nutrition summary",
+      target: "stale-direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      persistAppCardTextFallback: async (input) => {
+        observedOrder.push("persist-fallback");
+        return await persistAppCardTextFallback(input);
+      },
+    })).resolves.toMatchObject({
+      idempotencyKey: "same-home-stale-card:fallback",
+      providerMessageId: "materialized-fallback-message",
+      providerThreadId: "materialized-direct-chat",
+      target: "materialized-direct-chat",
+    });
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: "same-home-stale-card:fallback",
+      staleTargetRecoveryRequired: true,
+    });
+    expect(observedOrder).toEqual([
+      "provider:stale-card",
+      "persist-fallback",
+      "provider:materialize-text",
+    ]);
   });
 
   it("does not use transient phone recovery after persisting a stale-card target replacement", async () => {

@@ -83,6 +83,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
 }));
 
 import {
+  materializeHostedAppCardFallbackHomeRouteTx,
   materializeHostedSignupWelcomeHomeRouteTx,
   readHostedLinqHomeLineAuthority,
   reserveHostedLinqHomeLineFromPoolTx,
@@ -269,6 +270,115 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
 
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
   });
+
+  it("replaces the exact rejected home chat after participant fallback", async () => {
+    const staleChatId = "chat_rejected_card";
+    const materializedChatId = "chat_materialized_fallback";
+    mocks.readHostedMemberRoutingState.mockResolvedValue(
+      buildMaterializationRouting({ linqChatId: staleChatId }),
+    );
+    const prisma = buildMaterializationPrisma();
+    mockAppCardFallbackDeliveries({
+      materializedChatId,
+      prisma,
+      staleChatId,
+    });
+
+    await expect(materializeHostedAppCardFallbackHomeRouteTx({
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      linqChatId: materializedChatId,
+      memberId,
+      prisma: prisma as never,
+    })).resolves.toEqual({ kind: "materialized" });
+
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqChatId: materializedChatId,
+        memberId,
+        recipientPhone: fromPhoneNumber,
+      }),
+    );
+  });
+
+  it("replays accepted participant fallback idempotently but preserves a newer home", async () => {
+    const staleChatId = "chat_rejected_card";
+    const materializedChatId = "chat_materialized_fallback";
+    const prisma = buildMaterializationPrisma();
+    mocks.readHostedMemberRoutingState.mockResolvedValueOnce(
+      buildMaterializationRouting({ linqChatId: materializedChatId }),
+    );
+    mockAppCardFallbackDeliveries({
+      acceptedAt: new Date("2026-07-15T20:28:00.000Z"),
+      materializedChatId,
+      prisma,
+      staleChatId,
+    });
+
+    await expect(materializeHostedAppCardFallbackHomeRouteTx({
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      linqChatId: materializedChatId,
+      memberId,
+      prisma: prisma as never,
+    })).resolves.toEqual({ kind: "already_materialized" });
+
+    mocks.upsertHostedMemberHomeLinqBindingTx.mockClear();
+    mocks.readHostedMemberRoutingState.mockResolvedValueOnce(
+      buildMaterializationRouting({ linqChatId: "chat_newer_home" }),
+    );
+    mockAppCardFallbackDeliveries({
+      acceptedAt: new Date("2026-07-15T20:28:00.000Z"),
+      materializedChatId,
+      prisma,
+      staleChatId,
+    });
+    await expect(materializeHostedAppCardFallbackHomeRouteTx({
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      linqChatId: materializedChatId,
+      memberId,
+      prisma: prisma as never,
+    })).resolves.toEqual({ kind: "superseded" });
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  function mockAppCardFallbackDeliveries(input: {
+    acceptedAt?: Date | null;
+    materializedChatId: string;
+    prisma: ReturnType<typeof buildMaterializationPrisma>;
+    staleChatId: string;
+  }): void {
+    input.prisma.hostedLinqDelivery.findUnique
+      .mockReset()
+      .mockResolvedValueOnce({
+        acceptedAt: input.acceptedAt ?? null,
+        linqChatLookupKey: input.acceptedAt
+          ? requireLookupKey(
+              createHostedLinqChatLookupKeyReadCandidates(
+                input.materializedChatId,
+              ),
+            )
+          : null,
+        phoneNumberLookupKey: requireLookupKey(
+          createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber),
+        ),
+        source: "hosted_runtime_linq_delivery",
+        targetKind: "participant",
+      })
+      .mockResolvedValueOnce({
+        failureCode: "ASSISTANT_LINQ_APP_CARD_REJECTED",
+        linqChatLookupKey: requireLookupKey(
+          createHostedLinqChatLookupKeyReadCandidates(input.staleChatId),
+        ),
+        source: "hosted_runtime_linq_delivery",
+        status: "failed",
+        targetKind: "thread",
+      });
+  }
 
   function buildMaterializationPrisma(overrides: {
     acceptedAt?: Date | null;

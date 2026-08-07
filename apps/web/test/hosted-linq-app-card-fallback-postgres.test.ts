@@ -181,6 +181,65 @@ describe.skipIf(!runPostgresProof)(
         await prisma.$disconnect();
       }
     });
+
+    it("moves a stale thread-card fence to participant fallback without persisting its target", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const suffix = randomUUID();
+      const intentId = `intent-card-participant-fallback-${suffix}`;
+      const predecessorIdempotencyKey = `assistant-outbox:${intentId}`;
+      const fallbackIdempotencyKey = `${predecessorIdempotencyKey}:fallback`;
+      const predecessorLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+        predecessorIdempotencyKey,
+      );
+      const fallbackLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+        fallbackIdempotencyKey,
+      );
+      if (!predecessorLookupKey || !fallbackLookupKey) {
+        await prisma.$disconnect();
+        throw new Error("Expected deterministic delivery lookup keys.");
+      }
+
+      try {
+        await expect(recordHostedLinqRuntimeProviderDispatchFenceTx({
+          idempotencyKey: predecessorIdempotencyKey,
+          linqChatId: `chat-card-participant-fallback-${suffix}`,
+          prisma,
+          sourceRef: intentId,
+          targetKind: "thread",
+        })).resolves.toMatchObject({ claimed: true });
+
+        await expect(transitionHostedLinqRuntimeAppCardFallbackFenceTx({
+          fallbackIdempotencyKey,
+          linqChatId: null,
+          predecessorIdempotencyKey,
+          prisma,
+          sourceRef: intentId,
+          targetKind: "participant",
+        })).resolves.toMatchObject({ claimed: true });
+
+        await expect(prisma.hostedLinqDelivery.findUnique({
+          select: {
+            linqChatLookupKey: true,
+            status: true,
+            targetKind: true,
+          },
+          where: { idempotencyKey: fallbackLookupKey },
+        })).resolves.toEqual({
+          linqChatLookupKey: null,
+          status: "provider_dispatch_started",
+          targetKind: "participant",
+        });
+      } finally {
+        await prisma.hostedLinqDelivery.deleteMany({
+          where: {
+            idempotencyKey: {
+              in: [predecessorLookupKey, fallbackLookupKey],
+            },
+          },
+        });
+        await prisma.$disconnect();
+      }
+    });
   },
 );
 

@@ -1903,7 +1903,9 @@ export async function runHostedWorkspaceAssistantPhase(
             );
           }
           const conversationThreadId =
-            authority.targetOverride?.conversationThreadId?.trim() ?? "";
+            authority.targetOverride?.targetKind === "thread"
+              ? authority.targetOverride.conversationThreadId?.trim() ?? ""
+              : "";
           return {
             ...(conversationThreadId ? { conversationThreadId } : {}),
             ...(authority.deliveryBlockCode

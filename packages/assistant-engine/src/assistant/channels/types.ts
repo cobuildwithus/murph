@@ -61,6 +61,15 @@ export interface AssistantEmailDeliverySummary {
   status: 'failed' | 'partial_failure' | 'sent'
 }
 
+export type LinqAppCardFallbackTarget = {
+  target: string
+  targetKind: 'thread'
+} | {
+  fromPhoneNumber: string
+  target: string
+  targetKind: 'participant'
+}
+
 export interface LinqRuntimeDependencies {
   capabilityFetchImplementation?: LinqFetch
   env?: NodeJS.ProcessEnv
@@ -82,10 +91,7 @@ export interface LinqRuntimeDependencies {
     staleTargetRecoveryRequired?: true
     target?: string
     targetKind?: 'thread'
-  }) => Promise<{
-    target: string
-    targetKind: 'thread'
-  } | void>
+  }) => Promise<LinqAppCardFallbackTarget | void>
   refreshMs?: number
   signal?: AbortSignal
 }
@@ -188,10 +194,7 @@ export interface AssistantChannelDependencies {
       staleTargetRecoveryRequired?: true
       target?: string
       targetKind?: 'thread'
-    }) => Promise<{
-      target: string
-      targetKind: 'thread'
-    } | void>
+    }) => Promise<LinqAppCardFallbackTarget | void>
   }) => Promise<
     | {
         idempotencyKey?: string | null
@@ -208,10 +211,7 @@ export interface AssistantChannelDependencies {
     staleTargetRecoveryRequired?: true
     target?: string
     targetKind?: 'thread'
-  }) => Promise<{
-    target: string
-    targetKind: 'thread'
-  } | void>
+  }) => Promise<LinqAppCardFallbackTarget | void>
   sendLinqVoiceMemo?: (input: {
     answeredMailboxItemIds?: readonly string[] | null
     attachmentId: string

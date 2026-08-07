@@ -30,9 +30,11 @@ specified by
 `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/operations/imessage-deliverability.md`.
 
-Detached stale-card recovery, current-direct-chat authorization before local
-fallback persistence, cross-chat predecessor transfer, delivery-control error
-provenance, and post-admission rate-limit ambiguity use those same owners.
+Detached stale-card recovery, current-home-only authorization before local
+fallback persistence, restart-safe Web-derived participant materialization
+when the rejected chat is still current, cross-target predecessor transfer,
+delivery-control error provenance, and post-admission rate-limit ambiguity use
+those same owners.
 
 Venice's code-owned provider-model binding without duplicate deploy variables
 provider-aware immutable allowance pricing, explicit Codex prompt-cache

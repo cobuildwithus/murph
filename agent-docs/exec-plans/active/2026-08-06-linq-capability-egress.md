@@ -67,6 +67,11 @@ Updated: 2026-08-06
   recipient phone. A retained inbound could therefore re-authorize the dead
   chat, while a live process could commit fallback before rehoming through
   transient phone state. Either path could strand fallback after restart.
+- Final ReviewGPT round 9 exposed the remaining same-home loop. When Linq
+  rejected the chat that Web still considered current, Web returned direct
+  authority without an override, so exact replay retried the rejected chat
+  forever even though Web retained the encrypted member identity and assigned
+  line needed to authorize a participant-addressed replacement.
 
 ## Success criteria
 
@@ -110,6 +115,14 @@ Updated: 2026-08-06
   while the fallback fence is claimed on that current chat. Missing authority
   preserves the card and confirmation-pending state, and provider-side chat
   materialization cannot replace the durable target transition.
+- If the rejected chat is still current, fallback-key authority may return the
+  exact participant and assigned line derived by Web from encrypted durable
+  state. The runtime persists the participant fallback fence before `/chats`
+  without storing raw phone numbers, reacquires that authority on every drain,
+  and uses the same fallback delivery key. An accepted replacement chat
+  replaces only the exact rejected current home; callback replay is
+  idempotent, a newer home wins, and missing durable route authority leaves the
+  card untouched and confirmation-pending.
 - Exhausted provider-message `429` responses after dispatch admission are
   confirmation-pending; a capability-only `429` may still select deterministic
   text fallback before message dispatch.
@@ -240,3 +253,15 @@ Updated: 2026-08-06
   transition. Focused live, detached, missing-authority, and fresh-restart
   regressions pass: hosted provider effects 27, hosted callbacks 3, and the
   assistant outbox restart case 1.
+- Final ReviewGPT round 9 found that current-home-only authorization still
+  looped when the rejected chat itself remained current. The remediation now
+  authorizes a participant-addressed fallback from Web-owned encrypted state,
+  persists a phone-free participant fence before provider chat creation,
+  reacquires the route after restart, and binds an accepted replacement chat
+  back to the exact rejected home. Provider entry also rechecks that the
+  predecessor chat remains current, closing the race where a newer home could
+  appear between recovery authorization and `/chats`. Focused proof passes:
+  assistant channel runtime 64, hosted provider effects plus callbacks 251,
+  the three affected Web files 131, the full Cloudflare Node workspace 2,264,
+  and local PostgreSQL fallback lifecycle 3. All four affected package
+  typechecks, documentation gardening, and documentation drift checks pass.

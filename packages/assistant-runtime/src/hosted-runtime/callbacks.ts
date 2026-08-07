@@ -92,6 +92,7 @@ import type {
   HostedRuntimeLinqDeliveryOutcomeRequest,
   HostedRuntimeLinqRecentInboundEngagementResult,
   HostedRuntimeLinqSendResponse,
+  HostedRuntimeLinqTargetOverride,
   HostedRuntimeProviderTargetKind,
 } from "./platform.ts";
 import {
@@ -3531,15 +3532,15 @@ function createHostedAssistantLinqSendDependency(input: {
           target: request.target,
           targetKind: request.targetKind ?? null,
         });
-    const directRecipientPhoneNumber =
+    let directRecipientPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.directRecipientPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.directRecipientPhoneNumber);
-    const originalParticipantRecipientPhoneNumber =
+    let originalParticipantRecipientPhoneNumber =
       request.targetKind === "participant"
         ? normalizeHostedLinqDirectRecipient(request.target)
           ?? directRecipientPhoneNumber
         : null;
-    const fromPhoneNumber =
+    let fromPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
@@ -3589,6 +3590,15 @@ function createHostedAssistantLinqSendDependency(input: {
       engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
     let providerTargetKind =
       engagement.targetOverride?.targetKind ?? request.targetKind ?? null;
+    if (engagement.targetOverride?.targetKind === "participant") {
+      directRecipientPhoneNumber = normalizeHostedLinqDirectRecipient(
+        engagement.targetOverride.target,
+      );
+      fromPhoneNumber = normalizeHostedLinqDirectRecipient(
+        engagement.targetOverride.fromPhoneNumber,
+      );
+      originalParticipantRecipientPhoneNumber = directRecipientPhoneNumber;
+    }
     if (
       includesVaultFile
       && (
@@ -3759,7 +3769,7 @@ function createHostedAssistantLinqSendDependency(input: {
           ? {
               persistAppCardTextFallback: async (fallback) => {
                 let recoveredTarget:
-                  | { target: string; targetKind: "thread" }
+                  | HostedRuntimeLinqTargetOverride
                   | null = null;
                 if (fallback.staleTargetRecoveryRequired === true) {
                   const recoveryEngagement =
@@ -3779,15 +3789,48 @@ function createHostedAssistantLinqSendDependency(input: {
                     });
                   const recoveredProviderTarget =
                     recoveryEngagement.targetOverride?.target.trim() ?? "";
-                  recoveredTarget =
-                    recoveryEngagement.targetOverride?.targetKind === "thread"
-                      && recoveredProviderTarget.length > 0
+                  const recoveryOverride = recoveryEngagement.targetOverride;
+                  if (
+                    recoveryOverride?.targetKind === "thread"
+                    && recoveredProviderTarget.length > 0
+                  ) {
+                    recoveredTarget = {
+                      ...(recoveryOverride.conversationThreadId
+                        ? {
+                            conversationThreadId:
+                              recoveryOverride.conversationThreadId,
+                          }
+                        : {}),
+                      target: recoveredProviderTarget,
+                      targetKind: "thread",
+                    };
+                  } else if (recoveryOverride?.targetKind === "participant") {
+                    const recoveredRecipient = normalizeHostedLinqDirectRecipient(
+                      recoveryOverride.target,
+                    );
+                    const recoveredSender = normalizeHostedLinqDirectRecipient(
+                      recoveryOverride.fromPhoneNumber,
+                    );
+                    recoveredTarget = recoveredRecipient && recoveredSender
                       ? {
-                          target: recoveredProviderTarget,
-                          targetKind: "thread",
+                          fromPhoneNumber: recoveredSender,
+                          target: recoveredRecipient,
+                          targetKind: "participant",
                         }
                       : null;
+                  }
                   if (!recoveredTarget) {
+                    emitHostedExecutionStructuredLog({
+                      component: "assistant-delivery",
+                      details: {
+                        eventType:
+                          "assistant.delivery.linq_app_card_stale_chat_recovery_unavailable",
+                        providerKind: "linq",
+                      },
+                      level: "warn",
+                      message: "Hosted Linq stale app-card recovery had no current Web-authorized direct route.",
+                      phase: "outbox",
+                    });
                     throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
                       "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
                       "Hosted iMessage app-card recovery requires a current direct chat before changing to text fallback.",
@@ -3797,7 +3840,9 @@ function createHostedAssistantLinqSendDependency(input: {
                 }
                 await persistAppCardTextFallback({
                   ...fallback,
-                  ...(recoveredTarget ?? {}),
+                  ...(recoveredTarget?.targetKind === "thread"
+                    ? recoveredTarget
+                    : {}),
                 });
                 const predecessorIdempotencyKey = effectiveIdempotencyKey;
                 effectiveIdempotencyKey = fallback.idempotencyKey;
@@ -3805,6 +3850,23 @@ function createHostedAssistantLinqSendDependency(input: {
                 if (recoveredTarget) {
                   providerTarget = recoveredTarget.target;
                   providerTargetKind = recoveredTarget.targetKind;
+                  if (recoveredTarget.targetKind === "participant") {
+                    directRecipientPhoneNumber = recoveredTarget.target;
+                    fromPhoneNumber = recoveredTarget.fromPhoneNumber;
+                    originalParticipantRecipientPhoneNumber = recoveredTarget.target;
+                  }
+                  emitHostedExecutionStructuredLog({
+                    component: "assistant-delivery",
+                    details: {
+                      eventType:
+                        "assistant.delivery.linq_app_card_stale_chat_recovery_authorized",
+                      providerKind: "linq",
+                      recoveryMode: recoveredTarget.targetKind,
+                    },
+                    level: "info",
+                    message: "Hosted Linq stale app-card recovery acquired a current Web-authorized direct route.",
+                    phase: "outbox",
+                  });
                 }
                 if (
                   fallback.idempotencyKey !== predecessorIdempotencyKey
@@ -4803,8 +4865,21 @@ function normalizeHostedAssistantLinqEngagementResult(
   const targetOverride = result?.targetOverride ?? null;
   if (targetOverride?.target && targetOverride.targetKind === "thread") {
     normalized.targetOverride = {
+      ...(targetOverride.conversationThreadId
+        ? { conversationThreadId: targetOverride.conversationThreadId }
+        : {}),
       target: targetOverride.target,
       targetKind: "thread",
+    };
+  } else if (
+    targetOverride?.target
+    && targetOverride.targetKind === "participant"
+    && targetOverride.fromPhoneNumber
+  ) {
+    normalized.targetOverride = {
+      fromPhoneNumber: targetOverride.fromPhoneNumber,
+      target: targetOverride.target,
+      targetKind: "participant",
     };
   }
   return normalized;

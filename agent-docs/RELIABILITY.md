@@ -46,19 +46,28 @@ Last verified: 2026-08-06
   fallback rather than an error. Before promoted fallback text enters Linq,
   Web atomically terminalizes the exact original provider-dispatch fence with
   the bounded app-card rejection code and claims the fallback fence under the
-  same runtime intent, source, and thread target. Whenever an exact replay
-  proves its old chat stale, Web must first authorize the current direct chat
-  without historical reply selectors or a process-local recipient hint;
-  only then may the runtime atomically persist the text transition, current
-  chat binding, and matching target fingerprint before claiming its fallback
-  fence on that current chat. Provider-side chat materialization cannot replace
-  this durable transition. A restart therefore replays fallback text to the
-  authorized current chat rather than the stale predecessor. Failure to
-  resolve that target leaves the card intact and confirmation-pending. A retry whose local
-  outbox already contains the fallback repeats that exact transition, so a
-  lost control response cannot strand the original card fence or bypass
-  provider-entry authority. Once the fallback outcome is terminal, no
-  unresolved card fence remains to block later canonical group routing.
+  same runtime intent and source. Whenever an exact replay proves its old chat
+  stale, Web must resolve current-home-only authority without historical reply
+  selectors or a process-local recipient hint. If a different current direct
+  chat exists, the runtime atomically persists that thread binding and matching
+  target fingerprint with the text transition. If the rejected chat is still
+  Web's current home, Web may instead return the existing encrypted verified
+  participant plus assigned-line route. The outbox then persists only
+  `card: null` and the stable fallback key before `/chats`; it never stores the
+  raw participant route, and every initial or resumed fallback dispatch
+  reacquires that route from Web. Web atomically terminalizes the thread-card
+  predecessor and claims the participant fallback fence without persisting its
+  raw target. An accepted provider chat replaces the exact rejected home chat
+  under the same member, route, identity, line, and predecessor-provenance
+  locks; a callback replay is idempotent and a newer home route wins. If neither
+  route exists, the card remains intact and confirmation-pending. The runtime
+  emits metadata-only recovery-authorized or recovery-unavailable events in
+  addition to the sanitized original rejection warning, without logging route
+  values. A retry whose local outbox already contains the fallback repeats the
+  exact Web transition, so a lost control response cannot strand the original
+  card fence or bypass provider-entry authority. Once the fallback outcome is
+  terminal, no unresolved card fence remains to block later canonical group
+  routing.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
 - Health-data withdrawal commits its revocation boundary, then waits for the
@@ -894,15 +903,18 @@ Last verified: 2026-08-06
   fence; only the first message request does. Text retry is safe only after a
   definitive rejection, including a structured stale-chat app-card `404`, and
   the text-only transition commits with `card: null` and a stable fallback
-  identity. A detached replay must
-  resolve and authorize the current direct chat before that commit. The same
-  atomic outbox write replaces the stale binding and target fingerprint, so a
-  fresh process uses the authorized current chat; if it cannot, the card remains
-  unchanged and confirmation-pending. Before the first fallback provider request, the existing
-  Web delivery transaction must also terminalize the exact card dispatch and
-  claim that fallback identity on the authorized current chat, which may differ
-  from the rejected predecessor chat; a persisted-fallback retry idempotently
-  reconciles the same predecessor before sending.
+  identity. A detached replay must resolve current-home-only authority before
+  that commit. A different current chat is persisted with the fallback. When
+  the rejected chat remains current, the fallback instead reacquires Web's
+  encrypted participant and assigned-line route on every drain, persists no raw
+  phone locally, and materializes the provider chat only after the text
+  transition is durable. If neither route exists, the card remains unchanged
+  and confirmation-pending. Before the first fallback provider request, Web
+  terminalizes the exact thread-card dispatch and claims the fallback identity
+  on either the authorized current thread or the participant materialization
+  path. Acceptance of a materialized chat atomically replaces only the exact
+  rejected home; a persisted-fallback retry and a repeated outcome callback are
+  idempotent, while a newer home route is preserved.
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
 - Assistant product-feedback capture accepts at most one in-memory candidate during a successful provider turn. The assistant execution context can only hand that candidate to its hosted invocation synchronously; the existing web-control write remains at the foreground delivery owner and starts only after a current-turn member-channel send succeeds. Failed provider attempts discard their candidate, invocations without a successful foreground send may abandon it, feedback never counts as a provider side effect for transport retry safety, and persistence remains best-effort with a two-second maximum deadline, no retry queue, and no user-visible delivery state. The accepted-input-derived idempotency key remains the ambiguity fence when a timed-out post-reply write may already have reached Web.
 - Exact private support escalation remains the bounded in-turn exception to ordinary post-reply feedback persistence. Under the same member-scoped advisory lock, Web writes the fixed member marker plus the anonymous bounded and sanitized issue Murph wrote in its own words, reads and validates both rows, and ranks the member marker for the three-per-UTC-day alert cap. An eligible provider attempt formats from the first stored issue rather than callback memory and uses the feedback-derived Resend idempotency key, so replay has one stable body even when a later callback supplies different wording; missing, member-linked, unsanitized, still-prefixed, or malformed stored detail fails before email. Later records remain durable without another alert; missing email configuration or provider failure remains visible to the current turn without adding a retry queue or second delivery owner.

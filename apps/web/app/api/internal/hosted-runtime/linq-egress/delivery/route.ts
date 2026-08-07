@@ -16,6 +16,7 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
+  materializeHostedAppCardFallbackHomeRouteTx,
   materializeHostedSignupWelcomeHomeRouteTx,
 } from "@/src/lib/hosted-onboarding/linq-home-routing";
 import {
@@ -34,6 +35,7 @@ import { getPrisma } from "@/src/lib/prisma";
 const HOSTED_LINQ_EGRESS_DELIVERY_BODY_LIMIT_BYTES = 8 * 1024;
 const HOSTED_RUNTIME_ATTEMPT_ID_HEADER = "x-hosted-runtime-attempt-id";
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
+const HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX = ":fallback";
 // Must stay >= the hosted mailbox run import limit so one grouped auto-reply
 // can stamp every answered conversation item.
 const HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
@@ -130,6 +132,11 @@ export const POST = withJsonError(async (request: Request) => {
   const acceptedSignupWelcome = acceptedAt
     ? parseHostedSignupWelcomeIdempotencyKey(idempotencyKey)
     : null;
+  const acceptedAppCardFallback = Boolean(
+    acceptedAt
+    && targetKind === "participant"
+    && parseHostedAppCardFallbackPredecessorIdempotencyKey(idempotencyKey),
+  );
   const claimsParticipantSignupWelcomeNamespace = Boolean(
     acceptedAt
     && targetKind === "participant"
@@ -147,7 +154,10 @@ export const POST = withJsonError(async (request: Request) => {
     throwHostedSignupWelcomeDeliveryAuthorityInvalid();
   }
 
-  const result = acceptedSignupWelcome && targetKind === "participant"
+  const materializeParticipantHomeRoute =
+    targetKind === "participant"
+    && (Boolean(acceptedSignupWelcome) || acceptedAppCardFallback);
+  const result = materializeParticipantHomeRoute
     ? await prisma.$transaction(async (tx) => {
         if (
           threadIsDirect !== true
@@ -156,17 +166,28 @@ export const POST = withJsonError(async (request: Request) => {
           || !fromPhoneNumber
           || !directRecipientPhoneNumber
         ) {
-          throwHostedSignupWelcomeDeliveryAuthorityInvalid();
+          throwHostedParticipantHomeRouteDeliveryAuthorityInvalid({
+            appCardFallback: acceptedAppCardFallback,
+          });
         }
 
-        await materializeHostedSignupWelcomeHomeRouteTx({
+        const materializationInput = {
           directRecipientPhoneNumber,
           fromPhoneNumber,
           idempotencyKey: idempotencyKey ?? "",
           linqChatId: providerThreadId,
           memberId: userId,
           prisma: tx,
-        });
+        };
+        if (acceptedAppCardFallback) {
+          await materializeHostedAppCardFallbackHomeRouteTx(
+            materializationInput,
+          );
+        } else {
+          await materializeHostedSignupWelcomeHomeRouteTx(
+            materializationInput,
+          );
+        }
         const recorded = await recordHostedLinqRuntimeDeliveryOutcomeTx({
           ...outcomeInput,
           phoneNumber: fromPhoneNumber,
@@ -175,7 +196,9 @@ export const POST = withJsonError(async (request: Request) => {
         });
         if (!recorded.recorded || !recorded.deliveryId) {
           throw hostedOnboardingError({
-            code: "HOSTED_LINQ_SIGNUP_WELCOME_DELIVERY_NOT_RECORDED",
+            code: acceptedAppCardFallback
+              ? "HOSTED_LINQ_APP_CARD_FALLBACK_DELIVERY_NOT_RECORDED"
+              : "HOSTED_LINQ_SIGNUP_WELCOME_DELIVERY_NOT_RECORDED",
             httpStatus: 503,
             message: "Hosted signup welcome delivery outcome was not recorded.",
             retryable: true,
@@ -218,6 +241,36 @@ function parseHostedSignupWelcomeIdempotencyKey(
   }
   const memberId = value.slice(HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX.length);
   return memberId && !memberId.includes(":") ? memberId : null;
+}
+
+function parseHostedAppCardFallbackPredecessorIdempotencyKey(
+  value: string | null,
+): string | null {
+  if (
+    !value
+    || value.length <= HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX.length
+    || !value.endsWith(HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX)
+  ) {
+    return null;
+  }
+  return value.slice(
+    0,
+    -HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX.length,
+  );
+}
+
+function throwHostedParticipantHomeRouteDeliveryAuthorityInvalid(input: {
+  appCardFallback: boolean;
+}): never {
+  if (!input.appCardFallback) {
+    throwHostedSignupWelcomeDeliveryAuthorityInvalid();
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_APP_CARD_FALLBACK_DELIVERY_AUTHORITY_INVALID",
+    httpStatus: 403,
+    message: "Hosted app-card fallback delivery authority is invalid.",
+    retryable: false,
+  });
 }
 
 function throwHostedSignupWelcomeDeliveryAuthorityInvalid(): never {

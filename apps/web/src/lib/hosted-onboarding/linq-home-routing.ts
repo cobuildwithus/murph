@@ -37,6 +37,9 @@ import {
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "./linq-observability-identifiers";
+import {
+  HOSTED_LINQ_APP_CARD_REJECTED_FAILURE_CODE,
+} from "./linq-delivery-store";
 import { normalizePhoneNumber } from "./phone";
 import { hostedOnboardingError } from "./errors";
 import type { HostedLinqParticipantContact } from "./linq-participant-contact";
@@ -44,6 +47,7 @@ import { lockHostedMemberRow } from "./shared";
 import type { Prisma } from "@prisma/client";
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
+const HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX = ":fallback";
 
 export interface HostedMemberActivationLinqRouteResolution {
   welcomeRoute: HostedMemberAssistantNotificationRoute | null;
@@ -117,6 +121,35 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedSignupWelcomeHomeRouteMaterializationResult> {
+  return await materializeHostedParticipantHomeRouteTx({
+    ...input,
+    authorityKind: "signup_welcome",
+  });
+}
+
+export async function materializeHostedAppCardFallbackHomeRouteTx(input: {
+  directRecipientPhoneNumber: string;
+  fromPhoneNumber: string;
+  idempotencyKey: string;
+  linqChatId: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedSignupWelcomeHomeRouteMaterializationResult> {
+  return await materializeHostedParticipantHomeRouteTx({
+    ...input,
+    authorityKind: "app_card_fallback",
+  });
+}
+
+async function materializeHostedParticipantHomeRouteTx(input: {
+  authorityKind: "app_card_fallback" | "signup_welcome";
+  directRecipientPhoneNumber: string;
+  fromPhoneNumber: string;
+  idempotencyKey: string;
+  linqChatId: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedSignupWelcomeHomeRouteMaterializationResult> {
   const idempotencyKey = input.idempotencyKey.trim();
   const linqChatId = input.linqChatId.trim();
   const directRecipientPhoneNumber = normalizePhoneNumber(
@@ -125,8 +158,19 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
   const fromPhoneNumber = normalizePhoneNumber(input.fromPhoneNumber);
   const expectedIdempotencyKey =
     `${HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX}${input.memberId}`;
+  const predecessorIdempotencyKey =
+    input.authorityKind === "app_card_fallback"
+    && idempotencyKey.length > HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX.length
+    && idempotencyKey.endsWith(HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX)
+      ? idempotencyKey.slice(
+          0,
+          -HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX.length,
+        )
+      : null;
   const deliveryIdempotencyLookupKey =
     createHostedLinqDeliveryIdempotencyLookupKey(idempotencyKey);
+  const predecessorIdempotencyLookupKey =
+    createHostedLinqDeliveryIdempotencyLookupKey(predecessorIdempotencyKey);
   const directRecipientLookupKeys =
     createHostedPhoneLookupKeyReadCandidates(directRecipientPhoneNumber);
   const fromPhoneLookupKeys =
@@ -135,7 +179,11 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
     createHostedLinqChatLookupKeyReadCandidates(linqChatId);
 
   if (
-    idempotencyKey !== expectedIdempotencyKey
+    (
+      input.authorityKind === "signup_welcome"
+        ? idempotencyKey !== expectedIdempotencyKey
+        : !predecessorIdempotencyLookupKey
+    )
     || !deliveryIdempotencyLookupKey
     || !directRecipientPhoneNumber
     || directRecipientLookupKeys.length === 0
@@ -144,7 +192,7 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
     || !linqChatId
     || linqChatLookupKeys.length === 0
   ) {
-    throwHostedSignupWelcomeRouteAuthorityInvalid();
+    throwHostedParticipantHomeRouteAuthorityInvalid(input.authorityKind);
   }
 
   // Identity reconciliation locks the member row before mutating verified
@@ -156,16 +204,30 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
     prisma: input.prisma,
   });
 
-  const delivery = await input.prisma.hostedLinqDelivery.findUnique({
-    where: { idempotencyKey: deliveryIdempotencyLookupKey },
-    select: {
-      acceptedAt: true,
-      linqChatLookupKey: true,
-      phoneNumberLookupKey: true,
-      source: true,
-      targetKind: true,
-    },
-  });
+  const [delivery, predecessor] = await Promise.all([
+    input.prisma.hostedLinqDelivery.findUnique({
+      where: { idempotencyKey: deliveryIdempotencyLookupKey },
+      select: {
+        acceptedAt: true,
+        linqChatLookupKey: true,
+        phoneNumberLookupKey: true,
+        source: true,
+        targetKind: true,
+      },
+    }),
+    predecessorIdempotencyLookupKey
+      ? input.prisma.hostedLinqDelivery.findUnique({
+          where: { idempotencyKey: predecessorIdempotencyLookupKey },
+          select: {
+            failureCode: true,
+            linqChatLookupKey: true,
+            source: true,
+            status: true,
+            targetKind: true,
+          },
+        })
+      : null,
+  ]);
 
   if (
     !delivery
@@ -178,11 +240,27 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
       && !linqChatLookupKeys.includes(delivery.linqChatLookupKey)
     )
     || (delivery.acceptedAt !== null && delivery.linqChatLookupKey === null)
+    || (
+      input.authorityKind === "app_card_fallback"
+      && (
+        !predecessor
+        || predecessor.failureCode
+          !== HOSTED_LINQ_APP_CARD_REJECTED_FAILURE_CODE
+        || !predecessor.linqChatLookupKey
+        || predecessor.source !== "hosted_runtime_linq_delivery"
+        || predecessor.status !== "failed"
+        || predecessor.targetKind !== "thread"
+      )
+    )
   ) {
     throw hostedOnboardingError({
-      code: "HOSTED_LINQ_SIGNUP_WELCOME_DELIVERY_PROVENANCE_MISMATCH",
+      code: input.authorityKind === "app_card_fallback"
+        ? "HOSTED_LINQ_APP_CARD_FALLBACK_DELIVERY_PROVENANCE_MISMATCH"
+        : "HOSTED_LINQ_SIGNUP_WELCOME_DELIVERY_PROVENANCE_MISMATCH",
       httpStatus: 409,
-      message: "Hosted signup welcome delivery does not match its provider dispatch claim.",
+      message: input.authorityKind === "app_card_fallback"
+        ? "Hosted app-card fallback delivery does not match its provider dispatch claim."
+        : "Hosted signup welcome delivery does not match its provider dispatch claim.",
       retryable: true,
     });
   }
@@ -199,18 +277,36 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
     prisma: input.prisma,
   });
   const authority = readHostedLinqHomeLineAuthority(routing);
-  if (
-    (authority.kind === "home" || authority.kind === "pending")
+  const replacingRejectedHomeChat =
+    input.authorityKind === "app_card_fallback"
+    && authority.kind === "home"
     && authority.chatId !== linqChatId
+    && predecessor?.linqChatLookupKey !== null
+    && createHostedLinqChatLookupKeyReadCandidates(authority.chatId)
+      .includes(predecessor?.linqChatLookupKey ?? "");
+  if (input.authorityKind === "signup_welcome") {
+    if (
+      (authority.kind === "home" || authority.kind === "pending")
+      && authority.chatId !== linqChatId
+    ) {
+      return { kind: "superseded" };
+    }
+  } else if (
+    authority.kind !== "home"
+    || (authority.chatId !== linqChatId && !replacingRejectedHomeChat)
   ) {
     return { kind: "superseded" };
   }
 
   if (authority.kind === "none") {
     throw hostedOnboardingError({
-      code: "HOSTED_LINQ_SIGNUP_WELCOME_HOME_ROUTE_UNAVAILABLE",
+      code: input.authorityKind === "app_card_fallback"
+        ? "HOSTED_LINQ_APP_CARD_FALLBACK_HOME_ROUTE_UNAVAILABLE"
+        : "HOSTED_LINQ_SIGNUP_WELCOME_HOME_ROUTE_UNAVAILABLE",
       httpStatus: 503,
-      message: "Hosted signup welcome home-line authority is unavailable.",
+      message: input.authorityKind === "app_card_fallback"
+        ? "Hosted app-card fallback home-line authority is unavailable."
+        : "Hosted signup welcome home-line authority is unavailable.",
       retryable: true,
     });
   }
@@ -243,16 +339,23 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
   return {
     kind:
       authority.kind === "home"
+      && !replacingRejectedHomeChat
         ? "already_materialized"
         : "materialized",
   };
 }
 
-function throwHostedSignupWelcomeRouteAuthorityInvalid(): never {
+function throwHostedParticipantHomeRouteAuthorityInvalid(
+  authorityKind: "app_card_fallback" | "signup_welcome",
+): never {
   throw hostedOnboardingError({
-    code: "HOSTED_LINQ_SIGNUP_WELCOME_ROUTE_AUTHORITY_INVALID",
+    code: authorityKind === "app_card_fallback"
+      ? "HOSTED_LINQ_APP_CARD_FALLBACK_ROUTE_AUTHORITY_INVALID"
+      : "HOSTED_LINQ_SIGNUP_WELCOME_ROUTE_AUTHORITY_INVALID",
     httpStatus: 400,
-    message: "Hosted signup welcome route materialization authority is invalid.",
+    message: authorityKind === "app_card_fallback"
+      ? "Hosted app-card fallback route materialization authority is invalid."
+      : "Hosted signup welcome route materialization authority is invalid.",
     retryable: false,
   });
 }

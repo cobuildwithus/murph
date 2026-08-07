@@ -42,6 +42,15 @@ import type {
   HostedRuntimeTelegramSendResponse,
 } from "./hosted-runtime/platform.ts";
 
+type HostedLinqAppCardFallbackTarget = {
+  target: string;
+  targetKind: "thread";
+} | {
+  fromPhoneNumber: string;
+  target: string;
+  targetKind: "participant";
+};
+
 export interface HostedProviderEffectDependencies {
   capabilityFetchImplementation?: typeof fetch;
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
@@ -55,10 +64,7 @@ export interface HostedProviderEffectDependencies {
     staleTargetRecoveryRequired?: true;
     target?: string;
     targetKind?: "thread";
-  }) => Promise<{
-    target: string;
-    targetKind: "thread";
-  } | void>;
+  }) => Promise<HostedLinqAppCardFallbackTarget | void>;
   signal?: AbortSignal;
   telegramMaxDeliveryAttempts?: number;
 }
@@ -75,10 +81,7 @@ interface HostedProviderEffectContext {
     staleTargetRecoveryRequired?: true;
     target?: string;
     targetKind?: "thread";
-  }) => Promise<{
-    target: string;
-    targetKind: "thread";
-  } | void>;
+  }) => Promise<HostedLinqAppCardFallbackTarget | void>;
   signal?: AbortSignal;
 }
 
@@ -193,8 +196,13 @@ export async function sendHostedProviderLinqMessage(
           : {}),
       };
       if (input.staleTargetRecoveryRequired === true) {
-        fallbackRequest.directRecipientPhoneNumber = null;
-        fallbackRequest.fromPhoneNumber = null;
+        if (recoveredTarget?.targetKind === "participant") {
+          fallbackRequest.directRecipientPhoneNumber = recoveredTarget.target;
+          fallbackRequest.fromPhoneNumber = recoveredTarget.fromPhoneNumber;
+        } else {
+          fallbackRequest.directRecipientPhoneNumber = null;
+          fallbackRequest.fromPhoneNumber = null;
+        }
         fallbackRequest.homeRouteFallbackAllowed = false;
       }
       delete fallbackRequest.linqAppCardReplay;

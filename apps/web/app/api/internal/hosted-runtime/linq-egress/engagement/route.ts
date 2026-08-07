@@ -71,7 +71,9 @@ export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
 
   const assertion = await prisma.$transaction(async (tx) => {
-    if (targetKind !== "participant") {
+    const participantFallbackDispatch = targetKind === "participant"
+      && providerDispatchPredecessorIdempotencyKey !== null;
+    if (targetKind !== "participant" || participantFallbackDispatch) {
       await acquireHostedMemberHomeLinqRouteLockTx({
         memberId: userId,
         prisma: tx,
@@ -180,13 +182,17 @@ export const POST = withJsonError(async (request: Request) => {
       const claim = providerDispatchPredecessorIdempotencyKey
         ? await transitionHostedLinqRuntimeAppCardFallbackFenceTx({
             fallbackIdempotencyKey: idempotencyKey,
-            linqChatId: providerTarget ?? "",
+            linqChatId: providerTargetKind === "participant"
+              ? null
+              : providerTarget,
             phoneNumber: fromPhoneNumber,
             predecessorIdempotencyKey:
               providerDispatchPredecessorIdempotencyKey,
             prisma: tx,
             sourceRef: intentId ?? "",
-            targetKind: "thread",
+            targetKind: providerTargetKind === "participant"
+              ? "participant"
+              : "thread",
           })
         : await recordHostedLinqRuntimeProviderDispatchFenceTx({
             idempotencyKey,

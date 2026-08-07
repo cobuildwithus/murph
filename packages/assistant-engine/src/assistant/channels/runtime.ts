@@ -535,6 +535,7 @@ export async function sendLinqMessage(
   // bytes. Otherwise approved vault-file bytes leave the vault and reach Linq
   // even when the send would fail closed on a missing target or sender phone.
   let target = input.target.trim()
+  let targetKind = input.targetKind
   if (target.length === 0) {
     throw new VaultCliError(
       'ASSISTANT_CHANNEL_TARGET_REQUIRED',
@@ -556,17 +557,17 @@ export async function sendLinqMessage(
         'A native iMessage reply requires a target message id.',
       )
     }
-    if (input.targetKind === 'participant') {
+    if (targetKind === 'participant') {
       throw new VaultCliError(
         'ASSISTANT_LINQ_NATIVE_REPLY_CHAT_REQUIRED',
         'A native iMessage reply requires an existing Linq chat.',
       )
     }
   }
-  const participantFromPhoneNumber = input.targetKind === 'participant'
+  let participantFromPhoneNumber = targetKind === 'participant'
     ? normalizeOptionalText(input.fromPhoneNumber)
     : null
-  if (input.targetKind === 'participant' && !participantFromPhoneNumber) {
+  if (targetKind === 'participant' && !participantFromPhoneNumber) {
     throw new VaultCliError(
       'ASSISTANT_LINQ_FROM_PHONE_REQUIRED',
       'Materializing an iMessage direct chat requires a sender phone number.',
@@ -579,7 +580,7 @@ export async function sendLinqMessage(
   const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
   const nativeCardDeliveryIdentityAvailable =
     card !== null &&
-    input.targetKind === 'thread' &&
+    targetKind === 'thread' &&
     input.threadIsDirect === true &&
     input.nativeReplyRequested !== true &&
     idempotencyKey !== null
@@ -696,6 +697,17 @@ export async function sendLinqMessage(
         )
       }
       target = recoveredTarget
+      targetKind = recoveredFallbackTarget.targetKind
+      participantFromPhoneNumber =
+        recoveredFallbackTarget.targetKind === 'participant'
+          ? normalizeOptionalText(recoveredFallbackTarget.fromPhoneNumber)
+          : null
+      if (targetKind === 'participant' && !participantFromPhoneNumber) {
+        throw new VaultCliError(
+          'ASSISTANT_LINQ_FROM_PHONE_REQUIRED',
+          'Materializing an iMessage direct chat requires a sender phone number.',
+        )
+      }
     }
   }
 
@@ -711,7 +723,8 @@ export async function sendLinqMessage(
     const created = await createLinqChat(
       {
         from: participantFromPhoneNumber,
-        idempotencyKey: input.idempotencyKey ?? null,
+        idempotencyKey:
+          appCardFallbackIdempotencyKey ?? input.idempotencyKey ?? null,
         message,
         ...(media.length > 0 ? { media } : {}),
         to: [target],
@@ -724,6 +737,9 @@ export async function sendLinqMessage(
     )
 
     return {
+      ...(appCardFallbackIdempotencyKey
+        ? { idempotencyKey: appCardFallbackIdempotencyKey }
+        : {}),
       providerMessageId: normalizeOptionalText(created.messageId),
       ...(created.providerMessageIds && created.providerMessageIds.length > 0
         ? { providerMessageIds: [...created.providerMessageIds] }

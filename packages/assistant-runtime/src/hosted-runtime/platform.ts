@@ -317,11 +317,15 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
-export interface HostedRuntimeLinqTargetOverride {
+export type HostedRuntimeLinqTargetOverride = {
   conversationThreadId?: string | null;
   target: string;
   targetKind: "thread";
-}
+} | {
+  fromPhoneNumber: string;
+  target: string;
+  targetKind: "participant";
+};
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
   assistantAskFallbackRequired?: boolean | null;

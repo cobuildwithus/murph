@@ -429,6 +429,18 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
       target,
       targetKind,
     };
+  } else if (target && targetKind === "participant") {
+    const fromPhoneNumber = readOptionalStringField(
+      targetOverride,
+      "fromPhoneNumber",
+    );
+    if (fromPhoneNumber) {
+      result.targetOverride = {
+        fromPhoneNumber,
+        target,
+        targetKind,
+      };
+    }
   }
   return result;
 }

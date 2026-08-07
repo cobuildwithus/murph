@@ -698,12 +698,12 @@ export async function hasHostedLinqRuntimeProviderDispatchFenceTx(input: {
 export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
   attemptedAt?: Date;
   fallbackIdempotencyKey: string;
-  linqChatId: string;
+  linqChatId?: string | null;
   phoneNumber?: string | null;
   predecessorIdempotencyKey: string;
   prisma: HostedLinqDeliveryClient;
   sourceRef: string;
-  targetKind: "thread";
+  targetKind: "participant" | "thread";
 }): Promise<HostedLinqDeliveryProviderDispatchClaim | null> {
   const predecessorIdempotencyKey = normalizeNullable(
     input.predecessorIdempotencyKey,
@@ -712,12 +712,14 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
     input.fallbackIdempotencyKey,
   );
   const sourceRef = normalizeNullable(input.sourceRef);
-  const linqChatLookupKey = createHostedLinqChatLookupKey(input.linqChatId);
+  const linqChatLookupKey = input.targetKind === "thread"
+    ? createHostedLinqChatLookupKey(input.linqChatId)
+    : null;
   if (
     !predecessorIdempotencyKey
     || fallbackIdempotencyKey !== `${predecessorIdempotencyKey}:fallback`
     || !sourceRef
-    || !linqChatLookupKey
+    || (input.targetKind === "thread" && !linqChatLookupKey)
   ) {
     return null;
   }
@@ -741,7 +743,6 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
       if (!predecessor || !hostedLinqAppCardPredecessorMatches({
         delivery: predecessor,
         sourceRefLookupKey,
-        targetKind: input.targetKind,
       })) {
         return null;
       }
@@ -762,7 +763,7 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
             source: "hosted_runtime_linq_delivery",
             sourceRef: sourceRefLookupKey,
             status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-            targetKind: input.targetKind,
+            targetKind: "thread",
           },
           data: {
             failedAt,
@@ -779,11 +780,10 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
           });
           if (
             !concurrent
-            || !hostedLinqAppCardPredecessorMatches({
-              delivery: concurrent,
-              sourceRefLookupKey,
-              targetKind: input.targetKind,
-            })
+              || !hostedLinqAppCardPredecessorMatches({
+                delivery: concurrent,
+                sourceRefLookupKey,
+              })
             || !isHostedLinqTerminalAppCardRejection(concurrent)
           ) {
             return null;
@@ -809,7 +809,6 @@ function hostedLinqAppCardPredecessorMatches(input: {
     select: typeof hostedLinqDeliveryLifecycleSelect;
   }>;
   sourceRefLookupKey: string;
-  targetKind: "thread";
 }): boolean {
   return input.delivery.acceptedAt === null
     && input.delivery.deliveredAt === null
@@ -818,7 +817,7 @@ function hostedLinqAppCardPredecessorMatches(input: {
     && input.delivery.skippedAt === null
     && input.delivery.source === "hosted_runtime_linq_delivery"
     && input.delivery.sourceRef === input.sourceRefLookupKey
-    && input.delivery.targetKind === input.targetKind;
+    && input.delivery.targetKind === "thread";
 }
 
 function isHostedLinqTerminalAppCardRejection(

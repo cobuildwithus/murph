@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   getPrisma: vi.fn(),
   linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(),
+  materializeHostedAppCardFallbackHomeRouteTx: vi.fn(),
   materializeHostedSignupWelcomeHomeRouteTx: vi.fn(),
   recordHostedLinqRuntimeDeliveryOutcomeTx: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -29,6 +30,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-home-routing", () => ({
+  materializeHostedAppCardFallbackHomeRouteTx:
+    mocks.materializeHostedAppCardFallbackHomeRouteTx,
   materializeHostedSignupWelcomeHomeRouteTx:
     mocks.materializeHostedSignupWelcomeHomeRouteTx,
 }));
@@ -82,6 +85,9 @@ describe("hosted runtime Linq delivery route", () => {
     mocks.materializeHostedSignupWelcomeHomeRouteTx.mockResolvedValue({
       kind: "materialized",
     });
+    mocks.materializeHostedAppCardFallbackHomeRouteTx.mockResolvedValue({
+      kind: "materialized",
+    });
   });
 
   it("atomically materializes an accepted canonical participant welcome before recording it", async () => {
@@ -125,6 +131,38 @@ describe("hosted runtime Linq delivery route", () => {
     );
     expect(
       mocks.materializeHostedSignupWelcomeHomeRouteTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.recordHostedLinqRuntimeDeliveryOutcomeTx.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("atomically replaces a rejected card chat after participant fallback acceptance", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      directRecipientPhoneNumber: "+15550100001",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      intentId: "intent_123",
+      providerMessageId: "linq_message_fallback",
+      providerThreadId: "linq_chat_materialized",
+      targetKind: "participant",
+      threadIsDirect: true,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(mocks.materializeHostedAppCardFallbackHomeRouteTx).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: "+15550100001",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      linqChatId: "linq_chat_materialized",
+      memberId: "member_123",
+      prisma,
+    });
+    expect(mocks.materializeHostedSignupWelcomeHomeRouteTx).not.toHaveBeenCalled();
+    expect(
+      mocks.materializeHostedAppCardFallbackHomeRouteTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
       mocks.recordHostedLinqRuntimeDeliveryOutcomeTx.mock.invocationCallOrder[0],
     );
