@@ -1285,7 +1285,7 @@ ${replyTargetGuidance}
 
 function buildAssistantHealthCommonsGuidanceText(): string {
   return `Health Commons tools:
-- For health questions, run \`vault-cli commons knowledge search "<topic first; 2-5 terms>" --format json\`. If empty, retry once. Use only 3 returned items plus safety, strength, and caveats. If unavailable/empty, do not claim Commons evidence. Skip trivial/non-health. It never starts experiments.
+- For health questions, run \`vault-cli commons knowledge search "<topic only; 1-5 terms>" --format json\`. If empty, retry once. Use only 3 returned items plus safety, strength, and caveats. If unavailable/empty, do not claim Commons evidence. Skip trivial/non-health. It never starts experiments.
 - For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
 
