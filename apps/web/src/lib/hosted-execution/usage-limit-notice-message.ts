@@ -36,15 +36,22 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
       ) {
         return pauseMessage;
       }
-      const fundingUrl = new URL(status.fundingUrl, `${MURPH_PRODUCT_ORIGIN}/`);
+      let fundingUrl: URL;
+      try {
+        fundingUrl = new URL(status.fundingUrl, `${MURPH_PRODUCT_ORIGIN}/`);
+      } catch {
+        return pauseMessage;
+      }
       if (fundingUrl.origin !== MURPH_PRODUCT_ORIGIN) {
         return pauseMessage;
       }
+      if (status.sponsorshipStatus === "sponsored") {
+        return `${pauseMessage}\n\nMore Murph time can be added privately here:\n${fundingUrl.toString()}`;
+      }
       /**
        * Only this branch knows a public funding ask is timely right now, so it
-       * owns the ask. A live monthly sponsorship keeps the neutral pause copy
-       * while the same first-party URL offers an additional private one-time
-       * contribution. No payer, amount, cap, or refill detail enters the room.
+       * owns the ask. Sponsored rooms use fixed factual copy above so the
+       * generic unsponsored prompt cannot nominate or pressure a payer.
        */
       const funding = renderUserFacingMessage({
         context: { fundingUrl: fundingUrl.toString() },

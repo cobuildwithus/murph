@@ -905,8 +905,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   proactive depletion messaging and may share the returned URL after an
   explicit funding request even when the boolean is false. A Web-owned
   exhaustion projection may append that current URL in either sponsorship
-  state; sponsored rooms retain neutral pause copy and the funding page admits
-  only an additional one-time contribution. Deploy that reader
+  state; sponsored rooms retain neutral pause copy, add only one fixed factual
+  private-recovery line, and admit only an additional one-time contribution on
+  the funding page. Deploy that reader
   throughout Cloudflare/runner before Web begins emitting the current shape.
   Because the preceding producer cannot represent an active monthly
   sponsorship, the Web switch becomes a forward-only tandem cutover once

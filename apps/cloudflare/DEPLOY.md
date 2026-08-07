@@ -459,9 +459,10 @@ suppression until Web changes the boolean, while old runners against new Web
 could still suppress the proactive warning. After both deployments, smoke a
 low sponsored group and confirm Murph gives a link-free warning without payer,
 cap, amount, balance, or refill detail. Then smoke an exhausted sponsored group
-and confirm the deterministic notice uses the neutral pause sentence plus the
-first-party link; opening it must preserve the existing automatic sponsor and
-offer only an additional one-time contribution. Also smoke an explicit funding
+and confirm the deterministic notice uses the neutral pause sentence, one fixed
+factual private-recovery line, and the first-party link; opening it must
+preserve the existing automatic sponsor and offer only an additional one-time
+contribution. Also smoke an explicit funding
 request in a healthy unsponsored group and confirm Murph returns the first-party
 link without claiming the room needs funding.
 

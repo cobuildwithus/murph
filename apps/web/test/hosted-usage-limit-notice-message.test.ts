@@ -91,14 +91,14 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
       prisma: {} as never,
     });
 
-    expect(projected.startsWith(`${HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE}\n\n`))
-      .toBe(true);
-    expect(projected.endsWith(
-      "\nhttps://www.withmurph.ai/groups/fund/group_join_code_1234",
-    )).toBe(true);
+    expect(projected).toBe(
+      `${HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE}\n\n`
+      + "More Murph time can be added privately here:\n"
+      + "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+    );
     expect(projected).not.toBe(productionNotice);
     expect(projected).not.toMatch(
-      /payer|\$|percent|remaining|balance|cap|refill|reset|month/iu,
+      /anyone|anybody|any one|any of you|one of you|someone|somebody|whoever|whichever|which of you|one person|tap|volunteer|cave|payer|\$|percent|remaining|balance|cap|refill|reset|month|back/iu,
     );
   });
 
@@ -124,7 +124,7 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
     ],
     [
       "https://[invalid",
-      "I'm out for the whole room until my time resets.",
+      HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE,
     ],
   ])("rejects a non-canonical sponsored group funding URL: %s", async (
     fundingUrl,

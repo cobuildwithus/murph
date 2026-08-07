@@ -2835,6 +2835,167 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
   )
 
   it(
+    'keeps a sponsored low-usage heads-up link-free and offers only one-time funding after a bare yes',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-sponsored-low-usage-heads-up-e2e-'),
+      )
+      const groupActions: string[] = []
+      const fundingUrl =
+        'https://www.withmurph.ai/groups/fund/e2e_sponsored_low_usage_options'
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await Promise.all([
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'group-chat',
+          }),
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'hosted-low-usage',
+          }),
+        ])
+
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: [
+            buildHostedUsageOptionsDeveloperInstructions('group'),
+            'Hosted usage context:',
+            "This conversation's remaining Murph usage is running low.",
+          ].join('\n\n'),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: {
+              request: async (request) => {
+                groupActions.push(request.action)
+                if (request.action === 'read_usage') {
+                  return {
+                    action: 'read_usage',
+                    result: {
+                      status: 'ok',
+                      usage: {
+                        fundingNeeded: true,
+                        fundingUrl,
+                        sponsorshipStatus: 'sponsored',
+                      },
+                    },
+                  }
+                }
+                if (request.action === 'read_usage_referral') {
+                  return {
+                    action: 'read_usage_referral',
+                    result: {
+                      outcome: 'read',
+                      referral: {
+                        activeMissions: [],
+                        availablePolicies: [
+                          {
+                            code: 'new_person_activation_v1',
+                            requirementsLabel:
+                              'Bring Murph and one genuinely new person together in a fresh group.',
+                            rewardLabel:
+                              '$2.00 of cost-weighted usage credit for your Murph',
+                          },
+                          {
+                            code: 'active_group_v1',
+                            requirementsLabel:
+                              'Start a fresh group and make it genuinely active, with multiple people actually talking.',
+                            rewardLabel:
+                              '$3.50 of cost-weighted usage credit for your Murph',
+                          },
+                        ],
+                        trialCreditNotice: null,
+                      },
+                      status: 'ok',
+                    },
+                  }
+                }
+                throw new Error(
+                  `Unexpected sponsored low-usage action: ${request.action}`,
+                )
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'The blue team logged 14,320 steps, the highest total yesterday. Tell the room which team won and the winning total.',
+        })
+
+        expect(groupActions).toEqual(['read_usage'])
+        expect(first.finalMessage).toMatch(/blue team/iu)
+        expect(first.finalMessage).toMatch(/14,?320/iu)
+        expect(first.finalMessage).toMatch(/Murph time/iu)
+        expect(first.finalMessage).toMatch(/\?/u)
+        expect(first.finalMessage).not.toContain(fundingUrl)
+        expect(first.finalMessage).not.toMatch(/(?:^|\n)---(?:\n|$)/u)
+        expect(first.finalMessage).not.toMatch(
+          /payer|\$|charged|maximum|monthly cap|percent|balance|remaining|refill|purchase|funding|referral|introduc/iu,
+        )
+
+        groupActions.length = 0
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Yes.',
+          resumeSessionId: first.sessionId,
+        })
+        const newPersonPathIndex = second.finalMessage.search(
+          /new person|introduc/iu,
+        )
+        const activeGroupPathIndex = second.finalMessage.search(
+          /genuinely active|multiple people|active group/iu,
+        )
+        const fundingUrlIndex = second.finalMessage.indexOf(fundingUrl)
+
+        expect(groupActions).toHaveLength(2)
+        expect(groupActions).toEqual(expect.arrayContaining([
+          'read_usage',
+          'read_usage_referral',
+        ]))
+        expect(newPersonPathIndex).toBeGreaterThanOrEqual(0)
+        expect(activeGroupPathIndex).toBeGreaterThanOrEqual(0)
+        expect(fundingUrlIndex).toBeGreaterThan(newPersonPathIndex)
+        expect(fundingUrlIndex).toBeGreaterThan(activeGroupPathIndex)
+        expect(second.finalMessage).toMatch(/one-time|contribut/iu)
+        expect(second.finalMessage).not.toMatch(
+          /monthly sponsorship|second sponsor|new sponsor|payer|charged|maximum|monthly cap|balance|remaining|percent|refill/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+
+  it(
     'handles explicit group funding without referral detours',
     async () => {
       const config = await resolveRealCodexE2eConfig()

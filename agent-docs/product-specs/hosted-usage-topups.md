@@ -189,9 +189,10 @@ count, or automatic refill events. The exact payer privately sees the current
 period's fulfilled and pending amounts, maximum, period end, status, and
 management controls. A near-cap notice is private and revalidated against the
 current authorization. The room is notified only when the existing usage gate
-actually pauses work. A sponsored room receives a neutral pause sentence plus
-the current first-party funding link, which offers another participant only a
-one-time contribution; the room copy exposes no private sponsorship details.
+actually pauses work. A sponsored room receives a neutral pause sentence, one
+fixed factual private-recovery line, and the current first-party funding link,
+which offers another participant only a one-time contribution; the room copy
+exposes no private sponsorship details.
 
 ## Group Sponsorship Moment
 

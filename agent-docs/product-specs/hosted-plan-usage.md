@@ -507,9 +507,10 @@ valid for an accepted group conversation. At delivery time Web rechecks the
 exhausted state and may append the group's funding link, using the owner join
 code when one exists or the signed funding-only locator when none does. For a
 sponsored room, Web replaces the reset-oriented base with a neutral pause
-sentence and still appends the same current link; the funding page preserves
-the automatic sponsor and offers an additional payer only a one-time
-contribution. The notice does not name a payer, amount, cap, balance, or
+sentence, one fixed factual private-recovery line, and the same current link;
+the funding page preserves the automatic sponsor and offers an additional payer
+only a one-time contribution. The notice does not name a payer, amount, cap,
+balance, or
 refill, claim that payment occurred, or add a separate scheduler or
 money-prompt lifecycle.
 
