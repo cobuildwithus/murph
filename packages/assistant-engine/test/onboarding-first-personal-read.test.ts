@@ -334,23 +334,24 @@ describe('onboarding first personal read', () => {
       'Return skip unless the scheduled occurrence context and current route are for one private member conversation.',
       'Return skip if the member asked not to receive this read, requested no follow-up, or otherwise revoked this proactive outreach.',
       'A generic closing invitation such as `anything else?` is not an unresolved task',
-      'return skip if the page is malformed or unreadable',
-      'reuse its outbound text only when the body contains exactly one `schema: murph.first-personal-read.v1` line',
-      'exactly one decimal `outbound_text_utf8_bytes: <count>` line',
-      'exactly one ordered `---BEGIN MURPH FIRST READ OUTBOUND---` / `---END MURPH FIRST READ OUTBOUND---` delimiter pair',
-      'Missing, duplicate, malformed, or mismatched replay fields require skip.',
-      'Reuse only those exact validated bytes',
+      'return skip if the page itself is malformed or unreadable',
+      'use its compact `claim:`, `evidence:`, `uncertainty:`, and canonical source paths only as the same occurrence\'s semantic candidate',
+      'revalidate the candidate against current canonical sources',
+      'redo the bounded evidence pass from canonical sources instead of treating transport formatting as a terminal skip',
       'If any other section heading begins `First read `, return skip; this one-shot never sends a second first personal read.',
       'vault-cli knowledge append-section weekly-health-insights',
-      'Use the exact ISO instant from the Scheduled occurrence context so only a retry or replay of this occurrence can reuse the section.',
-      'outbound_text_utf8_bytes: <exact decimal count>',
-      'The outbound text must not contain either delimiter.',
+      'Use the exact ISO instant from the Scheduled occurrence context so only a retry of this occurrence can reuse its semantic candidate.',
+      'Do not store the outbound message or any transport framing in this page.',
       'A failed dedupe write must not make the member lose an otherwise sound first read.',
+      'The page owns semantic non-repeat only; the existing occurrence-scoped cron/outbox identity freezes and replays exact member-facing text after an outbox intent exists.',
       'I took a deeper look across what you shared.',
       'at most one optional low-burden next action or question',
       'Do not diagnose, prescribe, alarm, shame, dump metrics, stack findings, create a habit, plan, experiment, reminder, or other action',
       'do not spawn a child; this scheduled turn owns the complete read, selection, and delivery',
     ])
+    expect(prompt).not.toContain('schema: murph.first-personal-read.v1')
+    expect(prompt).not.toContain('outbound_text_utf8_bytes')
+    expect(prompt).not.toContain('MURPH FIRST READ OUTBOUND')
     expect(prompt).not.toContain('First read <Occurrence local date>')
   })
 

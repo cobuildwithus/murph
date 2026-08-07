@@ -622,16 +622,16 @@ optional low-burden next action or question. It never automatically creates a
 habit, plan, experiment, reminder, purchase, booking, or other effect.
 
 The turn reads the existing `weekly-health-insights` knowledge page before
-selection and best-effort records the exact outbound read there under a distinct
+selection and best-effort records one compact semantic candidate there under a
 first-read heading keyed by the exact scheduled occurrence instant. Its body
-uses one versioned schema, an exact UTF-8 byte count, and unique begin/end
-delimiters around the settled outbound text. Only that same occurrence may reuse
-text when the schema, count, and delimiters validate; missing, duplicate, or
-malformed replay fields fail closed. Any other first-read heading suppresses
-another send. That reuses the weekly insight dedupe owner instead of
-creating another insight table, page family, or lifecycle. Failure to update the
-ledger does not suppress an otherwise sound first read; the automation and
-outbox remain the delivery and replay owners.
+contains only the claim, evidence, uncertainty, and canonical source paths, not
+the outbound message or transport framing. The same occurrence may reuse that
+candidate only after rechecking current gates and canonical evidence; an
+incomplete candidate causes bounded recomputation rather than terminal skip.
+Any other first-read heading suppresses another send. The page owns semantic
+non-repeat only. The existing occurrence-scoped cron/outbox identity freezes
+exact member-facing text after an outbox intent exists, and a failed ledger
+write does not suppress an otherwise sound first read.
 
 ## Finite Scheduled Continuation
 
