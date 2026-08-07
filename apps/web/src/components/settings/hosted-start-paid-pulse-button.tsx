@@ -59,7 +59,6 @@ const PULSE_FEATURES = [
   "Private before/after outcomes",
   "Chat with Murph via iMessage, Telegram, or email",
   "Guided experiment setup",
-  "Access to the most capable AI models",
 ];
 const GROUP_FEATURES = [
   "Keep your wearable syncing",

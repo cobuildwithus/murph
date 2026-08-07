@@ -59,15 +59,14 @@ const PULSE_FEATURES = [
   "Sync your health data",
   "Chat with Murph via iMessage, Telegram, or email",
   "Experiments when you need a clear answer",
-  "Access to the most capable AI models",
 ];
 
 const EDGE_FEATURES = [
   "Everything in Pulse and:",
-  "More usage on the most capable AI models",
+  "The most capable AI models",
+  "Higher monthly usage",
   "Murph remembers more of your history",
   "Deeper analysis across your context",
-  "Detailed biomarker changes",
   "Richer plans and protocol recommendations",
   "Early access to new features",
 ];

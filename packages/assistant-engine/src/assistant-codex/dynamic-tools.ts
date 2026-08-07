@@ -2703,9 +2703,14 @@ export async function executeMurphDynamicToolRequest(input: {
           'connected apps are unavailable without hosted connected-app transport',
         )
       }
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
       return await executeConnectedAppsDynamicTool({
         abortSignal: input.abortSignal ?? null,
         connectedApps,
+        emailSendAuthorized:
+          userActionScope?.conversationScope === 'direct'
+          && userActionScope.acceptedInputIds.length > 0,
         request: input.request,
       })
     }

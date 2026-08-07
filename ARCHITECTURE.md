@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-05
+Last verified: 2026-08-07
 
 ## Accepted-Message Targeting
 
@@ -398,7 +398,7 @@ fan-out, scheduler, policy engine, result table, or second service.
 
 ## Hosted Connected Apps
 
-Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather authority, agent-approved calendar-create write allowlist, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results for its tools. Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, and accountless execution only for server-allowlisted built-in service tools. The existing current-weather tools use direct custom-auth execution through Composio. One fixed web-owned One Call read accepts only bounded latitude and longitude, requests only official national alerts, and returns a small normalized alert projection. It adds no scheduler, state, cache, or user-defined weather threshold. The direct and scheduled alert guidance must not deploy until One Call 3 is active for the exact production key and a signed Web-control smoke read returns a normalized success, including a valid empty alert list. Deploy Web first when activation and assistant deployment cannot happen together. Primary-calendar creation keeps its separate agent-approved direct-execute path, rejects unsupported write arguments before provider execution, and marks failed or ambiguous provider outcomes non-retryable.
+Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather authority, server-owned fixed-write allowlist for primary-calendar creation and bounded Gmail/Outlook email sending, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results for its tools. Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, and accountless execution only for server-allowlisted built-in service tools. The existing current-weather tools use direct custom-auth execution through Composio. One fixed web-owned One Call read accepts only bounded latitude and longitude, requests only official national alerts, and returns a small normalized alert projection. It adds no scheduler, state, cache, or user-defined weather threshold. The direct and scheduled alert guidance must not deploy until One Call 3 is active for the exact production key and a signed Web-control smoke read returns a normalized success, including a valid empty alert list. Deploy Web first when activation and assistant deployment cannot happen together. Primary-calendar creation and bounded Gmail/Outlook email sends share one exact server-owned direct-execute policy table. Every route pins its toolkit and provider version, requires agent approval plus an active owned account from that toolkit, rejects missing, blank, unsupported, or server-owned model arguments before egress, and forces provider-owned fields such as the primary calendar, sender, and Outlook Sent-copy behavior. Email sends additionally require current accepted user input in a private direct turn at the assistant runtime boundary; scheduled, group, maintenance, system-notification, and output-only turns fail closed before provider egress. Failed or ambiguous writes are non-retryable; ambiguous email outcomes are reconciled only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and uncertain results remain unknown.
 
 Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, newsletters, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. One structured automation write creates the single group newsletter and stores its delivery choice as a system-owned tag: current-chat editions use the ordinary bound-route conversation outbox, while email editions alone receive the one-shot prepare/send capability. Email preparation derives the group from the signed runtime member rather than a model-supplied group id and persists the private authorization proof plus HTML on the existing assistant outbox parent. The outbox reports an accepted parent to cron immediately, so even a later provider, validation, or persistence error leaves the occurrence in its existing pending-delivery state while retaining the error on the run record. Web marks that parent sent only after durably persisting recipient fanout, and the existing cron reconciler settles the occurrence from the parent state. Recipient intents use only the generic outbox retry lifecycle, so newsletter retries never recompose the body or create a second recipient budget. Because newsletter email `From` identity is spoofable, group-email replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
 
@@ -1420,15 +1420,18 @@ existing direct Linq chat owns native-card delivery without a reverse map or a
 new-chat workaround. Same-route inputs accepted during the live turn may update
 the reply message, reaction capability, and delivery idempotency inputs, but do
 not recreate the explicit-target override or replace the turn's thread binding.
-Linq owns the
-noninteractive static transcript layout, which carries the date, meal count,
-available totals, an explicit partial marker, and the first available exact V2
-goal plus its frozen status in canonical metric order. Its required URL is a
-fixed, non-sensitive HTTPS product URL rather than encoded card state. The
+Linq explicitly requests interactive transcript rendering. A recipient with
+the shipping Messages extension sees the extension-owned SwiftUI balloon; a
+recipient without it sees the same provider-owned static layout carrying the
+date, meal count, available totals, explicit partial marker, and first
+available exact V2 goal plus its frozen status. The required HTTPS URL keeps
+the immutable V1 or V2 presentation snapshot in a bounded Base64URL fragment
+that the extension decodes offline. Encoding is not encryption, so that
+fragment may contain only the same private-direct card values and never member
+identity, canonical record references, credentials, or other authority. The
 fallback body remains value-free and names a truthful text-recovery action to
-avoid Apple data-detector downgrade; the installed extension does not own
-balloon visibility. No card API, database, auth path, cleanup owner, extension
-network read, or second queue exists.
+avoid Apple data-detector downgrade. No card API, database, auth path, cleanup
+owner, extension network read, or second queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
@@ -2434,7 +2437,8 @@ flows inside the local TypeScript workspace.
 ## Tracked Compact Table Response Cards
 
 Compact table response cards reuse the existing outbox-owned immutable effect
-and provider-rendered static Linq balloon. A compact card is a bounded
+and interactive Messages-extension balloon, with Linq's static layout retained
+for recipients without the extension. A compact card is a bounded
 presentation snapshot, never a mutable tracker: canonical workout events remain
 the only workout authority, qualitative set annotations live on canonical set
 notes, and an update is complete only after a successful workout re-read
@@ -2453,10 +2457,11 @@ the same bounded health-related values visible in the immutable message, but it
 must never contain a member identity, canonical record reference, credential,
 or other authority. The provider request rejects encoded URLs at 2,048
 characters, while the contract applies the same aggregate bound before
-delivery. Nutrition cards keep their existing fixed HTTPS URL and
-provider-rendered summary layout. The Messages extension remains offline and
-read-only. This adds no card API, database, background synchronization owner,
-authentication surface, or mutable message state.
+delivery. Nutrition V1 and V2 cards use the same bounded fragment family
+without a tracking field, while the provider-rendered summary remains their
+fallback layout. The Messages extension remains offline and read-only. This
+adds no card API, database, background synchronization owner, authentication
+surface, or mutable message state.
 
 ## Scheduled assistant tool authority
 
