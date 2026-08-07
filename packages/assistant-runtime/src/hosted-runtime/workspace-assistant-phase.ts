@@ -33,10 +33,14 @@ import {
   GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
   GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
   GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   applyMurphManagedAutomations,
   getAssistantCronStatus,
   hasGroupNewsletterDeliveryTag,
+  isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
   isCanonicalGroupNewsletterAutomationInstructions,
+  readAssistantOnboardingState,
   recordHostedMailboxAssistantInputItem,
   readAssistantInputEvent,
   readAssistantOutboxIntent,
@@ -1309,6 +1313,7 @@ function createHostedAssistantAutomationTool(input: {
   const currentRoute = automationRouteSchema.parse(
     resolveAssistantDeliveryRouteWithCurrentRoute({}, input.route),
   );
+  let onboardingFirstReadCompletionTransitionConsumed = false;
   return {
     async request(request, context) {
       context?.signal?.throwIfAborted();
@@ -1341,6 +1346,47 @@ function createHostedAssistantAutomationTool(input: {
               vaultRoot: input.vaultRoot,
             })
           : null;
+        const targetsOnboardingFirstRead =
+          request.automationId ===
+            MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
+          || requestedSlug ===
+            MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
+          || existingTarget?.slug ===
+            MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG;
+        if (targetsOnboardingFirstRead) {
+          if (
+            context?.onboardingFirstReadCompletionTransition !== true
+            || !isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest(
+              request,
+            )
+            || currentRoute.threadIsDirect !== true
+            || onboardingFirstReadCompletionTransitionConsumed
+          ) {
+            throw new VaultCliError(
+              "invalid_option",
+              "The onboarding first read can be created only once during its answered-completion transition.",
+            );
+          }
+          onboardingFirstReadCompletionTransitionConsumed = true;
+          const onboardingState = await readAssistantOnboardingState(
+            input.vaultRoot,
+          );
+          const existingFirstRead = existingTarget
+            ?? await showAutomation({
+              slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+              vaultRoot: input.vaultRoot,
+            });
+          if (
+            onboardingState.status !== "completed"
+            || onboardingState.completedReason !== "user_answered"
+            || existingFirstRead !== null
+          ) {
+            throw new VaultCliError(
+              "invalid_option",
+              "The onboarding first read can be created only once during its answered-completion transition.",
+            );
+          }
+        }
         const isGroupNewsletter =
           requestedSlug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
           || existingTarget?.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG;
