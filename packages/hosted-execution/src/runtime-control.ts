@@ -2121,6 +2121,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     extractMs?: number;
     encryptedBytes?: number;
     plainBytes?: number;
+    replaySafeReadMaxAttempt?: number;
   };
   boot?: {
     nodeStartupMs?: number;
@@ -2145,13 +2146,21 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   // Runtime-owned work between mailbox staging and the assistant engine's
   // local Codex turn/start write. These metadata-only diagnostics are attached
   // to that existing milestone rather than emitted synchronously.
+  // Only mailboxImportDoneToAssistantPhaseMs,
+  // workspaceAssistantPreAutomationMs, and
+  // automationLaneToAssistantServiceMs participate in the canonical additive
+  // provider-start path. The other leaves are nested diagnostics.
   preProvider?: {
+    mailboxImportDoneToAssistantPhaseMs?: number;
     workspaceAssistantPreAutomationMs?: number;
+    automationLaneToAssistantServiceMs?: number;
     executionTargetHydrateMs?: number;
     systemMailboxMaintenanceMs?: number;
     memberPreferencesPrePlanningMs?: number;
     automationBootstrapMs?: number;
+    outboxScanBytesRead?: number;
     outboxScanElapsedMs?: number;
+    outboxScanFilesRead?: number;
     outboxScanPerformed?: boolean;
     receiptScanBytesRead?: number;
     receiptScanElapsedMs?: number;
@@ -2173,17 +2182,23 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     runtimeLeaseGeneration?: string;
   };
   provider?: {
+    // Together with the three canonical preProvider leaves, these six leaves
+    // are adjacent and additive. Session, prompt, admission, and App Server
+    // lifecycle leaves below are nested diagnostics and must not be added.
+    assistantServicePreLockMs?: number;
     codexAppServerInitializeMs?: number;
     codexAppServerPreProviderMs?: number;
     codexAppServerSpawnReadyMs?: number;
     codexAppServerThreadResumeMs?: number;
     codexAppServerThreadStartMs?: number;
     codexAppServerWarmReuseMs?: number;
+    codexProcessPreparationMs?: number;
     turnLockWaitMs?: number;
     sessionResolveMs?: number;
     promptBuildMs?: number;
     admissionMs?: number;
     preProviderSetupMs?: number;
+    providerPlanAndGateMs?: number;
     linqEgressGuardMs?: number;
   };
 }
@@ -2263,6 +2278,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "extractMs",
     "encryptedBytes",
     "plainBytes",
+    "replaySafeReadMaxAttempt",
   ],
   boot: ["nodeStartupMs", "restoreWasCold"],
   wake: [
@@ -2282,12 +2298,16 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "stagedAtEpochMs",
   ],
   preProvider: [
+    "mailboxImportDoneToAssistantPhaseMs",
     "workspaceAssistantPreAutomationMs",
+    "automationLaneToAssistantServiceMs",
     "executionTargetHydrateMs",
     "systemMailboxMaintenanceMs",
     "memberPreferencesPrePlanningMs",
     "automationBootstrapMs",
+    "outboxScanBytesRead",
     "outboxScanElapsedMs",
+    "outboxScanFilesRead",
     "outboxScanPerformed",
     "receiptScanBytesRead",
     "receiptScanElapsedMs",
@@ -2306,17 +2326,20 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "runtimeLeaseGeneration",
   ],
   provider: [
+    "assistantServicePreLockMs",
     "codexAppServerInitializeMs",
     "codexAppServerPreProviderMs",
     "codexAppServerSpawnReadyMs",
     "codexAppServerThreadResumeMs",
     "codexAppServerThreadStartMs",
     "codexAppServerWarmReuseMs",
+    "codexProcessPreparationMs",
     "turnLockWaitMs",
     "sessionResolveMs",
     "promptBuildMs",
     "admissionMs",
     "preProviderSetupMs",
+    "providerPlanAndGateMs",
     "linqEgressGuardMs",
   ],
 } as const;
@@ -2921,13 +2944,6 @@ export interface HostedRunnerStatusResponse {
   mailboxLag: HostedMailboxLaneLag[];
   nextAlarmAt?: string | null;
   recentLogs?: HostedRuntimeLogEntry[];
-  r2Cutover?: {
-    coexisting: boolean;
-    pausedCanaryConfigured?: boolean;
-    phase: "destination_active" | "source_active";
-    protocolVersion: string;
-    writeAdmission?: "open" | "paused";
-  };
   userId: string;
   workspace: HostedWorkspaceState | null;
 }

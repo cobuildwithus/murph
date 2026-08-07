@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 import {
   DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,

@@ -23,6 +23,7 @@ import {
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import type { R2BucketLike } from "../bundle-store.js";
+import type { HostedBrowserVaultReplicaOrphanCandidate } from "../browser-vault-store.ts";
 import type { HostedExecutionEnvironment } from "../env.js";
 import {
   readHostedPrivateMediaCapabilitySecret,
@@ -37,10 +38,6 @@ import type {
   WorkerProviderEgressCredentialValidationResult,
   WorkerProviderEgressTokenValidationResult,
 } from "../worker-contracts.js";
-import {
-  readHostedR2CutoverStatus,
-  type HostedR2CutoverContext,
-} from "../r2-cutover.ts";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../web-control-plane.ts";
@@ -101,11 +98,6 @@ export class HostedUserRunner {
   private readonly privateMediaDeliveryOrigin: string;
   private privateMediaMutationLock: Promise<void> | null = null;
   private runtimeConsentMutationLock: Promise<void> | null = null;
-  private readonly r2CutoverStatus: {
-    coexisting: boolean;
-    phase: "destination_active" | "source_active";
-    protocolVersion: string;
-  };
 
   constructor(
     state: DurableObjectStateLike,
@@ -117,7 +109,6 @@ export class HostedUserRunner {
         runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
       }
     ).runnerContainerNamespace ?? null,
-    r2CutoverContext: HostedR2CutoverContext | null = null,
   ) {
     this.stateStore = new RunnerStateStore(state);
     this.privateMediaBucket = bucket;
@@ -153,20 +144,8 @@ export class HostedUserRunner {
       stateStore: this.stateStore,
     });
     this.runtimeProcessing = runtimeProcessing;
-    this.r2CutoverStatus = r2CutoverContext
-      ? readHostedR2CutoverStatus(r2CutoverContext)
-      : {
-          coexisting: false,
-          phase: "source_active",
-          protocolVersion: "legacy-single-bucket",
-        };
     this.userDataDeletionInput = {
-      buckets: r2CutoverContext
-        ? {
-            destination: r2CutoverContext.destinationBucket,
-            source: r2CutoverContext.sourceBucket,
-          }
-        : { destination: bucket, source: bucket },
+      bucket,
       runnerContainerNamespace,
       runnerRuntimeEnvSource,
       state,
@@ -209,12 +188,10 @@ export class HostedUserRunner {
 
     const status: HostedRunnerStatusResponse & {
       activeWriteFence: RunnerWriteFenceToken | null;
-      r2Cutover: ReturnType<typeof readHostedR2CutoverStatus>;
     } = {
       ...webStatus,
       activeWriteFence,
       inFlight: record.writeFence !== null,
-      r2Cutover: this.r2CutoverStatus,
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
       ...(record.lastInvocationAt ? { lastInvocationAt: record.lastInvocationAt } : {}),
@@ -344,6 +321,12 @@ export class HostedUserRunner {
       });
     }
     return validation.owns;
+  }
+
+  async recordRuntimeCompletionFromContainer(
+    input: Parameters<RuntimeInvocationService["recordRuntimeCompletionFromContainer"]>[0],
+  ): ReturnType<RuntimeInvocationService["recordRuntimeCompletionFromContainer"]> {
+    return this.runtimeInvocation.recordRuntimeCompletionFromContainer(input);
   }
 
   private async withPrivateMediaMutationLock<T>(
@@ -480,6 +463,12 @@ export class HostedUserRunner {
     input: HostedWorkspaceSnapshotOrphanCandidate,
   ): Promise<HostedWorkspaceSnapshotOrphanCandidate> {
     return await this.workspaceSnapshotSessions.recordOrphanCandidate(input);
+  }
+
+  async recordHostedBrowserVaultReplicaOrphanCandidate(
+    input: HostedBrowserVaultReplicaOrphanCandidate,
+  ): Promise<HostedBrowserVaultReplicaOrphanCandidate> {
+    return await this.workspaceSnapshotSessions.recordBrowserVaultReplicaOrphanCandidate(input);
   }
 
   async readHostedWorkspaceSnapshotUploadSession(input: {
