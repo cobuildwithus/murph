@@ -2197,6 +2197,18 @@ function markHostedDeliveryPreProviderRetryable(error: unknown): unknown {
   });
 }
 
+function markHostedDeliveryPreProvider(error: unknown): unknown {
+  if (typeof error === "object" && error !== null) {
+    return Object.assign(error, {
+      deliveryMayHaveSucceeded: false,
+    });
+  }
+
+  return Object.assign(new Error("Hosted provider delivery did not start."), {
+    deliveryMayHaveSucceeded: false,
+  });
+}
+
 function createHostedEmailGroupRecipientAmbiguityError(): VaultCliError & {
   deliveryMayHaveSucceeded: true;
   retryable: false;
@@ -2681,7 +2693,6 @@ export async function resetHostedPreparedAssistantDeliveryEffects(input: {
       continue;
     }
     await resetAssistantOutboxPreparedDispatchById({
-      deliveryIdempotencyKey: effect.payload.idempotencyKey,
       deliveryTransportIdempotent: effect.payload.transportIdempotent,
       intentId: effect.effectId,
       ...(input.minimumNextAttemptAt
@@ -3193,7 +3204,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       });
     if (input.preparedDispatch && resetPreparedDelivery) {
       await resetAssistantOutboxPreparedDispatchById({
-        deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
         deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
         intentId: input.assistantDeliveryEffect.effectId,
         preparedDispatchToken: input.preparedDispatch?.preparedDispatchToken ?? null,
@@ -3374,7 +3384,6 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
   }
 
   const reset = await resetAssistantOutboxPreparedDispatchById({
-    deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
     deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
     intentId: input.assistantDeliveryEffect.effectId,
     preparedDispatchToken: input.preparedDispatchToken,
@@ -3412,37 +3421,15 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
 function createHostedProviderFetchBoundary(input: {
   assertLive?: () => Promise<void>;
   assertProviderEntryLive?: () => Promise<void>;
-  handleProviderEntryError?: (error: unknown) => Response | null;
-  isReadOnlyProviderRequest?: (
-    request: Parameters<typeof fetch>[0],
-    init?: Parameters<typeof fetch>[1],
-  ) => boolean;
-  onReadOnlyProviderRequest?: () => Promise<void>;
   onProviderDispatchEntered?: () => Promise<void> | void;
-  onProviderEntryStarted?: () => void;
   onTelegramVoiceMemoDispatchEntered?: () => void;
   operation: string;
-  providerDispatchIdentity?: () => string | null;
   providerFetch: typeof fetch | null;
 }): typeof fetch {
   let providerEntryPromise: Promise<void> | null = null;
-  const providerEntryPromisesByIdentity = new Map<
-    string | null,
-    Promise<void>
-  >();
   const enterProviderDispatch = () => {
     if (!input.onProviderDispatchEntered) {
       return Promise.resolve();
-    }
-    if (input.providerDispatchIdentity) {
-      const identity = input.providerDispatchIdentity();
-      const existing = providerEntryPromisesByIdentity.get(identity);
-      if (existing) {
-        return existing;
-      }
-      const entering = Promise.resolve().then(input.onProviderDispatchEntered);
-      providerEntryPromisesByIdentity.set(identity, entering);
-      return entering;
     }
     providerEntryPromise ??= Promise.resolve().then(
       input.onProviderDispatchEntered,
@@ -3451,26 +3438,12 @@ function createHostedProviderFetchBoundary(input: {
   };
 
   return (async (request, init) => {
-    input.onProviderEntryStarted?.();
-    let fetchImplementation: typeof fetch;
-    try {
-      await (input.assertProviderEntryLive ?? input.assertLive)?.();
-      fetchImplementation = requireHostedProviderFetch(
-        input.providerFetch,
-        input.operation,
-      );
-      if (input.isReadOnlyProviderRequest?.(request, init) === true) {
-        await input.onReadOnlyProviderRequest?.();
-      } else {
-        await enterProviderDispatch();
-      }
-    } catch (error) {
-      const handled = input.handleProviderEntryError?.(error) ?? null;
-      if (handled) {
-        return handled;
-      }
-      throw error;
-    }
+    await (input.assertProviderEntryLive ?? input.assertLive)?.();
+    const fetchImplementation = requireHostedProviderFetch(
+      input.providerFetch,
+      input.operation,
+    );
+    await enterProviderDispatch();
     if (
       input.onTelegramVoiceMemoDispatchEntered &&
       isTelegramSendVoiceProviderFetchRequest(request)
@@ -3502,22 +3475,6 @@ function readProviderFetchRequestUrl(request: Parameters<typeof fetch>[0]): stri
     return request.toString();
   }
   return String(request);
-}
-
-function isHostedLinqCapabilityCheckProviderFetchRequest(
-  request: Parameters<typeof fetch>[0],
-  init?: Parameters<typeof fetch>[1],
-): boolean {
-  try {
-    const url = new URL(readProviderFetchRequestUrl(request));
-    const method = (
-      init?.method ?? (request instanceof Request ? request.method : "GET")
-    ).toUpperCase();
-    return method === "POST"
-      && url.pathname.endsWith("/capability/check_imessage");
-  } catch {
-    return false;
-  }
 }
 
 function resolveHostedAssistantLinqDeliveryContexts(input: {
@@ -3590,7 +3547,6 @@ function createHostedAssistantLinqSendDependency(input: {
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     const idempotencyKey = request.idempotencyKey?.trim() || null;
-    let effectiveIdempotencyKey = idempotencyKey;
     const persistAppCardTextFallback = request.persistAppCardTextFallback;
     const reviewedAssistantAskCompletion = idempotencyKey?.startsWith(
       HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
@@ -3651,53 +3607,23 @@ function createHostedAssistantLinqSendDependency(input: {
       media: request.media ?? [],
       vaultRoot: input.vaultRoot ?? null,
     });
-    let attemptedAt: Date | null = null;
-    const providerEntryFailure: { current: { error: unknown } | null } = {
-      current: null,
-    };
-    const dependencies = requireHostedProviderFetchDependencies({
-      env: input.linqEnv,
-      fetchImplementation: createHostedProviderFetchBoundary({
-        assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
-        handleProviderEntryError: (error) => {
-          if (signal?.aborted === true) {
-            return null;
-          }
-          providerEntryFailure.current = { error };
-          return new Response(
-            JSON.stringify({ error: "Hosted Linq provider entry denied." }),
-            {
-              headers: { "content-type": "application/json" },
-              status: 403,
-            },
-          );
-        },
-        isReadOnlyProviderRequest:
-          isHostedLinqCapabilityCheckProviderFetchRequest,
-        onReadOnlyProviderRequest: async () => {
-          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-            answeredMailboxItemIds: request.answeredMailboxItemIds,
-            assistantAskFallback:
-              reviewedAssistantAskCompletion
-                ? isHostedReviewedAssistantAskFallbackPayload({
-                    media: request.media,
-                    message: request.message,
-                  })
-                : undefined,
-            authorityCheckOnly: true,
-            directRecipientPhoneNumber,
-            effectsPort: input.effectsPort ?? null,
-            fromPhoneNumber,
-            homeRouteFallbackAllowed: currentHomeRouteOnly,
-            idempotencyKey: effectiveIdempotencyKey,
-            intentId: input.intentId ?? null,
-            replyToMessageId: request.replyToMessageId ?? null,
-            signal: signal ?? null,
-            target: providerTarget,
-            targetKind: providerTargetKind,
-          });
-        },
-        onProviderDispatchEntered: async () => {
+    let providerAttempt: {
+      attemptedAt: Date;
+      idempotencyKey: string | null;
+    } | null = null;
+    const readProviderAttempt = () => providerAttempt;
+    const createMessageFetchBoundary = (
+      deliveryIdempotencyKey: string | null,
+    ): typeof fetch => createHostedProviderFetchBoundary({
+      assertProviderEntryLive: async () => {
+        try {
+          await assertHostedDeliveryCanEnterProvider(input);
+        } catch (error) {
+          throw markHostedDeliveryPreProvider(error);
+        }
+      },
+      onProviderDispatchEntered: async () => {
+        try {
           const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
             ? await prepareHostedReviewedAssistantAskProviderEntry({
                 intentId: input.intentId ?? null,
@@ -3723,7 +3649,7 @@ function createHostedAssistantLinqSendDependency(input: {
               effectsPort: input.effectsPort ?? null,
               fromPhoneNumber,
               homeRouteFallbackAllowed: currentHomeRouteOnly,
-              idempotencyKey: effectiveIdempotencyKey,
+              idempotencyKey: deliveryIdempotencyKey,
               intentId: input.intentId ?? null,
               replyToMessageId: request.replyToMessageId ?? null,
               providerDispatchRetrySafe: true,
@@ -3750,16 +3676,66 @@ function createHostedAssistantLinqSendDependency(input: {
               { retryable: true },
             );
           }
-          attemptedAt = new Date();
+          providerAttempt = {
+            attemptedAt: new Date(),
+            idempotencyKey: deliveryIdempotencyKey,
+          };
           input.onProviderDispatchEntered?.();
-        },
-        onProviderEntryStarted: () => {
-          providerEntryFailure.current = null;
-        },
-        operation: "Hosted assistant Linq delivery",
-        providerDispatchIdentity: () => effectiveIdempotencyKey,
-        providerFetch: input.providerFetch,
-      }),
+        } catch (error) {
+          if (isHostedLinqProviderOutcomeAmbiguous(error)) {
+            throw error;
+          }
+          throw markHostedDeliveryPreProvider(error);
+        }
+      },
+      operation: "Hosted assistant Linq delivery",
+      providerFetch: input.providerFetch,
+    });
+    const capabilityFetch = createHostedProviderFetchBoundary({
+      assertProviderEntryLive: async () => {
+        try {
+          await assertHostedDeliveryCanEnterProvider(input);
+          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+            answeredMailboxItemIds: request.answeredMailboxItemIds,
+            assistantAskFallback:
+              reviewedAssistantAskCompletion
+                ? isHostedReviewedAssistantAskFallbackPayload({
+                    media: request.media,
+                    message: request.message,
+                  })
+                : undefined,
+            authorityCheckOnly: true,
+            directRecipientPhoneNumber,
+            effectsPort: input.effectsPort ?? null,
+            fromPhoneNumber,
+            homeRouteFallbackAllowed: currentHomeRouteOnly,
+            idempotencyKey,
+            intentId: input.intentId ?? null,
+            replyToMessageId: request.replyToMessageId ?? null,
+            signal: signal ?? null,
+            target: providerTarget,
+            targetKind: providerTargetKind,
+          });
+        } catch (error) {
+          throw markHostedDeliveryPreProvider(error);
+        }
+      },
+      operation: "Hosted assistant Linq capability lookup",
+      providerFetch: input.providerFetch,
+    });
+    const fallbackIdempotencyKey = idempotencyKey
+      ? `${idempotencyKey}:fallback`
+      : null;
+    const dependencies = requireHostedProviderFetchDependencies({
+      ...(request.card == null
+        ? {}
+        : {
+            appCardCapabilityFetchImplementation: capabilityFetch,
+            appCardTextFallbackFetchImplementation:
+              createMessageFetchBoundary(fallbackIdempotencyKey),
+          }),
+      env: input.linqEnv,
+      fetchImplementation: createMessageFetchBoundary(idempotencyKey),
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq delivery");
     let result: HostedRuntimeLinqSendResponse;
@@ -3826,13 +3802,13 @@ function createHostedAssistantLinqSendDependency(input: {
           ? {
               persistAppCardTextFallback: async (fallback) => {
                 if (
-                  attemptedAt
-                  && effectiveIdempotencyKey !== fallback.idempotencyKey
+                  providerAttempt
+                  && providerAttempt.idempotencyKey !== fallback.idempotencyKey
                 ) {
                   await recordHostedAssistantLinqDeliveryOutcomeRequired({
                     effectsPort: input.effectsPort ?? null,
                     outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
-                      attemptedAt,
+                      attemptedAt: providerAttempt.attemptedAt,
                       answeredMailboxItemIds: [],
                       deliveryContext,
                       directRecipientPhoneNumber:
@@ -3841,7 +3817,7 @@ function createHostedAssistantLinqSendDependency(input: {
                       failureCode: HOSTED_LINQ_APP_CARD_REJECTED_FAILURE_CODE,
                       failureReason: null,
                       fromPhoneNumber,
-                      idempotencyKey: effectiveIdempotencyKey,
+                      idempotencyKey: providerAttempt.idempotencyKey,
                       intentId: input.intentId ?? null,
                       providerTarget,
                       providerThreadId: null,
@@ -3854,20 +3830,17 @@ function createHostedAssistantLinqSendDependency(input: {
                         ?? null,
                     }),
                   });
-                  attemptedAt = null;
+                  providerAttempt = null;
                   input.onProviderDispatchSettledWithoutEffect?.();
                 }
                 await persistAppCardTextFallback(fallback);
-                effectiveIdempotencyKey = fallback.idempotencyKey;
               },
             }
           : {}),
       });
     } catch (error) {
-      if (providerEntryFailure.current) {
-        throw providerEntryFailure.current.error;
-      }
-      if (!attemptedAt) {
+      const failedProviderAttempt = readProviderAttempt();
+      if (!failedProviderAttempt) {
         throw error;
       }
       const partialRichLinkResult =
@@ -3876,7 +3849,7 @@ function createHostedAssistantLinqSendDependency(input: {
         await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
           effectsPort: input.effectsPort ?? null,
           outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
-            attemptedAt,
+            attemptedAt: failedProviderAttempt.attemptedAt,
             answeredMailboxItemIds: [],
             deliveryContext,
             directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
@@ -3884,7 +3857,7 @@ function createHostedAssistantLinqSendDependency(input: {
             failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
             failureReason: null,
             fromPhoneNumber,
-            idempotencyKey: effectiveIdempotencyKey,
+            idempotencyKey: failedProviderAttempt.idempotencyKey,
             intentId: input.intentId ?? null,
             providerTarget,
             providerThreadId: partialRichLinkResult.providerThreadId ?? null,
@@ -3903,7 +3876,7 @@ function createHostedAssistantLinqSendDependency(input: {
       queueHostedAssistantLinqDeliveryOutcomeWrite({
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
-          attemptedAt,
+          attemptedAt: failedProviderAttempt.attemptedAt,
           answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
           deliveryContext,
           directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
@@ -3911,7 +3884,7 @@ function createHostedAssistantLinqSendDependency(input: {
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
           failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
           fromPhoneNumber,
-          idempotencyKey: effectiveIdempotencyKey,
+          idempotencyKey: failedProviderAttempt.idempotencyKey,
           intentId: input.intentId ?? null,
           providerTarget,
           providerThreadId: null,
@@ -3924,8 +3897,11 @@ function createHostedAssistantLinqSendDependency(input: {
       throw error;
     }
     const acceptedAt = new Date();
-    effectiveIdempotencyKey =
-      result.idempotencyKey ?? effectiveIdempotencyKey;
+    const acceptedProviderAttempt = readProviderAttempt();
+    const acceptedIdempotencyKey =
+      result.idempotencyKey
+      ?? acceptedProviderAttempt?.idempotencyKey
+      ?? idempotencyKey;
     input.onProviderAccepted?.({
       acceptedAssistantInputIds: request.acceptedAssistantInputIds ?? [],
       acceptedAt,
@@ -3934,12 +3910,14 @@ function createHostedAssistantLinqSendDependency(input: {
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
         acceptedAt,
-        attemptedAt: requireHostedLinqProviderAttemptedAt(attemptedAt),
+        attemptedAt: requireHostedLinqProviderAttemptedAt(
+          acceptedProviderAttempt?.attemptedAt ?? null,
+        ),
         answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,
         directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
         fromPhoneNumber,
-        idempotencyKey: effectiveIdempotencyKey,
+        idempotencyKey: acceptedIdempotencyKey,
         intentId: input.intentId ?? null,
         providerTarget,
         providerThreadId: result.providerThreadId ?? null,

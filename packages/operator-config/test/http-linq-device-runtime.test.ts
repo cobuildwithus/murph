@@ -2364,6 +2364,30 @@ test('linq runtime surfaces non-retryable transport, http, and configuration fai
   )
 })
 
+test('linq runtime preserves an explicit pre-provider delivery failure', async () => {
+  const preProviderError = Object.assign(
+    new VaultCliError(
+      'HOSTED_BACKGROUND_DELIVERY_YIELDED',
+      'Hosted background delivery yielded before provider entry.',
+      { retryable: true },
+    ),
+    { deliveryMayHaveSucceeded: false as const },
+  )
+  const fetchImplementation: LinqFetch = vi.fn(async () => {
+    throw preProviderError
+  })
+
+  await expect(sendLinqChatMessage({
+    chatId: 'chat-pre-provider-failure',
+    idempotencyKey: 'message-pre-provider-failure',
+    message: 'hello',
+  }, {
+    env: { LINQ_API_TOKEN: 'linq-token' },
+    fetchImplementation,
+  })).rejects.toBe(preProviderError)
+  expect(fetchImplementation).toHaveBeenCalledOnce()
+})
+
 test('deleteLinqMessage treats missing provider messages as an idempotent success', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test/custom',

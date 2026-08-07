@@ -62,6 +62,8 @@ export interface AssistantEmailDeliverySummary {
 }
 
 export interface LinqRuntimeDependencies {
+  appCardCapabilityFetchImplementation?: LinqFetch
+  appCardTextFallbackFetchImplementation?: LinqFetch
   env?: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
   publicFetchImplementation?: LinqFetch

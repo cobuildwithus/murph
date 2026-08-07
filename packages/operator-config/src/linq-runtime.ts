@@ -1569,19 +1569,20 @@ async function fetchLinqResponse(input: {
   return fetchJsonResponse({
     body: input.body,
     createTransportError: ({ error, timedOut }) =>
-      createLinqRequestError({
-        details: input.details,
-        error,
-        requestOrigin: readRequestOrigin(input.url),
-        method: input.method,
-        path: input.path,
-        timedOut,
-        retryable: shouldRetryLinqTransportFailure(
-          input.method,
-          input.allowDeleteRetries,
-          input.details.hasIdempotencyKey === true,
-        ),
-      }),
+      readPreProviderLinqRequestError(error)
+      ?? createLinqRequestError({
+          details: input.details,
+          error,
+          requestOrigin: readRequestOrigin(input.url),
+          method: input.method,
+          path: input.path,
+          timedOut,
+          retryable: shouldRetryLinqTransportFailure(
+            input.method,
+            input.allowDeleteRetries,
+            input.details.hasIdempotencyKey === true,
+          ),
+        }),
     fetchImplementation: input.fetchImplementation,
     headers: input.headers,
     method: input.method,
@@ -1742,6 +1743,14 @@ function createLinqRequestError(input: {
       timedOut: input.timedOut,
     },
   )
+}
+
+function readPreProviderLinqRequestError(error: unknown): Error | null {
+  return error instanceof Error
+    && 'deliveryMayHaveSucceeded' in error
+    && error.deliveryMayHaveSucceeded === false
+    ? error
+    : null
 }
 
 function buildLinqTransportErrorDiagnostics(

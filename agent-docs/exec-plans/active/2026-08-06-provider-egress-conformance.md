@@ -22,6 +22,10 @@ Updated: 2026-08-07
     lookup must not claim message dispatch, and a definitive card rejection
     must settle the original identity before the persisted text fallback claims
     its replacement identity.
+  - Prepared-dispatch reset after a pre-provider yield must preserve the current
+    durable outbox identity, including a promoted card fallback identity.
+  - A rich-link primary accepted before a later request yields must retain the
+    existing partial-delivery checkpoint and deterministic recovery path.
   - Real hosted Telegram client calls for `sendMessage`, `sendPhoto`,
     `sendVoice`, `sendChatAction`, `deleteMessages`,
     `deleteBusinessMessages`, `setMessageReaction`, `getFile`, and the
@@ -46,10 +50,30 @@ Updated: 2026-08-07
 - Reuse the existing interceptor route-matrix coverage for direct allowlist
   testing and add one cross-boundary suite rather than introducing a provider
   framework.
-- Classify only the exact capability request as read-only inside the existing
-  hosted Linq fetch boundary. Keep one provider-entry claim per effective
-  idempotency key so the original card and a durably promoted fallback cannot
-  share stale authority or dispatch state.
+- Keep the generic provider fetch boundary free of Linq URL classification,
+  synthetic HTTP responses, saved provider-entry errors, and per-identity
+  promise state. Pass explicit capability and fallback fetch implementations
+  through the existing Linq dependency surface instead.
+- Treat the current durable outbox intent as the sole delivery-identity owner.
+  Prepared reset restores dispatch metadata while preserving that current
+  identity, so a settled card identity cannot overwrite its promoted fallback.
+- Preserve pre-provider authority and yield errors as typed failures with
+  `deliveryMayHaveSucceeded: false`; do not translate them into provider
+  responses or let the card runtime convert them into text fallback.
+
+## Review retrospective
+
+- The first correction grew a generic provider boundary from 116 changed lines
+  to 266 by combining URL recognition, synthetic responses, saved errors, and
+  per-identity dispatch state. That shape duplicated identity ownership already
+  held by the durable outbox and obscured the rich-link partial-delivery path.
+- The correction was redesigned by deletion: the generic boundary returned to
+  one entry promise, capability and text fallback now have explicit fetch
+  dependencies, and prepared reset no longer carries an identity snapshot.
+- Exact regressions now cover capability-entry yield without fallback
+  persistence, rejected-card settlement followed by fallback persistence and
+  pre-fallback reset, and primary-rich-link acceptance followed by pre-link
+  yield and checkpoint recording.
 
 ## Verification
 
@@ -59,6 +83,7 @@ Updated: 2026-08-07
   tests covering the same clients used by the conformance suite.
 - Hosted-runtime regressions for authority revocation during capability lookup,
   capability-unavailable fallback ordering, definitive card rejection
-  settlement and replacement-identity claim, and pre-provider abort reset.
+  settlement and replacement-identity claim, pre-provider abort reset,
+  promoted-identity reset, and rich-link partial delivery.
 - Documentation drift/gardening and `git diff --check`.
 - Exact-head required GitHub Actions and final review before closing this plan.

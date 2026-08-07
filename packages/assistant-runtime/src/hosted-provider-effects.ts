@@ -42,6 +42,8 @@ import type {
 } from "./hosted-runtime/platform.ts";
 
 export interface HostedProviderEffectDependencies {
+  appCardCapabilityFetchImplementation?: typeof fetch;
+  appCardTextFallbackFetchImplementation?: typeof fetch;
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
   loadVaultImage?: (media: AssistantVaultImageResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
@@ -56,6 +58,8 @@ export interface HostedProviderEffectDependencies {
 }
 
 interface HostedProviderEffectContext {
+  appCardCapabilityFetchImplementation?: typeof fetch;
+  appCardTextFallbackFetchImplementation?: typeof fetch;
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
   loadVaultImage?: (media: AssistantVaultImageResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
@@ -327,6 +331,18 @@ async function sendHostedProviderLinqMessageDirect(
       ? {}
       : { card: request.card, threadIsDirect: request.threadIsDirect ?? null }),
   }, {
+    ...(context.appCardCapabilityFetchImplementation
+      ? {
+          appCardCapabilityFetchImplementation:
+            context.appCardCapabilityFetchImplementation,
+        }
+      : {}),
+    ...(context.appCardTextFallbackFetchImplementation
+      ? {
+          appCardTextFallbackFetchImplementation:
+            context.appCardTextFallbackFetchImplementation,
+        }
+      : {}),
     env: context.env,
     fetchImplementation: context.fetchImplementation,
     signal: context.signal,
@@ -348,6 +364,18 @@ function createHostedProviderEffectContext(
   const { publicFetchImplementation, ...providerDependencies } = dependencies;
   return {
     ...requireHostedProviderFetchDependencies(providerDependencies, operation),
+    ...(dependencies.appCardCapabilityFetchImplementation
+      ? {
+          appCardCapabilityFetchImplementation:
+            dependencies.appCardCapabilityFetchImplementation,
+        }
+      : {}),
+    ...(dependencies.appCardTextFallbackFetchImplementation
+      ? {
+          appCardTextFallbackFetchImplementation:
+            dependencies.appCardTextFallbackFetchImplementation,
+        }
+      : {}),
     ...(publicFetchImplementation
       ? { publicFetchImplementation }
       : {}),

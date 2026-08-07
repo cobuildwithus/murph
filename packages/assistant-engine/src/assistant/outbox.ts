@@ -1855,7 +1855,6 @@ export async function markAssistantOutboxIntentMirrorRetryableById(input: {
 }
 
 export async function resetAssistantOutboxPreparedDispatchById(input: {
-  deliveryIdempotencyKey?: string | null
   deliveryTransportIdempotent: boolean
   intentId: string
   minimumNextAttemptAt?: Date | null
@@ -1875,7 +1874,6 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
   }
 
   return resetAssistantOutboxPreparedDispatch({
-    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     intent,
     intentPath,
