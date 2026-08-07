@@ -10,6 +10,8 @@ Last verified: 2026-08-06
 | `pnpm test:repo-tools` | Focused Vitest coverage for repo-owned verification/config helpers. `test:diff` selects it for `scripts/**` and `config/**` changes, and the host-support release typecheck job runs it directly. The design-proof uploader tests use fixture-only credentials and a stubbed fetch boundary while proving primary-checkout env discovery from a real temporary linked worktree, lossless high-resolution input gates, and creation or validation of the dedicated non-downscaling delivery variant. | `scripts/**/*.test.ts` plus the shared config helpers those tests import, including `scripts/upload-design-proof-image.ts` |
 | `pnpm stripe-requests:guard` | Babel-based static guard, included in root typecheck and diff preflight, that rejects object spreads in official Stripe SDK requests, explicitly named custom Stripe-client calls, and Stripe-typed parameter builders. This keeps every optional provider key visible to the SDK's generated TypeScript declarations. | `apps/web/app/**`, `apps/web/scripts/**`, `apps/web/src/**`, `scripts/check-stripe-request-spreads.ts`, and `scripts/check-stripe-request-spreads.test.ts` |
 | `MURPH_STRIPE_CONTRACT_TEST_SECRET_KEY=<test-key> pnpm --dir apps/web stripe:contract:resume` | Opt-in live Stripe test-mode contract probe for the paused-subscription resume request. It refuses live and restricted credentials, sends the production-shaped params to a deliberately missing synthetic Subscription, and succeeds only when Stripe accepts the params far enough to return `resource_missing`; it creates, charges, and mutates nothing. | `apps/web/scripts/verify-stripe-subscription-resume-contract.ts` plus fixture-only unit coverage in `apps/web/test/stripe-subscription-resume-contract.test.ts` |
+| `pnpm hosted-billing:ci-guard` | Source-level drift guard for the hosted Stripe billing workflow. It forbids `pull_request_target`, requires the every-PR hermetic resume/config/support proof, pins the same-repository and dependency-bot exclusion, keeps writable authority out of pre-live jobs, requires serial non-canceling cleanup, and allows only the redacted matrix diagnostic artifact. Repo Hygiene runs this guard, and focused mutation tests live under `scripts/check-hosted-stripe-billing-ci.test.ts`. | `.github/workflows/hosted-stripe-billing.yml`, `.github/workflows/repo-hygiene.yml`, `packages/hosted-local-harness/src/e2e.ts`, the nine-journey browser matrix, and the root command contract |
+| `pnpm hosted-local e2e stripe-billing-browser-matrix` | Manual/local or trusted-CI production-shaped billing proof against a dedicated Stripe test sandbox. It drives Murph, Stripe Checkout/Invoice/Portal, real test APIs, the harness-owned webhook listener, local PostgreSQL reconciliation, Settings projections, a renewal schedule, and web Family activation. It is intentionally excluded from default hosted-local E2E and requires preflighted operator configuration. | `apps/cloudflare/test/hosted-local-stripe-billing-browser-e2e.test.ts`, browser/Stripe/testkit support under `apps/web/test/support/**`, and canonical hosted-local lifecycle |
 | `pnpm test:frontend-design-proof` | Focused Node tests for the pull-request design-proof guard. The guard requires every user-facing hosted-web UI diff to update the reusable-component or composed-section design catalog and to provide hosted desktop and mobile design-page screenshots in the PR body. It validates GitHub-rendered GFM so comments, code blocks, and raw HTML cannot be mistaken for visible proof. | `scripts/check-frontend-design-proof.mjs`, `scripts/check-frontend-design-proof.test.mjs`, `.github/workflows/frontend-design-proof.yml`, and `.github/pull_request_template.md` |
 | `node --test scripts/check-pr-architecture-summary.test.mjs` | Focused Node tests for the every-PR architecture-and-reuse summary guard. The guard requires concrete bullets for reused systems, new logic, new abstractions, and intentionally avoided complexity, and rejects blank or bare placeholder answers. | `scripts/check-pr-architecture-summary.mjs`, `scripts/check-pr-architecture-summary.test.mjs`, `.github/workflows/frontend-design-proof.yml`, and `.github/pull_request_template.md` |
 | `pnpm test:diff` | Self-contained diff-aware agent/local lane. It maps paths to owners plus reverse dependents, runs relevant guards, then batches exact package typecheck/test scripts through bounded pnpm fanout with one CPU-derived nested Vitest budget. Assistant Engine tests retain the package's proven 6 GiB heap ceiling while staying within that worker budget. The command holds the workspace artifact lock from producers through dependent consumers, package-boundary follow-ups remain intact, and two affected apps reuse the prepared parallel app lane. Tooling-only diffs stay narrow; root manifests broaden to the workspace. Do not precede a truthful scoped run with redundant root `pnpm typecheck`. | Affected workspace owners plus reverse dependents under `packages/**` and `apps/**`, repo-internal tooling fast-path files under `agent-docs/**`, `docs/**`, `scripts/**`, `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, `package.json`, `vitest.config.ts`, and root `tsconfig*.json`, plus whole-workspace fan-out when root workspace manifests change, the nested built-CLI verification lane only for CLI artifact-sensitive diffs, and explicit built package-boundary scripts for affected hosted-local-harness/inboxd/messaging-ingress diffs |
@@ -166,9 +168,9 @@ dedupe, next-new-container binding, trusted runtime sender injection,
 unlinked-Telegram evidence isolation, dynamic-tool/parser contracts, source
 celebration replay, and deletion-time anonymization without group-credit
 clawback. Provider-normalization fixtures contain no Linq SDK or Telegram
-payload types in the shared policy assertions. Stripe remains mocked,
-and component tests do not replace a deployed browser flow, so launch still
-needs the documented test-mode Checkout, webhook, and browser smoke.
+payload types in the shared policy assertions. That group-credit surface keeps
+Stripe mocked; it does not replace the separate hosted-local live billing lane
+or a deployed browser smoke for its own product path.
 
 Account-deletion cleanup coverage is split at the ownership boundary.
 `hosted-account-data-service.test.ts` proves the encrypted receipt is prepared
@@ -764,3 +766,28 @@ keep the one-second presentation-only deadline and late-result rejection.
 ## Update Rule
 
 When real source code, CI, or deployment automation is added, update this file and `agent-docs/operations/verification-and-runtime.md` in the same change.
+
+## Hosted Stripe Billing Pull-Request Lanes
+
+`.github/workflows/hosted-stripe-billing.yml` separates proof from authority:
+
+- `Hermetic hosted billing proof` runs on every pull request, including forks. It exercises the paid-Pulse resume owner test, live-config partition and listener-child credential tests, browser/cleanup pure support tests, and workflow guard mutations without a Stripe secret or network call to Stripe. This is the required check when dedicated sandbox infrastructure is absent.
+- `Live hosted-local Stripe browser matrix` can run only for a same-repository PR head (or an explicit manual dispatch), excludes dependency-bot heads, uses the protected `hosted-stripe-billing-sandbox` GitHub Environment, and is serialized with `cancel-in-progress: false`. Fork code is classified before a secret-bearing job is eligible; this workflow must never be converted to `pull_request_target`.
+- Every trusted same-repository head enters the live job and fails closed if the protected Environment contract is absent or malformed. Fork and dependency-bot heads run only the hermetic job. The always-present `Required hosted Stripe billing boundary` result requires hermetic success plus live success whenever the trust classifier admits the live job. The dedicated secret, sandbox account, four price IDs, public Privy app id, and active default Portal configuration with plan updates enabled, Trial upgrades ending immediately, and immediate invoicing stay outside the repository. The browser remains the authoritative proof that Stripe exposes both dedicated individual products.
+- Failure upload is limited to `apps/web/playwright-report/hosted-stripe-billing/redacted.json`, containing only the opaque run id and step/surface/status records. Checkout/Portal URLs, object IDs, provider payloads, browser screenshots, traces, and full reports are not artifacts. Cleanup is always attempted and independently recoverable with the same opaque run id.
+
+Existing paid Pulse/Edge to Family is a supported direct subscription update,
+not a Family Checkout. The matrix proves that same-subscription conversion as
+its own browser case. Its separate live Checkout case starts from an
+authenticated lapsed individual without an active subscription. Edge to Pulse
+remains a scheduled renewal downgrade and is asserted as current Edge plus
+pending Pulse rather than an immediate price replacement.
+
+The paused-Trial live case first proves the provider rejects
+`default_payment_method` on Subscription Resume. The product flow passes only when the
+supported Subscription Update first makes the inherited payment instrument
+explicit, Resume creates the hosted invoice, and paying that exact invoice
+opens Stripe and Murph entitlement. Mutable run-owned Sessions, Schedules,
+Subscriptions, Customers, PaymentMethods, and ready Test Clocks are cleaned up,
+while Stripe's immutable paid invoices, events, and terminal records remain as
+bounded provider audit history for the nine named journeys.

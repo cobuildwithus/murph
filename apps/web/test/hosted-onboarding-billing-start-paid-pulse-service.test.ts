@@ -158,6 +158,10 @@ describe("startHostedPulseTrialPaidPlan", () => {
             trialEnd: null,
           })
           : makeSubscription({
+            defaultPaymentMethod: params.default_source
+              ? null
+              : params.default_payment_method,
+            defaultSource: params.default_source,
             latestInvoice: null,
             status: "paused",
             trialEnd: null,
@@ -1218,6 +1222,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
       "sub_123",
       {
+        default_payment_method: "pm_123",
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
         metadata: { murphTrialExtensionTargetTrialEnd: "" },
       },
@@ -1283,6 +1288,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
       "sub_123",
       {
+        default_payment_method: "pm_123",
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
         metadata: { murphTrialExtensionTargetTrialEnd: "" },
       },
@@ -1578,8 +1584,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
 
   test("resumes a paused no-card Pulse trial after payment method setup", async () => {
     const invoice = makeInvoice({
+      attempted: false,
       hostedInvoiceUrl: "https://invoice.stripe.test/in_resume",
-      paymentIntentStatus: "requires_action",
+      paymentIntentStatus: null,
       status: "open",
     });
     mocks.readHostedMemberCoreState.mockResolvedValueOnce({
@@ -1621,6 +1628,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
       "sub_123",
       {
+        default_payment_method: "pm_customer_123",
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
         metadata: { murphTrialExtensionTargetTrialEnd: "" },
       },
@@ -2244,6 +2252,7 @@ function makeSubscriptionItem(input: {
 }
 
 function makeInvoice(input: {
+  attempted?: boolean;
   customer?: string;
   hostedInvoiceUrl?: string | null;
   paymentIntentStatus?: Stripe.PaymentIntent.Status | null;
@@ -2251,7 +2260,7 @@ function makeInvoice(input: {
 }): Stripe.Invoice {
   return {
     amount_remaining: input.status === "open" ? 800 : 0,
-    attempted: input.status === "open",
+    attempted: input.attempted ?? input.status === "open",
     billing_reason: "subscription_cycle",
     customer: input.customer ?? "cus_123",
     hosted_invoice_url: input.hostedInvoiceUrl === undefined

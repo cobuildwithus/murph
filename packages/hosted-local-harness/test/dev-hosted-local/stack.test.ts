@@ -1124,6 +1124,34 @@ describe("hosted local dev stack", () => {
     expect(spawnChildProcess).not.toHaveBeenCalled();
   });
 
+  it("rejects an E2E Stripe listener without exact isolated ownership", async () => {
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      linqWebhookTunnelMode: "disabled",
+      skipLinqWebhookRegister: true,
+      skipStripeListen: false,
+      webPort: 31001,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    await expect(startHostedLocalDevStack({
+      env: {
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_WEB_PORT: "31001",
+        MURPH_DEV_WORKER_PORT: "32001",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+      },
+    })).rejects.toThrow(/isolated Stripe listener is explicitly owned/u);
+
+    expect(spawnStripeListenerWithSecretCapture).not.toHaveBeenCalled();
+    expect(spawnChildProcess).not.toHaveBeenCalled();
+  });
+
   it("rejects worktree-scoped startup when asked to reuse an existing worker", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const configModule = await import("../../src/dev-hosted-local/config.ts");
@@ -1155,7 +1183,7 @@ describe("hosted local dev stack", () => {
       ...defaultConfig,
       linqWebhookTunnelMode: "disabled",
       skipLinqWebhookRegister: true,
-      skipStripeListen: true,
+      skipStripeListen: false,
       webPort: 31001,
       workerPersistDir: ".tmp/e2e/wrangler",
       workerPort: 32001,
@@ -1163,6 +1191,10 @@ describe("hosted local dev stack", () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
+    spawnStripeListenerWithSecretCapture.mockResolvedValueOnce({
+      child: createBufferedChild({ exitCode: null, name: "stripe", pid: 105 }),
+      secret: "whsec_isolated_e2e",
+    });
     vi.mocked(access).mockResolvedValueOnce(undefined);
     vi.mocked(readFile).mockImplementationOnce(async (filePath) => {
       if (/apps[/\\]web[/\\]\.next-smoke-e2e-fixture[/\\]BUILD_ID$/u.test(String(filePath))) {
@@ -1181,6 +1213,7 @@ describe("hosted local dev stack", () => {
         ...process.env,
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
         MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        MURPH_HOSTED_LOCAL_E2E_STRIPE_LISTENER: "1",
         MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
         MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
         MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
@@ -1192,6 +1225,8 @@ describe("hosted local dev stack", () => {
     });
     await stack.ready;
     await stack.stop();
+
+    expect(spawnStripeListenerWithSecretCapture).toHaveBeenCalledTimes(1);
 
     expect(spawnChildProcess).toHaveBeenCalledWith(
       "web",
@@ -3573,6 +3608,46 @@ describe("hosted local dev stack", () => {
           expect.any(Object),
         );
         expect(stack.processes.stripe).toBe(listenerChild);
+      });
+    });
+
+    it("scopes STRIPE_API_KEY to the harness-owned listener child", async () => {
+      const stripeCliApiKey = "sk_test_listener_child_only";
+      spawnStripeListenerWithSecretCapture.mockResolvedValueOnce({
+        child: createBufferedChild({ exitCode: null, name: "stripe", pid: 915 }),
+        secret: "whsec_captured_scoped",
+      });
+
+      await withListenerConfig({}, async () => {
+        const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+        const stack = await startHostedLocalDevStack({
+          env: {
+            ...process.env,
+            STRIPE_API_KEY: stripeCliApiKey,
+          },
+        });
+        await stack.ready;
+        await stack.stop();
+
+        expect(spawnStripeListenerWithSecretCapture).toHaveBeenCalledWith(
+          expect.objectContaining({
+            env: expect.objectContaining({
+              STRIPE_API_KEY: stripeCliApiKey,
+            }),
+          }),
+        );
+        expect(stack.runtimeEnv.STRIPE_API_KEY).toBeUndefined();
+        expect(stack.workerRuntimeEnv?.STRIPE_API_KEY).toBeUndefined();
+        for (const [, , , env] of spawnChildProcess.mock.calls) {
+          expect(env.STRIPE_API_KEY).toBeUndefined();
+        }
+        for (const [, , options] of runCommand.mock.calls) {
+          expect(options.env.STRIPE_API_KEY).toBeUndefined();
+        }
+        for (const [input] of startHostedLocalTemporalRuntime.mock.calls) {
+          expect(input.env.STRIPE_API_KEY).toBeUndefined();
+        }
       });
     });
 
