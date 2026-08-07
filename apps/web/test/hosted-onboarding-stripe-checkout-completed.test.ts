@@ -790,6 +790,9 @@ describe("applyStripeCheckoutCompleted", () => {
   it.each(["canceled", "incomplete_expired"] as const)(
     "keeps an exact %s direct Checkout on loser cleanup until its attempt can be retired",
     async (status) => {
+      mocks.acceptHostedMemberStripeCheckoutCompletionTx.mockResolvedValueOnce({
+        kind: "cleanup_terminal",
+      });
       mocks.retrieveStripeSubscription.mockResolvedValueOnce({
         customer: "cus_terminal",
         id: "sub_terminal",
@@ -824,7 +827,13 @@ describe("applyStripeCheckoutCompleted", () => {
         welcomeEmailMemberId: null,
       });
 
-      expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx).not.toHaveBeenCalled();
+      expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx)
+        .toHaveBeenCalledWith(expect.objectContaining({
+          billingIdentityDisposition: "terminal",
+          checkoutAttemptId: "attempt_terminal",
+          checkoutIntentHash: "intent_terminal",
+          checkoutSessionId: "cs_terminal",
+        }));
       expect(mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx).not.toHaveBeenCalled();
     },
   );

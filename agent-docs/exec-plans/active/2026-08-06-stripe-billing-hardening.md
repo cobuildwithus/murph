@@ -156,3 +156,19 @@ Updated: 2026-08-07
   10/10 PostgreSQL webhook/lock-order tests pass. The new SDK-typed Stripe
   request guard also passes; its merge-exposed subscription-resume probe now
   starts without unsupported top-level `await`, with focused contract coverage.
+- ReviewGPT round 7 found that the terminal-subscription correction from round
+  6 ran before the existing Checkout acceptance owner. The narrow correction
+  removes that shortcut and lets the locked acceptance owner distinguish an
+  accepted replay from an unaccepted terminal attempt. An accepted replay is a
+  no-op with no refund or welcome; a pending terminal attempt remains
+  receipt-owned cleanup. Web typecheck, full lint, the Stripe request guard, 748
+  changed-surface tests, a fresh 166-migration deploy, and 12/12 serial
+  PostgreSQL receipt/lock-order tests pass. The formal loop is paused at its
+  seven-round cap pending the policy-required explicit round-eight decision.
+- ReviewGPT's first inline remediation diff lost every hunk prefix and failed
+  `git apply --check`. The explicit artifact retry returned a valid five-file
+  patch whose reported SHA-256 matched locally and whose whitespace-strict
+  apply check passed against the exact reviewed head. Its ownership ordering,
+  cross-member identity fence, and legacy regression were incorporated; the
+  optional boolean and third success variant were simplified into the required
+  two-state disposition on the existing acceptance owner.

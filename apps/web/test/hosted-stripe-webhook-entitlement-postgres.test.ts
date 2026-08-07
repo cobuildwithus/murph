@@ -347,6 +347,7 @@ describe.skipIf(!runPostgresProof)(
           });
         await expect(cleanupClient.$transaction((tx) =>
           bindHostedStripeBillingRefsFromCheckoutSessionTx({
+            billingIdentityDisposition: "bind",
             dispatchContext: {
               eventCreatedAt: new Date("2026-07-01T12:01:00.000Z"),
               sourceEventId: `evt_family_checkout_replay_${fixture.fixtureId}`,
@@ -365,7 +366,7 @@ describe.skipIf(!runPostgresProof)(
             } as never,
             tx,
           })
-        )).resolves.toBe(true);
+        )).resolves.toMatchObject({ kind: "accepted" });
         await expect(readHostedMemberBillingSnapshot({
           memberId: fixture.memberId,
           prisma: observer,
@@ -571,6 +572,120 @@ describe.skipIf(!runPostgresProof)(
         clearHostedStripeFixtureEnvironment(runtimeGlobals);
         await prisma.hostedStripeEvent.deleteMany({ where: { eventId } });
         await deleteFamilyCleanupFixture(prisma, fixture);
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it("completes an accepted terminal Checkout replay without refund cleanup", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_accepted_terminal_checkout_${fixtureId}`;
+      const stripeCustomerId = `cus_accepted_terminal_checkout_${fixtureId}`;
+      const stripeSubscriptionId = `sub_accepted_terminal_checkout_${fixtureId}`;
+      const checkoutSessionId = `cs_accepted_terminal_checkout_${fixtureId}`;
+      const eventId = `evt_accepted_terminal_checkout_${fixtureId}`;
+      const event = {
+        created: Math.floor(Date.now() / 1_000),
+        data: {
+          object: {
+            customer: stripeCustomerId,
+            id: checkoutSessionId,
+            metadata: {
+              billingPlanCode: "launch_monthly",
+              checkoutAttemptId: `attempt_accepted_terminal_${fixtureId}`,
+              checkoutIntentHash: `intent_accepted_terminal_${fixtureId}`,
+              checkoutOffer: "standard",
+              memberId,
+            },
+            object: "checkout.session",
+            status: "complete",
+            subscription: stripeSubscriptionId,
+          },
+        },
+        id: eventId,
+        object: "event",
+        type: "checkout.session.completed",
+      } as never;
+      const subscription = {
+        customer: stripeCustomerId,
+        id: stripeSubscriptionId,
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutOffer: "standard",
+          memberId,
+        },
+        status: "canceled",
+      } as never;
+      const retrieve = vi.fn(async () => subscription);
+      const cancel = vi.fn();
+      const listInvoices = vi.fn();
+      const listInvoicePayments = vi.fn();
+      const listRefunds = vi.fn();
+      const createRefund = vi.fn();
+      const stripe = {
+        events: { retrieve: vi.fn(async () => event) },
+        invoicePayments: { list: listInvoicePayments },
+        invoices: { list: listInvoices },
+        refunds: { create: createRefund, list: listRefunds },
+        subscriptions: { cancel, retrieve },
+      } as never;
+      const runtimeGlobals = readHostedStripeRuntimeGlobals();
+
+      configureHostedStripeFixtureEnvironment({
+        edgePriceId: `price_edge_${fixtureId}`,
+        pulsePriceId: `price_pulse_${fixtureId}`,
+        stripe,
+        webhookSecret: "whsec_accepted_terminal_checkout_fixture",
+      });
+
+      try {
+        await prisma.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: memberId,
+          },
+        });
+        await prisma.$transaction((tx) =>
+          writeHostedMemberStripeBillingRefTx({
+            memberId,
+            stripeCustomerId,
+            stripeEventCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+            stripeSubscriptionId,
+            tx,
+          })
+        );
+        await recordHostedStripeEvent({ event, prisma });
+
+        await expect(processRecordedHostedStripeWebhookEvent({
+          eventId,
+          prisma,
+          timeoutMs: 5_000,
+        })).resolves.toEqual({ accepted: true, required: false });
+
+        expect(retrieve).toHaveBeenCalledOnce();
+        expect(cancel).not.toHaveBeenCalled();
+        expect(listInvoices).not.toHaveBeenCalled();
+        expect(listInvoicePayments).not.toHaveBeenCalled();
+        expect(listRefunds).not.toHaveBeenCalled();
+        expect(createRefund).not.toHaveBeenCalled();
+        await expect(readStripeReceiptProof({ eventId, prisma }))
+          .resolves.toMatchObject({
+            attemptCount: 1,
+            processedAt: expect.any(Date),
+            status: HostedStripeEventStatus.completed,
+          });
+        await expect(readHostedMemberBillingSnapshot({ memberId, prisma }))
+          .resolves.toMatchObject({
+            billingRef: {
+              stripeCustomerId,
+              stripeSubscriptionId,
+            },
+            core: { billingStatus: HostedBillingStatus.active },
+          });
+      } finally {
+        clearHostedStripeFixtureEnvironment(runtimeGlobals);
+        await prisma.hostedStripeEvent.deleteMany({ where: { eventId } });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
         await prisma.$disconnect();
       }
     }, 60_000);

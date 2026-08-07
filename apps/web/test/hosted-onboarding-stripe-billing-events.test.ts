@@ -303,6 +303,73 @@ describe("hosted onboarding stripe billing events", () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("does not clean up or welcome an accepted terminal subscription replay", async () => {
+    mocks.acceptHostedMemberStripeCheckoutCompletionTx.mockResolvedValueOnce({
+      kind: "already_accepted",
+    });
+
+    await expect(applyStripeCheckoutCompleted({
+      created: 1_714_700_800,
+      customer: "cus_123",
+      id: "cs_accepted_terminal_replay",
+      metadata: { checkoutOffer: "standard" },
+      subscription: "sub_123",
+    } as unknown as Stripe.Checkout.Session, {} as never, undefined, undefined,
+    makePreparedStandardCheckoutCompletion({
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      subscriptionStatus: "canceled",
+    }))).resolves.toEqual({
+      activatedMemberId: null,
+      activatedMembers: [],
+      hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: [],
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        billingIdentityDisposition: "terminal",
+      }));
+    expect(
+      mocks.upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unaccepted terminal Checkout owned by standard cleanup", async () => {
+    mocks.acceptHostedMemberStripeCheckoutCompletionTx.mockResolvedValueOnce({
+      kind: "cleanup_terminal",
+    });
+
+    await expect(applyStripeCheckoutCompleted({
+      created: 1_714_700_800,
+      customer: "cus_123",
+      id: "cs_pending_terminal",
+      metadata: {
+        checkoutAttemptId: "attempt_pending_terminal",
+        checkoutIntentHash: "intent_pending_terminal",
+        checkoutOffer: "standard",
+      },
+      subscription: "sub_pending_terminal",
+    } as unknown as Stripe.Checkout.Session, {} as never, undefined, undefined,
+    makePreparedStandardCheckoutCompletion({
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_pending_terminal",
+      subscriptionStatus: "incomplete_expired",
+    }))).resolves.toMatchObject({
+      cleanupStandardCheckout: {
+        checkoutSessionId: "cs_pending_terminal",
+        subscriptionId: "sub_pending_terminal",
+      },
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        billingIdentityDisposition: "terminal",
+      }));
+  });
+
   it("clears the durable member attempt when its Checkout Session expires", async () => {
     const session = {
       id: "cs_expired_123",
@@ -2408,6 +2475,7 @@ function makePreparedStandardCheckoutCompletion(input: {
   stripeCheckoutEmail?: string;
   stripeCustomerId: string;
   stripeSubscriptionId: string;
+  subscriptionStatus?: Stripe.Subscription.Status;
 }) {
   return {
     billingCompletion: {
@@ -2422,7 +2490,7 @@ function makePreparedStandardCheckoutCompletion(input: {
     canonicalSubscription: {
       customer: input.stripeCustomerId,
       id: input.stripeSubscriptionId,
-      status: "active",
+      status: input.subscriptionStatus ?? "active",
     } as Stripe.Subscription,
     memberId: "member_123",
     stripeCheckoutEmail: input.stripeCheckoutEmail

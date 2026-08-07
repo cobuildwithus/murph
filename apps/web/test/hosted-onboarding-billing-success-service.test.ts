@@ -241,6 +241,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
       expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
       expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
+      expect(mocks.cleanupHostedStandardCheckoutLoser).not.toHaveBeenCalled();
     },
   );
 

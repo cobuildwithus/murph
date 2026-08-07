@@ -49,6 +49,7 @@ import {
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
   writeAcceptedHostedMemberPulseTrialBillingTx,
+  type HostedMemberStripeCheckoutAcceptance,
   type PreparedHostedMemberStripeCheckoutCompletion,
 } from "./hosted-member-billing-store";
 import {
@@ -416,27 +417,13 @@ export async function applyStripeCheckoutCompleted(
       "Prepared canonical Stripe subscription does not match the Checkout Session.",
     );
   }
-  if (
-    stripeCustomerId
-    && stripeSubscriptionId
-    && (
-      canonicalSubscription?.status === "canceled"
-      || canonicalSubscription?.status === "incomplete_expired"
-    )
-  ) {
-    // Stripe cancellation can survive a rolled-back Family cleanup. Keep the
-    // original receipt responsible for its idempotent refund instead of
-    // rebinding a subscription that can no longer provide access.
-    return {
-      ...buildEmptyHostedStripeActivationOutcome(),
-      cleanupStandardCheckout: {
-        checkoutSessionId: session.id,
-        subscriptionId: stripeSubscriptionId,
-      },
-    };
-  }
-
-  const accepted = await bindHostedStripeBillingRefsFromCheckoutSessionTx({
+  const billingIdentityDisposition =
+    canonicalSubscription?.status === "canceled"
+    || canonicalSubscription?.status === "incomplete_expired"
+      ? "terminal"
+      : "bind";
+  const acceptance = await bindHostedStripeBillingRefsFromCheckoutSessionTx({
+    billingIdentityDisposition,
     dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
     memberId: memberSnapshot.core.id,
     preparedCompletion:
@@ -446,7 +433,10 @@ export async function applyStripeCheckoutCompleted(
     session,
     tx: prisma,
   });
-  if (!accepted) {
+  if (
+    acceptance.kind === "cleanup_superseded"
+    || acceptance.kind === "cleanup_terminal"
+  ) {
     if (!stripeSubscriptionId) {
       throw new TypeError(
         "Accepted standard Stripe Checkout is missing its subscription.",
@@ -459,6 +449,9 @@ export async function applyStripeCheckoutCompleted(
         subscriptionId: stripeSubscriptionId,
       },
     };
+  }
+  if (billingIdentityDisposition === "terminal") {
+    return buildEmptyHostedStripeActivationOutcome();
   }
 
   return {
@@ -560,13 +553,14 @@ function readExpandedStripeCheckoutSubscription(
 }
 
 export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
+  billingIdentityDisposition: "bind" | "terminal";
   dispatchContext?: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId">;
   memberId: string;
   preparedCompletion?: PreparedHostedMemberStripeCheckoutCompletion;
   preparedStripeCheckoutEmail: PreparedHostedMemberStripeCheckoutEmail | null;
   session: Stripe.Checkout.Session;
   tx: Prisma.TransactionClient;
-}): Promise<boolean> {
+}): Promise<HostedMemberStripeCheckoutAcceptance> {
   const dispatchContext = input.dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(input.session);
   const stripeCustomerId = coerceStripeObjectId(input.session.customer);
   const stripeSubscriptionId =
@@ -607,6 +601,7 @@ export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
     input.session.metadata?.checkoutIntentHash,
   );
   const acceptance = await acceptHostedMemberStripeCheckoutCompletionTx({
+    billingIdentityDisposition: input.billingIdentityDisposition,
     checkoutAttemptId,
     checkoutIntentHash,
     checkoutSessionId: input.session.id,
@@ -616,11 +611,17 @@ export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
     preparedCompletion: input.preparedCompletion,
     tx: input.tx,
   });
-  if (acceptance.kind === "cleanup_superseded") {
-    return false;
+  if (
+    acceptance.kind === "cleanup_superseded"
+    || acceptance.kind === "cleanup_terminal"
+  ) {
+    return acceptance;
   }
 
-  if (input.preparedStripeCheckoutEmail) {
+  if (
+    input.billingIdentityDisposition === "bind"
+    && input.preparedStripeCheckoutEmail
+  ) {
     await upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx({
       collectedAt: dispatchContext.eventCreatedAt,
       memberId: input.memberId,
@@ -629,7 +630,7 @@ export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
     });
   }
 
-  return true;
+  return acceptance;
 }
 
 export async function applyPulseTrialCheckoutCompletedTx(input: {
@@ -786,6 +787,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
   const checkoutAcceptance =
     await acceptHostedMemberStripeCheckoutCompletionTx({
       allowBillingIdentityReplacement: true,
+      billingIdentityDisposition: "bind",
       checkoutAttemptId: normalizeNullableString(
         input.session.metadata?.checkoutAttemptId,
       ),
@@ -799,7 +801,10 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
       preparedCompletion,
       tx: input.tx,
     });
-  if (checkoutAcceptance.kind === "cleanup_superseded") {
+  if (
+    checkoutAcceptance.kind === "cleanup_superseded"
+    || checkoutAcceptance.kind === "cleanup_terminal"
+  ) {
     return {
       activatedMemberId: null,
       cleanupPulseTrialStripeSubscriptionId: subscription.id,

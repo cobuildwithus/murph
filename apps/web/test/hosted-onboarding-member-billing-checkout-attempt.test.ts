@@ -20,6 +20,7 @@ describe("hosted member Checkout completion ownership", () => {
     const harness = await createBillingRefHarness();
 
     await expect(acceptHostedMemberStripeCheckoutCompletionTx({
+      billingIdentityDisposition: "bind",
       checkoutAttemptId: "attempt_123",
       checkoutIntentHash: "intent_123",
       checkoutSessionId: "cs_winner",
@@ -115,6 +116,7 @@ describe("hosted member Checkout completion ownership", () => {
     const harness = await createBillingRefHarness({ openAttempt: false });
 
     await expect(acceptHostedMemberStripeCheckoutCompletionTx({
+      billingIdentityDisposition: "bind",
       checkoutAttemptId: null,
       checkoutIntentHash: null,
       checkoutSessionId: "cs_legacy",
@@ -134,6 +136,7 @@ describe("hosted member Checkout completion ownership", () => {
   it("treats a repeated completion for the accepted subscription as idempotent", async () => {
     const harness = await createBillingRefHarness();
     const completion = {
+      billingIdentityDisposition: "bind" as const,
       checkoutAttemptId: "attempt_123",
       checkoutIntentHash: "intent_123",
       checkoutSessionId: "cs_winner",
@@ -159,9 +162,103 @@ describe("hosted member Checkout completion ownership", () => {
     expect(harness.update).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps an accepted subscription replay out of terminal cleanup", async () => {
+    const harness = await createBillingRefHarness({
+      currentStripeCustomerId: "cus_winner",
+      currentStripeSubscriptionId: "sub_winner",
+      openAttempt: false,
+    });
+
+    await expect(acceptHostedMemberStripeCheckoutCompletionTx({
+      billingIdentityDisposition: "terminal",
+      checkoutAttemptId: null,
+      checkoutIntentHash: null,
+      checkoutSessionId: "cs_winner",
+      currentCheckoutOffer: "standard",
+      eventCreatedAt: new Date("2026-07-27T12:02:00.000Z"),
+      memberId: "member_123",
+      preparedCompletion: buildPreparedCompletion(
+        "cus_winner",
+        "sub_winner",
+      ),
+      tx: harness.tx as never,
+    })).resolves.toEqual({ kind: "already_accepted" });
+
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unaccepted terminal Checkout owned by loser cleanup", async () => {
+    const harness = await createBillingRefHarness();
+
+    await expect(acceptHostedMemberStripeCheckoutCompletionTx({
+      billingIdentityDisposition: "terminal",
+      checkoutAttemptId: "attempt_123",
+      checkoutIntentHash: "intent_123",
+      checkoutSessionId: "cs_winner",
+      currentCheckoutOffer: "standard",
+      eventCreatedAt: new Date("2026-07-27T12:02:00.000Z"),
+      memberId: "member_123",
+      preparedCompletion: buildPreparedCompletion(
+        "cus_winner",
+        "sub_winner",
+      ),
+      tx: harness.tx as never,
+    })).resolves.toEqual({ kind: "cleanup_terminal" });
+
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps a legacy unaccepted terminal Checkout owned by loser cleanup", async () => {
+    const harness = await createBillingRefHarness({ openAttempt: false });
+
+    await expect(acceptHostedMemberStripeCheckoutCompletionTx({
+      billingIdentityDisposition: "terminal",
+      checkoutAttemptId: null,
+      checkoutIntentHash: null,
+      checkoutSessionId: "cs_legacy_terminal",
+      currentCheckoutOffer: "standard",
+      eventCreatedAt: new Date("2026-07-27T12:02:00.000Z"),
+      memberId: "member_123",
+      preparedCompletion: buildPreparedCompletion(
+        "cus_legacy_terminal",
+        "sub_legacy_terminal",
+      ),
+      tx: harness.tx as never,
+    })).resolves.toEqual({ kind: "cleanup_terminal" });
+
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it("does not clean up a terminal identity already owned by another member", async () => {
+    const harness = await createBillingRefHarness({
+      conflictingMemberId: "member_other",
+    });
+
+    await expect(acceptHostedMemberStripeCheckoutCompletionTx({
+      billingIdentityDisposition: "terminal",
+      checkoutAttemptId: "attempt_123",
+      checkoutIntentHash: "intent_123",
+      checkoutSessionId: "cs_winner",
+      currentCheckoutOffer: "standard",
+      eventCreatedAt: new Date("2026-07-27T12:02:00.000Z"),
+      memberId: "member_123",
+      preparedCompletion: buildPreparedCompletion(
+        "cus_winner",
+        "sub_winner",
+      ),
+      tx: harness.tx as never,
+    })).rejects.toMatchObject({
+      code: "STRIPE_BILLING_IDENTITY_CONFLICT",
+      details: { violatedField: "stripeCustomerId" },
+    });
+
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
   it("keeps the first subscription when a different Checkout completes later", async () => {
     const harness = await createBillingRefHarness();
     await acceptHostedMemberStripeCheckoutCompletionTx({
+      billingIdentityDisposition: "bind",
       checkoutAttemptId: "attempt_123",
       checkoutIntentHash: "intent_123",
       checkoutSessionId: "cs_winner",
@@ -176,6 +273,7 @@ describe("hosted member Checkout completion ownership", () => {
     });
 
     await expect(acceptHostedMemberStripeCheckoutCompletionTx({
+      billingIdentityDisposition: "bind",
       checkoutAttemptId: "attempt_loser",
       checkoutIntentHash: "intent_loser",
       checkoutSessionId: "cs_loser",
@@ -203,6 +301,7 @@ describe("hosted member Checkout completion ownership", () => {
 
     await expect(acceptHostedMemberStripeCheckoutCompletionTx({
       allowBillingIdentityReplacement: true,
+      billingIdentityDisposition: "bind",
       checkoutAttemptId: "attempt_123",
       checkoutIntentHash: "intent_123",
       checkoutSessionId: "cs_pulse_trial",
@@ -236,6 +335,7 @@ describe("hosted member Checkout completion ownership", () => {
 
     await expect(acceptHostedMemberStripeCheckoutCompletionTx({
       allowBillingIdentityReplacement: true,
+      billingIdentityDisposition: "bind",
       checkoutAttemptId: "attempt_superseded",
       checkoutIntentHash: "intent_superseded",
       checkoutSessionId: "cs_superseded",
@@ -279,6 +379,7 @@ function buildPreparedCompletion(
 
 async function createBillingRefHarness(input: {
   checkoutSessionId?: string;
+  conflictingMemberId?: string;
   currentStripeCustomerId?: string;
   currentStripeSubscriptionId?: string;
   openAttempt?: boolean;
@@ -342,7 +443,11 @@ async function createBillingRefHarness(input: {
   const tx = {
     $queryRaw: vi.fn().mockResolvedValue([]),
     hostedMemberBillingRef: {
-      findMany: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn().mockResolvedValue(
+        input.conflictingMemberId
+          ? [{ memberId: input.conflictingMemberId }]
+          : [],
+      ),
       findUnique,
       update,
     },
