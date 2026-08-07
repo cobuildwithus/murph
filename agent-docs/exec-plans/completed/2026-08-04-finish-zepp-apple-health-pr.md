@@ -1,8 +1,8 @@
 # Finish Zepp Apple Health onboarding PR
 
-Status: active
+Status: completed
 Created: 2026-08-04
-Updated: 2026-08-04
+Updated: 2026-08-07
 
 ## Goal
 
@@ -179,3 +179,4 @@ Updated: 2026-08-04
   while US iPhone chart evidence also favors Strava. Zepp now follows Strava and
   precedes Withings. The focused connect-page suite passes 88 tests, and Web
   typecheck, scoped lint, and `git diff --check` pass on the correction.
+Completed: 2026-08-07
