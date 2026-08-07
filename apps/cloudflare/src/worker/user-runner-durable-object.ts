@@ -134,6 +134,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.recordHostedWorkspaceSnapshotOrphanCandidate(input);
   }
 
+  async recordHostedBrowserVaultReplicaOrphanCandidate(
+    input: Parameters<HostedUserRunner["recordHostedBrowserVaultReplicaOrphanCandidate"]>[0],
+  ): ReturnType<HostedUserRunner["recordHostedBrowserVaultReplicaOrphanCandidate"]> {
+    return this.runner.recordHostedBrowserVaultReplicaOrphanCandidate(input);
+  }
+
   async fetch(): Promise<Response> {
     return notFound();
   }

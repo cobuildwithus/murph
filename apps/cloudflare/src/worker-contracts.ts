@@ -1,4 +1,5 @@
 import type { R2BucketLike } from "./bundle-store.ts";
+import type { HostedBrowserVaultReplicaOrphanCandidate } from "./browser-vault-store.ts";
 import type {
   HostedPrivateMediaPublishInput,
   HostedPrivateMediaPublishResult,
@@ -135,6 +136,9 @@ export interface WorkerUserRunnerStubLike {
   recordHostedWorkspaceSnapshotOrphanCandidate?(
     input: HostedWorkspaceSnapshotOrphanCandidate,
   ): Promise<HostedWorkspaceSnapshotOrphanCandidate>;
+  recordHostedBrowserVaultReplicaOrphanCandidate?(
+    input: HostedBrowserVaultReplicaOrphanCandidate,
+  ): Promise<HostedBrowserVaultReplicaOrphanCandidate>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;
