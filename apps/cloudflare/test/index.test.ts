@@ -54,6 +54,7 @@ import type {
 import {
   hostedArtifactObjectKey,
   hostedBrowserVaultReplicaObjectKey,
+  hostedWorkspaceSnapshotObjectKey,
 } from "../src/storage-paths.ts";
 import type {
   UserRunnerDurableObjectStubLike,
@@ -363,6 +364,7 @@ describe("cloudflare worker routes", () => {
       "test-read-active-runtime-fence",
       "test-start-stuck-invocation",
       "test-direct-r2-presigned-put",
+      "test-direct-r2-locator-marker",
       "deploy-container-smoke",
       "runtime-ensure-processing",
       "runtime-health-data-consent",
@@ -1479,6 +1481,71 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("seeds a bound hosted-local direct R2 locator marker", async () => {
+    const userId = "member_123";
+    const snapshotId = "snapshot-direct-r2-marker";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId,
+    });
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        `https://runner.example.test/__test/users/${userId}/direct-r2-locator-marker`,
+        {
+          body: JSON.stringify({ objectKey, snapshotId }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ), {
+        boundUserId: userId,
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(env.__bucketStore.keys()).toContain(objectKey);
+  });
+
+  it("rejects a hosted-local direct R2 locator marker outside the bound snapshot", async () => {
+    const userId = "member_123";
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        `https://runner.example.test/__test/users/${userId}/direct-r2-locator-marker`,
+        {
+          body: JSON.stringify({
+            objectKey: "users/other/workspace-snapshots/snapshot.snapshot.enc",
+            snapshotId: "snapshot-direct-r2-marker",
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ), {
+        boundUserId: userId,
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "objectKey does not match the bound snapshot.",
+    });
+    expect(env.__bucketStore.keys()).toEqual([]);
+  });
+
   it("reads hosted-local test bundle refs for correctly bound callers", async () => {
     const bundleBytes = Buffer.from("bundle-payload\n", "utf8");
     const env = createWorkerEnv(createUserRunnerStub(), {
@@ -2143,40 +2210,6 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("reports the Worker-level R2 write-admission state with runner cutover status", async () => {
-    const stub = createUserRunnerStub({
-      runnerStatus: vi.fn(async () => ({
-        inFlight: false,
-        mailboxLag: [],
-        r2Cutover: {
-          coexisting: true,
-          phase: "source_active" as const,
-          protocolVersion: "r2-oc-enam-v2",
-        },
-        userId: "member_123",
-        workspace: null,
-      })),
-    });
-
-    const statusResponse = await worker.fetch(
-      await signControlRequest(new Request(
-        "https://runner.example.test/internal/users/member_123/status",
-        { method: "GET" },
-      )),
-      createWorkerEnv(stub, { HOSTED_R2_WRITE_ADMISSION: "paused" }),
-    );
-
-    expect(statusResponse.status).toBe(200);
-    await expect(statusResponse.json()).resolves.toMatchObject({
-      r2Cutover: {
-        phase: "source_active",
-        pausedCanaryConfigured: false,
-        protocolVersion: "r2-oc-enam-v2",
-        writeAdmission: "paused",
-      },
-    });
-  });
-
   it("ignores malformed per-user status log limits instead of partially parsing them", async () => {
     const stub = createUserRunnerStub({
       runnerStatus: vi.fn(async () => ({
@@ -2506,160 +2539,6 @@ describe("cloudflare worker routes", () => {
         },
         userId: "test-user",
       });
-    });
-
-    it("returns retry-later without a Durable Object call while R2 write admission is paused", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-08-04T03:00:00.000Z"));
-      const stub = createUserRunnerStub();
-      const env = createWorkerEnv(stub, {
-        HOSTED_R2_WRITE_ADMISSION: "paused",
-      });
-
-      const response = await worker.fetch(
-        await signWebCallbackControlRequest(
-          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
-            body: JSON.stringify({
-              orchestrationAttemptId: "orchestration-attempt-test",
-            }),
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            method: "POST",
-          }),
-          env,
-        ),
-        env,
-      );
-
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
-        kind: "retry_later",
-        retryAt: "2026-08-04T03:01:00.000Z",
-      });
-      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
-    });
-
-    it("keeps a scheduled retry fenced until destination convergence and the canary digest deploy", async () => {
-      const canaryUserId = "test-canary";
-      const stub = createUserRunnerStub({
-        ensureRuntimeProcessingForUser: vi.fn(async () => ({
-          action: "started" as const,
-          kind: "runtime_processing_accepted" as const,
-          recommendedRecheckAt: "2026-08-04T03:01:00.000Z",
-          runtimeAttemptId: "runtime-attempt-canary",
-        })),
-      });
-      const sourcePausedEnv = createWorkerEnv(stub, {
-        BUNDLES_ENAM: createBucketStore().api,
-        HOSTED_R2_CUTOVER_PHASE: "source_active",
-        HOSTED_R2_WRITE_ADMISSION: "paused",
-      });
-      const destinationConvergingEnv = createWorkerEnv(stub, {
-        BUNDLES_ENAM: createBucketStore().api,
-        HOSTED_R2_CUTOVER_PHASE: "destination_active",
-        HOSTED_R2_WRITE_ADMISSION: "paused",
-      });
-      const destinationCanaryEnv = createWorkerEnv(stub, {
-        BUNDLES_ENAM: createBucketStore().api,
-        HOSTED_R2_CUTOVER_PHASE: "destination_active",
-        HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256:
-          createHash("sha256").update(canaryUserId).digest("hex"),
-        HOSTED_R2_WRITE_ADMISSION: "paused",
-      });
-
-      const sendCallbackEnsure = async (
-        env: WorkerTestEnv,
-        orchestrationAttemptId: string,
-      ): Promise<Response> => await worker.fetch(
-        await signWebCallbackControlRequest(
-          new Request(
-            `https://runner.example.test/internal/users/${canaryUserId}/runtime/ensure-processing`,
-            {
-              body: JSON.stringify({
-                orchestrationAttemptId,
-              }),
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              method: "POST",
-            },
-          ),
-          env,
-        ),
-        env,
-      );
-
-      const sourceRetry = await sendCallbackEnsure(
-        sourcePausedEnv,
-        "orchestration-attempt-scheduled-retry",
-      );
-      const destinationRetryBeforeConvergence = await sendCallbackEnsure(
-        destinationConvergingEnv,
-        "orchestration-attempt-scheduled-retry",
-      );
-
-      await expect(sourceRetry.json()).resolves.toMatchObject({ kind: "retry_later" });
-      await expect(destinationRetryBeforeConvergence.json()).resolves.toMatchObject({
-        kind: "retry_later",
-      });
-      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
-
-      const explicitCanary = await sendCallbackEnsure(
-        destinationCanaryEnv,
-        "orchestration-attempt-explicit-canary",
-      );
-
-      expect(explicitCanary.status).toBe(200);
-      await expect(explicitCanary.json()).resolves.toMatchObject({
-        kind: "runtime_processing_accepted",
-        runtimeAttemptId: "runtime-attempt-canary",
-      });
-      expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledOnce();
-      expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith(
-        expect.objectContaining({
-          orchestrationAttemptId: "orchestration-attempt-explicit-canary",
-          userId: canaryUserId,
-        }),
-      );
-    });
-
-    it("does not schedule the direct web latency hint while R2 write admission is paused", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-08-04T03:00:00.000Z"));
-      const stub = createUserRunnerStub();
-      const env = createWorkerEnv(stub, {
-        BUNDLES_ENAM: createBucketStore().api,
-        HOSTED_R2_CUTOVER_PHASE: "destination_active",
-        HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256:
-          createHash("sha256").update("test-user").digest("hex"),
-        HOSTED_R2_WRITE_ADMISSION: "paused",
-      });
-      const execution = createWorkerExecutionContextForTest();
-
-      const response = await worker.fetch(
-        await signControlRequest(
-          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
-            body: JSON.stringify({
-              orchestrationAttemptId: "web-ingress-attempt-test",
-            }),
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            method: "POST",
-          }),
-        ),
-        env,
-        execution.ctx,
-      );
-
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
-        kind: "retry_later",
-        retryAt: "2026-08-04T03:01:00.000Z",
-      });
-      expect(execution.waitUntil).not.toHaveBeenCalled();
-      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
     it("runs runtime health-data consent reconciliation synchronously for Web OIDC", async () => {
@@ -3064,7 +2943,9 @@ describe("cloudflare worker routes", () => {
       });
 
       const response = await runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId:
+          "web-ingress-33333333-3333-4333-8333-333333333333",
         userId: "test-user",
       });
 
@@ -3080,6 +2961,11 @@ describe("cloudflare worker routes", () => {
         userId: "test-user",
         workspaceVersion: "7",
       });
+      expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+        runtimeInvocationOrchestrationAttemptId:
+          "web-ingress-33333333-3333-4333-8333-333333333333",
+        triggeredByWebDirect: true,
+      });
       await vi.waitFor(() =>
         expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
           active_attempt_id: null,
@@ -3092,11 +2978,14 @@ describe("cloudflare worker routes", () => {
     it("sends activation diagnostics for an active fence wake", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const activeWakeEnsureProcessing = vi.fn<
+        NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>
+      >(async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }));
       const { ensureProcessing, invoke, runner, sql } = createRuntimeControlRunnerHarness({
-        ensureProcessing: vi.fn(async () => ({
-          action: "woken" as const,
-          kind: "accepted" as const,
-        })),
+        ensureProcessing: activeWakeEnsureProcessing,
       });
       const token = await writeRuntimeControlFenceForTest({
         runner,
@@ -3106,7 +2995,9 @@ describe("cloudflare worker routes", () => {
       });
 
       const response = await runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId:
+          "web-ingress-44444444-4444-4444-8444-444444444444",
         userId: "test-user",
       });
 
@@ -3124,6 +3015,14 @@ describe("cloudflare worker routes", () => {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runtimeConsentLockAcquiredAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            triggeredByWebDirect: true,
             userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
           },
           processingMode: "default",
@@ -3131,6 +3030,9 @@ describe("cloudflare worker routes", () => {
         },
         userId: "test-user",
       });
+      expect(
+        activeWakeEnsureProcessing.mock.calls[0]?.[0].activeRuntime?.orchestration,
+      ).not.toHaveProperty("runtimeInvocationOrchestrationAttemptId");
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
         active_attempt_id: token.attemptId,
@@ -3172,6 +3074,13 @@ describe("cloudflare worker routes", () => {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runtimeConsentLockAcquiredAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
           },
           processingMode: "default",

@@ -1,4 +1,5 @@
 import type {
+  HostedClinicalRecordsConnectLinkRequest,
   HostedClinicalRecordsConnectLinkResponse,
   HostedClinicalRecordsFetchPageRequest,
   HostedClinicalRecordsFetchPageResponse,
@@ -59,9 +60,7 @@ import type {
 } from "@murphai/hosted-execution/assistant-personalization";
 import {
   assistantResponseMediaSchema,
-} from "@murphai/operator-config/assistant-cli-contracts";
-import type {
-  AssistantResponseMedia,
+  type AssistantResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import type {
   AssistantResponseCard,
@@ -209,6 +208,7 @@ export interface HostedRuntimeBrowserVaultReplicaPort {
   }): Promise<HostedBrowserVaultReplicaPublishResponse>;
   write(input: {
     replica: unknown;
+    replacedReplicaRef?: HostedBrowserVaultReplicaRef | null;
     signal?: AbortSignal | null;
   }): Promise<HostedBrowserVaultReplicaRef>;
 }
@@ -454,7 +454,9 @@ export interface HostedRuntimeDeviceSyncPort {
 
 export interface HostedRuntimeClinicalRecordsPort {
   createConnectLink?(
-    options?: { signal?: AbortSignal | null },
+    options?: HostedClinicalRecordsConnectLinkRequest & {
+      signal?: AbortSignal | null
+    },
   ): Promise<HostedClinicalRecordsConnectLinkResponse>;
   fetchPage(
     request: HostedClinicalRecordsFetchPageRequest,
@@ -615,6 +617,7 @@ export interface HostedRuntimeWorkspaceSnapshotRestoreTimingDetails {
   extractMs?: number;
   encryptedBytes?: number;
   plainBytes?: number;
+  replaySafeReadMaxAttempt?: number;
 }
 
 export interface HostedRuntimeWorkspaceSnapshotPort {

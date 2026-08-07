@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
-  buildExaResearchScoutRequest,
+  buildExaResearchScoutBatchLaneRequest,
   MAX_RESEARCH_SCOUT_CANDIDATES,
 } from "@murphai/contracts";
 
@@ -125,7 +125,7 @@ function createHostedExaResearchScoutRequestBody(
       ? overrideNumResults
       : MAX_RESEARCH_SCOUT_CANDIDATES;
   return {
-    ...buildExaResearchScoutRequest({
+    ...buildExaResearchScoutBatchLaneRequest({
       profile: {
         topics: ["sleep", "metabolic health"],
         biomarkers: ["glucose", "hs-crp"],
@@ -7136,6 +7136,20 @@ describe("hostedRunnerIntercept", () => {
       name: "chat creation",
       operation: "chat_create",
       path: "/chats",
+    },
+    {
+      body: {
+        address: "+15550000001",
+        from: "+15550000000",
+      },
+      method: "POST",
+      name: "iMessage capability check",
+      operation: "check_imessage_capability",
+      path: "/capability/check_imessage",
+      responseBody: JSON.stringify({
+        address: "+15550000001",
+        available: true,
+      }),
     },
     {
       body: {

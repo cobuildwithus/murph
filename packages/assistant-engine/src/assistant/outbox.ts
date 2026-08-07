@@ -78,6 +78,7 @@ import {
   readAssistantOutboxIntent as readAssistantOutboxIntentLocal,
   readAssistantOutboxIntentAtPath,
   saveAssistantOutboxIntent as saveAssistantOutboxIntentLocal,
+  type AssistantOutboxInventoryScanMetrics,
 } from './outbox/store.js'
 import {
   buildAssistantOutboxIntentMirrorState,
@@ -125,6 +126,7 @@ export type {
   AssistantOutboxPreparedDispatchState,
   AssistantOutboxPreparedMirrorDispatch,
 }
+export type { AssistantOutboxInventoryScanMetrics } from './outbox/store.js'
 export {
   compareAssistantOutboxDeliverySequenceOrder,
   isAssistantOutboxReplyBubbleSuccessor,
@@ -553,9 +555,9 @@ export async function saveAssistantOutboxIntent(
 }
 
 /**
- * Compare-and-set persistence for state derived from a remote approval check.
- * A concurrent dispatcher or approval reconciliation always wins over a stale
- * snapshot, while action identity reuse still fails closed.
+ * Compare-and-set persistence for outbox-owner state transitions. The explicit
+ * outcome lets callers distinguish their own write from a concurrent owner;
+ * action identity reuse still fails closed.
  */
 export async function saveAssistantOutboxIntentIfUnchanged(input: {
   expectedDedupeKey: string
@@ -563,7 +565,10 @@ export async function saveAssistantOutboxIntentIfUnchanged(input: {
   expectedUpdatedAt: string
   intent: AssistantOutboxIntent
   vault: string
-}): Promise<AssistantOutboxIntent> {
+}): Promise<{
+  applied: boolean
+  intent: AssistantOutboxIntent
+}> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const intentPath = resolveAssistantOutboxIntentPath(
@@ -592,7 +597,10 @@ export async function saveAssistantOutboxIntentIfUnchanged(input: {
       current.status !== input.expectedStatus
       || current.updatedAt !== input.expectedUpdatedAt
     ) {
-      return current
+      return {
+        applied: false,
+        intent: current,
+      }
     }
 
     const parsed = assistantOutboxIntentSchema.parse(
@@ -611,20 +619,25 @@ export async function saveAssistantOutboxIntentIfUnchanged(input: {
       intent: parsed,
       vault: input.vault,
     })
-    return parsed
+    return {
+      applied: true,
+      intent: parsed,
+    }
   })
 }
 
 export async function listAssistantOutboxIntents(
   vault: string,
+  onScan?: (metrics: AssistantOutboxInventoryScanMetrics) => void,
 ): Promise<AssistantOutboxIntent[]> {
-  return listAssistantOutboxIntentsLocalStore(vault)
+  return listAssistantOutboxIntentsLocalStore(vault, onScan)
 }
 
 export async function listAssistantOutboxIntentsLocal(
   vault: string,
+  onScan?: (metrics: AssistantOutboxInventoryScanMetrics) => void,
 ): Promise<AssistantOutboxIntent[]> {
-  return listAssistantOutboxIntentsLocalStore(vault)
+  return listAssistantOutboxIntentsLocalStore(vault, onScan)
 }
 
 export interface DispatchAssistantOutboxIntentInput {
@@ -1867,7 +1880,6 @@ export async function markAssistantOutboxIntentMirrorRetryableById(input: {
 }
 
 export async function resetAssistantOutboxPreparedDispatchById(input: {
-  deliveryIdempotencyKey?: string | null
   deliveryTransportIdempotent: boolean
   intentId: string
   minimumNextAttemptAt?: Date | null
@@ -1887,7 +1899,6 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
   }
 
   return resetAssistantOutboxPreparedDispatch({
-    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     intent,
     intentPath,

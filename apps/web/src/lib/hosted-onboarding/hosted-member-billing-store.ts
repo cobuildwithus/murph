@@ -144,7 +144,7 @@ export type HostedMemberStripeCheckoutAcceptance =
       kind: "accepted" | "already_accepted";
     }
   | {
-      kind: "cleanup_superseded";
+      kind: "cleanup_superseded" | "cleanup_terminal";
     };
 
 export type HostedMemberStripeCheckoutAttemptRevalidation =
@@ -636,13 +636,15 @@ export async function clearHostedMemberStripeCheckoutAttemptForSessionTx(input: 
 }
 
 /**
- * Binds exactly one completed direct Checkout. Standard Checkout preserves an
+ * Owns exactly one completed direct Checkout. Standard Checkout preserves an
  * existing billing identity. Pulse Trial may replace an identity only after
  * its caller classifies that identity as stale while holding the same member
- * lock.
+ * lock. A terminal provider candidate is never bound, but the same owner must
+ * distinguish an already-accepted replay from an unaccepted cleanup target.
  */
 export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
   allowBillingIdentityReplacement?: boolean;
+  billingIdentityDisposition: "bind" | "terminal";
   checkoutAttemptId: string | null;
   checkoutIntentHash: string | null;
   checkoutSessionId: string;
@@ -730,6 +732,9 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
         currentRecord.stripeSubscriptionLookupKey,
       ),
     );
+  if (alreadyAccepted && input.billingIdentityDisposition === "terminal") {
+    return { kind: "already_accepted" };
+  }
   if (!alreadyAccepted && !completionMatchesAttempt && !acceptsLegacyCompletion) {
     return { kind: "cleanup_superseded" };
   }
@@ -740,6 +745,9 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
     stripeSubscriptionId: input.preparedCompletion.stripeSubscriptionId,
     tx: input.tx,
   });
+  if (input.billingIdentityDisposition === "terminal") {
+    return { kind: "cleanup_terminal" };
+  }
   const lastStripeEventCreatedAt =
     currentRecord?.lastStripeEventCreatedAt
     && currentRecord.lastStripeEventCreatedAt > input.eventCreatedAt

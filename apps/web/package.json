@@ -24,6 +24,7 @@
     "linq:backfill-thread-route-accounts": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-thread-route-account-projections.ts",
     "privacy:backfill-phone-calls": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-phone-call-private-content.ts",
     "stripe:migrate-legacy-usage-items": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/migrate-legacy-stripe-usage-items.ts",
+    "stripe:contract:resume": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/verify-stripe-subscription-resume-contract.ts",
     "pitch:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/export-pitch-pdf.ts",
     "legal:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-legal-pdfs.ts",
     "typecheck": "pnpm health-commons:generate && pnpm prisma:generate && pnpm typecheck:prepared",
@@ -88,6 +89,7 @@
   },
   "devDependencies": {
     "@linqapp/sdk": "0.28.0",
+    "@murphai/hosted-local-harness": "workspace:*",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.3.0",
     "@types/pg": "8.20.0",

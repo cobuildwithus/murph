@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import {
   createJsonRouteHelpers,
+  describeErrorForLog,
   mapDomainJsonError,
   readOptionalJsonObject as readBaseOptionalJsonObject,
   readJsonObject as readBaseJsonObject,
@@ -47,6 +48,33 @@ export const HOSTED_ONBOARDING_REDACTED_ERROR_MESSAGE = "[redacted]";
 
 export const readJsonObject = readBaseJsonObject;
 export const readOptionalJsonObject = readBaseOptionalJsonObject;
+
+export function logHostedOnboardingRouteFailure(input: {
+  error: unknown;
+  operationName: string;
+  requestMethod: string;
+}): void {
+  const errorType = input.error instanceof Error
+    ? sanitizeHostedOnboardingLogString(input.error.name) ?? "Error"
+    : Array.isArray(input.error)
+      ? "array"
+      : input.error === null
+        ? "null"
+        : typeof input.error;
+  console.error("Hosted onboarding route failed.", {
+    errorType,
+    internalMessage: "Hosted onboarding route failed unexpectedly.",
+    operationName:
+      sanitizeHostedOnboardingLogString(input.operationName) ?? "unknown",
+    requestMethod:
+      sanitizeHostedOnboardingLogString(input.requestMethod) ?? "unknown",
+    ...(describeErrorForLog(
+      input.error,
+      sanitizeHostedOnboardingLogString,
+    ) ?? {}),
+    ...(describeHostedOnboardingErrorForLog(input.error) ?? {}),
+  });
+}
 
 export interface HostedOnboardingBoundedBodyOptions {
   limitBytes: number;

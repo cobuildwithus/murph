@@ -1,9 +1,11 @@
-import type { AssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import {
+  normalizeAssistantBackendTarget,
+  type AssistantModelTarget,
+} from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import type {
   AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type {
   HostedExecutionExternalThreadRouteAuthority,
@@ -20,6 +22,7 @@ import type {
   AutomationSupportKind,
 } from '@murphai/contracts'
 import type {
+  HostedClinicalRecordsConnectLinkRequest,
   HostedClinicalRecordsConnectLinkResponse,
 } from '@murphai/hosted-execution/clinical-records'
 import type {
@@ -220,7 +223,10 @@ export type AssistantHostedAutomationToolResponse =
 export interface AssistantHostedAutomationTool {
   request(
     request: AssistantHostedAutomationToolRequest,
-    context?: { signal?: AbortSignal | null },
+    context?: {
+      onboardingFirstReadCompletionTransition?: true
+      signal?: AbortSignal | null
+    },
   ): Promise<AssistantHostedAutomationToolResponse>
 }
 
@@ -271,7 +277,10 @@ export interface AssistantHostedSubscriptionTool {
 
 export interface AssistantHostedClinicalRecordsConnectLinkTool {
   createConnectLink(
-    options?: { signal?: AbortSignal | null },
+    options?: {
+      requestKey?: HostedClinicalRecordsConnectLinkRequest['requestKey']
+      signal?: AbortSignal | null
+    },
   ): Promise<HostedClinicalRecordsConnectLinkResponse>
 }
 
@@ -398,9 +407,15 @@ export type AssistantGeneratedImageCapturePersistence = <T>(
 
 export interface AssistantHostedImageGenerationLauncher {
   launch(input: {
+    // The durable assistant session that must receive the asynchronous
+    // completion. The host binds it; it is never derived from tool arguments
+    // and never doubles as the pending-image coordination scope.
+    continuationSessionId?: string | null
     operationId: string
     originAssistantInputId: string
     originAssistantInputIdExact: boolean
+    // Pending/queued duplicate prevention and cleanup scope. Unrelated to
+    // continuation identity.
     scopeId?: string | null
     run(
       signal: AbortSignal,

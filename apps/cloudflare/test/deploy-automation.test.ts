@@ -88,8 +88,6 @@ const REMOVED_HOSTED_ASSISTANT_VAR_NAMES = [
 
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
   CF_PUBLIC_BASE_URL: "https://murph-hosted.cobuildwithus.workers.dev",
-  CF_BUNDLES_ENAM_BUCKET: "hosted-bundles-enam",
-  CF_BUNDLES_ENAM_PREVIEW_BUCKET: "hosted-bundles-enam-preview",
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
   HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
@@ -100,10 +98,8 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
   HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME: "main",
   HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME: "database-test",
   HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION: "org-test",
-  HOSTED_R2_CUTOVER_PHASE: "source_active",
   HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account-test",
   HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
-  HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles-enam",
 } as const;
 const REQUIRED_R2_PRESIGN_WORKER_SECRETS = {
   HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: "chat-test",
@@ -243,6 +239,10 @@ describe("hosted deploy automation helpers", () => {
           name: string;
         }>;
       };
+      analytics_engine_datasets: Array<{
+        binding: string;
+        dataset: string;
+      }>;
       main: string;
       migrations: Array<{
         new_sqlite_classes: string[];
@@ -327,6 +327,12 @@ describe("hosted deploy automation helpers", () => {
         name: "RUNNER_CONTAINER_SMOKE",
       },
     ]);
+    expect(config.analytics_engine_datasets).toEqual([
+      {
+        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
+        dataset: "murph_hosted_runtime_retries",
+      },
+    ]);
     expect(config.migrations).toEqual([
       {
         new_sqlite_classes: ["UserRunnerDurableObject"],
@@ -357,11 +363,6 @@ describe("hosted deploy automation helpers", () => {
         binding: "BUNDLES",
         bucket_name: "hosted-bundles",
         preview_bucket_name: "hosted-bundles-preview",
-      },
-      {
-        binding: "BUNDLES_ENAM",
-        bucket_name: "hosted-bundles-enam",
-        preview_bucket_name: "hosted-bundles-enam-preview",
       },
     ]);
     expect(config).not.toHaveProperty("queues");
@@ -469,14 +470,11 @@ describe("hosted deploy automation helpers", () => {
 
   it("keeps the checked-in wrangler scaffold aligned with generated container sizing and durable object config", async () => {
     const environment = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "murph-hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "murph-hosted-bundles-preview",
+      CF_BUNDLES_BUCKET: "murph-hosted-bundles-enam",
+      CF_BUNDLES_PREVIEW_BUCKET: "murph-hosted-bundles-preview-enam",
       CF_WORKER_NAME: "murph-hosted",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      CF_BUNDLES_ENAM_BUCKET: "murph-hosted-bundles-enam",
-      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "murph-hosted-bundles-preview-enam",
-      HOSTED_R2_PRESIGN_BUCKET_NAME: "murph-hosted-bundles",
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "murph-hosted-bundles-enam",
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "murph-hosted-bundles-enam",
     });
     const generatedConfig = buildHostedWranglerDeployConfig(environment) as {
       containers: Array<{
@@ -496,6 +494,10 @@ describe("hosted deploy automation helpers", () => {
           name: string;
         }>;
       };
+      analytics_engine_datasets: Array<{
+        binding: string;
+        dataset: string;
+      }>;
       migrations: Array<{
         new_sqlite_classes: string[];
         tag: string;
@@ -535,6 +537,10 @@ describe("hosted deploy automation helpers", () => {
           name: string;
         }>;
       };
+      analytics_engine_datasets: Array<{
+        binding: string;
+        dataset: string;
+      }>;
       migrations: Array<{
         new_sqlite_classes: string[];
         tag: string;
@@ -575,6 +581,9 @@ describe("hosted deploy automation helpers", () => {
       });
     }
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
+    expect(checkedInConfig.analytics_engine_datasets).toEqual(
+      generatedConfig.analytics_engine_datasets,
+    );
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
     expect(checkedInConfig.placement).toEqual(generatedConfig.placement);
     expect(checkedInConfig.r2_buckets).toEqual(generatedConfig.r2_buckets);
@@ -590,14 +599,11 @@ describe("hosted deploy automation helpers", () => {
     // value. Required vars are exempt: the scaffold holds placeholders and
     // deploys supply them from the GitHub environment.
     const environment = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "murph-hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "murph-hosted-bundles-preview",
+      CF_BUNDLES_BUCKET: "murph-hosted-bundles-enam",
+      CF_BUNDLES_PREVIEW_BUCKET: "murph-hosted-bundles-preview-enam",
       CF_WORKER_NAME: "murph-hosted",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      CF_BUNDLES_ENAM_BUCKET: "murph-hosted-bundles-enam",
-      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "murph-hosted-bundles-preview-enam",
-      HOSTED_R2_PRESIGN_BUCKET_NAME: "murph-hosted-bundles",
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "murph-hosted-bundles-enam",
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "murph-hosted-bundles-enam",
     });
     const generatedConfig = buildHostedWranglerDeployConfig(environment) as {
       vars: Record<string, string>;
@@ -635,7 +641,6 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
-      HOSTED_R2_WRITE_ADMISSION: "open",
     });
   });
 
@@ -927,54 +932,7 @@ describe("hosted deploy automation helpers", () => {
     ).toThrowError(/CF_BUNDLES_BUCKET must be configured\./u);
   });
 
-  it("rejects invalid or transposed fixed-role cutover configuration", () => {
-    expect(() => readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker",
-      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      HOSTED_R2_CUTOVER_PHASE: "dual_write",
-    })).toThrow("source_active or destination_active");
-
-    expect(() => readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker",
-      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      HOSTED_R2_WRITE_ADMISSION: "draining",
-    })).toThrow("HOSTED_R2_WRITE_ADMISSION must be open or paused");
-
-    expect(() => readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker",
-      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
-    })).toThrow(
-      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused",
-    );
-
-    expect(() => readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker",
-      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
-      HOSTED_R2_WRITE_ADMISSION: "paused",
-    })).toThrow(
-      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused",
-    );
-
-    expect(readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker",
-      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      HOSTED_R2_CUTOVER_PHASE: "destination_active",
-      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
-      HOSTED_R2_WRITE_ADMISSION: "paused",
-    }).workerVars.HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256).toBe("a".repeat(64));
-
+  it("requires the presign bucket to match the canonical R2 binding", () => {
     expect(() => readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
@@ -982,14 +940,6 @@ describe("hosted deploy automation helpers", () => {
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles-enam",
     })).toThrow("HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET");
-
-    expect(() => readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker",
-      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles",
-    })).toThrow("HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME must match CF_BUNDLES_ENAM_BUCKET");
   });
 
   it("defaults generated deploy paths to the cloudflare app directory", () => {
@@ -1087,5 +1037,39 @@ describe("hosted deploy automation helpers", () => {
         tag: "manual-2026-03-26T10-00-00-000Z",
       },
     ]);
+  });
+
+  it("keeps retirement instructions aligned with the canonical R2 deploy surface", async () => {
+    const deployGuide = await readFile(new URL("../DEPLOY.md", import.meta.url), "utf8");
+    const docsIndex = await readFile(
+      new URL("../../../agent-docs/index.md", import.meta.url),
+      "utf8",
+    );
+    const maintenanceGuard = await readFile(
+      new URL("../../web/src/lib/hosted-privacy/account-deletion-maintenance.ts", import.meta.url),
+      "utf8",
+    );
+    const deployPreflight = await readFile(
+      new URL("../scripts/deploy-preflight.ts", import.meta.url),
+      "utf8",
+    );
+    const currentSurfaces = [deployGuide, docsIndex, maintenanceGuard, deployPreflight].join("\n");
+
+    expect(deployGuide).toContain("- `CF_BUNDLES_BUCKET`");
+    expect(deployGuide).toContain("- `CF_BUNDLES_PREVIEW_BUCKET`");
+    expect(deployPreflight).toContain('"CF_BUNDLES_BUCKET"');
+    expect(deployPreflight).toContain('"CF_BUNDLES_PREVIEW_BUCKET"');
+    expect(currentSurfaces).not.toContain("CF_BUNDLES_RETIRING_OC");
+    expect(currentSurfaces).not.toContain("all four configured R2 bucket names");
+    expect(currentSurfaces).not.toContain("deletion-only binding");
+    expect(currentSurfaces).not.toContain("deletion-only retirement bindings");
+
+    const deployNoOcWorker = /Deploy\s+Cloudflare first/u.exec(deployGuide)?.index ?? -1;
+    const deleteOcBuckets = /empty\s+and delete only the exact retired production and preview OC buckets/u
+      .exec(deployGuide)?.index ?? -1;
+    const removeWebGuard = /Only\s+after physical absence is proven/u.exec(deployGuide)?.index ?? -1;
+    expect(deployNoOcWorker).toBeGreaterThan(-1);
+    expect(deleteOcBuckets).toBeGreaterThan(deployNoOcWorker);
+    expect(removeWebGuard).toBeGreaterThan(deleteOcBuckets);
   });
 });

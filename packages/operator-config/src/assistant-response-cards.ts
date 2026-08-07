@@ -5,12 +5,13 @@ import {
   type AssistantResponseCard,
   type CompactTableResponseCardV1,
   type DailyNutritionResponseCard,
+  type DailyNutritionResponseCardV1,
   type DailyNutritionResponseCardV2,
   type NutritionCardGoalSnapshot,
   type NutritionCardGoalStatus,
   type NutritionCardMetric,
 } from '@murphai/contracts'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 const NUTRITION_CARD_MONTHS = [
   'Jan',
@@ -41,10 +42,20 @@ const NUTRITION_CARD_GOAL_STATUS_LABELS = {
 
 export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
   'Ask Murph for this card in text'
-export const LINQ_IMESSAGE_APP_CARD_URL = 'https://murph.ai'
-const COMPACT_TABLE_APP_CARD_URL_PREFIX =
-  `${LINQ_IMESSAGE_APP_CARD_URL}/#murph-card=`
+export const LINQ_IMESSAGE_APP_CARD_ORIGIN = 'https://murph.ai'
+const APP_CARD_URL_PREFIX =
+  `${LINQ_IMESSAGE_APP_CARD_ORIGIN}/#murph-card=`
 const LINQ_IMESSAGE_APP_CARD_URL_MAX_LENGTH = 2_048
+
+export type AppCardEnvelopeV1 = {
+  schemaVersion: 1
+  card: DailyNutritionResponseCardV1
+}
+
+export type AppCardEnvelopeV2 = {
+  schemaVersion: 2
+  card: DailyNutritionResponseCardV2
+}
 
 export type AppCardEnvelopeV3 = {
   schemaVersion: 3
@@ -172,7 +183,21 @@ export function buildLinqIMessageAppCardUrl(
   const parsed = assistantResponseCardSchema.parse(card)
   return parsed.kind === 'compact_table'
     ? encodeCompactTableAppCardUrl(parsed)
-    : LINQ_IMESSAGE_APP_CARD_URL
+    : encodeDailyNutritionAppCardUrl(parsed)
+}
+
+export function encodeDailyNutritionAppCardUrl(
+  card: DailyNutritionResponseCard,
+): string {
+  const parsed = assistantResponseCardSchema.parse(card)
+  if (parsed.kind !== 'daily_nutrition') {
+    throw new TypeError('Expected a daily nutrition response card.')
+  }
+  const envelope: AppCardEnvelopeV1 | AppCardEnvelopeV2 =
+    isDailyNutritionResponseCardV2(parsed)
+      ? { schemaVersion: 2, card: parsed }
+      : { schemaVersion: 1, card: parsed }
+  return encodeAppCardEnvelope(envelope)
 }
 
 export function encodeCompactTableAppCardUrl(
@@ -187,9 +212,15 @@ export function encodeCompactTableAppCardUrl(
     schemaVersion: 3,
     card: presentationCard,
   }
+  return encodeAppCardEnvelope(envelope)
+}
+
+function encodeAppCardEnvelope(
+  envelope: AppCardEnvelopeV1 | AppCardEnvelopeV2 | AppCardEnvelopeV3,
+): string {
   const encoded = Buffer.from(JSON.stringify(envelope), 'utf8')
     .toString('base64url')
-  const url = `${COMPACT_TABLE_APP_CARD_URL_PREFIX}${encoded}`
+  const url = `${APP_CARD_URL_PREFIX}${encoded}`
   if (url.length >= LINQ_IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
     throw new TypeError('The encoded app card exceeds the inline size limit.')
   }

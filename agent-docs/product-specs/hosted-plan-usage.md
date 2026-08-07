@@ -118,7 +118,11 @@ marked uncounted and cannot consume the new included allowance or purchased
 usage credit. Provider work that starts after the cutover counts normally. The
 meter uses the later of this cutover and the latest fulfilled purchase grant,
 so it displays the fresh capacity immediately and does not forecast from
-pre-reset work.
+pre-reset work. A committed direct or Family capacity increase carries only the
+affected member identities to the existing post-commit runtime-recheck owner.
+A failed wake leaves the Stripe receipt retryable; replay re-proves the exact
+billing transition, preserves the idempotent reset, and retries the wake rather
+than waiting for the former period end.
 
 For paid access, the included monthly usage value is exactly 80% of the
 server-owned recurring amount for that member's billing mode and tier. Direct

@@ -26,7 +26,10 @@ import {
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { subscribeBrowserVaultSessionInvalidation } from "@/src/lib/browser-vault/session-invalidation";
-import { hasStagedClinicalRecordsConnectIntentForCurrentPath } from "@/src/lib/clinical-records/browser-connect-intent";
+import {
+  hasStagedClinicalRecordsConnectIntentForCurrentPath,
+  isClinicalRecordsConnectLauncherForCurrentPath,
+} from "@/src/lib/clinical-records/browser-connect-intent";
 
 import {
   navigateHostedAuthRedirect,
@@ -232,7 +235,10 @@ function shouldResumeCurrentClinicalRecordsConnectUrl(
 ): boolean {
   return (
     isHostedOnboardingAccessibleStage(payload.stage)
-    && hasStagedClinicalRecordsConnectIntentForCurrentPath()
+    && (
+      hasStagedClinicalRecordsConnectIntentForCurrentPath()
+      || isClinicalRecordsConnectLauncherForCurrentPath()
+    )
   );
 }
 

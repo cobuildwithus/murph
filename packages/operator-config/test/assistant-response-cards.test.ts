@@ -1,10 +1,13 @@
+import { Buffer } from 'node:buffer'
+
 import { describe, expect, it } from 'vitest'
 
 import {
   LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
-  LINQ_IMESSAGE_APP_CARD_URL,
+  LINQ_IMESSAGE_APP_CARD_ORIGIN,
   assistantResponseCardJsonSchema,
   assistantResponseCardSchema,
+  buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
   renderAssistantResponseCardText,
   type DailyNutritionResponseCard,
@@ -42,6 +45,11 @@ const COMPLETE_CARD_V2: DailyNutritionResponseCardV2 = {
     fatGrams: { target: 40, status: 'on_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
+}
+
+function decodeAppCardUrl(url: string): unknown {
+  const encoded = new URL(url).hash.replace(/^#murph-card=/u, '')
+  return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
 }
 
 describe('assistant response cards', () => {
@@ -414,7 +422,7 @@ describe('assistant response cards', () => {
     })
   })
 
-  it('renders complete, goal-aware, and partial Linq static layouts', () => {
+  it('builds interactive snapshots and truthful Linq fallback layouts', () => {
     const completeLayout = buildLinqIMessageAppLayout(COMPLETE_CARD)
     const goalLayout = buildLinqIMessageAppLayout(COMPLETE_CARD_V2)
     const proteinGoalLayout = buildLinqIMessageAppLayout({
@@ -441,9 +449,23 @@ describe('assistant response cards', () => {
     expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
       'Ask Murph for this card in text',
     )
-    expect(LINQ_IMESSAGE_APP_CARD_URL).toBe('https://murph.ai')
-    expect(LINQ_IMESSAGE_APP_CARD_URL.length).toBeLessThanOrEqual(2_048)
-    expect(new URL(LINQ_IMESSAGE_APP_CARD_URL).protocol).toBe('https:')
+    const completeCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD)
+    const goalCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD_V2)
+    expect(LINQ_IMESSAGE_APP_CARD_ORIGIN).toBe('https://murph.ai')
+    expect(completeCardUrl.startsWith(
+      `${LINQ_IMESSAGE_APP_CARD_ORIGIN}/#murph-card=`,
+    )).toBe(true)
+    expect(completeCardUrl.length).toBeLessThan(2_048)
+    expect(goalCardUrl.length).toBeLessThan(2_048)
+    expect(new URL(goalCardUrl).protocol).toBe('https:')
+    expect(decodeAppCardUrl(completeCardUrl)).toEqual({
+      schemaVersion: 1,
+      card: COMPLETE_CARD,
+    })
+    expect(decodeAppCardUrl(goalCardUrl)).toEqual({
+      schemaVersion: 2,
+      card: COMPLETE_CARD_V2,
+    })
     expect(completeLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
       subcaption: '1,490.25 cal',

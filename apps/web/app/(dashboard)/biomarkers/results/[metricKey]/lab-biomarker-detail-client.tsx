@@ -18,6 +18,7 @@ import {
   LabBiomarkerHistoryChart,
   type LabBiomarkerChartPoint,
   type LabBiomarkerChartRange,
+  type LabBiomarkerReferenceRangeTone,
 } from "@/src/components/biomarkers/lab-biomarker-history-chart";
 import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -283,6 +284,7 @@ function BiomarkerDetailContent({
                   referenceRangeLabel={chartReference?.label}
                   referenceRangeSourceLabel={chartReference?.sourceLabel}
                   referenceRangeTitle={chartReference?.title}
+                  referenceRangeTone={chartReference?.tone}
                   unit={detail.comparableUnit}
                 />
               </div>
@@ -584,6 +586,7 @@ function resolveChartedReferenceContext(
   range: LabBiomarkerChartRange;
   sourceLabel: string | null;
   title: string;
+  tone: LabBiomarkerReferenceRangeTone;
 } | null {
   const latestPoint = detail.chartSeries.find((point) => point.rowId === detail.latest.id);
   if (
@@ -604,6 +607,7 @@ function resolveChartedReferenceContext(
       range: { high, low },
       sourceLabel: detail.latest.labName ?? detail.latest.sourceLabel,
       title: "Latest lab range",
+      tone: "lab",
     };
   }
 
@@ -636,6 +640,7 @@ function resolveChartedReferenceContext(
     },
     sourceLabel: `${fallback.label} · not the reporting lab's range`,
     title: "Published adult comparator",
+    tone: "context",
   };
 }
 

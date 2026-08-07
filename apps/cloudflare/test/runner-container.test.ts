@@ -4168,6 +4168,9 @@ describe("RunnerContainer", () => {
     const runnerResponse = createDeferred<Response>();
     const abortRequestStarted = createDeferred<void>();
     const abortResponse = createDeferred<Response>();
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
+      completed: true,
+    }));
     let executeCallCount = 0;
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
@@ -4199,6 +4202,11 @@ describe("RunnerContainer", () => {
     });
     const { container } = createContainerDouble({
       containerFetch,
+      env: {
+        USER_RUNNER: {
+          getByName: vi.fn(() => ({ recordRuntimeCompletionFromContainer })),
+        },
+      },
       initialStatus: "running",
     });
     const request = createRunnerRequest("evt_registered_abort_settlement");
@@ -4246,6 +4254,7 @@ describe("RunnerContainer", () => {
       status: 200,
     }));
     await expect(invocation).resolves.toEqual(createRunnerResult());
+    expect(recordRuntimeCompletionFromContainer).not.toHaveBeenCalled();
     await expect(container.invoke({
       job: {
         kind: "workspace-invocation",
@@ -4285,6 +4294,7 @@ describe("RunnerContainer", () => {
       abortResult,
       coalescedAbortResult,
     ])).resolves.toEqual(["accepted", "accepted"]);
+    expect(recordRuntimeCompletionFromContainer).not.toHaveBeenCalled();
     await expect(canceledSuccessor).resolves.toMatchObject({
       message: "workspace invocation preempted",
     });

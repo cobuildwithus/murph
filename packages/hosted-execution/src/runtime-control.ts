@@ -2057,9 +2057,10 @@ export type HostedRuntimeLatencyTraceMilestone =
 
 export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
-  // Control-plane orchestration stamps before the runner-container DO starts
-  // dispatch. These are epoch-ms values from different hosts, so they are for
-  // coarse span splitting only, not strict clock-order assertions.
+  // Control-plane orchestration diagnostics before the runner-container DO
+  // starts dispatch. Timestamps come from different hosts and are for coarse
+  // span splitting only. The two bounded ids correlate one Web direct ensure
+  // with the runtime invocation it launched.
   orchestration?: {
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
@@ -2067,11 +2068,21 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     tokenAcquiredAtEpochMs?: number;
     directEnsureRequestStartedAtEpochMs?: number;
     directEnsureResponseReceivedAtEpochMs?: number;
+    directEnsureOrchestrationAttemptId?: string;
     runtimeControlAuthStartedAtEpochMs?: number;
     runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
+    runtimeInvocationOrchestrationAttemptId?: string;
     triggeredByWebDirect?: boolean;
+    userRunnerRpcStartedAtEpochMs?: number;
+    runtimeConsentLockAcquiredAtEpochMs?: number;
+    healthDataAdmissionReadStartedAtEpochMs?: number;
+    healthDataAdmissionReadFinishedAtEpochMs?: number;
     userRunnerEnsureStartedAtEpochMs?: number;
+    runnerStateBindStartedAtEpochMs?: number;
+    runnerStateBindFinishedAtEpochMs?: number;
+    runnerStateReadStartedAtEpochMs?: number;
+    runnerStateReadFinishedAtEpochMs?: number;
     activeFenceObservedAtEpochMs?: number;
     activeFenceTargetWasPriorVersion?: boolean;
     activeWakeStartedAtEpochMs?: number;
@@ -2121,6 +2132,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     extractMs?: number;
     encryptedBytes?: number;
     plainBytes?: number;
+    replaySafeReadMaxAttempt?: number;
   };
   boot?: {
     nodeStartupMs?: number;
@@ -2145,13 +2157,21 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   // Runtime-owned work between mailbox staging and the assistant engine's
   // local Codex turn/start write. These metadata-only diagnostics are attached
   // to that existing milestone rather than emitted synchronously.
+  // Only mailboxImportDoneToAssistantPhaseMs,
+  // workspaceAssistantPreAutomationMs, and
+  // automationLaneToAssistantServiceMs participate in the canonical additive
+  // provider-start path. The other leaves are nested diagnostics.
   preProvider?: {
+    mailboxImportDoneToAssistantPhaseMs?: number;
     workspaceAssistantPreAutomationMs?: number;
+    automationLaneToAssistantServiceMs?: number;
     executionTargetHydrateMs?: number;
     systemMailboxMaintenanceMs?: number;
     memberPreferencesPrePlanningMs?: number;
     automationBootstrapMs?: number;
+    outboxScanBytesRead?: number;
     outboxScanElapsedMs?: number;
+    outboxScanFilesRead?: number;
     outboxScanPerformed?: boolean;
     receiptScanBytesRead?: number;
     receiptScanElapsedMs?: number;
@@ -2173,17 +2193,23 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     runtimeLeaseGeneration?: string;
   };
   provider?: {
+    // Together with the three canonical preProvider leaves, these six leaves
+    // are adjacent and additive. Session, prompt, admission, and App Server
+    // lifecycle leaves below are nested diagnostics and must not be added.
+    assistantServicePreLockMs?: number;
     codexAppServerInitializeMs?: number;
     codexAppServerPreProviderMs?: number;
     codexAppServerSpawnReadyMs?: number;
     codexAppServerThreadResumeMs?: number;
     codexAppServerThreadStartMs?: number;
     codexAppServerWarmReuseMs?: number;
+    codexProcessPreparationMs?: number;
     turnLockWaitMs?: number;
     sessionResolveMs?: number;
     promptBuildMs?: number;
     admissionMs?: number;
     preProviderSetupMs?: number;
+    providerPlanAndGateMs?: number;
     linqEgressGuardMs?: number;
   };
 }
@@ -2219,11 +2245,21 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "tokenAcquiredAtEpochMs",
     "directEnsureRequestStartedAtEpochMs",
     "directEnsureResponseReceivedAtEpochMs",
+    "directEnsureOrchestrationAttemptId",
     "runtimeControlAuthStartedAtEpochMs",
     "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
+    "runtimeInvocationOrchestrationAttemptId",
     "triggeredByWebDirect",
+    "userRunnerRpcStartedAtEpochMs",
+    "runtimeConsentLockAcquiredAtEpochMs",
+    "healthDataAdmissionReadStartedAtEpochMs",
+    "healthDataAdmissionReadFinishedAtEpochMs",
     "userRunnerEnsureStartedAtEpochMs",
+    "runnerStateBindStartedAtEpochMs",
+    "runnerStateBindFinishedAtEpochMs",
+    "runnerStateReadStartedAtEpochMs",
+    "runnerStateReadFinishedAtEpochMs",
     "activeFenceObservedAtEpochMs",
     "activeFenceTargetWasPriorVersion",
     "activeWakeStartedAtEpochMs",
@@ -2263,6 +2299,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "extractMs",
     "encryptedBytes",
     "plainBytes",
+    "replaySafeReadMaxAttempt",
   ],
   boot: ["nodeStartupMs", "restoreWasCold"],
   wake: [
@@ -2282,12 +2319,16 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "stagedAtEpochMs",
   ],
   preProvider: [
+    "mailboxImportDoneToAssistantPhaseMs",
     "workspaceAssistantPreAutomationMs",
+    "automationLaneToAssistantServiceMs",
     "executionTargetHydrateMs",
     "systemMailboxMaintenanceMs",
     "memberPreferencesPrePlanningMs",
     "automationBootstrapMs",
+    "outboxScanBytesRead",
     "outboxScanElapsedMs",
+    "outboxScanFilesRead",
     "outboxScanPerformed",
     "receiptScanBytesRead",
     "receiptScanElapsedMs",
@@ -2306,17 +2347,20 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "runtimeLeaseGeneration",
   ],
   provider: [
+    "assistantServicePreLockMs",
     "codexAppServerInitializeMs",
     "codexAppServerPreProviderMs",
     "codexAppServerSpawnReadyMs",
     "codexAppServerThreadResumeMs",
     "codexAppServerThreadStartMs",
     "codexAppServerWarmReuseMs",
+    "codexProcessPreparationMs",
     "turnLockWaitMs",
     "sessionResolveMs",
     "promptBuildMs",
     "admissionMs",
     "preProviderSetupMs",
+    "providerPlanAndGateMs",
     "linqEgressGuardMs",
   ],
 } as const;
@@ -2576,6 +2620,15 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   leafKey: string,
   value: unknown,
 ): value is HostedRuntimeLatencyPhaseBreakdownJsonLeaf {
+  if (
+    phase === "orchestration"
+    && (
+      leafKey === "directEnsureOrchestrationAttemptId"
+      || leafKey === "runtimeInvocationOrchestrationAttemptId"
+    )
+  ) {
+    return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+  }
   if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
     return typeof value === "string"
       && value.length <= 20
@@ -2586,6 +2639,13 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   }
 
   return isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value);
+}
+
+export function isHostedRuntimeDirectEnsureOrchestrationAttemptId(
+  value: unknown,
+): value is string {
+  return typeof value === "string"
+    && /^web-ingress-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
 }
 
 function isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value: unknown): value is number {
@@ -2921,13 +2981,6 @@ export interface HostedRunnerStatusResponse {
   mailboxLag: HostedMailboxLaneLag[];
   nextAlarmAt?: string | null;
   recentLogs?: HostedRuntimeLogEntry[];
-  r2Cutover?: {
-    coexisting: boolean;
-    pausedCanaryConfigured?: boolean;
-    phase: "destination_active" | "source_active";
-    protocolVersion: string;
-    writeAdmission?: "open" | "paused";
-  };
   userId: string;
   workspace: HostedWorkspaceState | null;
 }

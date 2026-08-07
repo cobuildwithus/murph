@@ -370,9 +370,6 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBe("hosted-local-r2-access-key");
     expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
-    expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
-    expect(merged.HOSTED_R2_WRITE_ADMISSION).toBe("open");
-    expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
   });
 
@@ -390,8 +387,6 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBe("hosted-local-r2-access-key");
     expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
-    expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
-    expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
   });
 
@@ -410,8 +405,6 @@ describe("mergeCloudflareLocalEnv", () => {
       expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBeUndefined();
       expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBeUndefined();
       expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBeUndefined();
-      expect(merged.HOSTED_R2_CUTOVER_PHASE).toBeUndefined();
-      expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBeUndefined();
       expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBeUndefined();
     }
   });
@@ -429,7 +422,6 @@ describe("mergeCloudflareLocalEnv", () => {
         HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:9000",
         HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:9000",
         HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
-        HOSTED_R2_WRITE_ADMISSION: "paused",
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
       },
     });
@@ -438,9 +430,6 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
     expect(merged.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT).toBe("1");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
-    expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
-    expect(merged.HOSTED_R2_WRITE_ADMISSION).toBe("paused");
-    expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT).toBe("http://127.0.0.1:9000");
     expect(merged.HOSTED_R2_PRESIGN_ENDPOINT).toBe("http://host.docker.internal:9000");
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
@@ -465,8 +454,6 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT).toBe("http://127.0.0.1:9000");
     expect(merged.HOSTED_R2_PRESIGN_ENDPOINT).toBe("http://host.docker.internal:9000");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
-    expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
-    expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
   });
 
   it("keeps local generated hosted crypto keys ahead of pulled Vercel values by default", () => {
@@ -1635,6 +1622,12 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(config.triggers).toEqual({
       crons: ["*/5 * * * *"],
     });
+    expect(config.analytics_engine_datasets).toEqual([
+      {
+        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
+        dataset: "murph_hosted_runtime_retries",
+      },
+    ]);
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
     expect(container.image_vars).toEqual({
@@ -1700,10 +1693,6 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(config.ai).toEqual({ binding: "AI" });
     expect(config.send_email).toEqual([{ name: "HOSTED_EMAIL" }]);
     expect(config.version_metadata).toEqual({ binding: "CF_VERSION_METADATA" });
-    expect((config.vars as Record<string, string>).HOSTED_R2_WRITE_ADMISSION).toBe("open");
-    expect((buildWranglerLocalDevConfig({
-      HOSTED_R2_WRITE_ADMISSION: "paused",
-    }).vars as Record<string, string>).HOSTED_R2_WRITE_ADMISSION).toBe("paused");
   });
 
   it("omits the Workers AI binding for hosted-local test routes so the fake binding composes", () => {

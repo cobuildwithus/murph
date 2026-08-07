@@ -13,7 +13,6 @@ import {
   HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID,
   HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID,
   HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
-  HOSTED_LOCAL_R2_PRESIGN_ENAM_BUCKET_NAME,
   HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
   HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -412,13 +411,6 @@ function resolveHostedLocalR2PresignEnvironment(
     HOSTED_R2_PRESIGN_BUCKET_NAME:
       normalizeOptionalString(env.HOSTED_R2_PRESIGN_BUCKET_NAME)
       ?? HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
-    HOSTED_R2_CUTOVER_PHASE:
-      normalizeOptionalString(env.HOSTED_R2_CUTOVER_PHASE) ?? "source_active",
-    HOSTED_R2_WRITE_ADMISSION:
-      normalizeOptionalString(env.HOSTED_R2_WRITE_ADMISSION) ?? "open",
-    HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME:
-      normalizeOptionalString(env.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME)
-      ?? HOSTED_LOCAL_R2_PRESIGN_ENAM_BUCKET_NAME,
     ...(controlEndpoint ? { HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: controlEndpoint } : {}),
     ...(endpoint ? { HOSTED_R2_PRESIGN_ENDPOINT: endpoint } : {}),
     ...(dockerBridgeHost ? { MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST: dockerBridgeHost } : {}),
@@ -1041,8 +1033,6 @@ export function buildWranglerLocalDevConfig(
     // Local Cloudflare container cold starts are materially slower than the hosted runtime.
     HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS", source) ?? "60000",
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: resolveWranglerEnvValue("HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT", source) ?? "development",
-    HOSTED_R2_CUTOVER_PHASE: resolveWranglerEnvValue("HOSTED_R2_CUTOVER_PHASE", source) ?? "source_active",
-    HOSTED_R2_WRITE_ADMISSION: resolveWranglerEnvValue("HOSTED_R2_WRITE_ADMISSION", source) ?? "open",
   };
 
   for (const key of new Set(WRANGLER_VAR_ALLOWLIST)) {
@@ -1142,10 +1132,11 @@ export function buildWranglerLocalDevConfig(
         bucket_name: "murph-hosted-bundles",
         preview_bucket_name: "murph-hosted-bundles-preview",
       },
+    ],
+    analytics_engine_datasets: [
       {
-        binding: "BUNDLES_ENAM",
-        bucket_name: "murph-hosted-bundles-enam",
-        preview_bucket_name: "murph-hosted-bundles-preview-enam",
+        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
+        dataset: "murph_hosted_runtime_retries",
       },
     ],
     // Wrangler proxies the Workers AI binding through a remote session. The

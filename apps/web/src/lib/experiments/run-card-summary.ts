@@ -13,8 +13,16 @@ export interface ExperimentRunCardMetric {
   sentiment?: ExperimentSignal["sentiment"];
 }
 
+export interface ExperimentRunCardDailyCadence {
+  cadence: string;
+  completed: number;
+  expected: number;
+  label?: string;
+}
+
 export interface ExperimentRunCardSummary {
   completionPercent?: number;
+  dailyCadence?: ExperimentRunCardDailyCadence;
   dateRange?: string;
   day?: number;
   metric?: ExperimentRunCardMetric;

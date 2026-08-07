@@ -1,21 +1,21 @@
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 /**
- * Temporary control for the OC-to-ENAM bundles migration in
- * `apps/cloudflare/R2_BUNDLES_ENAM_MIGRATION.md`.
+ * Temporary control for the OC-to-ENAM retirement tracked by
+ * `agent-docs/exec-plans/active/2026-08-06-retire-r2-oc-bridge.md`.
  *
- * During that cutover two buckets hold the member's objects and either one can
- * still become authoritative. Before destination activation and the
- * dual-bucket deletion canary complete, a deletion cannot yet be proven
- * everywhere. Rather than accept an incomplete deletion, the operation
- * temporarily declines it.
+ * The Worker no longer needs an OC binding, but the retired production and
+ * preview buckets still exist during the staged rollout. Until the exact no-OC
+ * Worker is live and both buckets are physically absent, deletion completion
+ * cannot be proven everywhere. Rather than accept an incomplete deletion, the
+ * operation temporarily declines it.
  *
  * The flag is the only authority and the message makes no timing promise, not
  * even a relative one. Recovery guidance is stated as a condition instead, so
  * it stays true if migration or cutover validation takes longer than planned.
  *
- * Delete this module, its env var, and both call sites with the runbook once
- * the OC buckets are retired.
+ * Delete this module, its env var, and both call sites only after both OC
+ * bucket APIs report the buckets absent.
  */
 export const HOSTED_ACCOUNT_DELETION_MAINTENANCE_ENV = "HOSTED_ACCOUNT_DELETION_MAINTENANCE";
 

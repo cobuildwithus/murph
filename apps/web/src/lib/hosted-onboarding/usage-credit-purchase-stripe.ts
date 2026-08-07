@@ -10,6 +10,7 @@ import {
 import { hostedOnboardingError } from "./errors";
 import type { HostedOnboardingReadClient } from "./shared";
 import {
+  buildHostedStripeAlertCorrelationCause,
   describeHostedStripeError,
   logHostedStripeFailure,
 } from "./stripe-error-log";
@@ -248,7 +249,15 @@ function buildHostedUsageCreditStripeCheckoutRequest(input: {
   showPaymentMethodSaveControl: boolean;
   stripeCustomerId: string;
 }): Stripe.Checkout.SessionCreateParams {
-  return {
+  const paymentIntentData: NonNullable<
+    Stripe.Checkout.SessionCreateParams["payment_intent_data"]
+  > = {
+    metadata: input.checkoutMetadata,
+  };
+  if (input.savePaymentMethod) {
+    paymentIntentData.setup_future_usage = "off_session";
+  }
+  const checkoutParams: Stripe.Checkout.SessionCreateParams = {
     adaptive_pricing: { enabled: false },
     cancel_url: input.checkoutCancelUrl,
     client_reference_id: input.purchaseId,
@@ -257,22 +266,16 @@ function buildHostedUsageCreditStripeCheckoutRequest(input: {
     line_items: [{ price: input.priceId, quantity: 1 }],
     metadata: input.checkoutMetadata,
     mode: "payment",
-    payment_intent_data: {
-      metadata: input.checkoutMetadata,
-      ...(input.savePaymentMethod
-        ? { setup_future_usage: "off_session" as const }
-        : {}),
-    },
-    ...(input.showPaymentMethodSaveControl
-      ? {
-          saved_payment_method_options: {
-            allow_redisplay_filters: ["always"] as const,
-            payment_method_save: "enabled" as const,
-          },
-        }
-      : {}),
+    payment_intent_data: paymentIntentData,
     success_url: input.checkoutSuccessUrl,
   };
+  if (input.showPaymentMethodSaveControl) {
+    checkoutParams.saved_payment_method_options = {
+      allow_redisplay_filters: ["always"],
+      payment_method_save: "enabled",
+    };
+  }
+  return checkoutParams;
 }
 
 export async function assertHostedUsageCreditStripePriceMatchesPurchase(input: {
@@ -448,6 +451,7 @@ export function buildHostedUsageCreditStripeUnavailableError(
 ) {
   logHostedStripeFailure({ error, operationName });
   return hostedOnboardingError({
+    cause: buildHostedStripeAlertCorrelationCause(error),
     code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
     details: describeSafeHostedUsageCreditStripeError(error),
     httpStatus: 502,

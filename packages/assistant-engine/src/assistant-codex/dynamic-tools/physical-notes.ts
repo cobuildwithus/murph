@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
   normalizeHostedPhysicalNoteRecipient,
   type HostedPhysicalNoteRecipient,

@@ -125,7 +125,16 @@ export interface HostedPulseTrialExtensionSubscription {
   trial_start: number | null;
 }
 
-type HostedPulseTrialExtensionStripeUpdateParams =
+export type HostedPulseTrialExtensionStripeResumeParams = Parameters<
+  Stripe["subscriptions"]["resume"]
+>[1] & {
+  billing_cycle_anchor: "unchanged";
+  proration_behavior: "none";
+};
+
+export type HostedPulseTrialExtensionStripeUpdateParams = Parameters<
+  Stripe["subscriptions"]["update"]
+>[1] & (
   | {
       metadata: Record<string, string>;
       proration_behavior?: never;
@@ -135,12 +144,8 @@ type HostedPulseTrialExtensionStripeUpdateParams =
       metadata: Record<string, string>;
       proration_behavior: "none";
       trial_end: number;
-    };
-
-interface HostedPulseTrialExtensionStripeResumeParams {
-  billing_cycle_anchor: "unchanged";
-  proration_behavior: "none";
-}
+    }
+);
 
 interface HostedPulseTrialExtensionStripeClient {
   retrieveSubscription(
@@ -484,13 +489,12 @@ async function prepareHostedPulseTrialExtension(input: {
       {
         metadata: buildHostedPulseTrialExtensionPendingMetadata(input),
       },
-      {
-        idempotencyKey: buildHostedPulseTrialExtensionIdempotencyKey({
+      buildHostedPulseTrialExtensionStripeRequestOptions(
+        buildHostedPulseTrialExtensionIdempotencyKey({
           operationId: input.operationId,
           step: "prepare",
         }),
-        ...buildHostedPulseTrialExtensionStripeRequestOptions(),
-      },
+      ),
     );
   } catch (error) {
     throw new HostedPulseTrialExtensionProviderError({
@@ -528,13 +532,12 @@ async function resumeHostedPulseTrialExtension(input: {
         billing_cycle_anchor: "unchanged",
         proration_behavior: "none",
       },
-      {
-        idempotencyKey: buildHostedPulseTrialExtensionIdempotencyKey({
+      buildHostedPulseTrialExtensionStripeRequestOptions(
+        buildHostedPulseTrialExtensionIdempotencyKey({
           operationId: input.operationId,
           step: "resume",
         }),
-        ...buildHostedPulseTrialExtensionStripeRequestOptions(),
-      },
+      ),
     );
   } catch (error) {
     throw new HostedPulseTrialExtensionProviderError({
@@ -572,13 +575,12 @@ async function updateHostedPulseTrialExtension(input: {
         proration_behavior: "none",
         trial_end: input.targetTrialEnd,
       },
-      {
-        idempotencyKey: buildHostedPulseTrialExtensionIdempotencyKey({
+      buildHostedPulseTrialExtensionStripeRequestOptions(
+        buildHostedPulseTrialExtensionIdempotencyKey({
           operationId: input.operationId,
           step: "update",
         }),
-        ...buildHostedPulseTrialExtensionStripeRequestOptions(),
-      },
+      ),
     );
   } catch (error) {
     throw new HostedPulseTrialExtensionProviderError({
@@ -1317,11 +1319,17 @@ function createHostedPulseTrialExtensionStripeClient(
   };
 }
 
-function buildHostedPulseTrialExtensionStripeRequestOptions(): Stripe.RequestOptions {
-  return {
+function buildHostedPulseTrialExtensionStripeRequestOptions(
+  idempotencyKey?: string,
+): Stripe.RequestOptions {
+  const requestOptions: Stripe.RequestOptions = {
     maxNetworkRetries: STRIPE_REQUEST_MAX_NETWORK_RETRIES,
     timeout: STRIPE_REQUEST_TIMEOUT_MS,
   };
+  if (idempotencyKey) {
+    requestOptions.idempotencyKey = idempotencyKey;
+  }
+  return requestOptions;
 }
 
 /**

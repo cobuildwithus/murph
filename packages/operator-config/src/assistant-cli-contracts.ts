@@ -1,5 +1,5 @@
 import { isIP } from 'node:net'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
   assistantReasoningEffortValues as contractAssistantReasoningEffortValues,
   automationRouteSchema,

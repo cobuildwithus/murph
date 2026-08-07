@@ -40,6 +40,7 @@ const hostedLocalRunUntilIdleTimeoutMs = 30_000;
 
 export interface HostedLocalDevHarness {
   assertNoInterventions(): void;
+  assertStripeListenerAlive(): void;
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
   /** The app-session HMAC key the web process runs with. */
   hostedAppSessionHmacKey: string;
@@ -64,7 +65,9 @@ export interface HostedLocalDevHarness {
   armShutdownCheckpointPublicationBarrierForTest(userId: string): Promise<{ ok: true }>;
   beginShutdownCheckpointGracefulStopForTest(userId: string): Promise<{ ok: true }>;
   expireRunnerActivityForTest(userId: string): Promise<{ ok: true }>;
-  dropRunnerActiveOperationForTest(userId: string): Promise<{ ok: true }>;
+  dropRunnerActiveOperationForTest(userId: string, input?: {
+    loseCompletedInvocationResult?: boolean;
+  }): Promise<{ ok: true }>;
   readForegroundPriorityOrderingObservationForTest(
     userId: string,
   ): Promise<HostedLocalForegroundPriorityOrderingObservationState>;
@@ -226,6 +229,14 @@ export async function startHostedLocalDevHarness(input: {
         throw new Error(
           `Expected a passive hosted-local scenario, but the harness issued ${interventionCount} mutating intervention request(s). Deliberate recovery controls require faultInjection: true.`,
         );
+      },
+      assertStripeListenerAlive: (): void => {
+        const stripeListener = stack?.processes.stripe;
+        if (!stripeListener || stripeListener.child.exitCode !== null) {
+          throw new Error(
+            "The hosted-local scenario requires its owned stripe listen process to remain alive.",
+          );
+        }
       },
       config: {
         ...config,
@@ -803,10 +814,16 @@ export async function startHostedLocalDevHarness(input: {
     );
   }
 
-  async function dropRunnerActiveOperationForTest(userId: string): Promise<{ ok: true }> {
+  async function dropRunnerActiveOperationForTest(
+    userId: string,
+    input: { loseCompletedInvocationResult?: boolean } = {},
+  ): Promise<{ ok: true }> {
     assertHostedLocalTestControlsAvailable("dropRunnerActiveOperationForTest");
     return await requestJsonForRuntime<{ ok: true }>(
-      `/__test/users/${encodeURIComponent(userId)}/container-active-operation-drop`,
+      `/__test/users/${encodeURIComponent(userId)}/container-active-operation-drop`
+        + (input.loseCompletedInvocationResult === true
+          ? "?loseCompletedInvocationResult=1"
+          : ""),
       {
         headers: {
           [HOSTED_EXECUTION_USER_ID_HEADER]: userId,

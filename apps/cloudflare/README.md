@@ -94,16 +94,16 @@ Root `pnpm dev` starts the same local Cloudflare container path and uses the ima
 
 ## Storage Contract
 
-- The live v2 workspace snapshot is one encrypted zstd-compressed tar object under `users/<namespace>/workspace-snapshots/<snapshotId>.snapshot.enc`. The container uploads that object directly to R2 through a short-lived presigned `PUT` URL minted by the Worker, and restores through a presigned `GET`; Worker routes carry JSON session/presign/complete metadata only and never receive the snapshot body. During either R2 coexistence phase, dispatch omits the fixed-source prepared URL and cold restore uses the existing write-fenced object locator to presign the concrete bucket that contains the checkpoint. This v2 format is a greenfield zstd hard cut: gzip v2 refs are not produced or restored.
+- The live v2 workspace snapshot is one encrypted zstd-compressed tar object under `users/<namespace>/workspace-snapshots/<snapshotId>.snapshot.enc`. The container uploads that object directly to the canonical ENAM R2 bucket through a short-lived presigned `PUT` URL minted by the Worker, and restores through a presigned `GET`; Worker routes carry JSON session/presign/complete metadata only and never receive the snapshot body. This v2 format is a greenfield zstd hard cut: gzip v2 refs are not produced or restored.
 - V2 snapshot creation validates the planned durable-root entries, then streams `tar -> zstd -> AES-GCM` into the encrypted object. Restore treats v2 snapshots as first-party authenticated artifacts: it verifies the encrypted object size/hash, AES-GCM tag, and plaintext compressed archive hash, extracts once into a temporary root, then swaps that root into place. Restore does not re-list tar members; a valid encrypted snapshot is trusted as output from the snapshot writer.
 - Legacy full/base bundle refs and legacy artifact sidecars remain restoreable during migration, but v2 snapshot production does not externalize raw files into artifact blobs.
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
 - Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, timestamps, and short-lived direct-R2 upload sessions without persisted presigned URLs. Canonical mailbox ordering, workspace checkpoint refs, redacted status/logs, and mailbox lag stay web-owned; snapshot refs come from hosted-runtime workspace control responses and may be kept only as an in-memory warm cache.
 - A valid workspace-CAS snapshot is not discarded because web observes newer conversation input. Current web commits the request snapshot, redacted watermarks, and wake projection as one prefix and may return `conversationInputAhead`; a live default-mode runtime imports through the existing foreground path, while retention-only work or shutdown leaves the durable mailbox row for reconciliation. The runner performs no post-upload wake discard and no metadata-only shutdown resnapshot. If shutdown follows a real import that staged assistant input, its ordinary dirty checkpoint carries a due assistant wake so restore can run it. Handling for an old web deployment's `foreground_pending` checkpoint response remains compatibility-only.
 - Hosted raw email payloads now live under the encrypted, root-independent `hosted-email/messages/{storageNamespaceId}/` prefix. Raw blobs and their encrypted recovery refs carry an R2 lifecycle backstop under `hosted-email/messages/` that makes them deletion-eligible after 24 hours, while account-deletion cleanup removes the same user prefix directly. Normal worker deploys reapply that checked-in lifecycle rule before `wrangler deploy`. Removed pre-launch root-derived raw-email paths are unsupported under the greenfield hard cut; the same lifecycle prefix bounds any transient leftovers.
-- Account deletion removes user-scoped R2 objects and destroys the warm container before deleting Durable Object state. It clears the alarm and calls Durable Object storage `deleteAll()` after the SQL owner check; already-absent SQL state is idempotent success, while missing `deleteAll` support or any R2/container/state failure remains incomplete so web's durable cleanup receipt retries it. The response carries explicit `deleteAllCompleted` evidence; web must treat a legacy response without that field as pending. Deploy this Worker before the receipt-producing web release and do not roll Cloudflare below this capability while those receipts can run.
+- Account deletion removes user-scoped R2 objects from the canonical ENAM bucket, then destroys the warm container before deleting Durable Object state. It proves the bucket stably empty, clears the alarm, and calls Durable Object storage `deleteAll()` after the SQL owner check; already-absent SQL state is idempotent success, while missing `deleteAll` support or any R2/container/state failure remains incomplete so web's durable cleanup receipt retries it. The response carries explicit `deleteAllCompleted` evidence; web must treat a legacy response without that field as pending. Deploy this Worker before the receipt-producing web release and do not roll Cloudflare below this capability while those receipts can run.
 - Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, legacy artifact blobs, and runner-secrets blobs. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
-- The OC-to-ENAM move uses Cloudflare-managed [Super Slurper](https://developers.cloudflare.com/r2/data-migration/super-slurper/) jobs instead of an application-owned copier. The source stays read-only to migration tooling, and the temporary two-bucket runtime bridge remains the cutover safety boundary. The healthy cutover keeps `HOSTED_R2_WRITE_ADMISSION=open`: bridge v2 is first proven on every source-active runner, then `destination_active` routes new writes to ENAM while explicit reads prefer the phase-active bucket and use the other bucket only after a definitive miss. Source-active runners and bucket-affine uploads drain normally, and exact-key tail jobs converge the stable approved OC manifest into ENAM. Whole-bucket equality is not a post-promotion invariant because legitimate live writes already exist only in ENAM. `paused` and the hashed per-member canary remain emergency incident-containment tools, not planned migration steps. Follow `R2_BUNDLES_ENAM_MIGRATION.md`.
+- Hosted R2 uses one canonical production bucket in ENAM and one isolated preview bucket for all runtime reads, writes, presigns, lifecycle rules, restores, and account deletion. Deploy preflight requires both buckets to be ENAM Standard. The retired OC region has no Worker binding or runtime role.
 - Runtime domain-root material comes from a signed web callback as ingress/runtime
   envelopes only. Cloudflare verifies the GCP KMS authority signature and unwraps
   only its configured P-256 automation recipient; it does not receive GCP KMS
@@ -270,6 +270,58 @@ When hosted email sender identity is configured, deploy automation renders an en
 The runtime always includes the minimal `assistant` env profile. Deploy automation layers `exa`, `hosted-email`, `linq`, `mapbox`, and `telegram` on top by default. Cloudflare owns the configured profile string, runner-secret allowlisting, native parser toolchain binding inside the container image, and container transport rewrites such as local loopback host adaptation. The profile key sets and canonical hosted runtime launch spec are built by `@murphai/assistant-runtime`, so local and Cloudflare execution pass the same semantic runtime manifest shape. Hosted device-sync runtime config is derived into `runtime.resolvedConfig`, so it stays outside the runtime-env profile surface.
 
 Cloudflare keeps only the wake-payload decryption lane plus the worker-owned callback-signing key. Broad web-private-field encryption stays in `apps/web`, and the hosted runtime reaches the web control plane through the worker proxy instead of holding callback-signing material directly.
+
+## Private Operational Telemetry
+
+The `HOSTED_RUNTIME_RETRY_ANALYTICS` Analytics Engine binding records one
+identifier-free data point only after UserRunner has decided to return
+`retry_later`. `index1` and `blob2` are the bounded retry reason, `blob1` is the
+schema `murph.hosted-runtime-retry.v1`, `double1` is the event count, and
+`double2` is the selected retry delay in milliseconds. The write is immediate,
+unawaited, best-effort, and absent from successful processing. Run
+[`scripts/runtime-retry-reasons.sql`](./scripts/runtime-retry-reasons.sql)
+through the private Cloudflare Analytics Engine SQL API or dashboard to get a
+sampling-corrected 24-hour reason breakdown.
+
+For the primary production control database, run the identifier-free cold-start
+report through the read-only helper:
+
+```sh
+murph-prod-psql-ro -f apps/cloudflare/scripts/cold-start-latency-report.sql
+```
+
+Pass `-v window_hours=6` (or another integer) before `-f` to change the UTC
+window. The report deduplicates causal rows by runtime attempt and keeps direct
+cold starts separate from Temporal recovery. A direct sample must be the only
+row in its runtime attempt whose Web direct-ensure orchestration id exactly
+matches the id attached only after that request acquires the fresh runtime
+fence. Active or warm wakes never receive launch identity. Ambiguous races,
+mismatches, backlog rows, and missing ids are omitted. Temporal-owned launches
+retain an explicit false direct-launch marker even if a later direct wake is
+merged into them. Exact direct samples
+begin only after the compatible Web and Cloudflare builds are deployed;
+historical rows are intentionally not inferred from timestamp proximity. The
+first table reports accepted-to-runner-job time only for those causal direct
+cold starts. The second reports Temporal-activity-to-runner-job time by exact
+recovery versus Temporal-only attempt; current Temporal-owned launches remain
+Temporal-only when a direct wake overlaps, while pre-deploy rows with legacy
+direct markers are labeled `legacy_unclassified` instead of being guessed.
+Current rows without either the launch-owned direct id or the explicit
+Temporal-owner marker are omitted: an activity can start before runner
+acceptance yet reach the runtime later as an active wake, so timestamp order is
+not launch evidence.
+The final cohort is resolved before attempt-level deduplication, so mailbox-local
+marker differences cannot discard a coherent multi-item invocation. Temporal
+activities that begin after runner acceptance are active wakes, not startup
+candidates, and are removed before ambiguity is assessed. Conflicting
+launch-owner evidence also fails closed. Warm direct
+wakes are omitted because they create no new runner job. The final table splits
+the same causal direct samples across Durable Object dispatch,
+consent locking, the existing health-data admission callback, runner-state
+operations, the parallel container-readiness and invocation-preparation
+branches, invocation launch, and runner-job acceptance. Per-phase chronology
+guards omit unavailable or reversed cross-runtime clock samples. It returns no
+member, mailbox, trace, or attempt identifiers.
 
 ## Runner Container Lifecycle
 

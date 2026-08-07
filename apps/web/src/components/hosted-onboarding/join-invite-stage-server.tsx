@@ -23,6 +23,12 @@ import {
   isHostedAutoPulseTrialEnabled,
   isHostedPulseTrialCheckoutEnabled,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  JOIN_EDGE_FEATURES,
+  JOIN_FAMILY_FEATURES,
+  JOIN_PULSE_FEATURES,
+  PULSE_TRIAL_FEATURES,
+} from "@/src/lib/hosted-onboarding/plan-features";
 import type { HostedFamilyBillingRecoveryState } from "@/src/lib/hosted-onboarding/family-plan";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
@@ -46,38 +52,6 @@ import {
 } from "./join-invite-islands";
 
 const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
-
-const PULSE_TRIAL_FEATURES = [
-  `Full Pulse access for ${HOSTED_PULSE_TRIAL_DAYS} days`,
-  "Card required. Then $8/month unless canceled.",
-  "Cancel anytime",
-];
-
-const PULSE_FEATURES = [
-  "Private personal health assistant",
-  "Questions, decisions, plans, and follow-through",
-  "Sync your health data",
-  "Chat via iMessage, Telegram, or email",
-  "Experiments when you need a clear answer",
-  "Access to the most capable AI models",
-];
-
-const EDGE_FEATURES = [
-  "Everything in Pulse and:",
-  "More usage on the most capable AI models",
-  "Murph remembers more of your history",
-  "Deeper analysis across your context",
-  "Detailed biomarker changes",
-  "Richer plans and protocol recommendations",
-  "Early access to new features",
-];
-
-const FAMILY_FEATURES = [
-  "2 to 6 people, one bill",
-  "Choose Pulse or Edge for each person",
-  "Each person keeps a private Murph",
-  "Family members' chats and health data stay private",
-];
 
 export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel }) {
   const { status } = model;
@@ -362,7 +336,7 @@ export function JoinInviteCheckoutPanel({
           description="Your private personal health assistant."
           price={pulsePlan ? `$${Math.round(pulsePlan.recurringAmountUsdCents / 100)}` : "$8"}
           priceUnit="/ month"
-          features={PULSE_FEATURES}
+          features={JOIN_PULSE_FEATURES}
           cta={
             <JoinInviteCheckoutPlanButtonIsland
               billingReady={billingReady}
@@ -380,7 +354,7 @@ export function JoinInviteCheckoutPanel({
           description="More guidance and deeper research."
           price={edgePlan ? `$${Math.round(edgePlan.recurringAmountUsdCents / 100)}` : "$20"}
           priceUnit="/ month"
-          features={EDGE_FEATURES}
+          features={JOIN_EDGE_FEATURES}
           cta={
             <JoinInviteCheckoutPlanButtonIsland
               billingReady={billingReady}
@@ -402,7 +376,7 @@ export function JoinInviteCheckoutPanel({
               HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat / 100,
             )}`}
             priceUnit="/ person / month"
-            features={FAMILY_FEATURES}
+            features={JOIN_FAMILY_FEATURES}
             cta={
               <HostedFamilyStartButton
                 block

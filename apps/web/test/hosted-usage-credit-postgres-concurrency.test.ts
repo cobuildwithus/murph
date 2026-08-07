@@ -2897,10 +2897,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           beneficiaryMemberId,
           cashAmountMinor: 500,
           cashCurrency: "usd",
-          checkoutCancelUrl: "https://example.test/groups/fund/cancel",
+          checkoutCancelUrl:
+            `https://example.test/groups/fund/cancel?usageCheckout=cancel&usagePurchase=${activationPurchaseId}`,
           checkoutExpiresAt: periodEndsAt,
           checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v4",
-          checkoutSuccessUrl: "https://example.test/groups/fund/return",
+          checkoutSuccessUrl:
+            `https://example.test/groups/fund/return?usageCheckout=success&usagePurchase=${activationPurchaseId}`,
           grantUsdMicros: 5_000_000n,
           groupSponsorshipAuthorizationId: authorizationId,
           groupSponsorshipPeriodStartedAt: periodStartedAt,
@@ -3050,10 +3052,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           beneficiaryMemberId,
           cashAmountMinor: 500,
           cashCurrency: "usd",
-          checkoutCancelUrl: "https://example.test/groups/fund/cancel",
+          checkoutCancelUrl:
+            `https://example.test/groups/fund/cancel?usageCheckout=cancel&usagePurchase=${activationPurchaseId}`,
           checkoutExpiresAt: periodEndsAt,
           checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v4",
-          checkoutSuccessUrl: "https://example.test/groups/fund/return",
+          checkoutSuccessUrl:
+            `https://example.test/groups/fund/return?usageCheckout=success&usagePurchase=${activationPurchaseId}`,
           grantUsdMicros: 5_000_000n,
           groupSponsorshipAuthorizationId: authorizationId,
           groupSponsorshipPeriodStartedAt: periodStartedAt,

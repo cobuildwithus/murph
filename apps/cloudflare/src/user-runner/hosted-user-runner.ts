@@ -23,6 +23,7 @@ import {
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import type { R2BucketLike } from "../bundle-store.js";
+import type { HostedBrowserVaultReplicaOrphanCandidate } from "../browser-vault-store.ts";
 import type { HostedExecutionEnvironment } from "../env.js";
 import {
   readHostedPrivateMediaCapabilitySecret,
@@ -34,13 +35,10 @@ import {
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import { withSerializedLock } from "../serialized-lock.js";
 import type {
+  WorkerAnalyticsEngineDatasetLike,
   WorkerProviderEgressCredentialValidationResult,
   WorkerProviderEgressTokenValidationResult,
 } from "../worker-contracts.js";
-import {
-  readHostedR2CutoverStatus,
-  type HostedR2CutoverContext,
-} from "../r2-cutover.ts";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../web-control-plane.ts";
@@ -75,7 +73,6 @@ import {
   RuntimeProcessingController,
   type RuntimeProcessingInput,
 } from "./runtime-processing-controller.js";
-
 export type { DurableObjectStateLike } from "./types.js";
 
 export interface HostedRuntimeHealthDataConsentReconcileResult {
@@ -99,13 +96,9 @@ export class HostedUserRunner {
   private readonly privateMediaBucket: R2BucketLike;
   private readonly privateMediaCapabilitySecret: string | null;
   private readonly privateMediaDeliveryOrigin: string;
+  private readonly runtimeRetryAnalytics: WorkerAnalyticsEngineDatasetLike | null;
   private privateMediaMutationLock: Promise<void> | null = null;
   private runtimeConsentMutationLock: Promise<void> | null = null;
-  private readonly r2CutoverStatus: {
-    coexisting: boolean;
-    phase: "destination_active" | "source_active";
-    protocolVersion: string;
-  };
 
   constructor(
     state: DurableObjectStateLike,
@@ -117,7 +110,7 @@ export class HostedUserRunner {
         runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
       }
     ).runnerContainerNamespace ?? null,
-    r2CutoverContext: HostedR2CutoverContext | null = null,
+    runtimeRetryAnalytics: WorkerAnalyticsEngineDatasetLike | null = null,
   ) {
     this.stateStore = new RunnerStateStore(state);
     this.privateMediaBucket = bucket;
@@ -125,6 +118,7 @@ export class HostedUserRunner {
       readHostedPrivateMediaCapabilitySecret(runnerRuntimeEnvSource);
     this.privateMediaDeliveryOrigin =
       readHostedPrivateMediaDeliveryOrigin(runnerRuntimeEnvSource);
+    this.runtimeRetryAnalytics = runtimeRetryAnalytics;
     this.runnerStoreCache = new RunnerStoreCache({
       bucket,
       env,
@@ -150,23 +144,12 @@ export class HostedUserRunner {
       invocationService: runtimeInvocation,
       runnerContainerNamespace,
       runnerRuntimeEnvSource,
+      runtimeRetryAnalytics,
       stateStore: this.stateStore,
     });
     this.runtimeProcessing = runtimeProcessing;
-    this.r2CutoverStatus = r2CutoverContext
-      ? readHostedR2CutoverStatus(r2CutoverContext)
-      : {
-          coexisting: false,
-          phase: "source_active",
-          protocolVersion: "legacy-single-bucket",
-        };
     this.userDataDeletionInput = {
-      buckets: r2CutoverContext
-        ? {
-            destination: r2CutoverContext.destinationBucket,
-            source: r2CutoverContext.sourceBucket,
-          }
-        : { destination: bucket, source: bucket },
+      bucket,
       runnerContainerNamespace,
       runnerRuntimeEnvSource,
       state,
@@ -209,12 +192,10 @@ export class HostedUserRunner {
 
     const status: HostedRunnerStatusResponse & {
       activeWriteFence: RunnerWriteFenceToken | null;
-      r2Cutover: ReturnType<typeof readHostedR2CutoverStatus>;
     } = {
       ...webStatus,
       activeWriteFence,
       inFlight: record.writeFence !== null,
-      r2Cutover: this.r2CutoverStatus,
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
       ...(record.lastInvocationAt ? { lastInvocationAt: record.lastInvocationAt } : {}),
@@ -280,9 +261,16 @@ export class HostedUserRunner {
     input: RuntimeProcessingInput,
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     return await this.withRuntimeConsentMutationLock(async () => {
+      const lockInput = withRuntimeOrchestration(input, {
+        runtimeConsentLockAcquiredAtEpochMs: Date.now(),
+        healthDataAdmissionReadStartedAtEpochMs: Date.now(),
+      });
       const admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
-        input.userId,
+        lockInput.userId,
       );
+      const processingInput = withRuntimeOrchestration(lockInput, {
+        healthDataAdmissionReadFinishedAtEpochMs: Date.now(),
+      });
       if (!admission.processingAllowed) {
         return {
           kind: "retry_later",
@@ -291,7 +279,7 @@ export class HostedUserRunner {
           ).toISOString(),
         };
       }
-      return await this.runtimeProcessing.ensureForUser(input);
+      return await this.runtimeProcessing.ensureForUser(processingInput);
     });
   }
 
@@ -344,6 +332,12 @@ export class HostedUserRunner {
       });
     }
     return validation.owns;
+  }
+
+  async recordRuntimeCompletionFromContainer(
+    input: Parameters<RuntimeInvocationService["recordRuntimeCompletionFromContainer"]>[0],
+  ): ReturnType<RuntimeInvocationService["recordRuntimeCompletionFromContainer"]> {
+    return this.runtimeInvocation.recordRuntimeCompletionFromContainer(input);
   }
 
   private async withPrivateMediaMutationLock<T>(
@@ -482,6 +476,12 @@ export class HostedUserRunner {
     return await this.workspaceSnapshotSessions.recordOrphanCandidate(input);
   }
 
+  async recordHostedBrowserVaultReplicaOrphanCandidate(
+    input: HostedBrowserVaultReplicaOrphanCandidate,
+  ): Promise<HostedBrowserVaultReplicaOrphanCandidate> {
+    return await this.workspaceSnapshotSessions.recordBrowserVaultReplicaOrphanCandidate(input);
+  }
+
   async readHostedWorkspaceSnapshotUploadSession(input: {
     snapshotId: string;
     userId: string;
@@ -592,4 +592,17 @@ export class HostedUserRunner {
   private readHostedWebControlBaseUrl(): string {
     return this.env.hostedWebBaseUrl;
   }
+}
+
+function withRuntimeOrchestration(
+  input: RuntimeProcessingInput,
+  orchestration: NonNullable<RuntimeProcessingInput["orchestration"]>,
+): RuntimeProcessingInput {
+  return {
+    ...input,
+    orchestration: {
+      ...(input.orchestration ?? {}),
+      ...orchestration,
+    },
+  };
 }

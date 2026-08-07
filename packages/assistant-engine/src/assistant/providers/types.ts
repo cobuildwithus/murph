@@ -44,6 +44,10 @@ import type {
 import type {
   HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
+import type {
+  AssistantProviderStartCriticalPathContext,
+  AssistantProviderStartCriticalPathTiming,
+} from '../provider-start-critical-path.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -89,6 +93,7 @@ export interface AssistantProviderRequestStartTiming {
   codexAppServerThreadResumeMs?: number
   codexAppServerThreadStartMs?: number
   codexAppServerWarmReuseMs?: number
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathTiming
 }
 
 export interface AssistantProviderRequestStartedEvent
@@ -143,6 +148,7 @@ export interface AssistantProviderTurn {
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   providerFetch?: typeof fetch | null
   providerRequestOrdinal?: number | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   prompt?: string | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   providerThreadEphemeral?: boolean | null
@@ -161,6 +167,7 @@ export interface AssistantProviderTurn {
   progressDelivery?: AssistantProgressDelivery | null
   hostedToolContext?: AssistantHostedToolContext | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null

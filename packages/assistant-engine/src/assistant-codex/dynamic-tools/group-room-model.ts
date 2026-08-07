@@ -1,10 +1,9 @@
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 import type {
   AssistantHostedUserActionScope,
 } from '../../assistant/hosted-tool-context.js'
 import {
-  ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES,
   deleteAssistantGroupRoomModel,
   readAssistantGroupRoomModelState,
   replaceAssistantGroupRoomModel,
@@ -18,13 +17,6 @@ const groupRoomModelBodySchema = z
   .string()
   .trim()
   .min(1)
-  .max(ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES)
-  .refine(
-    (body) =>
-      new TextEncoder().encode(body).byteLength <=
-        ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES,
-    { message: 'body exceeds the UTF-8 byte limit' },
-  )
 
 const groupRoomModelArgumentsSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('show') }).strict(),
@@ -43,7 +35,7 @@ const GROUP_ROOM_MODEL_TOOL_DESCRIPTION = [
   'Read, fully replace, or delete the one advisory room-model page owned by the current authenticated group chat. Ordinary group turns may use it only for an explicit current-room request to remember, correct, retire, or forget social context; silent consolidation receives separate immutable automation authority.',
   'During engine-authorized silent consolidation, the page may keep an optional `Photo references` subsection under `People` when supplied evidence explicitly associates a familiar conversational name with an exact `raw/captures/**` or `raw/inbox/**` image ref. Keep the exact ref and only the minimum multi-person disambiguator needed, such as "far left". Prefer `raw/captures/**`; for transient `raw/inbox/**` refs, also keep the evidence date and retire the entry after 14 days. Keep at most three useful non-duplicate refs per person, and prune contradicted or superseded entries. Never invent a ref or infer identity from facial similarity; use only explicit captions, positions, labels, and corrections.',
   'For an ordinary image-generation or image-edit request involving a named person, check current attachments, recent visible conversation, and injected `Photo references` before asking for another upload. The current page is already injected into ordinary group turns, so do not call show merely to look for a photo ref. Use an exact usable ref when available. If a multi-person mapping is incomplete, ask only for the missing photo or position; ask for a new photo only when no usable ref exists. Current participant corrections override the page.',
-  'Show first, then pass the returned expectedDigest to upsert or delete. Upsert must contain the complete compact Markdown page, must fit the complete advisory prompt, and must not contain raw participant handles. If show fails or a write reports stale state, stop. This tool is unavailable in group email and never changes participant identity, permissions, health sharing, or personal memory.',
+  'Show first, then pass the returned expectedDigest to upsert or delete. Upsert must contain the complete compact Markdown page, must keep the serialized fixed page within its defensive 64 KiB file-read ceiling, and must not contain raw participant handles. If show fails or a write reports stale state, stop. This tool is unavailable in group email and never changes participant identity, permissions, health sharing, or personal memory.',
 ].join(' ')
 
 export const MURPH_GROUP_ROOM_MODEL_TOOL = {

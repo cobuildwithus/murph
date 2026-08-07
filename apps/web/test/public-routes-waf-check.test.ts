@@ -9,24 +9,29 @@ import {
   MURPH_SAFE_SEARCH_PATH,
   MURPH_SAFE_WEB_DETAIL_PREFIX,
   runPublicRoutesWafPreflight,
+  SIGNUP_REFERRAL_CLAIM_PATH_PREFIX,
+  SIGNUP_REFERRAL_CLAIM_PATH_SUFFIX,
   validatePublicRoutesWafConfig,
 } from "../scripts/check-public-routes-waf";
 
 const SEARCH_RULE_ID = "rule_murph_safe_search";
 const DETAIL_RULE_ID = "rule_murph_safe_detail";
 const DIAGNOSTICS_RULE_ID = "rule_companion_auth_diagnostics";
+const SIGNUP_REFERRAL_CLAIM_RULE_ID = "rule_signup_referral_claim";
 
 type RuleIds = Parameters<typeof validatePublicRoutesWafConfig>[1];
 
 const RULE_IDS: RuleIds = {
   detailRuleId: DETAIL_RULE_ID,
   searchRuleId: SEARCH_RULE_ID,
+  signupReferralClaimRuleId: SIGNUP_REFERRAL_CLAIM_RULE_ID,
 };
 
 const RULE_IDS_WITH_DIAGNOSTICS: RuleIds = {
   companionDiagnosticsRuleId: DIAGNOSTICS_RULE_ID,
   detailRuleId: DETAIL_RULE_ID,
   searchRuleId: SEARCH_RULE_ID,
+  signupReferralClaimRuleId: SIGNUP_REFERRAL_CLAIM_RULE_ID,
 };
 
 function rateLimitAction(limit: number): Record<string, unknown> {
@@ -96,6 +101,28 @@ function validConfig(options: { diagnostics?: boolean } = {}): Record<string, un
       name: "Murph Safe detail",
       valid: true,
     },
+    {
+      action: rateLimitAction(10),
+      active: true,
+      conditionGroup: [{
+        conditions: [
+          { op: "eq", type: "method", value: "POST" },
+          {
+            op: "pre",
+            type: "path",
+            value: SIGNUP_REFERRAL_CLAIM_PATH_PREFIX,
+          },
+          {
+            op: "suf",
+            type: "path",
+            value: SIGNUP_REFERRAL_CLAIM_PATH_SUFFIX,
+          },
+        ],
+      }],
+      id: SIGNUP_REFERRAL_CLAIM_RULE_ID,
+      name: "Signup referral claim",
+      valid: true,
+    },
   );
 
   return {
@@ -128,6 +155,8 @@ function productionEnvironment(
     HOSTED_WEB_VERCEL_TOKEN: "token_test",
     MURPH_SAFE_DETAIL_WAF_RULE_ID: DETAIL_RULE_ID,
     MURPH_SAFE_SEARCH_WAF_RULE_ID: SEARCH_RULE_ID,
+    MURPH_SIGNUP_REFERRAL_CLAIM_WAF_RULE_ID:
+      SIGNUP_REFERRAL_CLAIM_RULE_ID,
     VERCEL_ENV: "production",
     ...overrides,
   };
@@ -230,6 +259,32 @@ describe("public routes WAF preflight", () => {
     expect(validatePublicRoutesWafConfig(disabledPredecessor, RULE_IDS)).toEqual([]);
   });
 
+  it("allows scoped rules before signup claims but rejects an active bypass", () => {
+    const scopedPredecessor = validConfig();
+    activeRules(scopedPredecessor).splice(2, 0, {
+      action: rateLimitAction(5),
+      active: true,
+      conditionGroup: [{
+        conditions: [{ op: "eq", type: "path", value: "/another-route" }],
+      }],
+      id: "scoped_rate_limit",
+      valid: true,
+    });
+    expect(validatePublicRoutesWafConfig(scopedPredecessor, RULE_IDS)).toEqual([]);
+
+    const bypassPredecessor = validConfig();
+    activeRules(bypassPredecessor).splice(2, 0, {
+      action: { mitigate: { action: "bypass" } },
+      active: true,
+      conditionGroup: [{ conditions: [] }],
+      id: "broad_bypass",
+      valid: true,
+    });
+    expect(validatePublicRoutesWafConfig(bypassPredecessor, RULE_IDS)).toContain(
+      "signup referral claim rule must not follow an active bypass rule",
+    );
+  });
+
   it("requires the exact search path and POST method", () => {
     const wrongMethod = validConfig();
     const method = (
@@ -307,6 +362,33 @@ describe("public routes WAF preflight", () => {
     ).push({ conditions: [] });
     expect(validatePublicRoutesWafConfig(extraGroup, RULE_IDS)).toContain(
       "Murph Safe detail rule has unexpected path or method conditions",
+    );
+  });
+
+  it("requires the exact dynamic signup-claim path family and POST method", () => {
+    const wrongSuffix = validConfig();
+    const conditions = (
+      findRule(wrongSuffix, SIGNUP_REFERRAL_CLAIM_RULE_ID)
+        .conditionGroup as Array<{
+          conditions: Array<Record<string, unknown>>;
+        }>
+    )[0].conditions;
+    const suffix = conditions.find((condition) => condition.op === "suf");
+    if (!suffix) {
+      throw new Error("Missing signup referral suffix fixture.");
+    }
+    suffix.value = "/anything";
+    expect(validatePublicRoutesWafConfig(wrongSuffix, RULE_IDS)).toContain(
+      "signup referral claim rule has unexpected path or method conditions",
+    );
+
+    const broadPrefixOnly = validConfig();
+    (
+      findRule(broadPrefixOnly, SIGNUP_REFERRAL_CLAIM_RULE_ID)
+        .conditionGroup as Array<{ conditions: unknown[] }>
+    )[0].conditions.pop();
+    expect(validatePublicRoutesWafConfig(broadPrefixOnly, RULE_IDS)).toContain(
+      "signup referral claim rule has unexpected path or method conditions",
     );
   });
 
@@ -397,6 +479,12 @@ describe("public routes WAF preflight", () => {
     await expect(runPublicRoutesWafPreflight(
       productionEnvironment({ MURPH_SAFE_SEARCH_WAF_RULE_ID: undefined }),
     )).rejects.toThrow("MURPH_SAFE_SEARCH_WAF_RULE_ID is required");
+
+    await expect(runPublicRoutesWafPreflight(productionEnvironment({
+      MURPH_SIGNUP_REFERRAL_CLAIM_WAF_RULE_ID: undefined,
+    }))).rejects.toThrow(
+      "MURPH_SIGNUP_REFERRAL_CLAIM_WAF_RULE_ID is required",
+    );
 
     await expect(runPublicRoutesWafPreflight(
       productionEnvironment({ HOSTED_WEB_VERCEL_TOKEN: undefined }),

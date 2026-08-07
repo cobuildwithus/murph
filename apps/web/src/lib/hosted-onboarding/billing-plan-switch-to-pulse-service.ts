@@ -13,7 +13,10 @@ import {
 } from "./billing-plans";
 import { assertHostedBillingPlanSelectable } from "./billing-plan-eligibility";
 import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "./errors";
 import {
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId,
   readHostedMemberStripeBillingRef,
@@ -30,8 +33,10 @@ import {
   hasHostedStripeSubscriptionPaymentMethod,
 } from "./stripe-subscription-payment-method";
 import {
+  buildHostedStripeAlertCorrelationCause,
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
+  withHostedStripeActionFailureAlert,
 } from "./stripe-error-log";
 
 const LEGACY_EDGE_TO_PULSE_SOURCE_PLAN =
@@ -182,101 +187,133 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
     throw buildHostedBillingPlanSwitchSourceChangedError();
   }
   const sourceConfig = requireHostedSwitchPlanConfig(sourcePlanCode);
-  const targetConfig = await requireValidatedHostedStripeBillingPlanConfig({
+  const targetRuntimeConfig = requireHostedStripeBillingPlanConfig({
     billingPlanCode: input.targetPlanCode,
   });
-  const stripe = sourceConfig.stripe;
-  const subscription = await callHostedStripePlanSwitchOperation(
-    "subscription.retrieve",
-    () =>
-      stripe.subscriptions.retrieve(stripeSubscriptionId, {
-        expand: ["customer", "items.data.price"],
-      }),
-  );
+  const performPlanSwitch = async (): Promise<HostedBillingPlanSwitchResult> => {
+    const targetConfig = await requireValidatedHostedStripeBillingPlanConfig({
+      billingPlanCode: input.targetPlanCode,
+    });
+    const stripe = sourceConfig.stripe;
+    const subscription = await callHostedStripePlanSwitchOperation(
+      "subscription.retrieve",
+      () =>
+        stripe.subscriptions.retrieve(stripeSubscriptionId, {
+          expand: ["customer", "items.data.price"],
+        }),
+    );
 
-  assertHostedStripeSubscriptionMatchesCustomer({
-    stripeCustomerId,
-    subscription,
-  });
-  if (
-    sourceIsPulseTrial
-    && subscription.status !== "trialing"
-  ) {
-    throw buildHostedBillingPlanSwitchSourceChangedError();
-  }
-  assertHostedStripeSubscriptionScheduleableState({
-    allowTrialing: sourceIsPulseTrial,
-    now: input.now,
-    subscription,
-  });
-  assertHostedStripeCanonicalSourceSubscriptionItems({
-    sourceConfig,
-    subscription,
-  });
-
-  if (
-    sourceIsPulseTrial
-    && input.targetPlanCode === "launch_group_monthly"
-    && !hasHostedStripeSubscriptionPaymentMethod(subscription)
-  ) {
-    return {
-      billingPlanCode: "launch_group_monthly",
-      status: "payment_method_required",
-    };
-  }
-
-  const currentPeriodEnd = requireHostedStripeSubscriptionCurrentPeriodEnd({
-    now: input.now,
-    subscription,
-  });
-  const currentPeriodEndUnix = toUnixSeconds(currentPeriodEnd);
-  const context: HostedSwitchScheduleContext = {
-    currentPeriodEnd,
-    currentPeriodEndUnix,
-    memberId: input.memberId,
-    sourceConfig,
-    sourcePlanCode,
-    stripeSubscriptionId,
-    targetConfig,
-    targetPlanCode: input.targetPlanCode,
-  };
-  const existingScheduleId = coerceStripeObjectId(subscription.schedule);
-
-  if (existingScheduleId) {
-    const existingSchedule = await retrieveHostedBillingPlanSwitchSchedule({
-      scheduleId: existingScheduleId,
-      stripe,
+    assertHostedStripeSubscriptionMatchesCustomer({
+      stripeCustomerId,
+      subscription,
+    });
+    if (
+      sourceIsPulseTrial
+      && subscription.status !== "trialing"
+    ) {
+      throw buildHostedBillingPlanSwitchSourceChangedError();
+    }
+    assertHostedStripeSubscriptionScheduleableState({
+      allowTrialing: sourceIsPulseTrial,
+      now: input.now,
+      subscription,
+    });
+    assertHostedStripeCanonicalSourceSubscriptionItems({
+      sourceConfig,
+      subscription,
     });
 
-    if (isHostedBillingPlanSwitchToPulseScheduleCompatible(existingSchedule, context)) {
+    if (
+      sourceIsPulseTrial
+      && input.targetPlanCode === "launch_group_monthly"
+      && !hasHostedStripeSubscriptionPaymentMethod(subscription)
+    ) {
+      return {
+        billingPlanCode: "launch_group_monthly",
+        status: "payment_method_required",
+      };
+    }
+
+    const currentPeriodEnd = requireHostedStripeSubscriptionCurrentPeriodEnd({
+      now: input.now,
+      subscription,
+    });
+    const currentPeriodEndUnix = toUnixSeconds(currentPeriodEnd);
+    const context: HostedSwitchScheduleContext = {
+      currentPeriodEnd,
+      currentPeriodEndUnix,
+      memberId: input.memberId,
+      sourceConfig,
+      sourcePlanCode,
+      stripeSubscriptionId,
+      targetConfig,
+      targetPlanCode: input.targetPlanCode,
+    };
+    const existingScheduleId = coerceStripeObjectId(subscription.schedule);
+
+    if (existingScheduleId) {
+      const existingSchedule = await retrieveHostedBillingPlanSwitchSchedule({
+        scheduleId: existingScheduleId,
+        stripe,
+      });
+
+      if (isHostedBillingPlanSwitchToPulseScheduleCompatible(existingSchedule, context)) {
+        await persistHostedBillingPlanSwitchToPulsePendingFields({
+          context,
+          schedule: existingSchedule,
+          tx: input.tx,
+        });
+
+        return {
+          effectiveAt: currentPeriodEnd.toISOString(),
+          scheduledBillingPlanCode: input.targetPlanCode,
+          status: "already_scheduled",
+        };
+      }
+
+      const recoveredSchedule = await tryRecoverHostedBillingPlanSwitchScheduleFromCreateIdempotency({
+        context,
+        stripe,
+        stripeSubscriptionId,
+      });
+
+      if (!recoveredSchedule || recoveredSchedule.id !== existingSchedule.id) {
+        throw buildHostedBillingPlanSwitchScheduleConflictError();
+      }
+
+      const updatedSchedule = await updateHostedBillingPlanSwitchToPulseSchedule({
+        context,
+        schedule: recoveredSchedule,
+        stripe,
+      });
       await persistHostedBillingPlanSwitchToPulsePendingFields({
         context,
-        schedule: existingSchedule,
+        schedule: updatedSchedule,
         tx: input.tx,
       });
 
       return {
         effectiveAt: currentPeriodEnd.toISOString(),
         scheduledBillingPlanCode: input.targetPlanCode,
-        status: "already_scheduled",
+        status: "scheduled",
       };
     }
 
-    const recoveredSchedule = await tryRecoverHostedBillingPlanSwitchScheduleFromCreateIdempotency({
+    const createdSchedule = await createHostedBillingPlanSwitchScheduleFromSubscription({
       context,
       stripe,
       stripeSubscriptionId,
     });
-
-    if (!recoveredSchedule || recoveredSchedule.id !== existingSchedule.id) {
-      throw buildHostedBillingPlanSwitchScheduleConflictError();
-    }
-
-    const updatedSchedule = await updateHostedBillingPlanSwitchToPulseSchedule({
-      context,
-      schedule: recoveredSchedule,
+    const retrievedSchedule = await retrieveHostedBillingPlanSwitchSchedule({
+      scheduleId: createdSchedule.id,
       stripe,
     });
+    const updatedSchedule = await updateHostedBillingPlanSwitchToPulseSchedule({
+      context,
+      schedule: retrievedSchedule,
+      stripe,
+    });
+
     await persistHostedBillingPlanSwitchToPulsePendingFields({
       context,
       schedule: updatedSchedule,
@@ -288,34 +325,23 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
       scheduledBillingPlanCode: input.targetPlanCode,
       status: "scheduled",
     };
-  }
-
-  const createdSchedule = await createHostedBillingPlanSwitchScheduleFromSubscription({
-    context,
-    stripe,
-    stripeSubscriptionId,
-  });
-  const retrievedSchedule = await retrieveHostedBillingPlanSwitchSchedule({
-    scheduleId: createdSchedule.id,
-    stripe,
-  });
-  const updatedSchedule = await updateHostedBillingPlanSwitchToPulseSchedule({
-    context,
-    schedule: retrievedSchedule,
-    stripe,
-  });
-
-  await persistHostedBillingPlanSwitchToPulsePendingFields({
-    context,
-    schedule: updatedSchedule,
-    tx: input.tx,
-  });
-
-  return {
-    effectiveAt: currentPeriodEnd.toISOString(),
-    scheduledBillingPlanCode: input.targetPlanCode,
-    status: "scheduled",
   };
+
+  return withHostedStripeActionFailureAlert(
+    {
+      isTerminalStripeFailure: isHostedBillingPlanSwitchStripeUnavailableError,
+      operationIdentity: buildHostedBillingPlanSwitchOperationIdentity({
+        sourcePlanCode,
+        sourcePriceId: sourceConfig.priceId,
+        stripeSubscriptionId,
+        targetPlanCode: input.targetPlanCode,
+        targetPriceId: targetRuntimeConfig.priceId,
+      }),
+      operationName: "billing.plan-switch",
+      stripeLiveMode: sourceConfig.stripeLiveMode,
+    },
+    performPlanSwitch,
+  );
 }
 
 export async function refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx(input: {
@@ -466,7 +492,7 @@ function buildHostedBillingPlanSwitchContextFromLocalPendingState(input: {
 
 function requireHostedSwitchPlanConfig(
   billingPlanCode: HostedBillingPlanCode,
-): HostedStripePlanConfig & { stripe: Stripe } {
+): HostedStripePlanConfig & { stripe: Stripe; stripeLiveMode: boolean } {
   const config = requireHostedStripeBillingPlanConfig({
     billingPlanCode,
   });
@@ -474,7 +500,28 @@ function requireHostedSwitchPlanConfig(
   return {
     priceId: config.priceId,
     stripe: config.stripe,
+    stripeLiveMode: config.stripeLiveMode,
   };
+}
+
+function buildHostedBillingPlanSwitchOperationIdentity(input: {
+  sourcePlanCode: HostedBillingPlanCode;
+  sourcePriceId: string;
+  stripeSubscriptionId: string;
+  targetPlanCode: HostedBillingPlanCode;
+  targetPriceId: string;
+}): string {
+  return `hosted-billing-plan-switch:${sha256Hex(JSON.stringify(input))}`;
+}
+
+function isHostedBillingPlanSwitchStripeUnavailableError(
+  error: unknown,
+): boolean {
+  return isHostedOnboardingError(error) &&
+    (
+      error.code === "HOSTED_BILLING_PRICE_UNAVAILABLE" ||
+      error.code === "HOSTED_BILLING_STRIPE_PLAN_SWITCH_UNAVAILABLE"
+    );
 }
 
 function assertHostedStripeSubscriptionMatchesCustomer(input: {
@@ -667,8 +714,7 @@ function buildHostedBillingPlanSwitchCurrentPhaseParams(input: {
   context: HostedSwitchScheduleContext;
   phase: Stripe.SubscriptionSchedule.Phase;
 }): Stripe.SubscriptionScheduleUpdateParams.Phase {
-  return {
-    ...copySupportedHostedStripeSchedulePhaseFields(input.phase),
+  const params: Stripe.SubscriptionScheduleUpdateParams.Phase = {
     end_date: input.context.currentPeriodEndUnix,
     items: [
       {
@@ -678,6 +724,8 @@ function buildHostedBillingPlanSwitchCurrentPhaseParams(input: {
     ],
     start_date: input.phase.start_date,
   };
+  copySupportedHostedStripeSchedulePhaseFields(params, input.phase);
+  return params;
 }
 
 function buildHostedBillingPlanSwitchFuturePhaseParams(
@@ -701,38 +749,46 @@ function buildHostedBillingPlanSwitchFuturePhaseParams(
 }
 
 function copySupportedHostedStripeSchedulePhaseFields(
+  params: Stripe.SubscriptionScheduleUpdateParams.Phase,
   phase: Stripe.SubscriptionSchedule.Phase,
-): Partial<Stripe.SubscriptionScheduleUpdateParams.Phase> {
-  return {
-    ...(phase.application_fee_percent !== null
-      ? { application_fee_percent: phase.application_fee_percent }
-      : {}),
-    ...(phase.automatic_tax
-      ? {
-          automatic_tax: {
-            enabled: phase.automatic_tax.enabled,
-          },
-        }
-      : {}),
-    ...(phase.billing_cycle_anchor ? { billing_cycle_anchor: phase.billing_cycle_anchor } : {}),
-    ...(phase.collection_method ? { collection_method: phase.collection_method } : {}),
-    ...(phase.currency ? { currency: phase.currency } : {}),
-    ...(typeof coerceStripeObjectId(phase.default_payment_method) === "string"
-      ? { default_payment_method: coerceStripeObjectId(phase.default_payment_method) ?? undefined }
-      : {}),
-    ...(Array.isArray(phase.default_tax_rates) && phase.default_tax_rates.length > 0
-      ? {
-          default_tax_rates: phase.default_tax_rates.flatMap((taxRate) => {
-            const id = coerceStripeObjectId(taxRate);
-            return id ? [id] : [];
-          }),
-        }
-      : {}),
-    ...(phase.description ? { description: phase.description } : {}),
-    ...(phase.metadata ? { metadata: phase.metadata } : {}),
-    ...(phase.proration_behavior ? { proration_behavior: phase.proration_behavior } : {}),
-    ...(phase.trial_end ? { trial_end: phase.trial_end } : {}),
-  };
+): void {
+  if (phase.application_fee_percent !== null) {
+    params.application_fee_percent = phase.application_fee_percent;
+  }
+  if (phase.automatic_tax) {
+    params.automatic_tax = { enabled: phase.automatic_tax.enabled };
+  }
+  if (phase.billing_cycle_anchor) {
+    params.billing_cycle_anchor = phase.billing_cycle_anchor;
+  }
+  if (phase.collection_method) {
+    params.collection_method = phase.collection_method;
+  }
+  if (phase.currency) {
+    params.currency = phase.currency;
+  }
+  const defaultPaymentMethodId = coerceStripeObjectId(phase.default_payment_method);
+  if (defaultPaymentMethodId) {
+    params.default_payment_method = defaultPaymentMethodId;
+  }
+  if (Array.isArray(phase.default_tax_rates) && phase.default_tax_rates.length > 0) {
+    params.default_tax_rates = phase.default_tax_rates.flatMap((taxRate) => {
+      const id = coerceStripeObjectId(taxRate);
+      return id ? [id] : [];
+    });
+  }
+  if (phase.description) {
+    params.description = phase.description;
+  }
+  if (phase.metadata) {
+    params.metadata = phase.metadata;
+  }
+  if (phase.proration_behavior) {
+    params.proration_behavior = phase.proration_behavior;
+  }
+  if (phase.trial_end) {
+    params.trial_end = phase.trial_end;
+  }
 }
 
 function buildHostedBillingPlanSwitchScheduleMetadata(
@@ -749,14 +805,11 @@ function buildHostedBillingPlanSwitchScheduleMetadata(
 function buildHostedBillingPlanSwitchFuturePhaseMetadata(
   context: HostedSwitchScheduleContext,
 ): Stripe.MetadataParam {
-  return {
-    ...buildHostedBillingPlanSwitchScheduleMetadata(context),
-    ...buildStripeMetadataUnsetFields(STRIPE_TRIAL_METADATA_KEYS),
-  };
-}
-
-function buildStripeMetadataUnsetFields(keys: readonly string[]): Stripe.MetadataParam {
-  return Object.fromEntries(keys.map((key) => [key, ""]));
+  const metadata = buildHostedBillingPlanSwitchScheduleMetadata(context);
+  for (const key of STRIPE_TRIAL_METADATA_KEYS) {
+    metadata[key] = "";
+  }
+  return metadata;
 }
 
 function isHostedBillingPlanSwitchToPulseScheduleCompatible(
@@ -954,6 +1007,7 @@ async function callHostedStripePlanSwitchOperation<T>(
   } catch (error) {
     logHostedStripeFailure({ error, operationName });
     throw hostedOnboardingError({
+      cause: buildHostedStripeAlertCorrelationCause(error),
       code: "HOSTED_BILLING_STRIPE_PLAN_SWITCH_UNAVAILABLE",
       details: describeHostedStripeErrorDetails({ error, operationName }),
       httpStatus: 502,

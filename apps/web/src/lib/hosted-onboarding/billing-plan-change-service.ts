@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
+import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { coerceStripeObjectId } from "./billing";
 import {
@@ -15,7 +16,10 @@ import {
   type HostedBillingPlanCode,
 } from "./billing-plans";
 import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "./errors";
 import {
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
@@ -29,8 +33,10 @@ import {
 } from "./runtime";
 import { normalizeNullableString } from "./shared";
 import {
+  buildHostedStripeAlertCorrelationCause,
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
+  withHostedStripeActionFailureAlert,
 } from "./stripe-error-log";
 
 const HOSTED_BILLING_PLAN_CHANGE_PORTAL_CONFIGURATION_ENV_BY_TARGET = {
@@ -71,40 +77,58 @@ export async function upgradeHostedBillingPlan(input: {
     prisma,
     targetPlanCode: input.targetPlanCode,
   });
-  if (owner.currentPlanCode === input.targetPlanCode) {
-    return {
-      billingPlanCode: input.targetPlanCode,
-      status: "already_on_plan",
-    };
-  }
 
   const currentConfig = requireHostedStripeBillingPlanConfig({
     billingPlanCode: owner.currentPlanCode,
   });
+  const targetRuntimeConfig = requireHostedStripeBillingPlanConfig({
+    billingPlanCode: input.targetPlanCode,
+  });
+  return withHostedStripeActionFailureAlert(
+    {
+      isTerminalStripeFailure: isHostedBillingPlanUpgradeStripeUnavailableError,
+      operationIdentity: buildHostedBillingPlanUpgradeOperationIdentity({
+        currentPlanCode: owner.currentPlanCode,
+        currentPriceId: currentConfig.priceId,
+        stripeSubscriptionId: owner.stripeSubscriptionId,
+        targetPlanCode: input.targetPlanCode,
+        targetPriceId: targetRuntimeConfig.priceId,
+      }),
+      operationName: "billing.plan-upgrade",
+      stripeLiveMode: targetRuntimeConfig.stripeLiveMode,
+    },
+    () => performHostedBillingPlanUpgrade({
+      currentConfig,
+      memberId: input.memberId,
+      owner,
+      prisma,
+      targetPlanCode: input.targetPlanCode,
+    }),
+  );
+}
+
+async function performHostedBillingPlanUpgrade(input: {
+  currentConfig: ReturnType<typeof requireHostedStripeBillingPlanConfig>;
+  memberId: string;
+  owner: HostedBillingPlanUpgradeOwnerSnapshot;
+  prisma: PrismaClient;
+  targetPlanCode: HostedBillingPlanCode;
+}): Promise<HostedBillingPlanUpgradeResult> {
   const targetConfig = await requireValidatedHostedStripeBillingPlanConfig({
     billingPlanCode: input.targetPlanCode,
   });
   const stripe = targetConfig.stripe;
   const subscription = await callHostedStripePlanUpgradeOperation(
     "subscription.retrieve.portal-confirmation",
-    () => stripe.subscriptions.retrieve(owner.stripeSubscriptionId, {
+    () => stripe.subscriptions.retrieve(input.owner.stripeSubscriptionId, {
       expand: ["items.data.price"],
     }),
   );
 
   assertHostedStripeSubscriptionMatchesCustomer({
-    stripeCustomerId: owner.stripeCustomerId,
+    stripeCustomerId: input.owner.stripeCustomerId,
     subscription,
   });
-  if (isHostedStripeSubscriptionAppliedPlan({
-    subscription,
-    targetPriceId: targetConfig.priceId,
-  })) {
-    return {
-      billingPlanCode: input.targetPlanCode,
-      status: "already_on_plan",
-    };
-  }
   if (coerceStripeObjectId(subscription.schedule)) {
     throw buildHostedBillingPlanChangeAlreadyScheduledError();
   }
@@ -116,9 +140,19 @@ export async function upgradeHostedBillingPlan(input: {
         "A previous plan change is still waiting for payment. Finish or cancel it before starting another change.",
     });
   }
+  assertHostedStripeSubscriptionLiveBillable(subscription);
+  if (isHostedStripeSubscriptionAppliedPlan({
+    subscription,
+    targetPriceId: targetConfig.priceId,
+  })) {
+    return {
+      billingPlanCode: input.targetPlanCode,
+      status: "already_on_plan",
+    };
+  }
 
   const sourceItem = requireHostedStripePlanChangeSourceItem({
-    sourcePriceId: currentConfig.priceId,
+    sourcePriceId: input.currentConfig.priceId,
     subscription,
   });
   const returnUrls = buildHostedBillingPlanChangeReturnUrls({
@@ -130,7 +164,7 @@ export async function upgradeHostedBillingPlan(input: {
     "billing-portal.session.create.subscription-update-confirm",
     () => stripe.billingPortal.sessions.create({
       configuration: portalConfigurationId,
-      customer: owner.stripeCustomerId,
+      customer: input.owner.stripeCustomerId,
       flow_data: {
         after_completion: {
           redirect: {
@@ -144,7 +178,7 @@ export async function upgradeHostedBillingPlan(input: {
             price: targetConfig.priceId,
             quantity: 1,
           }],
-          subscription: owner.stripeSubscriptionId,
+          subscription: input.owner.stripeSubscriptionId,
         },
         type: "subscription_update_confirm",
       },
@@ -161,17 +195,37 @@ export async function upgradeHostedBillingPlan(input: {
   }
 
   await assertHostedBillingPlanUpgradeOwnerStillCurrent({
-    expected: owner,
+    expected: input.owner,
     memberId: input.memberId,
-    prisma,
+    prisma: input.prisma,
     targetPlanCode: input.targetPlanCode,
   });
 
   return {
-    billingPlanCode: owner.currentPlanCode,
+    billingPlanCode: input.owner.currentPlanCode,
     paymentUrl,
     status: "pending_payment",
   };
+}
+
+function buildHostedBillingPlanUpgradeOperationIdentity(input: {
+  currentPlanCode: HostedBillingPlanCode;
+  currentPriceId: string;
+  stripeSubscriptionId: string;
+  targetPlanCode: HostedBillingPlanCode;
+  targetPriceId: string;
+}): string {
+  return `hosted-billing-plan-upgrade:${sha256Hex(JSON.stringify(input))}`;
+}
+
+function isHostedBillingPlanUpgradeStripeUnavailableError(
+  error: unknown,
+): boolean {
+  return isHostedOnboardingError(error) &&
+    (
+      error.code === "HOSTED_BILLING_PRICE_UNAVAILABLE" ||
+      error.code === "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE"
+    );
 }
 
 async function readHostedBillingPlanUpgradeOwner(input: {
@@ -380,6 +434,26 @@ function assertHostedStripeSubscriptionMatchesCustomer(input: {
   });
 }
 
+function assertHostedStripeSubscriptionLiveBillable(
+  subscription: Stripe.Subscription,
+): void {
+  if (
+    subscription.status === "active"
+    && subscription.cancel_at == null
+    && subscription.cancel_at_period_end !== true
+    && subscription.pause_collection == null
+    && subscription.collection_method === "charge_automatically"
+  ) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_BILLING_PLAN_UPGRADE_SOURCE_INVALID",
+    httpStatus: 409,
+    message:
+      "Your current billing state is not ready for this plan change. Resolve the pending Stripe billing change and try again.",
+  });
+}
+
 function buildHostedBillingPlanChangeReturnUrls(input: {
   targetPlanCode: HostedBillingPlanCode;
 }): { canceled: string; completed: string } {
@@ -460,6 +534,7 @@ async function callHostedStripePlanUpgradeOperation<T>(
   } catch (error) {
     logHostedStripeFailure({ error, operationName });
     throw hostedOnboardingError({
+      cause: buildHostedStripeAlertCorrelationCause(error),
       code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
       details: describeHostedStripeErrorDetails({ error, operationName }),
       httpStatus: 502,

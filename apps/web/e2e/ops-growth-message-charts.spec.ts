@@ -6,6 +6,7 @@ const VIEWPORTS = [
 ] as const;
 
 const CHART_NAMES = [
+  "People who messaged Murph",
   "Total messages sent",
   "Messages sent per day",
   "Intake and activation",
@@ -65,22 +66,50 @@ for (const viewport of VIEWPORTS) {
     );
 
     const chartCards = study.locator(
-      "#growth-message-volume-charts > div.grid > div",
+      "#growth-charts > div.grid > div",
     );
     const chartSurfaces = chartCards.locator(
       '.recharts-surface[role="application"][tabindex="0"]',
     );
-    await expect(chartCards).toHaveCount(4);
-    await expect(chartSurfaces).toHaveCount(4);
+    await expect(chartCards).toHaveCount(5);
+    await expect(chartSurfaces).toHaveCount(5);
 
     for (const [index, name] of CHART_NAMES.entries()) {
       await expect(chartSurfaces.nth(index)).toHaveAccessibleName(name);
     }
 
-    const dailyTooltip = chartCards.nth(1).locator(
+    const activityLines = chartCards.nth(0).locator(".recharts-line-curve");
+    await expect(chartCards.nth(0)).toContainText(
+      "Personal and owned-group rows are removed with account deletion",
+    );
+    await expect(chartCards.nth(0)).toContainText(
+      "activity retained in another member's shared group follows normal content retention",
+    );
+    await expect(activityLines).toHaveCount(2);
+    await expect.poll(
+      () => activityLines.nth(0).getAttribute("stroke-dasharray"),
+    ).toBeNull();
+    await expect(activityLines.nth(1)).toHaveAttribute("stroke-dasharray", "6 4");
+
+    const activityTooltip = chartCards.nth(0).locator(
       ".recharts-tooltip-wrapper",
     );
-    await chartSurfaces.nth(1).focus();
+    await chartSurfaces.nth(0).focus();
+    for (let index = 0; index < 18; index += 1) {
+      await page.keyboard.press("ArrowRight");
+    }
+    await expect(activityTooltip).toBeVisible();
+    await expect(activityTooltip).toContainText("Jul 19");
+    await expect(activityTooltip).toContainText("Messaged that day");
+    await expect(activityTooltip).toContainText("Messaged in trailing 7 days");
+    await expect(
+      activityTooltip.getByText("84", { exact: true }),
+    ).toHaveCount(2);
+
+    const dailyTooltip = chartCards.nth(2).locator(
+      ".recharts-tooltip-wrapper",
+    );
+    await chartSurfaces.nth(2).focus();
     await expect(dailyTooltip).toBeHidden();
 
     await chartSurfaces.nth(1).focus();
@@ -104,7 +133,7 @@ for (const viewport of VIEWPORTS) {
     }
     await expect(chartSurfaces.last()).not.toBeFocused();
 
-    await chartSurfaces.nth(1).focus();
+    await chartSurfaces.nth(2).focus();
     for (let index = 0; index < 14; index += 1) {
       await page.keyboard.press("ArrowRight");
     }
@@ -114,6 +143,7 @@ for (const viewport of VIEWPORTS) {
     await expect(dailyTooltip).toContainText("0");
 
     await page.emulateMedia({ forcedColors: "active" });
+    await expect(activityLines.nth(1)).toHaveAttribute("stroke-dasharray", "6 4");
     await chartSurfaces.nth(1).focus();
     await page.keyboard.press("Shift+Tab");
     const forcedColorFocus = await chartCards

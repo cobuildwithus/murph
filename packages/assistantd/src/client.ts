@@ -4,6 +4,41 @@ const ASSISTANTD_BASE_URL_ENV_KEYS = ['MURPH_ASSISTANTD_BASE_URL'] as const
 const ASSISTANTD_CONTROL_TOKEN_ENV_KEYS = ['MURPH_ASSISTANTD_CONTROL_TOKEN'] as const
 const ASSISTANTD_DISABLE_CLIENT_ENV = 'MURPH_ASSISTANTD_DISABLE_CLIENT'
 
+export const assistantDaemonSessionResolutionWireFields = [
+  'alias',
+  'approvalPolicy',
+  'channel',
+  'codexHome',
+  'conversation',
+  'identityId',
+  'maxSessionAgeMs',
+  'model',
+  'modelProvider',
+  'participantId',
+  'profile',
+  'reasoningEffort',
+  'sandbox',
+  'sessionId',
+  'threadId',
+  'threadIsDirect',
+  'vault',
+] as const
+
+export const assistantDaemonMessageWireFields = [
+  ...assistantDaemonSessionResolutionWireFields,
+  'codexCommand',
+  'deliverResponse',
+  'deliveryReplyToMessageId',
+  'deliverySubject',
+  'deliveryTarget',
+  'includeEarlySessionOnboarding',
+  'operatorAuthority',
+  'persistUserPromptOnFailure',
+  'prompt',
+  'turnTrigger',
+  'workingDirectory',
+] as const
+
 export interface AssistantDaemonClientConfig {
   baseUrl: string
   token: string

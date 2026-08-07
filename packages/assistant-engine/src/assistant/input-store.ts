@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import { assistantPreferenceCausalSeqSchema } from '@murphai/contracts'
 import { createHostedMailboxAssistantInputIdFromBlindedIdentity } from '@murphai/hosted-execution/assistant-identifiers'
 import {
@@ -164,6 +164,7 @@ const assistantInputConversationRefSchema = z
     actorId: safeNullableAssistantInputTokenSchema('actorId'),
     actorIsSelf: z.boolean(),
     source: safeNullableAssistantInputTokenSchema('source'),
+    sessionId: safeNullableAssistantInputTokenSchema('sessionId').optional(),
     threadId: safeNullableAssistantInputTokenSchema('threadId'),
     threadIsDirect: z.boolean().nullable().default(null),
   })

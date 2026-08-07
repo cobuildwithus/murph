@@ -17,7 +17,7 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
 import {
-  readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
 } from "../hosted-mailbox/store";
 import { getPrisma } from "../prisma";
 
@@ -41,13 +41,13 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
 
   try {
     const updated = await prisma.$transaction(async (tx) => {
-      const causalSeq =
-        await readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+      const inputAuthority =
+        await readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
           assistantInputId: updateRequest.assistantInputId,
           memberId: input.memberId,
           prisma: tx,
         });
-      if (causalSeq === null) {
+      if (inputAuthority === null) {
         throw hostedOnboardingError({
           code: "ASSISTANT_CONFIGURATION_INPUT_AUTHORITY_INVALID",
           httpStatus: 403,

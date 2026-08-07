@@ -49,7 +49,10 @@ import {
   resolveAssistantDiagnosticsPolicy,
   type AssistantDiagnosticsPolicy,
 } from '../issue-reporting.js'
-import { resolveAssistantModelBehaviorProfile } from '../model-behavior.js'
+import {
+  buildAssistantResearchScoutCapabilityText,
+  resolveAssistantModelBehaviorProfile,
+} from '../model-behavior.js'
 import {
   resolveAssistantCodexResumeThreadId,
   resolveAssistantRouteResumeBinding,
@@ -76,6 +79,7 @@ import {
   type AssistantProgressDelivery,
 } from '../turn-progress.js'
 import {
+  resolveAssistantHostedScheduledInvocationScope,
   resolveAssistantHostedScheduledPhoneCallScope,
   type AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
@@ -96,6 +100,7 @@ import type {
   AssistantProviderConversationMessage,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
 } from '../providers/types.js'
+import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import {
   assistantConversationHistoryUtf8Bytes,
   limitAssistantConversationHistoryTextBytes,
@@ -113,7 +118,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
   resolveMurphDynamicTools,
   type MurphDynamicTool,
-} from '../../assistant-codex/dynamic-tools.js'
+} from '../../assistant-codex/dynamic-tool-catalog.js'
 import {
   resolveAssistantUserActionAcceptedInputIds,
 } from '../../assistant-codex/dynamic-tools/phone-calls.js'
@@ -456,6 +461,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   }
   const privateInteractiveAudience = conversationScope === 'direct'
+  const scheduledInvocationScope =
+    resolveAssistantHostedScheduledInvocationScope({
+      conversationScope,
+      messageInput: input.input,
+      originSessionId: input.session.sessionId,
+    })
   const scheduledPhoneCallScope =
     resolveAssistantHostedScheduledPhoneCallScope({
       channel: input.input.channel,
@@ -471,11 +482,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
       channel: resolvedChannel,
       threadIsDirect: false,
     })
-  const deliveredGroupPhoneCallPreviewAvailable =
-    authenticatedGroupChatRuntime &&
-    input.hostedToolContext?.phoneCalls != null &&
-    await input.hostedToolContext
-      .currentGroupPhoneCallPreviewAuthority?.() != null
   const hostedGroupStyleSettingsAvailable =
     hostedGroupRuntime &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&
@@ -503,8 +509,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   const responseCardsAvailable =
     privateInteractiveProviderTurn &&
-    ((ordinaryInboundTurn &&
-      input.input.scheduledInvocationAuthority == null) ||
+    (scheduledInvocationScope !== null ||
+      (ordinaryInboundTurn &&
+        input.input.scheduledInvocationAuthority == null) ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
   const shouldUseCommittedTranscriptHistory =
@@ -634,12 +641,23 @@ export async function resolveAssistantRouteTurnPlan(input: {
           vaultRoot: input.input.vault,
         })
       : null
-  const assistantDynamicContextPrompts = groupRoomModelPrompt
-    ? [...hostedDynamicContextPrompts, groupRoomModelPrompt]
-    : hostedDynamicContextPrompts
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
+  const assistantResearchAvailable = normalizeNullableString(
+    input.sharedPlan.cliAccess.env.EXA_API_KEY,
+  ) !== null
+    && input.profile.promptProfile === 'conversation'
+    && (privateInteractiveAudience || authenticatedGroupChatRuntime)
+  const assistantDynamicContextPrompts = [
+    ...hostedDynamicContextPrompts,
+    ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
+    ...(assistantResearchAvailable
+      ? [buildAssistantResearchScoutCapabilityText({
+          progressUpdateMode: authenticatedGroupChatRuntime ? 'group' : 'direct',
+        })]
+      : []),
+  ]
   const voiceMemoDeliveryChannel = outputOnlyTurn
     ? null
     : resolveAssistantVoiceMemoDeliveryChannel({
@@ -663,6 +681,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
     hostedRuntime: input.executionContext?.hosted != null,
+    researchAvailable: assistantResearchAvailable,
   })
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
@@ -800,6 +819,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
       session: input.session,
       sharedPlan: input.sharedPlan,
     })
+  const imageGenerationAvailable =
+    scheduledInvocationScope === null ||
+    getAssistantChannelAdapter(
+      currentAudienceDeliveryFields.channel,
+    )?.supportedResponseMediaKinds.includes('vault_image') === true
   const messageTargetingAvailable =
     input.messageTargetAuthorizerAvailable === true &&
     supportsAssistantAcceptedMessageTargetingRoute({
@@ -808,8 +832,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
       threadId: currentAudienceDeliveryFields.threadId,
       threadIsDirect: currentAudienceDeliveryFields.threadIsDirect,
     })
-  const productFeedbackAcceptedInputIds =
-    resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? [])
+  const productFeedbackAuthorized =
+    resolveAssistantProductFeedbackAcceptedInputIds(
+      input.acceptedInputItems ?? [],
+    ).length > 0
   const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
     acceptedInputItems: input.acceptedInputItems ?? [],
     turnTrigger: input.input.turnTrigger ?? null,
@@ -829,6 +855,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : resolveMurphDynamicTools({
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
+        imageGenerationAvailable,
         messageTargetingAvailable,
         assistantConfigurationAvailable:
           privateInteractiveAudience &&
@@ -851,7 +878,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
           input.hostedToolContext?.deviceTool != null,
         clinicalRecordsConnectLinkAvailable:
           privateInteractiveAudience &&
-          userActionAcceptedInputIds.length > 0 &&
+          (userActionAcceptedInputIds.length > 0 ||
+            scheduledInvocationScope !== null) &&
           input.hostedToolContext?.clinicalRecordsConnectLinkTool != null,
         familyPlanAvailable:
           privateInteractiveAudience &&
@@ -887,7 +915,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           assistantStyleSettingsAvailable &&
           input.hostedToolContext?.personalizationTool != null,
         productFeedbackAvailable:
-          productFeedbackAcceptedInputIds.length > 0 &&
+          productFeedbackAuthorized &&
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,
@@ -900,16 +928,23 @@ export async function resolveAssistantRouteTurnPlan(input: {
           (
             scheduledPhoneCallScope !== null ||
             (
+              userActionAcceptedInputIds.length > 0 &&
               (
-                privateInteractiveAudience
-                || deliveredGroupPhoneCallPreviewAvailable
-              ) &&
-              userActionAcceptedInputIds.length > 0
+                privateInteractiveAudience ||
+                (
+                  hostedGroupRuntime &&
+                  messageTargetingAvailable
+                )
+              )
             )
           ),
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,
+        pendingVaultFilesAvailable:
+          privateInteractiveAudience &&
+          userActionAcceptedInputIds.length > 0 &&
+          input.hostedToolContext?.pendingVaultFilesAvailable === true,
         vaultFileSendAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,

@@ -36,7 +36,9 @@ import type {
 import {
   createHostedBundleStore,
 } from "../src/bundle-store.ts";
-import { resolveHostedR2CutoverContext } from "../src/r2-cutover.ts";
+import {
+  HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+} from "../src/browser-vault-store.ts";
 import {
   hostedArtifactUserPrefix,
   hostedBrowserVaultReplicaUserPrefix,
@@ -55,6 +57,7 @@ import type {
   DurableObjectStorageLike,
 } from "../src/user-runner/types.ts";
 import {
+  browserVaultReplicaOrphanCandidateStorageKey,
   workspaceSnapshotUploadSessionCurrentStorageKey,
   workspaceSnapshotOrphanCandidateStorageKey,
   workspaceSnapshotOrphanCandidateStoragePrefix,
@@ -127,11 +130,14 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureReadyForProcessing = vi.fn();
+    const writeDataPoint = vi.fn();
     const { runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       readHealthDataConsentState: () => "revoked",
+      runtimeRetryAnalytics: { writeDataPoint },
     });
     await runner.bindUser(TEST_USER_ID);
+    mocks.emitHostedExecutionStructuredLog.mockClear();
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "revoked-consent-attempt",
@@ -141,7 +147,60 @@ describe("HostedUserRunner execution coordination", () => {
       retryAt: "2026-04-27T00:01:00.000Z",
     });
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(writeDataPoint).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+  });
+
+  it("captures existing control-plane boundaries without writing retry analytics for an accepted start", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const fixedNowMs = Date.parse(FIXED_NOW);
+    const writeDataPoint = vi.fn();
+    const { invoke, runner } = createRunnerHarness({
+      readHealthDataConsentState: () => {
+        vi.setSystemTime(fixedNowMs + 10);
+        return "granted";
+      },
+      runtimeRetryAnalytics: { writeDataPoint },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    runner.installRuntimeProcessingStateTimingHooksForTest({
+      afterBindUser: () => vi.setSystemTime(fixedNowMs + 20),
+      afterReadState: () => vi.setSystemTime(fixedNowMs + 30),
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestration: {
+        cloudflareRouteReceivedAtEpochMs: fixedNowMs - 2,
+        triggeredByWebDirect: true,
+        userRunnerRpcStartedAtEpochMs: fixedNowMs - 1,
+      },
+      orchestrationAttemptId:
+        "web-ingress-11111111-1111-4111-8111-111111111111",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+      cloudflareRouteReceivedAtEpochMs: fixedNowMs - 2,
+      userRunnerRpcStartedAtEpochMs: fixedNowMs - 1,
+      runtimeConsentLockAcquiredAtEpochMs: fixedNowMs,
+      healthDataAdmissionReadStartedAtEpochMs: fixedNowMs,
+      healthDataAdmissionReadFinishedAtEpochMs: fixedNowMs + 10,
+      userRunnerEnsureStartedAtEpochMs: fixedNowMs + 10,
+      runnerStateBindStartedAtEpochMs: fixedNowMs + 10,
+      runnerStateBindFinishedAtEpochMs: fixedNowMs + 20,
+      runnerStateReadStartedAtEpochMs: fixedNowMs + 20,
+      runnerStateReadFinishedAtEpochMs: fixedNowMs + 30,
+      runtimeInvocationOrchestrationAttemptId:
+        "web-ingress-11111111-1111-4111-8111-111111111111",
+      triggeredByWebDirect: true,
+    });
+    expect(writeDataPoint).not.toHaveBeenCalled();
   });
 
   it("serializes withdrawal behind an admitted ensure and stops the stale start before acknowledging", async () => {
@@ -675,6 +734,99 @@ describe("HostedUserRunner execution coordination", () => {
           "Hosted runner runtime owner-release recheck callback failed; preserving completed result.",
       }),
     );
+  });
+
+  it("records an exact container completion before the detached caller resumes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-container-completion-receipt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const invokeInput = invoke.mock.calls[0]?.[0];
+    if (!invokeInput) {
+      throw new Error("Expected a hosted runtime invocation.");
+    }
+    const result: HostedWorkspaceInvocationResult = {
+      nextWakeAt: null,
+      status: "idle",
+    };
+
+    await expect(runner.recordRuntimeCompletionFromContainer({
+      attemptId: invokeInput.job.request.attemptId,
+      generation: invokeInput.job.request.leaseGeneration,
+      result,
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({ completed: true });
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(1);
+
+    invocationResult.resolve(result);
+    await vi.waitFor(() =>
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Hosted runner runtime execution adapter completed.",
+        }),
+      )
+    );
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("rejects a stale container completion without clearing the active fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-stale-container-completion-receipt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const invokeInput = invoke.mock.calls[0]?.[0];
+    if (!invokeInput) {
+      throw new Error("Expected a hosted runtime invocation.");
+    }
+    const activeAttemptId = readRunnerMeta(sql).active_attempt_id;
+
+    await expect(runner.recordRuntimeCompletionFromContainer({
+      attemptId: invokeInput.job.request.attemptId,
+      generation: "999",
+      result: { nextWakeAt: null, status: "idle" },
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({ completed: false });
+    expect(readRunnerMeta(sql).active_attempt_id).toBe(activeAttemptId);
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(0);
+
+    invocationResult.resolve({ nextWakeAt: null, status: "idle" });
   });
 
   it("does not send owner release after a stale completion loses the exact fence", async () => {
@@ -1287,54 +1439,6 @@ describe("HostedUserRunner execution coordination", () => {
       }),
     );
   });
-
-  it.each(["source_active", "destination_active"] as const)(
-    "dispatches %s cutover restores through the role-aware fenced control plane",
-    async (cutoverPhase) => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date(FIXED_NOW));
-      const snapshotId = `snapshot_${cutoverPhase}`;
-      const snapshotRef = await createWorkspaceSnapshotV2RefWithRuntimeRootForTest({
-        objectKey: await hostedWorkspaceSnapshotObjectKey({
-          snapshotId,
-          userId: TEST_USER_ID,
-        }),
-        snapshotId,
-      });
-      const { invoke, runner } = createRunnerHarness({
-        runnerRuntimeEnvSource: {
-          ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
-          HOSTED_R2_CUTOVER_PHASE: cutoverPhase,
-          HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "test-access-key",
-          HOSTED_R2_PRESIGN_ACCOUNT_ID: "account123",
-          HOSTED_R2_PRESIGN_BUCKET_NAME: "murph-test",
-          HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "murph-test-enam",
-          HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "test-secret-key",
-        },
-        workspace: createWorkspaceState({
-          snapshotRef,
-          version: "5",
-        }),
-      });
-      await runner.bindUser(TEST_USER_ID);
-
-      await expect(runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "test-orchestration-attempt",
-        userId: TEST_USER_ID,
-      })).resolves.toMatchObject({
-        action: "started",
-        kind: "runtime_processing_accepted",
-      });
-
-      await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-      expect(invoke.mock.calls[0]?.[0].job).not.toHaveProperty("preparedSnapshotRestore");
-      expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: "Hosted workspace snapshot restore preparation unavailable.",
-        }),
-      );
-    },
-  );
 
   it("reuses cached runner stores when applying a caller command budget", async () => {
     vi.useFakeTimers();
@@ -2115,9 +2219,13 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const neverReady = new Promise<never>(() => undefined);
+    let readinessStartedAt: number | null = null;
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
-    >(async () => await neverReady);
+    >(async () => {
+      readinessStartedAt = Date.now();
+      return await neverReady;
+    });
     const { invoke, runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       workspace: createWorkspaceState({ version: "5" }),
@@ -2133,11 +2241,14 @@ describe("HostedUserRunner execution coordination", () => {
       timeoutMs: 8_000,
       userId: TEST_USER_ID,
     }));
+    if (readinessStartedAt === null) {
+      throw new Error("Expected startup readiness to begin.");
+    }
 
     await vi.advanceTimersByTimeAsync(8_000);
     await expect(response).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:18.050Z",
+      retryAt: new Date(readinessStartedAt + 18_000).toISOString(),
     });
 
     expect(invoke).not.toHaveBeenCalled();
@@ -2304,7 +2415,14 @@ describe("HostedUserRunner execution coordination", () => {
           activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
           activeFenceTargetWasPriorVersion: false,
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
+          healthDataAdmissionReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+          healthDataAdmissionReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
         },
         processingMode: "default",
         userId: TEST_USER_ID,
@@ -2355,7 +2473,14 @@ describe("HostedUserRunner execution coordination", () => {
         activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
         activeFenceTargetWasPriorVersion: false,
         activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
+        runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
+        healthDataAdmissionReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+        healthDataAdmissionReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
         userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+        runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
+        runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
+        runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+        runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
       },
       processingMode: "default",
       userId: TEST_USER_ID,
@@ -3537,7 +3662,9 @@ describe("HostedUserRunner execution coordination", () => {
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-replace",
+      orchestration: { triggeredByWebDirect: true },
+      orchestrationAttemptId:
+        "web-ingress-22222222-2222-4222-8222-222222222222",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "replaced",
@@ -3548,6 +3675,11 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+      runtimeInvocationOrchestrationAttemptId:
+        "web-ingress-22222222-2222-4222-8222-222222222222",
+      triggeredByWebDirect: true,
+    });
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,
@@ -4464,6 +4596,10 @@ describe("HostedUserRunner execution coordination", () => {
           activeFenceTargetWasPriorVersion: false,
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
         },
         processingMode: "default",
         userId: TEST_USER_ID,
@@ -4721,43 +4857,6 @@ describe("HostedUserRunner execution coordination", () => {
     ]) {
       expect(bucket.objects.has(key)).toBe(false);
     }
-    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
-  });
-
-  it("reports the destination-active bridge and deletes both fixed-role buckets", async () => {
-    const sourceBucket = new ListableMemoryEncryptedR2Bucket();
-    const destinationBucket = new ListableMemoryEncryptedR2Bucket();
-    const bundlePrefix = await hostedBundleUserPrefix({ userId: TEST_USER_ID });
-    const sourceKey = `${bundlePrefix}source.bundle.json`;
-    const destinationKey = `${bundlePrefix}destination.bundle.json`;
-    await sourceBucket.put(sourceKey, "source-data");
-    await destinationBucket.put(destinationKey, "destination-data");
-    const { runner, sql } = createRunnerHarness({
-      bucket: sourceBucket,
-      destinationBucket,
-      r2CutoverPhase: "destination_active",
-    });
-    await runner.bindUser(TEST_USER_ID);
-
-    await expect(runner.runnerStatus()).resolves.toMatchObject({
-      r2Cutover: {
-        coexisting: true,
-        phase: "destination_active",
-        protocolVersion: "r2-oc-enam-v2",
-      },
-    });
-    await expect(runner.deleteHostedUserData(TEST_USER_ID)).resolves.toMatchObject({
-      ok: true,
-      r2: {
-        deletedObjectCount: 2,
-        skippedUserScopedPrefixes: false,
-        supported: true,
-      },
-      userId: TEST_USER_ID,
-    });
-
-    expect(sourceBucket.objects.has(sourceKey)).toBe(false);
-    expect(destinationBucket.objects.has(destinationKey)).toBe(false);
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 
@@ -5268,6 +5367,183 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms.at(-1)).toBe("deleted");
   });
 
+  it("cleans stale browser vault replicas alongside snapshots after confirming current Web refs", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userPrefix = await hostedBrowserVaultReplicaUserPrefix({ userId: TEST_USER_ID });
+    const staleObjectKey = `${userPrefix}${"a".repeat(48)}.json`;
+    const currentObjectKey = `${userPrefix}${"b".repeat(48)}.json`;
+    const staleSnapshotObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_with_replica.snapshot.enc`;
+    await bucket.put(staleObjectKey, "stale-encrypted-replica");
+    await bucket.put(currentObjectKey, "current-encrypted-replica");
+    await bucket.put(staleSnapshotObjectKey, "stale-encrypted-snapshot");
+    const { alarms, runner, storageValues } = createRunnerHarness({
+      bucket,
+      workspace: createWorkspaceState({
+        browserVaultReplicaRef: createBrowserVaultReplicaRef({
+          objectKey: currentObjectKey,
+        }),
+      }),
+    });
+
+    for (const objectKey of [staleObjectKey, currentObjectKey]) {
+      await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+        createdAt: FIXED_NOW,
+        objectKey,
+        schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+        userId: TEST_USER_ID,
+      });
+    }
+    await runner.recordHostedWorkspaceSnapshotOrphanCandidate({
+      createdAt: FIXED_NOW,
+      objectKey: staleSnapshotObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: "snapshot_with_replica",
+      userId: TEST_USER_ID,
+    });
+    expect(alarms).toContain("2026-04-27T01:05:00.000Z");
+
+    vi.setSystemTime(new Date("2026-04-27T01:04:59.999Z"));
+    await runner.alarm();
+    expect(bucket.objects.has(staleObjectKey)).toBe(true);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(bucket.objects.has(staleSnapshotObjectKey)).toBe(true);
+
+    vi.setSystemTime(new Date("2026-04-27T01:05:00.000Z"));
+    await runner.alarm();
+
+    expect(bucket.deleted).toContain(staleObjectKey);
+    expect(bucket.deleted).toContain(staleSnapshotObjectKey);
+    expect(bucket.objects.has(staleObjectKey)).toBe(false);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(bucket.objects.has(staleSnapshotObjectKey)).toBe(false);
+    expect(storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(staleObjectKey),
+    )).toBeUndefined();
+    expect(storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(currentObjectKey),
+    )).toBeUndefined();
+    expect(alarms.at(-1)).toBe("deleted");
+  });
+
+  it("rejects browser vault replica cleanup obligations outside the bound user namespace", async () => {
+    const { runner } = createRunnerHarness();
+
+    await expect(runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+      createdAt: FIXED_NOW,
+      objectKey: "users/hsn_foreign/browser-vault-replicas/replica.json",
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: TEST_USER_ID,
+    })).rejects.toThrow(
+      "Hosted browser vault replica orphan candidate is outside the bound user namespace.",
+    );
+  });
+
+  it("does not erase a newer cleanup obligation registered while Web currentness is checked", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userPrefix = await hostedBrowserVaultReplicaUserPrefix({ userId: TEST_USER_ID });
+    const previousObjectKey = `${userPrefix}${"d".repeat(48)}.json`;
+    const nextObjectKey = `${userPrefix}${"e".repeat(48)}.json`;
+    await bucket.put(previousObjectKey, "previous-encrypted-replica");
+    await bucket.put(nextObjectKey, "next-encrypted-replica");
+    const workspace = createWorkspaceState({
+      browserVaultReplicaRef: createBrowserVaultReplicaRef({
+        objectKey: previousObjectKey,
+      }),
+    });
+    let runner!: HostedUserRunner;
+    let registeredDuringRead = false;
+    const harness = createRunnerHarness({
+      bucket,
+      onWorkspaceRead: async () => {
+        if (registeredDuringRead) {
+          return;
+        }
+        registeredDuringRead = true;
+        await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+          createdAt: FIXED_NOW,
+          objectKey: previousObjectKey,
+          schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+          userId: TEST_USER_ID,
+        });
+      },
+      workspace,
+    });
+    runner = harness.runner;
+    await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+      createdAt: "2026-04-26T00:00:00.000Z",
+      objectKey: previousObjectKey,
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: TEST_USER_ID,
+    });
+
+    await runner.alarm();
+
+    expect(bucket.objects.has(previousObjectKey)).toBe(true);
+    expect(harness.storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(previousObjectKey),
+    )).toMatchObject({
+      createdAt: FIXED_NOW,
+      objectKey: previousObjectKey,
+    });
+
+    workspace.browserVaultReplicaRef = createBrowserVaultReplicaRef({
+      objectKey: nextObjectKey,
+    });
+    vi.setSystemTime(new Date("2026-04-27T01:05:00.000Z"));
+    await runner.alarm();
+
+    expect(bucket.objects.has(previousObjectKey)).toBe(false);
+    expect(bucket.objects.has(nextObjectKey)).toBe(true);
+    expect(harness.storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(previousObjectKey),
+    )).toBeUndefined();
+  });
+
+  it("keeps browser vault replica orphan cleanup retryable when R2 deletion fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const userPrefix = await hostedBrowserVaultReplicaUserPrefix({ userId: TEST_USER_ID });
+    const staleObjectKey = `${userPrefix}${"c".repeat(48)}.json`;
+    class BrowserVaultReplicaDeleteFailureBucket extends MemoryEncryptedR2Bucket {
+      failDelete = true;
+
+      override async delete(key: string | string[]): Promise<void> {
+        const keys = Array.isArray(key) ? key : [key];
+        if (this.failDelete && keys.includes(staleObjectKey)) {
+          throw new Error("browser vault replica delete failed");
+        }
+        await super.delete(key);
+      }
+    }
+    const bucket = new BrowserVaultReplicaDeleteFailureBucket();
+    await bucket.put(staleObjectKey, "stale-encrypted-replica");
+    const { runner, storageValues } = createRunnerHarness({ bucket });
+    await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+      createdAt: "2026-04-26T00:00:00.000Z",
+      objectKey: staleObjectKey,
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: TEST_USER_ID,
+    });
+
+    await expect(runner.alarm()).rejects.toThrow("browser vault replica delete failed");
+    expect(bucket.objects.has(staleObjectKey)).toBe(true);
+    expect(storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(staleObjectKey),
+    )).toBeDefined();
+
+    bucket.failDelete = false;
+    await runner.alarm();
+    expect(bucket.objects.has(staleObjectKey)).toBe(false);
+    expect(storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(staleObjectKey),
+    )).toBeUndefined();
+  });
+
   it("does not scan orphan candidates when deleting an upload session", async () => {
     const currentObjectKey =
       `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_delete_no_scan_session.snapshot.enc`;
@@ -5571,7 +5847,6 @@ function createRunnerHarness(input: {
   alarmDeleteError?: Error;
   abortWorkspaceInvocation?: HostedExecutionContainerStubLike["abortWorkspaceInvocation"];
   bucket?: MemoryEncryptedR2Bucket;
-  destinationBucket?: MemoryEncryptedR2Bucket;
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
   runnerContainerStubForName?: (
     name: string,
@@ -5595,9 +5870,13 @@ function createRunnerHarness(input: {
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   ownerReleaseResponse?: () => Promise<Response> | Response;
   runtimeLogResponse?: () => Promise<Response> | Response;
-  r2CutoverPhase?: "destination_active" | "source_active";
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
+  runtimeRetryAnalytics?: { writeDataPoint(dataPoint: {
+    blobs?: string[];
+    doubles?: number[];
+    indexes?: string[];
+  }): void };
   wakeRuntime?: HostedExecutionContainerStubLike["wakeRuntime"];
   workspace?: HostedWorkspaceState | null;
 } = {}) {
@@ -5727,15 +6006,7 @@ function createRunnerHarness(input: {
     ownerReleaseResponse: input.ownerReleaseResponse,
   });
 
-  const sourceBucket = input.bucket ?? new MemoryEncryptedR2Bucket();
-  const r2CutoverContext = input.destinationBucket
-    ? resolveHostedR2CutoverContext({
-        BUNDLES: sourceBucket,
-        BUNDLES_ENAM: input.destinationBucket,
-        HOSTED_R2_CUTOVER_PHASE:
-          input.r2CutoverPhase ?? "destination_active",
-      })
-    : null;
+  const bucket = input.bucket ?? new MemoryEncryptedR2Bucket();
   const runner = new HostedUserRunnerWithTestControls(
     durable.state,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
@@ -5743,12 +6014,12 @@ function createRunnerHarness(input: {
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
     })),
-    r2CutoverContext?.bucket ?? sourceBucket,
+    bucket,
     input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,
     input.runnerContainerNamespace === undefined
       ? namespace
       : input.runnerContainerNamespace,
-    r2CutoverContext,
+    input.runtimeRetryAnalytics ?? null,
   );
 
   return {
@@ -6031,6 +6302,7 @@ function createWorkspaceState(
 
 function createBrowserVaultReplicaRef(input: {
   generatedAt?: string;
+  objectKey?: string;
   sourceBundleHash?: string;
 } = {}): NonNullable<HostedWorkspaceState["browserVaultReplicaRef"]> {
   const sourceBundleHash = input.sourceBundleHash ?? "a".repeat(64);
@@ -6039,7 +6311,7 @@ function createBrowserVaultReplicaRef(input: {
     dataVersion: "d".repeat(64),
     generatedAt: input.generatedAt ?? FIXED_NOW,
     keyId: "browser-vault-replica:d",
-    objectKey: "users/browser-vault-replicas/opaque/replica.json",
+    objectKey: input.objectKey ?? "users/browser-vault-replicas/opaque/replica.json",
     replicaSchema: "murph.browser-vault-replica",
     runtimeRootKeyId: "udrk:runtime:test-root",
     schema: "murph.hosted-browser-vault-replica-ref.v1",

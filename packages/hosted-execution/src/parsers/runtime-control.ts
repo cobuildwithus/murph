@@ -51,6 +51,7 @@ import {
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
+  isHostedRuntimeDirectEnsureOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
@@ -5661,9 +5662,10 @@ function readOptionalHostedRuntimeLatencyPhaseBreakdown(
 }
 
 // Secret-safety trust boundary: this parser is the only path through which a
-// phaseBreakdown reaches storage. It rejects any non-number/non-boolean leaf and
-// any unknown top-level or sub key so secrets (ids/tokens/paths/urls) cannot ride
-// this channel into the trace JSON.
+// phaseBreakdown reaches storage. It rejects unknown keys and all strings except
+// the two exact UUID-shaped direct-wake correlation leaves plus the bounded
+// runtime lease generation, so secrets/tokens/paths/URLs cannot ride this
+// channel into the trace JSON.
 function parseHostedRuntimeLatencyPhaseBreakdown(
   value: unknown,
 ): HostedRuntimeLatencyPhaseBreakdown {
@@ -5697,11 +5699,21 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "tokenAcquiredAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "directEnsureRequestStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "directEnsureResponseReceivedAtEpochMs", orchestrationLabel),
+      ...requireOptionalDirectEnsureOrchestrationAttemptId(orchestration, "directEnsureOrchestrationAttemptId", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "cloudflareRouteReceivedAtEpochMs", orchestrationLabel),
+      ...requireOptionalDirectEnsureOrchestrationAttemptId(orchestration, "runtimeInvocationOrchestrationAttemptId", orchestrationLabel),
       ...requireOptionalBoolean(orchestration, "triggeredByWebDirect", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "userRunnerRpcStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runtimeConsentLockAcquiredAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "healthDataAdmissionReadStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "healthDataAdmissionReadFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "userRunnerEnsureStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerStateBindStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerStateBindFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerStateReadStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerStateReadFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "activeFenceObservedAtEpochMs", orchestrationLabel),
       ...requireOptionalBoolean(orchestration, "activeFenceTargetWasPriorVersion", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "activeWakeStartedAtEpochMs", orchestrationLabel),
@@ -5761,6 +5773,11 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(restore, "extractMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "encryptedBytes", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "plainBytes", restoreLabel),
+      ...requireOptionalNonNegativeInteger(
+        restore,
+        "replaySafeReadMaxAttempt",
+        restoreLabel,
+      ),
     };
   }
 
@@ -5823,12 +5840,16 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       preProviderLabel,
     );
     breakdown.preProvider = {
+      ...requireOptionalNonNegativeInteger(preProvider, "mailboxImportDoneToAssistantPhaseMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "workspaceAssistantPreAutomationMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationLaneToAssistantServiceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "executionTargetHydrateMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "systemMailboxMaintenanceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "memberPreferencesPrePlanningMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationBootstrapMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxScanBytesRead", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "outboxScanElapsedMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxScanFilesRead", preProviderLabel),
       ...requireOptionalBoolean(preProvider, "outboxScanPerformed", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "receiptScanBytesRead", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "receiptScanElapsedMs", preProviderLabel),
@@ -5873,22 +5894,42 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       providerLabel,
     );
     breakdown.provider = {
+      ...requireOptionalNonNegativeInteger(provider, "assistantServicePreLockMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerInitializeMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerPreProviderMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerSpawnReadyMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadResumeMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadStartMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerWarmReuseMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexProcessPreparationMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "turnLockWaitMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "sessionResolveMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "promptBuildMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "admissionMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "preProviderSetupMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "providerPlanAndGateMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "linqEgressGuardMs", providerLabel),
     };
   }
 
   return breakdown;
+}
+
+function requireOptionalDirectEnsureOrchestrationAttemptId<
+  Key extends "directEnsureOrchestrationAttemptId" | "runtimeInvocationOrchestrationAttemptId",
+>(
+  record: Record<string, unknown>,
+  key: Key,
+  label: string,
+): Partial<Record<Key, string>> {
+  const value = record[key];
+  if (value === undefined) {
+    return {};
+  }
+  if (!isHostedRuntimeDirectEnsureOrchestrationAttemptId(value)) {
+    throw new TypeError(`${label}.${key} must be a direct-wake orchestration attempt id.`);
+  }
+  return { [key]: value } as Record<Key, string>;
 }
 
 function parseHostedRuntimeLatencyTraceProviderStartedEvent(
@@ -6599,64 +6640,9 @@ export function parseHostedRunnerStatusResponse(value: unknown): HostedRunnerSta
           recentLogs: requireArray(record.recentLogs, "Hosted runner status response recentLogs")
             .map((entry) => parseHostedRuntimeLogEntry(entry)),
         }),
-    ...(record.r2Cutover === undefined
-      ? {}
-      : { r2Cutover: parseHostedRunnerR2CutoverStatus(record.r2Cutover) }),
     userId: requireString(record.userId, "Hosted runner status response userId"),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };
-}
-
-function parseHostedRunnerR2CutoverStatus(
-  value: unknown,
-): NonNullable<HostedRunnerStatusResponse["r2Cutover"]> {
-  const record = requireObject(value, "Hosted runner status response r2Cutover");
-  const phase = requireString(
-    record.phase,
-    "Hosted runner status response r2Cutover.phase",
-  );
-  if (phase !== "source_active" && phase !== "destination_active") {
-    throw new TypeError(
-      "Hosted runner status response r2Cutover.phase must be source_active or destination_active.",
-    );
-  }
-  return {
-    coexisting: requireBoolean(
-      record.coexisting,
-      "Hosted runner status response r2Cutover.coexisting",
-    ),
-    ...(record.pausedCanaryConfigured === undefined
-      ? {}
-      : {
-          pausedCanaryConfigured: requireBoolean(
-            record.pausedCanaryConfigured,
-            "Hosted runner status response r2Cutover.pausedCanaryConfigured",
-          ),
-        }),
-    phase,
-    protocolVersion: requireString(
-      record.protocolVersion,
-      "Hosted runner status response r2Cutover.protocolVersion",
-    ),
-    ...(record.writeAdmission === undefined
-      ? {}
-      : {
-          writeAdmission: parseHostedR2WriteAdmission(record.writeAdmission),
-        }),
-  };
-}
-
-function parseHostedR2WriteAdmission(value: unknown): "open" | "paused" {
-  const writeAdmission = requireString(
-    value,
-    "Hosted runner status response r2Cutover.writeAdmission",
-  );
-  if (writeAdmission !== "open" && writeAdmission !== "paused") {
-    throw new TypeError(
-      "Hosted runner status response r2Cutover.writeAdmission must be open or paused.",
-    );
-  }
-  return writeAdmission;
 }
 
 export function parseHostedRuntimeWebStatusResponse(value: unknown): HostedRuntimeWebStatusResponse {

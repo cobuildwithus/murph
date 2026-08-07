@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 import {
   assistantPersonalitySettingIds,
@@ -51,6 +51,7 @@ export type AssistantStyleDynamicToolRequest =
   | {
       args: AssistantStyleArguments
       kind: 'assistant-style'
+      toolCallId?: string
     }
   | {
       kind: 'invalid-assistant-style-arguments'
@@ -64,6 +65,7 @@ export interface AssistantStyleTurnSettingsOverlay {
 export function readAssistantStyleDynamicToolRequest(input: {
   arguments: unknown
   tool: string | null
+  toolCallId?: string | null
 }): AssistantStyleDynamicToolRequest | null {
   if (input.tool !== MURPH_ASSISTANT_STYLE_TOOL.name) {
     return null
@@ -77,7 +79,11 @@ export function readAssistantStyleDynamicToolRequest(input: {
   })
 
   return parsed.ok
-    ? { args: parsed.args, kind: 'assistant-style' }
+    ? {
+        args: parsed.args,
+        kind: 'assistant-style',
+        ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
+      }
     : {
         kind: 'invalid-assistant-style-arguments',
         validationDigest: parsed.validationDigest,
@@ -85,7 +91,7 @@ export function readAssistantStyleDynamicToolRequest(input: {
 }
 
 export async function executeAssistantStyleDynamicTool(input: {
-  assistantInputId: string | null
+  authority: HostedRuntimeAssistantPersonalizationToolAuthority | null
   available: boolean
   hosted: boolean
   hostedPersonalizationTool: {
@@ -121,7 +127,7 @@ export async function executeAssistantStyleDynamicTool(input: {
     const usecases = await import('@murphai/vault-usecases/preferences')
     if (input.hosted) {
       const personalizationTool = input.hostedPersonalizationTool
-      const assistantInputId = input.assistantInputId
+      const authority = input.authority
       if (args.action === 'show') {
         const canonical = await usecases.showAssistantPersonality(input.vaultRoot)
         return assistantStyleTextResult(true, JSON.stringify({
@@ -132,7 +138,7 @@ export async function executeAssistantStyleDynamicTool(input: {
           ),
         }))
       }
-      if (!personalizationTool || !assistantInputId) {
+      if (!personalizationTool || !authority) {
         return assistantStyleTextResult(
           false,
           'assistant style settings could not be updated',
@@ -152,12 +158,15 @@ export async function executeAssistantStyleDynamicTool(input: {
               assistantPersonalitySettingIds.map((setting) => [setting, null]),
             )
           : { [args.setting]: null }
-      const response = await personalizationTool.request({
-        action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
-        personality,
-      }, {
-        assistantInputId,
-      })
+      const response = await personalizationTool.request(
+        {
+          action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+          personality,
+        },
+        input.request.toolCallId
+          ? { ...authority, toolCallId: input.request.toolCallId }
+          : authority,
+      )
       if (response.action !== HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION) {
         throw new TypeError('Assistant style request returned the wrong response action.')
       }
