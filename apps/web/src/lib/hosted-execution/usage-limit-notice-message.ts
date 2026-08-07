@@ -30,12 +30,10 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
       ) {
         return input.message;
       }
-      let fundingUrl: URL;
-      try {
-        fundingUrl = new URL(status.fundingUrl, `${MURPH_PRODUCT_ORIGIN}/`);
-      } catch {
-        return input.message;
-      }
+      const fundingUrl = new URL(
+        status.fundingUrl,
+        `${MURPH_PRODUCT_ORIGIN}/`,
+      );
       if (fundingUrl.origin !== MURPH_PRODUCT_ORIGIN) {
         return input.message;
       }
