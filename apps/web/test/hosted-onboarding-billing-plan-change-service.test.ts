@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type Stripe from "stripe";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn<(task: () => Promise<void>) => void>(),
   getPrisma: vi.fn(),
   prismaClient: {
     hostedMember: {
@@ -25,6 +26,10 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+vi.mock("next/server", () => ({
+  after: mocks.after,
+}));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -42,6 +47,12 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import { upgradeHostedBillingPlan } from "@/src/lib/hosted-onboarding/billing-plan-change-service";
+import {
+  createResendFetch,
+  makeStripeProviderError,
+  readResendRequest,
+  stubAlertEnvironment,
+} from "./support/hosted-stripe-alert-fixture";
 
 describe("upgradeHostedBillingPlan", () => {
   beforeEach(() => {
@@ -84,6 +95,7 @@ describe("upgradeHostedBillingPlan", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   test("creates an exact Stripe plan confirmation after two short owner checks", async () => {
@@ -161,6 +173,39 @@ describe("upgradeHostedBillingPlan", () => {
     );
   });
 
+  test("delivers request-id-free plan upgrade failures with stable replay identity", async () => {
+    stubAlertEnvironment();
+    const fetchMock = createResendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.stripe.billingPortal.sessions.create.mockRejectedValue(
+      makeStripeProviderError(),
+    );
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(upgradeHostedBillingPlan({
+        expectedCurrentPlanCode: "launch_monthly",
+        memberId: "member_fixture",
+        targetPlanCode: "launch_edge_monthly",
+      })).rejects.toMatchObject({
+        code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
+        httpStatus: 502,
+      });
+    }
+
+    expect(mocks.after).toHaveBeenCalledTimes(2);
+    for (const [task] of mocks.after.mock.calls) {
+      await task();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstRequest = readResendRequest(fetchMock, 0);
+    const secondRequest = readResendRequest(fetchMock, 1);
+    expect(secondRequest.idempotencyKey).toBe(firstRequest.idempotencyKey);
+    expect(secondRequest.body).toBe(firstRequest.body);
+    expect(firstRequest.body).toContain("operation: billing.plan-upgrade");
+    expect(firstRequest.body).not.toContain("member_fixture");
+  });
+
   test("returns no-action when the local billing owner is already on target", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue(
       makeBillingRef({ currentBillingPlanCode: "launch_edge_monthly" }),
@@ -191,6 +236,7 @@ describe("upgradeHostedBillingPlan", () => {
       status: "already_on_plan",
     });
     expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
   });
 
   test("fails closed while a previous Stripe pending update exists", async () => {
@@ -315,6 +361,7 @@ function makePlanConfig(input: {
       launch_monthly: "price_pulse",
     }[input.billingPlanCode],
     stripe: mocks.stripe,
+    stripeLiveMode: true,
   };
 }
 

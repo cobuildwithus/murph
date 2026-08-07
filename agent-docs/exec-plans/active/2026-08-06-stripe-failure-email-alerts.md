@@ -155,3 +155,13 @@ Updated: 2026-08-06
 - Added real Resend transport proof for a request-id-free current redirect
   failure with stable replay, an unbound valid Session ID with zero email, and
   a successful open Session with zero email.
+- Final round 6 found that removing alert eligibility from the shared diagnostic
+  logger left two Web-owned subscription actions without a terminal action
+  owner. Paid-plan upgrades and paid-trial transitions now report only after
+  their complete provider-backed action aborts. The adjacent scheduled plan
+  switch uses the same ownership rule, including Assistant callers that already
+  share these services.
+- Added real Resend transport proof for request-id-free plan-upgrade,
+  paid-trial, scheduled-switch, and cardless Group payment-setup failures.
+  Stable replays retain the same body and Resend key, while recovered ambiguous
+  mutations, already-applied outcomes, and domain conflicts schedule no email.

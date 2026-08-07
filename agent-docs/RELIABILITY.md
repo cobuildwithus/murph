@@ -324,10 +324,12 @@ Last verified: 2026-08-06
 - Stripe failure email reuses the shared operational Resend transport as a
   best-effort projection, never a retry or billing owner. Only an action owner
   schedules a metadata-only operation alert when a Stripe rejection actually
-  aborts the complete checkout action. That owner covers mandatory price
+  aborts the complete billing action. Checkout owners cover mandatory price
   lookup, customer provisioning, saved-card preparation, and Checkout Session
-  creation/resume without treating each provider call as a separate alert
-  occurrence. Family replacement attempts rebind alert identity to the current
+  creation/resume; paid-plan upgrades, paid-trial transitions, and scheduled
+  plan switches likewise report only after the complete provider-backed action
+  fails. No individual provider call is a separate alert occurrence. Family
+  replacement attempts rebind alert identity to the current
   attempt, while direct paid upgrades include the complete current-plan,
   current-Price, target-Price, and seat-count provider effect. An explicit
   group-sponsorship recovery owns a terminal provider rejection, but a

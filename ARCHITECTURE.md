@@ -1473,12 +1473,14 @@ responses never grant credit.
 
 Stripe failure email is a best-effort observability projection at these shared
 Web-owned boundaries, not a billing owner. A provider rejection that aborts
-the complete website or assistant checkout action, a new verified canonical
+the complete website or assistant billing action, a new verified canonical
 payment-failure event, and the first failed local event-reconciliation attempt
 schedule a plain-text Resend alert through the existing operational sender and
-recipient allowlist. Checkout action ownership spans its mandatory price read,
+recipient allowlist. Checkout ownership spans its mandatory price read,
 customer provisioning, saved-card preparation, and Checkout Session
-creation/resume; individual SDK calls do not independently own email. The
+creation/resume. Paid-plan upgrades, paid-trial transitions, and scheduled plan
+switches own their complete provider-backed action in the same way; individual
+SDK calls do not independently own email. The
 Family action derives one complete provider-effect identity from the current
 plan, current Price, target Price, and seat count, and a stale Session restart
 rebinds reporting to the replacement checkout attempt. Explicit

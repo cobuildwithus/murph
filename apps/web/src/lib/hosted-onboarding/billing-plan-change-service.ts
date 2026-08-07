@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
+import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { coerceStripeObjectId } from "./billing";
 import {
@@ -15,7 +16,10 @@ import {
   type HostedBillingPlanCode,
 } from "./billing-plans";
 import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "./errors";
 import {
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
@@ -31,6 +35,7 @@ import { normalizeNullableString } from "./shared";
 import {
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
+  withHostedStripeActionFailureAlert,
 } from "./stripe-error-log";
 
 const HOSTED_BILLING_PLAN_CHANGE_PORTAL_CONFIGURATION_ENV_BY_TARGET = {
@@ -81,19 +86,52 @@ export async function upgradeHostedBillingPlan(input: {
   const currentConfig = requireHostedStripeBillingPlanConfig({
     billingPlanCode: owner.currentPlanCode,
   });
+  const targetRuntimeConfig = requireHostedStripeBillingPlanConfig({
+    billingPlanCode: input.targetPlanCode,
+  });
+  return withHostedStripeActionFailureAlert(
+    {
+      isTerminalStripeFailure: isHostedBillingPlanUpgradeStripeUnavailableError,
+      operationIdentity: buildHostedBillingPlanUpgradeOperationIdentity({
+        currentPlanCode: owner.currentPlanCode,
+        currentPriceId: currentConfig.priceId,
+        stripeSubscriptionId: owner.stripeSubscriptionId,
+        targetPlanCode: input.targetPlanCode,
+        targetPriceId: targetRuntimeConfig.priceId,
+      }),
+      operationName: "billing.plan-upgrade",
+      stripeLiveMode: targetRuntimeConfig.stripeLiveMode,
+    },
+    () => performHostedBillingPlanUpgrade({
+      currentConfig,
+      memberId: input.memberId,
+      owner,
+      prisma,
+      targetPlanCode: input.targetPlanCode,
+    }),
+  );
+}
+
+async function performHostedBillingPlanUpgrade(input: {
+  currentConfig: ReturnType<typeof requireHostedStripeBillingPlanConfig>;
+  memberId: string;
+  owner: HostedBillingPlanUpgradeOwnerSnapshot;
+  prisma: PrismaClient;
+  targetPlanCode: HostedBillingPlanCode;
+}): Promise<HostedBillingPlanUpgradeResult> {
   const targetConfig = await requireValidatedHostedStripeBillingPlanConfig({
     billingPlanCode: input.targetPlanCode,
   });
   const stripe = targetConfig.stripe;
   const subscription = await callHostedStripePlanUpgradeOperation(
     "subscription.retrieve.portal-confirmation",
-    () => stripe.subscriptions.retrieve(owner.stripeSubscriptionId, {
+    () => stripe.subscriptions.retrieve(input.owner.stripeSubscriptionId, {
       expand: ["items.data.price"],
     }),
   );
 
   assertHostedStripeSubscriptionMatchesCustomer({
-    stripeCustomerId: owner.stripeCustomerId,
+    stripeCustomerId: input.owner.stripeCustomerId,
     subscription,
   });
   if (isHostedStripeSubscriptionAppliedPlan({
@@ -118,7 +156,7 @@ export async function upgradeHostedBillingPlan(input: {
   }
 
   const sourceItem = requireHostedStripePlanChangeSourceItem({
-    sourcePriceId: currentConfig.priceId,
+    sourcePriceId: input.currentConfig.priceId,
     subscription,
   });
   const returnUrls = buildHostedBillingPlanChangeReturnUrls({
@@ -130,7 +168,7 @@ export async function upgradeHostedBillingPlan(input: {
     "billing-portal.session.create.subscription-update-confirm",
     () => stripe.billingPortal.sessions.create({
       configuration: portalConfigurationId,
-      customer: owner.stripeCustomerId,
+      customer: input.owner.stripeCustomerId,
       flow_data: {
         after_completion: {
           redirect: {
@@ -144,7 +182,7 @@ export async function upgradeHostedBillingPlan(input: {
             price: targetConfig.priceId,
             quantity: 1,
           }],
-          subscription: owner.stripeSubscriptionId,
+          subscription: input.owner.stripeSubscriptionId,
         },
         type: "subscription_update_confirm",
       },
@@ -161,17 +199,37 @@ export async function upgradeHostedBillingPlan(input: {
   }
 
   await assertHostedBillingPlanUpgradeOwnerStillCurrent({
-    expected: owner,
+    expected: input.owner,
     memberId: input.memberId,
-    prisma,
+    prisma: input.prisma,
     targetPlanCode: input.targetPlanCode,
   });
 
   return {
-    billingPlanCode: owner.currentPlanCode,
+    billingPlanCode: input.owner.currentPlanCode,
     paymentUrl,
     status: "pending_payment",
   };
+}
+
+function buildHostedBillingPlanUpgradeOperationIdentity(input: {
+  currentPlanCode: HostedBillingPlanCode;
+  currentPriceId: string;
+  stripeSubscriptionId: string;
+  targetPlanCode: HostedBillingPlanCode;
+  targetPriceId: string;
+}): string {
+  return `hosted-billing-plan-upgrade:${sha256Hex(JSON.stringify(input))}`;
+}
+
+function isHostedBillingPlanUpgradeStripeUnavailableError(
+  error: unknown,
+): boolean {
+  return isHostedOnboardingError(error) &&
+    (
+      error.code === "HOSTED_BILLING_PRICE_UNAVAILABLE" ||
+      error.code === "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE"
+    );
 }
 
 async function readHostedBillingPlanUpgradeOwner(input: {

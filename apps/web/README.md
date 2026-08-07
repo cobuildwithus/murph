@@ -1067,10 +1067,12 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   time-zone setting is required for Stripe alerts. Confirm that the Stripe
   webhook endpoint subscribes to `checkout.session.async_payment_failed`,
   `payment_intent.payment_failed`, `invoice.payment_failed`, and
-  `invoice.finalization_failed`. The checkout action owner covers mandatory
+  `invoice.finalization_failed`. Checkout action owners cover mandatory
   price reads, customer provisioning, saved-card preparation, and Checkout
-  Session create/resume. It emails only when the provider rejection aborts the
-  action; recovered reads, replays, and cleanup races remain diagnostic logs.
+  Session create/resume. Paid-plan upgrades, paid-trial transitions, and
+  scheduled plan switches use the same complete-action ownership. An owner
+  emails only when the provider rejection aborts the action; recovered reads,
+  replays, and cleanup races remain diagnostic logs.
   Family retries bind alerts to the current replacement attempt, and explicit
   group-sponsorship recovery reports only when its own provider-backed checkout
   terminates; a no-charge reactivation stays silent. The final Family redirect
