@@ -3809,7 +3809,10 @@ function createHostedAssistantLinqSendDependency(input: {
         });
         throw markHostedDeliveryMayHaveSucceeded(error);
       }
-      if (isHostedLinqProviderOutcomeAmbiguous(error)) {
+      if (
+        hostedDeliveryErrorProvesProviderWasSkipped(error)
+        || isHostedLinqProviderOutcomeAmbiguous(error)
+      ) {
         throw markHostedDeliveryMayHaveSucceeded(error);
       }
       queueHostedAssistantLinqDeliveryOutcomeWrite({

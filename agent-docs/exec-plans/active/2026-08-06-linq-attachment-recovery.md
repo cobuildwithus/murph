@@ -107,6 +107,11 @@ Updated: 2026-08-06
   treat every successful but unusable reservation response as ambiguous. Both
   corrections reuse the existing prepared intent and terminal ambiguity owner;
   they add no state, queue, or transport-wide retry policy.
+- Accept the follow-up specialist's cumulative-provenance finding. A per-call
+  defer before a later attachment reservation cannot erase an earlier provider
+  entry in the same multi-image delivery. Promote that whole delivery through
+  the existing ambiguity owner and prove malformed successful responses at the
+  real hosted adapter boundary.
 
 ## Verification
 
@@ -140,3 +145,13 @@ Updated: 2026-08-06
 - `pnpm --filter @murphai/operator-config typecheck`,
   `pnpm --filter @murphai/assistant-engine typecheck`, and
   `pnpm --filter @murphai/assistant-runtime typecheck`: passed.
+- Follow-up ReviewGPT implementation proof:
+  `pnpm --filter @murphai/assistant-runtime exec vitest run test/hosted-runtime-linq-outbox-regression.test.ts --reporter=dot`:
+  5 tests passed, including cumulative multi-image provider entry and malformed
+  successful reservation JSON.
+- Follow-up callback proof:
+  `pnpm --filter @murphai/assistant-runtime exec vitest run test/hosted-runtime-callbacks.test.ts --reporter=dot`:
+  215 tests passed; assistant-runtime typecheck passed.
+- Follow-up engine owner proof ran 306 tests with 305 passing and one unrelated
+  retention test timing out under concurrent load; the exact timed-out test
+  passed in isolation on immediate rerun.

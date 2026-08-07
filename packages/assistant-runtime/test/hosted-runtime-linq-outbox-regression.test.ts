@@ -145,6 +145,129 @@ it("defers a real hosted Linq attachment before provider entry and later sends t
   ]);
 });
 
+it("terminalizes a two-image hosted Linq delivery when a later reservation yields after provider entry", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
+  const fixture = await createHostedLinqAttachmentFixture({
+    imageCount: 2,
+    key: "cumulative-provider-entry",
+    target: "linq_chat_hosted_cumulative_provider_entry",
+  });
+  let reservationIndex = 0;
+  const providerFetch = vi.fn<typeof fetch>(async (request) => {
+    const url = String(request);
+    if (url.endsWith("/attachments")) {
+      reservationIndex += 1;
+      return new Response(JSON.stringify({
+        attachment_id: `attachment_cumulative_provider_entry_${reservationIndex}`,
+        expires_at: "2026-08-06T21:00:00.000Z",
+        http_method: "PUT",
+        required_headers: {
+          "content-type": "image/png",
+        },
+        upload_url:
+          `https://uploads.example.test/private/cumulative-provider-entry-${reservationIndex}`,
+      }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw new Error(`Unexpected Linq provider request: ${url}`);
+  });
+  const publicInternetFetch = vi.fn<typeof fetch>(async () =>
+    new Response(null, { status: 204 }));
+  const drainInput = buildHostedLinqDrainInput({
+    fixture,
+    providerFetch,
+    publicInternetFetch,
+  });
+  const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+    assistantDeliveryEffects: [fixture.effect],
+    linqDeliveryContext: fixture.linqDeliveryContext,
+    now: () => "2026-08-06T20:00:00.000Z",
+    vaultRoot: fixture.vaultRoot,
+  });
+  expect(preparation.preparedDispatches).toHaveLength(1);
+  const onBackgroundDeliveryYield = vi.fn();
+  let laterReservationYieldRequested = false;
+
+  const outcomes = await drainHostedPreparedAssistantDeliveries({
+    ...drainInput,
+    allowPreparedSending: true,
+    onBackgroundDeliveryYield,
+    preparedDispatches: preparation.preparedDispatches,
+    shouldYieldBackgroundDelivery: () => {
+      const reservationCallCount = providerFetch.mock.calls.filter(([request]) =>
+        String(request).endsWith("/attachments")
+      ).length;
+      const shouldYield = !laterReservationYieldRequested
+        && reservationCallCount === 1
+        && publicInternetFetch.mock.calls.length === 1;
+      laterReservationYieldRequested ||= shouldYield;
+      return shouldYield;
+    },
+  });
+
+  expect(outcomes).toEqual([
+    expect.objectContaining({
+      deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+      deliveryStatus: "failed_ambiguous",
+      effectId: fixture.intent.intentId,
+      retryable: false,
+    }),
+  ]);
+  expect(laterReservationYieldRequested).toBe(true);
+  expect(onBackgroundDeliveryYield).not.toHaveBeenCalled();
+  expect(providerFetch.mock.calls.filter(([request]) =>
+    String(request).endsWith("/attachments")
+  )).toHaveLength(1);
+  expect(providerFetch.mock.calls.filter(([request]) =>
+    String(request).endsWith(`/chats/${fixture.target}/messages`)
+  )).toHaveLength(0);
+  expect(publicInternetFetch).toHaveBeenCalledTimes(1);
+  await expect(readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  )).resolves.toMatchObject({
+    intentId: fixture.intent.intentId,
+    nextAttemptAt: null,
+    status: "abandoned",
+  });
+
+  vi.setSystemTime(new Date("2026-08-06T20:11:00.000Z"));
+  const laterOutcomes = await drainHostedPreparedAssistantDeliveries({
+    ...drainInput,
+    shouldYieldBackgroundDelivery: () => false,
+    wake: buildHostedExecutionRuntimeTimerWake({
+      eventId: "evt_hosted_cumulative_provider_entry_later",
+      occurredAt: "2026-08-06T20:11:00.000Z",
+      triggerKind: "runtime_timer",
+      userId: "member_hosted_cumulative_provider_entry",
+    }),
+  });
+
+  expect(laterOutcomes).toEqual([
+    expect.objectContaining({
+      deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+      deliveryStatus: "failed_ambiguous",
+      effectId: fixture.intent.intentId,
+      retryable: false,
+    }),
+  ]);
+  expect(providerFetch.mock.calls.filter(([request]) =>
+    String(request).endsWith("/attachments")
+  )).toHaveLength(1);
+  expect(providerFetch.mock.calls.filter(([request]) =>
+    String(request).endsWith(`/chats/${fixture.target}/messages`)
+  )).toHaveLength(0);
+  expect(publicInternetFetch).toHaveBeenCalledTimes(1);
+  await expect(listAssistantOutboxIntents(fixture.vaultRoot)).resolves.toEqual([
+    expect.objectContaining({
+      intentId: fixture.intent.intentId,
+      status: "abandoned",
+    }),
+  ]);
+});
+
 it.each([
   {
     key: "missing-fields",
@@ -171,9 +294,16 @@ it.each([
       upload_url: "https://uploads.example.test/private/unsupported-method",
     },
   },
+  {
+    key: "malformed-json",
+    label: "malformed JSON",
+    payload: null,
+    responseBody: '{"attachment_id":',
+  },
 ])("terminalizes a real hosted Linq 2xx reservation with $label", async ({
   key,
   payload,
+  responseBody,
 }) => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
@@ -186,7 +316,7 @@ it.each([
     if (!url.endsWith("/attachments")) {
       throw new Error(`Unexpected Linq provider request: ${url}`);
     }
-    return new Response(JSON.stringify(payload), {
+    return new Response(responseBody ?? JSON.stringify(payload), {
       headers: { "Content-Type": "application/json" },
     });
   });
@@ -257,6 +387,7 @@ it.each([
 });
 
 async function createHostedLinqAttachmentFixture(input: {
+  imageCount?: number;
   key: string;
   target: string;
 }) {
@@ -269,20 +400,26 @@ async function createHostedLinqAttachmentFixture(input: {
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
     0x00, 0x00, 0x00, 0x0d,
   ]);
-  const imageRef = `raw/captures/${input.key}.png`;
-  const imagePath = path.join(workspace.vaultRoot, imageRef);
-  await mkdir(path.dirname(imagePath), { recursive: true });
-  await writeFile(imagePath, imageBytes);
-  const media: HostedAssistantDeliveryMedia[] = [{
-    alt: "Private generated image",
-    contentType: "image/png",
-    filename: `${input.key}.png`,
-    kind: "vault_image",
-    ref: imageRef,
-    sha256: createHash("sha256").update(imageBytes).digest("hex"),
-    sizeBytes: imageBytes.byteLength,
-    source: "gpt-image-2",
-  }];
+  const media: HostedAssistantDeliveryMedia[] = [];
+  for (let index = 0; index < (input.imageCount ?? 1); index += 1) {
+    const imageKey = input.imageCount
+      ? `${input.key}-${index + 1}`
+      : input.key;
+    const imageRef = `raw/captures/${imageKey}.png`;
+    const imagePath = path.join(workspace.vaultRoot, imageRef);
+    await mkdir(path.dirname(imagePath), { recursive: true });
+    await writeFile(imagePath, imageBytes);
+    media.push({
+      alt: "Private generated image",
+      contentType: "image/png",
+      filename: `${imageKey}.png`,
+      kind: "vault_image",
+      ref: imageRef,
+      sha256: createHash("sha256").update(imageBytes).digest("hex"),
+      sizeBytes: imageBytes.byteLength,
+      source: "gpt-image-2",
+    });
+  }
   const intent = await createAssistantOutboxIntent({
     actorId: `actor_${input.key}`,
     channel: "linq",
