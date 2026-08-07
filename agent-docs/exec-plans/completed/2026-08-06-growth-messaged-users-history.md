@@ -1,8 +1,8 @@
 # Growth messaged-user history
 
-Status: active
+Status: completed
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Goal
 
@@ -91,7 +91,7 @@ Updated: 2026-08-06
    component and design study.
 5. [x] Update durable architecture/reliability/design guidance and run focused
    verification plus desktop/mobile browser proof.
-6. [ ] Push the exact candidate, run preliminary and final ReviewGPT alongside
+6. [x] Push the exact candidate, run preliminary and final ReviewGPT alongside
    CI, resolve accepted findings, complete parent review, and close this plan.
 
 ## Verification
@@ -127,13 +127,21 @@ Updated: 2026-08-06
   after committing legacy fields when activity capture is operationally
   unavailable. Current focused tests, Web typecheck, Prisma validation, lint,
   rendered proof, and parent full-diff review pass after the clean `main` merge.
-- Blocked: the fresh same-thread final ReviewGPT round never submitted. Eragon
-  reached an attached, ready draft but timed out in browser control before
-  submission; Phlebas and Hercules failed before the attachment/composer was
-  ready; Mountain was unavailable because its profile was already locked.
-  Read-only recovery found no completed new turn, so no duplicate prompt was
-  sent and no final-round pass is claimed.
-- Blocked: GitHub accepted repeated synchronize pushes but created no Actions
-  runs for the branch. GitHub's official status reports a partial system outage
-  with Actions in a major outage. Exact-head required CI therefore remains
-  pending for an external reason; Vercel remains the only emitted PR status.
+- Passed: same-thread final ReviewGPT round 3 reviewed implementation head
+  `21897d208adca1de8d42ea90ed909b5d616cc466` and returned `PASS` with no
+  qualifying findings. The browser selected GPT-5.6 Sol; the saved platform
+  attestation maps it to backend slug `gpt-5-6-pro` and matches the response
+  hash. The sole pre-existing/adjacent observation corrected explanatory
+  failure-boundary wording; that docs-only correction and the later base-only
+  merge do not require another review round under the review workflow.
+- Passed after the GitHub Actions outage recovered: the first emitted Host
+  Support run exposed unrelated assistant-runtime and CLI expectation failures,
+  which reproduced outside this diff. Current `main` repaired those tests and
+  was green; after merging it, the focused CLI test passed 34/34, the two
+  assistant-runtime files passed 286/286, and the growth suites passed 49/49.
+  Required exact-head CI on merged candidate
+  `01e5d040df054ba71accd0726d5fcbd2ae594243` passed Host Support (including
+  the umbrella release check), frontend design proof, viewport overflow, repo
+  hygiene, and Vercel. Final parent diff and privacy reviews found no remaining
+  task-scoped issue.
+Completed: 2026-08-06
