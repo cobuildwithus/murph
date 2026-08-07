@@ -5,6 +5,9 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = ROOT / "packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts"
+TOP_LEVEL_TEST_START = re.compile(
+    r"(?m)^  (?:it|test|describe)(?:\.|\b)"
+)
 
 text = TARGET.read_text(encoding="utf-8")
 
@@ -30,17 +33,16 @@ if import_count != 1:
 text = import_region + text[heading_index:]
 heading_index = text.index(heading)
 
-block_start = text.rfind("\n  it.each(", 0, heading_index)
-if block_start < 0:
-    raise RuntimeError("could not find the stale parameterized test start")
-
-next_test = re.search(
-    r"\n  (?:it(?:\.each)?|describe)\(",
-    text[heading_index + len(heading):],
-)
-if next_test is None:
+starts = list(TOP_LEVEL_TEST_START.finditer(text))
+prior_starts = [match for match in starts if match.start() < heading_index]
+next_starts = [match for match in starts if match.start() > heading_index]
+if not prior_starts:
+    raise RuntimeError("could not find the stale top-level test start")
+if not next_starts:
     raise RuntimeError("could not find the next top-level test boundary")
-block_end = heading_index + len(heading) + next_test.start()
+
+block_start = prior_starts[-1].start()
+block_end = next_starts[0].start()
 block = text[block_start:block_end]
 
 for marker in (
