@@ -1,10 +1,11 @@
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  pruneBundledRunnerDependencies,
   rewriteRuntimeBinWrappers,
   rewriteRuntimePackageManifest,
 } from "../scripts/runner-bundle/runtime-shape.js";
@@ -17,6 +18,98 @@ afterEach(async () => {
       rm(directory, { force: true, recursive: true }),
     ),
   );
+});
+
+describe("post-bundle dependency pruning", () => {
+  it("removes unused Zod variants while retaining the live root and v4 runtimes", async () => {
+    const bundleDir = await mkdtemp(
+      path.join(tmpdir(), "murph-runner-runtime-shape-"),
+    );
+    const zodPackageDir = path.join(bundleDir, "node_modules", "zod");
+    const siblingSourcePath = path.join(
+      bundleDir,
+      "node_modules",
+      "another-package",
+      "src",
+      "index.js",
+    );
+
+    temporaryDirectories.push(bundleDir);
+    const retainedZodPaths = [
+      path.join(zodPackageDir, "index.js"),
+      path.join(zodPackageDir, "v4", "classic", "index.js"),
+      path.join(zodPackageDir, "v4", "core", "index.js"),
+      path.join(zodPackageDir, "v4", "locales", "en.js"),
+    ];
+    const removedZodPaths = [
+      path.join(zodPackageDir, "src", "index.ts"),
+      path.join(zodPackageDir, "v3", "index.js"),
+      path.join(zodPackageDir, "mini", "index.js"),
+      path.join(zodPackageDir, "v4-mini", "index.js"),
+      path.join(zodPackageDir, "v4", "mini", "index.js"),
+    ];
+
+    await Promise.all(
+      [...retainedZodPaths, ...removedZodPaths].map(async (filePath) => {
+        await mkdir(path.dirname(filePath), { recursive: true });
+        await writeFile(filePath, "export const retained = true\n", "utf8");
+      }),
+    );
+    await mkdir(path.dirname(siblingSourcePath), { recursive: true });
+    await mkdir(path.join(bundleDir, "dist"), { recursive: true });
+    await writeFile(
+      path.join(zodPackageDir, "package.json"),
+      JSON.stringify({ name: "zod", version: "4.4.3" }),
+      "utf8",
+    );
+    await writeFile(siblingSourcePath, "retained when required\n", "utf8");
+    const zodPackageName = ["zo", "d"].join("");
+    await writeFile(
+      path.join(bundleDir, "dist", "consumer.js"),
+      [
+        `import "${zodPackageName}"`,
+        `import "${zodPackageName}/v4"`,
+        `import "${zodPackageName}/v4/core"`,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await pruneBundledRunnerDependencies(bundleDir);
+
+    await expect(access(zodPackageDir)).resolves.toBeUndefined();
+    for (const retainedPath of retainedZodPaths) {
+      await expect(access(retainedPath)).resolves.toBeUndefined();
+    }
+    for (const removedPath of removedZodPaths) {
+      await expect(access(removedPath)).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    await expect(readFile(siblingSourcePath, "utf8")).resolves.toBe(
+      "retained when required\n",
+    );
+  });
+
+  it("rejects imports of a Zod surface selected for removal", async () => {
+    const bundleDir = await mkdtemp(
+      path.join(tmpdir(), "murph-runner-runtime-shape-"),
+    );
+
+    temporaryDirectories.push(bundleDir);
+    await mkdir(path.join(bundleDir, "node_modules", "zod", "v3"), {
+      recursive: true,
+    });
+    await mkdir(path.join(bundleDir, "dist"), { recursive: true });
+    const zodPackageName = ["zo", "d"].join("");
+    await writeFile(
+      path.join(bundleDir, "dist", "consumer.js"),
+      `import "${zodPackageName}/v3"\n`,
+      "utf8",
+    );
+
+    await expect(
+      pruneBundledRunnerDependencies(bundleDir),
+    ).rejects.toThrow(/imports zod\/v3/);
+  });
 });
 
 describe("runner bundle runtime manifest rewriting", () => {
