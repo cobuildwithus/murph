@@ -233,10 +233,11 @@ new participant fallback claims require the complete snapshot atomically.
   ids, idempotency keys, and raw error text out of durable diagnostics.
 - Preserve the current single-effect outbox transition and use its existing
   confirmation-pending state for exact provider-idempotent card replay.
-- Deploy Web first because it accepts the optional predecessor transition while
-  remaining compatible with the old runner. Then ship the Cloudflare Worker
-  and runner bundle together with immediate rollout; the new runner must not
-  precede the Web endpoint that understands the transition.
+- Apply the nullable delivery-claim migration before deploying Web. The old Web
+  and runner remain compatible with the added columns. Then deploy Web before
+  shipping the Cloudflare Worker and runner bundle together with immediate
+  rollout; the new runner must not precede the Web endpoint that understands
+  the transition.
 
 ## Tasks
 
@@ -244,7 +245,7 @@ new participant fallback claims require the complete snapshot atomically.
 2. [x] Add caught-failure diagnostics without changing text recovery.
 3. [x] Run focused tests, typechecks, documentation checks, and privacy review.
 4. [x] Prove and correct post-claim route reselection for changed home lines.
-5. [ ] Persist and verify the exact claimed participant recipient after the
+5. [x] Persist and verify the exact claimed participant recipient after the
    round 14 requirement retrospective.
 6. [ ] Push the exact candidate and complete ReviewGPT plus CI gates.
 
@@ -416,3 +417,18 @@ new participant fallback claims require the complete snapshot atomically.
   selects an encrypted recipient snapshot on the existing member-owned delivery
   row, with exact original-recipient replay after claim and fail-closed handling
   for incomplete legacy rows.
+- The round 14 failing-first Web regression changed the member's verified phone
+  after claim and reproduced `HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH` instead
+  of exact replay. The existing delivery row now atomically stores its member,
+  blind recipient index, and row-bound encrypted recipient at participant claim;
+  later route reads decrypt only that snapshot. Current-phone substitution,
+  changed-line substitution, corrupt or incomplete legacy claims, and source or
+  key mismatches all stop before provider entry with the existing structured
+  unavailable/control diagnostics.
+- Focused round 14 correction proof passes 162 Web engagement, deletion, and
+  private-envelope tests; all 3 opt-in PostgreSQL fallback lifecycle cases; and
+  254 hosted provider/callback tests. Prepared Web typecheck, Prisma client
+  generation, migration application against the isolated PostgreSQL database,
+  documentation gardening, diff whitespace, and private-field classification
+  checks pass. Account deletion explicitly removes member-owned delivery rows,
+  with the new foreign-key cascade as defense in depth.

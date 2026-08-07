@@ -217,6 +217,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_usage_credit_purchase",
   "prisma.hosted_product_feedback",
   "prisma.hosted_linq_daily_state",
+  "prisma.hosted_linq_runtime_delivery",
   "prisma.hosted_linq_invite_delivery",
   "prisma.hosted_invite",
   "prisma.hosted_consent_event",
@@ -1887,6 +1888,15 @@ describe("deleteHostedAccountData", () => {
       },
     ]));
     expect(result.deletedCounts["prisma.hosted_linq_invite_delivery"]).toBe(1);
+    expect(result.deletedCounts["prisma.hosted_linq_runtime_delivery"]).toBe(1);
+    expect(deleteCalls).toContainEqual({
+      model: "hostedLinqDelivery",
+      where: {
+        memberId: {
+          in: ["member_123", "member_thread_container_123"],
+        },
+      },
+    });
   });
 
   it("aborts before the receipt when a thread container appears after the deletion fence", async () => {

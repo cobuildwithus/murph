@@ -34,6 +34,9 @@ import {
   isHostedLinqStaleChatAppCardFallbackIdempotencyKey,
   parseHostedLinqAppCardFallbackIdentity,
 } from "./linq-app-card-fallback";
+import {
+  decryptHostedLinqDeliveryParticipantPhoneNumber,
+} from "./linq-delivery-participant-phone-codec";
 import { decryptHostedLinqLinePhoneNumber } from "./linq-line-phone-codec";
 import {
   resolveHostedMemberAssistantNotificationRoute,
@@ -552,6 +555,14 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
       await resolveHostedLinqAppCardFallbackParticipantRoute({
         claimedLinePhoneLookupKey:
           appCardFallbackRoute.fallbackLinePhoneLookupKey,
+        claimedParticipantDeliveryId:
+          appCardFallbackRoute.fallbackDeliveryId,
+        claimedParticipantMemberId:
+          appCardFallbackRoute.fallbackMemberId,
+        claimedParticipantPhoneEncrypted:
+          appCardFallbackRoute.fallbackParticipantPhoneEncrypted,
+        claimedParticipantPhoneLookupKey:
+          appCardFallbackRoute.fallbackParticipantPhoneLookupKey,
         memberId: input.memberId,
         prisma: input.prisma,
         routing,
@@ -560,12 +571,7 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
       return participantRecovery.authority;
     }
     return {
-      ...(routing.linqRecipientPhoneLookupKey
-        ? {
-            linePhoneNumberLookupKey:
-              routing.linqRecipientPhoneLookupKey,
-          }
-        : {}),
+      routeDisposition: "unavailable",
       targetOverride: null,
       threadIsDirect: true,
     };
@@ -742,7 +748,13 @@ async function assertHostedLinqAppCardFallbackParticipantEgressAuthority(input: 
   }
   if (
     predecessor.fallbackTargetKind === "participant"
-    && !predecessor.fallbackLinePhoneLookupKey
+    && (
+      !predecessor.fallbackDeliveryId
+      || !predecessor.fallbackLinePhoneLookupKey
+      || predecessor.fallbackMemberId !== input.memberId
+      || !predecessor.fallbackParticipantPhoneEncrypted
+      || !predecessor.fallbackParticipantPhoneLookupKey
+    )
   ) {
     throwHostedLinqParticipantEgressAuthorityMismatch();
   }
@@ -751,6 +763,14 @@ async function assertHostedLinqAppCardFallbackParticipantEgressAuthority(input: 
       ? {
           claimedLinePhoneLookupKey:
             predecessor.fallbackLinePhoneLookupKey,
+          claimedParticipantDeliveryId:
+            predecessor.fallbackDeliveryId,
+          claimedParticipantMemberId:
+            predecessor.fallbackMemberId,
+          claimedParticipantPhoneEncrypted:
+            predecessor.fallbackParticipantPhoneEncrypted,
+          claimedParticipantPhoneLookupKey:
+            predecessor.fallbackParticipantPhoneLookupKey,
           memberId: input.memberId,
           prisma: input.prisma,
           routing,
@@ -799,8 +819,12 @@ async function readHostedLinqAppCardFallbackRoute(input: {
   idempotencyKey?: string | null;
   prisma: HostedLinqEngagementClient;
 }): Promise<{
+  fallbackDeliveryId: string | null;
   fallbackChatLookupKey: string | null;
   fallbackLinePhoneLookupKey: string | null;
+  fallbackMemberId: string | null;
+  fallbackParticipantPhoneEncrypted: string | null;
+  fallbackParticipantPhoneLookupKey: string | null;
   fallbackTargetKind: "participant" | "thread" | null;
   predecessorChatLookupKey: string;
 } | null> {
@@ -829,7 +853,11 @@ async function readHostedLinqAppCardFallbackRoute(input: {
       ? input.prisma.hostedLinqDelivery.findUnique({
           where: { idempotencyKey: fallbackIdempotencyLookupKey },
           select: {
+            id: true,
             linqChatLookupKey: true,
+            memberId: true,
+            participantPhoneEncrypted: true,
+            participantPhoneLookupKey: true,
             phoneNumberLookupKey: true,
             source: true,
             targetKind: true,
@@ -853,6 +881,10 @@ async function readHostedLinqAppCardFallbackRoute(input: {
       ? fallback.targetKind
       : null;
   return {
+    fallbackDeliveryId:
+      fallbackTargetKind === "participant"
+        ? normalizeNullable(fallback?.id)
+        : null,
     fallbackChatLookupKey:
       fallbackTargetKind === "thread"
         ? normalizeNullable(fallback?.linqChatLookupKey)
@@ -861,6 +893,18 @@ async function readHostedLinqAppCardFallbackRoute(input: {
       fallbackTargetKind !== null
         ? normalizeNullable(fallback?.phoneNumberLookupKey)
         : null,
+    fallbackMemberId:
+      fallbackTargetKind === "participant"
+        ? normalizeNullable(fallback?.memberId)
+        : null,
+    fallbackParticipantPhoneEncrypted:
+      fallbackTargetKind === "participant"
+        ? normalizeNullable(fallback?.participantPhoneEncrypted)
+        : null,
+    fallbackParticipantPhoneLookupKey:
+      fallbackTargetKind === "participant"
+        ? normalizeNullable(fallback?.participantPhoneLookupKey)
+        : null,
     fallbackTargetKind,
     predecessorChatLookupKey: predecessor.linqChatLookupKey,
   };
@@ -868,6 +912,10 @@ async function readHostedLinqAppCardFallbackRoute(input: {
 
 async function resolveHostedLinqAppCardFallbackParticipantRoute(input: {
   claimedLinePhoneLookupKey?: string | null;
+  claimedParticipantDeliveryId?: string | null;
+  claimedParticipantMemberId?: string | null;
+  claimedParticipantPhoneEncrypted?: string | null;
+  claimedParticipantPhoneLookupKey?: string | null;
   expectedCurrentChatId?: string | null;
   expectedCurrentChatLookupKey?: string | null;
   memberId: string;
@@ -883,7 +931,81 @@ async function resolveHostedLinqAppCardFallbackParticipantRoute(input: {
   const claimedLinePhoneLookupKey = normalizeNullable(
     input.claimedLinePhoneLookupKey,
   );
-  const [privateState, identity, claimedLine] = await Promise.all([
+  if (claimedLinePhoneLookupKey) {
+    const claimedParticipantDeliveryId = normalizeNullable(
+      input.claimedParticipantDeliveryId,
+    );
+    const claimedParticipantMemberId = normalizeNullable(
+      input.claimedParticipantMemberId,
+    );
+    const claimedParticipantPhoneEncrypted = normalizeNullable(
+      input.claimedParticipantPhoneEncrypted,
+    );
+    const claimedParticipantPhoneLookupKey = normalizeNullable(
+      input.claimedParticipantPhoneLookupKey,
+    );
+    if (
+      !claimedParticipantDeliveryId
+      || claimedParticipantMemberId !== input.memberId
+      || !claimedParticipantPhoneEncrypted
+      || !claimedParticipantPhoneLookupKey
+    ) {
+      return { kind: "unavailable" };
+    }
+    const claimedLine = await input.prisma.hostedLinqLine.findUnique({
+      where: { phoneNumberLookupKey: claimedLinePhoneLookupKey },
+      select: {
+        phoneNumberEncrypted: true,
+        phoneNumberLookupKey: true,
+      },
+    });
+    if (
+      claimedLine?.phoneNumberLookupKey !== claimedLinePhoneLookupKey
+      || !claimedLine.phoneNumberEncrypted
+    ) {
+      return { kind: "unavailable" };
+    }
+    let claimedLinePhoneNumber: string | null = null;
+    let claimedParticipantPhoneNumber: string | null = null;
+    try {
+      claimedLinePhoneNumber = normalizePhoneNumber(
+        decryptHostedLinqLinePhoneNumber(claimedLine.phoneNumberEncrypted),
+      );
+      claimedParticipantPhoneNumber = normalizePhoneNumber(
+        decryptHostedLinqDeliveryParticipantPhoneNumber({
+          deliveryId: claimedParticipantDeliveryId,
+          encrypted: claimedParticipantPhoneEncrypted,
+        }),
+      );
+    } catch {
+      return { kind: "unavailable" };
+    }
+    if (
+      !claimedLinePhoneNumber
+      || !createHostedPhoneLookupKeyReadCandidates(claimedLinePhoneNumber)
+        .includes(claimedLinePhoneLookupKey)
+      || !claimedParticipantPhoneNumber
+      || !createHostedPhoneLookupKeyReadCandidates(
+        claimedParticipantPhoneNumber,
+      ).includes(claimedParticipantPhoneLookupKey)
+    ) {
+      return { kind: "unavailable" };
+    }
+    return {
+      authority: {
+        linePhoneNumberLookupKey: claimedLinePhoneLookupKey,
+        targetOverride: {
+          fromPhoneNumber: claimedLinePhoneNumber,
+          target: claimedParticipantPhoneNumber,
+          targetKind: "participant",
+        },
+        threadIsDirect: true,
+      },
+      kind: "participant",
+    };
+  }
+
+  const [privateState, identity] = await Promise.all([
     readHostedMemberRoutingPrivateState(input.routing, input.prisma),
     input.prisma.hostedMemberIdentity.findUnique({
       where: { memberId: input.memberId },
@@ -893,39 +1015,7 @@ async function resolveHostedLinqAppCardFallbackParticipantRoute(input: {
         phoneNumberEncrypted: true,
       },
     }),
-    claimedLinePhoneLookupKey
-      ? input.prisma.hostedLinqLine.findUnique({
-          where: { phoneNumberLookupKey: claimedLinePhoneLookupKey },
-          select: {
-            phoneNumberEncrypted: true,
-            phoneNumberLookupKey: true,
-          },
-        })
-      : null,
   ]);
-  let claimedLinePhoneNumber: string | null = null;
-  if (claimedLinePhoneLookupKey) {
-    if (
-      claimedLine?.phoneNumberLookupKey !== claimedLinePhoneLookupKey
-      || !claimedLine.phoneNumberEncrypted
-    ) {
-      return { kind: "unavailable" };
-    }
-    try {
-      claimedLinePhoneNumber = normalizePhoneNumber(
-        decryptHostedLinqLinePhoneNumber(claimedLine.phoneNumberEncrypted),
-      );
-    } catch {
-      return { kind: "unavailable" };
-    }
-    if (
-      !claimedLinePhoneNumber
-      || !createHostedPhoneLookupKeyReadCandidates(claimedLinePhoneNumber)
-        .includes(claimedLinePhoneLookupKey)
-    ) {
-      return { kind: "unavailable" };
-    }
-  }
   const expectedCurrentChatId = normalizeNullable(input.expectedCurrentChatId);
   if (!claimedLinePhoneLookupKey && (
     expectedCurrentChatId
@@ -966,7 +1056,7 @@ async function resolveHostedLinqAppCardFallbackParticipantRoute(input: {
   const route = resolveHostedMemberAssistantNotificationRoute({
     linqChatId: null,
     linqRecipientPhone:
-      claimedLinePhoneNumber ?? privateState.linqRecipientPhone,
+      privateState.linqRecipientPhone,
     memberId: input.memberId,
     memberPhoneNumber,
     messaging,
@@ -982,8 +1072,7 @@ async function resolveHostedLinqAppCardFallbackParticipantRoute(input: {
     return { kind: "unavailable" };
   }
   const linePhoneNumberLookupKey =
-    claimedLinePhoneLookupKey
-    ?? input.routing.linqRecipientPhoneLookupKey;
+    input.routing.linqRecipientPhoneLookupKey;
   return {
     authority: {
       ...(linePhoneNumberLookupKey

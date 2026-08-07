@@ -12,6 +12,9 @@ import {
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  decryptHostedLinqDeliveryParticipantPhoneNumber,
+} from "@/src/lib/hosted-onboarding/linq-delivery-participant-phone-codec";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -209,9 +212,11 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("moves a stale thread-card fence to participant fallback without persisting its target", async () => {
+    it("moves a stale thread-card fence to an exact encrypted participant fallback", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
       const suffix = randomUUID();
+      const memberId = `member-card-participant-fallback-${suffix}`;
+      const participantPhoneNumber = "+15550100001";
       const intentId = `intent-card-participant-fallback-${suffix}`;
       const predecessorIdempotencyKey = `assistant-outbox:${intentId}`;
       const fallbackIdempotencyKey =
@@ -228,6 +233,7 @@ describe.skipIf(!runPostgresProof)(
       }
 
       try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
         await expect(recordHostedLinqRuntimeProviderDispatchFenceTx({
           idempotencyKey: predecessorIdempotencyKey,
           linqChatId: `chat-card-participant-fallback-${suffix}`,
@@ -239,6 +245,8 @@ describe.skipIf(!runPostgresProof)(
         await expect(transitionHostedLinqRuntimeAppCardFallbackFenceTx({
           fallbackIdempotencyKey,
           linqChatId: null,
+          memberId,
+          participantPhoneNumber,
           phoneNumber: "+15550100099",
           predecessorIdempotencyKey,
           prisma,
@@ -248,16 +256,35 @@ describe.skipIf(!runPostgresProof)(
 
         await expect(prisma.hostedLinqDelivery.findUnique({
           select: {
+            id: true,
             linqChatLookupKey: true,
+            memberId: true,
+            participantPhoneEncrypted: true,
+            participantPhoneLookupKey: true,
             status: true,
             targetKind: true,
           },
           where: { idempotencyKey: fallbackLookupKey },
-        })).resolves.toEqual({
+        })).resolves.toMatchObject({
+          id: expect.any(String),
           linqChatLookupKey: null,
+          memberId,
+          participantPhoneEncrypted: expect.any(String),
+          participantPhoneLookupKey: expect.any(String),
           status: "provider_dispatch_started",
           targetKind: "participant",
         });
+        const participantClaim = await prisma.hostedLinqDelivery.findUnique({
+          select: { id: true, participantPhoneEncrypted: true },
+          where: { idempotencyKey: fallbackLookupKey },
+        });
+        expect(participantClaim?.participantPhoneEncrypted).not.toContain(
+          participantPhoneNumber,
+        );
+        expect(decryptHostedLinqDeliveryParticipantPhoneNumber({
+          deliveryId: participantClaim?.id ?? "",
+          encrypted: participantClaim?.participantPhoneEncrypted ?? "",
+        })).toBe(participantPhoneNumber);
 
         await expect(transitionHostedLinqRuntimeAppCardFallbackFenceTx({
           fallbackIdempotencyKey,
@@ -275,6 +302,7 @@ describe.skipIf(!runPostgresProof)(
             },
           },
         });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
         await prisma.$disconnect();
       }
     });

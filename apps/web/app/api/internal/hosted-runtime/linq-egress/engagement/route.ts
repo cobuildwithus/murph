@@ -198,6 +198,10 @@ export const POST = withJsonError(async (request: Request) => {
             linqChatId: providerTargetKind === "participant"
               ? null
               : providerTarget,
+            memberId: userId,
+            participantPhoneNumber: providerTargetKind === "participant"
+              ? providerTarget
+              : null,
             phoneNumber: fromPhoneNumber,
             predecessorIdempotencyKey:
               providerDispatchPredecessorIdempotencyKey,

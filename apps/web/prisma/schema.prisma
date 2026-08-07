@@ -561,6 +561,7 @@ model HostedMember {
   aiUsage                        HostedAiUsage[]
   linqDailyStates                HostedLinqDailyState[]
   linqContactCardShares          HostedLinqContactCardShare[]
+  linqDeliveries                 HostedLinqDelivery[]
   identity                       HostedMemberIdentity?
   routing                        HostedMemberRouting?
   billingRef                     HostedMemberBillingRef?
@@ -2020,6 +2021,7 @@ model HostedLinqProviderEvent {
 
 model HostedLinqDelivery {
   id                       String   @id
+  memberId                 String?  @map("member_id")
   idempotencyKey           String?  @unique @map("idempotency_key")
   source                   String
   sourceRef                String?  @map("source_ref")
@@ -2028,6 +2030,8 @@ model HostedLinqDelivery {
   groupJoinReplyOccurredAt DateTime? @map("group_join_reply_occurred_at")
   phoneNumberLookupKey     String?  @map("phone_number_lookup_key")
   phoneNumberHint          String?  @map("phone_number_hint")
+  participantPhoneLookupKey String? @map("participant_phone_lookup_key")
+  participantPhoneEncrypted String? @map("participant_phone_encrypted")
   targetKind               String?  @map("target_kind")
   threadIsDirect           Boolean? @map("thread_is_direct")
   linqChatLookupKey        String?  @map("linq_chat_lookup_key")
@@ -2049,12 +2053,14 @@ model HostedLinqDelivery {
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
   groupJoinOutreach        HostedGroupJoinOutreach? @relation(fields: [groupJoinOutreachId], references: [id], onDelete: Cascade)
+  member                   HostedMember? @relation(fields: [memberId], references: [id], onDelete: Cascade)
   line                     HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
   alerts                   HostedLinqAlert[]
   ingressLatencyTraces     HostedIngressLatencyTrace[]
   messages                 HostedLinqDeliveryMessage[]
 
   @@index([groupJoinOutreachId, status, attemptedAt], map: "hosted_linq_delivery_group_join_outreach_status_idx")
+  @@index([memberId, attemptedAt], map: "hosted_linq_delivery_member_attempted_idx")
   @@index([phoneNumberLookupKey, attemptedAt])
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])

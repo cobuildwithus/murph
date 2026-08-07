@@ -1,4 +1,5 @@
 import { createCipheriv, createHmac, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -6,6 +7,10 @@ import {
   encryptHostedGroupJoinOutreachPhoneNumber,
 } from "@/src/lib/hosted-groups/group-join-outreach-phone-codec";
 import { readHostedContactPrivacyKeyring } from "@/src/lib/hosted-onboarding/env";
+import {
+  decryptHostedLinqDeliveryParticipantPhoneNumber,
+  encryptHostedLinqDeliveryParticipantPhoneNumber,
+} from "@/src/lib/hosted-onboarding/linq-delivery-participant-phone-codec";
 import {
   decryptHostedLinqLinePhoneNumber,
   encryptHostedLinqLinePhoneNumber,
@@ -101,6 +106,17 @@ describe("hosted contact phone envelope", () => {
       encrypted: outreach,
       outreachId: "hgrpjoa_opaque",
     })).toBe(PARTICIPANT_PHONE);
+
+    const deliveryParticipant =
+      encryptHostedLinqDeliveryParticipantPhoneNumber({
+        deliveryId: "hld_opaque",
+        phoneNumber: PARTICIPANT_PHONE,
+      });
+    expect(deliveryParticipant).not.toContain(PARTICIPANT_PHONE);
+    expect(decryptHostedLinqDeliveryParticipantPhoneNumber({
+      deliveryId: "hld_opaque",
+      encrypted: deliveryParticipant,
+    })).toBe(PARTICIPANT_PHONE);
   });
 
   it("keeps each purpose and row isolated", () => {
@@ -117,5 +133,38 @@ describe("hosted contact phone envelope", () => {
 
     // Nor may one purpose's envelope be read by another purpose's codec.
     expect(() => decryptHostedLinqLinePhoneNumber(outreach)).toThrow();
+
+    const deliveryParticipant =
+      encryptHostedLinqDeliveryParticipantPhoneNumber({
+        deliveryId: "hld_opaque",
+        phoneNumber: PARTICIPANT_PHONE,
+      });
+    expect(() => decryptHostedLinqDeliveryParticipantPhoneNumber({
+      deliveryId: "hld_other",
+      encrypted: deliveryParticipant,
+    })).toThrow();
+    expect(() => decryptHostedGroupJoinOutreachPhoneNumber({
+      encrypted: deliveryParticipant,
+      outreachId: "hld_opaque",
+    })).toThrow();
+  });
+
+  it("classifies the delivery participant as owner metadata, blind lookup, and encrypted content only", () => {
+    const schema = readFileSync(
+      new URL("../prisma/schema.prisma", import.meta.url),
+      "utf8",
+    );
+    const model = schema.match(
+      /model HostedLinqDelivery \{(?<body>[\s\S]*?)\n\}/u,
+    )?.groups?.body ?? "";
+
+    expect(model).toMatch(/memberId\s+String\?\s+@map\("member_id"\)/u);
+    expect(model).toMatch(
+      /participantPhoneLookupKey\s+String\?\s+@map\("participant_phone_lookup_key"\)/u,
+    );
+    expect(model).toMatch(
+      /participantPhoneEncrypted\s+String\?\s+@map\("participant_phone_encrypted"\)/u,
+    );
+    expect(model).not.toMatch(/participantPhone(?:Number)?\s+String/u);
   });
 });

@@ -6,8 +6,13 @@ import {
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
   readHostedPhoneHint,
 } from "./contact-privacy";
+import {
+  decryptHostedLinqDeliveryParticipantPhoneNumber,
+  encryptHostedLinqDeliveryParticipantPhoneNumber,
+} from "./linq-delivery-participant-phone-codec";
 import {
   projectHostedLinqLineForDeliveryReceiptTx,
   upsertHostedLinqLineForPhoneTx,
@@ -65,6 +70,9 @@ type HostedLinqDeliveryProviderDispatchData = {
   groupJoinOutreachId: string | null;
   groupJoinReplyOccurredAt: Date | null;
   linqChatLookupKey: string | null;
+  memberId: string | null;
+  participantPhoneEncrypted: string | null;
+  participantPhoneLookupKey: string | null;
   phoneNumberHint: string | null;
   phoneNumberLookupKey: string | null;
   retryAfterAt: null;
@@ -312,6 +320,8 @@ type HostedLinqDeliveryProviderDispatchClaimInput = {
   groupJoinReplyOccurredAt?: Date | null;
   idempotencyKey?: string | null;
   linqChatId?: string | null;
+  memberId?: string | null;
+  participantPhoneNumber?: string | null;
   phoneNumber?: string | null;
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
@@ -556,11 +566,33 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
     normalizeNullable(input.idempotencyKey),
   );
   if (!idempotencyKey) {
+    if (input.memberId || input.participantPhoneNumber) {
+      throw new TypeError(
+        "Hosted Linq participant delivery claims require an idempotency key.",
+      );
+    }
     return {
       claimed: true,
       id: null,
     };
   }
+
+  const memberId = normalizeNullable(input.memberId);
+  const participantPhoneNumber = normalizePhoneNumber(
+    input.participantPhoneNumber,
+  );
+  const participantPhoneLookupKey = createHostedPhoneLookupKey(
+    participantPhoneNumber,
+  );
+  if (
+    Boolean(memberId)
+    !== Boolean(participantPhoneNumber && participantPhoneLookupKey)
+  ) {
+    throw new TypeError(
+      "Hosted Linq participant delivery claims require a complete member and phone binding.",
+    );
+  }
+  const deliveryId = buildDeliveryId(idempotencyKey);
 
   const phoneNumber = normalizePhoneNumber(input.phoneNumber);
   const phoneNumberLookupKey = await ensureHostedLinqDeliveryLineTx({
@@ -576,6 +608,14 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
     groupJoinOutreachId,
     groupJoinReplyOccurredAt,
     linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
+    memberId,
+    participantPhoneEncrypted: participantPhoneNumber
+      ? encryptHostedLinqDeliveryParticipantPhoneNumber({
+          deliveryId,
+          phoneNumber: participantPhoneNumber,
+        })
+      : null,
+    participantPhoneLookupKey,
     phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
     phoneNumberLookupKey,
     retryAfterAt: null,
@@ -592,7 +632,7 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
   } satisfies HostedLinqDeliveryProviderDispatchData;
   const createData = {
     ...data,
-    id: buildDeliveryId(idempotencyKey),
+    id: deliveryId,
     idempotencyKey,
   };
   const existing = await input.prisma.hostedLinqDelivery.findUnique({
@@ -644,6 +684,8 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   attemptedAt?: Date;
   idempotencyKey: string;
   linqChatId?: string | null;
+  memberId?: string | null;
+  participantPhoneNumber?: string | null;
   phoneNumber?: string | null;
   prisma: HostedLinqDeliveryClient;
   sourceRef?: string | null;
@@ -654,6 +696,8 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
     attemptedAt,
     idempotencyKey: input.idempotencyKey,
     linqChatId: input.linqChatId,
+    memberId: input.memberId,
+    participantPhoneNumber: input.participantPhoneNumber,
     phoneNumber: input.phoneNumber,
     prisma: input.prisma,
     source: "hosted_runtime_linq_delivery",
@@ -702,6 +746,8 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
   attemptedAt?: Date;
   fallbackIdempotencyKey: string;
   linqChatId?: string | null;
+  memberId?: string | null;
+  participantPhoneNumber?: string | null;
   phoneNumber?: string | null;
   predecessorIdempotencyKey: string;
   prisma: HostedLinqDeliveryClient;
@@ -718,6 +764,15 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
   const linqChatLookupKey = input.targetKind === "thread"
     ? createHostedLinqChatLookupKey(input.linqChatId)
     : null;
+  const memberId = input.targetKind === "participant"
+    ? normalizeNullable(input.memberId)
+    : null;
+  const participantPhoneNumber = input.targetKind === "participant"
+    ? normalizePhoneNumber(input.participantPhoneNumber)
+    : null;
+  const participantPhoneLookupKeys = input.targetKind === "participant"
+    ? createHostedPhoneLookupKeyReadCandidates(participantPhoneNumber)
+    : [];
   const phoneNumberLookupKey = createHostedPhoneLookupKey(
     normalizePhoneNumber(input.phoneNumber),
   );
@@ -731,7 +786,15 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
       !== predecessorIdempotencyKey
     || !sourceRef
     || (input.targetKind === "thread" && !linqChatLookupKey)
-    || (input.targetKind === "participant" && !phoneNumberLookupKey)
+    || (
+      input.targetKind === "participant"
+      && (
+        !memberId
+        || !participantPhoneNumber
+        || participantPhoneLookupKeys.length === 0
+        || !phoneNumberLookupKey
+      )
+    )
   ) {
     return null;
   }
@@ -771,6 +834,9 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
         && !hostedLinqAppCardFallbackClaimMatches({
           delivery: existingFallback,
           linqChatLookupKey,
+          memberId,
+          participantPhoneLookupKeys,
+          participantPhoneNumber,
           phoneNumberLookupKey,
           sourceRefLookupKey,
           targetKind: input.targetKind,
@@ -827,6 +893,8 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
         attemptedAt: input.attemptedAt,
         idempotencyKey: fallbackIdempotencyKey,
         linqChatId: input.linqChatId,
+        memberId,
+        participantPhoneNumber,
         phoneNumber: input.phoneNumber,
         prisma,
         sourceRef,
@@ -841,15 +909,53 @@ function hostedLinqAppCardFallbackClaimMatches(input: {
     select: typeof hostedLinqDeliveryLifecycleSelect;
   }>;
   linqChatLookupKey: string | null;
+  memberId: string | null;
+  participantPhoneLookupKeys: readonly string[];
+  participantPhoneNumber: string | null;
   phoneNumberLookupKey: string | null;
   sourceRefLookupKey: string;
   targetKind: "participant" | "thread";
 }): boolean {
-  return input.delivery.linqChatLookupKey === input.linqChatLookupKey
+  const participantMatches = input.targetKind === "thread"
+    ? input.delivery.memberId === null
+      && input.delivery.participantPhoneEncrypted === null
+      && input.delivery.participantPhoneLookupKey === null
+    : input.memberId !== null
+      && input.participantPhoneNumber !== null
+      && input.delivery.memberId === input.memberId
+      && input.delivery.participantPhoneLookupKey !== null
+      && input.participantPhoneLookupKeys.includes(
+        input.delivery.participantPhoneLookupKey,
+      )
+      && decryptHostedLinqDeliveryParticipantPhoneOrNull({
+        deliveryId: input.delivery.id,
+        encrypted: input.delivery.participantPhoneEncrypted,
+      }) === input.participantPhoneNumber;
+  return participantMatches
+    && input.delivery.linqChatLookupKey === input.linqChatLookupKey
     && input.delivery.phoneNumberLookupKey === input.phoneNumberLookupKey
     && input.delivery.source === "hosted_runtime_linq_delivery"
     && input.delivery.sourceRef === input.sourceRefLookupKey
     && input.delivery.targetKind === input.targetKind;
+}
+
+function decryptHostedLinqDeliveryParticipantPhoneOrNull(input: {
+  deliveryId: string;
+  encrypted: string | null;
+}): string | null {
+  if (!input.encrypted) {
+    return null;
+  }
+  try {
+    return normalizePhoneNumber(
+      decryptHostedLinqDeliveryParticipantPhoneNumber({
+        deliveryId: input.deliveryId,
+        encrypted: input.encrypted,
+      }),
+    );
+  } catch {
+    return null;
+  }
 }
 
 function hostedLinqAppCardPredecessorMatches(input: {
@@ -2767,7 +2873,10 @@ const hostedLinqDeliveryLifecycleSelect = {
   id: true,
   lastReceiptAt: true,
   linqChatLookupKey: true,
+  memberId: true,
   messageLookupKey: true,
+  participantPhoneEncrypted: true,
+  participantPhoneLookupKey: true,
   phoneNumberLookupKey: true,
   retryAfterAt: true,
   skippedAt: true,
@@ -2879,7 +2988,10 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     id: string;
     lastReceiptAt: Date | null;
     linqChatLookupKey: string | null;
+    memberId: string | null;
     messageLookupKey: string | null;
+    participantPhoneEncrypted: string | null;
+    participantPhoneLookupKey: string | null;
     phoneNumberLookupKey: string | null;
     retryAfterAt: Date | null;
     skippedAt: Date | null;
@@ -2919,6 +3031,28 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
         )
         || input.delivery.targetKind !== input.data.targetKind
         || input.delivery.template !== input.data.template
+      )
+    )
+    || (
+      (
+        input.delivery.memberId !== null
+        || input.delivery.participantPhoneEncrypted !== null
+        || input.delivery.participantPhoneLookupKey !== null
+        || input.data.memberId !== null
+        || input.data.participantPhoneEncrypted !== null
+        || input.data.participantPhoneLookupKey !== null
+      )
+      && (
+        input.delivery.memberId !== input.data.memberId
+        || input.delivery.participantPhoneLookupKey
+          !== input.data.participantPhoneLookupKey
+        || decryptHostedLinqDeliveryParticipantPhoneOrNull({
+          deliveryId: input.delivery.id,
+          encrypted: input.delivery.participantPhoneEncrypted,
+        }) !== decryptHostedLinqDeliveryParticipantPhoneOrNull({
+          deliveryId: input.delivery.id,
+          encrypted: input.data.participantPhoneEncrypted,
+        })
       )
     )
   ) {

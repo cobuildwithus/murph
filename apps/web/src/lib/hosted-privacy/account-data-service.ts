@@ -419,6 +419,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes member-scoped Linq daily inbound/outbound quota counters.",
   },
   {
+    slug: "prisma.hosted_linq_runtime_delivery",
+    label: "Member-owned Linq runtime delivery records",
+    deletion: "live-delete",
+    note: "Deletes member-owned runtime delivery claims, including each row-bound encrypted participant recipient snapshot. Export omits operational delivery claims and recipient ciphertext.",
+  },
+  {
     slug: "prisma.hosted_linq_invite_delivery",
     label: "Linq signup-link delivery records",
     deletion: "live-delete",
@@ -2123,6 +2129,9 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_codex_auth_connection", await input.prisma.hostedCodexAuthConnection.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_inference_connection", await input.prisma.hostedInferenceConnection.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_linq_daily_state", await input.prisma.hostedLinqDailyState.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.hosted_linq_runtime_delivery", await input.prisma.hostedLinqDelivery.deleteMany({
+    where: { memberId: memberIdFilter },
+  }));
   record("prisma.hosted_linq_invite_delivery", await input.prisma.hostedLinqDelivery.deleteMany({
     where: buildHostedLinqInviteSignupDeliveryWhere(input.memberIds),
   }));
