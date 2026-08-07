@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyHostedStripeBillingLiveEligibility,
   inspectHostedStripeBillingProviderBoundary,
   inspectHostedStripeBillingWorkflow,
   type HostedStripeBillingProviderBoundarySources,
@@ -38,6 +39,57 @@ function providerIssueCodes(
 }
 
 describe("hosted Stripe billing workflow guard", () => {
+  it.each([
+    {
+      actor: "maintainer",
+      eventName: "pull_request",
+      expected: true,
+      headRepository: "example/murph",
+      label: "same-repository human pull request",
+      pullRequestAuthor: "contributor",
+    },
+    {
+      actor: "contributor",
+      eventName: "pull_request",
+      expected: false,
+      headRepository: "example/fork",
+      label: "fork pull request",
+      pullRequestAuthor: "contributor",
+    },
+    {
+      actor: "dependabot[bot]",
+      eventName: "pull_request",
+      expected: false,
+      headRepository: "example/murph",
+      label: "dependency-bot pull request triggered by the bot",
+      pullRequestAuthor: "dependabot[bot]",
+    },
+    {
+      actor: "maintainer",
+      eventName: "pull_request",
+      expected: false,
+      headRepository: "example/murph",
+      label: "dependency-bot pull request retriggered by a maintainer",
+      pullRequestAuthor: "dependabot[bot]",
+    },
+    {
+      actor: "maintainer",
+      eventName: "workflow_dispatch",
+      expected: true,
+      headRepository: "",
+      label: "manual dispatch",
+      pullRequestAuthor: "",
+    },
+  ])("classifies $label without crossing the live trust boundary", (input) => {
+    expect(classifyHostedStripeBillingLiveEligibility({
+      actor: input.actor,
+      eventName: input.eventName,
+      headRepository: input.headRepository,
+      pullRequestAuthor: input.pullRequestAuthor,
+      repository: "example/murph",
+    })).toBe(input.expected);
+  });
+
   it("accepts the checked-in fork-safe workflow", async () => {
     expect(issueCodes(await readWorkflow())).toEqual([]);
   });
@@ -52,10 +104,26 @@ describe("hosted Stripe billing workflow guard", () => {
 
   it("rejects removing the same-repository trust check", async () => {
     const source = (await readWorkflow()).replace(
-      'if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$ACTOR" != "dependabot[bot]" ]]; then',
+      'if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$PR_AUTHOR" != "dependabot[bot]" && "$ACTOR" != "dependabot[bot]" ]]; then',
       'if [[ "$HEAD_REPOSITORY" != "" ]]; then',
     );
     expect(issueCodes(source)).toContain("missing-trusted-head-check");
+  });
+
+  it("rejects classifying dependency-bot authors only from the triggering actor", async () => {
+    const source = (await readWorkflow()).replace(
+      'if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$PR_AUTHOR" != "dependabot[bot]" && "$ACTOR" != "dependabot[bot]" ]]; then',
+      'if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$ACTOR" != "dependabot[bot]" ]]; then',
+    );
+    expect(issueCodes(source)).toContain("missing-trusted-head-check");
+  });
+
+  it("rejects dropping the pull request author identity from eligibility", async () => {
+    const source = (await readWorkflow()).replace(
+      "          PR_AUTHOR: ${{ github.event.pull_request.user.login }}\n",
+      "",
+    );
+    expect(issueCodes(source)).toContain("missing-pr-author-check");
   });
 
   it("rejects restoring a marker that silently skips trusted live proof", async () => {

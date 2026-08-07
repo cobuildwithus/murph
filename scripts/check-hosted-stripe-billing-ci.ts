@@ -13,6 +13,22 @@ export interface HostedStripeBillingProviderBoundarySources {
   sandbox: string;
 }
 
+export function classifyHostedStripeBillingLiveEligibility(input: {
+  actor: string;
+  eventName: string;
+  headRepository: string;
+  pullRequestAuthor: string;
+  repository: string;
+}): boolean {
+  if (input.eventName === "workflow_dispatch") {
+    return true;
+  }
+
+  return input.headRepository === input.repository
+    && input.pullRequestAuthor !== "dependabot[bot]"
+    && input.actor !== "dependabot[bot]";
+}
+
 const REQUIRED_MATRIX_MARKERS = [
   "proveNewMemberPulseTrialCheckout",
   "proveTrialStartsPaidPulseAfterInvoiceReconciliation",
@@ -63,8 +79,13 @@ export function inspectHostedStripeBillingWorkflow(
     "Hermetic proof must retain browser and provider-boundary support tests.",
   );
   requireText(
+    "missing-pr-author-check",
+    "PR_AUTHOR: ${{ github.event.pull_request.user.login }}",
+    "Live eligibility must classify the pull request author independently of the event actor.",
+  );
+  requireText(
     "missing-trusted-head-check",
-    'if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$ACTOR" != "dependabot[bot]" ]]; then\n            echo "run_live=true" >> "$GITHUB_OUTPUT"',
+    'if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$PR_AUTHOR" != "dependabot[bot]" && "$ACTOR" != "dependabot[bot]" ]]; then\n            echo "run_live=true" >> "$GITHUB_OUTPUT"',
     "Every trusted same-repository PR head must enter the live lane, while dependency-bot code remains excluded.",
   );
   if (source.includes("HOSTED_STRIPE_BILLING_LIVE_CONFIGURED")) {

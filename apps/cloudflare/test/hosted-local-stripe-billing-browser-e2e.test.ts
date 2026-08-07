@@ -183,8 +183,10 @@ async function proveNewMemberPulseTrialCheckout(): Promise<void> {
         && candidate.stripeSubscriptionId === subscriptionId,
     });
     expect(projection.currentTrialEndsAt).not.toBeNull();
-    await requireDriver().assertSettingsText(actor, "Free trial");
-    await requireDriver().assertSettingsText(actor, "Pulse");
+    await requireDriver().assertSettingsPlanState(actor, {
+      planName: "Pulse",
+      stateLabel: "Free trial",
+    });
   } finally {
     await closeActor(actor);
   }
@@ -224,8 +226,10 @@ async function proveTrialStartsPaidPulseAfterInvoiceReconciliation(): Promise<vo
       subscriptionId: fixture.subscriptionId,
     });
     await waitForPaidMemberProjection(member.memberId, "launch_monthly");
-    await requireDriver().assertSettingsText(actor, "Current plan");
-    await requireDriver().assertSettingsText(actor, "Pulse");
+    await requireDriver().assertSettingsPlanState(actor, {
+      planName: "Pulse",
+      stateLabel: "Current plan",
+    });
   } finally {
     await closeActor(actor);
   }
@@ -273,8 +277,10 @@ async function provePausedTrialUpdateBeforeResumeIncidentRegression(): Promise<v
     });
     expect(truth.customerDefaultPaymentMethodPresent).toBe(true);
     await waitForPaidMemberProjection(member.memberId, "launch_monthly");
-    await requireDriver().assertSettingsText(actor, "Current plan");
-    await requireDriver().assertSettingsText(actor, "Pulse");
+    await requireDriver().assertSettingsPlanState(actor, {
+      planName: "Pulse",
+      stateLabel: "Current plan",
+    });
   } finally {
     await closeActor(actor);
   }
@@ -299,8 +305,10 @@ async function proveTrialUpgradesToEdgeThroughPortal(): Promise<void> {
       targetPlan: "edge",
     });
     await waitForPaidEdgeTruthAndProjection(member.memberId, fixture.subscriptionId);
-    await requireDriver().assertSettingsText(actor, "Current plan");
-    await requireDriver().assertSettingsText(actor, "Edge");
+    await requireDriver().assertSettingsPlanState(actor, {
+      planName: "Edge",
+      stateLabel: "Current plan",
+    });
   } finally {
     await closeActor(actor);
   }
@@ -325,8 +333,10 @@ async function provePaidPulseUpgradesToEdgeThroughPortal(): Promise<void> {
       targetPlan: "edge",
     });
     await waitForPaidEdgeTruthAndProjection(member.memberId, fixture.subscriptionId);
-    await requireDriver().assertSettingsText(actor, "Current plan");
-    await requireDriver().assertSettingsText(actor, "Edge");
+    await requireDriver().assertSettingsPlanState(actor, {
+      planName: "Edge",
+      stateLabel: "Current plan",
+    });
   } finally {
     await closeActor(actor);
   }
@@ -376,6 +386,10 @@ async function proveEdgeSchedulesPulseAtRenewal(): Promise<void> {
     );
     expect(subscriptionTruth.priceIds.includes(requireSandbox().priceIds.edge)).toBe(true);
     expect(subscriptionTruth.priceIds.includes(requireSandbox().priceIds.pulse)).toBe(false);
+    await requireDriver().assertSettingsPlanState(actor, {
+      planName: "Edge",
+      stateLabel: "Current plan",
+    });
     await requireDriver().assertSettingsText(actor, /Pulse starts/iu);
     await requireDriver().assertSettingsText(actor, /Edge stays active until then/iu);
   } finally {
@@ -433,8 +447,10 @@ async function proveIndividualStartsFamilyThroughCheckout(): Promise<{
   });
   expect(family.seats?.billed).toBe(2);
   expect(family.seats?.active).toBe(1);
-  await requireDriver().assertSettingsText(actor, "Family");
-  await requireDriver().assertSettingsText(actor, "Current plan");
+  await requireDriver().assertSettingsPlanState(actor, {
+    planName: "Family",
+    stateLabel: "Current plan",
+  });
   return { actor, ownerMemberId: owner.memberId, subscriptionId };
 }
 
@@ -478,8 +494,10 @@ async function provePaidIndividualConvertsToFamilyInPlace(): Promise<void> {
       subscriptionId: fixture.subscriptionId,
     });
     expect(stripeTruth.scheduleId).toBeNull();
-    await requireDriver().assertSettingsText(actor, "Family");
-    await requireDriver().assertSettingsText(actor, "Current plan");
+    await requireDriver().assertSettingsPlanState(actor, {
+      planName: "Family",
+      stateLabel: "Current plan",
+    });
   } finally {
     await closeActor(actor);
   }
@@ -529,12 +547,18 @@ async function proveFamilyInviteActivation(input: {
         && entry.quantity === 2
       )).toBe(true);
       await requireDriver().assertFamilyActivePulseMemberRow(input.actor);
-      await requireDriver().assertSettingsText(input.actor, "Family");
+      await requireDriver().assertSettingsPlanState(input.actor, {
+        planName: "Family",
+        stateLabel: "Current plan",
+      });
       await requireDriver().assertSettingsText(
         memberActor,
         /Billing is managed by your Family plan owner/iu,
       );
-      await requireDriver().assertSettingsText(memberActor, "Sponsored");
+      await requireDriver().assertSettingsPlanState(memberActor, {
+        planName: "Family",
+        stateLabel: "Sponsored",
+      });
     } finally {
       await closeActor(memberActor);
     }

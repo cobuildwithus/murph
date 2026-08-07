@@ -301,13 +301,17 @@ export class HostedBillingBrowserDriver {
       ]);
       await assertSuccessfulResponse(response);
       await this.waitForStripeSurface(actor.page, "portal");
-      await actor.page.getByText("Edge", { exact: false }).first().waitFor();
-      await assertStripePositiveActionVisible(actor.page, [
-        /^Confirm/iu,
-        /^Confirm change$/iu,
-        /^Update subscription$/iu,
-        /^Switch plan$/iu,
-      ]);
+      await assertStripePlanActionVisible({
+        actionNames: [
+          /^Confirm/iu,
+          /^Confirm change$/iu,
+          /^Update subscription$/iu,
+          /^Switch plan$/iu,
+        ],
+        page: actor.page,
+        planName: "Edge",
+        timeoutMs: this.timeoutMs,
+      });
     });
   }
 
@@ -430,6 +434,40 @@ export class HostedBillingBrowserDriver {
     await this.runStep("settings-projection", "murph-settings", async () => {
       await this.openSettings(actor);
       await actor.page.getByText(text, { exact: false }).first().waitFor();
+    });
+  }
+
+  async assertSettingsPlanState(
+    actor: HostedBillingBrowserActor,
+    input: {
+      planName: "Edge" | "Family" | "Pulse";
+      stateLabel: "Current plan" | "Free trial" | "Sponsored";
+    },
+  ): Promise<void> {
+    await this.runStep("settings-plan-projection", "murph-settings", async () => {
+      await this.openSettings(actor);
+      const card = await findSettingsPlanCard(
+        actor.page,
+        input.planName,
+        this.timeoutMs,
+      );
+      await card.getByText(input.stateLabel, { exact: true }).first().waitFor({
+        state: "visible",
+        timeout: this.timeoutMs,
+      });
+      if (input.stateLabel === "Current plan") {
+        const currentAction = card.getByRole("button", {
+          exact: true,
+          name: "Current plan",
+        });
+        await currentAction.waitFor({ state: "visible", timeout: this.timeoutMs });
+        if (await currentAction.isEnabled()) {
+          throw new Error(`${input.planName} current-plan action must be disabled.`);
+        }
+        if (await card.getByText("Free trial", { exact: true }).count() > 0) {
+          throw new Error(`${input.planName} paid plan still renders the Free trial state.`);
+        }
+      }
     });
   }
 
@@ -853,9 +891,75 @@ async function assertStripePortalPlanAvailable(
   })).first();
   await navigation.waitFor({ state: "visible", timeout: timeoutMs });
   await navigation.click();
-  await page.getByText(planName, { exact: false }).first().waitFor({ timeout: timeoutMs });
-  await page.getByRole("button", { exact: true, name: "Select" }).first().waitFor({
-    state: "visible",
-    timeout: timeoutMs,
+  await assertStripePlanActionVisible({
+    actionNames: [/^Select$/iu],
+    page,
+    planName,
+    timeoutMs,
   });
+}
+
+async function assertStripePlanActionVisible(input: {
+  actionNames: readonly RegExp[];
+  page: Page;
+  planName: string;
+  timeoutMs: number;
+}): Promise<void> {
+  const deadline = Date.now() + input.timeoutMs;
+  while (Date.now() < deadline) {
+    for (const frame of input.page.frames()) {
+      const labels = frame.getByText(input.planName, { exact: false });
+      for (let labelIndex = 0; labelIndex < await labels.count(); labelIndex += 1) {
+        const label = labels.nth(labelIndex);
+        if (!await label.isVisible().catch(() => false)) {
+          continue;
+        }
+        const planContainer = label.locator("xpath=ancestor::*[.//button][1]");
+        if (await planContainer.count() === 0) {
+          continue;
+        }
+        for (const actionName of input.actionNames) {
+          const actions = planContainer.getByRole("button", { name: actionName });
+          for (let actionIndex = 0; actionIndex < await actions.count(); actionIndex += 1) {
+            const action = actions.nth(actionIndex);
+            if (
+              await action.isVisible().catch(() => false)
+              && await action.isEnabled().catch(() => false)
+            ) {
+              return;
+            }
+          }
+        }
+      }
+    }
+    await input.page.waitForTimeout(250);
+  }
+  throw new Error(
+    `Stripe hosted UI did not expose ${input.planName} and its expected action in one plan container.`,
+  );
+}
+
+async function findSettingsPlanCard(
+  page: Page,
+  planName: string,
+  timeoutMs: number,
+): Promise<Locator> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const labels = page.getByText(planName, { exact: true });
+    for (let index = 0; index < await labels.count(); index += 1) {
+      const label = labels.nth(index);
+      if (!await label.isVisible().catch(() => false)) {
+        continue;
+      }
+      const card = label.locator(
+        "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' rounded-xl ') and contains(concat(' ', normalize-space(@class), ' '), ' border ')][1]",
+      );
+      if (await card.count() > 0) {
+        return card;
+      }
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`Settings did not render the ${planName} plan card.`);
 }
