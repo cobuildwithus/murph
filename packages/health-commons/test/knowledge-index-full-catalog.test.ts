@@ -11,9 +11,10 @@ const knowledgeIndexPath = fileURLToPath(
   new URL("../generated/knowledge.sqlite", import.meta.url),
 );
 
-function search(query: string): HealthCommonsKnowledgeSearchResult {
+function search(query: string, focus?: string): HealthCommonsKnowledgeSearchResult {
   return searchHealthCommonsKnowledgeIndex({
     databasePath: knowledgeIndexPath,
+    focus,
     query,
   });
 }
@@ -31,7 +32,7 @@ function packetText(result: HealthCommonsKnowledgeSearchResult): string {
 
 describe("Health Commons full-catalog knowledge retrieval", () => {
   it("returns a safety-only hard stop for sauna and fentanyl patches", () => {
-    const result = search("sauna fentanyl patch");
+    const result = search("Finnish Dry Sauna", "fentanyl patch");
 
     expect(result.items).toEqual([]);
     expect(result.safety?.text).toMatch(/opioid|fentanyl|life-threatening/iu);
@@ -41,7 +42,7 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
   });
 
   it("keeps caffeine pregnancy safety separate from unrelated safety", () => {
-    const result = search("caffeine pregnancy");
+    const result = search("Caffeine Curfew", "pregnancy");
     const text = packetText(result);
 
     expect(text).toMatch(/caffeine/iu);
@@ -50,7 +51,7 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
   });
 
   it("returns the core dry-sauna systematic review", () => {
-    const result = search("dry sauna");
+    const result = search("Finnish Dry Sauna", "systematic review");
 
     expect(result.items.some((item) =>
       item.sources.some((source) => source.pmid === "29849692")
@@ -66,22 +67,25 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
   });
 
   it.each([
-    ["vitamin c", /vitamin c/iu],
-    ["vitamin d", /vitamin d/iu],
-    ["type 2 diabetes", /type 2 diabet/iu],
-    ["omega 3", /omega[- ]3/iu],
-  ])("preserves the qualifier in %s", (query, expectedTopic) => {
-    const result = search(query);
+    ["Daily Vitamin D3 Supplementation", undefined, /vitamin d/iu],
+    ["Walking After Every Meal", "type 2 diabetes", /type 2 diabet/iu],
+    ["Omega-3 Supplementation", undefined, /omega[- ]3/iu],
+  ])("preserves the qualifier for %s", (query, focus, expectedTopic) => {
+    const result = search(query, focus);
 
     expect(result.items.length).toBeGreaterThan(0);
     for (const item of result.items) {
-      expect(`${result.query} ${packetText({ ...result, items: [item], safety: null })}`)
-        .toMatch(expectedTopic);
+      expect(packetText({ ...result, items: [item], safety: null })).toMatch(expectedTopic);
+      expect(item.sources.length).toBeGreaterThan(0);
     }
     if (result.safety) {
-      expect(`${result.query} ${packetText({ ...result, items: [], safety: result.safety })}`)
+      expect(`${result.focus ?? ""} ${packetText({ ...result, items: [], safety: result.safety })}`)
         .toMatch(expectedTopic);
     }
+  });
+
+  it("does not route vitamin C through a compound collagen alias", () => {
+    expect(search("vitamin c")).toMatchObject({ items: [], safety: null });
   });
 
   it("does not compose a topic from unrelated sauna citations", () => {
@@ -91,11 +95,53 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
 
   it("keeps water-fasting evidence and safety on the fasting topic", () => {
     const direct = search("water fasting");
-    const naturalQuestionTerms = search("water fasting health");
+    const naturalQuestionTerms = search("water fasting", "health");
 
     expect(packetText(direct)).toMatch(/water fast|prolonged fast/iu);
-    expect(direct.safety?.entityTitle).toMatch(/fast/iu);
+    expect(direct.items.every((item) => item.sources.length > 0)).toBe(true);
     expect(packetText(naturalQuestionTerms)).not.toMatch(/cold.water|submersion/iu);
-    expect(naturalQuestionTerms.safety).toBeNull();
+    if (naturalQuestionTerms.safety) {
+      expect(naturalQuestionTerms.safety.entityKey).toMatch(/fast/iu);
+    }
+  });
+
+  it.each([
+    ["recent fainting", /faint/iu],
+    ["unstable cardiovascular disease", /cardiovascular|unstable/iu],
+    ["fever", /fever/iu],
+    ["trying to conceive", /trying to conceive|pregnan/iu],
+  ])("returns the focused dry-sauna safety boundary for %s", (focus, expected) => {
+    const result = search("Finnish Dry Sauna", focus);
+
+    expect(packetText({ ...result, items: [], safety: result.safety })).toMatch(expected);
+  });
+
+  it("returns dry-sauna immunity evidence from the resolved owner", () => {
+    const result = search("Finnish Dry Sauna", "immunity");
+
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(packetText(result)).toMatch(/immun/iu);
+  });
+
+  it("never returns an unsourced ordinary item or an overview row", async () => {
+    for (const query of ["Finnish Dry Sauna", "Mean Corpuscular Hemoglobin", "Magnesium RBC"]) {
+      expect(search(query).items.every((item) => item.sources.length > 0)).toBe(true);
+    }
+    expect(search("Mean Corpuscular Hemoglobin").items).toEqual([]);
+    expect(search("Magnesium RBC").items).toEqual([]);
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const database = new DatabaseSync(knowledgeIndexPath, { readOnly: true });
+    try {
+      expect(database.prepare("SELECT COUNT(*) AS count FROM chunks WHERE kind = 'overview'").get())
+        .toMatchObject({ count: 0 });
+      expect(database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM chunks
+        WHERE kind <> 'safety' AND sources_json = '[]'
+      `).get()).toMatchObject({ count: 0 });
+    } finally {
+      database.close();
+    }
   });
 });

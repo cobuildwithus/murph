@@ -88,6 +88,17 @@ Updated: 2026-08-07
   aliases resolve topic keys first. Evidence text and its one returned source
   title can rank rows only after that step. Ordinary evidence and independent
   safety must share a resolved owner key.
+- Round 3 separated topic resolution from the user's question. The command now
+  resolves an exact normalized title or alias, then uses optional focus terms
+  only to rank evidence and matching safety inside that owner set. Ambiguous
+  topics return nothing, while an exact title wins over an alias. BM25 text
+  relevance ranks before evidence priority.
+- The same correction removed every unsourced overview row and its selection
+  path. Ordinary results now always carry direct source references. Topics with
+  overview prose but no sourced claim, finding, or appraisal return no packet.
+- The real assistant harness now forwards the model's command to the generated
+  index through the actual CLI entrypoint. It no longer returns a fixed sauna
+  fixture.
 
 ## Verification
 
