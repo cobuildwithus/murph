@@ -538,42 +538,49 @@ async function runHostedBillingCheckoutAttempt(input: {
         checkoutOffer: HOSTED_STANDARD_CHECKOUT_OFFER,
         memberId: input.memberId,
       });
-  const checkoutMetadata = {
-    ...offerMetadata,
-    checkoutAttemptId: currentAttempt.attemptId,
-    checkoutIntentHash: currentAttempt.intentHash,
+  const checkoutMetadata = offerMetadata;
+  checkoutMetadata.checkoutAttemptId = currentAttempt.attemptId;
+  checkoutMetadata.checkoutIntentHash = currentAttempt.intentHash;
+  const subscriptionData: NonNullable<
+    Stripe.Checkout.SessionCreateParams["subscription_data"]
+  > = {
+    metadata: checkoutMetadata,
   };
-  const session = await input.stripe.checkout.sessions.create({
+  if (input.prepared.resolvedOffer === HOSTED_PULSE_TRIAL_OFFER) {
+    subscriptionData.trial_period_days = HOSTED_PULSE_TRIAL_DAYS;
+  }
+  const checkoutParams: Stripe.Checkout.SessionCreateParams = {
     cancel_url: buildStripeCancelUrl(input.publicBaseUrl, input.inviteCode),
     client_reference_id: input.memberId,
-    ...(input.prepared.stripeCustomerId
-      ? { customer: input.prepared.stripeCustomerId }
-      : {}),
-    ...(input.prepared.verifiedEmailAddress
-      ? { customer_email: input.prepared.verifiedEmailAddress }
-      : {}),
     line_items: buildHostedBillingCheckoutLineItems(input.priceId),
     metadata: checkoutMetadata,
     mode: "subscription",
     payment_method_types: ["card"],
-    subscription_data: {
-      metadata: checkoutMetadata,
-      ...(input.prepared.resolvedOffer === HOSTED_PULSE_TRIAL_OFFER
-        ? { trial_period_days: HOSTED_PULSE_TRIAL_DAYS }
-        : {}),
-    },
+    subscription_data: subscriptionData,
     success_url: buildStripeSuccessUrl(
       input.publicBaseUrl,
       input.inviteCode,
     ),
-  }, {
-    ...HOSTED_BILLING_CHECKOUT_REQUEST_OPTIONS,
+  };
+  if (input.prepared.stripeCustomerId) {
+    checkoutParams.customer = input.prepared.stripeCustomerId;
+  }
+  if (input.prepared.verifiedEmailAddress) {
+    checkoutParams.customer_email = input.prepared.verifiedEmailAddress;
+  }
+  const requestOptions: Stripe.RequestOptions = {
     idempotencyKey: [
       "hosted-billing-checkout",
       currentAttempt.attemptId,
       currentAttempt.intentHash,
     ].join(":"),
-  });
+    maxNetworkRetries: HOSTED_BILLING_CHECKOUT_REQUEST_OPTIONS.maxNetworkRetries,
+    timeout: HOSTED_BILLING_CHECKOUT_REQUEST_OPTIONS.timeout,
+  };
+  const session = await input.stripe.checkout.sessions.create(
+    checkoutParams,
+    requestOptions,
+  );
   assertHostedBillingCheckoutSessionMatchesAttempt({
     attempt: currentAttempt,
     memberId: input.memberId,

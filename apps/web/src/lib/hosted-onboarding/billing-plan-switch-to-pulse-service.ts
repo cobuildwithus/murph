@@ -667,8 +667,7 @@ function buildHostedBillingPlanSwitchCurrentPhaseParams(input: {
   context: HostedSwitchScheduleContext;
   phase: Stripe.SubscriptionSchedule.Phase;
 }): Stripe.SubscriptionScheduleUpdateParams.Phase {
-  return {
-    ...copySupportedHostedStripeSchedulePhaseFields(input.phase),
+  const params: Stripe.SubscriptionScheduleUpdateParams.Phase = {
     end_date: input.context.currentPeriodEndUnix,
     items: [
       {
@@ -678,6 +677,8 @@ function buildHostedBillingPlanSwitchCurrentPhaseParams(input: {
     ],
     start_date: input.phase.start_date,
   };
+  copySupportedHostedStripeSchedulePhaseFields(params, input.phase);
+  return params;
 }
 
 function buildHostedBillingPlanSwitchFuturePhaseParams(
@@ -701,38 +702,46 @@ function buildHostedBillingPlanSwitchFuturePhaseParams(
 }
 
 function copySupportedHostedStripeSchedulePhaseFields(
+  params: Stripe.SubscriptionScheduleUpdateParams.Phase,
   phase: Stripe.SubscriptionSchedule.Phase,
-): Partial<Stripe.SubscriptionScheduleUpdateParams.Phase> {
-  return {
-    ...(phase.application_fee_percent !== null
-      ? { application_fee_percent: phase.application_fee_percent }
-      : {}),
-    ...(phase.automatic_tax
-      ? {
-          automatic_tax: {
-            enabled: phase.automatic_tax.enabled,
-          },
-        }
-      : {}),
-    ...(phase.billing_cycle_anchor ? { billing_cycle_anchor: phase.billing_cycle_anchor } : {}),
-    ...(phase.collection_method ? { collection_method: phase.collection_method } : {}),
-    ...(phase.currency ? { currency: phase.currency } : {}),
-    ...(typeof coerceStripeObjectId(phase.default_payment_method) === "string"
-      ? { default_payment_method: coerceStripeObjectId(phase.default_payment_method) ?? undefined }
-      : {}),
-    ...(Array.isArray(phase.default_tax_rates) && phase.default_tax_rates.length > 0
-      ? {
-          default_tax_rates: phase.default_tax_rates.flatMap((taxRate) => {
-            const id = coerceStripeObjectId(taxRate);
-            return id ? [id] : [];
-          }),
-        }
-      : {}),
-    ...(phase.description ? { description: phase.description } : {}),
-    ...(phase.metadata ? { metadata: phase.metadata } : {}),
-    ...(phase.proration_behavior ? { proration_behavior: phase.proration_behavior } : {}),
-    ...(phase.trial_end ? { trial_end: phase.trial_end } : {}),
-  };
+): void {
+  if (phase.application_fee_percent !== null) {
+    params.application_fee_percent = phase.application_fee_percent;
+  }
+  if (phase.automatic_tax) {
+    params.automatic_tax = { enabled: phase.automatic_tax.enabled };
+  }
+  if (phase.billing_cycle_anchor) {
+    params.billing_cycle_anchor = phase.billing_cycle_anchor;
+  }
+  if (phase.collection_method) {
+    params.collection_method = phase.collection_method;
+  }
+  if (phase.currency) {
+    params.currency = phase.currency;
+  }
+  const defaultPaymentMethodId = coerceStripeObjectId(phase.default_payment_method);
+  if (defaultPaymentMethodId) {
+    params.default_payment_method = defaultPaymentMethodId;
+  }
+  if (Array.isArray(phase.default_tax_rates) && phase.default_tax_rates.length > 0) {
+    params.default_tax_rates = phase.default_tax_rates.flatMap((taxRate) => {
+      const id = coerceStripeObjectId(taxRate);
+      return id ? [id] : [];
+    });
+  }
+  if (phase.description) {
+    params.description = phase.description;
+  }
+  if (phase.metadata) {
+    params.metadata = phase.metadata;
+  }
+  if (phase.proration_behavior) {
+    params.proration_behavior = phase.proration_behavior;
+  }
+  if (phase.trial_end) {
+    params.trial_end = phase.trial_end;
+  }
 }
 
 function buildHostedBillingPlanSwitchScheduleMetadata(
@@ -749,14 +758,11 @@ function buildHostedBillingPlanSwitchScheduleMetadata(
 function buildHostedBillingPlanSwitchFuturePhaseMetadata(
   context: HostedSwitchScheduleContext,
 ): Stripe.MetadataParam {
-  return {
-    ...buildHostedBillingPlanSwitchScheduleMetadata(context),
-    ...buildStripeMetadataUnsetFields(STRIPE_TRIAL_METADATA_KEYS),
-  };
-}
-
-function buildStripeMetadataUnsetFields(keys: readonly string[]): Stripe.MetadataParam {
-  return Object.fromEntries(keys.map((key) => [key, ""]));
+  const metadata = buildHostedBillingPlanSwitchScheduleMetadata(context);
+  for (const key of STRIPE_TRIAL_METADATA_KEYS) {
+    metadata[key] = "";
+  }
+  return metadata;
 }
 
 function isHostedBillingPlanSwitchToPulseScheduleCompatible(

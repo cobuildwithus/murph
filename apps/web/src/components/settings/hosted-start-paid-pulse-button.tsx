@@ -57,7 +57,7 @@ const PULSE_FEATURES = [
   "Run experiments, see what changed",
   "Sync your health data",
   "Private before/after outcomes",
-  "Chat via iMessage, Telegram, or email",
+  "Chat with Murph via iMessage, Telegram, or email",
   "Guided experiment setup",
   "Access to the most capable AI models",
 ];
