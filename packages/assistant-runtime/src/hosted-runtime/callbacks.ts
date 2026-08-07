@@ -3609,6 +3609,7 @@ function createHostedAssistantLinqSendDependency(input: {
       currentHomeRouteOnly
       && providerDispatchPredecessorIdempotencyKey
       && !engagement.targetOverride
+      && engagement.providerDispatchStarted !== true
     ) {
       emitHostedExecutionStructuredLog({
         component: "assistant-delivery",

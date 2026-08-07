@@ -12952,6 +12952,118 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
+  it("exact-replays an already-claimed thread route on every fresh fallback drain", async () => {
+    const staleFallbackIdempotencyKey =
+      "assistant-outbox:intent_123:stale-chat-fallback";
+    const frozenFallbackTarget = "authorized-direct-chat";
+    const effect = createEffect({
+      bindingDeliveryTarget: frozenFallbackTarget,
+      channel: "linq",
+      explicitTarget: frozenFallbackTarget,
+      idempotencyKey: staleFallbackIdempotencyKey,
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+      idempotencyKey?: string | null;
+      providerDispatchPredecessorIdempotencyKey?: string | null;
+      target?: string | null;
+      targetKind?: string | null;
+    }) => {
+      expect(request).toEqual(expect.objectContaining({
+        idempotencyKey: staleFallbackIdempotencyKey,
+        target: frozenFallbackTarget,
+        targetKind: "thread",
+      }));
+      return request.authorityCheckOnly
+        ? {
+            providerDispatchStarted: true,
+            threadIsDirect: true,
+          }
+        : { providerDispatchClaimed: false };
+    });
+    const providerRequests: Array<{
+      body: string;
+      idempotencyKey: string | null;
+      target: string;
+    }> = [];
+    const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body)) as {
+        message?: { idempotency_key?: string; parts?: Array<{ value?: string }> };
+      };
+      providerRequests.push({
+        body: body.message?.parts?.[0]?.value ?? "missing",
+        idempotencyKey: body.message?.idempotency_key ?? null,
+        target: url,
+      });
+      return new Response(JSON.stringify({
+        message: { id: "provider-deduplicated-message" },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    mocks.useActualLinqMessage = true;
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        homeRouteFallbackAllowed: true,
+        idempotencyKey: staleFallbackIdempotencyKey,
+        message: "Nutrition summary",
+        replyToMessageId: null,
+        target: frozenFallbackTarget,
+        targetKind: "thread",
+        threadIsDirect: true,
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: "thread",
+        }),
+        status: "sent",
+      });
+    });
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+        }),
+        forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+        platformEnv: {},
+        providerFetch,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).resolves.toEqual([
+        expect.objectContaining({ deliveryStatus: "sent" }),
+      ]);
+    }
+
+    expect(providerRequests).toEqual([
+      {
+        body: "Nutrition summary",
+        idempotencyKey: staleFallbackIdempotencyKey,
+        target: expect.stringContaining(
+          `/chats/${frozenFallbackTarget}/messages`,
+        ),
+      },
+      {
+        body: "Nutrition summary",
+        idempotencyKey: staleFallbackIdempotencyKey,
+        target: expect.stringContaining(
+          `/chats/${frozenFallbackTarget}/messages`,
+        ),
+      },
+    ]);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(4);
+    for (const [request] of assertRecentInbound.mock.calls) {
+      expect(request.target).toBe(frozenFallbackTarget);
+    }
+  });
+
   it("retries a stale participant recovery on a newer home before provider entry", async () => {
     const staleFallbackIdempotencyKey =
       "assistant-outbox:intent_123:stale-chat-fallback";
