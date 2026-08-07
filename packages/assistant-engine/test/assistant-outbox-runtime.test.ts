@@ -1086,7 +1086,7 @@ describe('assistant outbox runtime', () => {
     })
   })
 
-  it('replays the exact Linq app card after an ambiguous provider outcome', async () => {
+  it('retains and repeatedly exact-replays a Linq app card after restart ambiguity', async () => {
     await useActualOutboundDeliveryImplementation()
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-card-ambiguous-',
@@ -1111,13 +1111,19 @@ describe('assistant outbox runtime', () => {
       })
       if (sendLinq.mock.calls.length === 1) {
         expect(request).not.toHaveProperty('linqAppCardReplay')
-        throw Object.assign(new Error('app-card acknowledgement was lost'), {
+        throw Object.assign(new Error('exact app-card dispatch already exists'), {
+          code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
           deliveryMayHaveSucceeded: true,
         })
       }
       expect(request).toMatchObject({
         linqAppCardReplay: true,
       })
+      if (sendLinq.mock.calls.length === 2) {
+        throw Object.assign(new Error('app-card replay acknowledgement was lost'), {
+          deliveryMayHaveSucceeded: true,
+        })
+      }
       return {
         idempotencyKey: `assistant-outbox:${intent.intentId}`,
         providerMessageId: 'native-card-message-replayed',
@@ -1146,7 +1152,7 @@ describe('assistant outbox runtime', () => {
       'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
     )
 
-    const laterDrain = await dispatchAssistantOutboxIntent({
+    const ambiguousReplay = await dispatchAssistantOutboxIntent({
       dependencies: { sendLinq },
       force: true,
       intentId: intent.intentId,
@@ -1154,12 +1160,40 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
 
-    expect(laterDrain.intent.status).toBe('sent')
-    expect(laterDrain.intent.delivery).toMatchObject({
+    expect(ambiguousReplay.intent).toMatchObject({
+      card: NUTRITION_RESPONSE_CARD,
+      deliveryConfirmationPending: true,
+      deliveryTransportIdempotent: true,
+      status: 'retryable',
+    })
+    expect(ambiguousReplay.deliveryError?.code).toBe(
+      'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    )
+
+    const confirmedReplay = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-07-31T02:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(confirmedReplay.intent.status).toBe('sent')
+    expect(confirmedReplay.intent.delivery).toMatchObject({
       idempotencyKey: `assistant-outbox:${intent.intentId}`,
       providerMessageId: 'native-card-message-replayed',
     })
-    expect(sendLinq).toHaveBeenCalledTimes(2)
+    expect(sendLinq).toHaveBeenCalledTimes(3)
+    const exactReplayRequest = {
+      card: NUTRITION_RESPONSE_CARD,
+      idempotencyKey: `assistant-outbox:${intent.intentId}`,
+      linqAppCardReplay: true,
+      message: renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD),
+      target: 'thread-response-card-ambiguous',
+      targetKind: 'thread',
+    }
+    expect(sendLinq.mock.calls[1]?.[0]).toMatchObject(exactReplayRequest)
+    expect(sendLinq.mock.calls[2]?.[0]).toMatchObject(exactReplayRequest)
   })
 
   it('retains the exact Linq app card after a pre-provider control retry', async () => {

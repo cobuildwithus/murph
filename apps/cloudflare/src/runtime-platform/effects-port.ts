@@ -374,9 +374,8 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     assistantAskFallbackRequired?: unknown;
     deliveryBlockCode?: unknown;
     deliveryPosture?: unknown;
-    exactFallbackRouteMatched?: unknown;
+    exactDispatchMatched?: unknown;
     providerDispatchClaimed?: unknown;
-    providerDispatchStarted?: unknown;
     routeDisposition?: unknown;
     targetOverride?: unknown;
     threadIsDirect?: unknown;
@@ -403,11 +402,8 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   if (typeof response.providerDispatchClaimed === "boolean") {
     result.providerDispatchClaimed = response.providerDispatchClaimed;
   }
-  if (typeof response.exactFallbackRouteMatched === "boolean") {
-    result.exactFallbackRouteMatched = response.exactFallbackRouteMatched;
-  }
-  if (typeof response.providerDispatchStarted === "boolean") {
-    result.providerDispatchStarted = response.providerDispatchStarted;
+  if (typeof response.exactDispatchMatched === "boolean") {
+    result.exactDispatchMatched = response.exactDispatchMatched;
   }
   if (
     response.routeDisposition === "superseded"

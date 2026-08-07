@@ -1397,10 +1397,14 @@ retains that card and enters delivery-confirmation-pending under the same
 provider-idempotent key. Its retry bypasses capability selection and replays
 only the identical card body and key; it does not require a rehydrated raw
 recipient phone number and cannot substitute text or another effect. A resumed
-non-replay card that finds its Web provider-dispatch claim already started is
-first converted to that confirmation-pending exact-replay state, before
-another capability or provider message request can run. Provider acceptance
-or deduplication closes the original Web dispatch fence. Only a definitive
+non-replay card that finds its exact Web dispatch row is first converted to
+that confirmation-pending exact-replay state before another capability or
+provider message request can run, even after the row advances to accepted or
+delivered. This shared lifecycle-independent check binds the runtime source and
+source reference, target kind, thread, and source line for both the original
+card and any promoted fallback; mismatches fail closed before local mutation
+or provider entry. Provider acceptance or deduplication closes the original
+Web dispatch fence. Only a definitive
 card rejection, including a structurally classified stale-chat `404`, may
 commit the text-only transition, clear the card, freeze the stable fallback
 identity, and transfer that Web fence before text enters Linq.

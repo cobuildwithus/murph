@@ -5,11 +5,14 @@ import {
   assertHostedAssistantAskCompletionDeliveryAuthorityTx,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
+  createHostedPhoneLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
   assertHostedLinqRecentInboundEngagementForRuntime,
   resolveHostedLinqEgressPolicyForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
-  hasHostedLinqRuntimeProviderDispatchFenceTx,
+  readHostedLinqRuntimeExactDispatchAuthorityTx,
   recordHostedLinqRuntimeProviderDispatchFenceTx,
   transitionHostedLinqRuntimeAppCardFallbackFenceTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
@@ -59,6 +62,7 @@ export const POST = withJsonError(async (request: Request) => {
   const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
   const idempotencyKey = readOptionalBodyString(body.idempotencyKey);
   const intentId = readOptionalBodyString(body.intentId);
+  const lineLookupKey = readOptionalBodyString(body.lineLookupKey);
   const providerDispatchPredecessorIdempotencyKey = readOptionalBodyString(
     body.providerDispatchPredecessorIdempotencyKey,
   );
@@ -110,8 +114,8 @@ export const POST = withJsonError(async (request: Request) => {
         asserted,
         deliveryBlockCode: null,
         deliveryPosture: null,
+        exactDispatchMatched: false,
         providerDispatchClaimed: null,
-        providerDispatchStarted: false,
       };
     }
     let finalAuthority = asserted;
@@ -140,20 +144,51 @@ export const POST = withJsonError(async (request: Request) => {
       });
     }
 
-    const providerDispatchStarted =
-      authorityCheckOnly && idempotencyKey
-        ? await hasHostedLinqRuntimeProviderDispatchFenceTx({
+    const authorityLineLookupKey =
+      finalAuthority.linePhoneNumberLookupKey ?? null;
+    if (
+      lineLookupKey
+      && authorityLineLookupKey
+      && lineLookupKey !== authorityLineLookupKey
+    ) {
+      throwHostedLinqEgressRouteAuthorityMismatch();
+    }
+    const fromPhoneNumberLookupKeys =
+      createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber);
+    if (
+      lineLookupKey
+      && fromPhoneNumberLookupKeys.length > 0
+      && !fromPhoneNumberLookupKeys.includes(lineLookupKey)
+    ) {
+      throwHostedLinqEgressRouteAuthorityMismatch();
+    }
+    const providerLineLookupKey =
+      authorityLineLookupKey ?? lineLookupKey;
+    const dispatchAuthority =
+      authorityCheckOnly
+      && idempotencyKey
+      && providerTarget
+      && providerTargetKind !== "participant"
+        ? await readHostedLinqRuntimeExactDispatchAuthorityTx({
             idempotencyKey,
+            linqChatId: providerTarget,
+            phoneNumber: fromPhoneNumber,
+            phoneNumberLookupKey: providerLineLookupKey,
             prisma: tx,
             sourceRef: intentId ?? idempotencyKey,
             targetKind: providerTargetKind,
           })
-        : false;
+        : {
+            authorityMismatch: false,
+            exactDispatchMatched: false,
+          };
+    if (dispatchAuthority.authorityMismatch) {
+      throwHostedLinqEgressRouteAuthorityMismatch();
+    }
 
     const health = await resolveHostedLinqEgressPolicyForRuntime({
       fromPhoneNumber,
-      linePhoneNumberLookupKey:
-        finalAuthority.linePhoneNumberLookupKey,
+      linePhoneNumberLookupKey: providerLineLookupKey,
       prisma: tx,
       target: providerTarget,
       targetKind: providerTargetKind,
@@ -164,8 +199,8 @@ export const POST = withJsonError(async (request: Request) => {
         asserted,
         deliveryBlockCode: health.policy.code,
         deliveryPosture: null,
+        exactDispatchMatched: dispatchAuthority.exactDispatchMatched,
         providerDispatchClaimed: null,
-        providerDispatchStarted,
       };
     }
 
@@ -203,6 +238,7 @@ export const POST = withJsonError(async (request: Request) => {
               ? providerTarget
               : null,
             phoneNumber: fromPhoneNumber,
+            phoneNumberLookupKey: providerLineLookupKey,
             predecessorIdempotencyKey:
               providerDispatchPredecessorIdempotencyKey,
             prisma: tx,
@@ -215,6 +251,7 @@ export const POST = withJsonError(async (request: Request) => {
             idempotencyKey,
             linqChatId: providerTargetKind === "participant" ? null : providerTarget,
             phoneNumber: fromPhoneNumber,
+            phoneNumberLookupKey: providerLineLookupKey,
             prisma: tx,
             sourceRef: intentId ?? idempotencyKey,
             targetKind: providerTargetKind,
@@ -245,8 +282,8 @@ export const POST = withJsonError(async (request: Request) => {
       deliveryPosture: health.policy.posture === "normal"
         ? null
         : health.policy.posture,
+      exactDispatchMatched: dispatchAuthority.exactDispatchMatched,
       providerDispatchClaimed,
-      providerDispatchStarted,
     };
   });
 
@@ -255,8 +292,8 @@ export const POST = withJsonError(async (request: Request) => {
     ...(assertion.assistantAskFallbackRequired
       ? { assistantAskFallbackRequired: true }
       : {}),
-    ...(assertion.asserted.exactFallbackRouteMatched
-      ? { exactFallbackRouteMatched: true }
+    ...(assertion.exactDispatchMatched
+      ? { exactDispatchMatched: true }
       : {}),
     threadIsDirect: assertion.asserted.threadIsDirect,
     ...(assertion.asserted.targetOverride
@@ -274,15 +311,21 @@ export const POST = withJsonError(async (request: Request) => {
     ...(assertion.providerDispatchClaimed === null
       ? {}
       : { providerDispatchClaimed: assertion.providerDispatchClaimed }),
-    ...(assertion.providerDispatchStarted
-      ? { providerDispatchStarted: true }
-      : {}),
   });
 });
 
 function readOptionalBodyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function throwHostedLinqEgressRouteAuthorityMismatch(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+    httpStatus: 403,
+    message: "Linq egress route authority does not match the requested dispatch.",
+    retryable: false,
+  });
 }
 
 function parseRequiredAuthorityCheckOnly(value: unknown): boolean {

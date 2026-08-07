@@ -1347,6 +1347,7 @@ describe("hosted Linq observability stores", () => {
       attemptedAt,
       idempotencyKey: "assistant-outbox:intent-123",
       linqChatId: "chat_123",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
       prisma: fixture.prisma as never,
       sourceRef: "intent-123",
       targetKind: "thread",
@@ -1360,6 +1361,7 @@ describe("hosted Linq observability stores", () => {
       data: [expect.objectContaining({
         attemptedAt,
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:/u),
+        phoneNumberLookupKey: "hbidx:phone:runtime-line",
         source: "hosted_runtime_linq_delivery",
         status: "provider_dispatch_started",
         targetKind: "thread",

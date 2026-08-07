@@ -32,9 +32,13 @@ Last verified: 2026-08-06
   provider-idempotent key retained. Retry bypasses capability selection and
   replays only that exact card effect without depending on a rehydrated raw
   recipient phone; acceptance or provider deduplication closes the original
-  Web fence. A resumed non-replay card that encounters an already-started Web
-  claim becomes confirmation-pending before another capability or message
-  request. The capability probe is authority-checked but does not create that
+  Web fence. A resumed non-replay card that encounters the exact Web dispatch
+  row becomes confirmation-pending before another capability or message
+  request, regardless of whether that row is provider-started, accepted,
+  delivered, or failed. The shared exact-dispatch check binds the runtime
+  source and source reference, target kind, thread, and source line; any
+  mismatch fails closed before card mutation or provider entry. The capability
+  probe is authority-checked but does not create that
   irreversible claim; the claim is written only when the first provider
   message request begins. An ordinary definitive 400, 415, or 422 rejection
   commits the text-only transition under `:fallback`, which remains pinned to
@@ -81,11 +85,11 @@ Last verified: 2026-08-06
   route supersession is confined to the pre-claim window. Once Web has created
   the fallback delivery row, that row freezes the thread or participant/line
   target: later home-route changes cannot rewrite it. Each fresh drain must
-  reauthorize and exact-replay that claimed effect under the same provider key;
-  Web reports the exact-row route match independently of whether the row is
-  provider-started, accepted, delivered, or failed, so lifecycle advancement
-  cannot be mistaken for missing route authority.
-  a target-kind, thread, participant, or line mismatch fails closed before
+  reauthorize and exact-replay that claimed effect under the same provider key.
+  The same lifecycle-independent exact-dispatch disposition covers the
+  original card and its fallback, so row advancement cannot be mistaken for
+  missing route authority. A source, source-reference, target-kind, thread,
+  participant, or line mismatch fails closed before
   local target mutation or provider entry. Every
   pre-provider dispatch-control error, including a liveness yield before the
   read-only capability request, also emits a sanitized structured warning and

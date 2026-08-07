@@ -323,6 +323,7 @@ type HostedLinqDeliveryProviderDispatchClaimInput = {
   memberId?: string | null;
   participantPhoneNumber?: string | null;
   phoneNumber?: string | null;
+  phoneNumberLookupKey?: string | null;
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
   returnExistingFailureCode?: boolean;
@@ -595,9 +596,10 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
   const deliveryId = buildDeliveryId(idempotencyKey);
 
   const phoneNumber = normalizePhoneNumber(input.phoneNumber);
-  const phoneNumberLookupKey = await ensureHostedLinqDeliveryLineTx({
+  const phoneNumberLookupKey = await resolveHostedLinqDeliveryLineLookupKeyTx({
     observedAt: attemptedAt,
     phoneNumber,
+    phoneNumberLookupKey: input.phoneNumberLookupKey,
     prisma: input.prisma,
   });
   const data = {
@@ -687,6 +689,7 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   memberId?: string | null;
   participantPhoneNumber?: string | null;
   phoneNumber?: string | null;
+  phoneNumberLookupKey?: string | null;
   prisma: HostedLinqDeliveryClient;
   sourceRef?: string | null;
   targetKind?: string | null;
@@ -699,6 +702,7 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
     memberId: input.memberId,
     participantPhoneNumber: input.participantPhoneNumber,
     phoneNumber: input.phoneNumber,
+    phoneNumberLookupKey: input.phoneNumberLookupKey,
     prisma: input.prisma,
     source: "hosted_runtime_linq_delivery",
     sourceRef: input.sourceRef,
@@ -707,39 +711,71 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   });
 }
 
-export async function hasHostedLinqRuntimeProviderDispatchFenceTx(input: {
+export type HostedLinqRuntimeExactDispatchAuthority = {
+  authorityMismatch: boolean;
+  exactDispatchMatched: boolean;
+};
+
+export async function readHostedLinqRuntimeExactDispatchAuthorityTx(input: {
   idempotencyKey: string;
+  linqChatId: string;
+  phoneNumber?: string | null;
+  phoneNumberLookupKey?: string | null;
   prisma: HostedLinqDeliveryClient;
   sourceRef: string;
   targetKind: string | null;
-}): Promise<boolean> {
+}): Promise<HostedLinqRuntimeExactDispatchAuthority> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     input.idempotencyKey,
   );
   const sourceRef = createHostedLinqDeliverySourceRefLookupKey(input.sourceRef);
-  if (!idempotencyKey || !sourceRef) {
-    return false;
+  const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
+    input.linqChatId,
+  );
+  const explicitLineLookupKey = normalizeNullable(input.phoneNumberLookupKey);
+  const phoneNumberLookupKeys = explicitLineLookupKey
+    ? [explicitLineLookupKey]
+    : createHostedPhoneLookupKeyReadCandidates(
+        normalizePhoneNumber(input.phoneNumber),
+      );
+  if (!idempotencyKey || !sourceRef || linqChatLookupKeys.length === 0) {
+    return {
+      authorityMismatch: false,
+      exactDispatchMatched: false,
+    };
   }
   const delivery = await input.prisma.hostedLinqDelivery.findUnique({
     where: { idempotencyKey },
     select: {
-      acceptedAt: true,
-      deliveredAt: true,
-      failureCode: true,
-      lastReceiptAt: true,
-      messageLookupKey: true,
+      linqChatLookupKey: true,
+      phoneNumberLookupKey: true,
       source: true,
       sourceRef: true,
-      status: true,
       targetKind: true,
     },
   });
-  return delivery !== null
+  if (!delivery) {
+    return {
+      authorityMismatch: false,
+      exactDispatchMatched: false,
+    };
+  }
+  const exactDispatchMatched =
+    delivery.linqChatLookupKey !== null
+    && linqChatLookupKeys.includes(delivery.linqChatLookupKey)
+    && (
+      phoneNumberLookupKeys.length > 0
+        ? delivery.phoneNumberLookupKey !== null
+          && phoneNumberLookupKeys.includes(delivery.phoneNumberLookupKey)
+        : delivery.phoneNumberLookupKey === null
+    )
     && delivery.source === "hosted_runtime_linq_delivery"
     && delivery.sourceRef === sourceRef
-    && delivery.status === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
-    && delivery.targetKind === normalizeNullable(input.targetKind)
-    && !isHostedLinqDeliveryProviderCorrelated(delivery);
+    && delivery.targetKind === normalizeNullable(input.targetKind);
+  return {
+    authorityMismatch: !exactDispatchMatched,
+    exactDispatchMatched,
+  };
 }
 
 export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
@@ -749,6 +785,7 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
   memberId?: string | null;
   participantPhoneNumber?: string | null;
   phoneNumber?: string | null;
+  phoneNumberLookupKey?: string | null;
   predecessorIdempotencyKey: string;
   prisma: HostedLinqDeliveryClient;
   sourceRef: string;
@@ -773,9 +810,24 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
   const participantPhoneLookupKeys = input.targetKind === "participant"
     ? createHostedPhoneLookupKeyReadCandidates(participantPhoneNumber)
     : [];
-  const phoneNumberLookupKey = createHostedPhoneLookupKey(
-    normalizePhoneNumber(input.phoneNumber),
+  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
+  const explicitPhoneNumberLookupKey = normalizeNullable(
+    input.phoneNumberLookupKey,
   );
+  const phoneNumberLookupKeys = createHostedPhoneLookupKeyReadCandidates(
+    phoneNumber,
+  );
+  if (
+    explicitPhoneNumberLookupKey
+    && phoneNumberLookupKeys.length > 0
+    && !phoneNumberLookupKeys.includes(explicitPhoneNumberLookupKey)
+  ) {
+    throw new TypeError(
+      "Hosted Linq fallback source-line authority does not match the supplied phone number.",
+    );
+  }
+  const phoneNumberLookupKey = explicitPhoneNumberLookupKey
+    ?? createHostedPhoneLookupKey(phoneNumber);
   const fallbackIdentity = parseHostedLinqAppCardFallbackIdentity(
     fallbackIdempotencyKey,
   );
@@ -896,6 +948,7 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
         memberId,
         participantPhoneNumber,
         phoneNumber: input.phoneNumber,
+        phoneNumberLookupKey,
         prisma,
         sourceRef,
         targetKind: input.targetKind,
@@ -3539,6 +3592,30 @@ async function ensureHostedLinqDeliveryLineTx(input: {
     source: "webhook",
   });
   return line.phoneNumberLookupKey;
+}
+
+async function resolveHostedLinqDeliveryLineLookupKeyTx(input: {
+  observedAt: Date;
+  phoneNumber: string | null;
+  phoneNumberLookupKey?: string | null;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<string | null> {
+  const phoneNumberLookupKey = normalizeNullable(input.phoneNumberLookupKey);
+  if (phoneNumberLookupKey) {
+    const phoneNumberLookupKeys = createHostedPhoneLookupKeyReadCandidates(
+      input.phoneNumber,
+    );
+    if (
+      phoneNumberLookupKeys.length > 0
+      && !phoneNumberLookupKeys.includes(phoneNumberLookupKey)
+    ) {
+      throw new TypeError(
+        "Hosted Linq source-line authority does not match the supplied phone number.",
+      );
+    }
+    return phoneNumberLookupKey;
+  }
+  return await ensureHostedLinqDeliveryLineTx(input);
 }
 
 async function readHostedLinqDeliveryLineIdentityTx(input: {

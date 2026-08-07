@@ -311,6 +311,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
+  lineLookupKey?: string | null;
   providerDispatchPredecessorIdempotencyKey?: string | null;
   replyToMessageId?: string | null;
   target: string | null;
@@ -331,9 +332,8 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   assistantAskFallbackRequired?: boolean | null;
   deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null;
   deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null;
-  exactFallbackRouteMatched?: boolean | null;
+  exactDispatchMatched?: boolean | null;
   providerDispatchClaimed?: boolean | null;
-  providerDispatchStarted?: boolean | null;
   routeDisposition?: "superseded" | "unavailable" | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
   threadIsDirect?: boolean | null;

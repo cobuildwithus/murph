@@ -3570,6 +3570,8 @@ function createHostedAssistantLinqSendDependency(input: {
     let fromPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
+    const lineLookupKey =
+      deliveryContext?.routeAuthority?.accountLookupKey ?? null;
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     let effectiveIdempotencyKey = idempotencyKey;
     let providerDispatchPredecessorIdempotencyKey =
@@ -3599,6 +3601,7 @@ function createHostedAssistantLinqSendDependency(input: {
           homeRouteFallbackAllowed: currentHomeRouteOnly,
           idempotencyKey,
           intentId: input.intentId ?? null,
+          lineLookupKey,
           replyToMessageId: request.replyToMessageId ?? null,
           signal: signal ?? null,
           target: deliveryContext?.target ?? request.target,
@@ -3609,7 +3612,7 @@ function createHostedAssistantLinqSendDependency(input: {
       currentHomeRouteOnly
       && providerDispatchPredecessorIdempotencyKey
       && !engagement.targetOverride
-      && engagement.exactFallbackRouteMatched !== true
+      && engagement.exactDispatchMatched !== true
     ) {
       emitHostedExecutionStructuredLog({
         component: "assistant-delivery",
@@ -3628,10 +3631,10 @@ function createHostedAssistantLinqSendDependency(input: {
         { retryable: false },
       ));
     }
-    if (initialNativeCard && engagement.providerDispatchStarted === true) {
+    if (initialNativeCard && engagement.exactDispatchMatched === true) {
       throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
         "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
-        "Hosted iMessage app-card dispatch already started and requires exact replay reconciliation.",
+        "Hosted iMessage app-card dispatch already exists and requires exact replay reconciliation.",
         { retryable: false },
       ));
     }
@@ -3722,6 +3725,7 @@ function createHostedAssistantLinqSendDependency(input: {
           homeRouteFallbackAllowed: currentHomeRouteOnly,
           idempotencyKey: effectiveIdempotencyKey,
           intentId: input.intentId ?? null,
+          lineLookupKey,
           providerDispatchPredecessorIdempotencyKey,
           replyToMessageId: request.replyToMessageId ?? null,
           providerDispatchRetrySafe:
@@ -3958,6 +3962,7 @@ function createHostedAssistantLinqSendDependency(input: {
                         homeRouteFallbackAllowed: true,
                         idempotencyKey: fallback.idempotencyKey,
                         intentId: input.intentId ?? null,
+                        lineLookupKey,
                         replyToMessageId: null,
                         signal: signal ?? null,
                         target: providerTarget,
@@ -4904,6 +4909,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   homeRouteFallbackAllowed: boolean;
   idempotencyKey: string | null;
   intentId: string | null;
+  lineLookupKey?: string | null;
   providerDispatchPredecessorIdempotencyKey?: string | null;
   providerDispatchRetrySafe?: boolean;
   replyToMessageId: string | null;
@@ -4941,6 +4947,9 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
       homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
       idempotencyKey: input.idempotencyKey,
       intentId: input.intentId,
+      ...(input.lineLookupKey
+        ? { lineLookupKey: input.lineLookupKey }
+        : {}),
       ...(input.providerDispatchPredecessorIdempotencyKey
         ? {
             providerDispatchPredecessorIdempotencyKey:
@@ -5048,14 +5057,11 @@ function normalizeHostedAssistantLinqEngagementResult(
   if (result?.deliveryPosture) {
     normalized.deliveryPosture = result.deliveryPosture;
   }
-  if (typeof result?.exactFallbackRouteMatched === "boolean") {
-    normalized.exactFallbackRouteMatched = result.exactFallbackRouteMatched;
+  if (typeof result?.exactDispatchMatched === "boolean") {
+    normalized.exactDispatchMatched = result.exactDispatchMatched;
   }
   if (typeof result?.providerDispatchClaimed === "boolean") {
     normalized.providerDispatchClaimed = result.providerDispatchClaimed;
-  }
-  if (typeof result?.providerDispatchStarted === "boolean") {
-    normalized.providerDispatchStarted = result.providerDispatchStarted;
   }
   if (
     result?.routeDisposition === "superseded"

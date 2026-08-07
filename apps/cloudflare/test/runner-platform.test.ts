@@ -4676,6 +4676,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
   it("write-fences Linq egress authority assertions and preserves boolean fallback/directness", async () => {
     let responseCount = 0;
+    const requestBodies: Array<Record<string, unknown>> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH);
@@ -4684,7 +4685,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         assistantAskCompletionExpiresAt?: unknown;
         assistantAskFallback?: unknown;
         authorityCheckOnly?: unknown;
+        lineLookupKey?: unknown;
       };
+      requestBodies.push(body);
       expect(body.authorityCheckOnly).toBe(responseCount === 1 ? false : true);
       expect(body.assistantAskFallback).toBe(
         responseCount === 2 ? false : undefined,
@@ -4703,8 +4706,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               providerDispatchClaimed: true,
             }
           : responseCount === 5
-            ? { exactFallbackRouteMatched: true }
-            : { providerDispatchStarted: true }),
+            ? { exactDispatchMatched: true }
+            : {}),
         ...(responseCount === 2
           ? {
               targetOverride: {
@@ -4769,7 +4772,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       targetKind: "thread",
     })).resolves.toEqual({
       assistantAskFallbackRequired: true,
-      providerDispatchStarted: true,
       targetOverride: {
         conversationThreadId: "hid_current_chat",
         target: "chat_current",
@@ -4783,7 +4785,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       target: "chat_current",
       targetKind: "thread",
     })).resolves.toEqual({
-      providerDispatchStarted: true,
       targetOverride: {
         fromPhoneNumber: "+15550000",
         target: "+15550001",
@@ -4798,7 +4799,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       target: "+15550001",
       targetKind: "participant",
     })).resolves.toEqual({
-      providerDispatchStarted: true,
       routeDisposition: "superseded",
       targetOverride: {
         target: "chat_newer_home",
@@ -4810,11 +4810,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       authorityCheckOnly: true,
       idempotencyKey:
         "assistant-outbox:intent_123:stale-chat-fallback",
+      lineLookupKey: "hbidx:phone:v1:frozen-line",
       target: "chat_frozen_fallback",
       targetKind: "thread",
     })).resolves.toEqual({
-      exactFallbackRouteMatched: true,
+      exactDispatchMatched: true,
       threadIsDirect: true,
+    });
+
+    expect(requestBodies[4]).toMatchObject({
+      lineLookupKey: "hbidx:phone:v1:frozen-line",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(5);

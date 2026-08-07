@@ -535,7 +535,6 @@ describe("hosted Linq egress authority", () => {
       target: "chat-current-home",
       targetKind: "thread",
     })).resolves.toEqual({
-      exactFallbackRouteMatched: true,
       linePhoneNumberLookupKey:
         createRequiredPhoneLookupKey(homeLinePhone),
       targetOverride: null,
@@ -773,13 +772,11 @@ describe("hosted Linq egress authority", () => {
         targetKind: "thread",
       });
     await expect(assertFrozenFallbackRoute()).resolves.toEqual({
-      exactFallbackRouteMatched: true,
       targetOverride: null,
       threadIsDirect: true,
     });
     fallbackOutcome = "failed";
     await expect(assertFrozenFallbackRoute()).resolves.toEqual({
-      exactFallbackRouteMatched: true,
       targetOverride: null,
       threadIsDirect: true,
     });
@@ -2334,11 +2331,13 @@ describe("hosted Linq egress authority", () => {
   });
 
   it("reports an existing exact provider-dispatch fence during an authority-only check", async () => {
+    const lineLookupKey = createRequiredPhoneLookupKey("+15550100099");
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
+      homeLinePhone: "+15550100099",
     });
     prisma.hostedLinqDelivery.findUnique.mockResolvedValue(
-      buildHostedRuntimeProviderDispatchRow(),
+      buildHostedRuntimeProviderDispatchRow({ phoneNumberLookupKey: lineLookupKey }),
     );
     mocks.getPrisma.mockReturnValue(prisma);
 
@@ -2348,6 +2347,7 @@ describe("hosted Linq egress authority", () => {
           authorityCheckOnly: true,
           idempotencyKey: "assistant-outbox:intent_123",
           intentId: "intent_123",
+          lineLookupKey,
           target: "chat-home",
           targetKind: "thread",
         }),
@@ -2360,13 +2360,162 @@ describe("hosted Linq egress authority", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      exactDispatchMatched: true,
       ok: true,
-      providerDispatchStarted: true,
       threadIsDirect: true,
     });
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
   });
+
+  it.each(["accepted", "delivered"] as const)(
+    "reports an exact original-card %s dispatch independently of lifecycle status",
+    async (status) => {
+      const lineLookupKey = createRequiredPhoneLookupKey("+15550100099");
+      const lifecycleAt = new Date("2026-08-06T12:00:01.000Z");
+      const prisma = createPrismaStub({
+        homeChatId: "chat-home",
+        homeLinePhone: "+15550100099",
+      });
+      prisma.hostedLinqDelivery.findUnique.mockResolvedValue(
+        buildHostedRuntimeProviderDispatchRow({
+          acceptedAt: lifecycleAt,
+          deliveredAt: status === "delivered" ? lifecycleAt : null,
+          messageLookupKey: "message-card",
+          phoneNumberLookupKey: lineLookupKey,
+          status,
+        }),
+      );
+      mocks.getPrisma.mockReturnValue(prisma);
+
+      const response = await postHostedLinqEgressEngagement(
+        new Request("https://internal.example.test/engagement", {
+          body: JSON.stringify({
+            authorityCheckOnly: true,
+            idempotencyKey: "assistant-outbox:intent_123",
+            intentId: "intent_123",
+            lineLookupKey,
+            target: "chat-home",
+            targetKind: "thread",
+          }),
+          headers: {
+            "content-type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        exactDispatchMatched: true,
+        ok: true,
+        threadIsDirect: true,
+      });
+      expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+      expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails closed when an existing dispatch row does not match the source line", async () => {
+    const lineLookupKey = createRequiredPhoneLookupKey("+15550100099");
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+      homeLinePhone: "+15550100099",
+    });
+    prisma.hostedLinqDelivery.findUnique.mockResolvedValue(
+      buildHostedRuntimeProviderDispatchRow({
+        phoneNumberLookupKey: createRequiredPhoneLookupKey("+15550100098"),
+      }),
+    );
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: true,
+          idempotencyKey: "assistant-outbox:intent_123",
+          intentId: "intent_123",
+          lineLookupKey,
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+        retryable: false,
+      },
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["source", { source: "other_delivery_owner" }],
+    [
+      "source reference",
+      {
+        sourceRef: createHostedLinqDeliverySourceRefLookupKey(
+          "different_intent",
+        ),
+      },
+    ],
+    [
+      "thread",
+      { linqChatLookupKey: createHostedLinqChatLookupKey("other-chat") },
+    ],
+    ["target kind", { targetKind: "participant" as const }],
+  ])(
+    "fails closed when an existing dispatch row does not match the %s",
+    async (_label, rowOverrides) => {
+      const lineLookupKey = createRequiredPhoneLookupKey("+15550100099");
+      const prisma = createPrismaStub({
+        homeChatId: "chat-home",
+        homeLinePhone: "+15550100099",
+      });
+      prisma.hostedLinqDelivery.findUnique.mockResolvedValue(
+        buildHostedRuntimeProviderDispatchRow({
+          phoneNumberLookupKey: lineLookupKey,
+          ...rowOverrides,
+        }),
+      );
+      mocks.getPrisma.mockReturnValue(prisma);
+
+      const response = await postHostedLinqEgressEngagement(
+        new Request("https://internal.example.test/engagement", {
+          body: JSON.stringify({
+            authorityCheckOnly: true,
+            idempotencyKey: "assistant-outbox:intent_123",
+            intentId: "intent_123",
+            lineLookupKey,
+            target: "chat-home",
+            targetKind: "thread",
+          }),
+          headers: {
+            "content-type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+          retryable: false,
+        },
+      });
+      expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+      expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+    },
+  );
 
   it("reports an exact accepted fallback route during an authority-only check", async () => {
     const predecessorIdempotencyKey = "assistant-outbox:intent_123";
@@ -2421,7 +2570,7 @@ describe("hosted Linq egress authority", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      exactFallbackRouteMatched: true,
+      exactDispatchMatched: true,
       ok: true,
       threadIsDirect: true,
     });
@@ -2703,6 +2852,7 @@ describe("hosted Linq egress authority", () => {
 function buildHostedRuntimeProviderDispatchRow(
   overrides: {
     acceptedAt?: Date | null;
+    deliveredAt?: Date | null;
     failedAt?: Date | null;
     failureCode?: string | null;
     linqChatLookupKey?: string | null;
@@ -2710,6 +2860,7 @@ function buildHostedRuntimeProviderDispatchRow(
     participantPhoneEncrypted?: string | null;
     participantPhoneLookupKey?: string | null;
     phoneNumberLookupKey?: string | null;
+    source?: string;
     sourceRef?: string | null;
     messageLookupKey?: string | null;
     status?: string;

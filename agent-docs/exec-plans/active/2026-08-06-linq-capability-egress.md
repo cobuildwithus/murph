@@ -108,6 +108,13 @@ Updated: 2026-08-07
   route-authority request and local fallback transition made the replacement
   identity durable. Process loss in that interval left a local card intent but
   no discoverable exact-card fence or fallback identity.
+- Final ReviewGPT round 18 exposed the lifecycle-equivalent interruption for
+  the original card row. After Web advanced that row to accepted or delivered,
+  the fresh runtime no longer recognized it as an entered provider effect and
+  could select text under the original card key. The shared exact-dispatch
+  disposition now validates source, source reference, target kind, thread, and
+  source line independently of row status before any capability or text
+  mutation.
 
 ## Round 14 requirement retrospective
 
@@ -160,9 +167,11 @@ new participant fallback claims require the complete snapshot atomically.
 - Exact replay remains valid without a rehydrated raw recipient phone because
   it performs no capability lookup. A structured stale-chat app-card `404` is
   definitive and may promote fallback; unclassified `404` responses may not.
-- A resumed non-replay card that encounters an existing Web provider claim
-  becomes confirmation-pending before another capability or provider message
-  request, so the next outbox drain can derive exact replay.
+- A resumed non-replay card that encounters an exact Web dispatch row becomes
+  confirmation-pending before another capability or provider message request,
+  even after that row advances to accepted or delivered, so the next outbox
+  drain derives exact replay. A source, source-reference, target-kind, thread,
+  or line mismatch fails closed before card mutation or provider entry.
 - Capability probing remains read-only with respect to provider dispatch. Web
   reports an existing exact fence during the authority-only check, and the
   runtime creates or transfers a fence only when an actual Linq message request
@@ -460,3 +469,16 @@ new participant fallback claims require the complete snapshot atomically.
   Focused proof passes all 241 callback tests, 62 Web engagement/route tests,
   and 145 Cloudflare platform tests. Assistant runtime, prepared Web, and
   Cloudflare typechecks pass; documentation gardening passes.
+- Final ReviewGPT round 18 reproduced the same lifecycle gap for the original
+  card key after Web recorded provider acceptance or delivery. Failing-first
+  runtime proof reached capability selection instead of confirmation-pending.
+  Web now returns one shared lifecycle-independent exact-dispatch result for
+  original cards and fallbacks after validating source, source reference,
+  target kind, thread, and source line; Cloudflare preserves that result, and
+  the runtime stops before capability or text mutation. Focused proof passes
+  all 241 callback tests, 69 Web engagement/route tests, 145 Cloudflare
+  platform tests, and all 98 assistant outbox runtime tests. The outbox proof
+  retains the card after initial confirmation-pending, repeats the identical
+  card, thread, body, and key after another lost provider response, and then
+  completes through deduplication. Assistant engine/runtime, prepared Web, and
+  Cloudflare typechecks pass.

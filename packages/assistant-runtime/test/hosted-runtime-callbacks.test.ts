@@ -10183,7 +10183,7 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("marks a resumed native card with an existing provider claim as confirmation-pending", async () => {
+  it("marks a resumed native card with an exact accepted dispatch as confirmation-pending", async () => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",
       channel: "linq",
@@ -10193,7 +10193,7 @@ describe("hosted runtime callbacks", () => {
     const assertRecentInbound = vi.fn(async (request: {
       authorityCheckOnly: boolean;
     }) => request.authorityCheckOnly
-      ? { providerDispatchStarted: true }
+      ? { exactDispatchMatched: true }
       : await assertLinqEngagementWithExistingProviderClaim(request));
     const providerFetch = vi.fn<typeof fetch>();
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
@@ -10228,6 +10228,20 @@ describe("hosted runtime callbacks", () => {
         assertLinqRecentInboundEngagement: assertRecentInbound,
       }),
       forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      linqDeliveryContexts: [{
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        replyToMessageId: null,
+        routeAuthority: {
+          accountLookupKey: "hbidx:phone:v1:card-line",
+          channel: "linq",
+          containerMemberId: "member_123",
+          threadId: "linq_chat_123",
+        },
+        service: "iMessage",
+        target: "linq_chat_123",
+        threadIsDirect: true,
+      }],
       platformEnv: {},
       providerFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -10239,6 +10253,13 @@ describe("hosted runtime callbacks", () => {
 
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
     expect(persistAppCardTextFallback).not.toHaveBeenCalled();
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorityCheckOnly: true,
+        lineLookupKey: "hbidx:phone:v1:card-line",
+      }),
+      { signal: null },
+    );
     expect(providerFetch.mock.calls).toEqual([
       [expect.stringMatching(/\/typing$/u), expect.objectContaining({
         method: "DELETE",
@@ -10247,20 +10268,20 @@ describe("hosted runtime callbacks", () => {
   });
 
   it("does not claim card dispatch until capability fallback enters message delivery", async () => {
-    let providerDispatchStarted = false;
+    let providerDispatchClaimed = false;
     const assertRecentInbound = vi.fn(async (request: {
       authorityCheckOnly: boolean;
     }) => {
       if (request.authorityCheckOnly) {
-        return { providerDispatchStarted };
+        return { exactDispatchMatched: providerDispatchClaimed };
       }
-      if (providerDispatchStarted) {
+      if (providerDispatchClaimed) {
         throw Object.assign(
           new Error("Hosted Linq provider dispatch is already started."),
           { code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED" },
         );
       }
-      providerDispatchStarted = true;
+      providerDispatchClaimed = true;
       return { providerDispatchClaimed: true };
     });
     const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
@@ -10323,7 +10344,7 @@ describe("hosted runtime callbacks", () => {
       },
     })).rejects.toBe(interrupted);
 
-    expect(providerDispatchStarted).toBe(false);
+    expect(providerDispatchClaimed).toBe(false);
     const retryDependencies = createHostedAssistantProgressDeliveryDependencies({
       effectsPort,
       forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
@@ -12977,7 +12998,7 @@ describe("hosted runtime callbacks", () => {
       }));
       return request.authorityCheckOnly
         ? {
-            exactFallbackRouteMatched: true,
+            exactDispatchMatched: true,
             threadIsDirect: true,
           }
         : { providerDispatchClaimed: false };
@@ -14284,6 +14305,7 @@ describe("hosted runtime callbacks", () => {
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
+      lineLookupKey: "hbidx:phone:v1:account",
       replyToMessageId: "linq_message_current",
       target: "linq_chat_current",
       targetKind: "thread",
@@ -14397,6 +14419,7 @@ describe("hosted runtime callbacks", () => {
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
+      lineLookupKey: "hbidx:phone:v1:account_a",
       replyToMessageId: "linq_message_a",
       target: "linq_chat_a",
       targetKind: "thread",
