@@ -6,7 +6,7 @@ import {
   inspectHostedStripeBillingProviderBoundary,
   inspectHostedStripeBillingWorkflow,
   type HostedStripeBillingProviderBoundarySources,
-} from "./check-hosted-stripe-billing-ci";
+} from "./check-hosted-stripe-billing-ci.js";
 
 const workflowPath = new URL(
   "../.github/workflows/hosted-stripe-billing.yml",
