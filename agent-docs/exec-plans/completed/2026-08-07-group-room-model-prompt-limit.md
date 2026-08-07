@@ -43,6 +43,9 @@ was classified as unavailable.
 - [x] Production symptom and code-path root cause proved.
 - [x] Implementation and durable docs updated.
 - [x] Focused verification passed.
-- [ ] Review candidate committed and pushed.
-- [ ] Required review and CI gates passed.
-- [ ] Plan archived by the final task commit.
+- [x] Review candidate committed and pushed.
+- [x] Required review and CI gates passed.
+- [x] Plan archived by the final task commit.
+Status: completed
+Updated: 2026-08-07
+Completed: 2026-08-07
