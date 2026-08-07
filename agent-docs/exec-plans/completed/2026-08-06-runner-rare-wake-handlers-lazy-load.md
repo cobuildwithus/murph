@@ -1,8 +1,8 @@
 # Lazy-load rare hosted wake handlers
 
-Status: active
+Status: completed
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Goal
 
@@ -113,3 +113,6 @@ Updated: 2026-08-06
   direct manifest probe later completed in 28.79 seconds, the package build
   passed unchanged, and the assembled production artifact reported
   `devDependencies: skipped`; no timeout or runtime invariant was changed.
+- Post-merge workspace-boundary and workspace-package-cycle verification
+  passed.
+Completed: 2026-08-07
