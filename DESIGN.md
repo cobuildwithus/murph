@@ -217,10 +217,11 @@ with `10% target hit` or `Below 10% target` text. A missing comparison stays
 neutral and must not claim that a snapshot exists. Keep **Messaged Murph today**
 and **Messaged Murph · last 7 days** as prominent supporting readings beside the MRR
 lead; both count distinct people across personal and attributable group chats.
-Describe them as retained senders. Account deletion removes personal and
-owned-group source rows; activity retained in another member's shared-group
-container follows normal content retention instead of an analytics-side
-deletion trail.
+Each person belongs to the UTC window when Murph durably receives their message,
+not the provider-reported event time. Describe them as retained senders. Account
+deletion removes personal and owned-group source rows; activity retained in
+another member's shared-group container follows normal content retention
+instead of an analytics-side deletion trail.
 Active-user windows must not present intentionally retired group-sender evidence
 as an exact count: prefix an affected today, WAU, or MAU count with `At least`,
 explain the private evidence retirement in the supporting copy, and withhold a
@@ -234,9 +235,9 @@ values remain distinguishable without color. Then
 show **Total messages sent**, a thin sage cumulative line seeded from the
 established historical base, and **Messages sent per day**, restrained sage
 bars for completed UTC days. Shift each snapshot's prior-day counts onto the
-date when the activity occurred and always preserve the exact 30 completed-day
-UTC spine. Leave absent snapshots, incomplete sender windows, and legacy unknown
-counts as chart gaps rather than zeros. Once message tracking has begun, an
+UTC date when Murph received the activity and always preserve the exact 30
+completed-day UTC spine. Leave absent snapshots, incomplete sender windows, and
+legacy unknown counts as chart gaps rather than zeros. Once message tracking has begun, an
 unavailable day also ends the exact cumulative line until the missing evidence
 is reconciled; later known daily bars may still render. State that the daily
 message total combines inbound messages across supported channels with tracked

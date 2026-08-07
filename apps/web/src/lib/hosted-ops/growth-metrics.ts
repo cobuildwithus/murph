@@ -691,6 +691,7 @@ export function getTrialMaturityCutoff(now: Date): Date {
 
 interface HostedGrowthGroupMailboxRow {
   contentRetiredAt: Date | null;
+  createdAt: Date;
   dedupeKey: string;
   id: string;
   kind: string;
@@ -708,6 +709,7 @@ interface HostedGrowthGroupMailboxRow {
 
 const hostedGrowthGroupMailboxSelect = {
   contentRetiredAt: true,
+  createdAt: true,
   dedupeKey: true,
   id: true,
   kind: true,
@@ -747,13 +749,13 @@ type HostedGrowthGroupSenderEvidence =
   | HostedGrowthTelegramSenderEvidence;
 
 interface HostedGrowthAttributedGroupMessage {
+  createdAt: Date;
   evidence: HostedGrowthGroupSenderEvidence;
-  occurredAt: Date;
 }
 
 interface HostedGrowthDecodedGroupMessages {
   messages: HostedGrowthAttributedGroupMessage[];
-  retiredMessageOccurredAt: Date[];
+  retiredMessageCreatedAt: Date[];
 }
 
 interface HostedGrowthActiveUserCounts {
@@ -808,25 +810,25 @@ async function calculateHostedGrowthActiveUsers(input: {
       throw new Error("Hosted growth group sender identity was not resolved.");
     }
     if (
-      message.occurredAt.getTime() >= input.todayStart.getTime()
-      && message.occurredAt.getTime() < input.now.getTime()
+      message.createdAt.getTime() >= input.todayStart.getTime()
+      && message.createdAt.getTime() < input.now.getTime()
     ) {
       todayIdentities.add(identity);
     }
     if (
-      message.occurredAt.getTime() >= input.monthlyStart.getTime()
-      && message.occurredAt.getTime() < input.now.getTime()
+      message.createdAt.getTime() >= input.monthlyStart.getTime()
+      && message.createdAt.getTime() < input.now.getTime()
     ) {
       trailing30DayIdentities.add(identity);
     }
     if (
-      message.occurredAt.getTime() >= input.trailing7DayStart.getTime()
-      && message.occurredAt.getTime() < input.now.getTime()
+      message.createdAt.getTime() >= input.trailing7DayStart.getTime()
+      && message.createdAt.getTime() < input.now.getTime()
     ) {
       trailing7DayIdentities.add(identity);
     } else if (
-      message.occurredAt.getTime() >= input.previousStart.getTime()
-      && message.occurredAt.getTime() < input.trailing7DayStart.getTime()
+      message.createdAt.getTime() >= input.previousStart.getTime()
+      && message.createdAt.getTime() < input.trailing7DayStart.getTime()
     ) {
       previous7DayIdentities.add(identity);
     }
@@ -836,25 +838,25 @@ async function calculateHostedGrowthActiveUsers(input: {
     previous7Days: previous7DayIdentities.size,
     previous7DaysComplete: !hasHostedGrowthRetiredMessageInWindow({
       end: input.trailing7DayStart,
-      retiredMessageOccurredAt: decodedGroupMessages.retiredMessageOccurredAt,
+      retiredMessageCreatedAt: decodedGroupMessages.retiredMessageCreatedAt,
       start: input.previousStart,
     }),
     today: todayIdentities.size,
     todayComplete: !hasHostedGrowthRetiredMessageInWindow({
       end: input.now,
-      retiredMessageOccurredAt: decodedGroupMessages.retiredMessageOccurredAt,
+      retiredMessageCreatedAt: decodedGroupMessages.retiredMessageCreatedAt,
       start: input.todayStart,
     }),
     trailing30Days: trailing30DayIdentities.size,
     trailing30DaysComplete: !hasHostedGrowthRetiredMessageInWindow({
       end: input.now,
-      retiredMessageOccurredAt: decodedGroupMessages.retiredMessageOccurredAt,
+      retiredMessageCreatedAt: decodedGroupMessages.retiredMessageCreatedAt,
       start: input.monthlyStart,
     }),
     trailing7Days: trailing7DayIdentities.size,
     trailing7DaysComplete: !hasHostedGrowthRetiredMessageInWindow({
       end: input.now,
-      retiredMessageOccurredAt: decodedGroupMessages.retiredMessageOccurredAt,
+      retiredMessageCreatedAt: decodedGroupMessages.retiredMessageCreatedAt,
       start: input.trailing7DayStart,
     }),
   };
@@ -867,9 +869,9 @@ async function decodeHostedGrowthGroupMessages(
   return runWithHostedDomainRootUnwrapCache(async () => {
     // Retired reaction attestations were never sender evidence, so they must
     // not mark an active-user window incomplete.
-    const retiredMessageOccurredAt = rows.flatMap((row) =>
+    const retiredMessageCreatedAt = rows.flatMap((row) =>
       row.contentRetiredAt && !isHostedExecutionGroupReactionEventId(row.dedupeKey)
-        ? [row.occurredAt]
+        ? [row.createdAt]
         : []
     );
     const retainedRows = rows.filter((row) => !row.contentRetiredAt);
@@ -906,27 +908,27 @@ async function decodeHostedGrowthGroupMessages(
       }
 
       return {
+        createdAt: row.createdAt,
         evidence,
-        occurredAt: row.occurredAt,
       };
     }));
     return {
       messages: messages.filter(
         (message): message is HostedGrowthAttributedGroupMessage => message !== null,
       ),
-      retiredMessageOccurredAt,
+      retiredMessageCreatedAt,
     };
   });
 }
 
 function hasHostedGrowthRetiredMessageInWindow(input: {
   end: Date;
-  retiredMessageOccurredAt: readonly Date[];
+  retiredMessageCreatedAt: readonly Date[];
   start: Date;
 }): boolean {
-  return input.retiredMessageOccurredAt.some((occurredAt) =>
-    occurredAt.getTime() >= input.start.getTime()
-    && occurredAt.getTime() < input.end.getTime()
+  return input.retiredMessageCreatedAt.some((createdAt) =>
+    createdAt.getTime() >= input.start.getTime()
+    && createdAt.getTime() < input.end.getTime()
   );
 }
 
@@ -1305,7 +1307,7 @@ export async function readHostedGrowthDashboard(
       where: {
         kind: INBOUND_MESSAGE_MAILBOX_KIND,
         member: realHostedMemberWhere,
-        occurredAt: {
+        createdAt: {
           gte: activeUsersCurrentStart,
           lt: now,
         },
@@ -1316,7 +1318,7 @@ export async function readHostedGrowthDashboard(
       where: {
         kind: INBOUND_MESSAGE_MAILBOX_KIND,
         member: realHostedMemberWhere,
-        occurredAt: {
+        createdAt: {
           gte: activeUsersPreviousStart,
           lt: activeUsersCurrentStart,
         },
@@ -1327,7 +1329,7 @@ export async function readHostedGrowthDashboard(
       where: {
         kind: INBOUND_MESSAGE_MAILBOX_KIND,
         member: realHostedMemberWhere,
-        occurredAt: {
+        createdAt: {
           gte: activeUsersMonthlyStart,
           lt: now,
         },
@@ -1335,7 +1337,7 @@ export async function readHostedGrowthDashboard(
     }),
     prisma.hostedMailboxItem.findMany({
       orderBy: {
-        occurredAt: "asc",
+        createdAt: "asc",
       },
       select: hostedGrowthGroupMailboxSelect,
       where: {
@@ -1345,7 +1347,7 @@ export async function readHostedGrowthDashboard(
             isNot: null,
           },
         },
-        occurredAt: {
+        createdAt: {
           gte: activeUsersMonthlyStart,
           lt: now,
         },
@@ -1356,7 +1358,7 @@ export async function readHostedGrowthDashboard(
       where: {
         kind: INBOUND_MESSAGE_MAILBOX_KIND,
         member: realHostedMemberWhere,
-        occurredAt: {
+        createdAt: {
           gte: todayStart,
           lt: now,
         },
@@ -1519,9 +1521,10 @@ export async function readHostedGrowthDashboard(
  * the same date are deterministic. Inbound counts `conversation.message`
  * mailbox items across all channels; those rows expire, so the snapshot is
  * the durable record. Outbound counts sent rows in the Linq delivery ledger,
- * currently the only channel with a delivery ledger. Unique-sender counts
- * cover that completed day and the seven completed days ending at the
- * snapshot date. Incomplete sender evidence is stored as null.
+ * currently the only channel with a delivery ledger. Unique-sender counts use
+ * durable mailbox receipt time and cover that completed day and the seven
+ * completed days ending at the snapshot date. Incomplete sender evidence is
+ * stored as null.
  */
 export async function captureHostedGrowthDailySnapshot(
   now: Date,
@@ -1541,7 +1544,7 @@ export async function captureHostedGrowthDailySnapshot(
         where: {
           kind: INBOUND_MESSAGE_MAILBOX_KIND,
           member: realHostedMemberWhere,
-          occurredAt: {
+          createdAt: {
             gte: priorDayStart,
             lt: snapshotDate,
           },
@@ -1552,7 +1555,7 @@ export async function captureHostedGrowthDailySnapshot(
         where: {
           kind: INBOUND_MESSAGE_MAILBOX_KIND,
           member: realHostedMemberWhere,
-          occurredAt: {
+          createdAt: {
             gte: trailing7DayStart,
             lt: snapshotDate,
           },
@@ -1560,7 +1563,7 @@ export async function captureHostedGrowthDailySnapshot(
       }),
       prisma.hostedMailboxItem.findMany({
         orderBy: {
-          occurredAt: "asc",
+          createdAt: "asc",
         },
         select: hostedGrowthGroupMailboxSelect,
         where: {
@@ -1570,7 +1573,7 @@ export async function captureHostedGrowthDailySnapshot(
               isNot: null,
             },
           },
-          occurredAt: {
+          createdAt: {
             gte: trailing7DayStart,
             lt: snapshotDate,
           },

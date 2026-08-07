@@ -1056,7 +1056,7 @@ describe("hosted ops growth metrics", () => {
           hostedGroupRuntime: null,
           threadContainer: null,
         },
-        occurredAt: {
+        createdAt: {
           gte: new Date("2026-06-29T12:00:00.000Z"),
           lt: new Date("2026-07-06T12:00:00.000Z"),
         },
@@ -1070,7 +1070,7 @@ describe("hosted ops growth metrics", () => {
           hostedGroupRuntime: null,
           threadContainer: null,
         },
-        occurredAt: {
+        createdAt: {
           gte: new Date("2026-06-22T12:00:00.000Z"),
           lt: new Date("2026-06-29T12:00:00.000Z"),
         },
@@ -1084,7 +1084,7 @@ describe("hosted ops growth metrics", () => {
           hostedGroupRuntime: null,
           threadContainer: null,
         },
-        occurredAt: {
+        createdAt: {
           gte: new Date("2026-06-06T12:00:00.000Z"),
           lt: new Date("2026-07-06T12:00:00.000Z"),
         },
@@ -1098,7 +1098,7 @@ describe("hosted ops growth metrics", () => {
             isNot: null,
           },
         },
-        occurredAt: {
+        createdAt: {
           gte: new Date("2026-06-06T12:00:00.000Z"),
           lt: new Date("2026-07-06T12:00:00.000Z"),
         },
@@ -1106,13 +1106,88 @@ describe("hosted ops growth metrics", () => {
     });
     expect(mocks.hostedMailboxItem.groupBy.mock.calls[3]?.[0]).toMatchObject({
       where: {
-        occurredAt: {
+        createdAt: {
           gte: new Date("2026-07-06T00:00:00.000Z"),
           lt: now,
         },
       },
     });
     expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(7);
+  });
+
+  it("assigns late provider events to the durable receipt window", async () => {
+    const now = new Date("2026-07-06T00:20:00.000Z");
+    const providerOccurredAt = new Date("2026-07-05T23:59:00.000Z");
+    const mailboxCreatedAt = new Date("2026-07-06T00:15:00.000Z");
+    const groupPhone = requireLinqContact("phone", "+15550000001");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([{ userId: "member_direct_late" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ userId: "member_direct_late" }])
+      .mockResolvedValueOnce([{ userId: "member_direct_late" }]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: groupPhone,
+        containerMemberId: "thread_container_late",
+        createdAt: mailboxCreatedAt,
+        occurredAt: providerOccurredAt,
+      }),
+    ]);
+    mocks.hostedMemberIdentity.findMany.mockResolvedValueOnce([{
+      memberId: "member_group_late",
+      phoneLookupKey: groupPhone.lookupKey,
+    }]);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+      trackedFulfilledUsageTopUps: 0,
+    });
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.activeUsers).toEqual({
+      today: 2,
+      todayComplete: true,
+      trailing30Days: 2,
+      trailing30DaysComplete: true,
+      trailing7Days: 2,
+      trailing7DaysComplete: true,
+      wowComparisonComplete: true,
+      wowPercent: null,
+    });
+    expect(mocks.hostedMailboxItem.groupBy.mock.calls[3]?.[0]).toMatchObject({
+      where: {
+        createdAt: {
+          gte: new Date("2026-07-06T00:00:00.000Z"),
+          lt: now,
+        },
+      },
+    });
+    expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
+      orderBy: {
+        createdAt: "asc",
+      },
+      select: {
+        createdAt: true,
+        occurredAt: true,
+      },
+      where: {
+        createdAt: {
+          gte: new Date("2026-06-06T00:20:00.000Z"),
+          lt: now,
+        },
+      },
+    });
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        occurredAt: providerOccurredAt.toISOString(),
+      }),
+    );
   });
 
   it("marks MAU incomplete without discarding an exact weekly comparison", async () => {
@@ -1608,7 +1683,7 @@ describe("hosted ops growth metrics", () => {
       });
       expect(mocks.hostedMailboxItem.groupBy.mock.calls[0]?.[0]).toMatchObject({
         where: {
-          occurredAt: {
+          createdAt: {
             gte: addUtcDays(now, -7),
             lt: now,
           },
@@ -1616,7 +1691,7 @@ describe("hosted ops growth metrics", () => {
       });
       expect(mocks.hostedMailboxItem.groupBy.mock.calls[1]?.[0]).toMatchObject({
         where: {
-          occurredAt: {
+          createdAt: {
             gte: addUtcDays(now, -14),
             lt: addUtcDays(now, -7),
           },
@@ -1624,7 +1699,7 @@ describe("hosted ops growth metrics", () => {
       });
       expect(mocks.hostedMailboxItem.groupBy.mock.calls[2]?.[0]).toMatchObject({
         where: {
-          occurredAt: {
+          createdAt: {
             gte: addUtcDays(now, -30),
             lt: now,
           },
@@ -1667,13 +1742,15 @@ describe("hosted ops growth metrics", () => {
     expect(markup).toMatch(/text-red-700[^>]*>\+9\.9%/u);
     expect(markup).toContain("Below 10% target");
     expect(markup).toContain("Messaged Murph today");
-    expect(markup).toContain("Unique senders since 00:00 UTC");
+    expect(markup).toContain(
+      "Unique senders whose messages Murph received since 00:00 UTC",
+    );
     expect(markup).toContain("Messaged Murph · last 7 days");
     expect(markup).toContain(">24<");
     expect(markup).toContain("61 MAU across personal + group chats");
     expect(markup).toContain("+9.1% WAU versus the prior seven days");
     expect(markup).toContain(
-      "Each retained distinct sender counts once across personal + group chats",
+      "Each retained distinct sender counts once when Murph receives a message in the UTC window, across personal + group chats",
     );
     expect(markup).toContain("8 of 20 mature trials");
 
@@ -1895,6 +1972,33 @@ describe("hosted ops growth metrics", () => {
     expect(upsertArg?.update).toMatchObject({
       activeUsersPriorDay: 2,
       activeUsersTrailing7Days: 3,
+    });
+    expect(mocks.hostedMailboxItem.groupBy.mock.calls[0]?.[0]).toMatchObject({
+      where: {
+        createdAt: {
+          gte: new Date("2026-07-05T00:00:00.000Z"),
+          lt: new Date("2026-07-06T00:00:00.000Z"),
+        },
+      },
+    });
+    expect(mocks.hostedMailboxItem.groupBy.mock.calls[1]?.[0]).toMatchObject({
+      where: {
+        createdAt: {
+          gte: new Date("2026-06-29T00:00:00.000Z"),
+          lt: new Date("2026-07-06T00:00:00.000Z"),
+        },
+      },
+    });
+    expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
+      orderBy: {
+        createdAt: "asc",
+      },
+      where: {
+        createdAt: {
+          gte: new Date("2026-06-29T00:00:00.000Z"),
+          lt: new Date("2026-07-06T00:00:00.000Z"),
+        },
+      },
     });
   });
 
@@ -2254,6 +2358,7 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 function buildLinqGroupMailboxRow(input: {
   contact: NonNullable<ReturnType<typeof createHostedLinqParticipantContact>>;
   containerMemberId: string;
+  createdAt?: Date;
   from?: string;
   occurredAt: Date;
   senderMemberId?: string;
@@ -2293,6 +2398,7 @@ function buildLinqGroupMailboxRow(input: {
 
   return buildGroupMailboxRow({
     containerMemberId: input.containerMemberId,
+    createdAt: input.createdAt,
     eventId,
     occurredAt: input.occurredAt,
     wake,
@@ -2468,11 +2574,13 @@ function buildEmailGroupMailboxRow(input: {
 
 function buildGroupMailboxRow(input: {
   containerMemberId: string;
+  createdAt?: Date;
   eventId: string;
   occurredAt: Date;
   wake: HostedExecutionConversationMessageWake;
 }): {
   contentRetiredAt: Date | null;
+  createdAt: Date;
   dedupeKey: string;
   id: string;
   kind: string;
@@ -2487,6 +2595,7 @@ function buildGroupMailboxRow(input: {
 } {
   return {
     contentRetiredAt: null,
+    createdAt: input.createdAt ?? input.occurredAt,
     dedupeKey: input.eventId,
     id: `mailbox_${input.eventId}`,
     kind: "conversation.message",

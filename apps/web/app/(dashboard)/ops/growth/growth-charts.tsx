@@ -105,11 +105,12 @@ export function GrowthCharts(input: GrowthChartsProps) {
             People who messaged Murph
           </h3>
           <p className="text-sm leading-6 text-muted-foreground">
-            Unique retained senders across personal and group chats. Personal
-            and owned-group rows are removed with account deletion; activity
-            retained in another member&apos;s shared group follows normal content
-            retention. Solid sage tracks the trailing seven-day window; dashed
-            sand shows each completed UTC day. Unknown history is left blank.
+            Each UTC window counts retained distinct senders whose messages
+            Murph received across personal and group chats. Personal and
+            owned-group rows are removed with account deletion; activity retained
+            in another member&apos;s shared group follows normal content retention.
+            Solid sage tracks the trailing seven-day window; dashed sand shows
+            each completed UTC day. Unknown history is left blank.
           </p>
         </div>
         <ChartContainer

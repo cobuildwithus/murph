@@ -82,7 +82,7 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
 
           <div className="grid border-t border-border/70 sm:grid-cols-3 lg:grid-cols-1 lg:border-l lg:border-t-0">
             <GrowthSignal
-              detail="Unique senders since 00:00 UTC"
+              detail="Unique senders whose messages Murph received since 00:00 UTC"
               helper={formatTodayActiveUserDefinition(input.activeUsers)}
               label="Messaged Murph today"
               value={formatTodayActiveUsers(input.activeUsers)}
@@ -298,7 +298,7 @@ function formatTodayActiveUserDefinition(
   activeUsers: GrowthScorecardProps["activeUsers"],
 ): string {
   const definition =
-    "Each retained distinct sender counts once across personal + group chats";
+    "Each retained distinct sender counts once when Murph receives a message in the UTC window, across personal + group chats";
   return activeUsers.todayComplete
     ? definition
     : `Today is a lower bound because group sender evidence was intentionally retired · ${definition}`;
@@ -308,7 +308,7 @@ function formatActiveUserChange(
   activeUsers: GrowthScorecardProps["activeUsers"],
 ): string {
   const activityDefinition =
-    "Each retained distinct sender counts once across personal + group chats";
+    "Each retained distinct sender counts once when Murph receives a message in the UTC window, across personal + group chats";
 
   if (!activeUsers.wowComparisonComplete) {
     return `Prior-week comparison unavailable because older group sender evidence was intentionally retired · ${activityDefinition}`;

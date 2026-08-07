@@ -418,7 +418,11 @@ window has incomplete group-sender evidence. Missing unretired content remains
 an integrity failure. The existing authenticated daily growth snapshot is the
 only durable history owner for these anonymous aggregates: at each UTC date it
 stores the completed prior-day and completed trailing-seven-day distinct-sender
-counts only when their group evidence is complete. The date-keyed upsert makes
+counts only when their group evidence is complete. These windows use durable
+mailbox receipt (`HostedMailboxItem.createdAt`) so a provider event delivered
+after the daily capture cannot later rewrite a completed day; provider event
+time remains payload/decryption and conversation evidence only. The date-keyed
+upsert makes
 same-day cron and ops-page retries idempotent. An attribution integrity failure
 is reported and creates null activity values only when no same-date row exists;
 on retry it leaves any existing activity values untouched while still updating
@@ -431,7 +435,8 @@ existing integrity-fail behavior for missing unretired group evidence. Legacy
 or incomplete windows stay null, and the existing 30-day snapshot projection
 shifts each row onto the completed day its
 windows ended instead of reconstructing identities after mailbox expiry. These
-metrics count the retained sender population at read or capture time. Account
+metrics count the retained sender population received by Murph at read or
+capture time. Account
 deletion removes personal and owned group-container rows; activity retained in
 another member's shared-group container follows normal content retention
 instead of a durable deletion-timestamp trail in anonymous analytics.

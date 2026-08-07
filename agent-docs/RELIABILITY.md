@@ -913,7 +913,10 @@ Last verified: 2026-08-06
 - Hosted growth activity history reuses the authenticated daily growth snapshot
   cron and its UTC-date upsert; it has no second scheduler or retry owner. Each
   run computes the completed prior-day and trailing-seven-day distinct-sender
-  windows from direct and attributable group messages. A same-date rerun may
+  windows from direct and attributable group messages by durable mailbox receipt
+  time, not provider event time. A provider delivery that arrives after capture
+  therefore belongs to the open receipt window instead of mutating a closed day.
+  A same-date rerun may
   replace the aggregate, but retired group evidence makes the affected value
   null rather than silently freezing or lowering it, and charts retain that gap.
   An activity-query, decrypt, or identity-resolution failure is reported and
