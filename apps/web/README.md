@@ -1083,7 +1083,10 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   already-applied, and domain-only outcomes schedule no email. Provider
   adapters retain only a validated opaque Stripe request id in a frozen
   non-serialized correlation record so distinct failed requests remain distinct
-  emails; client-visible error details still expose presence only.
+  emails; client-visible error details still expose presence only. The parser
+  is dependency-free so production migration line sync and standalone Stripe
+  tooling can continue importing the general onboarding runtime under ordinary
+  Node conditions.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep

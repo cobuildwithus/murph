@@ -9,7 +9,7 @@ import {
 } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
 import { readHostedOnboardingEnvironment, type HostedOnboardingEnvironment } from "./env";
-import { buildHostedStripeAlertCorrelationCause } from "./stripe-error-log";
+import { buildHostedStripeAlertCorrelationCause } from "./stripe-error-fields";
 import {
   getHostedUsageCreditOfferDefinition,
   type HostedUsageCreditOfferCode,

@@ -63,9 +63,10 @@ That contract is jointly specified by `ARCHITECTURE.md`,
 Metadata-only Stripe failure email ownership for terminal checkout and
 subscription actions, current-attempt/provider-effect
 identity, paid Family capacity/member-transition identity, safe request
-correlation through hosted-error translation, blind-bound public redirect
-ownership, explicit recovery ownership, replay defense, and the rule that
-alerts never become billing or retry authority are jointly specified by
+correlation through dependency-free hosted-error translation, preservation of
+the general runtime's ordinary Node migration/tooling boundary, blind-bound
+public redirect ownership, explicit recovery ownership, replay defense, and
+the rule that alerts never become billing or retry authority are jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `apps/web/README.md`.
 

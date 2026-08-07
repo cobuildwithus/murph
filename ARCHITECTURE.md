@@ -1502,9 +1502,13 @@ live/test mode. When an SDK adapter replaces a raw provider error with a hosted
 error, only the validated opaque Stripe request id crosses that internal
 boundary in a frozen non-serialized correlation record; client-visible details
 retain only request-id presence. Member identity, contact details, checkout
-contents, raw errors, and provider
-payloads are excluded. Stripe receipts retain retry authority, and alert
-configuration or delivery failure cannot alter checkout results, webhook
+contents, raw errors, and provider payloads are excluded. The correlation
+parser is a dependency-free Stripe
+field boundary: the general onboarding runtime stays free of `server-only`,
+Next request-lifecycle, and alert-delivery imports because production migration
+line sync and standalone Stripe tooling also import that runtime. Stripe
+receipts retain retry authority, and alert configuration or delivery failure
+cannot alter checkout results, webhook
 acknowledgement, entitlement, or reconciliation state.
 
 Established Linq direct messages and established external-thread group messages

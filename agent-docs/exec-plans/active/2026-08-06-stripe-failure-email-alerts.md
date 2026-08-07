@@ -185,3 +185,12 @@ Updated: 2026-08-06
   two provider request ids, deduplicate replay of the same request id, preserve
   request-id-free fallback behavior, and omit the exact id from client-visible
   serialized errors.
+- Final round 9 found that the first safe-correlation implementation imported
+  the server-only alert module from the general onboarding runtime. That runtime
+  also serves the mandatory production line-sync migration and standalone
+  Stripe tools, so the coupling would abort those ordinary Node entry points.
+  The validated request-id parser and frozen cause constructor now live in a
+  dependency-free Stripe field module imported by both runtime and alert code.
+- Production-shaped child-process proof runs the exact line-sync package command
+  with Node server conditions unset and reaches its existing environment gate;
+  the legacy Stripe migration likewise reaches its own required mode gate.

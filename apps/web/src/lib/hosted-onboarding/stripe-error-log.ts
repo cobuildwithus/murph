@@ -1,6 +1,5 @@
 import {
   isHostedOnboardingError,
-  type HostedOnboardingError,
 } from "./errors";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import type { HostedOnboardingStructuredLogDetails } from "./logging";
@@ -8,14 +7,16 @@ import {
   buildHostedStripeOperationCorrelationId,
   scheduleHostedStripeOperationFailureAlert,
 } from "./stripe-alert-email";
+import {
+  readHostedStripeAlertCorrelationRequestId,
+  readHostedStripeRequestId,
+} from "./stripe-error-fields";
+
+export { buildHostedStripeAlertCorrelationCause } from "./stripe-error-fields";
 
 const STRIPE_ERROR_TOKEN_MAX_LENGTH = 120;
 const STRIPE_ERROR_MESSAGE_MAX_LENGTH = 240;
 const STRIPE_OPERATION_NAME_MAX_LENGTH = 120;
-const HOSTED_STRIPE_ALERT_CORRELATION_CAUSE_KIND =
-  "hosted_stripe_alert_correlation";
-// Stripe request ids are opaque correlation handles (`req_...`); anything else is dropped.
-const STRIPE_REQUEST_ID_PATTERN = /^req_[A-Za-z0-9_-]{1,64}$/u;
 const STRIPE_ERROR_TOKEN_PATTERN = /^[A-Za-z0-9_.\-[\]]{1,120}$/u;
 
 export interface HostedStripeErrorFields {
@@ -27,27 +28,6 @@ export interface HostedStripeErrorFields {
   readonly requestId: string | null;
   readonly statusCode: number | null;
   readonly type: string | null;
-}
-
-/**
- * Retains only Stripe's validated opaque request id when a provider adapter
- * replaces the raw SDK error with a client-safe hosted error. The raw error,
- * message, submitted parameters, and provider payload never cross this
- * boundary.
- */
-export function buildHostedStripeAlertCorrelationCause(
-  error: unknown,
-): Readonly<{
-  kind: typeof HOSTED_STRIPE_ALERT_CORRELATION_CAUSE_KIND;
-  requestId: string;
-}> | undefined {
-  const requestId = describeHostedStripeError(error).requestId;
-  return requestId
-    ? Object.freeze({
-        kind: HOSTED_STRIPE_ALERT_CORRELATION_CAUSE_KIND,
-        requestId,
-      })
-    : undefined;
 }
 
 /**
@@ -70,8 +50,6 @@ export function describeHostedStripeError(error: unknown): HostedStripeErrorFiel
     };
   }
 
-  const requestId = readHostedStripeErrorString(error, "requestId");
-
   return {
     code: readHostedStripeErrorToken(error, "code"),
     declineCode: readHostedStripeErrorToken(error, "decline_code") ??
@@ -82,7 +60,7 @@ export function describeHostedStripeError(error: unknown): HostedStripeErrorFiel
     ),
     param: readHostedStripeErrorToken(error, "param"),
     rawType: readHostedStripeErrorToken(error, "rawType"),
-    requestId: requestId && STRIPE_REQUEST_ID_PATTERN.test(requestId) ? requestId : null,
+    requestId: readHostedStripeRequestId(error),
     statusCode: readHostedStripeErrorStatusCode(error),
     type: readHostedStripeErrorToken(error, "type"),
   };
@@ -186,23 +164,6 @@ function describeHostedStripeAlertFields(
       readHostedStripeErrorStatusCode(error.details) ?? direct.statusCode,
     type: providerType ?? direct.type,
   };
-}
-
-function readHostedStripeAlertCorrelationRequestId(
-  error: HostedOnboardingError,
-): string | null {
-  const cause = error.cause;
-  if (!cause || typeof cause !== "object") {
-    return null;
-  }
-  if (
-    readHostedStripeErrorString(cause, "kind") !==
-      HOSTED_STRIPE_ALERT_CORRELATION_CAUSE_KIND
-  ) {
-    return null;
-  }
-  const requestId = readHostedStripeErrorString(cause, "requestId");
-  return requestId && STRIPE_REQUEST_ID_PATTERN.test(requestId) ? requestId : null;
 }
 
 /**
