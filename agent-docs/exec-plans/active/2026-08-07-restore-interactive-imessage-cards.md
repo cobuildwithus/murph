@@ -70,10 +70,12 @@ Updated: 2026-08-07
   hosted provider-egress tests, operator-config and Cloudflare typechecks, docs
   drift, and diff/privacy inspection. Exact V1/V2 TypeScript fixtures also pass
   31 focused shipping Swift decoder tests in the companion repository.
-- Hosted-local journey gap: runner preparation cannot start the scenario
-  because the runner entrypoint is 12,937 bytes over its existing bundle-size
-  budget. An exact-base comparison also fails and attributes only 476 bytes to
-  this change, so the exact-head CI run remains the broad journey owner.
+- Hosted-local journey gap: runner preparation cannot start the scenario. The
+  final-head retry timed out after 60 seconds while generating the unrelated
+  Assistant CLI surface manifest. A prior candidate reached the next gate,
+  where the runner entrypoint was 12,937 bytes over its existing bundle-size
+  budget; its exact base also failed and attributed only 476 bytes to this
+  change. The exact-head CI run therefore remains the broad journey owner.
 - Remaining proof: exact-head CI, both required ReviewGPT stages, and physical
   Messages sends showing the real custom transcript cards.
 
