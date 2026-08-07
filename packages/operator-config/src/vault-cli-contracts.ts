@@ -4,7 +4,7 @@ import {
   mealNutritionSchema,
 } from '@murphai/contracts'
 import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query/entity-families'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 export const VAULT_CLI_BATCH_RESULT_SCHEMA = 'murph.vault-cli.batch-result.v1'
 

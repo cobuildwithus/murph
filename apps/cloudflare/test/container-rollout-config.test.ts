@@ -12,18 +12,14 @@ const EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD = 300;
 const EXPECTED_CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100];
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
   CF_PUBLIC_BASE_URL: "https://murph-hosted.cobuildwithus.workers.dev",
-  CF_BUNDLES_ENAM_BUCKET: "hosted-bundles-enam",
-  CF_BUNDLES_ENAM_PREVIEW_BUCKET: "hosted-bundles-enam-preview",
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
   HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
     "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
   HOSTED_CRYPTO_ENV: "production",
-  HOSTED_R2_CUTOVER_PHASE: "source_active",
   HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account-test",
   HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
-  HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles-enam",
 } as const;
 
 describe("Cloudflare container rollout config", () => {

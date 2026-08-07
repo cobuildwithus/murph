@@ -1,5 +1,5 @@
 import { RECIPE_STATUSES, ID_PREFIXES, isContractId, type JsonObject } from '@murphai/contracts'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
