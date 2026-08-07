@@ -78,6 +78,12 @@ Last verified: 2026-08-06
   entry, Web returns a typed superseded disposition without claiming or
   contacting Linq. The runtime persists that newer thread under the same stale
   fallback identity, emits a metadata-only event, and retries the outbox. Every
+  route supersession is confined to the pre-claim window. Once Web has created
+  the fallback delivery row, that row freezes the thread or participant/line
+  target: later home-route changes cannot rewrite it. Each fresh drain must
+  reauthorize and exact-replay that claimed effect under the same provider key;
+  a target-kind, thread, participant, or line mismatch fails closed before
+  local target mutation or provider entry. Every
   pre-provider dispatch-control error, including a liveness yield before the
   read-only capability request, also emits a sanitized structured warning and
   retains its typed retry/control semantics through the Linq HTTP wrapper. The

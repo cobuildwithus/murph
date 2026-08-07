@@ -11498,7 +11498,7 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("reacquires a participant route on every fresh fallback drain without persisted phone state", async () => {
+  it("exact-replays an already-claimed participant route on every fresh fallback drain", async () => {
     const effect = createEffect({
       bindingDeliveryTarget: "stale-direct-chat",
       channel: "linq",
@@ -11524,7 +11524,7 @@ describe("hosted runtime callbacks", () => {
           },
           threadIsDirect: true,
         }
-      : { providerDispatchClaimed: true });
+      : { providerDispatchClaimed: false });
     const providerKeys: string[] = [];
     const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toMatch(/\/chats$/u);

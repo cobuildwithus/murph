@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   assertHostedAssistantAskCompletionDeliveryAuthorityTx: vi.fn(),
+  decryptHostedLinqLinePhoneNumber: vi.fn(),
   getPrisma: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -57,6 +58,17 @@ vi.mock("@/src/lib/hosted-onboarding/member-private-codecs", () => ({
     mocks.readHostedMemberRoutingPrivateState,
 }));
 
+vi.mock(
+  "@/src/lib/hosted-onboarding/linq-line-phone-codec",
+  async (importOriginal) => ({
+    ...await importOriginal<typeof import(
+      "@/src/lib/hosted-onboarding/linq-line-phone-codec"
+    )>(),
+    decryptHostedLinqLinePhoneNumber:
+      mocks.decryptHostedLinqLinePhoneNumber,
+  }),
+);
+
 import {
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
@@ -96,6 +108,9 @@ describe("hosted Linq egress authority", () => {
       telegramUserId: null,
     });
     mocks.readHostedMemberIdentityPhoneNumber.mockResolvedValue(null);
+    mocks.decryptHostedLinqLinePhoneNumber.mockImplementation(
+      (ciphertext: string) => ciphertext,
+    );
   });
 
   it("allows explicit signup welcome first contact for the bound runtime user", async () => {
@@ -377,10 +392,15 @@ describe("hosted Linq egress authority", () => {
       telegramUserId: null,
     });
     mocks.readHostedMemberIdentityPhoneNumber.mockResolvedValueOnce(memberPhone);
-    prisma.hostedLinqDelivery.findUnique.mockResolvedValue(
-      buildHostedRuntimeProviderDispatchRow({
-        linqChatLookupKey: createHostedLinqChatLookupKey("chat-current-home"),
-      }),
+    prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) =>
+      where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(
+          "assistant-outbox:intent_123",
+        )
+        ? buildHostedRuntimeProviderDispatchRow({
+            linqChatLookupKey: createHostedLinqChatLookupKey("chat-current-home"),
+          })
+        : null
     );
     mockPersistedLinqInbound({
       chatId: "chat-current-home",
@@ -476,11 +496,30 @@ describe("hosted Linq egress authority", () => {
       homeLinePhone,
       identityPhone: memberPhone,
     });
-    prisma.hostedLinqDelivery.findUnique.mockResolvedValue(
-      buildHostedRuntimeProviderDispatchRow({
-        linqChatLookupKey: createHostedLinqChatLookupKey("chat-rejected-card"),
-      }),
-    );
+    prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) => {
+      if (
+        where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(
+          "assistant-outbox:intent_123",
+        )
+      ) {
+        return buildHostedRuntimeProviderDispatchRow({
+          linqChatLookupKey: createHostedLinqChatLookupKey("chat-rejected-card"),
+        });
+      }
+      if (
+        where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(
+          "assistant-outbox:intent_123:stale-chat-fallback",
+        )
+      ) {
+        return buildHostedRuntimeProviderDispatchRow({
+          linqChatLookupKey: createHostedLinqChatLookupKey("chat-current-home"),
+          phoneNumberLookupKey: createRequiredPhoneLookupKey(homeLinePhone),
+        });
+      }
+      return null;
+    });
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       answeredMailboxItemIds: ["mailbox-stale-direct-chat"],
       authorityCheckOnly: true,
@@ -495,10 +534,7 @@ describe("hosted Linq egress authority", () => {
     })).resolves.toEqual({
       linePhoneNumberLookupKey:
         createRequiredPhoneLookupKey(homeLinePhone),
-      targetOverride: {
-        target: "chat-current-home",
-        targetKind: "thread",
-      },
+      targetOverride: null,
       threadIsDirect: true,
     });
   });
@@ -530,6 +566,8 @@ describe("hosted Linq egress authority", () => {
         === createHostedLinqDeliveryIdempotencyLookupKey(fallbackIdempotencyKey)
       ) {
         return {
+          linqChatLookupKey: null,
+          phoneNumberLookupKey: createRequiredPhoneLookupKey(homeLinePhone),
           source: "hosted_runtime_linq_delivery",
           targetKind: "participant",
         };
@@ -569,6 +607,150 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
+  it("keeps an already-claimed participant fallback after the home chat changes", async () => {
+    const claimedLinePhone = "+15550100099";
+    const currentHomeLinePhone = "+15550100098";
+    const memberPhone = "+15550100001";
+    const predecessorIdempotencyKey = "assistant-outbox:intent_123";
+    const fallbackIdempotencyKey =
+      `${predecessorIdempotencyKey}:stale-chat-fallback`;
+    const prisma = createPrismaStub({
+      homeChatId: "chat-newer-home",
+      homeLinePhone: currentHomeLinePhone,
+      identityPhone: memberPhone,
+    });
+    prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) => {
+      if (
+        where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(
+          predecessorIdempotencyKey,
+        )
+      ) {
+        return buildHostedRuntimeProviderDispatchRow({
+          linqChatLookupKey: createHostedLinqChatLookupKey("chat-rejected-card"),
+        });
+      }
+      if (
+        where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(fallbackIdempotencyKey)
+      ) {
+        return buildHostedRuntimeProviderDispatchRow({
+          linqChatLookupKey: null,
+          phoneNumberLookupKey: createRequiredPhoneLookupKey(claimedLinePhone),
+          targetKind: "participant",
+        });
+      }
+      return null;
+    });
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValue({
+      linqChatId: "chat-newer-home",
+      linqRecipientPhone: currentHomeLinePhone,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    mocks.readHostedMemberIdentityPhoneNumber.mockResolvedValue(memberPhone);
+    prisma.hostedLinqLine.findUnique.mockResolvedValue({
+      phoneNumberEncrypted: claimedLinePhone,
+      phoneNumberLookupKey: createRequiredPhoneLookupKey(claimedLinePhone),
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: false,
+      fromPhoneNumber: claimedLinePhone,
+      idempotencyKey: fallbackIdempotencyKey,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: memberPhone,
+      targetKind: "participant",
+    })).resolves.toEqual({
+      linePhoneNumberLookupKey:
+        createRequiredPhoneLookupKey(claimedLinePhone),
+      targetOverride: null,
+      threadIsDirect: true,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: false,
+      fromPhoneNumber: "+15550100100",
+      idempotencyKey: fallbackIdempotencyKey,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: memberPhone,
+      targetKind: "participant",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+  });
+
+  it("keeps an already-claimed thread fallback after the home chat changes", async () => {
+    const predecessorIdempotencyKey = "assistant-outbox:intent_123";
+    const fallbackIdempotencyKey =
+      `${predecessorIdempotencyKey}:stale-chat-fallback`;
+    const prisma = createPrismaStub({
+      homeChatId: "chat-newer-home",
+    });
+    prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) => {
+      if (
+        where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(
+          predecessorIdempotencyKey,
+        )
+      ) {
+        return buildHostedRuntimeProviderDispatchRow({
+          linqChatLookupKey: createHostedLinqChatLookupKey("chat-rejected-card"),
+        });
+      }
+      if (
+        where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(fallbackIdempotencyKey)
+      ) {
+        return buildHostedRuntimeProviderDispatchRow({
+          linqChatLookupKey: createHostedLinqChatLookupKey("chat-frozen-fallback"),
+        });
+      }
+      return null;
+    });
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValue({
+      linqChatId: "chat-newer-home",
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: true,
+      homeRouteFallbackAllowed: true,
+      idempotencyKey: fallbackIdempotencyKey,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-frozen-fallback",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      targetOverride: null,
+      threadIsDirect: true,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: true,
+      homeRouteFallbackAllowed: true,
+      idempotencyKey: fallbackIdempotencyKey,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-newer-home",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+  });
+
   it("keeps the stale current-home card route unchanged without a durable participant route", async () => {
     const homeLinePhone = "+15550100099";
     const prisma = createPrismaStub({
@@ -584,10 +766,15 @@ describe("hosted Linq egress authority", () => {
       telegramThreadId: null,
       telegramUserId: null,
     });
-    prisma.hostedLinqDelivery.findUnique.mockResolvedValue(
-      buildHostedRuntimeProviderDispatchRow({
-        linqChatLookupKey: createHostedLinqChatLookupKey("chat-current-home"),
-      }),
+    prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) =>
+      where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(
+          "assistant-outbox:intent_123",
+        )
+        ? buildHostedRuntimeProviderDispatchRow({
+            linqChatLookupKey: createHostedLinqChatLookupKey("chat-current-home"),
+          })
+        : null
     );
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
@@ -625,10 +812,15 @@ describe("hosted Linq egress authority", () => {
       telegramUserId: null,
     });
     mocks.readHostedMemberIdentityPhoneNumber.mockResolvedValue(memberPhone);
-    prisma.hostedLinqDelivery.findUnique.mockResolvedValue(
-      buildHostedRuntimeProviderDispatchRow({
-        linqChatLookupKey: createHostedLinqChatLookupKey("chat-current-home"),
-      }),
+    prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) =>
+      where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(
+          "assistant-outbox:intent_123",
+        )
+        ? buildHostedRuntimeProviderDispatchRow({
+            linqChatLookupKey: createHostedLinqChatLookupKey("chat-current-home"),
+          })
+        : null
     );
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
@@ -1549,6 +1741,172 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
+  it("re-enters an existing participant fallback claim after the home chat changes", async () => {
+    const homeLinePhone = "+15550100099";
+    const memberPhone = "+15550100001";
+    const predecessorIdempotencyKey = "assistant-outbox:intent_123";
+    const fallbackIdempotencyKey =
+      `${predecessorIdempotencyKey}:stale-chat-fallback`;
+    const prisma = createPrismaStub({
+      homeChatId: "chat-newer-home",
+      homeLinePhone,
+      identityPhone: memberPhone,
+    });
+    const fallbackRow = buildHostedRuntimeProviderDispatchRow({
+      linqChatLookupKey: null,
+      phoneNumberLookupKey: createRequiredPhoneLookupKey(homeLinePhone),
+      targetKind: "participant",
+    });
+    prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) => {
+      if (
+        where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(
+          predecessorIdempotencyKey,
+        )
+      ) {
+        return {
+          ...buildHostedRuntimeProviderDispatchRow({
+            linqChatLookupKey: createHostedLinqChatLookupKey("chat-rejected-card"),
+          }),
+          failedAt: new Date("2026-08-06T12:00:01.000Z"),
+          failureCode: "ASSISTANT_LINQ_APP_CARD_REJECTED",
+          status: "failed",
+        };
+      }
+      if (
+        where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(fallbackIdempotencyKey)
+      ) {
+        return fallbackRow;
+      }
+      return null;
+    });
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValue({
+      linqChatId: "chat-newer-home",
+      linqRecipientPhone: homeLinePhone,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    mocks.readHostedMemberIdentityPhoneNumber.mockResolvedValue(memberPhone);
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: false,
+          fromPhoneNumber: homeLinePhone,
+          homeRouteFallbackAllowed: true,
+          idempotencyKey: fallbackIdempotencyKey,
+          intentId: "intent_123",
+          providerDispatchPredecessorIdempotencyKey:
+            predecessorIdempotencyKey,
+          target: memberPhone,
+          targetKind: "participant",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
+      },
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.updateMany).toHaveBeenCalledOnce();
+    expect(prisma.hostedLinqDelivery.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          linqChatLookupKey: null,
+          phoneNumberLookupKey: createRequiredPhoneLookupKey(homeLinePhone),
+          targetKind: "participant",
+        }),
+      }),
+    );
+  });
+
+  it("re-enters an existing thread fallback claim after the home chat changes", async () => {
+    const predecessorIdempotencyKey = "assistant-outbox:intent_123";
+    const fallbackIdempotencyKey =
+      `${predecessorIdempotencyKey}:stale-chat-fallback`;
+    const prisma = createPrismaStub({
+      homeChatId: "chat-newer-home",
+    });
+    const fallbackRow = buildHostedRuntimeProviderDispatchRow({
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat-frozen-fallback"),
+    });
+    prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) => {
+      if (
+        where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(
+          predecessorIdempotencyKey,
+        )
+      ) {
+        return {
+          ...buildHostedRuntimeProviderDispatchRow({
+            linqChatLookupKey: createHostedLinqChatLookupKey("chat-rejected-card"),
+          }),
+          failedAt: new Date("2026-08-06T12:00:01.000Z"),
+          failureCode: "ASSISTANT_LINQ_APP_CARD_REJECTED",
+          status: "failed",
+        };
+      }
+      if (
+        where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(fallbackIdempotencyKey)
+      ) {
+        return fallbackRow;
+      }
+      return null;
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: false,
+          homeRouteFallbackAllowed: true,
+          idempotencyKey: fallbackIdempotencyKey,
+          intentId: "intent_123",
+          providerDispatchPredecessorIdempotencyKey:
+            predecessorIdempotencyKey,
+          target: "chat-frozen-fallback",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
+      },
+    });
+    expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.updateMany).toHaveBeenCalledOnce();
+    expect(prisma.hostedLinqDelivery.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          linqChatLookupKey:
+            createHostedLinqChatLookupKey("chat-frozen-fallback"),
+          targetKind: "thread",
+        }),
+      }),
+    );
+  });
+
   it("rejects an app-card fallback that does not derive from its predecessor", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
@@ -2186,7 +2544,9 @@ describe("hosted Linq egress authority", () => {
 function buildHostedRuntimeProviderDispatchRow(
   overrides: {
     linqChatLookupKey?: string | null;
+    phoneNumberLookupKey?: string | null;
     sourceRef?: string | null;
+    targetKind?: "participant" | "thread";
   } = {},
 ) {
   return {
@@ -2296,6 +2656,13 @@ function createPrismaStub(input: {
         providerReputationStatus: "HEALTHY",
         providerServiceStatus: "ACTIVE",
       }),
+      findUnique: vi.fn().mockResolvedValue(input.homeLinePhone
+        ? {
+            phoneNumberEncrypted: input.homeLinePhone,
+            phoneNumberLookupKey:
+              createRequiredPhoneLookupKey(input.homeLinePhone),
+          }
+        : null),
       findMany: vi.fn().mockResolvedValue(input.homeLinePhone
         ? [{
             phoneNumberLookupKey:

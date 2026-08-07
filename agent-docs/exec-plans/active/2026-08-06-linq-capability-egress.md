@@ -91,6 +91,11 @@ Updated: 2026-08-06
   its pre-request liveness check outside that preservation catch. A foreground
   yield there could therefore be genericized as a capability failure and
   irreversibly clear the native card to text before any provider request.
+- Final ReviewGPT round 13 exposed that stale-route recovery still reselected
+  the member's current home after Web had already claimed the fallback effect.
+  A later inbound could therefore supersede a frozen participant fallback in a
+  loop or rewrite a frozen thread fallback before exact claim validation,
+  leaving the accepted reply without either card or deterministic text.
 
 ## Success criteria
 
@@ -159,6 +164,11 @@ Updated: 2026-08-06
   fallback identity, records a metadata-only event, and retries so the next
   drain sends exactly once to that thread. Missing authority remains
   confirmation-pending.
+- A newer home may supersede stale recovery only while no fallback delivery row
+  exists. Once Web claims the fallback row, its exact thread or
+  participant/assigned-line target is the source of truth for every fresh
+  drain. Later home changes cannot mutate that effect; mismatches fail closed
+  before local persistence or provider entry.
 - Every error raised by the pre-provider dispatch-control boundary, including
   the liveness check before capability preflight, emits a sanitized structured
   warning and retains its original typed retry/control semantics through the
@@ -343,3 +353,17 @@ Updated: 2026-08-06
   or message request and persists no fallback; the second sends the original
   `imessage_app` card under the same key. All three affected package typechecks
   and both documentation checks pass.
+- Final ReviewGPT round 13 found post-claim route reselection. Two failing-first
+  Web regressions reproduced participant `superseded` and thread target rewrite
+  after the claimed route's home changed. Web now reads the existing delivery
+  row before current-home projection, reauthorizes the frozen participant/line
+  or thread, and fails closed on any mismatch. Route-level tests reach exact
+  existing-claim handling rather than returning supersession or route mismatch;
+  the hosted runtime test exact-replays the same participant effect and key
+  when Web reports that provider entry already started.
+- Round 13 correction proof passes 139 focused Web authority/routing tests, all
+  3 opt-in PostgreSQL fallback lifecycle cases, and 254 hosted
+  provider/callback tests. The claimed participant regression also changes the
+  member's current assigned line and proves Web decrypts and reauthorizes the
+  frozen claimed line rather than substituting the new home line. Prepared Web
+  typecheck and both documentation checks pass.
