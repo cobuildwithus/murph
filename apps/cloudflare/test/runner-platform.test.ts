@@ -6734,6 +6734,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     };
     const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
+    const replacedReplicaRef = createBrowserVaultReplicaRef("a".repeat(64));
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ replicaRef }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -6753,7 +6754,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     });
 
-    const result = await platform.browserVaultReplicaPort!.write({ replica });
+    const result = await platform.browserVaultReplicaPort!.write({
+      replica,
+      replacedReplicaRef,
+    });
 
     expect(result).toEqual(replicaRef);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -6764,7 +6768,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
-    await expect(request.json()).resolves.toEqual({ replica });
+    await expect(request.json()).resolves.toEqual({
+      replica,
+      replacedReplicaRef,
+    });
   });
 
   it("exposes callback-only browser-vault writes without legacy provider delivery effects", async () => {

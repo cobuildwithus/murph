@@ -71,6 +71,7 @@ import {
   readAssistantOutboxIntent as readAssistantOutboxIntentLocal,
   readAssistantOutboxIntentAtPath,
   saveAssistantOutboxIntent as saveAssistantOutboxIntentLocal,
+  type AssistantOutboxInventoryScanMetrics,
 } from './outbox/store.js'
 import {
   buildAssistantOutboxIntentMirrorState,
@@ -118,6 +119,7 @@ export type {
   AssistantOutboxPreparedDispatchState,
   AssistantOutboxPreparedMirrorDispatch,
 }
+export type { AssistantOutboxInventoryScanMetrics } from './outbox/store.js'
 export {
   compareAssistantOutboxDeliverySequenceOrder,
   isAssistantOutboxReplyBubbleSuccessor,
@@ -606,14 +608,16 @@ export async function saveAssistantOutboxIntentIfUnchanged(input: {
 
 export async function listAssistantOutboxIntents(
   vault: string,
+  onScan?: (metrics: AssistantOutboxInventoryScanMetrics) => void,
 ): Promise<AssistantOutboxIntent[]> {
-  return listAssistantOutboxIntentsLocalStore(vault)
+  return listAssistantOutboxIntentsLocalStore(vault, onScan)
 }
 
 export async function listAssistantOutboxIntentsLocal(
   vault: string,
+  onScan?: (metrics: AssistantOutboxInventoryScanMetrics) => void,
 ): Promise<AssistantOutboxIntent[]> {
-  return listAssistantOutboxIntentsLocalStore(vault)
+  return listAssistantOutboxIntentsLocalStore(vault, onScan)
 }
 
 export interface DispatchAssistantOutboxIntentInput {

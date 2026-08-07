@@ -571,10 +571,42 @@ function isAmbiguousDeliveryWithoutProviderIds(input: {
   error: unknown
   sending: AssistantOutboxIntent
 }): boolean {
-  return isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
+  return isLinqAttachmentReservationAmbiguity(input) ||
+    isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
     isLinqMessageReactionAmbiguityWithoutProviderIds(input) ||
     isLinqPartialDeliveryWithoutProviderIds(input) ||
     isEmailGroupFanoutAmbiguityWithoutProviderIds(input)
+}
+
+function isLinqAttachmentReservationAmbiguity(input: {
+  error: unknown
+  sending: AssistantOutboxIntent
+}): boolean {
+  if (input.sending.channel !== 'linq') {
+    return false
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  if (
+    readNonEmptyString(errorRecord?.code) !== 'LINQ_API_REQUEST_FAILED' ||
+    readNonEmptyString(context?.method) !== 'POST' ||
+    readNonEmptyString(context?.operation) !== 'create_attachment_upload'
+  ) {
+    return false
+  }
+
+  const failureStage = readNonEmptyString(context?.failureStage)
+  if (failureStage === 'transport') {
+    return true
+  }
+
+  // The reservation POST has no idempotency key. A timeout or server-side
+  // failure response cannot prove that Linq did not create the reservation.
+  const status = context?.status
+  return failureStage === 'http' &&
+    typeof status === 'number' &&
+    (status === 408 || (status >= 500 && status <= 599))
 }
 
 function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {

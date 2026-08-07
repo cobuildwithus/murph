@@ -10650,6 +10650,107 @@ describe("hosted runtime callbacks", () => {
     expect(recordedOutcome).not.toContain("private reply text");
   });
 
+  it.each([
+    {
+      failureStage: "transport",
+      method: "POST",
+      path: "/attachments",
+    },
+    {
+      failureStage: "http",
+      method: "PUT",
+      path: "[presigned-upload]",
+    },
+  ] as const)(
+    "keeps Linq attachment $method failures before the final message send",
+    async ({ failureStage, method, path }) => {
+      const effect = createEffect({
+        bindingDeliveryTarget: "linq_chat_123",
+        channel: "linq",
+        explicitTarget: "linq_chat_123",
+        transportIdempotent: true,
+      });
+      const diagnosticContext = {
+        failureStage,
+        method,
+        operation: "create_attachment_upload",
+        path,
+        provider: "linq",
+        retryable: false,
+      } satisfies Record<string, string | number | boolean | null>;
+      const providerError = new VaultCliError(
+        "LINQ_API_REQUEST_FAILED",
+        "Linq attachment preparation failed.",
+        diagnosticContext,
+      );
+      const recordDeliveryOutcome = vi.fn<
+        NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+      >(async () => undefined);
+      let capturedError: unknown = null;
+      mocks.sendLinqMessage.mockRejectedValueOnce(providerError);
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+        try {
+          await dependencies.sendLinq({
+            idempotencyKey: "assistant-outbox:intent_123",
+            message: "private image",
+            replyToMessageId: null,
+            target: "linq_chat_123",
+            targetKind: "thread",
+          });
+        } catch (error) {
+          capturedError = error;
+          return createDispatchResult(
+            {
+              lastError: {
+                code: providerError.code,
+                message: providerError.message,
+              },
+              status: "failed",
+            },
+            {
+              code: providerError.code,
+              diagnosticContext,
+              message: providerError.message,
+            },
+          );
+        }
+
+        throw new Error("Expected Linq attachment preparation to fail.");
+      });
+
+      const outcomes = await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          recordLinqDeliveryOutcome: recordDeliveryOutcome,
+        }),
+        forwardedEnv: {
+          LINQ_API_TOKEN: "linq-token",
+        },
+        platformEnv: {},
+        providerFetch: vi.fn<typeof fetch>(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+      await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+
+      expect(capturedError).toBe(providerError);
+      expect(capturedError).not.toHaveProperty("deliveryMayHaveSucceeded");
+      expect(outcomes).toEqual([
+        expect.objectContaining({
+          deliveryStatus: "failed",
+          retryable: false,
+        }),
+      ]);
+      expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({
+          failureCode: "LINQ_API_REQUEST_FAILED",
+          providerMessageId: null,
+        }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    },
+  );
+
   it("records a card fallback failure under its durably promoted identity", async () => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",
@@ -14836,6 +14937,65 @@ describe("hosted runtime callbacks", () => {
       ]);
     },
   );
+
+  it("logs bounded Linq attachment diagnostics without provider request details", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      transportIdempotent: true,
+    });
+    const deliveryError = {
+      code: "LINQ_API_REQUEST_FAILED",
+      diagnosticContext: {
+        authorization: "Bearer <REDACTED_TOKEN>",
+        failureStage: "transport",
+        method: "PUT",
+        operation: "create_attachment_upload",
+        path: "https://uploads.example.test/private-object?signature=private",
+        requestOrigin: "https://uploads.example.test",
+        retryable: false,
+        timedOut: true,
+        transportErrorName: "AbortError",
+      },
+      message: "Linq attachment upload timed out.",
+    };
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(
+      createDispatchResult(
+        {
+          lastError: deliveryError,
+          status: "failed",
+        },
+        deliveryError,
+      ),
+    );
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          deliveryErrorDetailFailureStage: "transport",
+          deliveryErrorDetailMethod: "PUT",
+          deliveryErrorDetailOperation: "create_attachment_upload",
+          deliveryErrorDetailRetryable: false,
+          deliveryErrorDetailTimedOut: true,
+          deliveryErrorDetailTransportErrorName: "AbortError",
+        }),
+        message: "Hosted assistant delivery finished with failed status.",
+      }),
+    );
+    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(serializedLogs).not.toContain("REDACTED_TOKEN");
+    expect(serializedLogs).not.toContain("private-object");
+    expect(serializedLogs).not.toContain("uploads.example.test");
+  });
 
   it("rethrows outbox dispatch failures with effect details attached", async () => {
     const effect = createEffect();
