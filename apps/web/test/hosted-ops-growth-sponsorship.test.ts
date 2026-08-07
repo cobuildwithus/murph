@@ -136,17 +136,17 @@ describe("hosted ops growth sponsorship metrics", () => {
     expect(markup).toContain('aria-labelledby="test-growth-sponsorship-title"');
     expect(markup).toContain("Group sponsorships");
     expect(markup).toContain("not subscriptions");
-    expect(markup).toContain,"Gross sponsor charges MTD");
+    expect(markup).toContain("Gross sponsor charges MTD");
     expect(markup).toContain("$35");
     expect(markup).toContain("refunds not netted");
     expect(markup).toContain("Sponsored usage MTD");
-    expect(markup).toContain,"$4.25");
-    expect(markup).toContain,"Remaining sponsored usage");
+    expect(markup).toContain("$4.25");
+    expect(markup).toContain("Remaining sponsored usage");
     expect(markup).toContain("$11.75");
-    expect(markup).toContain,"Active monthly cap");
+    expect(markup).toContain("Active monthly cap");
     expect(markup).toContain("$30/mo");
     expect(markup).toContain("2 active capped authorizations");
-    expect(markup).toContain,"Monthly sponsorship charges");
+    expect(markup).toContain("Monthly sponsorship charges");
     expect(markup).toContain("One-time contributions");
     expect(markup).not.toContain("Sponsorship MRR");
   });
@@ -157,6 +157,6 @@ describe("hosted ops growth sponsorship metrics", () => {
     }));
 
     expect(markup).toContain("Sponsorship metrics unavailable");
-    expect(markup).toContain,"Plan MRR");
+    expect(markup).toContain("Plan MRR");
   });
 });

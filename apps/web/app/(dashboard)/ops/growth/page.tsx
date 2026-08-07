@@ -137,7 +137,8 @@ export default async function HostedOpsGrowthPage() {
                 <TableCell>Tracked fulfilled usage top-ups</TableCell>
                 <TableCell className="text-right">
                   {formatInteger(dashboard.usageTopUps.trackedFulfilled)}
-                </TableCell className="text-right">One-time</TableCell>
+                </TableCell>
+                <TableCell className="text-right">One-time</TableCell>
               </TableRow>
               <TableRow>
                 <TableCell>Unpriced paid members</TableCell>
@@ -200,7 +201,7 @@ export default async function HostedOpsGrowthPage() {
         <div className="grid gap-3 md:grid-cols-4">
           {statusRows(dashboard.current.statusCounts).map((row) => (
             <Metric
-            key={row.label}
+              key={row.label}
               label={row.label}
               tone={row.value > 0 ? "warning" : "default"}
               value={formatInteger(row.value)}
