@@ -61,6 +61,14 @@ describe('Codex app-server protocol boundary', () => {
       },
       id: 'response-5',
     },
+    {
+      error: {
+        code: -32_001,
+        data: null,
+        message: 'request failed without details',
+      },
+      id: 6,
+    },
   ])('accepts canonical app-server envelope %#', (message) => {
     expect(parseCodexAppServerMessage(message)).toBe(message)
     expect(tryParseJsonLine(JSON.stringify(message))).toEqual({
