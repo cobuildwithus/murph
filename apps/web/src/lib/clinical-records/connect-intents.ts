@@ -3,7 +3,6 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 
 import type { Prisma } from "@prisma/client";
-
 import { getPrisma } from "../prisma";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { clinicalRecordsError } from "./errors";
@@ -47,6 +46,12 @@ export async function createClinicalRecordConnectIntent(input: {
 
   try {
     await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext(${input.memberId}),
+          hashtext('clinical-record-connect-intent')
+        )
+      `;
       await tx.clinicalRecordOauthSession.updateMany({
         data: { consumedAt: now },
         where: { consumedAt: null, memberId: input.memberId },
@@ -85,7 +90,11 @@ export async function createClinicalRecordConnectIntent(input: {
   const baseUrl = resolveHostedPublicBaseUrl() ?? new URL(input.request.url).origin;
   const connectUrl = new URL("/records/connect", `${baseUrl}/`);
   connectUrl.hash = new URLSearchParams({ clinicalRecordsIntent: claim }).toString();
-  return { claim, connectUrl: connectUrl.toString(), expiresAt: expiresAt.toISOString() };
+  return {
+    claim,
+    connectUrl: connectUrl.toString(),
+    expiresAt: expiresAt.toISOString(),
+  };
 }
 
 export async function claimClinicalRecordConnectIntentForStart(input: {

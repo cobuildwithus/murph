@@ -43,7 +43,10 @@ describe('murph.generate_image dynamic tool schema', () => {
       'attach the generated image to the final response',
     )
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      'private media is provided in a later trusted system input',
+      'Hosted accepted-message turns start generation in the background',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'Exact scheduled automation occurrences remain synchronous and attach private media to the same final response',
     )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'a known preference supports voice',

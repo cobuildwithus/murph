@@ -695,6 +695,15 @@ describe('murph.generate_image dynamic tool execution', () => {
     expect(listMurphDynamicToolNames()).toContain('murph.finish_without_reply')
   })
 
+  it('can disable image generation for a delivery route without changing the default', () => {
+    expect(resolveMurphDynamicTools({}).map((tool) => tool.name)).toContain(
+      'generate_image',
+    )
+    expect(resolveMurphDynamicTools({
+      imageGenerationAvailable: false,
+    }).map((tool) => tool.name)).not.toContain('generate_image')
+  })
+
   it('co-gates message-target tools and executes reactions through the authorizer', async () => {
     const messageRef = `ain_${'a'.repeat(32)}`
     expect(listMurphDynamicToolNames()).toContain('murph.react_to_message')

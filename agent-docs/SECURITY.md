@@ -836,3 +836,30 @@ Last verified: 2026-08-06
 - `assistant.ask.requested` and `assistant.ask.completed` may carry bounded question and answer content only in the existing encrypted mailbox and transient process state. Web derives the target runtime, exact membership generation, origin, expiry, and private return route from the signed caller; the model cannot supply them. Only the trusted target adapter may pass an authorized workspace root and committed conversation evidence to `executeReadOnlyAssistantAsk`. Web rechecks membership before target context is read and before completion is appended, and the private runtime treats the answer as untrusted data. Leaving, rejoining, expiry, an unsafe route, or a stale runtime fence suppresses completion rather than widening access. Failed Ask diagnostics may expose only a validated opaque request id, an allowlisted Prisma `P####` code when present, and HTTP status; they must never expose raw exceptions, response bodies, mailbox content, questions, answers, membership ids, runtime ids, or return routes. Diagnostic values are correlation metadata only and are never caller-supplied authority.
 - Except for that explicitly confined Assistant Ask child, Codex running inside the local Murph runtime or hosted execution container is assumed to have full access to that local/container filesystem. Passing repo-relative, vault-relative, or container-local paths to Codex so it can inspect or modify files is not a privacy leak by itself. Those paths still must not escape into user-facing messaging copy, public API responses, persisted logs/diagnostics, fixtures, generated docs, screenshots, provider requests, external review bundles, or other third-party outputs unless the surface has an explicit safe path policy.
 - Assistant turns may execute the same canonical local assistant/vault tool catalog shape through the active vault's per-turn Murph runtime context. Message-triggered assistant auto-reply now has the same full Murph autonomy as other assistant turns, including assistant runtime control plus canonical `memory` / `automation` and canonical vault write surfaces, so any accepted inbound channel message is effectively an operator-authorized action for that bound user and vault. The hard-cut assistant command surface is Codex App Server only: it may run with normal local CLI/filesystem/env authority through Codex-specific launch/config options, while legacy OpenAI-compatible endpoint flags are not part of the command surface. That privileged Codex App Server posture still does not grant hosted-control-plane authority outside the local runtime boundary.
+
+## Scheduled assistant action authority
+
+A scheduled tool action is authorized only by the trusted runtime's exact
+`automationId + occurrenceAt` pair when the turn trigger is `automation-cron` and
+the occurrence equals `scheduledOccurrenceAt`. Assistant Engine derives the opaque
+typed occurrence scope itself; it never creates an `ain_` identifier. Model
+arguments cannot choose, replay, or transform that scope. It does not grant
+accepted-message targeting, participant identity, physical-mail continuation, support
+escalation, subscription changes, or any other fresh-human-input capability.
+
+Personalization transports either the existing accepted `assistantInputId` or the
+additive exact scheduled pair. Web verifies the signed, member-bound runtime
+callback and active hosted access in both cases; accepted-input writes retain their
+mailbox and current-route causal checks, while scheduled writes never fabricate a
+conversation message or participant. Scheduled authority does not bypass existing
+channel or audience eligibility. An optional exact provider tool-call id is retry and
+command identity only: it cannot supply, replace, or widen accepted-input or scheduled
+authority. Clinical Records links remain private and use an operation-scoped retry
+key. Only the exact authenticated launcher may resume through sign-in. Its one-time
+claim is staged in browser history state and removed from any legacy visible fragment
+without erasing unrelated state or URL context. Automatic Web-control replay is
+restricted to the deterministic, non-mutating scheduled request-key branch; current
+message-authorized claim creation remains single-attempt at the transport boundary.
+Ordinary feedback and verified-private
+support escalation both require accepted-message authority; scheduled turns receive
+neither capability.
