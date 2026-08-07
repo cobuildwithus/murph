@@ -72,6 +72,9 @@ import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
 import type { AssistantAutoReplyProviderRequestStartHook } from './reply.js'
 import type { AssistantBeforeProviderAcceptedInputsHook } from '../service-contracts.js'
 import type { AssistantAutomationOperationScope } from './operation-scope.js'
+import type {
+  AssistantProviderStartCriticalPathContext,
+} from '../provider-start-critical-path.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
@@ -94,6 +97,7 @@ export interface RunAssistantAutomationInput {
   operationScope?: AssistantAutomationOperationScope | null
   buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   inboxServices?: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
@@ -931,6 +935,9 @@ export async function runAssistantAutomationPass(
     allowSelfAuthored: input.allowSelfAuthored ?? false,
     ...(input.beforeProviderAcceptedInputs
       ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+      : {}),
+    ...(input.providerStartCriticalPath
+      ? { providerStartCriticalPath: input.providerStartCriticalPath }
       : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext,

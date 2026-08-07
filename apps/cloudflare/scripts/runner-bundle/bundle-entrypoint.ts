@@ -133,14 +133,22 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // tool path without adding a forbidden boot input. After merging the native-
 // memory relay restoration, macOS measured 10,276,559B total on 2026-08-06;
 // retain the established allowance above that combined measurement.
+// The bounded @murphai/contracts/zod-runtime surface keeps Zod's required
+// English error map while removing the 53-module locale catalog and unrelated
+// namespace exports from production workspace imports. A clean macOS assembly
+// measured a 1,729,632B entry, 8,182,922B static closure, and 9,862,735B total
+// on 2026-08-06. Ratchet the static and total baselines to that implementation
+// while retaining the established cross-platform tolerances.
 //
-// Lazy-loading the rare hosted wake handlers reduced the exact macOS entry
-// from 1,729,632B to 1,636,957B and its static boot closure from 8,596,243B to
-// 8,453,351B on 2026-08-06. Total output measured 10,291,322B, so retain the
-// existing total ceiling while ratcheting both startup-path baselines.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_276_559 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_636_957;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_453_351;
+// Lazy-loading the rare hosted wake handlers then removes their uncommon
+// activation, notification, ask-completion, Environment voice, and Codex-auth
+// paths from the static boot closure. After merging the Zod runtime change and
+// current main, exact macOS assembly measured a 1,640,840B entry, 8,053,604B
+// static closure, and 9,885,077B total on 2026-08-07. Ratchet both startup-path
+// baselines while retaining the reviewed Zod total ceiling.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_862_735 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_640_840;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_053_604;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
@@ -167,10 +175,12 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/assistant-runtime/dist/hosted-runtime/events/assistant-ask-completion.js",
   "/assistant-runtime/dist/hosted-runtime/events/environment-voice.js",
   "/assistant-runtime/dist/hosted-runtime/events/codex-auth.js",
+  "node_modules/zod/v4/locales/",
 ] as const;
 
 const RUNNER_ENTRYPOINT_ALLOWED_BOOT_INPUT_MARKERS = [
   "/clinical-records/dist/retrieval-limits.js",
+  "node_modules/zod/v4/locales/en.js",
 ] as const;
 
 export async function bundleRunnerContainerEntrypoint(

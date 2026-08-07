@@ -102,3 +102,14 @@ Updated: 2026-08-06
   and image-contract tests, Assistant Runtime typecheck, and exact production
   runner assembly. Emitted bytes remain 1,636,957B entry, 8,453,351B static
   closure, and 10,291,322B total.
+- After merging the Zod runtime change and current `main`, 52 focused
+  Cloudflare bundle/image tests and the production-shaped Assistant Ask
+  preemption integration test passed. Exact artifact assembly measured
+  1,640,840B entry, 8,053,604B static closure, and 9,885,077B total. Relative
+  to the post-Zod base, the authored delta remains exactly -92,675B entry,
+  -142,892B static closure, and +8,768B total.
+- Two initial full assembly attempts hit the pre-existing 60-second CLI
+  manifest generation timeout under extreme shared-host CPU contention. A
+  direct manifest probe later completed in 28.79 seconds, the package build
+  passed unchanged, and the assembled production artifact reported
+  `devDependencies: skipped`; no timeout or runtime invariant was changed.

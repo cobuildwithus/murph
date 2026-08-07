@@ -4,6 +4,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+} from "@murphai/hosted-execution/contracts";
 
 import {
   buildAssistantProviderShellCommandCall,
@@ -28,6 +31,8 @@ const chatId = `chat_local_linq_lost_active_operation_${Date.now()}`;
 const unsteeredFirstReplyText = "I got the first note.";
 const secondInboundText = "Second message that used to be stranded behind idle checkpoint.";
 const secondReplyText = "I got the second note too.";
+const thirdInboundText = "Third message after the completion result was lost.";
+const thirdReplyText = "I got the third note after a fresh wake.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -99,6 +104,9 @@ describe("hosted local Linq lost active-operation e2e", () => {
     requireScenario().queueAssistantResponses([secondReplyText], {
       matchInputContains: secondInboundText,
     });
+    requireScenario().queueAssistantResponses([thirdReplyText], {
+      matchInputContains: thirdInboundText,
+    });
 
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
@@ -118,7 +126,9 @@ describe("hosted local Linq lost active-operation e2e", () => {
       "Expected the first hosted assistant turn to reach the provider before dropping active operation.",
     );
     const firstTurnProviderRequestCount = countResponsesApiRequests();
-    await requireScenario().harness.dropRunnerActiveOperationForTest(userId);
+    await requireScenario().harness.dropRunnerActiveOperationForTest(userId, {
+      loseCompletedInvocationResult: true,
+    });
 
     const secondWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
@@ -154,6 +164,35 @@ describe("hosted local Linq lost active-operation e2e", () => {
       .slice(firstTurnProviderRequestCount)
       .filter((request) => request.body.includes(secondInboundText))).toHaveLength(1);
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(outboundCountBeforeReply + 1);
+
+    await waitForCondition(
+      async () => await readActiveRuntimeFenceForTest() === null,
+      "Expected the container completion receipt to clear the exact fence while the outer result remained lost.",
+    );
+    await requireScenario().harness.expireRunnerActivityForTest(userId);
+    const outboundCountBeforeFreshWake = requireLinqStub().countObservedSends(replyPath);
+    const thirdWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      chatId,
+      {
+        eventId: `evt_lost_active_third_${userId}`,
+        messageId: `msg_lost_active_third_${userId}`,
+        text: thirdInboundText,
+      },
+    ));
+    expect(thirdWebhookResponse.status).toBe(202);
+    const freshWakeSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeFreshWake,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(freshWakeSend)).toBe(thirdReplyText);
+    const freshWakeStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(freshWakeStatus.lastErrorCode ?? null).toBeNull();
+    expect(requireScenario().assistantProviderRequests
+      .filter((request) => request.url === "/v1/responses")
+      .filter((request) => request.body.includes(thirdInboundText))).toHaveLength(1);
   }, 360_000);
 });
 
@@ -182,7 +221,7 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
 }
 
 async function waitForCondition(
-  condition: () => boolean,
+  condition: () => boolean | Promise<boolean>,
   message: string,
   input: {
     intervalMs?: number;
@@ -193,12 +232,27 @@ async function waitForCondition(
   const intervalMs = input.intervalMs ?? 100;
   const startedAt = Date.now();
   while ((Date.now() - startedAt) < timeoutMs) {
-    if (condition()) {
+    if (await condition()) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   throw new Error(await requireScenario().buildFailureMessage(userId, [message]));
+}
+
+async function readActiveRuntimeFenceForTest(): Promise<{
+  attemptId: string;
+  processingMode: "default" | "inbox_media_retention" | "system_mailbox";
+} | null> {
+  return await requireScenario().harness.requestJson(
+    `/__test/users/${encodeURIComponent(userId)}/active-runtime-fence`,
+    {
+      headers: {
+        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+      },
+      method: "POST",
+    },
+  );
 }
 
 function requireScenario(): HostedLocalFullStackScenario {

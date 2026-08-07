@@ -1,4 +1,4 @@
-import type { ZodTypeAny } from "zod";
+import type { ZodTypeAny } from "./zod-runtime.ts";
 
 export function withContractMetadata<TSchema extends ZodTypeAny>(
   schema: TSchema,

@@ -1449,6 +1449,7 @@ run_typecheck_preflight() {
   run_timed_step "Hosted Temporal orchestration guard" pnpm hosted-temporal:guard
   run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
   run_timed_step "Raw health log payload guard" pnpm logs:guard
+  run_timed_step "Stripe request spread guard" pnpm stripe-requests:guard
   run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" package -p "tsconfig.tools.json" --pretty false
   run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
 }
@@ -1495,6 +1496,11 @@ run_typecheck_overlapped() {
   local raw_health_log_guard_pid="$!"
   pids+=("$raw_health_log_guard_pid")
   register_background_pid "$raw_health_log_guard_pid"
+
+  run_timed_step "Stripe request spread guard" pnpm stripe-requests:guard &
+  local stripe_request_guard_pid="$!"
+  pids+=("$stripe_request_guard_pid")
+  register_background_pid "$stripe_request_guard_pid"
 
   run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" package -p "tsconfig.tools.json" --pretty false &
   local repo_tools_typecheck_pid="$!"
@@ -1691,6 +1697,7 @@ run_diff_repo_internal_fast_path() {
   run_timed_step "Hosted Temporal orchestration guard" pnpm hosted-temporal:guard
   run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
   run_timed_step "Raw health log payload guard" pnpm logs:guard
+  run_timed_step "Stripe request spread guard" pnpm stripe-requests:guard
   run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" package -p "tsconfig.tools.json" --pretty false
 }
 
@@ -1747,6 +1754,7 @@ run_test_diff() {
     run_timed_step "Hosted Temporal orchestration guard" pnpm hosted-temporal:guard
     run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
     run_timed_step "Raw health log payload guard" pnpm logs:guard
+    run_timed_step "Stripe request spread guard" pnpm stripe-requests:guard
   fi
 
   if [[ "$diff_run_verify_cli" == "1" ]]; then

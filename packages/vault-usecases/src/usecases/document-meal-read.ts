@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { rawImportManifestSchema } from '@murphai/contracts'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
   firstString,
   loadQueryRuntime,

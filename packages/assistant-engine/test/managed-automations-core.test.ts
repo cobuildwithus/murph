@@ -642,7 +642,13 @@ describe('applyMurphManagedAutomations core integration', () => {
       'preserve required prerequisites, availability limits, and approval or confirmation boundaries',
     )
     expect(productUpdatesRecord?.instructions).toContain(
-      'open with one sentence of no more than 10 words',
+      'Open every outbound note with one sentence of no more than 20 words before the first bullet',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      "In Murph's first-person voice",
+    )
+    expect(productUpdatesRecord?.instructions).not.toContain(
+      'If the ledger page was missing before this run',
     )
     expect(productUpdatesRecord?.instructions).toContain(
       'Close with one invitation sentence of no more than 12 words',
@@ -2062,6 +2068,60 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(productNotesRecord?.instructions).toContain(
       'last recorded feature discovery means changelog now',
     )
+  })
+
+  it('reconciles the product-note introduction for an otherwise-current installed record', async () => {
+    const vaultRoot = await createVaultRoot()
+    const productNotesSeed = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) => seed.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    )
+    if (!productNotesSeed) {
+      throw new Error('Expected the managed product-notes seed.')
+    }
+
+    const currentIntroduction =
+      '- Open every outbound note with one sentence of no more than 20 words before the first bullet. In Murph\'s first-person voice, explain that these occasional updates cover what is new or useful so the user can make use of it.'
+    const previousIntroduction =
+      '- If the ledger page was missing before this run, open with one sentence of no more than 10 words saying Murph occasionally shares what is new or useful.'
+    const previousInstructions = productNotesSeed.instructions.replace(
+      currentIntroduction,
+      previousIntroduction,
+    )
+    expect(previousInstructions).not.toBe(productNotesSeed.instructions)
+
+    await upsertAutomation({
+      assistantTargetOverride: productNotesSeed.assistantTargetOverride,
+      automationId: productNotesSeed.automationId,
+      continuityPolicy: productNotesSeed.continuityPolicy,
+      instructions: previousInstructions,
+      now: new Date('2026-08-06T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: productNotesSeed.schedule,
+      slug: productNotesSeed.slug,
+      status: 'active',
+      summary: productNotesSeed.summary,
+      tags: [...productNotesSeed.tags],
+      title: productNotesSeed.title,
+      vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-08-06T13:00:00.000Z'),
+      seeds: [productNotesSeed],
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 0,
+      updated: 1,
+    })
+
+    const productNotesRecord = await showAutomation({
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      vaultRoot,
+    })
+    expect(productNotesRecord?.instructions).toContain(currentIntroduction)
+    expect(productNotesRecord?.instructions).not.toContain(previousIntroduction)
   })
 
   it('migrates the deployed weekly improvement coach in place to monthly', async () => {

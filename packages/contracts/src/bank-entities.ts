@@ -1,4 +1,4 @@
-import type { ZodTypeAny } from "zod";
+import type { ZodTypeAny } from "./zod-runtime.ts";
 import type { JsonObject } from "./zod.ts";
 
 import { ID_PREFIXES } from "./constants.ts";
