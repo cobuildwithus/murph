@@ -21,6 +21,7 @@ import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
+import { ClinicalRecordsConnectLauncherStudy } from "./clinical-records-connect-launcher-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
 import {
@@ -43,6 +44,7 @@ import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
+import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
 import {
   GroupUsageFundingStudy,
@@ -280,6 +282,12 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Clinical Records scheduled launcher">
+        <ClinicalRecordsConnectLauncherStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Zepp/Amazfit Apple Health setup">
         <ZeppAppleHealthSetupStudy />
       </StudySection>
@@ -352,7 +360,13 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Overall AI usage, purchase reset, Family owner action, credits, and referrals">
+      <StudySection title="Reusable signup referral link and recipient claim states">
+        <SignupReferralFlowStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals">
         <PersonalUsageCreditOwnerStudy />
       </StudySection>
 

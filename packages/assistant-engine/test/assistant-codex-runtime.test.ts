@@ -6369,7 +6369,7 @@ describe('assistant codex runtime', () => {
     },
   )
 
-  it('uses the lower group threshold and preserves pre-compaction usage attribution', async () => {
+  it('uses-the-lower-group-threshold and preserves pre-compaction usage attribution', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
     const threadId = 'thread-compact-provider-usage'
@@ -6397,15 +6397,15 @@ describe('assistant codex runtime', () => {
               tokenUsage: {
                 last: {
                   cachedInputTokens: 25_000,
-                  inputTokens: 75_000,
+                  inputTokens: 50_000,
                   outputTokens: 12,
-                  totalTokens: 75_012,
+                  totalTokens: 50_012,
                 },
                 total: {
                   cachedInputTokens: 25_000,
-                  inputTokens: 75_000,
+                  inputTokens: 50_000,
                   outputTokens: 12,
-                  totalTokens: 75_012,
+                  totalTokens: 50_012,
                 },
                 modelContextWindow: 128_000,
               },
@@ -6520,20 +6520,20 @@ describe('assistant codex runtime', () => {
 
     await expect(
       compactWarmCodexThread({
-        groupMinThreadTokens: 60_000,
+        groupMinThreadTokens: 50_000,
         minThreadTokens: 100_000,
         timeoutMs: 5_000,
       }),
     ).resolves.toMatchObject({
       kind: 'compacted',
-      threadContextTokensBefore: 75_000,
+      threadContextTokensBefore: 50_000,
       threadId,
       usage: {
         cachedInputTokens: null,
-        inputTokens: 75_000,
+        inputTokens: 50_000,
         outputTokens: null,
         source: 'estimated',
-        totalTokens: 75_000,
+        totalTokens: 50_000,
       },
     })
   })

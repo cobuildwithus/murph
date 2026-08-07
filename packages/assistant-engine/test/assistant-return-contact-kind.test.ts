@@ -156,6 +156,42 @@ describe('assistant return contact kind', () => {
     expect(createConnectLink).toHaveBeenCalledOnce()
   })
 
+  it('retries a Clinical Records connect link after only the shared request fails', async () => {
+    const failure = new Error('temporary connect-link failure')
+    const connectLink = {
+      connectUrl: 'https://app.example.test/records/connect?launch=clinical-records',
+      expiresAt: null,
+      ok: true as const,
+    }
+    const createConnectLink = vi.fn()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(connectLink)
+    const hostedToolContext = createAssistantHostedToolContext({
+      executionContext: {
+        clinicalRecordsConnectLinkTool: { createConnectLink },
+        memberId: 'member-clinical-records-retry',
+        userEnvKeys: [],
+      },
+      messageInput: createMessageInput({
+        channel: 'linq',
+        hostedDeliveryIdempotency: null,
+      }),
+      session: createAssistantSession(),
+    })
+    const tool = hostedToolContext.clinicalRecordsConnectLinkTool
+    if (!tool) {
+      throw new Error('Expected a hosted Clinical Records connect-link tool.')
+    }
+
+    const first = tool.createConnectLink()
+    const shared = tool.createConnectLink()
+    expect(shared).toBe(first)
+    await expect(first).rejects.toBe(failure)
+    await expect(shared).rejects.toBe(failure)
+    await expect(tool.createConnectLink()).resolves.toEqual(connectLink)
+    expect(createConnectLink).toHaveBeenCalledTimes(2)
+  })
+
   it('routes detached image usage through the existing recorder without waiting', () => {
     const session = createAssistantSession()
     const recordUsage = vi.fn(async () => undefined)

@@ -37,13 +37,11 @@ import type {
 import { errorMessage, normalizeNullableString } from './shared.js'
 import {
   recordAssistantRuntimeIssueInputsBestEffort,
+  type AssistantRuntimeIssueInput,
 } from './issue-reporting.js'
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from './onboarding-goal-checkin-automation.js'
-import type {
-  AssistantRuntimeIssueInput,
-} from './issue-reporting.js'
 import type { CodexThreadIdentity } from './codex-thread-route.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import {
@@ -96,19 +94,17 @@ import {
   recordCodexAttemptFailed,
 } from './codex-turn/attempt-observability.js'
 import {
-  buildCodexTurnExecutionPlan,
   buildCodexTurnAttemptPlan,
+  buildCodexTurnExecutionPlan,
+  type AssistantCodexAttemptPlan,
+  type AssistantCodexTurnExecutionPlan,
+  type AssistantCodexTurnExecutionProfile,
+  type AssistantCodexTurnThreadScopeProfile,
+  type AssistantRoutePlanningDiagnostics,
 } from './codex-turn/planning.js'
 import {
   resolveAssistantConversationScope,
 } from './conversation-policy.js'
-import type {
-  AssistantCodexAttemptPlan,
-  AssistantRoutePlanningDiagnostics,
-  AssistantCodexTurnExecutionPlan,
-  AssistantCodexTurnExecutionProfile,
-  AssistantCodexTurnThreadScopeProfile,
-} from './codex-turn/planning.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'

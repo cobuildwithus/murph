@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   act,
   createElement,
+  StrictMode,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
@@ -134,6 +135,114 @@ describe("Clinical Records connect page", () => {
     expect(loadingStatus.getAttribute("aria-busy")).toBe("true");
     expect(loadingStatus.getAttribute("aria-label")).toBe("Preparing records connection");
     expect(queueMicrotask).toHaveBeenCalled();
+  });
+
+  it("creates the short-lived claim only after an authenticated launcher opens", async () => {
+    const claim = `cr_${"l".repeat(32)}`;
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      claim,
+      expiresAt: "2026-07-16T18:15:00.000Z",
+      ok: true,
+    });
+    const { RecordsConnectClient } = await import(
+      "../app/(dashboard)/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(
+        StrictMode,
+        null,
+        createElement(RecordsConnectClient, {
+          authenticated: true,
+          launchConnectIntent: true,
+        }),
+      ),
+      {
+        historyState: { __NA: true },
+        location: {
+          hash: "",
+          href: "https://join.example.test/records/connect?launch=clinical-records",
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "?launch=clinical-records",
+        },
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledExactlyOnceWith({
+        method: "POST",
+        payload: {},
+        url: "/api/clinical-records/connect-intents",
+      });
+      expect(rendered.replaceState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          __NA: true,
+          __murphClinicalRecordsConnectIntent: claim,
+        }),
+        "",
+        "https://join.example.test/records/connect?launch=clinical-records",
+      );
+      expect(rendered.window.location.href).not.toContain(claim);
+      expect(rendered.container.textContent).toContain(
+        "Review how Murph uses your health data",
+      );
+    });
+  });
+
+  it("retries a transient launcher failure in place", async () => {
+    const claim = `cr_${"r".repeat(32)}`;
+    mocks.requestHostedOnboardingJson
+      .mockRejectedValueOnce(new Error("temporary connect-intent failure"))
+      .mockResolvedValueOnce({
+        claim,
+        expiresAt: "2026-07-16T18:15:00.000Z",
+        ok: true,
+      });
+    const { RecordsConnectClient } = await import(
+      "../app/(dashboard)/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsConnectClient, {
+        authenticated: true,
+        launchConnectIntent: true,
+      }),
+      {
+        historyState: {},
+        location: {
+          hash: "",
+          href: "https://join.example.test/records/connect?launch=clinical-records",
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "?launch=clinical-records",
+        },
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+      expect(rendered.container.textContent).toContain(
+        "Couldn't start Clinical Records",
+      );
+    });
+    const retryButton = Array.from(
+      rendered.container.querySelectorAll("button"),
+    ).find((button) => button.textContent?.includes("Try again"));
+    assert.ok(retryButton);
+    await act(async () => {
+      retryButton.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+      expect(rendered.container.textContent).toContain(
+        "Review how Murph uses your health data",
+      );
+      expect(rendered.window.location.href).not.toContain(claim);
+    });
   });
 
   it("scrubs the claim, sends it only in the SMART start body, and closes a committed BFCache flow", async () => {

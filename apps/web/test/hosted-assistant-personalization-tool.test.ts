@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -7,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberAssistantPreferences: vi.fn(),
   readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
-  readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx: vi.fn(),
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx: vi.fn(),
   requireHostedRuntimeActiveAccess: vi.fn(),
   requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
   scheduleMailboxWake: vi.fn(),
@@ -33,8 +34,8 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxConversationWakeByAssistantInputId:
     mocks.readHostedMailboxConversationWakeByAssistantInputId,
-  readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx:
-    mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx:
+    mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
 }));
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
   assertHostedLinqRouteEgressAuthority: mocks.assertHostedLinqRouteEgressAuthority,
@@ -95,7 +96,10 @@ describe("hosted assistant personalization tool owner adapter", () => {
       model: "gpt-5.6-terra",
       solAvailable: false,
     });
-    mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx.mockResolvedValue("42");
+    mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx.mockResolvedValue({
+      causalSeq: "42",
+      occurredAt: "2026-07-16T00:00:00.000Z",
+    });
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
       appliedFields: ["voice"],
       assistantPersonality: {
@@ -188,10 +192,139 @@ describe("hosted assistant personalization tool owner adapter", () => {
       { prisma: expect.objectContaining({ tx: true }) },
     );
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
     expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
+  });
+
+  it("applies an exact scheduled update without fabricating message authority", async () => {
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: {
+        automationId: "automation_daily_style",
+        occurrenceAt: "2026-08-06T14:30:00.000Z",
+      },
+      memberId: "member_personalization_1",
+      request: { action: "update", tone: "casual" },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
+    })).resolves.toMatchObject({
+      action: "update",
+      result: { status: "saved" },
+    });
+
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx)
+      .toHaveBeenCalledWith(
+        "member_personalization_1",
+        { prisma: expect.objectContaining({ tx: true }) },
+      );
+    expect(mocks.readHostedMailboxConversationWakeByAssistantInputId)
+      .not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx)
+      .not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+      causalOrigin: "turn",
+      memberId: "member_personalization_1",
+      occurredAt: "2026-08-06T14:30:00.000Z",
+      preferences: { tone: "casual" },
+      prisma: expect.objectContaining({ tx: true }),
+      updateId: buildScheduledPreferenceUpdateId("tone-voice", ["tone"]),
+    });
+  });
+
+  it("uses an independent stable identity for scheduled personality updates", async () => {
+    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
+      appliedFields: ["humor"],
+      assistantPersona: null,
+      assistantPersonality: {
+        detail: null,
+        humor: 8,
+        push: null,
+        unhinged: null,
+      },
+      assistantTone: "formal",
+      assistantVoice: "warm",
+      dispatch: { mailboxItemId: "mailbox_scheduled_personality" },
+      updated: true,
+    });
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: {
+        automationId: "automation_daily_style",
+        occurrenceAt: "2026-08-06T14:30:00.000Z",
+      },
+      memberId: "member_personalization_1",
+      request: {
+        action: "update_personality",
+        personality: { humor: 8 },
+      },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
+    })).resolves.toMatchObject({
+      action: "update_personality",
+      result: { outcomes: { humor: "saved" } },
+    });
+
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+      causalOrigin: "turn",
+      memberId: "member_personalization_1",
+      occurredAt: "2026-08-06T14:30:00.000Z",
+      preferences: { personality: { humor: 8 } },
+      prisma: expect.objectContaining({ tx: true }),
+      updateId: buildScheduledPreferenceUpdateId("personality", ["humor"]),
+    });
+    expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_personalization_1",
+      mailboxItemId: "mailbox_scheduled_personality",
+    });
+  });
+
+  it("scopes scheduled personality identities to the requested dials", async () => {
+    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
+      appliedFields: [],
+      assistantPersona: null,
+      assistantPersonality: {
+        detail: null,
+        humor: null,
+        push: null,
+        unhinged: null,
+      },
+      assistantTone: "formal",
+      assistantVoice: "warm",
+      dispatch: null,
+      updated: false,
+    });
+    const authority = {
+      automationId: "automation_daily_style",
+      occurrenceAt: "2026-08-06T14:30:00.000Z",
+    };
+
+    await handleHostedRuntimeAssistantPersonalizationTool({
+      authority,
+      memberId: "member_personalization_1",
+      request: {
+        action: "update_personality",
+        personality: { humor: 8 },
+      },
+    });
+    await handleHostedRuntimeAssistantPersonalizationTool({
+      authority,
+      memberId: "member_personalization_1",
+      request: {
+        action: "update_personality",
+        personality: { push: 8 },
+      },
+    });
+
+    const firstUpdateId = mocks.upsertHostedMemberAssistantPreferencesTx
+      .mock.calls[0]?.[0]?.updateId;
+    const secondUpdateId = mocks.upsertHostedMemberAssistantPreferencesTx
+      .mock.calls[1]?.[0]?.updateId;
+    expect(firstUpdateId).toBe(
+      buildScheduledPreferenceUpdateId("personality", ["humor"]),
+    );
+    expect(secondUpdateId).toBe(
+      buildScheduledPreferenceUpdateId("personality", ["push"]),
+    );
+    expect(secondUpdateId).not.toBe(firstUpdateId);
   });
 
   it("checks runtime access before resolving causal input authority", async () => {
@@ -204,9 +337,49 @@ describe("hosted assistant personalization tool owner adapter", () => {
     expect(
       mocks.requireHostedRuntimeActiveAccessForUpdateTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx
         .mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("scopes accepted-turn retry identity to the provider tool call", async () => {
+    const assistantInputId = "ain_55555555555555555555555555555555";
+    await handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId, toolCallId: "call_style_one" },
+      memberId: "member_personalization_1",
+      request: { action: "update_personality", personality: { humor: 7 } },
+    });
+    await handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId, toolCallId: "call_style_two" },
+      memberId: "member_personalization_1",
+      request: { action: "update_personality", personality: { humor: 9 } },
+    });
+
+    const firstUpdateId = mocks.upsertHostedMemberAssistantPreferencesTx
+      .mock.calls[0]?.[0]?.updateId;
+    const secondUpdateId = mocks.upsertHostedMemberAssistantPreferencesTx
+      .mock.calls[1]?.[0]?.updateId;
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx)
+      .toHaveBeenNthCalledWith(1, expect.objectContaining({
+        preferenceCausalSeq: "42",
+      }));
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx)
+      .toHaveBeenNthCalledWith(2, expect.objectContaining({
+        preferenceCausalSeq: "42",
+      }));
+    expect(firstUpdateId).toBe(buildAcceptedPreferenceUpdateId({
+      assistantInputId,
+      operation: "personality",
+      requestedFields: ["humor"],
+      toolCallId: "call_style_one",
+    }));
+    expect(secondUpdateId).toBe(buildAcceptedPreferenceUpdateId({
+      assistantInputId,
+      operation: "personality",
+      requestedFields: ["humor"],
+      toolCallId: "call_style_two",
+    }));
+    expect(secondUpdateId).not.toBe(firstUpdateId);
   });
 
   it("keeps a group style update bound to the synthetic room runtime", async () => {
@@ -253,7 +426,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       prisma: expect.objectContaining({ tx: true }),
     });
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).toHaveBeenCalledWith({
       assistantInputId: "ain_66666666666666666666666666666666",
       memberId: "member_group_runtime",
@@ -346,6 +519,11 @@ describe("hosted assistant personalization tool owner adapter", () => {
         },
       },
       prisma: expect.objectContaining({ tx: true }),
+      updateId: buildAcceptedPreferenceUpdateId({
+        assistantInputId: "ain_67676767676767676767676767676767",
+        operation: "personality",
+        requestedFields: ["detail", "humor", "push", "unhinged"],
+      }),
     });
     expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_group_runtime",
@@ -400,7 +578,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
 
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -439,7 +617,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
 
     expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledOnce();
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -468,7 +646,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).rejects.toThrow("input authority is invalid");
 
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -500,7 +678,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).rejects.toThrow("input authority is invalid");
 
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -527,7 +705,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).rejects.toThrow("input authority is invalid");
 
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -571,7 +749,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
 
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).toHaveBeenCalledOnce();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -585,11 +763,11 @@ describe("hosted assistant personalization tool owner adapter", () => {
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
       memberId: "member_personalization_1",
       request: { action: "update", tone: "casual" },
-    })).rejects.toThrow("requires assistant input authority");
+    })).rejects.toThrow("requires action authority");
 
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -601,11 +779,11 @@ describe("hosted assistant personalization tool owner adapter", () => {
         action: "update_personality",
         personality: { push: null },
       },
-    })).rejects.toThrow("requires assistant input authority");
+    })).rejects.toThrow("requires action authority");
 
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -657,11 +835,11 @@ describe("hosted assistant personalization tool owner adapter", () => {
     expect(
       mocks.requireHostedRuntimeActiveAccessForUpdateTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx
         .mock.invocationCallOrder[0]!,
     );
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).toHaveBeenCalledWith({
       assistantInputId: "ain_99999999999999999999999999999999",
       memberId: "member_personalization_1",
@@ -680,6 +858,11 @@ describe("hosted assistant personalization tool owner adapter", () => {
         },
       },
       prisma: expect.objectContaining({ tx: true }),
+      updateId: buildAcceptedPreferenceUpdateId({
+        assistantInputId: "ain_99999999999999999999999999999999",
+        operation: "personality",
+        requestedFields: ["detail", "humor", "push"],
+      }),
     });
     expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_personalization_1",
@@ -751,7 +934,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       prisma: expect.objectContaining({ tx: true }),
     });
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).toHaveBeenCalledWith({
       assistantInputId: "ain_22222222222222222222222222222222",
       memberId: "member_personalization_1",
@@ -764,6 +947,11 @@ describe("hosted assistant personalization tool owner adapter", () => {
         preferenceCausalSeq: "42",
         preferences: { voice: "warm" },
         prisma: expect.objectContaining({ tx: true }),
+        updateId: buildAcceptedPreferenceUpdateId({
+          assistantInputId: "ain_22222222222222222222222222222222",
+          operation: "tone-voice",
+          requestedFields: ["voice"],
+        }),
       }),
     );
     expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
@@ -806,7 +994,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
   });
 
   it("rejects an assistant input that has no canonical mailbox authority", async () => {
-    mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx.mockResolvedValue(null);
+    mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx.mockResolvedValue(null);
 
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
       authority: { assistantInputId: "ain_44444444444444444444444444444444" },
@@ -815,7 +1003,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).rejects.toThrow("input authority is invalid");
 
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).toHaveBeenCalledWith({
       assistantInputId: "ain_44444444444444444444444444444444",
       memberId: "member_personalization_1",
@@ -825,6 +1013,45 @@ describe("hosted assistant personalization tool owner adapter", () => {
     expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
   });
 });
+
+function buildScheduledPreferenceUpdateId(
+  operation: "personality" | "tone-voice",
+  requestedFields: string[],
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      origin: {
+        automationId: "automation_daily_style",
+        kind: "automation_occurrence",
+        occurrenceAt: "2026-08-06T14:30:00.000Z",
+      },
+      operation,
+      requestedFields: [...requestedFields].sort(),
+      schema: "murph.assistant-preference-update.v2",
+      toolCallId: null,
+    }))
+    .digest("hex");
+}
+
+function buildAcceptedPreferenceUpdateId(input: {
+  assistantInputId: string;
+  operation: "personality" | "tone-voice";
+  requestedFields: string[];
+  toolCallId?: string;
+}): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      origin: {
+        assistantInputId: input.assistantInputId,
+        kind: "accepted_input",
+      },
+      operation: input.operation,
+      requestedFields: [...input.requestedFields].sort(),
+      schema: "murph.assistant-preference-update.v2",
+      toolCallId: input.toolCallId ?? null,
+    }))
+    .digest("hex");
+}
 
 function buildLinqStyleWake(input: {
   routeAuthority?: {

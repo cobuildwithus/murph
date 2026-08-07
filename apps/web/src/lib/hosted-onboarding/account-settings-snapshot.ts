@@ -61,6 +61,11 @@ export interface HostedAccountSettingsSnapshot {
     number: string | null;
     verifiedAt: string | null;
   };
+  /**
+   * Browser-local invalidation only; it grants no referral authority. Absent
+   * only in inert legacy fixtures—the server projection always supplies it.
+   */
+  referralIdentityKey?: string;
   telegram: {
     telegramUserId: string | null;
     username?: string | null;
@@ -242,6 +247,7 @@ export async function readHostedAccountSettingsPageSnapshot(input: {
         number: privateSettings?.phoneNumber ?? null,
         verifiedAt: member?.identity?.phoneNumberVerifiedAt?.toISOString() ?? null,
       },
+      referralIdentityKey: input.memberId,
       telegram: {
         telegramUserId,
       },

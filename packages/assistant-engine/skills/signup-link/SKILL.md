@@ -15,8 +15,16 @@ shareable link to forward, call `murph.group` with
 `message_ref` from the requester.
 
 Use only the exact returned `signupUrl`; mention `expiresAt` only when useful.
+Treat it as the member's reusable referral link: do not imply that one recipient
+consumes it or that the member needs a fresh link for each later recipient.
 Return the link to the requester. Never choose, contact, or message the
 recipient. Keep the reply focused on this handoff; do not append billing,
 low-usage, mission, or sponsorship options unless the user also asked about
-them. The link records signup attribution only and does not earn usage,
-complete a mission, or guarantee a reward.
+them.
+
+Sharing or opening the link does not earn usage, complete a mission, or
+guarantee a reward. If a recipient later finishes their own Murph setup through
+an invite attributed to that link and the referral qualifies under server
+policy, Murph adds any referral reward automatically. When helpful, explain that
+distinction in one short sentence. Do not promise a fixed reward or amount that
+the tool did not return.
