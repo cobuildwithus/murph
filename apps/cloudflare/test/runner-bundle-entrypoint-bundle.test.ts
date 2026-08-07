@@ -417,6 +417,26 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /packages\/query\/dist\/browser-replica\/murph-age\.js/,
     ],
     [
+      "staged assistant-notification wake handler",
+      ".deploy/runner-bundle/node_modules/@murphai/assistant-runtime/dist/hosted-runtime/events/assistant-notification.js",
+      /node_modules\/@murphai\/assistant-runtime\/dist\/hosted-runtime\/events\/assistant-notification\.js/,
+    ],
+    [
+      "workspace assistant-ask-completion wake handler",
+      "packages/assistant-runtime/dist/hosted-runtime/events/assistant-ask-completion.js",
+      /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/assistant-ask-completion\.js/,
+    ],
+    [
+      "staged Environment voice wake handler",
+      ".deploy/runner-bundle/node_modules/@murphai/assistant-runtime/dist/hosted-runtime/events/environment-voice.js",
+      /node_modules\/@murphai\/assistant-runtime\/dist\/hosted-runtime\/events\/environment-voice\.js/,
+    ],
+    [
+      "workspace Codex auth wake handler",
+      "packages/assistant-runtime/dist/hosted-runtime/events/codex-auth.js",
+      /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/codex-auth\.js/,
+    ],
+    [
       "Zod locale catalog",
       "node_modules/zod/v4/locales/index.js",
       /node_modules\/zod\/v4\/locales\/index\.js/,
@@ -582,8 +602,8 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // Mirror the production baselines plus their variance allowances so
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
-      entryBytes: 1_699_250 + 48_000,
-      staticClosureBytes: 8_182_922 + 96_000,
+      entryBytes: 1_640_840 + 48_000,
+      staticClosureBytes: 8_053_604 + 96_000,
       totalBytes: 9_862_735 + 32_768,
     });
   });
