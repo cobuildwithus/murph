@@ -425,9 +425,11 @@ on retry it leaves any existing activity values untouched while still updating
 the snapshot's revenue, member, and message aggregates. The cron returns a
 failure after that legacy snapshot write so monitoring and an authenticated
 manual rerun can recover the same date; Vercel does not retry failed cron
-invocations automatically. The ops-page retry may also recover the date without
-making the page all-or-nothing. Legacy or incomplete windows stay null, and the
-existing 30-day snapshot projection shifts each row onto the completed day its
+invocations automatically. The ops-page snapshot-capture branch may also
+recover the date before the normal live dashboard read. That read retains its
+existing integrity-fail behavior for missing unretired group evidence. Legacy
+or incomplete windows stay null, and the existing 30-day snapshot projection
+shifts each row onto the completed day its
 windows ended instead of reconstructing identities after mailbox expiry. These
 metrics count the retained sender population at read or capture time. Account
 deletion removes personal and owned group-container rows; activity retained in
