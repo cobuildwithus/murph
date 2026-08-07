@@ -34,17 +34,26 @@ import {
   hostedRunnerIntercept,
 } from "../src/runner-egress-intercept.ts";
 import {
+  HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "../src/runner-outbound/headers.ts";
+import {
+  createCloudflareHostedProviderFetch,
+} from "../src/runtime-platform/provider-fetch.ts";
 import type {
   RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
+import type {
+  WorkerProviderEgressTokenValidationResult,
+} from "../src/worker-contracts.ts";
 import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
+
+const PROVIDER_EGRESS_TOKEN = "provider-egress-token-conformance";
 
 const WRITE_FENCE_HEADERS = {
   [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_1",
@@ -92,9 +101,17 @@ afterEach(() => {
 });
 
 describe("hosted provider egress conformance", () => {
-  it("drives the real Linq response-card client through the production interceptor", async () => {
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-    const env = createProviderInterceptEnv(validateRuntimeWriteFence);
+  it("drives the real Linq response-card client through the production provider-fetch boundary", async () => {
+    const validateRuntimeProviderEgressToken = vi.fn(
+      createProviderEgressTokenValidationResult,
+    );
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("Provider fetch should authorize with the invocation token.");
+    });
+    const env = createProviderInterceptEnv({
+      validateRuntimeProviderEgressToken,
+      validateRuntimeWriteFence,
+    });
     const forwarded: ForwardedRequest[] = [];
     vi.stubGlobal("fetch", createProviderUpstreamFetch(forwarded));
 
@@ -111,13 +128,14 @@ describe("hosted provider egress conformance", () => {
       env: {
         LINQ_API_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       },
-      fetchImplementation: createInterceptingProviderFetch(env),
+      fetchImplementation: createProductionProviderFetch(env),
     })).resolves.toMatchObject({
       providerMessageId: "message_1",
       target: "chat_1",
     });
 
-    expect(validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledTimes(2);
     expect(forwarded).toHaveLength(2);
     expect(forwarded[0]).toMatchObject({
       body: {
@@ -163,7 +181,7 @@ describe("hosted provider egress conformance", () => {
           method: "POST",
         },
       ),
-      createProviderInterceptEnv(validateRuntimeWriteFence),
+      createProviderInterceptEnv({ validateRuntimeWriteFence }),
       { containerId: "opaque-container-id" },
     );
 
@@ -172,9 +190,17 @@ describe("hosted provider egress conformance", () => {
     expect(upstreamFetch).not.toHaveBeenCalled();
   });
 
-  it("drives every hosted Telegram client route through the production interceptor", async () => {
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-    const env = createProviderInterceptEnv(validateRuntimeWriteFence);
+  it("drives every hosted Telegram client route through the production provider-fetch boundary", async () => {
+    const validateRuntimeProviderEgressToken = vi.fn(
+      createProviderEgressTokenValidationResult,
+    );
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("Provider fetch should authorize with the invocation token.");
+    });
+    const env = createProviderInterceptEnv({
+      validateRuntimeProviderEgressToken,
+      validateRuntimeWriteFence,
+    });
     const forwarded: ForwardedRequest[] = [];
     vi.stubGlobal("fetch", createProviderUpstreamFetch(forwarded));
 
@@ -184,7 +210,7 @@ describe("hosted provider egress conformance", () => {
       TELEGRAM_BOT_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       TELEGRAM_FILE_BASE_URL: "https://api.telegram.org/file",
     } satisfies NodeJS.ProcessEnv;
-    const fetchImplementation = createInterceptingProviderFetch(env);
+    const fetchImplementation = createProductionProviderFetch(env);
 
     await sendTelegramMessage({
       message: "hello",
@@ -292,7 +318,8 @@ describe("hosted provider egress conformance", () => {
     expect(forwarded.at(-1)?.url.toString()).toBe(
       "https://api.telegram.org/file/bottelegram-worker-secret/photos/file_1.jpg",
     );
-    expect(validateRuntimeWriteFence).toHaveBeenCalledTimes(9);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledTimes(9);
     assertAuthorityHeadersStripped(forwarded);
   });
 });
@@ -353,29 +380,36 @@ function createProviderUpstreamFetch(
   });
 }
 
-function createInterceptingProviderFetch(
+function createProductionProviderFetch(
   env: RunnerOutboundEnvironmentSource,
 ): typeof fetch {
-  return async (input, init) => {
-    const request = input instanceof Request
-      ? input
-      : new Request(input, init);
-    if (new URL(request.url).hostname === "api.elevenlabs.io") {
-      return new Response(ELEVENLABS_MP3_BYTES, {
-        headers: { "content-type": "audio/mpeg" },
-      });
-    }
-
-    const headers = new Headers(request.headers);
-    for (const [name, value] of Object.entries(WRITE_FENCE_HEADERS)) {
-      headers.set(name, value);
-    }
-    return await hostedRunnerIntercept(
-      new Request(request, { headers }),
-      env,
-      { containerId: "opaque-container-id" },
-    );
-  };
+  return createCloudflareHostedProviderFetch(
+    "member_123",
+    async (input, init) => {
+      const request = input instanceof Request
+        ? input
+        : new Request(input, init);
+      if (new URL(request.url).hostname === "api.elevenlabs.io") {
+        return new Response(ELEVENLABS_MP3_BYTES, {
+          headers: { "content-type": "audio/mpeg" },
+        });
+      }
+      return await hostedRunnerIntercept(
+        request,
+        env,
+        { containerId: "opaque-container-id" },
+      );
+    },
+    {
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "7",
+        providerEgressToken: PROVIDER_EGRESS_TOKEN,
+        userId: "member_123",
+        workspaceVersion: "4",
+      }),
+    },
+  );
 }
 
 async function readForwardedBody(request: Request): Promise<unknown> {
@@ -389,13 +423,17 @@ async function readForwardedBody(request: Request): Promise<unknown> {
   return { contentType };
 }
 
-function createProviderInterceptEnv(
+function createProviderInterceptEnv(input: {
+  validateRuntimeProviderEgressToken?: (input: {
+    providerEgressToken: string;
+    userId: string;
+  }) => Promise<WorkerProviderEgressTokenValidationResult>;
   validateRuntimeWriteFence: (input: {
     attemptId: string;
     generation: string;
     userId: string;
-  }) => Promise<boolean>,
-): RunnerOutboundEnvironmentSource {
+  }) => Promise<boolean>;
+}): RunnerOutboundEnvironmentSource {
   const env: RunnerOutboundEnvironmentSource = {
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
@@ -404,18 +442,38 @@ function createProviderInterceptEnv(
     USER_RUNNER: {
       getByName: () => ({
         validateRuntimeProviderEgressCredential: async () => ({ owns: false }),
-        validateRuntimeProviderEgressToken: async () => ({ owns: false }),
-        validateRuntimeWriteFence,
+        validateRuntimeProviderEgressToken:
+          input.validateRuntimeProviderEgressToken
+          ?? (async () => ({ owns: false })),
+        validateRuntimeWriteFence: input.validateRuntimeWriteFence,
       }),
     },
   };
   return env;
 }
 
+async function createProviderEgressTokenValidationResult(input: {
+  providerEgressToken: string;
+  userId: string;
+}): Promise<WorkerProviderEgressTokenValidationResult> {
+  expect(input).toEqual({
+    providerEgressToken: PROVIDER_EGRESS_TOKEN,
+    userId: "member_123",
+  });
+  return {
+    attemptId: "attempt_1",
+    leaseGeneration: "7",
+    owns: true,
+    userId: input.userId,
+    workspaceVersion: "4",
+  };
+}
+
 function assertAuthorityHeadersStripped(
   requests: readonly ForwardedRequest[],
 ): void {
   for (const request of requests) {
+    expect(request.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
     expect(request.headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe(false);
     expect(request.headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe(false);
     expect(request.headers.has(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe(false);

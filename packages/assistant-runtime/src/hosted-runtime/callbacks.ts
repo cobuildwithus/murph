@@ -998,6 +998,8 @@ function hostedAssistantReplyTargetsSignupWelcomeRecipient(
 }
 
 const HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX = "signup-welcome:";
+const HOSTED_LINQ_APP_CARD_REJECTED_FAILURE_CODE =
+  "ASSISTANT_LINQ_APP_CARD_REJECTED";
 const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
   "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
 
@@ -3013,6 +3015,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
+          onProviderDispatchSettledWithoutEffect: () => {
+            providerDispatchEntered = false;
+          },
           providerFetch: input.providerFetch,
           publicInternetFetch: input.publicInternetFetch,
           signal: input.signal,
@@ -3407,15 +3412,37 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
 function createHostedProviderFetchBoundary(input: {
   assertLive?: () => Promise<void>;
   assertProviderEntryLive?: () => Promise<void>;
+  handleProviderEntryError?: (error: unknown) => Response | null;
+  isReadOnlyProviderRequest?: (
+    request: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => boolean;
+  onReadOnlyProviderRequest?: () => Promise<void>;
   onProviderDispatchEntered?: () => Promise<void> | void;
+  onProviderEntryStarted?: () => void;
   onTelegramVoiceMemoDispatchEntered?: () => void;
   operation: string;
+  providerDispatchIdentity?: () => string | null;
   providerFetch: typeof fetch | null;
 }): typeof fetch {
   let providerEntryPromise: Promise<void> | null = null;
+  const providerEntryPromisesByIdentity = new Map<
+    string | null,
+    Promise<void>
+  >();
   const enterProviderDispatch = () => {
     if (!input.onProviderDispatchEntered) {
       return Promise.resolve();
+    }
+    if (input.providerDispatchIdentity) {
+      const identity = input.providerDispatchIdentity();
+      const existing = providerEntryPromisesByIdentity.get(identity);
+      if (existing) {
+        return existing;
+      }
+      const entering = Promise.resolve().then(input.onProviderDispatchEntered);
+      providerEntryPromisesByIdentity.set(identity, entering);
+      return entering;
     }
     providerEntryPromise ??= Promise.resolve().then(
       input.onProviderDispatchEntered,
@@ -3424,12 +3451,26 @@ function createHostedProviderFetchBoundary(input: {
   };
 
   return (async (request, init) => {
-    await (input.assertProviderEntryLive ?? input.assertLive)?.();
-    const fetchImplementation = requireHostedProviderFetch(
-      input.providerFetch,
-      input.operation,
-    );
-    await enterProviderDispatch();
+    input.onProviderEntryStarted?.();
+    let fetchImplementation: typeof fetch;
+    try {
+      await (input.assertProviderEntryLive ?? input.assertLive)?.();
+      fetchImplementation = requireHostedProviderFetch(
+        input.providerFetch,
+        input.operation,
+      );
+      if (input.isReadOnlyProviderRequest?.(request, init) === true) {
+        await input.onReadOnlyProviderRequest?.();
+      } else {
+        await enterProviderDispatch();
+      }
+    } catch (error) {
+      const handled = input.handleProviderEntryError?.(error) ?? null;
+      if (handled) {
+        return handled;
+      }
+      throw error;
+    }
     if (
       input.onTelegramVoiceMemoDispatchEntered &&
       isTelegramSendVoiceProviderFetchRequest(request)
@@ -3461,6 +3502,22 @@ function readProviderFetchRequestUrl(request: Parameters<typeof fetch>[0]): stri
     return request.toString();
   }
   return String(request);
+}
+
+function isHostedLinqCapabilityCheckProviderFetchRequest(
+  request: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1],
+): boolean {
+  try {
+    const url = new URL(readProviderFetchRequestUrl(request));
+    const method = (
+      init?.method ?? (request instanceof Request ? request.method : "GET")
+    ).toUpperCase();
+    return method === "POST"
+      && url.pathname.endsWith("/capability/check_imessage");
+  } catch {
+    return false;
+  }
 }
 
 function resolveHostedAssistantLinqDeliveryContexts(input: {
@@ -3496,6 +3553,7 @@ function createHostedAssistantLinqSendDependency(input: {
     acceptedAt: Date;
   }) => void;
   onProviderDispatchEntered?: () => void;
+  onProviderDispatchSettledWithoutEffect?: () => void;
   providerFetch: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
@@ -3594,10 +3652,51 @@ function createHostedAssistantLinqSendDependency(input: {
       vaultRoot: input.vaultRoot ?? null,
     });
     let attemptedAt: Date | null = null;
+    const providerEntryFailure: { current: { error: unknown } | null } = {
+      current: null,
+    };
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
       fetchImplementation: createHostedProviderFetchBoundary({
         assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
+        handleProviderEntryError: (error) => {
+          if (signal?.aborted === true) {
+            return null;
+          }
+          providerEntryFailure.current = { error };
+          return new Response(
+            JSON.stringify({ error: "Hosted Linq provider entry denied." }),
+            {
+              headers: { "content-type": "application/json" },
+              status: 403,
+            },
+          );
+        },
+        isReadOnlyProviderRequest:
+          isHostedLinqCapabilityCheckProviderFetchRequest,
+        onReadOnlyProviderRequest: async () => {
+          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+            answeredMailboxItemIds: request.answeredMailboxItemIds,
+            assistantAskFallback:
+              reviewedAssistantAskCompletion
+                ? isHostedReviewedAssistantAskFallbackPayload({
+                    media: request.media,
+                    message: request.message,
+                  })
+                : undefined,
+            authorityCheckOnly: true,
+            directRecipientPhoneNumber,
+            effectsPort: input.effectsPort ?? null,
+            fromPhoneNumber,
+            homeRouteFallbackAllowed: currentHomeRouteOnly,
+            idempotencyKey: effectiveIdempotencyKey,
+            intentId: input.intentId ?? null,
+            replyToMessageId: request.replyToMessageId ?? null,
+            signal: signal ?? null,
+            target: providerTarget,
+            targetKind: providerTargetKind,
+          });
+        },
         onProviderDispatchEntered: async () => {
           const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
             ? await prepareHostedReviewedAssistantAskProviderEntry({
@@ -3654,7 +3753,11 @@ function createHostedAssistantLinqSendDependency(input: {
           attemptedAt = new Date();
           input.onProviderDispatchEntered?.();
         },
+        onProviderEntryStarted: () => {
+          providerEntryFailure.current = null;
+        },
         operation: "Hosted assistant Linq delivery",
+        providerDispatchIdentity: () => effectiveIdempotencyKey,
         providerFetch: input.providerFetch,
       }),
       ...(signal ? { signal } : {}),
@@ -3722,6 +3825,38 @@ function createHostedAssistantLinqSendDependency(input: {
         ...(persistAppCardTextFallback
           ? {
               persistAppCardTextFallback: async (fallback) => {
+                if (
+                  attemptedAt
+                  && effectiveIdempotencyKey !== fallback.idempotencyKey
+                ) {
+                  await recordHostedAssistantLinqDeliveryOutcomeRequired({
+                    effectsPort: input.effectsPort ?? null,
+                    outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+                      attemptedAt,
+                      answeredMailboxItemIds: [],
+                      deliveryContext,
+                      directRecipientPhoneNumber:
+                        originalParticipantRecipientPhoneNumber,
+                      failedAt: new Date(),
+                      failureCode: HOSTED_LINQ_APP_CARD_REJECTED_FAILURE_CODE,
+                      failureReason: null,
+                      fromPhoneNumber,
+                      idempotencyKey: effectiveIdempotencyKey,
+                      intentId: input.intentId ?? null,
+                      providerTarget,
+                      providerThreadId: null,
+                      result: null,
+                      target: providerTarget,
+                      targetKind: providerTargetKind,
+                      threadIsDirect:
+                        input.threadIsDirect
+                        ?? deliveryContext?.threadIsDirect
+                        ?? null,
+                    }),
+                  });
+                  attemptedAt = null;
+                  input.onProviderDispatchSettledWithoutEffect?.();
+                }
                 await persistAppCardTextFallback(fallback);
                 effectiveIdempotencyKey = fallback.idempotencyKey;
               },
@@ -3729,6 +3864,9 @@ function createHostedAssistantLinqSendDependency(input: {
           : {}),
       });
     } catch (error) {
+      if (providerEntryFailure.current) {
+        throw providerEntryFailure.current.error;
+      }
       if (!attemptedAt) {
         throw error;
       }

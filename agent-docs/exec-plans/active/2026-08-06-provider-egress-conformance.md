@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Goal
 
@@ -18,6 +18,10 @@ Updated: 2026-08-06
 - In scope:
   - The existing exact Linq `POST /capability/check_imessage` allowlist entry.
   - A real Linq response-card client-through-interceptor regression.
+  - Hosted Linq provider-entry timing and identity: the read-only capability
+    lookup must not claim message dispatch, and a definitive card rejection
+    must settle the original identity before the persisted text fallback claims
+    its replacement identity.
   - Real hosted Telegram client calls for `sendMessage`, `sendPhoto`,
     `sendVoice`, `sendChatAction`, `deleteMessages`,
     `deleteBusinessMessages`, `setMessageReaction`, `getFile`, and the
@@ -42,6 +46,10 @@ Updated: 2026-08-06
 - Reuse the existing interceptor route-matrix coverage for direct allowlist
   testing and add one cross-boundary suite rather than introducing a provider
   framework.
+- Classify only the exact capability request as read-only inside the existing
+  hosted Linq fetch boundary. Keep one provider-entry claim per effective
+  idempotency key so the original card and a durably promoted fallback cannot
+  share stale authority or dispatch state.
 
 ## Verification
 
@@ -49,5 +57,8 @@ Updated: 2026-08-06
 - Focused Linq policy, interceptor, and provider-conformance tests.
 - Focused Telegram channel, operator-config runtime, and hosted provider-effect
   tests covering the same clients used by the conformance suite.
+- Hosted-runtime regressions for authority revocation during capability lookup,
+  capability-unavailable fallback ordering, definitive card rejection
+  settlement and replacement-identity claim, and pre-provider abort reset.
 - Documentation drift/gardening and `git diff --check`.
 - Exact-head required GitHub Actions and final review before closing this plan.
