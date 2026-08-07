@@ -89,6 +89,38 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
+        label="Paid plan lapsed while Stripe recovery is available"
+        state="lapsed-pulse"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="past_due"
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_monthly"
+            currentCheckoutOffer="standard"
+            showGroupPlan
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Family-sponsored member with billing owned by the sponsor"
+        state="family-sponsored"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_edge_monthly"
+            familyState="sponsored"
+            showGroupPlan
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
         label="Completed Edge upgrade awaiting billing sync"
         state="plan-update-pending"
       >

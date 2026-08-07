@@ -782,6 +782,10 @@ export async function sendAssistantMessageLocal(
           && actionApprovalPort != null
           && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
           && vaultFileSendTargetFingerprint !== null
+        const pendingVaultFilesAvailable =
+          input.deliverResponse === true
+          && currentAudienceReplyDeliveryAvailable
+          && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               computerToolsAvailable: hostedComputerToolsAvailable,
@@ -806,6 +810,7 @@ export async function sendAssistantMessageLocal(
                   acceptedInputItemsForProviderRequest,
                 ),
               messageInput: input,
+              pendingVaultFilesAvailable,
               route,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {

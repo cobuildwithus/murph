@@ -31,11 +31,15 @@ vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
     planningMocks.readAssistantCliSurfaceBootstrapContext,
   scopeAssistantCliSurfaceContractForAssistant: (input: {
     contract: string | null
+    researchAvailable?: boolean
   }) => input.contract === null
     ? null
     : input.contract
         .split('\n')
-        .filter((line) => !/^- `assistant style (?:show|set|reset)`/u.test(line))
+        .filter((line) =>
+          !/^- `assistant style (?:show|set|reset)`/u.test(line)
+          && (input.researchAvailable !== false || !/^- `research(?: |`)/u.test(line))
+        )
         .join('\n'),
 }))
 
@@ -117,6 +121,116 @@ afterEach(() => {
 })
 
 describe('assistant Codex turn planning', () => {
+  it('exposes grounded research guidance only when Exa is configured across conversation routes', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue([
+      'Murph CLI Contract:',
+      '- `research scout`: Search current human research.',
+    ].join('\n'))
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const preferenceContext = {
+      assistantPersona: null,
+      assistantPersonality: null,
+      assistantTone: null,
+      assistantVoice: null,
+    }
+    const profile = {
+      promptProfile: 'conversation' as const,
+      threadScope: 'session-thread' as const,
+      toolProfile: 'provider-turn' as const,
+    }
+    const promptTimeContext = {
+      currentLocalDate: '2026-08-06',
+      currentTimeZone: 'America/New_York',
+    }
+    const route = createRoute()
+    const resolvePlan = async (input: {
+      configured: boolean
+      group?: boolean
+      scheduled?: boolean
+    }) => {
+      const group = input.group ?? false
+      return await resolveAssistantRouteTurnPlan({
+        executionContext: group
+          ? {
+              hosted: {
+                dynamicContextPrompts: [],
+                memberId: 'member-research-fixture',
+                userEnvKeys: input.configured ? ['EXA_API_KEY'] : [],
+              },
+            }
+          : null,
+        input: {
+          ...createMessageInput(),
+          channel: 'telegram',
+          threadIsDirect: !group,
+          ...(input.scheduled
+            ? {
+                scheduledAutomationAuthority: {
+                  automationId: 'automation_research_fixture',
+                  occurrenceAt: '2026-08-06T13:00:00.000Z',
+                },
+                scheduledOccurrenceAt: '2026-08-06T13:00:00.000Z',
+                turnTrigger: 'automation-cron' as const,
+              }
+            : {}),
+        },
+        preferenceContext,
+        profile,
+        promptTimeContext,
+        route,
+        session: createSession(),
+        sharedPlan: createSharedPlan({
+          cliAccess: {
+            env: input.configured ? { EXA_API_KEY: 'configured-sentinel' } : {},
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+        }, {
+          channel: 'telegram',
+          effectiveThreadIsDirect: !group,
+          threadId: 'thread-test',
+          threadIsDirect: !group,
+        }),
+      })
+    }
+
+    for (const configuredPlan of await Promise.all([
+      resolvePlan({ configured: true }),
+      resolvePlan({ configured: true, group: true }),
+      resolvePlan({ configured: true, scheduled: true }),
+    ])) {
+      expect(configuredPlan.systemPrompt).toContain(
+        'Configured Exa research:',
+      )
+      expect(configuredPlan.systemPrompt).toContain(
+        '`resultIndex` maps to a result',
+      )
+      expect(configuredPlan.systemPrompt).toContain(
+        'no usable current source',
+      )
+      expect(configuredPlan.systemPrompt).toContain(
+        'Use `research scout-batch` for broad discovery or automation',
+      )
+      expect(configuredPlan.systemPrompt).toContain(
+        'never send a mode-less single-scout request',
+      )
+    }
+
+    for (const unavailablePlan of await Promise.all([
+      resolvePlan({ configured: false }),
+      resolvePlan({ configured: false, group: true }),
+      resolvePlan({ configured: false, scheduled: true }),
+    ])) {
+      expect(unavailablePlan.systemPrompt).not.toContain(
+        'Configured Exa research:',
+      )
+      expect(unavailablePlan.systemPrompt).not.toContain('`research scout`')
+    }
+  })
+
   it('does not expose per-turn route env in Codex execution plans', async () => {
     const plan = await buildCodexTurnExecutionPlan({
       input: {
@@ -2099,6 +2213,60 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
+  it('offers pending-file cancellation without approval-backed file sending', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [{
+        id: `ain_${'7'.repeat(32)}`,
+        source: 'manual',
+      }],
+      executionContext: {
+        hosted: {
+          memberId: 'member-pending-file-cancellation',
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        pendingVaultFilesAvailable: true,
+        vaultFileSendAvailable: false,
+      },
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        deliverResponse: true,
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-08-06',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: 'linq',
+        effectiveThreadIsDirect: true,
+        threadId: 'linq-direct-thread',
+        threadIsDirect: true,
+      }),
+    })
+
+    const toolNames = plan.dynamicTools.map((tool) => tool.name)
+    expect(toolNames).toContain('pending_vault_files')
+    expect(toolNames).not.toContain('send_vault_file')
+  })
+
   it('exposes labs to private ordinary turns, including scheduled work', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
@@ -2942,6 +3110,7 @@ describe('assistant Codex turn planning', () => {
       'create_clinical_records_connect_link',
       'family_plan',
       'labs',
+      'pending_vault_files',
       'plan_usage',
       'send_vault_file',
       'subscription',

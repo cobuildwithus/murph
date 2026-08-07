@@ -2104,6 +2104,187 @@ test('linq runtime does not retry an ambiguous attachment reservation failure', 
   expect(publicFetch).not.toHaveBeenCalled()
 })
 
+test('linq runtime preserves pre-provider yield provenance without retrying the reservation locally', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerSkippedError = Object.assign(
+    new Error('foreground work owns provider entry'),
+    {
+      assistantDeliveryFailureClass: 'transient' as const,
+      assistantDeliveryResumeTrigger: 'fresh_foreground_input' as const,
+      deliveryMayHaveSucceeded: false as const,
+      retryable: true as const,
+    },
+  )
+  const providerFetch = vi.fn(async () => {
+    throw providerSkippedError
+  })
+  const publicFetch = vi.fn(async () => new Response(null, { status: 204 }))
+
+  await assert.rejects(
+    () => uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+    (error) => error === providerSkippedError,
+  )
+
+  expect(providerSkippedError).toMatchObject({
+    assistantDeliveryFailureClass: 'transient',
+    assistantDeliveryResumeTrigger: 'fresh_foreground_input',
+    deliveryMayHaveSucceeded: false,
+    retryable: true,
+  })
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).not.toHaveBeenCalled()
+})
+
+test('linq runtime preserves post-reservation provenance without retrying the message locally', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () => {
+    throw Object.assign(new Error('foreground work owns provider entry'), {
+      linqAttachmentReservationMayHaveSucceeded: true as const,
+    })
+  })
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-post-reservation-yield',
+        idempotencyKey: 'post-reservation-yield',
+        message: 'Private media',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'transport' &&
+      error.context?.method === 'POST' &&
+      error.context?.operation === 'send_message' &&
+      error.context?.retryable === false &&
+      (error as VaultCliError & {
+        linqAttachmentReservationMayHaveSucceeded?: unknown
+      }).linqAttachmentReservationMayHaveSucceeded === true,
+  )
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+})
+
+test.each([
+  {
+    label: 'missing required fields',
+    payload: {
+      attachment_id: 'attachment_missing_upload_url',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+      },
+      detail: 'reservation-secret-value',
+    },
+  },
+  {
+    label: 'an unsupported upload method',
+    payload: {
+      attachment_id: 'attachment_unsupported_method',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'POST',
+      required_headers: {
+        'content-type': 'application/pdf',
+      },
+      detail: 'reservation-secret-value',
+      upload_url: 'https://uploads.example.test/upload/report',
+    },
+  },
+  {
+    label: 'empty required headers',
+    payload: {
+      attachment_id: 'attachment_empty_headers',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {},
+      detail: 'reservation-secret-value',
+      upload_url: 'https://uploads.example.test/upload/report',
+    },
+  },
+  {
+    label: 'all-blank required headers',
+    payload: {
+      attachment_id: 'attachment_blank_headers',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        '   ': '   ',
+        'content-type': '   ',
+      },
+      detail: 'reservation-secret-value',
+      upload_url: 'https://uploads.example.test/upload/report',
+    },
+  },
+])('linq runtime marks a successful reservation with $label as post-reservation ambiguity', async ({ payload }) => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () => createJsonResponse(payload))
+  const publicFetch = vi.fn(async () => new Response(null, { status: 204 }))
+  await assert.rejects(
+    () => uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+    (error) => {
+      if (!(error instanceof VaultCliError)) {
+        return false
+      }
+      expect(JSON.stringify({
+        context: error.context,
+        message: error.message,
+      })).not.toContain('reservation-secret-value')
+      return error.code === 'LINQ_API_REQUEST_FAILED' &&
+        error.context?.failureStage === 'http' &&
+        error.context?.method === 'POST' &&
+        error.context?.operation === 'create_attachment_upload' &&
+        error.context?.path === '/attachments' &&
+        error.context?.retryable === false &&
+        error.context?.status === 200 &&
+        (error as VaultCliError & {
+          deliveryMayHaveSucceeded?: unknown
+          retryable?: unknown
+        }).deliveryMayHaveSucceeded === true &&
+        (error as VaultCliError & { retryable?: unknown }).retryable === false
+    },
+  )
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).not.toHaveBeenCalled()
+})
+
 test('linq runtime fails closed when a presigned attachment PUT redirects', async () => {
   vi.useFakeTimers()
   const env = {
@@ -2215,7 +2396,7 @@ test('linq runtime falls back to provider fetch for attachment PUT when public f
   ])
 })
 
-test('linq runtime rejects unsafe attachment upload URLs before uploading bytes', async () => {
+test('linq runtime marks unsafe 2xx attachment upload URLs ambiguous before uploading bytes', async () => {
   const env = {
     LINQ_API_BASE_URL: ' https://linq.example.test/custom/ ',
     LINQ_API_TOKEN: ' linq-token ',
@@ -2249,8 +2430,15 @@ test('linq runtime rejects unsafe attachment upload URLs before uploading bytes'
       ),
     (error) =>
       error instanceof VaultCliError &&
-      error.code === 'LINQ_INVALID_INPUT' &&
-      error.message.includes('must use HTTPS'),
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.message.includes('must use HTTPS') &&
+      error.context?.failureStage === 'http' &&
+      error.context?.method === 'POST' &&
+      error.context?.operation === 'create_attachment_upload' &&
+      error.context?.status === 200 &&
+      (error as VaultCliError & {
+        deliveryMayHaveSucceeded?: unknown
+      }).deliveryMayHaveSucceeded === true,
   )
   expect(createFetch).toHaveBeenCalledTimes(1)
 
@@ -2287,8 +2475,15 @@ test('linq runtime rejects unsafe attachment upload URLs before uploading bytes'
       ),
     (error) =>
       error instanceof VaultCliError &&
-      error.code === 'LINQ_INVALID_INPUT' &&
-      error.message.includes('must use a public host'),
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.message.includes('must use a public host') &&
+      error.context?.failureStage === 'http' &&
+      error.context?.method === 'POST' &&
+      error.context?.operation === 'create_attachment_upload' &&
+      error.context?.status === 200 &&
+      (error as VaultCliError & {
+        deliveryMayHaveSucceeded?: unknown
+      }).deliveryMayHaveSucceeded === true,
   )
   expect(uploadFetch).not.toHaveBeenCalled()
 })

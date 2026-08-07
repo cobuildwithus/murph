@@ -1,6 +1,6 @@
 # Hosted sensitive-action approvals
 
-Last verified: 2026-07-10
+Last verified: 2026-08-06
 
 ## Purpose
 
@@ -61,6 +61,31 @@ The hosted assistant-configuration tool uses this path for model and reasoning c
 
 The runtime keeps the exact file-and-destination delivery intent in its own outbox as `awaiting_approval`. One active approval cycle owns one parked intent, keyed by the approval ID and cycle expiry, so repeating the same request in another turn reuses that owner. Web never reconstructs the effect from the approval row. A later approval wake names that exact cycle owner and observed approval generation, then only asks the runtime to re-read and dispatch that owner; it cannot select an older same-action owner or unrelated due delivery work. A delayed older-cycle wake cannot apply a refreshed generation. At assistant admission, a due reconciliation wake is selected by both its runtime-control route and its exact pending-effects kind. If re-reading approval produces that named delivery effect, it owns the pass and drains before simultaneously pending foreground chat. If the effect is denied, missing, superseded, or otherwise not deliverable, the runtime records the control receipt and continues the foreground assistant pass; every unrelated system wake remains queued. The normal pre-dispatch consume gate remains the authorization boundary. If Linq re-homes the delivery to a different final provider target, the runtime terminalizes the approved file intent before consumption or provider entry; sending to the new target requires a fresh action and approval. Ordinary text delivery may still use the current-home fallback. Background fallback reconciliation is a separate bounded path.
 
+An explicit current-user cleanup request may list or cancel only generated-file
+intents whose exact origin session matches the trusted current user-action
+scope. The cleanup capability depends on that current direct-reply authority,
+not on whether the approval service or a fresh file-send target is available,
+so an already parked intent remains cancellable during approval-service
+degradation. A list returns the oldest 20 matching intents and the complete
+matching count. Explicit cancel-all handling is bounded to five list/cancel
+batches and reports any remainder or per-intent failure instead of looping
+indefinitely. Cancellation may compare-and-set an intent from
+`awaiting_approval` to terminal `abandoned`; the persistence result identifies
+whether that exact transition won. One concurrent approval refresh may be
+retried, while a concurrent terminal owner is reported from its observed state.
+Once delivery preparation or dispatch advances the outbox owner, cancellation
+refuses. The outbox remains the effect owner:
+cancellation adds no approval-row state and does not rewrite the historical
+approval decision, so a delayed approval observation cannot revive an intent
+that cancellation already terminalized. Cancellation-coded abandonment also
+does not repair the initiating turn receipt: that receipt continues to describe
+the approval-link reply that was actually delivered, while the cancellation
+turn reports its own result. Cancellation does not unlink files.
+The existing quiescent runtime-residue pass remains the sole byte-deletion
+owner and applies its complete inventory and fingerprint contract before the
+next encrypted workspace checkpoint. Canonical and user-owned vault files
+remain outside that cleanup authority.
+
 ## Browser decision flow
 
 1. `/approve/:approvalId` requires the owning member's active hosted app session before showing details.
@@ -76,6 +101,11 @@ The runtime keeps the exact file-and-destination delivery intent in its own outb
 The mailbox row is a durable shoulder tap, not authorization evidence or outcome payload. The runtime observes the outcome through `actionApprovalPort.read()`, whose read-only result includes the current opaque approval-cycle owner for every status. The runtime refuses to apply an observation to a different parked owner, then consumes the matching approved generation again at the final delivery boundary.
 
 Consumption closes the authorization generation against replay but does not rewrite the member's historical decision. Runtime approval reads and later consume attempts therefore report the consumed generation as expired, while the member-facing approval page continues to present that row as approved. A genuinely elapsed, unconsumed approval still presents as expired.
+
+The browser records only the approval decision. Its pending and approved states
+state that Murph continues only while the runtime still has the request pending;
+a cancellation from the conversation remains authoritative, and an old approval
+link cannot reactivate the cancelled delivery.
 
 ## Asynchronous outcome primitives
 

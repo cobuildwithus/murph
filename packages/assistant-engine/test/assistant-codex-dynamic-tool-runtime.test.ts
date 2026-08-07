@@ -431,6 +431,72 @@ describe('Codex dynamic tool runtime routing', () => {
     expect(executionOrder).toEqual([2, 8])
   })
 
+  it('serializes pending-file listing and cancellation in provider command order', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-pending-file-order-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-pending-file-order-home-',
+    )
+    const firstStarted = createDeferred<void>()
+    const releaseFirst = createDeferred<void>()
+    const executionOrder: string[] = []
+    codexMocks.onDynamicToolCall = async ({ kind }) => {
+      if (
+        kind !== 'pending-vault-files-list'
+        && kind !== 'pending-vault-files-cancel'
+      ) {
+        return
+      }
+      executionOrder.push(kind)
+      if (kind === 'pending-vault-files-list') {
+        firstStarted.resolve()
+        await releaseFirst.promise
+      }
+    }
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void runScriptedOverlappingPendingVaultFilesTurn(child)
+      })
+      return child
+    })
+
+    const turn = executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      dynamicTools: resolveMurphDynamicTools({
+        pendingVaultFilesAvailable: true,
+      }),
+      env: {
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      prompt: 'List and cancel one pending generated file.',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    await firstStarted.promise
+    await Promise.resolve()
+    const orderWhileFirstWasPending = [...executionOrder]
+    releaseFirst.resolve()
+
+    await expect(turn).resolves.toMatchObject({
+      finalMessage: 'pending file ordered',
+      threadId: 'thread-pending-file-order',
+      turnId: 'turn-pending-file-order',
+    })
+    expect(orderWhileFirstWasPending).toEqual([
+      'pending-vault-files-list',
+    ])
+    expect(executionOrder).toEqual([
+      'pending-vault-files-list',
+      'pending-vault-files-cancel',
+    ])
+  })
+
   it('keeps invalid computer calls in the serialized provider command order', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-invalid-computer-order-work-',
@@ -493,6 +559,71 @@ describe('Codex dynamic tool runtime routing', () => {
     ])
   })
 })
+
+async function runScriptedOverlappingPendingVaultFilesTurn(
+  child: MockChildProcess,
+): Promise<void> {
+  const initialize = await child.waitForRpcMethod('initialize')
+  child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  const threadStart = await child.waitForRpcMethod('thread/start')
+  child.stdout.write(jsonLine({
+    id: threadStart.id,
+    result: { thread: { id: 'thread-pending-file-order' } },
+  }))
+  const turnStart = await child.waitForRpcMethod('turn/start')
+  child.stdout.write(jsonLine({
+    id: turnStart.id,
+    result: { turn: { id: 'turn-pending-file-order' } },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/started',
+    params: { turn: { id: 'turn-pending-file-order' } },
+  }))
+
+  child.stdout.write(jsonLine({
+    id: 31,
+    method: 'item/tool/call',
+    params: {
+      arguments: { action: 'list' },
+      namespace: 'murph',
+      threadId: 'thread-pending-file-order',
+      tool: 'pending_vault_files',
+      turnId: 'turn-pending-file-order',
+    },
+  }))
+  child.stdout.write(jsonLine({
+    id: 32,
+    method: 'item/tool/call',
+    params: {
+      arguments: {
+        action: 'cancel',
+        intentIds: [`outbox_${'a'.repeat(32)}`],
+      },
+      namespace: 'murph',
+      threadId: 'thread-pending-file-order',
+      tool: 'pending_vault_files',
+      turnId: 'turn-pending-file-order',
+    },
+  }))
+  await child.waitForRpcId(31)
+  await child.waitForRpcId(32)
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        id: 'assistant-pending-file-order',
+        message: 'pending file ordered',
+        type: 'assistant_message',
+      },
+    },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      turn: { id: 'turn-pending-file-order', status: 'completed' },
+    },
+  }))
+}
 
 async function runScriptedRequestContextTurn(
   child: MockChildProcess,

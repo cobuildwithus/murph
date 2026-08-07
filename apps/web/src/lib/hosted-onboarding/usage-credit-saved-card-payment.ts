@@ -759,6 +759,23 @@ async function cancelUnboundHostedUsageCreditDirectPaymentIntent(input: {
   });
 }
 
+export function canCancelHostedUsageCreditDirectPayment(
+  purchase: Pick<
+    HostedUsageCreditPurchase,
+    | "status"
+    | "stripeCheckoutSessionLookupKey"
+    | "stripePaymentIntentIdEncrypted"
+    | "stripePaymentIntentLookupKey"
+  >,
+): boolean {
+  return purchase.status === HostedUsageCreditPurchaseStatus.payment_pending &&
+    !purchase.stripeCheckoutSessionLookupKey &&
+    Boolean(
+      purchase.stripePaymentIntentIdEncrypted &&
+      purchase.stripePaymentIntentLookupKey,
+    );
+}
+
 export async function cancelHostedUsageCreditDirectPayment(input: {
   groupBeneficiaryMemberId?: string;
   now: Date;

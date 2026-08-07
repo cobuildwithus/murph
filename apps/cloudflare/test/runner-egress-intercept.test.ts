@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
-  buildExaResearchScoutRequest,
+  buildExaResearchScoutBatchLaneRequest,
   MAX_RESEARCH_SCOUT_CANDIDATES,
 } from "@murphai/contracts";
 
@@ -125,7 +125,7 @@ function createHostedExaResearchScoutRequestBody(
       ? overrideNumResults
       : MAX_RESEARCH_SCOUT_CANDIDATES;
   return {
-    ...buildExaResearchScoutRequest({
+    ...buildExaResearchScoutBatchLaneRequest({
       profile: {
         topics: ["sleep", "metabolic health"],
         biomarkers: ["glucose", "hs-crp"],

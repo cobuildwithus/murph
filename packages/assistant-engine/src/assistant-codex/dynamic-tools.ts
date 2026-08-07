@@ -167,6 +167,11 @@ import {
   type LabsDynamicToolRequest,
 } from './dynamic-tools/labs.js'
 import {
+  executePendingVaultFilesDynamicTool,
+  readPendingVaultFilesDynamicToolRequest,
+  type PendingVaultFilesDynamicToolRequest,
+} from './dynamic-tools/pending-vault-files.js'
+import {
   executeGroupRoomModelDynamicTool,
   readGroupRoomModelDynamicToolRequest,
   type GroupRoomModelDynamicToolRequest,
@@ -975,6 +980,7 @@ export type MurphDynamicToolRequest =
   | AutomationDynamicToolRequest
   | DeviceDynamicToolRequest
   | LabsDynamicToolRequest
+  | PendingVaultFilesDynamicToolRequest
   | GroupRoomModelDynamicToolRequest
   | AssistantStyleDynamicToolRequest
   | {
@@ -1215,6 +1221,14 @@ export function readMurphDynamicToolRequest(
   })
   if (labsRequest) {
     return labsRequest
+  }
+
+  const pendingVaultFilesRequest = readPendingVaultFilesDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (pendingVaultFilesRequest) {
+    return pendingVaultFilesRequest
   }
 
   const groupRoomModelRequest = readGroupRoomModelDynamicToolRequest({
@@ -1698,6 +1712,7 @@ export async function executeMurphDynamicToolRequest(input: {
   hostedToolContext?: AssistantHostedToolContext | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
+  onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   deliveryContextOrdinal?: number | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   progressDelivery: AssistantProgressDelivery | null
@@ -1726,6 +1741,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid device arguments')
     case 'invalid-labs-arguments':
       return toolTextResult(false, 'invalid labs arguments')
+    case 'invalid-pending-vault-files-arguments':
+      return toolTextResult(false, 'invalid pending vault-file arguments')
     case 'invalid-group-room-model-arguments':
       return toolTextResult(false, 'invalid group room-model arguments')
     case 'invalid-connected-apps-arguments':
@@ -1860,6 +1877,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeAutomationDynamicTool({
         abortSignal: input.abortSignal ?? null,
         automationTool,
+        onboardingFirstReadCompletionTransitionAvailable:
+          input.onboardingFirstReadCompletionTransitionAvailable ?? false,
         request: input.request,
       })
     }
@@ -1901,6 +1920,14 @@ export async function executeMurphDynamicToolRequest(input: {
         request: input.request,
       })
     }
+    case 'pending-vault-files-list':
+    case 'pending-vault-files-cancel':
+      return await executePendingVaultFilesDynamicTool({
+        request: input.request,
+        userActionScope:
+          input.hostedToolContext?.currentUserActionScope?.() ?? null,
+        vaultRoot: input.vaultRoot?.trim() || null,
+      })
     case 'assistant-style': {
       const hostedToolContext = input.hostedToolContext ?? null
       return await executeAssistantStyleDynamicTool({
