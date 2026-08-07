@@ -11,6 +11,7 @@ export const HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT = 3;
 export const HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT = 6;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_SOURCES_PER_ITEM = 4;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_CANDIDATES = 48;
+const HEALTH_COMMONS_KNOWLEDGE_MAX_TOPICS = 32;
 
 export type HealthCommonsKnowledgeItemKind =
   | "appraisal"
@@ -138,7 +139,8 @@ export function searchHealthCommonsKnowledgeIndex(input: {
     Math.max(Math.trunc(input.limit ?? HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT), 1),
     HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT,
   );
-  const ftsQuery = toFtsQuery(query);
+  const topicQuery = toFtsQuery(query, "topic_text");
+  const contentQuery = toFtsQuery(query, "search_text");
   const database = openKnowledgeDatabase(input.databasePath, true);
   try {
     const version = Number(database.prepare("PRAGMA user_version").get()?.user_version ?? 0);
@@ -148,16 +150,36 @@ export function searchHealthCommonsKnowledgeIndex(input: {
     const catalogHashRow = database
       .prepare("SELECT value FROM metadata WHERE key = 'catalog_hash'")
       .get();
+    const topicRows = database.prepare(`
+      SELECT DISTINCT c.entity_key
+      FROM chunks_fts
+      JOIN chunks c ON c.rowid = chunks_fts.rowid
+      WHERE chunks_fts MATCH ?
+      ORDER BY c.entity_key ASC
+      LIMIT ?
+    `).all(topicQuery, HEALTH_COMMONS_KNOWLEDGE_MAX_TOPICS);
+    const entityKeys = topicRows.map((row) => String(row["entity_key"]));
+    if (entityKeys.length === 0) {
+      return {
+        catalogHash: String(catalogHashRow?.["value"] ?? ""),
+        items: [],
+        query,
+        safety: null,
+      };
+    }
+    const placeholders = entityKeys.map(() => "?").join(", ");
     const candidateRows = database.prepare(`
       SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
              c.strength, c.sources_json, c.priority, bm25(chunks_fts) AS rank
       FROM chunks_fts
       JOIN chunks c ON c.rowid = chunks_fts.rowid
       WHERE chunks_fts MATCH ? AND c.kind <> 'safety'
-      ORDER BY rank ASC, c.priority ASC, c.id ASC
+        AND c.entity_key IN (${placeholders})
+      ORDER BY c.priority ASC, rank ASC, c.id ASC
       LIMIT ?
     `).all(
-      ftsQuery,
+      contentQuery,
+      ...entityKeys,
       Math.min(limit * 8, HEALTH_COMMONS_KNOWLEDGE_MAX_CANDIDATES),
     );
     const rows = selectDiverseKnowledgeRows(candidateRows, limit);
@@ -169,9 +191,10 @@ export function searchHealthCommonsKnowledgeIndex(input: {
       FROM chunks_fts
       JOIN chunks c ON c.rowid = chunks_fts.rowid
       WHERE chunks_fts MATCH ? AND c.kind = 'safety'
+        AND c.entity_key IN (${placeholders})
       ORDER BY c.priority ASC, bm25(chunks_fts) ASC, c.id ASC
       LIMIT 1
-    `).get(ftsQuery);
+    `).get(contentQuery, ...entityKeys);
     const safety = safetyRow ? readKnowledgeRow(safetyRow) : null;
 
     return {
@@ -278,7 +301,8 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
   const chunks: KnowledgeChunk[] = [];
 
   for (const entity of catalog.entities) {
-    const entityTitle = entitySearchText(entity);
+    const entityTopic = entityTopicText(entity);
+    const entityTitle = entity.title;
     if (entity.summary && entity.entityType !== "source_artifact") {
       const text = entity.researchLandscape?.bottomLine ?? entity.summary;
       chunks.push({
@@ -288,11 +312,11 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
         id: `overview:${entity.key}`,
         kind: "overview",
         priority: overviewPriority(entity),
-        searchText: `${entityTitle} ${text} ${entity.researchLandscape?.mainCaveat ?? ""}`,
+        searchText: `${entityTopic} ${text} ${entity.researchLandscape?.mainCaveat ?? ""}`,
         sources: [],
         strength: entity.researchLandscape?.confidenceLabel ?? null,
         text,
-        topicText: entityTitle,
+        topicText: entityTopic,
       });
     }
     for (const [claimIndex, claim] of (entity.claims ?? []).entries()) {
@@ -303,11 +327,11 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
         id: `claim:${entity.key}:${claim.claimId}:${claimIndex}`,
         kind: claim.type === "safety" ? "safety" : "claim",
         priority: claim.type === "safety" ? 5 : 20,
-        searchText: `${entityTitle} ${sourceTitles(claim.sourceKeys ?? [], entitiesByKey)} ${claim.text} ${(claim.caveats ?? []).join(" ")}`,
+        searchText: `${entityTopic} ${claim.text} ${(claim.caveats ?? []).join(" ")}`,
         sources: resolveSources(claim.sourceKeys ?? [], entitiesByKey),
         strength: claim.strength,
         text: claim.text,
-        topicText: `${entityTitle} ${sourceTitles(claim.sourceKeys ?? [], entitiesByKey)}`,
+        topicText: entityTopic,
       });
     }
     for (const [findingIndex, finding] of (entity.sourceFindings ?? []).entries()) {
@@ -320,11 +344,11 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
         id: `finding:${entity.key}:${finding.findingId}:${findingIndex}`,
         kind: safetyFinding ? "safety" : "source_finding",
         priority: safetyFinding ? 10 : 25,
-        searchText: `${entityTitle} ${finding.summary ?? finding.outcome ?? ""}`,
+        searchText: `${entityTopic} ${finding.summary ?? finding.outcome ?? ""}`,
         sources: resolveSources([entity.key], entitiesByKey),
         strength: null,
         text: finding.summary ?? finding.outcome ?? "",
-        topicText: entityTitle,
+        topicText: entityTopic,
       });
     }
     if (entity.safety) {
@@ -341,11 +365,11 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
           id: `safety:${entity.key}`,
           kind: "safety",
           priority: 5,
-          searchText: `${entityTitle} ${safetyText}`,
+          searchText: `${entityTopic} ${safetyText}`,
           sources: resolveSources(collectEntitySourceKeys(entity), entitiesByKey),
           strength: entity.safety.cautionLevel,
           text: safetyText,
-          topicText: entityTitle,
+          topicText: entityTopic,
         });
       }
     }
@@ -354,7 +378,7 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
   for (const [appraisalIndex, appraisal] of catalog.evidenceAppraisals.entries()) {
     const target = entitiesByKey.get(appraisal.targetKey);
     const source = entitiesByKey.get(appraisal.sourceKey);
-    const topicText = [target?.title, source?.title].filter(Boolean).join(" ");
+    const topicText = target ? entityTopicText(target) : source ? entityTopicText(source) : "";
     const safetyAppraisal = appraisal.stance === "safety_boundary"
       || /\bsafety-only\b/iu.test(`${appraisal.headline} ${appraisal.implication}`);
     chunks.push({
@@ -364,7 +388,7 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
       id: `appraisal:${appraisal.key}:${appraisalIndex}`,
       kind: safetyAppraisal ? "safety" : "appraisal",
       priority: safetyAppraisal ? 10 : evidencePriority(source),
-      searchText: `${topicText} ${appraisal.headline} ${appraisal.implication} ${appraisal.caveat ?? ""}`,
+      searchText: `${topicText} ${source?.title ?? ""} ${appraisal.headline} ${appraisal.implication} ${appraisal.caveat ?? ""}`,
       sources: resolveSources([appraisal.sourceKey], entitiesByKey),
       strength: appraisal.result,
       text: `${appraisal.headline} ${appraisal.implication}`,
@@ -416,16 +440,6 @@ function collectEntitySourceKeys(entity: HealthCommonsCatalogEntity): string[] {
   ])];
 }
 
-function sourceTitles(
-  sourceKeys: readonly string[],
-  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
-): string {
-  return [...new Set(sourceKeys)]
-    .map((sourceKey) => entitiesByKey.get(sourceKey)?.title)
-    .filter((title): title is string => Boolean(title))
-    .join(" ");
-}
-
 function evidencePriority(source: HealthCommonsCatalogEntity | undefined): number {
   switch (source?.researchEvidence?.designKind) {
     case "systematic_review":
@@ -451,11 +465,11 @@ function overviewPriority(entity: HealthCommonsCatalogEntity): number {
   return entity.entityType === "source_artifact" ? 40 : 30;
 }
 
-function entitySearchText(entity: HealthCommonsCatalogEntity): string {
-  return entity.title;
+function entityTopicText(entity: HealthCommonsCatalogEntity): string {
+  return [entity.title, ...(entity.aliases ?? [])].join(" ");
 }
 
-function toFtsQuery(query: string): string {
+function toFtsQuery(query: string, column: "search_text" | "topic_text"): string {
   const tokens = searchTokens(query);
   if (tokens.length === 0) {
     throw new Error("Health Commons knowledge query needs at least one searchable term.");
@@ -470,7 +484,7 @@ function toFtsQuery(query: string): string {
     }
     return [`"${tokens[index - 1]} ${token}"`];
   });
-  return `topic_text : ${terms[0]} AND search_text : (${[
+  return `${column} : (${[
     ...terms,
     ...qualifierPhrases,
   ].join(" AND ")})`;

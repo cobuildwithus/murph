@@ -2335,7 +2335,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain('Supported experiment protocols:')
     expect(prompt).toContain('Health Commons tools:')
     expect(prompt).toContain(
-      '`vault-cli commons knowledge search "<topic first; 2-5 terms>" --format json`',
+      '`vault-cli commons knowledge search "<topic only; 1-5 terms>" --format json`',
     )
     expect(prompt).toContain(
       'Skip trivial/non-health.',
