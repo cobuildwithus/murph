@@ -198,6 +198,11 @@ export interface RunnerContainerEnsureReadyForProcessingResult {
   kind: "ready";
 }
 
+export interface RunnerContainerPrewarmShellResult {
+  action: "already_started" | "start_issued";
+  kind: "started";
+}
+
 interface HostedExecutionContainerRunnerInput {
   job: HostedExecutionRunnerJobInput;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
@@ -218,6 +223,9 @@ export interface HostedExecutionContainerStubLike {
   ensureReadyForProcessing?(
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
+  prewarmShell?(
+    input: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerPrewarmShellResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
@@ -721,6 +729,40 @@ export class RunnerContainer extends Container {
           AbortSignal.timeout(input.timeoutMs),
         );
         return { action, kind: "ready" };
+      } finally {
+        if (this.currentLogContext === logContext) {
+          this.currentLogContext = null;
+        }
+      }
+    });
+  }
+
+  /**
+   * Issues only the platform container start command. The ordinary processing
+   * owner later performs port and health readiness before invoking workspace
+   * work; this hint never reads a workspace or creates a runtime fence.
+   */
+  async prewarmShell(
+    payload: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerPrewarmShellResult> {
+    this.noteContainerInteraction();
+    const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+    return await this.withLifecycleLock(async () => {
+      const status = readContainerStatus(await this.getState());
+      if (!isRunnerContainerStopped(status)) {
+        return { action: "already_started", kind: "started" };
+      }
+
+      const logContext: RunnerContainerLogContext = {
+        userId: input.userId,
+      };
+      this.currentLogContext = logContext;
+      try {
+        await this.start(undefined, {
+          portToCheck: RUNNER_PORT,
+          signal: AbortSignal.timeout(input.timeoutMs),
+        });
+        return { action: "start_issued", kind: "started" };
       } finally {
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;

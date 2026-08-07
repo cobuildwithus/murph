@@ -1545,6 +1545,44 @@ describe("RunnerContainer", () => {
     expect(executeCalls).toHaveLength(0);
   });
 
+  it("prewarmShell issues startup without waiting for ports or invoking workspace work", async () => {
+    const { container, containerFetch, start, startAndWaitForPorts } =
+      createContainerDouble();
+
+    await expect(container.prewarmShell({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "start_issued",
+      kind: "started",
+    });
+
+    expect(start).toHaveBeenCalledOnce();
+    expect(start.mock.calls[0]?.[1]).toMatchObject({
+      portToCheck: 8080,
+      signal: expect.any(AbortSignal),
+    });
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+  });
+
+  it("prewarmShell leaves an already-started shell untouched", async () => {
+    const { container, start, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+    });
+
+    await expect(container.prewarmShell({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "already_started",
+      kind: "started",
+    });
+
+    expect(start).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
   it("reuses immediate startup readiness proof for the following workspace invocation", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 
@@ -8653,6 +8691,7 @@ interface CreateContainerDoubleInput {
   getState?: ReturnType<typeof vi.fn>;
   initialStatus?: "running" | "stopped" | "stopped_with_code";
   platformRunning?: boolean;
+  start?: ReturnType<typeof vi.fn>;
   storage?: ContainerStorageDouble;
   startAndWaitForPorts?: ReturnType<typeof vi.fn>;
   state?: Record<string, unknown>;
@@ -8715,11 +8754,15 @@ function createContainerDouble(input: CreateContainerDoubleInput = {}) {
   const startAndWaitForPorts = input.startAndWaitForPorts ?? vi.fn(async () => {
     currentStatus = "running";
   });
+  const start = input.start ?? vi.fn(async () => {
+    currentStatus = "running";
+  });
 
   Object.assign(container, {
     containerFetch,
     destroy,
     getState,
+    start,
     startAndWaitForPorts,
     storage,
   });
@@ -8730,6 +8773,7 @@ function createContainerDouble(input: CreateContainerDoubleInput = {}) {
     destroy,
     getState,
     storage,
+    start,
     startAndWaitForPorts,
   };
 }

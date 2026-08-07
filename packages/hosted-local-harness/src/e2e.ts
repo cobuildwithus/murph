@@ -410,6 +410,19 @@ export function resolveHostedLocalE2eScenarios(
     .filter((name) => name.length > 0);
   const normalizedNames = requestedNames.length > 0 ? requestedNames : ["all"];
 
+  if (
+    process.env.CI === "true"
+    && process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1"
+    && normalizedNames.length === 1
+    && normalizedNames[0] === "foreground-reply-priority"
+  ) {
+    return [{
+      file: "apps/cloudflare/test/hosted-local-cold-start-benchmark-e2e.test.ts",
+      name: "foreground-reply-priority",
+      testControls: true,
+    }];
+  }
+
   if (normalizedNames.includes("all")) {
     if (normalizedNames.length > 1) {
       throw new Error("The hosted-local E2E 'all' selection cannot be combined with named scenarios.");
