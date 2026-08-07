@@ -2208,9 +2208,13 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const neverReady = new Promise<never>(() => undefined);
+    let readinessStartedAt: number | null = null;
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
-    >(async () => await neverReady);
+    >(async () => {
+      readinessStartedAt = Date.now();
+      return await neverReady;
+    });
     const { invoke, runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       workspace: createWorkspaceState({ version: "5" }),
@@ -2226,11 +2230,14 @@ describe("HostedUserRunner execution coordination", () => {
       timeoutMs: 8_000,
       userId: TEST_USER_ID,
     }));
+    if (readinessStartedAt === null) {
+      throw new Error("Expected startup readiness to begin.");
+    }
 
     await vi.advanceTimersByTimeAsync(8_000);
     await expect(response).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:18.050Z",
+      retryAt: new Date(readinessStartedAt + 18_000).toISOString(),
     });
 
     expect(invoke).not.toHaveBeenCalled();
