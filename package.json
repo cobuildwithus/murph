@@ -55,6 +55,7 @@
     "hosted-crypto:guard": "node scripts/check-hosted-crypto-hardcut.mjs",
     "hosted-temporal:guard": "tsx scripts/check-hosted-temporal-orchestration-guards.ts",
     "logs:guard": "tsx scripts/check-raw-health-log-payloads.ts",
+    "stripe-requests:guard": "tsx scripts/check-stripe-request-spreads.ts",
     "no-js": "pnpm clean:source-sidecars && tsx scripts/check-no-js.ts",
     "docs:drift": "bash scripts/check-agent-docs-drift.sh",
     "docs:gardening": "bash scripts/doc-gardening.sh --fail-on-issues",
