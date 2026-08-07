@@ -156,7 +156,6 @@ const unsafePublicResearchQuestionPatterns = [
   /\b(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+[a-z]{2,24}(?:\/\S*)?\b/iu,
   /(?<!\d)\+?(?:\d[\s().-]*){9,}\d(?!\d)/u,
   /\b(?:dob|date of birth|birthdate|born on)\b/iu,
-  /\b(?:i|my|mine|me|i'm|i've|i have|i am|i was|i take|i use|i weigh|i should|i can|i could|i would|should i|can i|could i|would i)\b/iu,
   /\b(?:member|patient|user)[-_ ]?id\b/iu,
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu,
   /\b(?:appointment|medical record|clinical note|mychart|street address)\b/iu,
@@ -169,6 +168,10 @@ const unsafePublicResearchQuestionPatterns = [
   /\b\d+(?:\.\d+)?\s*%/u,
   /\b(?:a1c|hba1c|ldl|hdl|apo\s?b|hs-?crp|crp|glucose|triglycerides?|tsh|ferritin|vitamin d|25-?oh|testosterone|cortisol|alt|ast|egfr|gfr|creatinine|hemoglobin|platelets?)\b[^a-z0-9]{0,12}\d+(?:\.\d+)?\b/iu,
 ] as const;
+
+const unsafePublicResearchFirstPersonPattern =
+  /\b(?:i|my|mine|me|i'm|i've|i have|i am|i was|i take|i use|i weigh|i should|i can|i could|i would|should i|can i|could i|would i)\b/iu;
+const scientificRomanNumeralIPattern = /\b(?:phase|type|complex)\s+i\b/giu;
 
 const researchScoutCategoryTagPattern = /^[a-z0-9](?:[a-z0-9 /-]*[a-z0-9])?$/u;
 type ResearchScoutProfileField =
@@ -197,7 +200,16 @@ export function isSafePublicResearchQuestion(value: string): boolean {
   if (question.split(/\s+/u).length > 80) {
     return false;
   }
-  return !unsafePublicResearchQuestionPatterns.some((pattern) => pattern.test(question));
+  if (unsafePublicResearchQuestionPatterns.some((pattern) => pattern.test(question))) {
+    return false;
+  }
+  const questionWithoutScientificRomanNumerals = question.replace(
+    scientificRomanNumeralIPattern,
+    "",
+  );
+  return !unsafePublicResearchFirstPersonPattern.test(
+    questionWithoutScientificRomanNumerals,
+  );
 }
 
 const unsafeResearchScoutTagMessage =

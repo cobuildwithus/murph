@@ -4736,7 +4736,7 @@
                       "properties": {
                         "input": {
                           "type": "string",
-                          "description": "Compact tag-profile JSON in @file.json form or - for stdin. Use bucket fields: topics, biomarkers, behaviors, supplements, conditionsOrConcerns, goals, activeExperiments. Do not include raw labs, names, dates of birth, full notes, or medical records."
+                          "description": "Focused public question JSON such as {\"question\":\"...\"}, or compact tag-profile JSON using topics, biomarkers, behaviors, supplements, conditionsOrConcerns, goals, and activeExperiments. Pass @file.json or - for stdin. Do not include private notes, contacts, identifiers, credentials, exact personal measurements, or medical records."
                         },
                         "since": {
                           "type": "string",
@@ -4767,7 +4767,7 @@
                       "properties": {
                         "input": {
                           "type": "string",
-                          "description": "Compact lane JSON in @file.json form or - for stdin. Use {\"lanes\":[{\"label\":\"sleep\",\"profile\":{\"topics\":[\"sleep\"]}}]}. Lane profiles use the same bucket fields as research scout and must not include raw labs, names, dates of birth, full notes, or medical records."
+                          "description": "Compact lane JSON in @file.json form or - for stdin. Use {\"lanes\":[{\"label\":\"sleep\",\"profile\":{\"topics\":[\"sleep\"]}}]}. Lane profiles accept compact bucket fields only and must not include focused questions, raw labs, names, dates of birth, full notes, or medical records."
                         },
                         "since": {
                           "type": "string",

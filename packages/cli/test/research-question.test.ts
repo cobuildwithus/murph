@@ -8,6 +8,7 @@ import {
 import {
   fetchExaResearchScoutCandidates,
 } from '../src/research-scout-client.js'
+import { vaultCliCommandDescriptors } from '../src/vault-cli-command-manifest.js'
 
 const QUESTION_PROFILE = {
   question:
@@ -67,6 +68,36 @@ describe('focused public research questions', () => {
     expect(help).toContain(
       'Preserve public study titles, researcher names, institutions, and other public entities',
     )
+  })
+
+  it('keeps the static command manifest aligned with both supported scout inputs', () => {
+    const researchDescriptor = vaultCliCommandDescriptors.find(
+      (descriptor) => descriptor.id === 'research',
+    )
+    if (
+      !researchDescriptor
+      || !('leafCommands' in researchDescriptor)
+      || !researchDescriptor.leafCommands
+    ) {
+      throw new Error('Expected the research command descriptor to define leaf commands.')
+    }
+
+    const payloadSchema = researchDescriptor.leafCommands.find(
+      (command) => command.path.join(' ') === 'research payload-schema',
+    )
+    const scout = researchDescriptor.leafCommands.find(
+      (command) => command.path.join(' ') === 'research scout',
+    )
+    if (!scout || !('hint' in scout)) {
+      throw new Error('Expected the research scout descriptor to define a hint.')
+    }
+
+    expect(payloadSchema?.description).toContain('focused-question')
+    expect(payloadSchema?.description).toContain('compact tag-profile')
+    expect(scout?.description).toContain('focused public question')
+    expect(scout?.description).toContain('compact non-identifying tag profile')
+    expect(scout?.hint).toContain('{"question":"..."}')
+    expect(scout?.hint).not.toContain('tag profile only')
   })
 
   it('gives actionable guidance for invalid focused-question input', () => {

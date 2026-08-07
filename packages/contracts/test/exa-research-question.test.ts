@@ -32,6 +32,9 @@ const ALLOWED_PUBLIC_QUESTIONS = [
   "What changed in human research from 2010-2020 about creatine and cognition?",
   "What changed in human research from 2010 - 2020 about creatine and cognition?",
   "What should we do about sleep deprivation at a population level?",
+  "What do phase I trials show about a new insomnia treatment?",
+  "What does type I interferon signaling indicate in human studies?",
+  "What does mitochondrial complex I research show about Parkinson's disease?",
 ] as const;
 
 describe("focused public Exa research questions", () => {
@@ -84,6 +87,7 @@ describe("focused public Exa research questions", () => {
     "What applies to a 27-year-old adult?",
     "Research patient 123e4567-e89b-12d3-a456-426614174000.",
     "Can I take creatine for cognition?",
+    "What do phase I trials show, and should I take the treatment?",
     "Research the appointment from 2026-08-06.",
     "What does blood pressure 125/85 mean for my health?",
   ])("rejects private or identifying question text before provider work: %s", (question) => {
