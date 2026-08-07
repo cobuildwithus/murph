@@ -40,6 +40,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 import {
   prepareHostedMemberStripeBillingWrite,
   suspendHostedMemberForBillingReversalTx,
+  terminalizeHostedFamilySponsoredDirectBillingTx,
   writeHostedMemberStripeBillingRefIfFreshTx,
   writeHostedMemberStripeBillingTx,
 } from "@/src/lib/hosted-onboarding/stripe-billing-policy";
@@ -449,6 +450,125 @@ describe("hosted onboarding stripe billing policy", () => {
 
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+  });
+
+  it("terminalizes only the exact Family-sponsored direct subscription", async () => {
+    const activeMember = makeMemberSnapshot({
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_loser",
+      },
+    });
+    const canceledMember = makeMemberSnapshot({
+      billingRef: activeMember.billingRef,
+      core: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(activeMember)
+      .mockResolvedValueOnce(activeMember)
+      .mockResolvedValueOnce(canceledMember);
+
+    await expect(terminalizeHostedFamilySponsoredDirectBillingTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-25T00:10:00.000Z"),
+        occurredAt: "2026-04-25T00:10:00.000Z",
+        sourceEventId: "evt_family_cleanup",
+        sourceType: "stripe.customer.subscription.deleted",
+      },
+      memberId: "member_123",
+      stripeSubscriptionId: "sub_loser",
+      tx: {} as never,
+    })).resolves.toBe(true);
+
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
+      billingStatus: HostedBillingStatus.canceled,
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: undefined,
+    });
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_loser",
+      }),
+    );
+  });
+
+  it("does not terminalize a replacement direct subscription during Family cleanup", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(
+      makeMemberSnapshot({
+        billingRef: {
+          memberId: "member_123",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_replacement",
+        },
+      }),
+    );
+
+    await expect(terminalizeHostedFamilySponsoredDirectBillingTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-25T00:10:00.000Z"),
+        occurredAt: "2026-04-25T00:10:00.000Z",
+        sourceEventId: "evt_family_cleanup_stale",
+        sourceType: "stripe.customer.subscription.deleted",
+      },
+      memberId: "member_123",
+      stripeSubscriptionId: "sub_loser",
+      tx: {} as never,
+    })).resolves.toBe(false);
+
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+  });
+
+  it("clears only billing-owned suspension while terminalizing Family cleanup", async () => {
+    const reversalCreatedAt = new Date("2026-04-25T00:05:00.000Z");
+    const suspendedMember = makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: reversalCreatedAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_loser",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.unpaid,
+        suspendedAt: reversalCreatedAt,
+      },
+    });
+    const canceledMember = makeMemberSnapshot({
+      billingRef: suspendedMember.billingRef,
+      core: {
+        billingStatus: HostedBillingStatus.canceled,
+        suspendedAt: null,
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(suspendedMember)
+      .mockResolvedValueOnce(suspendedMember)
+      .mockResolvedValueOnce(canceledMember);
+
+    await expect(terminalizeHostedFamilySponsoredDirectBillingTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-25T00:10:00.000Z"),
+        occurredAt: "2026-04-25T00:10:00.000Z",
+        sourceEventId: "evt_family_cleanup_reversed",
+        sourceType: "stripe.customer.subscription.deleted",
+      },
+      memberId: "member_123",
+      stripeSubscriptionId: "sub_loser",
+      tx: {} as never,
+    })).resolves.toBe(true);
+
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
+      billingStatus: HostedBillingStatus.canceled,
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: null,
+    });
   });
 
   it("binds missing provider identity from a stale event during billing-owned suspension", async () => {

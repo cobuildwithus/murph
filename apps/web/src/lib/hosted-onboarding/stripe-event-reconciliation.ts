@@ -25,7 +25,7 @@ import {
   applyStripeInvoicePaymentFailed,
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
-  cancelHostedFamilySponsoredCheckoutSubscription,
+  cleanupHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
@@ -889,6 +889,9 @@ async function processClaimedHostedStripeEvent(
     if (result.cleanupPulseTrialStripeSubscriptionId && !processingMemberId) {
       throw new Error("Pulse Trial cleanup requires a direct billing member.");
     }
+    if (result.cleanupFamilySponsoredStripeSubscriptionId && !processingMemberId) {
+      throw new Error("Family-sponsored cleanup requires a direct billing member.");
+    }
     if (legacyFamilySubscriptionId) {
       await executeHostedLegacySyntheticFamilyCleanup({
         invoice: stripeEvent.type === "invoice.paid"
@@ -920,8 +923,11 @@ async function processClaimedHostedStripeEvent(
         purchaseId: usageCreditReconciliation.purchaseId,
       });
     }
-    if (result.cleanupFamilySponsoredStripeSubscriptionId) {
-      await cancelHostedFamilySponsoredCheckoutSubscription({
+    if (result.cleanupFamilySponsoredStripeSubscriptionId && processingMemberId) {
+      await cleanupHostedFamilySponsoredCheckoutSubscription({
+        memberId: processingMemberId,
+        prisma,
+        sourceEventId: `${claimed.eventId}:family-sponsored-cleanup`,
         subscriptionId: result.cleanupFamilySponsoredStripeSubscriptionId,
       });
     }
@@ -1067,8 +1073,9 @@ async function processClaimedHostedStripeEvent(
 function isHostedStripeEventOperationallyRetryableError(
   error: unknown,
 ): boolean {
-  if (isHostedOnboardingError(error) && error.retryable) {
-    return true;
+  const operationalError = unwrapHostedStripeOperationalError(error);
+  if (operationalError !== error) {
+    return isHostedStripeEventOperationallyRetryableError(operationalError);
   }
   if (error instanceof Prisma.PrismaClientInitializationError) {
     return typeof error.errorCode === "string" &&
@@ -1122,6 +1129,23 @@ function isHostedStripeEventOperationallyRetryableError(
     || code === "ECONNRESET"
     || code === "ECONNREFUSED"
     || code === "ETIMEDOUT";
+}
+
+function unwrapHostedStripeOperationalError(error: unknown): unknown {
+  let current = error;
+  const seen = new Set<unknown>();
+
+  while (
+    isHostedOnboardingError(current)
+    && current.cause !== undefined
+    && current.cause !== current
+    && !seen.has(current)
+  ) {
+    seen.add(current);
+    current = current.cause;
+  }
+
+  return current;
 }
 
 async function processHostedStripeEventWithDiscoveredMemberLock(

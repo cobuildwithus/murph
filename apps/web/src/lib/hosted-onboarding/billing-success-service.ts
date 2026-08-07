@@ -27,7 +27,7 @@ import {
 } from "./stripe-billing-lookup";
 import {
   applyStripeCheckoutCompleted,
-  cancelHostedFamilySponsoredCheckoutSubscription,
+  cleanupHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
   prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeCheckoutCompletion,
@@ -76,7 +76,10 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     session,
   });
   if (activationOutcome.cleanupFamilySponsoredStripeSubscriptionId) {
-    await cancelHostedFamilySponsoredCheckoutSubscription({
+    await cleanupHostedFamilySponsoredCheckoutSubscription({
+      memberId: invite.memberId,
+      prisma,
+      sourceEventId: `checkout-success:${session.id}:family-sponsored-cleanup`,
       subscriptionId: activationOutcome.cleanupFamilySponsoredStripeSubscriptionId,
     });
   }

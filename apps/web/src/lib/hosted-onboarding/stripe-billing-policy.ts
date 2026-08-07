@@ -473,6 +473,52 @@ export async function suspendHostedMemberForBillingReversalTx(input: {
   });
 }
 
+export async function terminalizeHostedFamilySponsoredDirectBillingTx(input: {
+  dispatchContext: HostedStripeDispatchContext;
+  memberId: string;
+  stripeSubscriptionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const member = await readHostedMemberBillingSnapshot({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+
+  if (
+    !member
+    || member.billingRef?.stripeSubscriptionId !== input.stripeSubscriptionId
+  ) {
+    return false;
+  }
+
+  const updatedMember = await writeHostedMemberStripeBillingTx({
+    billingStatus: HostedBillingStatus.canceled,
+    canonicalBillingStatus: HostedBillingStatus.canceled,
+    dispatchContext: input.dispatchContext,
+    member,
+    stripeCustomerId: member.billingRef.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    suspendedAtOverride: isHostedStripeBillingOwnedSuspension(member)
+      ? null
+      : undefined,
+    tx: input.tx,
+  });
+
+  if (
+    !updatedMember
+    || updatedMember.core.billingStatus !== HostedBillingStatus.canceled
+    || updatedMember.billingRef?.stripeSubscriptionId !==
+      input.stripeSubscriptionId
+  ) {
+    throw new Error(
+      "Family-sponsored Stripe cleanup did not terminalize the exact direct billing projection.",
+    );
+  }
+
+  return true;
+}
+
 function isHostedStripeBillingOwnedSuspension(
   member: HostedMemberBillingSnapshot,
 ): boolean {

@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => {
   const state = {
     activateHostedMemberForPositiveSourceTx: vi.fn(),
     applyStripeCheckoutCompleted: vi.fn(),
-    cancelHostedFamilySponsoredCheckoutSubscription: vi.fn(),
+    cleanupHostedFamilySponsoredCheckoutSubscription: vi.fn(),
     cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
     cleanupHostedStandardCheckoutLoser: vi.fn(),
     findMemberForStripeObject: vi.fn(),
@@ -99,8 +99,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
   applyStripeCheckoutCompleted: mocks.applyStripeCheckoutCompleted,
-  cancelHostedFamilySponsoredCheckoutSubscription:
-    mocks.cancelHostedFamilySponsoredCheckoutSubscription,
+  cleanupHostedFamilySponsoredCheckoutSubscription:
+    mocks.cleanupHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription:
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
   prepareHostedStripeDirectMemberActivationCrypto:
@@ -162,7 +162,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
-    mocks.cancelHostedFamilySponsoredCheckoutSubscription.mockResolvedValue(undefined);
+    mocks.cleanupHostedFamilySponsoredCheckoutSubscription.mockResolvedValue(undefined);
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockResolvedValue(undefined);
     mocks.cleanupHostedStandardCheckoutLoser.mockResolvedValue(undefined);
     mocks.sendHostedSignupWelcomeEmailForMemberBestEffort.mockResolvedValue(undefined);
@@ -506,7 +506,10 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       sessionId: "cs_123",
     })).resolves.toEqual(createStatus({ stage: "activating" }));
 
-    expect(mocks.cancelHostedFamilySponsoredCheckoutSubscription).toHaveBeenCalledWith({
+    expect(mocks.cleanupHostedFamilySponsoredCheckoutSubscription).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
+      sourceEventId: "checkout-success:cs_123:family-sponsored-cleanup",
       subscriptionId: "sub_superseded",
     });
     expect(mocks.cancelHostedPulseTrialCheckoutLoserSubscription).not.toHaveBeenCalled();
@@ -592,7 +595,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       }),
       tx,
     );
-    expect(mocks.cancelHostedFamilySponsoredCheckoutSubscription).not.toHaveBeenCalled();
+    expect(mocks.cleanupHostedFamilySponsoredCheckoutSubscription).not.toHaveBeenCalled();
     expect(mocks.cancelHostedPulseTrialCheckoutLoserSubscription).not.toHaveBeenCalled();
     expect(mocks.cleanupHostedStandardCheckoutLoser).not.toHaveBeenCalled();
   });

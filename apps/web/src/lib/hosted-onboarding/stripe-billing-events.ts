@@ -46,6 +46,7 @@ import {
   acceptHostedMemberStripeCheckoutCompletionTx,
   clearHostedMemberStripeCheckoutAttemptForSessionTx,
   prepareHostedMemberStripeCheckoutCompletion,
+  withHostedMemberStripeMutationLock,
   writeAcceptedHostedMemberPulseTrialBillingTx,
   type PreparedHostedMemberStripeCheckoutCompletion,
 } from "./hosted-member-billing-store";
@@ -70,6 +71,7 @@ import {
 import {
   prepareHostedMemberStripeBillingWrite,
   suspendHostedMemberForBillingReversalTx,
+  terminalizeHostedFamilySponsoredDirectBillingTx,
   writeHostedMemberStripeBillingTx,
 } from "./stripe-billing-policy";
 import {
@@ -873,34 +875,63 @@ export function cancelHostedPulseTrialCheckoutLoserSubscription(input: {
   });
 }
 
-export async function cancelHostedFamilySponsoredCheckoutSubscription(input: {
+export async function cleanupHostedFamilySponsoredCheckoutSubscription(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  sourceEventId: string;
   stripe?: Pick<Stripe, "subscriptions">;
   subscriptionId: string;
 }): Promise<void> {
-  try {
-    await (input.stripe ?? requireHostedStripeApi()).subscriptions.cancel(
-      input.subscriptionId,
-    );
-  } catch (error) {
-    if (
-      error &&
-      typeof error === "object" &&
-      Reflect.get(error, "code") === "resource_missing"
-    ) {
-      return;
-    }
-    logHostedStripeFailure({
-      error,
-      operationName: "subscription.cancel.family-sponsored-checkout",
-    });
-    throw hostedOnboardingError({
-      cause: error,
-      code: "HOSTED_FAMILY_SPONSORED_CHECKOUT_CLEANUP_FAILED",
-      httpStatus: 502,
-      message: "Murph could not cancel a superseded Stripe subscription. Try again.",
-      retryable: true,
-    });
-  }
+  await withHostedMemberStripeMutationLock({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    run: async (tx) => {
+      const familyClaim = await readHostedMemberFamilyBillingClaim({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      if (familyClaim?.kind !== "active_sponsorship") {
+        return;
+      }
+
+      try {
+        await (input.stripe ?? requireHostedStripeApi()).subscriptions.cancel(
+          input.subscriptionId,
+        );
+      } catch (error) {
+        if (
+          !error
+          || typeof error !== "object"
+          || Reflect.get(error, "code") !== "resource_missing"
+        ) {
+          logHostedStripeFailure({
+            error,
+            operationName: "subscription.cancel.family-sponsored-checkout",
+          });
+          throw hostedOnboardingError({
+            cause: error,
+            code: "HOSTED_FAMILY_SPONSORED_CHECKOUT_CLEANUP_FAILED",
+            httpStatus: 502,
+            message: "Murph could not cancel a superseded Stripe subscription. Try again.",
+            retryable: true,
+          });
+        }
+      }
+
+      const eventCreatedAt = new Date();
+      await terminalizeHostedFamilySponsoredDirectBillingTx({
+        dispatchContext: {
+          eventCreatedAt,
+          occurredAt: eventCreatedAt.toISOString(),
+          sourceEventId: input.sourceEventId,
+          sourceType: "stripe.customer.subscription.deleted",
+        },
+        memberId: input.memberId,
+        stripeSubscriptionId: input.subscriptionId,
+        tx,
+      });
+    },
+  });
 }
 
 export async function applyStripeCheckoutExpired(
@@ -964,14 +995,22 @@ export async function applyStripeSubscriptionUpdated(
     stripeSubscriptionId: subscription.id,
     tx: prisma,
   });
-  if (familyClaimDisposition !== "none") {
+  const isTerminalSubscription = subscription.status === "canceled"
+    || subscription.status === "incomplete_expired";
+  const terminalizesCurrentDirectSubscription =
+    familyClaimDisposition === "conflicting_family_subscription"
+    && isTerminalSubscription
+    && member.billingRef?.stripeSubscriptionId === subscription.id;
+  if (
+    familyClaimDisposition !== "none"
+    && !terminalizesCurrentDirectSubscription
+  ) {
     return {
       ...buildEmptyHostedStripeActivationOutcome(),
       ...(familyClaimDisposition === "conflicting_family_subscription"
         ? {
             cleanupFamilySponsoredStripeSubscriptionId:
-              subscription.status === "canceled" ||
-                subscription.status === "incomplete_expired"
+              isTerminalSubscription
                 ? null
                 : subscription.id,
           }
@@ -1420,6 +1459,9 @@ export async function applyStripeRefundCreated(
   }
 
   const { canonicalBillingStatus, member: preparedMember } = await prepareHostedMemberStripeBillingWrite({
+    canonicalBillingStatus: mapStripeSubscriptionStatusToHostedBillingStatus(
+      preparedProviderState.subscription.status,
+    ),
     dispatchContext: {
       eventCreatedAt: dispatchContext.eventCreatedAt,
       occurredAt: dispatchContext.eventCreatedAt.toISOString(),

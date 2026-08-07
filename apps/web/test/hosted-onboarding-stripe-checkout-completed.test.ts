@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedStripeApi: vi.fn(),
   cancelStripeSubscription: vi.fn(),
   retrieveStripeSubscription: vi.fn(),
+  terminalizeHostedFamilySponsoredDirectBillingTx: vi.fn(),
   upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx: vi.fn(),
   upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
@@ -115,6 +116,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-policy", async () => {
 
   return {
     ...actual,
+    terminalizeHostedFamilySponsoredDirectBillingTx:
+      mocks.terminalizeHostedFamilySponsoredDirectBillingTx,
     writeHostedMemberStripeBillingTx: mocks.writeHostedMemberStripeBillingTx,
   };
 });
@@ -131,7 +134,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 import {
   applyStripeCheckoutCompleted as applyStripeCheckoutCompletedImpl,
   applyStripeSubscriptionUpdated,
-  cancelHostedFamilySponsoredCheckoutSubscription,
+  cleanupHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
 } from "@/src/lib/hosted-onboarding/stripe-billing-events";
 import {
@@ -687,10 +690,25 @@ describe("applyStripeCheckoutCompleted", () => {
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
-  it("treats an already-absent sponsored checkout subscription as cleaned up", async () => {
+  it("terminalizes the exact direct projection when the sponsored checkout subscription is already absent", async () => {
     mocks.cancelStripeSubscription.mockRejectedValueOnce({ code: "resource_missing" });
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValueOnce({
+      groupId: "hbag_family",
+      kind: "active_sponsorship",
+      ownerMemberId: "member_owner",
+    });
+    mocks.terminalizeHostedFamilySponsoredDirectBillingTx.mockResolvedValueOnce(true);
+    const tx = { __tag: "tx" };
+    const prisma = {
+      $transaction: vi.fn(async (
+        run: (transaction: typeof tx) => Promise<unknown>,
+      ) => run(tx)),
+    };
 
-    await expect(cancelHostedFamilySponsoredCheckoutSubscription({
+    await expect(cleanupHostedFamilySponsoredCheckoutSubscription({
+      memberId: "member_123",
+      prisma: prisma as never,
+      sourceEventId: "evt_cleanup_123",
       stripe: {
         subscriptions: {
           cancel: mocks.cancelStripeSubscription,
@@ -698,6 +716,43 @@ describe("applyStripeCheckoutCompleted", () => {
       } as never,
       subscriptionId: "sub_superseded",
     })).resolves.toBeUndefined();
+
+    expect(mocks.terminalizeHostedFamilySponsoredDirectBillingTx)
+      .toHaveBeenCalledWith({
+        dispatchContext: expect.objectContaining({
+          sourceEventId: "evt_cleanup_123",
+          sourceType: "stripe.customer.subscription.deleted",
+        }),
+        memberId: "member_123",
+        stripeSubscriptionId: "sub_superseded",
+        tx,
+      });
+  });
+
+  it("keeps direct paid billing when Family sponsorship ends before cleanup", async () => {
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValueOnce(null);
+    const tx = { __tag: "tx" };
+    const prisma = {
+      $transaction: vi.fn(async (
+        run: (transaction: typeof tx) => Promise<unknown>,
+      ) => run(tx)),
+    };
+
+    await expect(cleanupHostedFamilySponsoredCheckoutSubscription({
+      memberId: "member_123",
+      prisma: prisma as never,
+      sourceEventId: "evt_cleanup_without_sponsor",
+      stripe: {
+        subscriptions: {
+          cancel: mocks.cancelStripeSubscription,
+        },
+      } as never,
+      subscriptionId: "sub_paid_current",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.terminalizeHostedFamilySponsoredDirectBillingTx)
+      .not.toHaveBeenCalled();
   });
 
   it("keeps stale checkout refs from replacing the winner or storing a loser email", async () => {

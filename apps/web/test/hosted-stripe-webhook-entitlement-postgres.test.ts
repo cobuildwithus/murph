@@ -65,6 +65,10 @@ import {
   readHostedMemberBillingSnapshot,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
+  suspendHostedMemberForBillingReversalTx,
+  terminalizeHostedFamilySponsoredDirectBillingTx,
+} from "@/src/lib/hosted-onboarding/stripe-billing-policy";
+import {
   readHostedOnboardingEnvironment,
 } from "@/src/lib/hosted-onboarding/env";
 import {
@@ -91,6 +95,158 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted Stripe webhook entitlement with PostgreSQL",
   () => {
+    it("applies an older proven-current full refund without moving the billing cursor backward", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_refund_freshness_${fixtureId}`;
+      const stripeCustomerId = `cus_refund_freshness_${fixtureId}`;
+      const stripeSubscriptionId = `sub_refund_freshness_${fixtureId}`;
+      const refundCreatedAt = new Date("2026-07-01T12:00:00.000Z");
+      const newerBillingCursor = new Date("2026-07-01T12:05:00.000Z");
+
+      try {
+        await prisma.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: memberId,
+          },
+        });
+        await prisma.$transaction((tx) =>
+          writeHostedMemberStripeBillingRefTx({
+            memberId,
+            stripeCustomerId,
+            stripeEventCreatedAt: newerBillingCursor,
+            stripeSubscriptionId,
+            tx,
+          })
+        );
+        const member = await readHostedMemberBillingSnapshot({
+          memberId,
+          prisma,
+        });
+        expect(member).not.toBeNull();
+        if (!member) {
+          throw new Error("Refund freshness fixture member was not created.");
+        }
+
+        await prisma.$transaction((tx) =>
+          suspendHostedMemberForBillingReversalTx({
+            canonicalBillingStatus: HostedBillingStatus.active,
+            dispatchContext: {
+              eventCreatedAt: refundCreatedAt,
+              sourceEventId: `evt_refund_freshness_${fixtureId}`,
+              sourceType: "stripe.refund.updated",
+            },
+            freshnessPolicy: "proven-current-refund",
+            member,
+            stripeCustomerId,
+            stripeSubscriptionId,
+            tx,
+          })
+        );
+
+        await expect(readHostedMemberBillingSnapshot({ memberId, prisma }))
+          .resolves.toMatchObject({
+            billingRef: {
+              lastStripeEventCreatedAt: newerBillingCursor,
+              stripeCustomerId,
+              stripeSubscriptionId,
+            },
+            core: {
+              billingStatus: HostedBillingStatus.unpaid,
+              suspendedAt: newerBillingCursor,
+            },
+          });
+      } finally {
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("terminalizes only the exact Family-sponsored direct subscription", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_family_cleanup_${fixtureId}`;
+      const stripeCustomerId = `cus_family_cleanup_${fixtureId}`;
+      const losingSubscriptionId = `sub_family_cleanup_loser_${fixtureId}`;
+      const replacementSubscriptionId = `sub_family_cleanup_replacement_${fixtureId}`;
+      const cleanupCreatedAt = new Date("2026-07-01T13:00:00.000Z");
+
+      try {
+        await prisma.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: memberId,
+          },
+        });
+        await prisma.$transaction((tx) =>
+          writeHostedMemberStripeBillingRefTx({
+            memberId,
+            stripeCustomerId,
+            stripeSubscriptionId: losingSubscriptionId,
+            tx,
+          })
+        );
+
+        await expect(prisma.$transaction((tx) =>
+          terminalizeHostedFamilySponsoredDirectBillingTx({
+            dispatchContext: {
+              eventCreatedAt: cleanupCreatedAt,
+              occurredAt: cleanupCreatedAt.toISOString(),
+              sourceEventId: `evt_family_cleanup_${fixtureId}`,
+              sourceType: "stripe.customer.subscription.deleted",
+            },
+            memberId,
+            stripeSubscriptionId: losingSubscriptionId,
+            tx,
+          })
+        )).resolves.toBe(true);
+        await expect(readHostedMemberBillingSnapshot({ memberId, prisma }))
+          .resolves.toMatchObject({
+            billingRef: { stripeSubscriptionId: losingSubscriptionId },
+            core: { billingStatus: HostedBillingStatus.canceled },
+          });
+
+        await prisma.hostedMember.update({
+          data: { billingStatus: HostedBillingStatus.active },
+          where: { id: memberId },
+        });
+        await prisma.$transaction((tx) =>
+          writeHostedMemberStripeBillingRefTx({
+            memberId,
+            stripeCustomerId,
+            stripeEventCreatedAt: new Date(cleanupCreatedAt.getTime() + 1_000),
+            stripeSubscriptionId: replacementSubscriptionId,
+            tx,
+          })
+        );
+
+        await expect(prisma.$transaction((tx) =>
+          terminalizeHostedFamilySponsoredDirectBillingTx({
+            dispatchContext: {
+              eventCreatedAt: new Date(cleanupCreatedAt.getTime() + 2_000),
+              occurredAt: new Date(
+                cleanupCreatedAt.getTime() + 2_000,
+              ).toISOString(),
+              sourceEventId: `evt_family_cleanup_replay_${fixtureId}`,
+              sourceType: "stripe.customer.subscription.deleted",
+            },
+            memberId,
+            stripeSubscriptionId: losingSubscriptionId,
+            tx,
+          })
+        )).resolves.toBe(false);
+        await expect(readHostedMemberBillingSnapshot({ memberId, prisma }))
+          .resolves.toMatchObject({
+            billingRef: { stripeSubscriptionId: replacementSubscriptionId },
+            core: { billingStatus: HostedBillingStatus.active },
+          });
+      } finally {
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
     it("verifies, records, reconciles, and idempotently projects one subscription event", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
       const memberId = `hbm_stripe_entitlement_${randomUUID()}`;
