@@ -242,6 +242,7 @@ function isHostedBillingPlanQuotePayload(
       targetPlanCode === "launch_group_monthly"
       || targetPlanCode === "launch_monthly"
       || targetPlanCode === "launch_edge_monthly"
+      || targetPlanCode === "launch_max_monthly"
     )
     && (
       timing === "at_trial_end"
