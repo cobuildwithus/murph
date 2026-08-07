@@ -40,13 +40,18 @@ export class HostedStripeCheckoutLoserCleanupPendingError
  */
 export async function cleanupHostedStandardCheckoutLoser(input: {
   stripe?: Stripe;
+  subscription?: Stripe.Subscription;
   stripeSubscriptionId: string;
 }): Promise<void> {
   const stripe = input.stripe ?? requireHostedStripeApi();
-  const subscription = await withHostedStripeFailureLog(
-    "subscription.retrieve.checkout-loser",
-    () => stripe.subscriptions.retrieve(input.stripeSubscriptionId),
-  );
+  const subscription = input.subscription ??
+    await withHostedStripeFailureLog(
+      "subscription.retrieve.checkout-loser",
+      () => stripe.subscriptions.retrieve(input.stripeSubscriptionId),
+    );
+  if (subscription.id !== input.stripeSubscriptionId) {
+    throw buildCheckoutLoserCleanupSupportError();
+  }
 
   if (
     subscription.status !== "canceled"

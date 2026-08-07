@@ -11,6 +11,7 @@ import {
   validateReleaseContext,
   writeJson,
 } from './release-helpers.mjs';
+import { verifyReleaseArtifacts } from './release-artifact-secret-guard.mjs';
 
 const execFileAsync = promisify(execFile);
 const npmPackMetadataMaxBufferBytes = 64 * 1024 * 1024;
@@ -83,6 +84,10 @@ function shouldSkipPayloadArtifact(sourcePath) {
 
 function shouldSkipExternalPayloadArtifact(sourcePath) {
   return path.basename(sourcePath) === 'node_modules' || shouldSkipPayloadArtifact(sourcePath);
+}
+
+function isNonRuntimeIncurPayloadPath(relativePath) {
+  return /(?:^|\/)[^/]+\.test\.[cm]?[jt]sx?$/u.test(relativePath);
 }
 
 async function pathExists(targetPath) {
@@ -182,7 +187,16 @@ async function copyExternalPackagePayload(packageName, packageJson, sourceDir, t
     }
 
     await copyPayloadPath(sourcePath, path.join(targetDir, relativePath), {
-      shouldSkip: shouldSkipExternalPayloadArtifact,
+      shouldSkip(candidatePath) {
+        const relativeCandidate = path.relative(sourceDir, candidatePath)
+          .split(path.sep)
+          .join('/');
+        return shouldSkipExternalPayloadArtifact(candidatePath)
+          || (
+            packageName === 'incur'
+            && isNonRuntimeIncurPayloadPath(relativeCandidate)
+          );
+      },
     });
   }
 }
@@ -460,7 +474,7 @@ for (const entry of context.orderedPackages) {
     version: entry.packageJson.version,
   });
 
-  console.log(`${entry.name}@${entry.packageJson.version} -> ${tarballFilename}`);
+  console.log(`${entry.name}@${entry.packageJson.version} packed.`);
 }
 
 const packOutput = {
@@ -472,5 +486,6 @@ const packOutput = {
   version: summary.version,
 };
 
+await verifyReleaseArtifacts(context.repoRoot, packOutput);
 await writeJson(packOutputPath, packOutput);
 console.log(`Wrote pack manifest: ${path.relative(context.repoRoot, packOutputPath)}`);

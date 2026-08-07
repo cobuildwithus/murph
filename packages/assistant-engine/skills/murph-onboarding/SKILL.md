@@ -22,7 +22,9 @@ Experiments are one optional primitive. Do not turn onboarding into an upfront
 profile questionnaire, capability tour, wearable funnel, or experiment funnel.
 Do not create a second context-collection lifecycle. This skill may create only
 the scheduled early-stall check-in defined in
-`references/persistence-recovery-follow-up.md`. A separate managed owner may
+`references/persistence-recovery-follow-up.md` and the post-completion
+first-personal-read one-shot defined in
+`references/return-launch-completion.md`. A separate managed owner may
 invoke this skill through the finite three-day recovery window defined there;
 never create, replace, extend, or reschedule that owner.
 

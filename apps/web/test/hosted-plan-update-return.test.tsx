@@ -51,6 +51,7 @@ describe("HostedPlanUpdateReturn", () => {
     }
     assert.equal(mocks.routerRefresh.mock.calls.length, 6);
     assert.match(rendered.container.textContent ?? "", /Your plan is still syncing/);
+    assert.match(rendered.container.textContent ?? "", /Manage billing/);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(9_000);

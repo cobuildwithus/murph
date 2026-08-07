@@ -25,13 +25,17 @@ import {
   applyStripeInvoicePaymentFailed,
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
-  cancelHostedFamilySponsoredCheckoutSubscription,
+  cleanupHostedFamilySponsoredDirectSubscription,
+  cleanupHostedStandardCheckoutAndRetireAttempt,
   cancelHostedPulseTrialCheckoutLoserSubscription,
+  HostedStripeFamilySponsoredCleanupPendingError,
+  type HostedStripeCheckoutCleanup,
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
   prepareHostedStripeCheckoutCompletion,
   prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeReversalProviderState,
+  isHostedStripeRefundEventType,
   type PreparedHostedStripeCheckoutCompletion,
   type PreparedHostedStripeReversalProviderState,
 } from "./stripe-billing-events";
@@ -83,10 +87,7 @@ import {
   withHostedStripeFailureLog,
 } from "./stripe-error-log";
 import { scheduleHostedStripeReconciliationFailureAlert } from "./stripe-alert-email";
-import {
-  cleanupHostedStandardCheckoutLoser,
-  HostedStripeCheckoutLoserCleanupPendingError,
-} from "./stripe-checkout-loser-cleanup";
+import { HostedStripeCheckoutLoserCleanupPendingError } from "./stripe-checkout-loser-cleanup";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -164,6 +165,15 @@ const STRIPE_EVENT_SAFE_PRISMA_META_KEYS = new Set([
   "table",
   "target",
 ]);
+const STRIPE_EVENT_RETRYABLE_PRISMA_CODES = new Set([
+  "P1001",
+  "P1002",
+  "P1008",
+  "P1017",
+  "P2024",
+  "P2034",
+  "P2037",
+]);
 const HOSTED_LEGACY_FAMILY_REFUND_INVOICE_METADATA_KEY = "hosted_family_legacy_invoice_id";
 
 class HostedLegacyFamilyCleanupPendingError extends Error {
@@ -185,6 +195,15 @@ class HostedStripeEventRetrieveRetryableError extends Error {
       { cause },
     );
     this.name = "HostedStripeEventRetrieveRetryableError";
+  }
+}
+
+class HostedStripeRuntimeRecheckPendingError extends Error {
+  readonly code = "HOSTED_STRIPE_RUNTIME_RECHECK_PENDING";
+
+  constructor(cause: unknown) {
+    super("Hosted runtime recheck remains pending.", { cause });
+    this.name = "HostedStripeRuntimeRecheckPendingError";
   }
 }
 
@@ -354,10 +373,12 @@ async function processHostedStripeEventRecord(
 ): Promise<{
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
-  cleanupStandardCheckoutStripeSubscriptionId: string | null;
+  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
+  runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 }> {
@@ -464,6 +485,7 @@ async function processHostedStripeEventRecord(
       );
       return buildEmptyHostedStripeEventProcessingResult();
     case "refund.created":
+    case "refund.updated":
       await applyStripeRefundCreated(
         payload as Stripe.Refund,
         dispatchContext,
@@ -513,7 +535,7 @@ async function prepareHostedStripeEventProcessingContext(
     ? mapStripeSubscriptionStatusToHostedBillingStatus(canonicalSubscription.status)
     : null;
 
-  if (event.type !== "refund.created" && !event.type.startsWith("charge.dispute.")) {
+  if (!isHostedStripeRefundEventType(event.type) && !event.type.startsWith("charge.dispute.")) {
     return {
       canonicalBillingStatus,
       canonicalSubscription,
@@ -578,7 +600,7 @@ async function resolveHostedStripeEventDirectBillingMemberId(
   }
 
   if (
-    event.type === "refund.created"
+    isHostedStripeRefundEventType(event.type)
     || event.type.startsWith("charge.dispute.")
   ) {
     const object = readHostedStripeEventObject(event.data.object);
@@ -644,7 +666,7 @@ async function resolveHostedStripeEventProcessingMemberId(
   }
 
   if (
-    event.type === "refund.created"
+    isHostedStripeRefundEventType(event.type)
     || event.type.startsWith("charge.dispute.")
   ) {
     const object = readHostedStripeEventObject(event.data.object);
@@ -770,7 +792,7 @@ function readHostedStripeEventObject(value: unknown): Record<string, unknown> {
 }
 
 function readHostedStripeEventChargeId(type: string, object: Record<string, unknown>): string | null {
-  if (type === "refund.created") {
+  if (isHostedStripeRefundEventType(type)) {
     return coerceStripeObjectId(object.charge as never);
   }
 
@@ -786,7 +808,7 @@ function readHostedStripeEventChargeId(type: string, object: Record<string, unkn
 }
 
 function readHostedStripeEventPaymentIntentId(type: string, object: Record<string, unknown>): string | null {
-  if (type === "refund.created") {
+  if (isHostedStripeRefundEventType(type)) {
     return coerceStripeObjectId(object.payment_intent as never);
   }
 
@@ -883,23 +905,35 @@ async function processClaimedHostedStripeEvent(
           preflightProcessingContext,
         );
     const { memberId: processingMemberId, result } = processing;
-    if (
-      usageCreditReconciliation.handled &&
-      usageCreditReconciliation.wakeRequired
-    ) {
-      try {
-        await signalHostedUsageCreditRuntimeRecheck({
-          prisma,
-          userId: usageCreditReconciliation.beneficiaryMemberId,
-        });
-      } catch (error) {
-        if (
-          !isHostedOnboardingError(error) ||
-          error.code !== "HOSTED_RUNTIME_USER_INACTIVE"
-        ) {
-          throw error;
-        }
-      }
+    if (result.cleanupPulseTrialStripeSubscriptionId && !processingMemberId) {
+      throw new Error("Pulse Trial cleanup requires a direct billing member.");
+    }
+    if (result.cleanupFamilySponsoredStripeSubscriptionId && !processingMemberId) {
+      throw new Error("Family-sponsored cleanup requires a direct billing member.");
+    }
+    if (result.cleanupFamilySponsoredCheckout && !processingMemberId) {
+      throw new Error("Family-sponsored Checkout cleanup requires a direct billing member.");
+    }
+    if (result.cleanupStandardCheckout && !processingMemberId) {
+      throw new Error("Standard Checkout cleanup requires a direct billing member.");
+    }
+    if (legacyFamilySubscriptionId) {
+      await executeHostedLegacySyntheticFamilyCleanup({
+        invoice: stripeEvent.type === "invoice.paid"
+          ? stripeEvent.data.object as Stripe.Invoice
+          : null,
+        subscriptionId: legacyFamilySubscriptionId,
+      });
+    }
+    const runtimeRecheckMemberIds = new Set(result.runtimeRecheckMemberIds);
+    if (usageCreditReconciliation.handled && usageCreditReconciliation.wakeRequired) {
+      runtimeRecheckMemberIds.add(usageCreditReconciliation.beneficiaryMemberId);
+    }
+    for (const memberId of runtimeRecheckMemberIds) {
+      await signalHostedBillingRuntimeRecheckIgnoringInactive({
+        prisma,
+        userId: memberId,
+      });
     }
     if (
       usageCreditReconciliation.handled &&
@@ -914,33 +948,37 @@ async function processClaimedHostedStripeEvent(
         purchaseId: usageCreditReconciliation.purchaseId,
       });
     }
-    if (legacyFamilySubscriptionId) {
-      await executeHostedLegacySyntheticFamilyCleanup({
-        invoice: stripeEvent.type === "invoice.paid"
-          ? stripeEvent.data.object as Stripe.Invoice
-          : null,
-        subscriptionId: legacyFamilySubscriptionId,
-      });
-    }
-    if (result.cleanupFamilySponsoredStripeSubscriptionId) {
-      await cancelHostedFamilySponsoredCheckoutSubscription({
+    if (result.cleanupFamilySponsoredStripeSubscriptionId && processingMemberId) {
+      await cleanupHostedFamilySponsoredDirectSubscription({
+        memberId: processingMemberId,
+        prisma,
+        sourceEventId: `${claimed.eventId}:family-sponsored-cleanup`,
         subscriptionId: result.cleanupFamilySponsoredStripeSubscriptionId,
       });
     }
-    if (result.cleanupPulseTrialStripeSubscriptionId) {
-      if (!processingMemberId) {
-        throw new Error("Pulse Trial cleanup requires a direct billing member.");
-      }
+    if (result.cleanupFamilySponsoredCheckout && processingMemberId) {
+      await cleanupHostedFamilySponsoredDirectSubscription({
+        checkoutSessionId: result.cleanupFamilySponsoredCheckout.checkoutSessionId,
+        memberId: processingMemberId,
+        prisma,
+        refundCheckoutPayment: true,
+        sourceEventId: `${claimed.eventId}:family-sponsored-checkout-cleanup`,
+        subscriptionId: result.cleanupFamilySponsoredCheckout.subscriptionId,
+      });
+    }
+    if (result.cleanupPulseTrialStripeSubscriptionId && processingMemberId) {
       await cancelHostedPulseTrialCheckoutLoserSubscription({
         memberId: processingMemberId,
         prisma,
         subscriptionId: result.cleanupPulseTrialStripeSubscriptionId,
       });
     }
-    if (result.cleanupStandardCheckoutStripeSubscriptionId) {
-      await cleanupHostedStandardCheckoutLoser({
-        stripeSubscriptionId:
-          result.cleanupStandardCheckoutStripeSubscriptionId,
+    if (result.cleanupStandardCheckout && processingMemberId) {
+      await cleanupHostedStandardCheckoutAndRetireAttempt({
+        checkoutSessionId: result.cleanupStandardCheckout.checkoutSessionId,
+        memberId: processingMemberId,
+        prisma,
+        subscriptionId: result.cleanupStandardCheckout.subscriptionId,
       });
     }
     if (result.welcomeEmailMemberId) {
@@ -1021,10 +1059,13 @@ async function processClaimedHostedStripeEvent(
     const poisoned = claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS &&
       !(error instanceof HostedLegacyFamilyCleanupPendingError) &&
       !(error instanceof HostedStripeCheckoutLoserCleanupPendingError) &&
+      !(error instanceof HostedStripeFamilySponsoredCleanupPendingError) &&
       !(error instanceof HostedStripeSubscriptionIdentityPendingError) &&
       !(error instanceof HostedStripeEventRetrieveRetryableError) &&
+      !(error instanceof HostedStripeRuntimeRecheckPendingError) &&
       !usageCreditEventHandled &&
-      !isHostedUsageCreditStripeRetryableError(error);
+      !isHostedUsageCreditStripeRetryableError(error) &&
+      !isHostedStripeEventOperationallyRetryableError(error);
     const reconciliationErrorCode = deriveHostedStripeEventErrorCode(error);
     logHostedStripeEventReconciliationFailure({
       attemptCount: claimed.attemptCount,
@@ -1074,6 +1115,84 @@ async function processClaimedHostedStripeEvent(
       status: "failed",
     };
   }
+}
+
+function isHostedStripeEventOperationallyRetryableError(
+  error: unknown,
+): boolean {
+  const operationalError = unwrapHostedStripeOperationalError(error);
+  if (operationalError !== error) {
+    return isHostedStripeEventOperationallyRetryableError(operationalError);
+  }
+  if (error instanceof Prisma.PrismaClientInitializationError) {
+    return typeof error.errorCode === "string" &&
+      STRIPE_EVENT_RETRYABLE_PRISMA_CODES.has(error.errorCode);
+  }
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError
+    && STRIPE_EVENT_RETRYABLE_PRISMA_CODES.has(error.code)
+  ) {
+    return true;
+  }
+  if (
+    error instanceof Error
+    && (
+      error.name === "AbortError"
+      || error.name === "TimeoutError"
+      || error.name === "PrismaClientRustPanicError"
+    )
+  ) {
+    return true;
+  }
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const shouldRetry = readStripeShouldRetryDirective(error);
+  if (shouldRetry !== null) {
+    return shouldRetry;
+  }
+  const statusCode = "statusCode" in error && typeof error.statusCode === "number"
+    ? error.statusCode
+    : null;
+  if (statusCode === 409 || statusCode === 429 || (statusCode !== null && statusCode >= 500)) {
+    return true;
+  }
+  const type = "type" in error && typeof error.type === "string"
+    ? error.type
+    : null;
+  const rawType = "rawType" in error && typeof error.rawType === "string"
+    ? error.rawType
+    : null;
+  const code = "code" in error && typeof error.code === "string"
+    ? error.code
+    : null;
+  return type === "StripeAPIError"
+    || type === "StripeConnectionError"
+    || type === "StripeRateLimitError"
+    || rawType === "api_error"
+    || rawType === "api_connection_error"
+    || rawType === "rate_limit_error"
+    || code === "ECONNRESET"
+    || code === "ECONNREFUSED"
+    || code === "ETIMEDOUT";
+}
+
+function unwrapHostedStripeOperationalError(error: unknown): unknown {
+  let current = error;
+  const seen = new Set<unknown>();
+
+  while (
+    isHostedOnboardingError(current)
+    && current.cause !== undefined
+    && current.cause !== current
+    && !seen.has(current)
+  ) {
+    seen.add(current);
+    current = current.cause;
+  }
+
+  return current;
 }
 
 async function processHostedStripeEventWithDiscoveredMemberLock(
@@ -1263,7 +1382,7 @@ function hostedStripeEventNeedsPreflightProcessingContext(
     isHostedStripeSubscriptionBillingEvent(stripeEvent.type)
     || stripeEvent.type === "invoice.paid"
     || stripeEvent.type === "invoice.payment_failed"
-    || stripeEvent.type === "refund.created"
+    || isHostedStripeRefundEventType(stripeEvent.type)
     || stripeEvent.type.startsWith("charge.dispute.")
   );
 }
@@ -1562,20 +1681,30 @@ function isDefinitiveHostedStripeEventRetrieveRejection(error: unknown): boolean
     rawType === "permission_error";
 }
 
-async function signalHostedUsageCreditRuntimeRecheck(input: {
+async function signalHostedBillingRuntimeRecheckIgnoringInactive(input: {
   prisma: PrismaClient;
   userId: string;
 }): Promise<void> {
-  await waitForHostedPostCommitOperation({
-    deadlineMs: createHostedPostCommitDeadline(
-      HOSTED_USAGE_CREDIT_RUNTIME_RECHECK_TIMEOUT_MS,
-    ),
-    operation: (abortSignal) => signalHostedRuntimeRecheckRuntime({
-      abortSignal,
-      prisma: input.prisma,
-      userId: input.userId,
-    }),
-  });
+  try {
+    await waitForHostedPostCommitOperation({
+      deadlineMs: createHostedPostCommitDeadline(
+        HOSTED_USAGE_CREDIT_RUNTIME_RECHECK_TIMEOUT_MS,
+      ),
+      operation: (abortSignal) => signalHostedRuntimeRecheckRuntime({
+        abortSignal,
+        prisma: input.prisma,
+        userId: input.userId,
+      }),
+    });
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_RUNTIME_USER_INACTIVE"
+    ) {
+      return;
+    }
+    throw new HostedStripeRuntimeRecheckPendingError(error);
+  }
 }
 
 function buildDueHostedStripeEventWhere(now: Date): Prisma.HostedStripeEventWhereInput {
@@ -1607,32 +1736,38 @@ function mapHostedStripeActivationOutcome(
   outcome: {
     activatedMemberId: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
+    cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
-    cleanupStandardCheckoutStripeSubscriptionId?: string | null;
+    cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
     hostedExecutionEventId: string | null;
+    runtimeRecheckMemberIds?: string[];
     welcomeEmailMemberId?: string | null;
   },
 ): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
-  cleanupStandardCheckoutStripeSubscriptionId: string | null;
+  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
+  runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 } {
   return {
     activatedMemberId: outcome.activatedMemberId,
     activatedMembers: outcome.activatedMembers ?? [],
+    cleanupFamilySponsoredCheckout:
+      outcome.cleanupFamilySponsoredCheckout ?? null,
     cleanupFamilySponsoredStripeSubscriptionId:
       outcome.cleanupFamilySponsoredStripeSubscriptionId ?? null,
     cleanupPulseTrialStripeSubscriptionId:
       outcome.cleanupPulseTrialStripeSubscriptionId ?? null,
-    cleanupStandardCheckoutStripeSubscriptionId:
-      outcome.cleanupStandardCheckoutStripeSubscriptionId ?? null,
+    cleanupStandardCheckout: outcome.cleanupStandardCheckout ?? null,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
+    runtimeRecheckMemberIds: outcome.runtimeRecheckMemberIds ?? [],
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
   };
@@ -1642,33 +1777,39 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   outcome: {
     activatedMemberId?: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
+    cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
-    cleanupStandardCheckoutStripeSubscriptionId?: string | null;
+    cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
     hostedExecutionEventId?: string | null;
+    runtimeRecheckMemberIds?: string[];
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
     welcomeEmailMemberId?: string | null;
   } | null | undefined,
 ): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
-  cleanupStandardCheckoutStripeSubscriptionId: string | null;
+  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
+  runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 } {
   return {
     activatedMemberId: outcome?.activatedMemberId ?? null,
     activatedMembers: outcome?.activatedMembers ?? [],
+    cleanupFamilySponsoredCheckout:
+      outcome?.cleanupFamilySponsoredCheckout ?? null,
     cleanupFamilySponsoredStripeSubscriptionId:
       outcome?.cleanupFamilySponsoredStripeSubscriptionId ?? null,
     cleanupPulseTrialStripeSubscriptionId:
       outcome?.cleanupPulseTrialStripeSubscriptionId ?? null,
-    cleanupStandardCheckoutStripeSubscriptionId:
-      outcome?.cleanupStandardCheckoutStripeSubscriptionId ?? null,
+    cleanupStandardCheckout: outcome?.cleanupStandardCheckout ?? null,
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
+    runtimeRecheckMemberIds: outcome?.runtimeRecheckMemberIds ?? [],
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,
     welcomeEmailMemberId: outcome?.welcomeEmailMemberId ?? null,
@@ -1678,20 +1819,24 @@ function mapHostedStripeSubscriptionUpdateOutcome(
 function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
-  cleanupStandardCheckoutStripeSubscriptionId: string | null;
+  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
+  runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 } {
   return {
     activatedMemberId: null,
     activatedMembers: [],
+    cleanupFamilySponsoredCheckout: null,
     cleanupFamilySponsoredStripeSubscriptionId: null,
     cleanupPulseTrialStripeSubscriptionId: null,
-    cleanupStandardCheckoutStripeSubscriptionId: null,
+    cleanupStandardCheckout: null,
     hostedExecutionEventId: null,
+    runtimeRecheckMemberIds: [],
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: null,
   };

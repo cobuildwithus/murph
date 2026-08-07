@@ -192,6 +192,7 @@ import {
   recoverHostedGroupSponsorshipUsageCreditCheckout,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
 import {
+  buildHostedUsageCreditSavedCardIdempotencyKey,
   tryChargeHostedUsageCreditSavedCard,
 } from "@/src/lib/hosted-onboarding/usage-credit-saved-card-payment";
 import {
@@ -5264,31 +5265,116 @@ describe("usage-credit account-deletion convergence", () => {
     });
   });
 
-  it("waits for a durably bound direct payment before deleting its payer", async () => {
+  it("cancels an exact bound direct payment before deleting its payer", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    const purchase = {
-      beneficiaryMemberId: "member_group_runtime",
-      id: "hucp_pending_direct_group_purchase",
-      lastReconciledAt: null,
-      paidAt: null,
-      payerMemberId: MEMBER_ID,
-      reconciliationVersion: 1n,
+    const fixture = installAutomaticGroupRefillFixture(fake, {
       status: "payment_pending",
-      stripeChargeIdEncrypted: null,
-      stripeChargeLookupKey: null,
-      stripeCheckoutSessionIdEncrypted: null,
-      stripeCheckoutSessionLookupKey: null,
-      stripeCheckoutUrlEncrypted: null,
-      stripeCustomerIdEncrypted: "encrypted:cus_group_payer",
-      stripeCustomerLookupKey: "customer:cus_group_payer",
-      stripePaymentIntentIdEncrypted: "encrypted:pi_direct_123",
-      stripePaymentIntentLookupKey: "billing:pi_direct_123",
-      stripePriceIdEncrypted: "encrypted:price_usage_10",
-      terminalAt: null,
-      updatedAt: NOW,
+    });
+    const requiresConfirmation = buildSavedCardPaymentIntent({
+      amount: 500,
+      amountReceived: 0,
+      latestCharge: null,
+      purchaseId: fixture.refill.id,
+      status: "requires_confirmation",
+    });
+    mocks.stripePaymentIntentRetrieve.mockResolvedValueOnce(
+      requiresConfirmation,
+    );
+    mocks.stripePaymentIntentCancel.mockResolvedValueOnce({
+      ...requiresConfirmation,
+      status: "canceled",
+    });
+    fake.member.suspendedAt = NOW;
+    const deletionAt = new Date(NOW.getTime() + 1_000);
+
+    await expect(closeHostedUsageCreditPurchasesForAccountDeletion({
+      memberIds: [MEMBER_ID],
+      now: deletionAt,
+    })).resolves.toBeUndefined();
+
+    expect(mocks.stripePaymentIntentRetrieve).toHaveBeenCalledWith(
+      "pi_saved_card_123",
+      { expand: ["latest_charge"] },
+    );
+    expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledWith(
+      "pi_saved_card_123",
+      { cancellation_reason: "abandoned" },
+      {
+        idempotencyKey:
+          `${buildHostedUsageCreditSavedCardIdempotencyKey(fixture.refill.id)}:cancel`,
+      },
+    );
+    expect(fixture.refill).toMatchObject({
+      lastReconciledAt: deletionAt,
+      status: "expired",
+      terminalAt: deletionAt,
+    });
+    await expect(assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
+      memberIds: [MEMBER_ID],
+      now: new Date(deletionAt.getTime() + 1_000),
+      prisma: fake.prisma as never,
+    })).resolves.toBeUndefined();
+  });
+
+  it("recovers a crash after Stripe canceled the bound direct payment", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    const fixture = installAutomaticGroupRefillFixture(fake, {
+      status: "payment_pending",
+    });
+    const requiresConfirmation = buildSavedCardPaymentIntent({
+      amount: 500,
+      amountReceived: 0,
+      latestCharge: null,
+      purchaseId: fixture.refill.id,
+      status: "requires_confirmation",
+    });
+    const canceled = {
+      ...requiresConfirmation,
+      status: "canceled",
     };
-    fake.purchases.set(String(purchase.id), purchase);
+    mocks.stripePaymentIntentRetrieve
+      .mockResolvedValueOnce(requiresConfirmation)
+      .mockResolvedValueOnce(canceled);
+    mocks.stripePaymentIntentCancel.mockRejectedValueOnce(
+      new Error("response lost after cancellation"),
+    );
+    fake.member.suspendedAt = NOW;
+
+    await expect(closeHostedUsageCreditPurchasesForAccountDeletion({
+      memberIds: [MEMBER_ID],
+      now: new Date(NOW.getTime() + 1_000),
+    })).resolves.toBeUndefined();
+
+    expect(mocks.stripePaymentIntentRetrieve).toHaveBeenCalledTimes(2);
+    expect(fixture.refill).toMatchObject({
+      status: "expired",
+    });
+  });
+
+  it.each([
+    { amountReceived: 0, latestCharge: null, status: "processing" },
+    {
+      amountReceived: 500,
+      latestCharge: "ch_refill_account_deletion",
+      status: "succeeded",
+    },
+  ])("does not cancel a provider-$status direct payment", async (providerState) => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    const fixture = installAutomaticGroupRefillFixture(fake, {
+      status: "payment_pending",
+    });
+    mocks.stripePaymentIntentRetrieve.mockResolvedValueOnce(
+      buildSavedCardPaymentIntent({
+        amount: 500,
+        amountReceived: providerState.amountReceived,
+        latestCharge: providerState.latestCharge,
+        purchaseId: fixture.refill.id,
+        status: providerState.status,
+      }),
+    );
     fake.member.suspendedAt = NOW;
 
     await expect(closeHostedUsageCreditPurchasesForAccountDeletion({
@@ -5299,11 +5385,9 @@ describe("usage-credit account-deletion convergence", () => {
       retryable: true,
     });
 
-    expectNoStripeProviderIo();
-    expect(purchase).toMatchObject({
-      payerMemberId: MEMBER_ID,
+    expect(mocks.stripePaymentIntentCancel).not.toHaveBeenCalled();
+    expect(fixture.refill).toMatchObject({
       status: "payment_pending",
-      stripePaymentIntentLookupKey: "billing:pi_direct_123",
     });
   });
 
@@ -5931,6 +6015,10 @@ function installAutomaticGroupRefillFixture(
     paidAt: periodStartedAt,
     remainingCreditUsdMicros: 5_000_000n,
     status: "fulfilled",
+    stripeChargeIdEncrypted: "sealed:ch_activation",
+    stripeChargeLookupKey: "billing:ch_activation",
+    stripePaymentIntentIdEncrypted: "sealed:pi_activation",
+    stripePaymentIntentLookupKey: "billing:pi_activation",
     terminalAt: periodStartedAt,
   });
   const refill = {

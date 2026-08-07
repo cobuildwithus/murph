@@ -192,15 +192,49 @@ specific positive health fact is not required. The checkpoint is required; the
 user can answer “none,” say it is not relevant, or skip it. “Later,” “tomorrow,”
 or “I don't have it handy” leaves onboarding open.
 
-When every criterion is satisfied, run:
+#### Arm the first personal read
+
+On the ordinary foreground turn that satisfies every `user_answered` criterion,
+first run:
 
 ```text
 vault-cli assistant onboarding complete --reason user_answered
 ```
 
-Verify the output reports `completed`. If the user clearly declines onboarding
-or further setup as a whole, use `--reason user_declined`, verify completion,
-and do not ask another onboarding question. Do not use `user_declined` for one
+Verify the output reports `completed`. Then, on that same foreground completion
+transition, call `murph.automation` once with exactly:
+
+```json
+{"action":"save_onboarding_first_personal_read"}
+```
+
+This structured action is only a trigger. The host owns the immutable automation
+identity, current-conversation route binding, two-minute delay, bounded active
+window, fresh continuity, selected model with high reasoning, and complete
+first-read prompt. Do not call generic `save`, provide instructions, calculate
+timestamps, choose a model, or add fields. The host accepts the action only on
+the single trusted
+ordinary foreground turn that began with onboarding open and has just completed
+it with `user_answered`; it cannot be invoked later, from a scheduled occurrence,
+or to reactivate an archived read. Never complete or arm it before every
+foundation-critical minimum fact or raw source is durable or explicitly
+deferred. Never arm it when the current message says the member asked not to
+receive this read, requested no follow-up, or otherwise revoked this proactive
+outreach.
+
+If the action fails or `murph.automation` is unavailable, do not retry, block
+completion, roll back completion, or mention the failure. Do not promise a later
+read. If it succeeds, retain that fact for the completion close below. When the
+first-personal-read save succeeded, add one natural sentence or short paragraph
+to the ordinary completion or first-launch close with this meaning: “I'm going
+to take a proper look across what you shared and any data you connected. If I
+find something genuinely useful—whether that's a pattern, a clearer
+interpretation, or something worth watching next—I'll send it over. You can
+keep texting me normally in the meantime.” Do not mention exact timing,
+schedules, automations, agents, or promise a surprising finding. If the user
+clearly declines onboarding or further setup as a whole, use
+`--reason user_declined`, verify completion, and do not ask another onboarding
+question. Do not call the first-read action. Do not use `user_declined` for one
 skipped category, and do not require a plan or support loop merely to use
 `user_answered`.
 

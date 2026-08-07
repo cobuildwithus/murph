@@ -36,6 +36,10 @@ import {
   retrieveAndExpireHostedUsageCreditStripeSession,
 } from "./usage-credit-purchase-stripe";
 import { logHostedStripeFailure } from "./stripe-error-log";
+import {
+  cancelHostedUsageCreditDirectPayment,
+  canCancelHostedUsageCreditDirectPayment,
+} from "./usage-credit-saved-card-payment";
 import { getPrisma } from "../prisma";
 
 export async function closeHostedUsageCreditPurchasesForAccountDeletion(input: {
@@ -69,7 +73,39 @@ export async function closeHostedUsageCreditPurchasesForAccountDeletion(input: {
       continue;
     }
     if (purchase.status === HostedUsageCreditPurchaseStatus.payment_pending) {
-      throw buildHostedUsageCreditAccountDeletionPaymentPendingError();
+      if (!canCancelHostedUsageCreditDirectPayment(purchase)) {
+        throw buildHostedUsageCreditAccountDeletionPaymentPendingError();
+      }
+      const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
+      if (stripeLiveMode !== purchase.stripeLiveMode) {
+        throw hostedOnboardingError({
+          code: "HOSTED_USAGE_CREDIT_STRIPE_MODE_MISMATCH",
+          httpStatus: 500,
+          message: "Usage-credit checkout is temporarily unavailable.",
+        });
+      }
+      const reconciledDirectPayment =
+        await cancelHostedUsageCreditDirectPayment({
+          ...(purchase.beneficiaryMemberId !== purchase.payerMemberId
+            ? { groupBeneficiaryMemberId: purchase.beneficiaryMemberId }
+            : {}),
+          now,
+          prisma,
+          purchase,
+          stripe,
+        });
+      if (isHostedUsageCreditPurchaseSafeForAccountDeletion(
+        reconciledDirectPayment,
+      )) {
+        continue;
+      }
+      if (
+        reconciledDirectPayment.status ===
+        HostedUsageCreditPurchaseStatus.payment_pending
+      ) {
+        throw buildHostedUsageCreditAccountDeletionPaymentPendingError();
+      }
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
     }
 
     const resolution = await resolveHostedUsageCreditStripeSessionForAccountDeletion({
