@@ -1,6 +1,6 @@
 # runner-image-layer-compaction
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-06
 
@@ -61,7 +61,7 @@ Updated: 2026-08-06
    focused tests/docs.
 3. [complete] Run focused tests, typecheck, real Docker build, health, permission,
    history, and size proof.
-4. [in progress] Commit, push, open a draft PR, and complete ReviewGPT and CI
+4. [complete] Commit, push, open a draft PR, and complete ReviewGPT and CI
    gates.
 
 ## Decisions
@@ -91,5 +91,14 @@ Updated: 2026-08-06
 - Preliminary specialists on the first candidate: invalid because the guarded
   review ZIP omitted `Dockerfile.cloudflare-hosted-runner-base`, which the
   changed contract test reads. The always-path list now includes that direct
-  dependency; pending exact-head packaged-content proof and retry.
-- Pending: corrected exact-head ReviewGPT and CI.
+  dependency. The corrected exact-head package included the base Dockerfile and
+  all required PR metadata; the trusted preliminary retry passed with no
+  findings and no patch artifact.
+- Final ReviewGPT round 2 on the corrected exact head used the required
+  sensitive full snapshot and passed with no findings and no patch artifact.
+- Exact-head native runner permission sandbox CI: passed. The manually
+  dispatched workflow assembled the production bundle and base image, then
+  passed native Codex permission-confinement smoke on the reviewed head; the
+  manual dispatch was required because the draft PR event did not create a
+  path-filtered run.
+Completed: 2026-08-06
