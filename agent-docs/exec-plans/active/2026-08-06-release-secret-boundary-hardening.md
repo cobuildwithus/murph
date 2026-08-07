@@ -201,3 +201,20 @@ Updated: 2026-08-06
   direct and complete-tarball cases fail closed for every reproduced authority,
   reference/placeholder cases remain accepted, the focused suite passes 17/17,
   and the fresh five-package inventory passes the exact updated scanner.
+- Final ReviewGPT round 7 accepted two remaining publication bypasses: the
+  repository's supported Temporal client private-key holders end in the
+  representation suffix `BASE64`, and quoted or curl-style `X-API-Key` headers
+  were outside the structured assignment grammar. The correction strips only
+  terminal `base64`/`pem` representation components for classification and
+  routes one quoted serialized-header matcher through the same key/literal
+  policy. Temporal certificate holders, explicit environment references,
+  exact placeholders, and harmless header-name prose remain public. The first
+  real five-package scan exposed the documented `Bearer <token>` placeholder;
+  that exact placeholder was enumerated and the complete inventory then passed.
+  On the latest merged `main`, the focused suite passes 21/21, the two release
+  owner files pass 46 tests with one intentional skip, CLI typecheck and package
+  shape pass, the clean workspace build passes, and both the fresh pack-owner
+  scan and standalone manifest scan pass all five tarballs.
+- Round 7 is the configured substantive-round cap. Its findings are resolved in
+  the candidate, but a further final-gate round requires an explicit continuation
+  decision; keep this plan active until that decision and a final PASS.
