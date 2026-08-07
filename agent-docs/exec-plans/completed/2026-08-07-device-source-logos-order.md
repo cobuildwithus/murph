@@ -1,6 +1,6 @@
 # Device source logos and catalog order
 
-Status: active
+Status: completed
 Created: 2026-08-07
 Updated: 2026-08-07
 
@@ -86,5 +86,17 @@ Updated: 2026-08-07
   provider marks and the intended order at a 1440 CSS-pixel desktop viewport
   with 2x density and a 390 CSS-pixel mobile viewport with 3x density. The
   cropped PNG evidence is immediately legible and within the upload limits.
-- Preliminary ReviewGPT, Claude UI review, exact-head CI, and final parent
-  review remain pending.
+- The preliminary ReviewGPT specialist pass inspected the exact production PNG
+  bytes plus desktop and mobile evidence and passed every applicable product,
+  frontend, and coverage lens with no findings or coverage patch. The separate
+  final full-patch ReviewGPT gate also passed with no findings.
+- The required Claude visual-review attempts were made with both supported
+  models, but each execution ended without a usable response; no Claude pass is
+  claimed. Native-resolution parent inspection and the trusted specialist
+  rendered-evidence review provide the completed visual proof.
+- The final parent review found no ownership, behavior, accessibility, privacy,
+  or regression issue. The PR description now follows the design-proof
+  checker's labeled-list contract, and the exact local checker passes for all
+  eight user-facing paths. Required GitHub Actions will evaluate the final
+  plan-archive head before completion.
+Completed: 2026-08-07
