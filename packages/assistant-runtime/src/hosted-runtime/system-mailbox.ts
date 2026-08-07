@@ -22,7 +22,7 @@ import {
 } from "./events.ts";
 import {
   isHostedAssistantAskCompletionPreemptedError,
-} from "./events/assistant-ask-completion.ts";
+} from "./events/assistant-ask-completion-errors.ts";
 import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,

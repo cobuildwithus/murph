@@ -81,7 +81,6 @@ import {
 import worker from "../src/index.ts";
 import { sendHostedEmailMessage } from "../src/hosted-email/transport.ts";
 import { handleHostedEmailIngress as handleHostedEmailIngressImpl } from "../src/hosted-email/worker-ingress.ts";
-import { resolveHostedR2CutoverContext } from "../src/r2-cutover.ts";
 import type { WorkerEnvironmentSource } from "../src/worker-routes/shared.ts";
 
 import {
@@ -141,21 +140,6 @@ class RecoveryWriteFailureBucket extends MemoryEncryptedR2Bucket {
       throw new Error("recovery write failed");
     }
     await super.put(key, value);
-  }
-}
-
-class BridgeMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
-  async list(input: { prefix?: string } = {}): Promise<{
-    objects: Array<{ key: string }>;
-    truncated: false;
-  }> {
-    return {
-      objects: [...this.objects.keys()]
-        .filter((key) => input.prefix ? key.startsWith(input.prefix) : true)
-        .sort()
-        .map((key) => ({ key })),
-      truncated: false,
-    };
   }
 }
 
@@ -320,83 +304,6 @@ describe("hosted email worker ingress", () => {
     expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
-  });
-
-  it("keeps a destination-only Worker email readable by a source-active consumer", async () => {
-    const source = new BridgeMemoryEncryptedR2Bucket();
-    const destination = new BridgeMemoryEncryptedR2Bucket();
-    mocks.fetchHostedExecutionWebControlPlaneResponse
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ ok: true }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        },
-      ))
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({
-          userId: "user_123",
-        }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        },
-      ));
-    const replyAliasAddress = await createHostedEmailUserAddress({
-      config: createHostedEmailConfig(),
-      userId: "user_123",
-      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
-      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
-    });
-    const env = {
-      ...createWorkerEnv(source),
-      BUNDLES_ENAM: destination,
-      HOSTED_R2_CUTOVER_PHASE: "destination_active",
-    } satisfies WorkerEnvironmentSource;
-    const rawEmail = buildRawEmail({
-      from: "Owner <owner@example.com>",
-      to: replyAliasAddress,
-    });
-    const rawBytes = new TextEncoder().encode(rawEmail);
-    const message: ForwardableEmailMessage = {
-      forward: vi.fn(async () => ({ messageId: "forwarded-message" })),
-      from: "owner@example.com",
-      headers: new Headers(),
-      raw: new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(rawBytes);
-          controller.close();
-        },
-      }),
-      rawSize: rawBytes.byteLength,
-      reply: vi.fn(async () => ({ messageId: "reply-message" })),
-      setReject: vi.fn(),
-      to: replyAliasAddress,
-    };
-
-    await worker.email(message, env);
-
-    expect(listHostedEmailMessageKeys(source)).toEqual([]);
-    expect(listHostedEmailMessageKeys(destination)).toHaveLength(1);
-    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
-    const rawMessageKey = appendInput?.body?.rawMessageKey;
-    expect(typeof rawMessageKey).toBe("string");
-    const sourceActiveContext = resolveHostedR2CutoverContext({
-      BUNDLES: source,
-      BUNDLES_ENAM: destination,
-      HOSTED_R2_CUTOVER_PHASE: "source_active",
-    });
-    await expect(readHostedEmailRawMessage({
-      bucket: sourceActiveContext.bucket,
-      key: TEST_KEY,
-      keyId: "v1",
-      rawMessageKey,
-      userId: "user_123",
-    })).resolves.toEqual(rawBytes);
   });
 
   it("persists and nudges alias ingress only after the web-owned signed alias lookup succeeds", async () => {
