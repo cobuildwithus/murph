@@ -158,7 +158,12 @@ function formatCashCurrency(valueUsdCents: number): string {
 }
 
 function formatMonthlyCap(valueUsdCents: number): string {
-  return `${formatCashCurrency(valueUsdCents)}/mo`;
+  return `${new Intl.NumberFormat("en-US", {
+    currency: "USD",
+    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
+    style: "currency",
+  }).format(valueUsdCents / 100)}/mo`;
 }
 
 function formatUsageCurrency(valueUsdMicros: number): string {

@@ -153,6 +153,7 @@ describe("hosted ops growth sponsorship metrics", () => {
     expect(markup).toContain("$11.75");
     expect(markup).toContain("Total active monthly cap");
     expect(markup).toContain("$30/mo");
+    expect(markup).not.toContain("$30.00/mo");
     expect(markup).toContain("2 active capped authorizations");
     expect(markup).toContain("Monthly sponsorship charges");
     expect(markup).toContain("One-time contributions");
