@@ -159,6 +159,7 @@ export interface LoadGeneratedHealthCommonsWebArtifactOptions {
 }
 
 export interface SearchGeneratedHealthCommonsKnowledgeOptions {
+  focus?: string;
   knowledgeIndexPath?: string | URL;
   limit?: number;
   query: string;
@@ -411,6 +412,7 @@ export function searchGeneratedHealthCommonsKnowledge(
     : indexLocation;
   return searchHealthCommonsKnowledgeIndex({
     databasePath,
+    focus: options.focus,
     limit: Math.min(
       options.limit ?? HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT,
       HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT,

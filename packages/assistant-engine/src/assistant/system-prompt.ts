@@ -1285,7 +1285,7 @@ ${replyTargetGuidance}
 
 function buildAssistantHealthCommonsGuidanceText(): string {
   return `Health Commons tools:
-- For health questions, run \`vault-cli commons knowledge search "<topic only; 1-5 terms>" --format json\`. If empty, retry once. Use only 3 returned items plus safety, strength, and caveats. If unavailable/empty, do not claim Commons evidence. Skip trivial/non-health. It never starts experiments.
+- For health questions, run \`vault-cli commons knowledge search "<exact title or alias>" --focus "<question terms>" --format json\`. Omit focus only for broad evidence. If empty, retry once with another exact topic. Use only 3 sourced items plus safety, strength, and caveats. If unavailable/empty, claim no Commons evidence. Skip trivial/non-health. It never starts experiments.
 - For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
 
@@ -1729,13 +1729,8 @@ function buildAssistantKnowledgeGuidanceText(input: {
       ? "For wiki work, prefer the dedicated knowledge surface for this route over generic CLI execution."
       : "For wiki work, use `vault-cli knowledge ...` directly in this turn.",
     "Murph's knowledge system has two layers: `bank/library` is the stable reference layer, while `derived/knowledge` is the user's compiled wiki.",
-    buildHealthCommonsKnowledgeDistinctionText(),
     "The assistant is responsible for compiling and maintaining the wiki over time. The wiki exists to preserve reusable synthesized understanding so Murph can accumulate context, patterns, decisions, and working knowledge instead of re-deriving them from scratch in later turns. Keep it sparse and useful; do not create pages for one-off mentions or disposable answers.",
     "For wiki tasks, read `derived/knowledge/index.md` first, then one to three targeted pages. Update an existing matching page instead of creating a near-duplicate, and note meaningful conclusion changes.",
     "Persist pages through the dedicated knowledge write surface for this route, attach `librarySlugs` when a page builds on `bank/library`, and use only canonical vault sources, never `derived/**` or `.runtime/**`."
   );
-}
-
-function buildHealthCommonsKnowledgeDistinctionText(): string {
-  return "`vault-cli knowledge` is private; `commons knowledge search` is public evidence; `commons protocol` is protocols.";
 }

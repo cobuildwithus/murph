@@ -3600,6 +3600,11 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
+                                "focus": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 240
+                                },
                                 "limit": {
                                   "default": 3,
                                   "type": "integer",

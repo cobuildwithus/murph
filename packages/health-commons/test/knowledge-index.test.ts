@@ -72,6 +72,7 @@ function testCatalog(): HealthCommonsCatalog {
         key: "experiment_family:dry-sauna",
         slug: "families/dry-sauna",
         title: "Dry Sauna",
+        aliases: ["shared heat"],
         summary: "Traditional high-temperature dry-sauna exposure.",
         status: "reviewed",
         quality: "usable",
@@ -109,11 +110,13 @@ describe("Health Commons knowledge SQLite projection", () => {
       await expect(readFile(firstPath)).resolves.toEqual(await readFile(secondPath));
       const result = searchHealthCommonsKnowledgeIndex({
         databasePath: firstPath,
+        focus: "cardiovascular",
         limit: 2,
         query: "dry sauna",
       });
 
-      expect(result.items).toHaveLength(2);
+      expect(result.focus).toBe("cardiovascular");
+      expect(result.items).toHaveLength(1);
       expect(result.items).toContainEqual(expect.objectContaining({
         entityKey: "experiment_family:dry-sauna",
         sources: expect.arrayContaining([expect.objectContaining({
@@ -128,7 +131,8 @@ describe("Health Commons knowledge SQLite projection", () => {
       });
       expect(searchHealthCommonsKnowledgeIndex({
         databasePath: firstPath,
-        query: "sauna immunity",
+        focus: "immunity",
+        query: "dry sauna",
       }).items).toEqual([]);
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });
@@ -140,5 +144,32 @@ describe("Health Commons knowledge SQLite projection", () => {
       databasePath: "unused.sqlite",
       query: " - ",
     })).toThrow("at least one searchable term");
+  });
+
+  it("returns nothing when one exact alias has two direct owners", async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), "health-commons-ambiguous-"));
+    const databasePath = path.join(temporaryRoot, "knowledge.sqlite");
+    const catalog = testCatalog();
+    const drySauna = catalog.entities.find((entity) =>
+      entity.key === "experiment_family:dry-sauna"
+    );
+    if (!drySauna) {
+      throw new Error("Expected the dry-sauna test entity.");
+    }
+    catalog.entities.push({
+      ...drySauna,
+      aliases: ["shared heat"],
+      key: "experiment_family:ambiguous-heat",
+      slug: "families/ambiguous-heat",
+      title: "Ambiguous Heat",
+    });
+
+    try {
+      writeHealthCommonsKnowledgeIndex(databasePath, catalog);
+      expect(searchHealthCommonsKnowledgeIndex({ databasePath, query: "shared heat" }))
+        .toMatchObject({ items: [], safety: null });
+    } finally {
+      await rm(temporaryRoot, { force: true, recursive: true });
+    }
   });
 });

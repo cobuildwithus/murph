@@ -202,10 +202,14 @@ generated `knowledge.sqlite` FTS projection gives the assistant a bounded
 claim-level read path for ordinary health questions. Authored Markdown and JSONL
 remain authoritative. The SQLite file is read-only build output, contains no
 user data, and returns at most a small evidence packet instead of loading the
-catalog or source files into a turn. The default packet contains three distinct
-evidence items, up to one relevant safety item, and at most four source locators
-per item. Multi-term searches require every term and use stemming, so related
-English word forms can match without broad semantic retrieval.
+catalog or source files into a turn. The command first resolves one exact
+normalized entity title or authored alias. An exact title wins over an alias.
+Two equally ranked owners or an unknown topic return no packet. Optional
+question terms then rank evidence only within that resolved owner set. The
+default packet contains three distinct sourced evidence items,
+up to one safety item that matches the question terms, and at most four source
+locators per item. Multi-term question terms require every term and use
+stemming. Unsourced overview text is not part of the assistant projection.
 Hosted runner packaging must include that compact direction projection and the
 knowledge index without shipping the web artifact tree. A missing direction
 projection is auxiliary availability loss: progress cards remain available with
