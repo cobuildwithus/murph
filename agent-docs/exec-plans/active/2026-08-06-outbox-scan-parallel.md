@@ -89,3 +89,8 @@ Updated: 2026-08-06
   reader's production reach. The implementation already kept the correct single
   owner; the PR contract now names creation/dedupe, delivery/wake, newsletter,
   vault-file, status, daemon, and CLI consumers and their representative proof.
+- Final ReviewGPT round 2 passed with no findings after the scope correction.
+- A later automatic main merge exposed an unrelated upstream expectation drift:
+  hosted conversation identities now include `sessionId: null`. The approved
+  four-line expectation alignment passed both affected test files (285 tests)
+  and the `packages/assistant-runtime` typecheck.
