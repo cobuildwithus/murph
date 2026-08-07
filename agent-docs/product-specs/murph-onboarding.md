@@ -599,7 +599,9 @@ habit, plan, experiment, reminder, purchase, booking, or other effect.
 
 The turn reads the existing `weekly-health-insights` knowledge page before
 selection and best-effort records the exact outbound read there under a distinct
-first-read heading. That reuses the weekly insight dedupe owner instead of
+first-read heading keyed by the exact scheduled occurrence instant. Only that
+same occurrence may reuse its settled outbound text; any other first-read
+heading suppresses another send. That reuses the weekly insight dedupe owner instead of
 creating another insight table, page family, or lifecycle. Failure to update the
 ledger does not suppress an otherwise sound first read; the automation and
 outbox remain the delivery and replay owners.

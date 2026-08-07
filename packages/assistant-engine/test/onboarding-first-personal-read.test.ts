@@ -244,15 +244,17 @@ describe('onboarding first personal read', () => {
       'Return skip if the member asked not to receive this read, requested no follow-up, or otherwise revoked this proactive outreach.',
       'A generic closing invitation such as `anything else?` is not an unresolved task',
       'return skip if the page is malformed or unreadable',
-      'If a `First read <Occurrence local date>` section already exists, reuse only its exact stored outbound text for retry or replay of this occurrence',
+      'If a `First read <Occurrence instant>` section already exists, reuse only its exact stored outbound text for retry or replay of this occurrence',
       'If any other section heading begins `First read `, return skip; this one-shot never sends a second first personal read.',
       'vault-cli knowledge append-section weekly-health-insights',
+      'Use the exact ISO instant from the Scheduled occurrence context so only a retry or replay of this occurrence can reuse the section.',
       'A failed dedupe write must not make the member lose an otherwise sound first read.',
       'I took a deeper look across what you shared.',
       'at most one optional low-burden next action or question',
       'Do not diagnose, prescribe, alarm, shame, dump metrics, stack findings, create a habit, plan, experiment, reminder, or other action',
       'do not spawn a child; this scheduled turn owns the complete read, selection, and delivery',
     ])
+    expect(prompt).not.toContain('First read <Occurrence local date>')
   })
 
   it('keeps onboarding responsible only for invoking the fixed action', async () => {
