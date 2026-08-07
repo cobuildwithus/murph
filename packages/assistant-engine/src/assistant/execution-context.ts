@@ -223,7 +223,10 @@ export type AssistantHostedAutomationToolResponse =
 export interface AssistantHostedAutomationTool {
   request(
     request: AssistantHostedAutomationToolRequest,
-    context?: { signal?: AbortSignal | null },
+    context?: {
+      onboardingFirstReadCompletionTransition?: true
+      signal?: AbortSignal | null
+    },
   ): Promise<AssistantHostedAutomationToolResponse>
 }
 

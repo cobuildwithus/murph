@@ -578,6 +578,10 @@ async function executeAssistantCodexAttempt(input: {
           nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
+        onboardingFirstReadCompletionTransitionAvailable:
+          attemptPlan.routePlan.onboardingGuidanceInjected &&
+          executionPlan.input.scheduledOccurrenceAt == null &&
+          executionPlan.input.scheduledInvocationAuthority == null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
         onFinishWithoutReplyAccepted:
           executionPlan.onFinishWithoutReplyAccepted ?? null,

@@ -97,8 +97,16 @@ message-bound effects.
   Linq and Telegram. Accepted-message tool availability is unchanged.
 - Final ReviewGPT round 7 returned `ROUND_OUTCOME: PASS` with no qualifying
   findings. It independently confirmed the route/media correction and the prior
-  authority, ordering, retry, and deletion fixes. Hosted desktop/mobile launcher
-  screenshots remain the only unresolved completion evidence.
+  authority, ordering, retry, and deletion fixes.
+- The latest `main` update produced one import-only conflict in the assistant
+  runtime workspace-phase test. The resolution keeps both the PR's feedback
+  coverage and `main`'s onboarding first-read coverage in the existing shared
+  import block. The complete file passes all 278 tests and the assistant-runtime
+  package typecheck.
+- Hosted design proof now covers the complete desktop launcher study plus
+  loading, sign-in, and retry states at the 390 CSS-pixel mobile viewport. The
+  local and hosted variants were inspected at native resolution, contain only
+  synthetic catalog props, and pass the PR-body design-proof guard.
 - Focused owner suites pass, including 278 assistant-runtime phase tests and a
   Strict Mode launcher replay test. The full-stack scheduled-image scenario
   observed the expected image upload, attachment, and Linq delivery, then timed
@@ -110,3 +118,6 @@ message-bound effects.
   105,212 bytes for group scheduled Murph (+0.1828%) versus base. Exact model
   token totals remain unavailable because the pinned local provider does not
   expose tokenizer usage for the selected model.
+Status: completed
+Updated: 2026-08-07
+Completed: 2026-08-07

@@ -1704,6 +1704,7 @@ export async function executeMurphDynamicToolRequest(input: {
   hostedToolContext?: AssistantHostedToolContext | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
+  onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   deliveryContextOrdinal?: number | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   progressDelivery: AssistantProgressDelivery | null
@@ -1866,6 +1867,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeAutomationDynamicTool({
         abortSignal: input.abortSignal ?? null,
         automationTool,
+        onboardingFirstReadCompletionTransitionAvailable:
+          input.onboardingFirstReadCompletionTransitionAvailable ?? false,
         request: input.request,
       })
     }

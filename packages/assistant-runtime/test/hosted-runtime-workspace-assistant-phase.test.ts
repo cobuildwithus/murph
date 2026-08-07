@@ -219,8 +219,12 @@ import {
 } from "@murphai/core";
 import {
   buildGroupNewsletterAutomationSaveRequest,
+  buildOnboardingFirstPersonalReadAutomationSaveRequest,
+  completeAssistantOnboarding,
   GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
   markAssistantContextSnapshotDirty,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   readAssistantContextSnapshotState,
   saveAssistantAutomationState,
   saveAssistantSession,
@@ -5393,6 +5397,242 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           "Availability conflict policy: fixed",
         ].join("\n"),
       });
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("creates the first personal read only on one private answered-completion transition", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-first-read-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const inputId = "ain_22222222222222222222222222222222";
+    try {
+      await initializeVault({
+        createdAt: "2026-08-06T20:00:00.000Z",
+        vaultRoot,
+      });
+      mocks.readAssistantInputEvent.mockResolvedValue({
+        conversation: {
+          accountId: "linq_identity_current",
+          actorId: "linq_participant_current",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "linq_thread_current",
+          threadIsDirect: true,
+        },
+        replyTarget: {
+          channel: "linq",
+          messageId: "linq_message_current",
+          threadId: "linq_chat_current",
+        },
+      });
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [inputId],
+        importedCount: 1,
+        vaultRoot,
+      }));
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
+      const firstReadRequest =
+        buildOnboardingFirstPersonalReadAutomationSaveRequest({
+          now: new Date("2026-08-06T21:00:00.000Z"),
+        });
+      const genericFixedTargetRequests = [
+        {
+          action: "save" as const,
+          automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+          instructions: "Replace the fixed first-read policy.",
+          schedule: {
+            at: "2026-08-06T21:02:00.000Z",
+            kind: "at" as const,
+          },
+          title: "Replacement by identifier",
+        },
+        {
+          action: "save" as const,
+          instructions: "Replace the fixed first-read policy.",
+          schedule: {
+            at: "2026-08-06T21:02:00.000Z",
+            kind: "at" as const,
+          },
+          slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+          title: "Replacement by slug",
+        },
+        {
+          action: "save" as const,
+          instructions: "Replace the fixed first-read policy.",
+          schedule: {
+            at: "2026-08-06T21:02:00.000Z",
+            kind: "at" as const,
+          },
+          title: "Onboarding___first / personal read",
+        },
+      ];
+      for (const request of genericFixedTargetRequests) {
+        await expect(operationScope.runAutoReplyGroup({
+          executionContext: laneInput.executionContext,
+          inputIds: [inputId],
+          operation: async (executionContext) => {
+            const automationTool = executionContext.hosted?.automationTool;
+            if (!automationTool) {
+              throw new Error("Expected scoped hosted automation tool.");
+            }
+            return await automationTool.request(request);
+          },
+          turnEnvironment: null,
+        })).rejects.toThrow(
+          "only once during its answered-completion transition",
+        );
+      }
+      await expect(operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request(genericFixedTargetRequests[0], {
+            onboardingFirstReadCompletionTransition: true,
+          });
+        },
+        turnEnvironment: null,
+      })).rejects.toThrow(
+        "only once during its answered-completion transition",
+      );
+      await expect(showAutomation({
+        slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+        vaultRoot,
+      })).resolves.toBeNull();
+
+      const unrelated = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "save",
+            instructions: "Send the unrelated reminder.",
+            schedule: {
+              at: "2026-08-07T13:00:00.000Z",
+              kind: "at",
+            },
+            title: "Unrelated reminder",
+          });
+        },
+        turnEnvironment: null,
+      });
+      expect(unrelated).toEqual(expect.objectContaining({
+        action: "save",
+        created: true,
+      }));
+      await expect(operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request(firstReadRequest, {
+            onboardingFirstReadCompletionTransition: true,
+          });
+        },
+        turnEnvironment: null,
+      })).rejects.toThrow(
+        "only once during its answered-completion transition",
+      );
+      await completeAssistantOnboarding({
+        completedAt: "2026-08-06T21:00:00.000Z",
+        reason: "user_answered",
+        vault: vaultRoot,
+      });
+
+      const saved = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          await expect(automationTool.request(firstReadRequest)).rejects.toThrow(
+            "only once during its answered-completion transition",
+          );
+          const result = await automationTool.request(firstReadRequest, {
+            onboardingFirstReadCompletionTransition: true,
+          });
+          await expect(automationTool.request(firstReadRequest, {
+            onboardingFirstReadCompletionTransition: true,
+          })).rejects.toThrow(
+            "only once during its answered-completion transition",
+          );
+          return result;
+        },
+        turnEnvironment: null,
+      });
+      expect(saved).toEqual(expect.objectContaining({
+        action: "save",
+        created: true,
+        routeBinding: "current_conversation",
+        status: "active",
+      }));
+      await expect(showAutomation({
+        slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({
+        route: expect.objectContaining({
+          channel: "linq",
+          deliveryTarget: "linq_chat_current",
+          threadIsDirect: true,
+        }),
+      }));
+
+      await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "patch",
+            lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+            status: "archived",
+          });
+        },
+        turnEnvironment: null,
+      });
+      await expect(operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request(firstReadRequest, {
+            onboardingFirstReadCompletionTransition: true,
+          });
+        },
+        turnEnvironment: null,
+      })).rejects.toThrow(
+        "only once during its answered-completion transition",
+      );
+      await expect(showAutomation({
+        slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({ status: "archived" }));
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
