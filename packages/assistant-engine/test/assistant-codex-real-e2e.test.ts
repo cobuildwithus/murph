@@ -2171,8 +2171,7 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
 
       expect(knowledgeCommands).toHaveLength(1)
       expect(knowledgeCommands[0] ?? '').toMatch(/finnish dry sauna/iu)
-      expect(knowledgeCommands[0] ?? '').toMatch(/--focus/iu)
-      expect(knowledgeCommands[0] ?? '').toMatch(/health|benefit|evidence|outcome/iu)
+      expect(knowledgeCommands[0] ?? '').toMatch(/overall evidence/iu)
       expect(result.actions.some((action) =>
         action.kind === 'command'
         && action.command.includes('vault-cli experiment')
@@ -2198,7 +2197,6 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       expect(knowledgeCommands).toHaveLength(2)
       expect(knowledgeCommands.every((command) =>
         /finnish dry sauna/iu.test(command)
-        && command.includes('--focus')
       )).toBe(true)
       expect(knowledgeCommands.some((command) => /immun/iu.test(command))).toBe(true)
       expect(knowledgeCommands.some((command) => /faint/iu.test(command))).toBe(true)

@@ -51,7 +51,7 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
   });
 
   it("returns the core dry-sauna systematic review", () => {
-    const result = search("Finnish Dry Sauna", "systematic review");
+    const result = search("Finnish Dry Sauna", "overall evidence");
 
     expect(result.items.some((item) =>
       item.sources.some((source) => source.pmid === "29849692")
@@ -59,8 +59,8 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
   });
 
   it("does not substitute nearby topics for unsupported queries", () => {
-    expect(search("magnesium sleep safety", "sleep safety")).toMatchObject({ items: [], safety: null });
-    expect(search("unsupported quux topic", "health evidence")).toMatchObject({ items: [], safety: null });
+    expect(search("magnesium sleep safety", "sleep safety")).toMatchObject({ items: [], safety: null, topicResolved: false });
+    expect(search("unsupported quux topic", "overall evidence")).toMatchObject({ items: [], safety: null, topicResolved: false });
     expect(search("vitamin k", "health evidence")).toMatchObject({ items: [], safety: null });
     expect(search("vitamin b", "health evidence")).toMatchObject({ items: [], safety: null });
     expect(search("hepatitis b", "health evidence")).toMatchObject({ items: [], safety: null });
@@ -163,13 +163,22 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     expect(packetText(result)).toMatch(/immun/iu);
   });
 
-  it("uses broad health intent to return direct Finnish-sauna evidence", () => {
-    const result = search("Finnish Dry Sauna", "health benefits");
+  it.each([
+    ["Finnish Dry Sauna", /sauna|heat/iu],
+    ["Caffeine Curfew", /caffeine|sleep/iu],
+    ["Creatine Monohydrate", /creatine/iu],
+    ["Omega-3 Supplementation", /omega|epa|dha/iu],
+    ["Collagen Supplementation", /collagen/iu],
+  ])("returns member-readable broad evidence for %s", (query, expected) => {
+    const result = search(query, "overall evidence");
+    const text = packetText(result);
 
-    expect(result.items.some((item) => item.sources.some((source) =>
-      source.pmid === "30077204" || source.pmid === "38577299"
-    ))).toBe(true);
-    expect(result.items.some((item) => /infrared|humidity control/iu.test(item.text))).toBe(false);
+    expect(result.topicResolved).toBe(true);
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(text).toMatch(expected);
+    expect(result.items.every((item) => item.kind === "claim" || item.kind === "source_finding"))
+      .toBe(true);
+    expect(text).not.toMatch(/landscape group|candidate row|shard\(s\)|preserving the source-specific extraction caveats/iu);
   });
 
   it("routes typed source findings to their related protocol", () => {
@@ -245,6 +254,7 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     }
     expect(search("Mean Corpuscular Hemoglobin", "evidence").items).toEqual([]);
     expect(search("Magnesium RBC", "evidence").items).toEqual([]);
+    expect(search("Mean Corpuscular Hemoglobin", "evidence").topicResolved).toBe(true);
 
     const { DatabaseSync } = await import("node:sqlite");
     const database = new DatabaseSync(knowledgeIndexPath, { readOnly: true });
@@ -259,9 +269,11 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
       expect(database.prepare(`
         SELECT COUNT(*) AS count
         FROM chunks
-        WHERE caveat = 'This source record preserves reducer classifications but does not replace source-level full-text extraction.'
+        WHERE kind = 'appraisal'
+           OR caveat = 'This source record preserves reducer classifications but does not replace source-level full-text extraction.'
            OR text LIKE '%candidate row(s)%'
            OR text LIKE '%shard(s)%'
+           OR text LIKE '%landscape group%'
       `).get()).toMatchObject({ count: 0 });
       expect(database.prepare(`
         SELECT COUNT(*) AS count

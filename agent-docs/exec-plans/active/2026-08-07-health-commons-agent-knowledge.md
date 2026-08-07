@@ -23,7 +23,7 @@ Updated: 2026-08-07
 
 - The Health Commons build produces one ignored, read-only SQLite FTS index from
   the authored catalog.
-- One bounded CLI command returns the best claim, appraisal, source finding, and
+- One bounded CLI command returns the best claim, typed source finding, and
   safety context for a health topic with direct source locators.
 - Murph uses that command for substantive health questions and does not use it
   for jokes, acknowledgements, logistics, or unrelated messages.
@@ -65,8 +65,8 @@ Updated: 2026-08-07
   avoiding large context loads.
 - Use lexical FTS search. Murph translates the user's topic into a few English
   search terms, so no embedding model or vector database is needed.
-- Keep one search call as the normal path. A second refined search is allowed
-  only when the first result is ambiguous or empty.
+- Keep one search call as the normal path. A second search is allowed only for
+  a separate evidence or safety clause about the same topic.
 - Load SQLite only when the knowledge command runs. Use a contentless FTS table
   and omit source-only overview rows to keep the generated index near 19 MB
   instead of the initial 54 MB.
@@ -95,7 +95,7 @@ Updated: 2026-08-07
   relevance ranks before evidence priority.
 - The same correction removed every unsourced overview row and its selection
   path. Ordinary results now always carry direct source references. Topics with
-  overview prose but no sourced claim, finding, or appraisal return no packet.
+  overview prose but no sourced claim or finding return no packet.
 - The real assistant harness now forwards the model's command to the generated
   index through the actual CLI entrypoint. It no longer returns a fixed sauna
   fixture.
@@ -117,7 +117,7 @@ Updated: 2026-08-07
   otherwise one measured biomarker. Ambiguous pages emit no finding rows.
 - Round 5 also found that aggregate page safety text used unrelated page-wide
   citations. The projection no longer emits those rows. Safety results now come
-  only from directly sourced safety claims, appraisals, or typed findings.
+  only from directly sourced safety claims or typed findings.
 - Round 6 found that family aliases were copied to child protocols even when
   the corpus said those variants were not interchangeable. Only the canonical
   family title now expands to its typed children. A family alias stays on the
@@ -133,6 +133,14 @@ Updated: 2026-08-07
   reducer-only appraisals in member-facing results. Candidate-row and shard
   bookkeeping is now excluded until source-level extraction creates readable
   evidence.
+- Round 8 required a requirement-level retrospective because both mechanisms
+  repeated. Broad questions now use the exact `overall evidence` class; other
+  focus remains a strict predicate. Results distinguish an unresolved topic
+  from a resolved topic with no matching evidence. All appraisal rows leave the
+  assistant projection; only sourced claims and extracted typed findings remain.
+  Focus is a required positional CLI input, so generated types match runtime.
+- The round-cap decision and retrospective are recorded on PR #1405. No new
+  service, model, database, state owner, or query language was added.
 
 ## Verification
 

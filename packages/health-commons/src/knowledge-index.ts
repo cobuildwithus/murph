@@ -12,11 +12,9 @@ export const HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT = 3;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_SOURCES_PER_ITEM = 4;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_CANDIDATES = 48;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_TOPICS = 32;
-const REDUCER_ONLY_APPRAISAL_CAVEAT =
-  "This source record preserves reducer classifications but does not replace source-level full-text extraction.";
+export const HEALTH_COMMONS_KNOWLEDGE_OVERALL_FOCUS = "overall evidence";
 
 export type HealthCommonsKnowledgeItemKind =
-  | "appraisal"
   | "claim"
   | "safety"
   | "source_finding";
@@ -49,6 +47,7 @@ export interface HealthCommonsKnowledgeSearchResult {
   items: HealthCommonsKnowledgeSearchItem[];
   query: string;
   safety: HealthCommonsKnowledgeSearchItem | null;
+  topicResolved: boolean;
 }
 
 interface KnowledgeChunk {
@@ -211,6 +210,7 @@ export function searchHealthCommonsKnowledgeIndex(input: {
         items: [],
         query,
         safety: null,
+        topicResolved: false,
       };
     }
     const ownerKey = String(ownerRows[0]?.["owner_key"]);
@@ -229,38 +229,65 @@ export function searchHealthCommonsKnowledgeIndex(input: {
         items: [],
         query,
         safety: null,
+        topicResolved: true,
       };
     }
-    const contentQuery = toFtsQuery(focus);
     const placeholders = entityKeys.map(() => "?").join(", ");
-    const candidateRows = database.prepare(`
-      SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
-             c.strength, c.sources_json, c.priority, bm25(chunks_fts) AS rank
-      FROM chunks_fts
-      JOIN chunks c ON c.rowid = chunks_fts.rowid
-      WHERE chunks_fts MATCH ? AND c.kind <> 'safety'
-        AND c.entity_key IN (${placeholders})
-        AND c.sources_json <> '[]'
-      ORDER BY rank ASC, c.priority ASC, c.id ASC
-      LIMIT ?
-    `).all(
-      contentQuery,
-      ...entityKeys,
-      Math.min(limit * 8, HEALTH_COMMONS_KNOWLEDGE_MAX_CANDIDATES),
-    );
+    const broadEvidence = normalizeTopicPhrase(focus)
+      === normalizeTopicPhrase(HEALTH_COMMONS_KNOWLEDGE_OVERALL_FOCUS);
+    const contentQuery = broadEvidence ? null : toFtsQuery(focus);
+    const candidateRows = broadEvidence
+      ? database.prepare(`
+          SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
+                 c.strength, c.sources_json, c.priority, 0 AS rank
+          FROM chunks c
+          WHERE c.kind <> 'safety'
+            AND c.entity_key IN (${placeholders})
+            AND c.sources_json <> '[]'
+          ORDER BY c.priority ASC, c.id ASC
+          LIMIT ?
+        `).all(
+          ...entityKeys,
+          Math.min(limit * 8, HEALTH_COMMONS_KNOWLEDGE_MAX_CANDIDATES),
+        )
+      : database.prepare(`
+          SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
+                 c.strength, c.sources_json, c.priority, bm25(chunks_fts) AS rank
+          FROM chunks_fts
+          JOIN chunks c ON c.rowid = chunks_fts.rowid
+          WHERE chunks_fts MATCH ? AND c.kind <> 'safety'
+            AND c.entity_key IN (${placeholders})
+            AND c.sources_json <> '[]'
+          ORDER BY rank ASC, c.priority ASC, c.id ASC
+          LIMIT ?
+        `).all(
+          contentQuery,
+          ...entityKeys,
+          Math.min(limit * 8, HEALTH_COMMONS_KNOWLEDGE_MAX_CANDIDATES),
+        );
     const rows = selectDiverseKnowledgeRows(candidateRows, limit);
 
     const items = rows.map(readKnowledgeRow);
-    const safetyRow = database.prepare(`
-      SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
-             c.strength, c.sources_json, c.priority
-      FROM chunks_fts
-      JOIN chunks c ON c.rowid = chunks_fts.rowid
-      WHERE chunks_fts MATCH ? AND c.kind = 'safety'
-        AND c.entity_key IN (${placeholders})
-      ORDER BY bm25(chunks_fts) ASC, c.priority ASC, c.id ASC
-      LIMIT 1
-    `).get(contentQuery, ...entityKeys);
+    const safetyRow = broadEvidence
+      ? database.prepare(`
+          SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
+                 c.strength, c.sources_json, c.priority
+          FROM chunks c
+          WHERE c.kind = 'safety'
+            AND c.entity_key IN (${placeholders})
+          ORDER BY c.priority ASC, c.id ASC
+          LIMIT 1
+        `).get(...entityKeys)
+      : database.prepare(`
+          SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
+                 c.strength, c.sources_json, c.priority
+          FROM chunks_fts
+          JOIN chunks c ON c.rowid = chunks_fts.rowid
+          WHERE chunks_fts MATCH ? AND c.kind = 'safety'
+            AND c.entity_key IN (${placeholders})
+          ORDER BY bm25(chunks_fts) ASC, c.priority ASC, c.id ASC
+          LIMIT 1
+        `).get(contentQuery, ...entityKeys);
     const safety = safetyRow ? readKnowledgeRow(safetyRow) : null;
 
     return {
@@ -269,6 +296,7 @@ export function searchHealthCommonsKnowledgeIndex(input: {
       items,
       query,
       safety,
+      topicResolved: true,
     };
   } finally {
     database.close();
@@ -314,8 +342,7 @@ function readKnowledgeRow(
 function readKnowledgeItemKind(value: SQLOutputValue): HealthCommonsKnowledgeItemKind {
   const normalized = String(value);
   if (
-    normalized === "appraisal"
-    || normalized === "claim"
+    normalized === "claim"
     || normalized === "safety"
     || normalized === "source_finding"
   ) {
@@ -400,34 +427,6 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
     }
   }
 
-  for (const [appraisalIndex, appraisal] of catalog.evidenceAppraisals.entries()) {
-    if (
-      appraisal.caveat === REDUCER_ONLY_APPRAISAL_CAVEAT
-      || /\bcandidate row(?:\(s\))?\b|\bshard(?:\(s\))?\b/iu.test(
-        `${appraisal.headline} ${appraisal.implication}`,
-      )
-    ) {
-      continue;
-    }
-    const target = entitiesByKey.get(appraisal.targetKey);
-    const source = entitiesByKey.get(appraisal.sourceKey);
-    const topicText = target ? entityTopicText(target) : source ? entityTopicText(source) : "";
-    const safetyAppraisal = appraisal.stance === "safety_boundary"
-      || /\bsafety-only\b/iu.test(`${appraisal.headline} ${appraisal.implication}`);
-    chunks.push({
-      caveat: appraisal.caveat ?? null,
-      entityKey: appraisal.targetKey,
-      entityTitle: target?.title ?? appraisal.targetKey,
-      id: `appraisal:${appraisal.key}:${appraisalIndex}`,
-      kind: safetyAppraisal ? "safety" : "appraisal",
-      priority: safetyAppraisal ? 10 : evidencePriority(source),
-      searchText: `${topicText} ${source?.title ?? ""} ${appraisal.headline} ${appraisal.implication} ${appraisal.caveat ?? ""}`,
-      sources: resolveSources([appraisal.sourceKey], entitiesByKey),
-      strength: appraisal.result,
-      text: `${appraisal.headline} ${appraisal.implication}`,
-    });
-  }
-
   return chunks
     .filter((chunk) => chunk.sources.length > 0)
     .sort((left, right) => left.id.localeCompare(right.id))
@@ -464,24 +463,6 @@ function openKnowledgeDatabase(filePath: string, readOnly = false): DatabaseSync
   return readOnly
     ? new NodeSqliteDatabaseSync(filePath, { readOnly: true })
     : new NodeSqliteDatabaseSync(filePath);
-}
-
-function evidencePriority(source: HealthCommonsCatalogEntity | undefined): number {
-  switch (source?.researchEvidence?.designKind) {
-    case "systematic_review":
-    case "meta_analysis":
-      return 12;
-    case "randomized_controlled_trial":
-    case "prospective_cohort":
-      return 13;
-    case "controlled_trial":
-      return 14;
-    case "guideline":
-    case "narrative_review":
-      return 15;
-    default:
-      return 18;
-  }
 }
 
 function entityTopicText(entity: HealthCommonsCatalogEntity): string {

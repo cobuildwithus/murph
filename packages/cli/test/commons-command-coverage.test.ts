@@ -47,13 +47,13 @@ test("commons knowledge search returns a bounded source-backed sauna packet", as
       sources: Array<{ pmid: string | null; url: string | null }>;
     }>;
     safety: { kind: string } | null;
+    topicResolved: boolean;
   }>(cli, [
     "commons",
     "knowledge",
     "search",
     "Finnish Dry Sauna",
-    "--focus",
-    "systematic review",
+    "overall evidence",
     "--limit",
     "3",
   ]);
@@ -61,7 +61,8 @@ test("commons knowledge search returns a bounded source-backed sauna packet", as
   assert.equal(result.envelope.ok, true);
   const data = requireData(result.envelope);
   assert.equal(data.available, true);
-  assert.equal(data.focus, "systematic review");
+  assert.equal(data.topicResolved, true);
+  assert.equal(data.focus, "overall evidence");
   assert.ok(data.items.length > 0 && data.items.length <= 3);
   assert.ok(data.items.some((item) =>
     item.sources.some((source) => source.pmid === "29849692")
@@ -81,7 +82,6 @@ test("commons knowledge search returns a safety-only sauna hard stop", async () 
     "knowledge",
     "search",
     "Finnish Dry Sauna",
-    "--focus",
     "fentanyl patch",
   ]);
 
@@ -101,8 +101,7 @@ test("commons knowledge search rejects a packet larger than three items", async 
     "knowledge",
     "search",
     "Finnish Dry Sauna",
-    "--focus",
-    "health benefits",
+    "overall evidence",
     "--limit",
     "4",
   ]);
@@ -140,7 +139,6 @@ test("commons knowledge search stays non-blocking when its generated index is mi
       "knowledge",
       "search",
       "Finnish Dry Sauna",
-      "--focus",
       "recent fainting",
     ]);
 
