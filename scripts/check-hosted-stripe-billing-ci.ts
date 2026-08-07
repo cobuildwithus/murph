@@ -15,15 +15,10 @@ export interface HostedStripeBillingProviderBoundarySources {
 
 export function classifyHostedStripeBillingLiveEligibility(input: {
   actor: string;
-  eventName: string;
   headRepository: string;
   pullRequestAuthor: string;
   repository: string;
 }): boolean {
-  if (input.eventName === "workflow_dispatch") {
-    return true;
-  }
-
   return input.headRepository === input.repository
     && input.pullRequestAuthor !== "dependabot[bot]"
     && input.actor !== "dependabot[bot]";
@@ -56,6 +51,12 @@ export function inspectHostedStripeBillingWorkflow(
     issues.push({
       code: "unsafe-pull-request-target",
       message: "Workflow must never execute PR code through pull_request_target.",
+    });
+  }
+  if (source.includes("workflow_dispatch")) {
+    issues.push({
+      code: "unsafe-workflow-dispatch",
+      message: "Writable Stripe authority must not execute an arbitrarily selected manual ref.",
     });
   }
   requireText(

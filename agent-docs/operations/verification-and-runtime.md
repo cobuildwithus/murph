@@ -97,8 +97,9 @@ pnpm hosted-billing:live:cleanup
 Never run PR-controlled fork code with writable Stripe authority and never use
 `pull_request_target` to work around GitHub's secret boundary. The Actions
 classifier admits only same-repository heads (excluding dependency-bot heads)
-or explicit manual dispatch. Every eligible trusted head enters the live lane;
-absent or malformed sandbox configuration fails closed. Fork and dependency-bot
+whose pull-request author and triggering actor are both non-Dependabot. Every
+eligible trusted head enters the live lane; absent or malformed sandbox
+configuration fails closed. Fork and dependency-bot
 pull requests run only the credential-free hermetic lane. The always-present
 `Required hosted Stripe billing boundary` job checks the applicable result so
 branch protection has one stable required context. Keep the key on

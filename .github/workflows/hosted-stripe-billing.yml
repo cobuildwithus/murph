@@ -2,13 +2,12 @@ name: Hosted Stripe Billing
 
 on:
   pull_request:
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
@@ -67,7 +66,6 @@ jobs:
       - id: classify
         name: Require trusted same-repository head
         env:
-          EVENT_NAME: ${{ github.event_name }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           REPOSITORY: ${{ github.repository }}
@@ -75,11 +73,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "run_live=true" >> "$GITHUB_OUTPUT"
-            echo "### Live Stripe lane: eligible manual dispatch" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
           if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$PR_AUTHOR" != "dependabot[bot]" && "$ACTOR" != "dependabot[bot]" ]]; then
             echo "run_live=true" >> "$GITHUB_OUTPUT"
             echo "### Live Stripe lane: eligible trusted head" >> "$GITHUB_STEP_SUMMARY"
@@ -143,7 +136,7 @@ jobs:
           MURPH_HOSTED_STRIPE_BILLING_LIVE: "1"
           MURPH_HOSTED_STRIPE_BILLING_SECRET_KEY: ${{ secrets.HOSTED_STRIPE_BILLING_SANDBOX_SECRET_KEY }}
           MURPH_HOSTED_STRIPE_BILLING_ACCOUNT_ID: ${{ vars.HOSTED_STRIPE_BILLING_SANDBOX_ACCOUNT_ID }}
-          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_pr_${{ github.event.pull_request.number || 'manual' }}_${{ github.run_id }}_${{ github.run_attempt }}
+          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
           NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_PULSE }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_EDGE }}
@@ -157,7 +150,7 @@ jobs:
           MURPH_HOSTED_STRIPE_BILLING_LIVE: "1"
           MURPH_HOSTED_STRIPE_BILLING_SECRET_KEY: ${{ secrets.HOSTED_STRIPE_BILLING_SANDBOX_SECRET_KEY }}
           MURPH_HOSTED_STRIPE_BILLING_ACCOUNT_ID: ${{ vars.HOSTED_STRIPE_BILLING_SANDBOX_ACCOUNT_ID }}
-          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_pr_${{ github.event.pull_request.number || 'manual' }}_${{ github.run_id }}_${{ github.run_attempt }}
+          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
           NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_PULSE }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_EDGE }}
@@ -175,7 +168,7 @@ jobs:
           MURPH_HOSTED_STRIPE_BILLING_LIVE: "1"
           MURPH_HOSTED_STRIPE_BILLING_SECRET_KEY: ${{ secrets.HOSTED_STRIPE_BILLING_SANDBOX_SECRET_KEY }}
           MURPH_HOSTED_STRIPE_BILLING_ACCOUNT_ID: ${{ vars.HOSTED_STRIPE_BILLING_SANDBOX_ACCOUNT_ID }}
-          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_pr_${{ github.event.pull_request.number || 'manual' }}_${{ github.run_id }}_${{ github.run_attempt }}
+          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
           NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_PULSE }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_EDGE }}
