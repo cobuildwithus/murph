@@ -805,7 +805,7 @@ async function persistHostedAssistantAskFallbackSupersession(input: {
     return current;
   }
   const updatedAt = input.now.toISOString();
-  const persisted = await saveAssistantOutboxIntentIfUnchanged({
+  const { intent: persisted } = await saveAssistantOutboxIntentIfUnchanged({
     expectedDedupeKey: current.dedupeKey,
     expectedStatus: current.status,
     expectedUpdatedAt: current.updatedAt,
@@ -851,13 +851,13 @@ async function persistHostedAssistantVaultFileApprovalState(input: {
     return input.current;
   }
 
-  return await saveAssistantOutboxIntentIfUnchanged({
+  return (await saveAssistantOutboxIntentIfUnchanged({
     expectedDedupeKey: input.current.dedupeKey,
     expectedStatus: input.current.status,
     expectedUpdatedAt: input.current.updatedAt,
     intent: input.next,
     vault: input.vaultRoot,
-  });
+  })).intent;
 }
 
 async function abandonStaleSignupWelcomeCandidatesAfterReplyEvidence(input: {

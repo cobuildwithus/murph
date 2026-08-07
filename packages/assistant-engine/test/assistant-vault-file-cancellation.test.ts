@@ -58,11 +58,28 @@ describe('pending generated vault-file cancellation', () => {
     expect(MURPH_PENDING_VAULT_FILES_TOOL.description).toContain(
       'does not delete bytes directly',
     )
+    expect(MURPH_PENDING_VAULT_FILES_TOOL.description).toContain(
+      'oldest 20 entries plus totalCount',
+    )
+    expect(MURPH_PENDING_VAULT_FILES_TOOL.description).toContain(
+      'at most five batches',
+    )
+    expect(MURPH_PENDING_VAULT_FILES_TOOL.description).toContain(
+      'not_pending means only that the intent is no longer cancellable',
+    )
     expect(resolveMurphDynamicTools({})).not.toContain(
       MURPH_PENDING_VAULT_FILES_TOOL,
     )
-    expect(resolveMurphDynamicTools({ vaultFileSendAvailable: true }))
+    expect(resolveMurphDynamicTools({ pendingVaultFilesAvailable: true }))
       .toContain(MURPH_PENDING_VAULT_FILES_TOOL)
+    expect(resolveMurphDynamicTools({
+      pendingVaultFilesAvailable: true,
+      vaultFileSendAvailable: false,
+    })).toContain(MURPH_PENDING_VAULT_FILES_TOOL)
+    expect(resolveMurphDynamicTools({
+      pendingVaultFilesAvailable: false,
+      vaultFileSendAvailable: true,
+    })).not.toContain(MURPH_PENDING_VAULT_FILES_TOOL)
 
     const listRequest = readPendingVaultFilesRequest({ action: 'list' })
     expect(listRequest).toEqual({ kind: 'pending-vault-files-list' })
@@ -290,6 +307,170 @@ describe('pending generated vault-file cancellation', () => {
       .toBe('awaiting_approval')
   })
 
+  it('reports exactly one winner when two cancellations race at the same time', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-cancel-concurrent-',
+    )
+    tempRoots.push(parentRoot)
+    const sessionId = 'session-concurrent'
+    const pending = await createPendingGeneratedVaultFileSend({
+      approvalId: `haa_${'5'.repeat(32)}`,
+      filename: 'concurrent.zip',
+      fileText: 'concurrent bytes',
+      sessionId,
+      vaultRoot,
+    })
+    const now = new Date('2026-08-06T18:10:00.000Z')
+
+    const outcomes = await Promise.all([
+      cancelPendingAssistantGeneratedVaultFileSends({
+        intentIds: [pending.intentId],
+        now,
+        originSessionId: sessionId,
+        vault: vaultRoot,
+      }),
+      cancelPendingAssistantGeneratedVaultFileSends({
+        intentIds: [pending.intentId],
+        now,
+        originSessionId: sessionId,
+        vault: vaultRoot,
+      }),
+    ])
+
+    expect(outcomes.map((outcome) => outcome.results[0]?.status).sort())
+      .toEqual(['already_cancelled', 'cancelled'])
+  })
+
+  it('retries once when an approval refresh wins the first compare-and-set', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-cancel-refresh-race-',
+    )
+    tempRoots.push(parentRoot)
+    const sessionId = 'session-refresh-race'
+    const pending = await createPendingGeneratedVaultFileSend({
+      approvalId: `haa_${'6'.repeat(32)}`,
+      filename: 'refresh-race.zip',
+      fileText: 'refresh race bytes',
+      sessionId,
+      vaultRoot,
+    })
+    const saveIfUnchanged = assistantOutbox.saveAssistantOutboxIntentIfUnchanged
+    vi.spyOn(assistantOutbox, 'saveAssistantOutboxIntentIfUnchanged')
+      .mockImplementationOnce(async (input) => {
+        const current = (await assistantOutbox.listAssistantOutboxIntents(
+          input.vault,
+        )).find((intent) => intent.intentId === input.intent.intentId)
+        if (!current) {
+          throw new Error('Expected the pending intent before refresh.')
+        }
+        const refreshed = {
+          ...current,
+          updatedAt: '2026-08-06T18:06:00.000Z',
+        }
+        const refreshResult = await saveIfUnchanged({
+          expectedDedupeKey: current.dedupeKey,
+          expectedStatus: current.status,
+          expectedUpdatedAt: current.updatedAt,
+          intent: refreshed,
+          vault: input.vault,
+        })
+        expect(refreshResult.applied).toBe(true)
+        return {
+          applied: false,
+          intent: refreshed,
+        }
+      })
+      .mockImplementation(saveIfUnchanged)
+
+    await expect(cancelPendingAssistantGeneratedVaultFileSends({
+      intentIds: [pending.intentId],
+      now: new Date('2026-08-06T18:10:00.000Z'),
+      originSessionId: sessionId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      results: [{
+        intentId: pending.intentId,
+        status: 'cancelled',
+      }],
+    })
+    expect(assistantOutbox.saveAssistantOutboxIntentIfUnchanged)
+      .toHaveBeenCalledTimes(2)
+  })
+
+  it('reports not_pending only after another owner advances the intent', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-cancel-advanced-race-',
+    )
+    tempRoots.push(parentRoot)
+    const sessionId = 'session-advanced-race'
+    const approvalId = `haa_${'8'.repeat(32)}`
+    const pending = await createPendingGeneratedVaultFileSend({
+      approvalId,
+      filename: 'advanced-race.zip',
+      fileText: 'advanced race bytes',
+      sessionId,
+      vaultRoot,
+    })
+    const intent = (await assistantOutbox.listAssistantOutboxIntents(vaultRoot))
+      .find((candidate) => candidate.intentId === pending.intentId)
+    if (!intent) {
+      throw new Error('Expected the pending intent before approval.')
+    }
+    const advanced = applyAssistantVaultFileSendApprovalResult({
+      approval: {
+        approvalGeneration: '9'.repeat(64),
+        approvalId,
+        status: 'approved',
+      },
+      intent,
+      now: new Date('2026-08-06T18:07:00.000Z'),
+    })
+    await assistantOutbox.saveAssistantOutboxIntent(vaultRoot, advanced)
+
+    await expect(cancelPendingAssistantGeneratedVaultFileSends({
+      intentIds: [pending.intentId],
+      now: new Date('2026-08-06T18:10:00.000Z'),
+      originSessionId: sessionId,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      results: [{ intentId: pending.intentId, status: 'not_pending' }],
+    })
+    expect((await assistantOutbox.listAssistantOutboxIntents(vaultRoot))
+      .find((candidate) => candidate.intentId === pending.intentId)?.status)
+      .toBe('pending')
+  })
+
+  it('returns the oldest page and a total count when more than 20 remain', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-cancel-paging-',
+    )
+    tempRoots.push(parentRoot)
+    const sessionId = 'session-paging'
+    vi.useFakeTimers()
+    for (let index = 0; index < 21; index += 1) {
+      vi.setSystemTime(new Date(Date.UTC(2026, 7, 6, 18, 0, index)))
+      await createPendingGeneratedVaultFileSend({
+        approvalId: `haa_${index.toString(16).padStart(32, '0')}`,
+        filename: `page-${index.toString().padStart(2, '0')}.zip`,
+        fileText: `page bytes ${index}`,
+        sessionId,
+        vaultRoot,
+      })
+    }
+
+    const listed = await listPendingAssistantGeneratedVaultFileSends({
+      originSessionId: sessionId,
+      vault: vaultRoot,
+    })
+    expect(listed).toMatchObject({
+      totalCount: 21,
+    })
+    expect(listed.pending).toHaveLength(20)
+    expect(listed.pending[0]?.filename).toBe('page-00.zip')
+    expect(listed.pending.some((file) => file.filename === 'page-20.zip'))
+      .toBe(false)
+  })
+
   it('rejects ambiguous inputs with the standard safe validation digest', () => {
     const intentId = `outbox_${'a'.repeat(32)}`
     const request = readPendingVaultFilesRequest({
@@ -342,7 +523,8 @@ function createHostedToolContext(
       filename: 'unused.zip',
       status: 'denied' as const,
     })),
-    vaultFileSendAvailable: true,
+    pendingVaultFilesAvailable: true,
+    vaultFileSendAvailable: false,
   }
 }
 

@@ -54,7 +54,7 @@ export const MURPH_PENDING_VAULT_FILES_TOOL = {
   namespace: 'murph',
   name: 'pending_vault_files',
   description:
-    'List or cancel runtime-generated files still awaiting secure delivery approval in this direct conversation. Use only for an explicit request from the current user. Always list first, then cancel only exact intentIds from that list. Cancellation may win only while the outbox intent remains awaiting_approval; once delivery preparation or dispatch owns it, cancellation refuses. Cancellation terminalizes the delivery but does not delete bytes directly: quiescent runtime-residue cleanup remains the sole deletion owner. A later approval observation cannot revive a delivery that cancellation already terminalized. Canonical and user-owned vault files are outside this tool.',
+    'List or cancel runtime-generated files still awaiting secure delivery approval in this direct conversation. Use only for an explicit request from the current user. Always list first, then cancel only exact intentIds from that list. List returns the oldest 20 entries plus totalCount; totalCount greater than pending.length means more remain. Cancel returns one status per requested id: failed may be retried once, while not_pending means only that the intent is no longer cancellable and never proves delivery. For an explicit cancel-all request, list and cancel at most five batches, stopping early when the list is empty or a batch makes no progress, then report any remaining count or failed ids. Cancellation may win only while the outbox intent remains awaiting_approval; once delivery preparation or dispatch owns it, cancellation refuses. Cancellation terminalizes the delivery but does not delete bytes directly: quiescent runtime-residue cleanup remains the sole deletion owner. A later approval observation cannot revive a delivery that cancellation already terminalized. Canonical and user-owned vault files are outside this tool.',
   inputSchema: z.toJSONSchema(pendingVaultFilesArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -220,41 +220,71 @@ export async function cancelPendingAssistantGeneratedVaultFileSends(input: {
       continue
     }
 
+    results.push(await cancelPendingGeneratedVaultFileSend({
+      file,
+      intent,
+      now,
+      vault: input.vault,
+    }))
+  }
+
+  return { results }
+}
+
+async function cancelPendingGeneratedVaultFileSend(input: {
+  file: AssistantVaultFileResponseMedia
+  intent: AssistantOutboxIntent
+  now: Date
+  vault: string
+}): Promise<AssistantPendingGeneratedVaultFileCancellation> {
+  let current = input.intent
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const cancelledIntent = assistantOutboxIntentSchema.parse({
-        ...intent,
+        ...current,
         lastError: {
           code: VAULT_FILE_SEND_CANCELLED_CODE,
           message: 'Pending generated-file delivery was cancelled.',
         },
         nextAttemptAt: null,
         status: 'abandoned',
-        updatedAt: nextCancellationTimestamp(intent.updatedAt, now),
+        updatedAt: nextCancellationTimestamp(current.updatedAt, input.now),
       })
-      const persisted = await saveAssistantOutboxIntentIfUnchanged({
-        expectedDedupeKey: intent.dedupeKey,
-        expectedStatus: intent.status,
-        expectedUpdatedAt: intent.updatedAt,
+      const persistence = await saveAssistantOutboxIntentIfUnchanged({
+        expectedDedupeKey: current.dedupeKey,
+        expectedStatus: current.status,
+        expectedUpdatedAt: current.updatedAt,
         intent: cancelledIntent,
         vault: input.vault,
       })
-      if (isCancelledGeneratedVaultFileSend(persisted)) {
-        const persistedFile = readGeneratedVaultFileMedia(persisted) ?? file
-        results.push({
-          ...buildPendingGeneratedVaultFileSend(persisted, persistedFile),
-          status: persisted.updatedAt === cancelledIntent.updatedAt
-            ? 'cancelled'
-            : 'already_cancelled',
-        })
-      } else {
-        results.push({ intentId, status: 'not_pending' })
+      const persisted = persistence.intent
+      if (persistence.applied) {
+        return {
+          ...buildPendingGeneratedVaultFileSend(
+            persisted,
+            readGeneratedVaultFileMedia(persisted) ?? input.file,
+          ),
+          status: 'cancelled',
+        }
       }
+      if (isCancelledGeneratedVaultFileSend(persisted)) {
+        return {
+          ...buildPendingGeneratedVaultFileSend(
+            persisted,
+            readGeneratedVaultFileMedia(persisted) ?? input.file,
+          ),
+          status: 'already_cancelled',
+        }
+      }
+      if (persisted.status !== 'awaiting_approval') {
+        return { intentId: current.intentId, status: 'not_pending' }
+      }
+      current = persisted
     } catch {
-      results.push({ intentId, status: 'failed' })
+      return { intentId: current.intentId, status: 'failed' }
     }
   }
-
-  return { results }
+  return { intentId: current.intentId, status: 'failed' }
 }
 
 function readPendingGeneratedVaultFileSend(

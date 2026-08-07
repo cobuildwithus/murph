@@ -392,7 +392,7 @@ describe('Codex dynamic tool runtime routing', () => {
       codexCommand: 'codex',
       codexHome,
       dynamicTools: resolveMurphDynamicTools({
-        vaultFileSendAvailable: true,
+        pendingVaultFilesAvailable: true,
       }),
       env: {
         CODEX_HOME: codexHome,

@@ -1,6 +1,6 @@
 # Hosted sensitive-action approvals
 
-Last verified: 2026-07-10
+Last verified: 2026-08-06
 
 ## Purpose
 
@@ -63,9 +63,18 @@ The runtime keeps the exact file-and-destination delivery intent in its own outb
 
 An explicit current-user cleanup request may list or cancel only generated-file
 intents whose exact origin session matches the trusted current user-action
-scope. Cancellation may compare-and-set an intent from `awaiting_approval` to
-terminal `abandoned`; once delivery preparation or dispatch advances the
-outbox owner, cancellation refuses. The outbox remains the effect owner:
+scope. The cleanup capability depends on that current direct-reply authority,
+not on whether the approval service or a fresh file-send target is available,
+so an already parked intent remains cancellable during approval-service
+degradation. A list returns the oldest 20 matching intents and the complete
+matching count. Explicit cancel-all handling is bounded to five list/cancel
+batches and reports any remainder or per-intent failure instead of looping
+indefinitely. Cancellation may compare-and-set an intent from
+`awaiting_approval` to terminal `abandoned`; the persistence result identifies
+whether that exact transition won. One concurrent approval refresh may be
+retried, while a concurrent terminal owner is reported from its observed state.
+Once delivery preparation or dispatch advances the outbox owner, cancellation
+refuses. The outbox remains the effect owner:
 cancellation adds no approval-row state and does not rewrite the historical
 approval decision, so a delayed approval observation cannot revive an intent
 that cancellation already terminalized. Cancellation does not unlink files.

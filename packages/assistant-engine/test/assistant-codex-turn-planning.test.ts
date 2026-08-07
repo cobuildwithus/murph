@@ -2099,6 +2099,60 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
+  it('offers pending-file cancellation without approval-backed file sending', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [{
+        id: `ain_${'7'.repeat(32)}`,
+        source: 'manual',
+      }],
+      executionContext: {
+        hosted: {
+          memberId: 'member-pending-file-cancellation',
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        pendingVaultFilesAvailable: true,
+        vaultFileSendAvailable: false,
+      },
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        deliverResponse: true,
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-08-06',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: 'linq',
+        effectiveThreadIsDirect: true,
+        threadId: 'linq-direct-thread',
+        threadIsDirect: true,
+      }),
+    })
+
+    const toolNames = plan.dynamicTools.map((tool) => tool.name)
+    expect(toolNames).toContain('pending_vault_files')
+    expect(toolNames).not.toContain('send_vault_file')
+  })
+
   it('exposes labs to private ordinary turns, including scheduled work', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',

@@ -15536,7 +15536,7 @@ describe('assistant codex runtime', () => {
       dynamicTools: resolveMurphDynamicTools({
         deviceAvailable: true,
         messageTargetingAvailable: true,
-        vaultFileSendAvailable: true,
+        pendingVaultFilesAvailable: true,
       }),
       prompt: 'inspect connected devices',
       workingDirectory,
@@ -15741,7 +15741,7 @@ describe('assistant codex runtime', () => {
 
     const result = await executeCodexAppServerTurn({
       dynamicTools: resolveMurphDynamicTools({
-        vaultFileSendAvailable: true,
+        pendingVaultFilesAvailable: true,
       }),
       prompt: 'try invalid pending file tool',
       workingDirectory,

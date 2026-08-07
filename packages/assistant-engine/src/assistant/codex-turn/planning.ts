@@ -910,6 +910,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,
+        pendingVaultFilesAvailable:
+          privateInteractiveAudience &&
+          userActionAcceptedInputIds.length > 0 &&
+          input.hostedToolContext?.pendingVaultFilesAvailable === true,
         vaultFileSendAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,
