@@ -1,6 +1,6 @@
 # Remove the Junction SDK runtime payload from the hosted runner
 
-Status: active
+Status: completed
 Created: 2026-08-07
 Updated: 2026-08-07
 
@@ -53,7 +53,7 @@ Updated: 2026-08-07
    in its owning package.
 3. [x] Run focused tests, typecheck, exact production assembly, and Docker
    deferred-import/device-sync proof.
-4. [ ] Commit, push, open a PR, complete exact-head CI/reviews, and close the
+4. [x] Commit, push, open a PR, complete exact-head CI/reviews, and close the
    plan with `scripts/finish-task`.
 
 ## Verification
@@ -88,3 +88,4 @@ Updated: 2026-08-07
 - A ten-pair alternating current-main Docker health benchmark is noise-neutral,
   as expected for a lazy-path/image-shape change: baseline p50 1,282 ms,
   candidate p50 1,291 ms, and paired median -11 ms.
+Completed: 2026-08-07
