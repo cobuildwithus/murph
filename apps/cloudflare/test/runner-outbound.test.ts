@@ -5259,6 +5259,85 @@ describe("handleRunnerOutboundRequest", () => {
     expect(workerBodyResponse.status).toBe(405);
   });
 
+  it("locates hosted-local direct-R2 snapshots through the local S3 control endpoint", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T12:34:56.000Z"));
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_read_local_s3";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const bindingHead = vi.fn(async () => {
+      throw new Error("hosted-local restore should use local S3 HEAD");
+    });
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        bindingHead,
+      ),
+      HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:39000",
+      HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = vi.fn(async (
+      request: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      const method = init?.method ?? (request instanceof Request ? request.method : "GET");
+      if (url.origin === "http://127.0.0.1:39000" && method === "HEAD") {
+        const bucketName = decodeURIComponent(url.pathname.split("/")[1] ?? "");
+        verifyLocalS3SigV4QueryUrl({
+          accessKeyId: "r2_access_fixture_test",
+          amzDate: "20260520T123456Z",
+          bucketName,
+          checksumMode: HOSTED_R2_CHECKSUM_MODE_ENABLED,
+          endpoint: "http://127.0.0.1:39000",
+          expiresSeconds: 60,
+          key: objectKey,
+          method: "HEAD",
+          secretAccessKey: "r2_signing_fixture_test",
+          url,
+        });
+        return new Response(null, { status: 200 });
+      }
+      throw new Error(`Unexpected hosted-local snapshot restore fetch ${method} ${url.href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignGetRequest({
+        objectKey,
+        snapshotRef,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    const body = requireTestObject(
+      await response.json(),
+      "hosted-local workspace snapshot presign GET response",
+    );
+    expect(new URL(requireTestString(body.getUrl, "hosted-local snapshot getUrl")).pathname)
+      .toBe(`/bundles-test/${objectKey}`);
+    expect(bindingHead).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
   it("rejects direct-R2 workspace snapshot GET presigns without a matching v2 ref", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_read_ref_bound";
