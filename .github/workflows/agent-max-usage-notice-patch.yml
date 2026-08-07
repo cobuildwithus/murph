@@ -1,4 +1,4 @@
-name: Agent Max usage notice patch
+name: Agent Max final audit
 
 on:
   push:
@@ -11,47 +11,32 @@ permissions:
   contents: write
 
 jobs:
-  patch:
+  inspect-merge:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
+          fetch-depth: 0
           ref: agent/add-murph-max-plan
 
-      - name: Treat Max exhaustion as a paid-plan usage limit
+      - name: Inspect latest-main merge
+        shell: bash
         run: |
-          python <<'PY'
-          from pathlib import Path
-
-          path = Path("apps/web/src/lib/hosted-execution/usage-allowance.ts")
-          text = path.read_text(encoding="utf-8")
-          start = text.index("function buildHostedPaidUsageLimitNotice(")
-          end = text.index("\nfunction ", start + 1)
-          block = text[start:end]
-          needle = 'input.billingPlanCode === "launch_edge_monthly"'
-          replacement = '''(
-                input.billingPlanCode === "launch_edge_monthly"
-                || input.billingPlanCode === "launch_max_monthly"
-              )'''
-          if block.count(needle) != 2:
-              raise SystemExit(
-                  f"Expected exactly two Edge plan checks in paid usage notice; found {block.count(needle)}"
-              )
-          updated_block = block.replace(needle, replacement)
-          path.write_text(
-              text[:start] + updated_block + text[end:],
-              encoding="utf-8",
-          )
-          PY
-
-      - name: Commit patch
-        run: |
-          if git diff --quiet; then
-            echo "Patch already applied."
-            exit 0
+          set -uo pipefail
+          git fetch origin main
+          set +e
+          git merge --no-commit --no-ff origin/main > /tmp/max-merge.log 2>&1
+          merge_status=$?
+          set -e
+          cat /tmp/max-merge.log
+          echo "merge_status=$merge_status"
+          echo "conflicts:"
+          git diff --name-only --diff-filter=U || true
+          echo "branch-owned files:"
+          git diff --name-only origin/main...HEAD
+          if [[ $merge_status -eq 0 ]]; then
+            git reset --merge HEAD
+          else
+            git merge --abort || true
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/web/src/lib/hosted-execution/usage-allowance.ts
-          git commit -m "usage: treat Max exhaustion as paid usage"
-          git push origin HEAD:agent/add-murph-max-plan
