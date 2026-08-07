@@ -1121,11 +1121,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'delivers a group call preview in one turn and calls only after a later exact confirmation',
+    'places one bounded group call from the current request without a group-only preview turn',
     async () => {
       const config = await resolveRealCodexE2eConfig()
-      const previewMessageRef = `ain_${'1'.repeat(32)}`
-      const confirmationMessageRef = `ain_${'2'.repeat(32)}`
+      const messageRef = `ain_${'1'.repeat(32)}`
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-group-phone-call-e2e-'),
       )
@@ -1140,7 +1139,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             })
           }),
         )
-        const commonInput = {
+        const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
@@ -1154,94 +1153,45 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
+          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
+          prompt: [
+            `Message ref: ${messageRef}`,
+            'Sender: participant-a',
+            'Profile name (display only): "Sam"',
+            'Place exactly one public restaurant call now for this room.',
+            'Reserve an outdoor table for six on August 15, 2026 at 7:00 p.m. America/New_York time by calling +12025550123.',
+            'A deposit is acceptable only up to $50 and only if refundable until 24 hours before the reservation.',
+            'I explicitly approve using my caller name Sam and sharing only that name and those room-visible reservation details.',
+            'Do not transfer the call to a participant. This is the complete bounded request; do not require a group-only preview or a later confirmation.',
+          ].join('\n\n'),
           reasoningEffort: 'low',
-          sandbox: 'workspace-write' as const,
+          sandbox: 'workspace-write',
           workingDirectory,
-        }
-        const preview = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: [
-            `Message ref: ${previewMessageRef}`,
-            'Sender: participant-a',
-            'Profile name (display only): "Sam"',
-            'Prepare one public restaurant call for this room.',
-            'The request is an outdoor table for six on August 15, 2026 at 7:00 p.m. America/New_York time at +12025550123.',
-            'The caller name would be Sam. A deposit is acceptable only up to $50 and only if refundable until 24 hours before the reservation.',
-            'Share only that caller name and those room-visible reservation details.',
-            'I am not confirming the call yet. Deliver the exact call preview and wait for a later confirmation message. Do not call now.',
-          ].join('\n\n'),
         })
-        const previewActions = readCapabilityRoutingActions(preview.jsonEvents)
-        const previewToolCalls = previewActions.filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_CREATE_PHONE_CALL_TOOL.name
-        )
-
-        expect(previewToolCalls).toHaveLength(0)
-        expect(preview.finalMessage).toContain('GROUP CALL PREVIEW')
-        expect(preview.finalMessage).toMatch(/restaurant|reserve|reservation/iu)
-        expect(preview.finalMessage).toContain('+12025550123')
-        expect(preview.finalMessage).toMatch(/August 15|2026-08-15/iu)
-        expect(preview.finalMessage).toMatch(/six|party.?size.{0,20}6/iu)
-        expect(preview.finalMessage).toMatch(/\$?50|deposit/iu)
-        expect(preview.finalMessage).toMatch(/24 hours|24-hour|refund/iu)
-        expect(preview.finalMessage).toContain(
-          'Transfer to a participant: no',
-        )
-        expect(preview.finalMessage).toMatch(/confirm|approve/iu)
-
-        const confirmed = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: [
-            `Message ref: ${confirmationMessageRef}`,
-            'Sender: participant-a',
-            'Profile name (display only): "Sam"',
-            'I am the same current requester.',
-            'I explicitly confirm the exact call preview you delivered in the prior turn, including the restaurant destination, August 15, 2026 at 7:00 p.m. America/New_York time, outdoor table for six, refundable deposit ceiling of $50, and 24-hour cancellation boundary.',
-            'I explicitly approve using my caller name Sam and sharing only that name and the room-visible reservation details. Place exactly one call now with no transfer.',
-          ].join('\n\n'),
-          resumeSessionId: preview.sessionId,
-        })
-        const confirmedActions = readCapabilityRoutingActions(
-          confirmed.jsonEvents,
-        )
-        const previewSkillRead = previewActions.find((action) =>
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const skillRead = actions.find((action) =>
           action.kind === 'command'
           && action.command.includes('phone-calls/SKILL.md')
           && action.output.includes('# Phone Calls')
         )
-        const confirmedSkillRead = confirmedActions.find((action) =>
-          action.kind === 'command'
-          && action.command.includes('phone-calls/SKILL.md')
-          && action.output.includes('# Phone Calls')
-        )
-        const toolCalls = confirmedActions.filter((action) =>
+        const toolCalls = actions.filter((action) =>
           action.kind === 'dynamic'
           && action.tool === MURPH_CREATE_PHONE_CALL_TOOL.name
         )
 
-        expect(
-          previewSkillRead ?? confirmedSkillRead,
-          'phone-calls skill read',
-        ).toBeDefined()
+        expect(skillRead, 'phone-calls skill read').toBeDefined()
         expect(toolCalls).toHaveLength(1)
         const toolCall = toolCalls[0]
         if (toolCall?.kind !== 'dynamic') {
           throw new Error('Expected a real group phone-call tool call.')
         }
         expect(
-          previewSkillRead !== undefined
-          || (
-            confirmedSkillRead !== undefined
-            && toolCall.eventIndex > confirmedSkillRead.eventIndex
-          ),
+          skillRead !== undefined && toolCall.eventIndex > skillRead.eventIndex,
           'phone-calls skill read before the real call',
         ).toBe(true)
-        expect(toolCall.argumentsValue.message_ref).toBe(
-          confirmationMessageRef,
-        )
+        expect(toolCall.argumentsValue.message_ref).toBe(messageRef)
         expect(toolCall.argumentsValue).toMatchObject({
           allowTransferToUser: false,
           callerName: 'Sam',
@@ -1256,6 +1206,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(serializedArguments).toMatch(/six|party.?size.{0,20}6/iu)
         expect(serializedArguments).toMatch(/\$?50|deposit/iu)
         expect(serializedArguments).toMatch(/24 hours|24-hour|refund/iu)
+        const removedStructuredHeading = ['GROUP', 'CALL', 'PREVIEW'].join(' ')
+        expect(serializedArguments).not.toContain(removedStructuredHeading)
+        expect(result.finalMessage).not.toContain(removedStructuredHeading)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

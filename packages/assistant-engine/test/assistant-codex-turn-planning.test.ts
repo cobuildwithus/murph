@@ -2791,9 +2791,6 @@ describe('assistant Codex turn planning', () => {
       personalizationTool: { request: vi.fn() },
       planUsageTool: { read: vi.fn() },
       phoneCalls: { start: vi.fn() },
-      currentGroupPhoneCallPreviewAuthority: vi.fn(async () => ({
-        assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
-      })),
       subscriptionTool: { request: vi.fn() },
     }
     const plan = await resolveAssistantRouteTurnPlan({
@@ -2807,6 +2804,7 @@ describe('assistant Codex turn planning', () => {
         },
       },
       hostedToolContext,
+      messageTargetAuthorizerAvailable: true,
       input: {
         ...createMessageInput(),
         channel: 'linq',
@@ -3309,11 +3307,9 @@ describe('assistant Codex turn planning', () => {
       },
       hostedToolContext: {
         ...createHostedToolContext(),
-        currentGroupPhoneCallPreviewAuthority: vi.fn(async () => ({
-          assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
-        })),
         phoneCalls: { start: vi.fn() },
       },
+      messageTargetAuthorizerAvailable: true,
       input: {
         ...createMessageInput(),
         channel: 'telegram',
@@ -3411,7 +3407,7 @@ describe('assistant Codex turn planning', () => {
     },
   )
 
-  it('withholds group phone calls until a delivered preview precedes the current input', async () => {
+  it('withholds group phone calls without participant targeting authority', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       null,
     )
@@ -3419,7 +3415,6 @@ describe('assistant Codex turn planning', () => {
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
     })
-    const currentGroupPhoneCallPreviewAuthority = vi.fn(async () => null)
     const plan = await resolveAssistantRouteTurnPlan({
       acceptedInputItems: [{
         id: 'linq-group-phone-request',
@@ -3435,7 +3430,6 @@ describe('assistant Codex turn planning', () => {
       },
       hostedToolContext: {
         ...createHostedToolContext(),
-        currentGroupPhoneCallPreviewAuthority,
         phoneCalls: { start: vi.fn() },
       },
       input: {
@@ -3462,7 +3456,6 @@ describe('assistant Codex turn planning', () => {
       }),
     })
 
-    expect(currentGroupPhoneCallPreviewAuthority).toHaveBeenCalledTimes(1)
     expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
       'create_phone_call',
     )
