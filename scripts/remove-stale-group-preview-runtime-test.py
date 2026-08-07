@@ -8,10 +8,20 @@ TARGET = ROOT / "packages/assistant-runtime/test/hosted-runtime-workspace-entryp
 TOP_LEVEL_TEST_START = re.compile(
     r"(?m)^  (?:it|test|describe)(?:\.|\b)"
 )
+PREVIEW_IMPORT_SYMBOLS = (
+    "ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING",
+    "hasDeliveredAssistantGroupPhoneCallPreview",
+)
+PREVIEW_RESIDUE = (
+    *PREVIEW_IMPORT_SYMBOLS,
+    "ASSISTANT_GROUP_PHONE_CALL_NO_TRANSFER_LINE",
+    "renderAssistantGroupPhoneCallPreview",
+    "resolveDeliveredAssistantGroupPhoneCallPreviewAuthority",
+    "AssistantGroupPhoneCallPreviewAuthority",
+)
 
 text = TARGET.read_text(encoding="utf-8")
 
-preview_symbol = "ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING"
 heading = "binds a late group confirmation to the preview delivery receipt"
 if text.count(heading) != 1:
     raise RuntimeError(
@@ -20,16 +30,17 @@ if text.count(heading) != 1:
 
 heading_index = text.index(heading)
 import_region = text[:heading_index]
-import_region, import_count = re.subn(
-    rf"(?m)^[ \t]*{preview_symbol},?[ \t]*\n",
-    "",
-    import_region,
-    count=1,
-)
-if import_count != 1:
-    raise RuntimeError(
-        "expected exactly one standalone stale group preview heading import"
+for symbol in PREVIEW_IMPORT_SYMBOLS:
+    import_region, import_count = re.subn(
+        rf"(?m)^[ \t]*{symbol},?[ \t]*\n",
+        "",
+        import_region,
+        count=1,
     )
+    if import_count != 1:
+        raise RuntimeError(
+            f"expected exactly one standalone stale preview import: {symbol}"
+        )
 text = import_region + text[heading_index:]
 heading_index = text.index(heading)
 
@@ -51,7 +62,7 @@ for marker in (
     "retryable",
     "terminal",
     "ambiguous",
-    preview_symbol,
+    *PREVIEW_IMPORT_SYMBOLS,
 ):
     if marker not in block:
         raise RuntimeError(
@@ -60,7 +71,7 @@ for marker in (
 
 text = text[:block_start] + text[block_end:]
 
-for stale in (preview_symbol, heading):
+for stale in (*PREVIEW_RESIDUE, heading):
     if stale in text:
         raise RuntimeError(f"stale preview test residue remains: {stale}")
 
