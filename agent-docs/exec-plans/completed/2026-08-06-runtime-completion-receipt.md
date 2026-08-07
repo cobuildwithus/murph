@@ -1,6 +1,6 @@
 # Runtime completion receipt
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-06
 
@@ -73,10 +73,18 @@ Updated: 2026-08-06
 ## Verification
 
 - Focused RunnerContainer, UserRunner, hosted-local control, and Worker route
-  tests: 267 passed.
+  tests passed on the reviewed candidate. After base reconciliation, the final
+  RunnerContainer/UserRunner slice passed 304 tests, and the repaired
+  fake-timer cadence proof passed in three consecutive isolated runs.
+- The two assistant-runtime suites affected by the reconciled conversation
+  session shape passed 286 tests.
 - Cloudflare typecheck passed.
 - The real hosted-local lost-active-operation scenario passed after discarding
   the completed outer result, clearing the exact fence by receipt, expiring the
   warm shell, and completing a fresh follow-up wake.
-- ReviewGPT specialist and final review on the exact pushed candidate head.
-- Required exact-head GitHub Actions.
+- Preliminary specialist ReviewGPT completed, and final ReviewGPT rounds 1 and
+  2 passed with no remaining qualifying findings on the substantive candidate.
+- Required GitHub Actions passed on exact pushed head
+  `126b1b62e8eb00fac85b09644dc2696919ce15fc`.
+- `git diff --check` and the scoped identifier/home-path privacy scan passed.
+Completed: 2026-08-06
