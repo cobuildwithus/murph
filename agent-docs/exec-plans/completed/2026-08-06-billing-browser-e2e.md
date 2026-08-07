@@ -1,8 +1,9 @@
 # Hosted Stripe billing browser regression matrix
 
-Status: active
+Status: completed
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-07
+Completed: 2026-08-07
 
 ## Goal
 
@@ -150,3 +151,58 @@ Updated: 2026-08-06
   - The paused resume scenario fails on the old unsupported resume payload and
     passes only when payment-method update precedes the supported resume call,
     the browser sees the resumption invoice, and payment opens entitlement.
+
+## Outcome
+
+- ReviewGPT returned an attachment-based implementation proposal. The parent
+  inspected it, retained the existing hosted-local owners, and incorporated the
+  accepted behavior deliberately instead of applying the artifact wholesale.
+- The finished browser matrix covers eight cases and nine logical journeys:
+  Pulse Trial Checkout; Trial to paid Pulse; paused Trial resumption; Trial to
+  Edge; paid Pulse to Edge; Edge to Pulse scheduled downgrade; lapsed
+  individual to Family Checkout; Family invite, acceptance, seat, and Settings
+  state; and paid individual to Family on the same Subscription.
+- Live provider proof established the incident's full root cause. Resume cannot
+  accept `default_payment_method`; the effective Customer payment instrument
+  must first be copied and verified through Subscription Update. Stripe can
+  then create an open positive-balance resumption invoice with
+  `attempted=false` and no PaymentIntent, which still must be surfaced as
+  payment-required rather than indefinite billing pending.
+- The production correction stays inside the existing member billing mutation
+  owner: resolve the effective PaymentMethod or legacy Source, Update and
+  verify the Subscription, Resume with supported-only parameters, and treat
+  every open positive invoice as actionable.
+- Trusted same-repository pull requests run the real Stripe sandbox matrix.
+  Forks and dependency-bot pull requests receive no writable provider authority
+  and run the required hermetic lane. The always-present aggregate check is
+  attached to branch protection.
+- Provider-protected Checkout and Portal final controls remain outside browser
+  automation. The browser proves the exact real provider surface, while pinned
+  Stripe test interfaces complete the exact Checkout Session, invoice payment,
+  and Portal-equivalent mutation before webhooks and Settings are asserted.
+
+## Completed review and proof
+
+- Preliminary specialist ReviewGPT found two accepted coverage defects: plan
+  assertions were not scoped to one card, and legacy Source plus Update-result
+  failure paths lacked direct proof. Both were corrected and verified.
+- Final ReviewGPT rounds found and resolved three authority/scope mechanisms:
+  actor-only dependency-bot eligibility, an unconditional manual selected-ref
+  authority path, and shared Stripe catalog values incorrectly activating the
+  dedicated live lane. The first now binds both PR author and actor provenance;
+  the second was deleted; the third now activates only from dedicated sandbox
+  authority. Final round four returned PASS with no qualifying findings after
+  rechecking the complete ledger and current full snapshot.
+- `pnpm --dir packages/hosted-local-harness test` completed with 434 passing
+  tests and one skip. Focused billing/support tests completed with 69 passing
+  tests, the runner entrypoint proof completed with 41 passing tests, and the
+  CI workflow/provider guard completed all 27 cases.
+- `pnpm typecheck`, focused owner typechecks, web lint, Stripe request guards,
+  diff checks, and privacy review passed.
+- The local real-provider matrix completed all eight cases and nine journeys in
+  224 seconds with listener-owned webhook delivery and clean teardown.
+- GitHub Actions on the final behavior-bearing candidate passed the hermetic
+  proof, live hosted-local Stripe browser matrix, required billing aggregate,
+  release typecheck/app verification, host matrix, design and viewport gates,
+  repository hygiene, runner sandbox, and deployment preview checks.
+Completed: 2026-08-07
