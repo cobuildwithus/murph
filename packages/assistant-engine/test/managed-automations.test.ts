@@ -1125,7 +1125,16 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('`## Explicit setup` section')
     expect(seed.instructions).toContain('preserve that section verbatim')
     expect(seed.instructions).toContain('explicit request to revise or forget it')
+    expect(seed.instructions).toContain('Target roughly 2-6 KiB')
+    expect(seed.instructions).toContain('20 KiB as a generous soft ceiling')
+    expect(seed.instructions).toContain('never a write gate')
+    expect(seed.instructions).toContain(
+      'is itself a material maintenance improvement even when no new room lore emerged',
+    )
     expect(seed.instructions).toContain('Treat the page as advisory')
+    expect(seed.instructions).toContain(
+      'do not encode a blanket "most turns use none" rule',
+    )
     expect(seed.instructions).toContain(
       `{"kind":"skip","privateSummary":"${MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY}"}`,
     )
