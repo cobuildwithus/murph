@@ -111,6 +111,13 @@ Updated: 2026-08-07
   item only when both catalog hashes match. Simple questions stay on one call.
 - The real assistant harness now receives the actual CLI entrypoint variables
   in the Health Commons probe itself. The public result ceiling is three items.
+- Round 5 found that page-level multi-protocol relations copied each finding to
+  every protocol, while measurement-only findings were omitted. A finding now
+  gets at most one target: one related protocol, otherwise one parent family,
+  otherwise one measured biomarker. Ambiguous pages emit no finding rows.
+- Round 5 also found that aggregate page safety text used unrelated page-wide
+  citations. The projection no longer emits those rows. Safety results now come
+  only from directly sourced safety claims, appraisals, or typed findings.
 
 ## Verification
 
