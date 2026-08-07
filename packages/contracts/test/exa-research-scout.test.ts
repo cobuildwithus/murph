@@ -3,11 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE,
   buildExaResearchScoutOutputSchema,
-  buildExaResearchScoutRequest,
+  buildExaResearchScoutBatchLaneRequest,
   clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_CATEGORY,
   EXA_RESEARCH_SCOUT_METHOD,
   EXA_RESEARCH_SCOUT_PATH,
+  EXA_RESEARCH_SCOUT_SYSTEM_PROMPT,
   MAX_RESEARCH_SCOUT_BATCH_LANES,
   parseExaResearchScoutRequestBody,
   researchScoutBatchInputSchema,
@@ -32,7 +33,7 @@ const VALID_INPUT = {
 
 describe("Exa research scout contracts", () => {
   it("builds the current research-paper request recipe from a compact profile", () => {
-    const request = buildExaResearchScoutRequest(VALID_INPUT);
+    const request = buildExaResearchScoutBatchLaneRequest(VALID_INPUT);
 
     expect(EXA_RESEARCH_SCOUT_METHOD).toBe("POST");
     expect(EXA_RESEARCH_SCOUT_PATH).toBe("/search");
@@ -40,12 +41,24 @@ describe("Exa research scout contracts", () => {
     expect(request.type).toBe("deep-reasoning");
     expect(request.moderation).toBe(true);
     expect(request.numResults).toBe(4);
-    expect(request.query).toContain("Behaviors: resistance training, yoga");
-    expect(request.query).toContain("Conditions or concerns: menopause");
-    expect(request.query).toContain("local context decides send-worthiness");
-    expect(request.systemPrompt).toContain("practical interpretive value");
-    expect(request.systemPrompt).toContain("not personalized medical advice or tasks to do");
-    expect(request.systemPrompt).toContain("not a behavior prescription");
+    expect(request.query).toBe([
+      "Find high-quality new human health research.",
+      "Research should relate to this non-identifying health interest profile.",
+      "",
+      "Topics: sleep, metabolic health",
+      "Biomarkers: glucose, hs-crp",
+      "Behaviors: resistance training, yoga",
+      "Supplements: creatine, omega-3",
+      "Conditions or concerns: menopause",
+      "Goals: longevity",
+      "Active experiments: none",
+      "",
+      "Prefer studies, clinical guidelines, therapy research, treatment research, and credible reviews.",
+      "Prefer candidates whose finding changes interpretation, measurement, or clinician-question framing.",
+      "Reject generic wellness content, obvious habit basics, social media, marketing pages, podcasts, and unsupported supplement claims.",
+      "Return candidates that can later be checked locally against a private user vault; local context decides send-worthiness.",
+    ].join("\n"));
+    expect(request.systemPrompt).toBe(EXA_RESEARCH_SCOUT_SYSTEM_PROMPT);
     expect(request.outputSchema).toEqual(buildExaResearchScoutOutputSchema(4));
     expect(parseExaResearchScoutRequestBody(request)).toEqual({
       numResults: 4,
@@ -55,30 +68,34 @@ describe("Exa research scout contracts", () => {
     });
   });
 
-  it("allows broad lowercase category tags but rejects raw or identifying profile data", () => {
+  it("allows finite focused concepts and rejects mode-less single-scout profiles", () => {
     expect(researchScoutProfileSchema.parse({
+      mode: "focused",
       behaviors: ["yoga"],
       conditionsOrConcerns: ["menopause"],
     })).toMatchObject({
+      mode: "focused",
       behaviors: ["yoga"],
       conditionsOrConcerns: ["menopause"],
     });
 
     expect(() =>
       researchScoutProfileSchema.parse({
-        biomarkers: ["LDL 181 mg/dL"],
+        biomarkers: ["ldl cholesterol"],
       })
-    ).toThrow(/non-identifying categories/u);
+    ).toThrow();
     expect(() =>
       researchScoutProfileSchema.parse({
-        topics: ["John Smith"],
+        mode: "focused",
+        topics: ["sampleperson"],
       })
-    ).toThrow(/non-identifying categories/u);
+    ).toThrow(/exact server-owned public concepts/u);
     expect(() =>
       researchScoutProfileSchema.parse({
+        mode: "focused",
         conditionsOrConcerns: ["mayo clinic"],
       })
-    ).toThrow(/non-identifying categories/u);
+    ).toThrow(/exact server-owned public concepts/u);
   });
 
   it("bounds batch lanes while reusing compact profile validation", () => {
@@ -163,7 +180,7 @@ describe("Exa research scout contracts", () => {
   });
 
   it("rejects drift from the exact request shape", () => {
-    const request = buildExaResearchScoutRequest(VALID_INPUT);
+    const request = buildExaResearchScoutBatchLaneRequest(VALID_INPUT);
 
     expect(parseExaResearchScoutRequestBody({
       ...request,

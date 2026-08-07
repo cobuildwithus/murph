@@ -159,6 +159,7 @@ export interface AssistantHostedToolContext {
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
+  readonly pendingVaultFilesAvailable?: boolean
   readonly vaultFileSendAvailable: boolean
   sendVaultFile(
     ref: string,
@@ -184,6 +185,7 @@ export function createAssistantHostedToolContext(input: {
     turnId: string
     vault: string
   } | null
+  pendingVaultFilesAvailable?: boolean
   route?: CodexThreadIdentity | null
   recordNewsletterSendResult?: (
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -460,6 +462,7 @@ export function createAssistantHostedToolContext(input: {
     currentUserActionScope: readCurrentUserActionScope,
     currentProductFeedbackAcceptedInputIds: () =>
       input.getProductFeedbackAcceptedInputIds?.() ?? [],
+    pendingVaultFilesAvailable: input.pendingVaultFilesAvailable === true,
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),

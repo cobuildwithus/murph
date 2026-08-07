@@ -19,6 +19,7 @@ import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-a
 import { Separator } from "@/src/components/ui/separator";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
+import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
@@ -167,6 +168,12 @@ export function SectionsContent() {
 
       <StudySection title="Settings health data consent withdrawal and return">
         <HealthDataConsentWithdrawalFlowStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Secure approval pending and recorded states">
+        <ActionApprovalLifecycleStudy />
       </StudySection>
 
       <Separator />
