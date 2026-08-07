@@ -904,10 +904,17 @@ async function handleRunnerWorkspaceSnapshotPresignGetRequest(input: {
     return jsonError("Hosted workspace snapshot presign target is outside the bound user namespace.", 403);
   }
 
-  if (typeof input.env.BUNDLES.head !== "function") {
-    throw new Error("Hosted workspace snapshot presign GET requires R2 HEAD support.");
+  const snapshotObjectStore = createWorkspaceSnapshotObjectStore({
+    bucket: input.env.BUNDLES,
+    env: input.env,
+  });
+  if (snapshotObjectStore.configurationError) {
+    throw new Error(snapshotObjectStore.configurationError);
   }
-  if (!await input.env.BUNDLES.head(requestedObjectKey)) {
+  if (!snapshotObjectStore.head) {
+    throw new Error("Hosted workspace snapshot presign GET requires object metadata support.");
+  }
+  if (!await snapshotObjectStore.head(requestedObjectKey)) {
     return notFound();
   }
   const presigned = await createHostedR2PresignedGetUrl({
