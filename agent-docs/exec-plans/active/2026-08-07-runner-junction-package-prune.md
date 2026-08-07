@@ -63,20 +63,27 @@ Updated: 2026-08-07
 - Cloudflare typecheck and 60 focused runtime-shape, entrypoint-bundle, and
   container-contract tests pass. Workspace-boundary and package-cycle checks
   pass on the combined Zod/Junction shaper.
-- The local ISO-8601 predicate matches the pinned SDK serializer across date,
-  datetime, week-date, ordinal-date, invalid-string, empty, and wrong-type
-  representative cases.
+- A table-driven real-webhook differential test matches the local predicate to
+  the pinned SDK serializer across calendar, datetime, week-date, ordinal-date,
+  passthrough, missing-field, invalid-string, and wrong-type cases. An inline
+  record carrier prevents the documented completion fallback from masking a
+  mismatch.
 - Exact production assembly leaves entry and static startup bytes unchanged at
   1,641,254 and 7,885,509 while reducing total JavaScript from 9,902,746 to
   9,851,385 (-51,361).
-- The artifact falls from 87,533,395 to 82,109,152 logical bytes (-5,424,243),
+- The artifact falls from 87,533,395 to 82,109,953 logical bytes (-5,423,442),
   from 111,788 to 92,268 allocated KiB (-19,520), and from 8,655 to 4,316 files
   (-4,339).
-- The paired amd64 Docker image falls from 486,043,010 to 485,172,198 bytes
-  (-870,812). In a network-isolated, read-only container, uid 1001 imports the
+- The paired amd64 Docker image falls from 486,043,010 to 485,175,172 bytes
+  (-867,838). In a network-isolated, read-only container, uid 1001 imports the
   deferred device-sync, importer, clinical-record, Zod root, and Zod v4 paths;
   the SDK is absent, `/app` is immutable, and CLI help, LLM metadata, and schema
   commands all exit successfully.
+- The owned final-image smoke now imports the deferred device-sync config graph
+  and rejects an installed Junction SDK. Its workflow runs for device-sync
+  package and source changes. Local Docker Desktop passed that new boundary,
+  then stopped later at the existing unsupported seccomp operation; the exact
+  network-isolated image import proof passes, and Linux CI owns the full smoke.
 - A ten-pair alternating local Docker health benchmark is noise-neutral, as
   expected for a lazy-path/image-shape change: baseline p50 1,308 ms, candidate
   p50 1,311 ms, and paired median -28 ms.
