@@ -1,6 +1,25 @@
-import { z } from 'zod'
+import {
+  array,
+  boolean,
+  enum as enumSchema,
+  literal,
+  number,
+  object,
+  string,
+} from 'zod/v4'
+import type { infer as ZodInfer, input as ZodInput } from 'zod/v4'
 
 import { isoTimestampSchema } from './shared.ts'
+
+const z = {
+  array,
+  boolean,
+  enum: enumSchema,
+  literal,
+  number,
+  object,
+  string,
+}
 
 export const gatewayConversationDirectnessValues = [
   'direct',
@@ -258,44 +277,44 @@ export const gatewayRespondToPermissionInputSchema = z
   })
   .strict()
 
-export type GatewayAttachment = z.infer<typeof gatewayAttachmentSchema>
-export type GatewayConversation = z.infer<typeof gatewayConversationSchema>
+export type GatewayAttachment = ZodInfer<typeof gatewayAttachmentSchema>
+export type GatewayConversation = ZodInfer<typeof gatewayConversationSchema>
 export type GatewayConversationTitleSource =
   (typeof gatewayConversationTitleSourceValues)[number]
-export type GatewayChannelDelivery = z.infer<typeof gatewaySendMessageResultSchema>['delivery']
+export type GatewayChannelDelivery = ZodInfer<typeof gatewaySendMessageResultSchema>['delivery']
 export type GatewayConversationDirectness =
   (typeof gatewayConversationDirectnessValues)[number]
-export type GatewayConversationRoute = z.infer<typeof gatewayConversationRouteSchema>
-export type GatewayEvent = z.infer<typeof gatewayEventSchema>
+export type GatewayConversationRoute = ZodInfer<typeof gatewayConversationRouteSchema>
+export type GatewayEvent = ZodInfer<typeof gatewayEventSchema>
 export type GatewayEventKind = (typeof gatewayEventKindValues)[number]
-export type GatewayFetchAttachmentsInput = z.input<typeof gatewayFetchAttachmentsInputSchema>
-export type GatewayGetConversationInput = z.infer<typeof gatewayGetConversationInputSchema>
-export type GatewayListConversationsInput = z.input<
+export type GatewayFetchAttachmentsInput = ZodInput<typeof gatewayFetchAttachmentsInputSchema>
+export type GatewayGetConversationInput = ZodInfer<typeof gatewayGetConversationInputSchema>
+export type GatewayListConversationsInput = ZodInput<
   typeof gatewayListConversationsInputSchema
 >
-export type GatewayListConversationsResult = z.infer<
+export type GatewayListConversationsResult = ZodInfer<
   typeof gatewayListConversationsResultSchema
 >
-export type GatewayListOpenPermissionsInput = z.input<
+export type GatewayListOpenPermissionsInput = ZodInput<
   typeof gatewayListOpenPermissionsInputSchema
 >
-export type GatewayMessage = z.infer<typeof gatewayMessageSchema>
+export type GatewayMessage = ZodInfer<typeof gatewayMessageSchema>
 export type GatewayMessageDirection = (typeof gatewayMessageDirectionValues)[number]
 export type GatewayPermissionDecision =
   (typeof gatewayPermissionDecisionValues)[number]
-export type GatewayPermissionRequest = z.infer<typeof gatewayPermissionRequestSchema>
-export type GatewayProjectionSnapshot = z.infer<typeof gatewayProjectionSnapshotSchema>
+export type GatewayPermissionRequest = ZodInfer<typeof gatewayPermissionRequestSchema>
+export type GatewayProjectionSnapshot = ZodInfer<typeof gatewayProjectionSnapshotSchema>
 export type GatewayPermissionStatus = (typeof gatewayPermissionStatusValues)[number]
-export type GatewayPollEventsInput = z.input<typeof gatewayPollEventsInputSchema>
-export type GatewayPollEventsResult = z.infer<typeof gatewayPollEventsResultSchema>
-export type GatewayReadMessagesInput = z.input<typeof gatewayReadMessagesInputSchema>
-export type GatewayReadMessagesResult = z.infer<typeof gatewayReadMessagesResultSchema>
+export type GatewayPollEventsInput = ZodInput<typeof gatewayPollEventsInputSchema>
+export type GatewayPollEventsResult = ZodInfer<typeof gatewayPollEventsResultSchema>
+export type GatewayReadMessagesInput = ZodInput<typeof gatewayReadMessagesInputSchema>
+export type GatewayReadMessagesResult = ZodInfer<typeof gatewayReadMessagesResultSchema>
 export type GatewayDeliveryTargetKind = (typeof gatewayDeliveryTargetKindValues)[number]
 export type GatewayReplyRouteKind = (typeof gatewayReplyRouteKindValues)[number]
-export type GatewayReplyRoute = z.infer<typeof gatewayReplyRouteSchema>
-export type GatewayRespondToPermissionInput = z.input<
+export type GatewayReplyRoute = ZodInfer<typeof gatewayReplyRouteSchema>
+export type GatewayRespondToPermissionInput = ZodInput<
   typeof gatewayRespondToPermissionInputSchema
 >
-export type GatewaySendMessageInput = z.input<typeof gatewaySendMessageInputSchema>
-export type GatewaySendMessageResult = z.infer<typeof gatewaySendMessageResultSchema>
-export type GatewayWaitForEventsInput = z.input<typeof gatewayWaitForEventsInputSchema>
+export type GatewaySendMessageInput = ZodInput<typeof gatewaySendMessageInputSchema>
+export type GatewaySendMessageResult = ZodInfer<typeof gatewaySendMessageResultSchema>
+export type GatewayWaitForEventsInput = ZodInput<typeof gatewayWaitForEventsInputSchema>

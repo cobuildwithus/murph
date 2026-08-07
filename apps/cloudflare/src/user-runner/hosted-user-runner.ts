@@ -23,6 +23,7 @@ import {
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import type { R2BucketLike } from "../bundle-store.js";
+import type { HostedBrowserVaultReplicaOrphanCandidate } from "../browser-vault-store.ts";
 import type { HostedExecutionEnvironment } from "../env.js";
 import {
   readHostedPrivateMediaCapabilitySecret,
@@ -322,6 +323,12 @@ export class HostedUserRunner {
     return validation.owns;
   }
 
+  async recordRuntimeCompletionFromContainer(
+    input: Parameters<RuntimeInvocationService["recordRuntimeCompletionFromContainer"]>[0],
+  ): ReturnType<RuntimeInvocationService["recordRuntimeCompletionFromContainer"]> {
+    return this.runtimeInvocation.recordRuntimeCompletionFromContainer(input);
+  }
+
   private async withPrivateMediaMutationLock<T>(
     run: () => Promise<T>,
   ): Promise<T> {
@@ -456,6 +463,12 @@ export class HostedUserRunner {
     input: HostedWorkspaceSnapshotOrphanCandidate,
   ): Promise<HostedWorkspaceSnapshotOrphanCandidate> {
     return await this.workspaceSnapshotSessions.recordOrphanCandidate(input);
+  }
+
+  async recordHostedBrowserVaultReplicaOrphanCandidate(
+    input: HostedBrowserVaultReplicaOrphanCandidate,
+  ): Promise<HostedBrowserVaultReplicaOrphanCandidate> {
+    return await this.workspaceSnapshotSessions.recordBrowserVaultReplicaOrphanCandidate(input);
   }
 
   async readHostedWorkspaceSnapshotUploadSession(input: {

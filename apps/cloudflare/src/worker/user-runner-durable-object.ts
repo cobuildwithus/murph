@@ -80,6 +80,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.validateRuntimeWriteFence(input);
   }
 
+  async recordRuntimeCompletionFromContainer(
+    input: Parameters<HostedUserRunner["recordRuntimeCompletionFromContainer"]>[0],
+  ): ReturnType<HostedUserRunner["recordRuntimeCompletionFromContainer"]> {
+    return this.runner.recordRuntimeCompletionFromContainer(input);
+  }
+
   async validateRuntimeProviderEgressToken(input: {
     providerEgressToken: string;
     userId: string;
@@ -129,6 +135,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     input: Parameters<HostedUserRunner["recordHostedWorkspaceSnapshotOrphanCandidate"]>[0],
   ): ReturnType<HostedUserRunner["recordHostedWorkspaceSnapshotOrphanCandidate"]> {
     return this.runner.recordHostedWorkspaceSnapshotOrphanCandidate(input);
+  }
+
+  async recordHostedBrowserVaultReplicaOrphanCandidate(
+    input: Parameters<HostedUserRunner["recordHostedBrowserVaultReplicaOrphanCandidate"]>[0],
+  ): ReturnType<HostedUserRunner["recordHostedBrowserVaultReplicaOrphanCandidate"]> {
+    return this.runner.recordHostedBrowserVaultReplicaOrphanCandidate(input);
   }
 
   async fetch(): Promise<Response> {

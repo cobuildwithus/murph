@@ -36,6 +36,7 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   isHostedWorkspaceSnapshotV2Ref,
+  parseHostedBrowserVaultReplicaRef,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
@@ -48,7 +49,11 @@ import {
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
-import { createHostedBrowserVaultReplicaStore } from "./browser-vault-store.ts";
+import {
+  createHostedBrowserVaultReplicaStore,
+  HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+  type HostedBrowserVaultReplicaOrphanCandidate,
+} from "./browser-vault-store.ts";
 import {
   HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
 } from "./browser-vault-limits.ts";
@@ -2014,6 +2019,18 @@ async function recordWorkspaceSnapshotOrphanCandidate(
   return true;
 }
 
+async function recordBrowserVaultReplicaOrphanCandidate(
+  env: RunnerOutboundEnvironmentSource,
+  candidate: HostedBrowserVaultReplicaOrphanCandidate,
+): Promise<void> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(env, candidate.userId);
+  requireRunnerOutboundUserStubMethod(
+    stub,
+    "recordHostedBrowserVaultReplicaOrphanCandidate",
+  );
+  await stub.recordHostedBrowserVaultReplicaOrphanCandidate(candidate);
+}
+
 function collectLegacyWorkspaceSnapshotBundleRefs(
   snapshotRef: HostedExecutionSnapshotRef,
 ): HostedExecutionBundleRef[] {
@@ -2415,6 +2432,10 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   if (!Object.hasOwn(body, "replica")) {
     throw new TypeError("Hosted browser-vault replica write request.replica is required.");
   }
+  const replacedReplicaRef = parseHostedBrowserVaultReplicaRef(
+    body.replacedReplicaRef,
+    "Hosted browser-vault replica write request.replacedReplicaRef",
+  );
 
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,
@@ -2431,7 +2452,23 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     rootKeyId: crypto.rootKeyId,
     userId: input.userId,
   });
+  if (replacedReplicaRef) {
+    await recordBrowserVaultReplicaOrphanCandidate(input.env, {
+      createdAt: new Date().toISOString(),
+      objectKey: replacedReplicaRef.objectKey,
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: input.userId,
+    });
+  }
   const replicaRef = await replicaStore.writeBrowserVaultReplica({
+    beforeWrite: async (plannedReplicaRef) => {
+      await recordBrowserVaultReplicaOrphanCandidate(input.env, {
+        createdAt: new Date().toISOString(),
+        objectKey: plannedReplicaRef.objectKey,
+        schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+        userId: input.userId,
+      });
+    },
     replica: body.replica,
     userId: input.userId,
   });

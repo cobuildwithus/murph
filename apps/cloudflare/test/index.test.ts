@@ -54,6 +54,7 @@ import type {
 import {
   hostedArtifactObjectKey,
   hostedBrowserVaultReplicaObjectKey,
+  hostedWorkspaceSnapshotObjectKey,
 } from "../src/storage-paths.ts";
 import type {
   UserRunnerDurableObjectStubLike,
@@ -363,6 +364,7 @@ describe("cloudflare worker routes", () => {
       "test-read-active-runtime-fence",
       "test-start-stuck-invocation",
       "test-direct-r2-presigned-put",
+      "test-direct-r2-locator-marker",
       "deploy-container-smoke",
       "runtime-ensure-processing",
       "runtime-health-data-consent",
@@ -1477,6 +1479,71 @@ describe("cloudflare worker routes", () => {
       ok: true,
       service: "cloudflare-hosted-runner",
     });
+  });
+
+  it("seeds a bound hosted-local direct R2 locator marker", async () => {
+    const userId = "member_123";
+    const snapshotId = "snapshot-direct-r2-marker";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId,
+    });
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        `https://runner.example.test/__test/users/${userId}/direct-r2-locator-marker`,
+        {
+          body: JSON.stringify({ objectKey, snapshotId }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ), {
+        boundUserId: userId,
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(env.__bucketStore.keys()).toContain(objectKey);
+  });
+
+  it("rejects a hosted-local direct R2 locator marker outside the bound snapshot", async () => {
+    const userId = "member_123";
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        `https://runner.example.test/__test/users/${userId}/direct-r2-locator-marker`,
+        {
+          body: JSON.stringify({
+            objectKey: "users/other/workspace-snapshots/snapshot.snapshot.enc",
+            snapshotId: "snapshot-direct-r2-marker",
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ), {
+        boundUserId: userId,
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "objectKey does not match the bound snapshot.",
+    });
+    expect(env.__bucketStore.keys()).toEqual([]);
   });
 
   it("reads hosted-local test bundle refs for correctly bound callers", async () => {
