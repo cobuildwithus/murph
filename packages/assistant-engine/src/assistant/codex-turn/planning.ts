@@ -49,7 +49,10 @@ import {
   resolveAssistantDiagnosticsPolicy,
   type AssistantDiagnosticsPolicy,
 } from '../issue-reporting.js'
-import { resolveAssistantModelBehaviorProfile } from '../model-behavior.js'
+import {
+  buildAssistantResearchScoutCapabilityText,
+  resolveAssistantModelBehaviorProfile,
+} from '../model-behavior.js'
 import {
   resolveAssistantCodexResumeThreadId,
   resolveAssistantRouteResumeBinding,
@@ -634,12 +637,23 @@ export async function resolveAssistantRouteTurnPlan(input: {
           vaultRoot: input.input.vault,
         })
       : null
-  const assistantDynamicContextPrompts = groupRoomModelPrompt
-    ? [...hostedDynamicContextPrompts, groupRoomModelPrompt]
-    : hostedDynamicContextPrompts
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
+  const assistantResearchAvailable = normalizeNullableString(
+    input.sharedPlan.cliAccess.env.EXA_API_KEY,
+  ) !== null
+    && input.profile.promptProfile === 'conversation'
+    && (privateInteractiveAudience || authenticatedGroupChatRuntime)
+  const assistantDynamicContextPrompts = [
+    ...hostedDynamicContextPrompts,
+    ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
+    ...(assistantResearchAvailable
+      ? [buildAssistantResearchScoutCapabilityText({
+          progressUpdateMode: authenticatedGroupChatRuntime ? 'group' : 'direct',
+        })]
+      : []),
+  ]
   const voiceMemoDeliveryChannel = outputOnlyTurn
     ? null
     : resolveAssistantVoiceMemoDeliveryChannel({
@@ -663,6 +677,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
     hostedRuntime: input.executionContext?.hosted != null,
+    researchAvailable: assistantResearchAvailable,
   })
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
@@ -910,6 +925,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,
+        pendingVaultFilesAvailable:
+          privateInteractiveAudience &&
+          userActionAcceptedInputIds.length > 0 &&
+          input.hostedToolContext?.pendingVaultFilesAvailable === true,
         vaultFileSendAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,
