@@ -143,7 +143,7 @@ Updated: 2026-08-06
   a current launch-owner marker. Continue fail-closed in the read-only report:
   only explicit `false` proves a current Temporal-owned launch, a launch-owned
   direct id still takes precedence, historical `true` without that id remains
-  `legacy_unclassified`, and rows without direct evidence remain Temporal-only.
+  `legacy_unclassified`.
 - Round 5 found that deduplicating the raw mailbox-local marker booleans before
   applying cohort precedence could omit a valid multi-item Temporal attempt
   when only its initiating row had Web direct timing. Resolve the cohort per
@@ -159,6 +159,17 @@ Updated: 2026-08-06
   activities, runner times, or final cohorts continue to fail closed. Later
   active-wake latency is not part of this cold-start report and needs no new
   measurement, state, or lifecycle for the current requirement.
+- Round 7 proved chronology is not ownership even when an activity begins
+  before runner acceptance: that request can reach the UserRunner only after a
+  direct request has already won the fresh fence, then enter the active runtime
+  as a markerless foreground wake. Requirement-level continuation decision:
+  Temporal startup cohorts require launch-owned evidence already stamped at the
+  successful fresh-fence boundary. Exact direct launch identity means
+  `temporal_recovery`; explicit false direct ownership means `temporal_only`;
+  legacy direct evidence remains `legacy_unclassified`; markerless and
+  contradictory current rows are omitted. Chronology remains only a
+  consistency guard after ownership is proven. Add no identifier, state,
+  lifecycle, callback, I/O, timer, or awaited operation.
 
 ## Verification
 
@@ -205,6 +216,15 @@ Updated: 2026-08-06
   filtering post-runner activity stamps before DISTINCT and ambiguity counting.
   The PostgreSQL fixture includes one valid launch plus a later active wake on
   the same attempt and still reports exactly one startup sample.
+- ReviewGPT final round 7: delayed-active-wake causal finding accepted and
+  resolved by requiring existing fresh-fence launch ownership before a current
+  Temporal row can enter a startup cohort. The PostgreSQL fixture includes a
+  Temporal activity that starts before a direct-owned runner is accepted but
+  arrives later as a markerless wake; it is omitted, the direct cold sample
+  remains, a genuine Temporal fresh launch emits once, and conflicting
+  launch-owned evidence remains fail closed.
+- Corrected default report contract: 2 passed, 1 opt-in fixture skipped.
+- Corrected real PostgreSQL report fixture: 3 passed.
 - `git diff --check`: passed.
-- Pending: corrected-head ReviewGPT round 7, exact-head CI, parent final review, plan
+- Pending: corrected-head ReviewGPT round 8, exact-head CI, parent final review, plan
   closure, and mergeability proof.

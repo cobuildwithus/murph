@@ -61,13 +61,16 @@ WITH raw_row_stamps AS (
     (phase_breakdown_json #>> '{orchestration,temporalActivityStartedAtEpochMs}')::double precision AS activity_started_ms,
     CASE
       WHEN phase_breakdown_json #> '{orchestration,runtimeInvocationOrchestrationAttemptId}' IS NOT NULL
+        AND phase_breakdown_json #>> '{orchestration,triggeredByWebDirect}' = 'false'
+        THEN NULL
+      WHEN phase_breakdown_json #> '{orchestration,runtimeInvocationOrchestrationAttemptId}' IS NOT NULL
         THEN 'temporal_recovery'
       WHEN phase_breakdown_json #>> '{orchestration,triggeredByWebDirect}' = 'false'
         THEN 'temporal_only'
       WHEN phase_breakdown_json #>> '{orchestration,triggeredByWebDirect}' = 'true'
         OR phase_breakdown_json #> '{orchestration,directEnsureRequestStartedAtEpochMs}' IS NOT NULL
         THEN 'legacy_unclassified'
-      ELSE 'temporal_only'
+      ELSE NULL
     END AS cohort
   FROM hosted_ingress_latency_trace
   WHERE runner_job_accepted_at >=
@@ -79,6 +82,7 @@ WITH raw_row_stamps AS (
   SELECT *
   FROM raw_row_stamps
   WHERE runner_job_accepted_ms >= activity_started_ms
+    AND cohort IS NOT NULL
 ), attempt_stamps AS (
   SELECT DISTINCT
     runtime_attempt_id,

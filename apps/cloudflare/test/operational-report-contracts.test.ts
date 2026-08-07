@@ -59,6 +59,8 @@ describe("hosted runtime operational report contracts", () => {
     expect(coldStartReportSql).toContain(
       "WHERE runner_job_accepted_ms >= activity_started_ms",
     );
+    expect(coldStartReportSql).toContain("AND cohort IS NOT NULL");
+    expect(coldStartReportSql).toContain("ELSE NULL");
     expect(coldStartReportSql).toContain("SELECT DISTINCT\n    runtime_attempt_id");
     expect(coldStartReportSql).toContain("WHERE phase.duration_ms >= 0");
     expect(coldStartReportSql).toContain("'web_direct_cold'");
@@ -98,7 +100,7 @@ describe.skipIf(!runPostgresProof)(
           coldStartReportPath,
         ]);
 
-        expect(stdout).toContain("temporal_only,2,4.000,4.000,4.000");
+        expect(stdout).toContain("temporal_only,1,4.000,4.000,4.000");
         expect(stdout).toContain("temporal_recovery,1,30.000,30.000,30.000");
         expect(stdout).toContain("legacy_unclassified,1,5.000,5.000,5.000");
         expect(stdout).toContain("web_direct_cold,2,6.000,6.900,7.000");
@@ -369,12 +371,12 @@ function createFixtureSql(schemaName: string): string {
     FROM fixture
     UNION ALL
     SELECT
-      'temporal-only',
-      t0 + INTERVAL '12 seconds',
-      t0 + INTERVAL '16 seconds',
-      'attempt-temporal-only',
+      'direct-owned-pre-runner-temporal-active-wake',
+      t0 + INTERVAL '5 seconds',
+      t0 + INTERVAL '6 seconds',
+      'attempt-direct-causal',
       jsonb_build_object('orchestration', jsonb_build_object(
-        'temporalActivityStartedAtEpochMs', base_ms + 12000
+        'temporalActivityStartedAtEpochMs', base_ms + 5000
       ))
     FROM fixture
     UNION ALL
@@ -447,6 +449,18 @@ function createFixtureSql(schemaName: string): string {
       jsonb_build_object('orchestration', jsonb_build_object(
         'temporalActivityStartedAtEpochMs', base_ms + 13000,
         'runtimeInvocationOrchestrationAttemptId', 'web-ingress-conflict'
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'temporal-conflict-single-row',
+      t0 + INTERVAL '13.5 seconds',
+      t0 + INTERVAL '19 seconds',
+      'attempt-temporal-conflict-single-row',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'temporalActivityStartedAtEpochMs', base_ms + 13000,
+        'triggeredByWebDirect', false,
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-conflict-single'
       ))
     FROM fixture
     UNION ALL

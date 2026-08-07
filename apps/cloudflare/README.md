@@ -306,10 +306,15 @@ cold starts. The second reports Temporal-activity-to-runner-job time by exact
 recovery versus Temporal-only attempt; current Temporal-owned launches remain
 Temporal-only when a direct wake overlaps, while pre-deploy rows with legacy
 direct markers are labeled `legacy_unclassified` instead of being guessed.
+Current rows without either the launch-owned direct id or the explicit
+Temporal-owner marker are omitted: an activity can start before runner
+acceptance yet reach the runtime later as an active wake, so timestamp order is
+not launch evidence.
 The final cohort is resolved before attempt-level deduplication, so mailbox-local
 marker differences cannot discard a coherent multi-item invocation. Temporal
 activities that begin after runner acceptance are active wakes, not startup
-candidates, and are removed before ambiguity is assessed. Warm direct
+candidates, and are removed before ambiguity is assessed. Conflicting
+launch-owner evidence also fails closed. Warm direct
 wakes are omitted because they create no new runner job. The final table splits
 the same causal direct samples across Durable Object dispatch,
 consent locking, the existing health-data admission callback, runner-state
