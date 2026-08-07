@@ -1,3 +1,4 @@
+import path from "node:path"
 import {
   type JsonValue,
   type ExperimentStatus,
@@ -5,6 +6,7 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts"
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
+import { withAssistantRuntimeWriteLock } from "../assistant-runtime-write-lock.js"
 import { ALL_QUERY_ENTITY_FAMILIES } from "@murphai/query/entity-families"
 import { readMemoryDocument as readMemoryDocumentSnapshot } from "@murphai/query"
 
@@ -1438,9 +1440,11 @@ function createIntegratedQueryServices(): QueryServices {
         experimentSlug: experiment,
       })
 
-      await materializeExportPack(vault, pack.files)
+      await withAssistantRuntimeWriteLock(vault, async () => {
+        await materializeExportPack(vault, pack.files)
+      })
 
-      if (out) {
+      if (out && path.resolve(out) !== path.resolve(vault)) {
         await materializeExportPack(out, pack.files)
       }
 

@@ -10,6 +10,7 @@ import {
   type QueryCanonicalEntity as AssessmentEntity,
 } from '@murphai/vault-usecases/runtime'
 import { materializeExportPack, resolveVaultRelativePath } from '@murphai/vault-usecases/helpers'
+import { withAssistantRuntimeWriteLock } from '@murphai/vault-usecases/assistant-runtime-write-lock'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 
@@ -436,39 +437,55 @@ export async function materializeStoredExportPack(input: {
   packId: string
   out?: string
 }) {
-  const { manifestFile, manifest } = await readStoredExportPackManifest(
-    input.vault,
-    input.packId,
-  )
-  const { rebuilt, files } = await loadFilesForMaterialization(input.vault, manifest)
   const outDir = input.out ?? input.vault
+  const writesCanonicalVault = path.resolve(outDir) === path.resolve(input.vault)
+  const stored = await withAssistantRuntimeWriteLock(input.vault, async () => {
+    const { manifestFile, manifest } = await readStoredExportPackManifest(
+      input.vault,
+      input.packId,
+    )
+    const { rebuilt, files } = await loadFilesForMaterialization(input.vault, manifest)
 
-  await materializeExportPack(outDir, files)
+    if (writesCanonicalVault) {
+      await materializeExportPack(outDir, files)
+    }
+
+    return { files, manifest, manifestFile, rebuilt }
+  })
+
+  if (!writesCanonicalVault) {
+    await materializeExportPack(outDir, stored.files)
+  }
 
   return {
     vault: input.vault,
-    packId: manifest.packId,
-    manifestFile,
+    packId: stored.manifest.packId,
+    manifestFile: stored.manifestFile,
     outDir,
-    rebuilt,
-    files: files.map((file: { path: string }) => file.path),
+    rebuilt: stored.rebuilt,
+    files: stored.files.map((file: { path: string }) => file.path),
   }
 }
 
 export async function pruneStoredExportPack(vaultRoot: string, packId: string) {
-  const { manifest } = await readStoredExportPackManifest(vaultRoot, packId)
-  const relativePackDirectory = packDirectory(packId)
-  const absolutePackDirectory = await resolveVaultRelativePath(vaultRoot, relativePackDirectory)
+  return await withAssistantRuntimeWriteLock(vaultRoot, async () => {
+    const { manifest } = await readStoredExportPackManifest(vaultRoot, packId)
+    const relativePackDirectory = packDirectory(packId)
+    const absolutePackDirectory = await resolveVaultRelativePath(
+      vaultRoot,
+      relativePackDirectory,
+    )
 
-  await rm(absolutePackDirectory, { recursive: true, force: true })
+    await rm(absolutePackDirectory, { recursive: true, force: true })
 
-  return {
-    vault: vaultRoot,
-    packId,
-    packDirectory: relativePackDirectory,
-    fileCount: manifest.files.length,
-    pruned: true as const,
-  }
+    return {
+      vault: vaultRoot,
+      packId,
+      packDirectory: relativePackDirectory,
+      fileCount: manifest.files.length,
+      pruned: true as const,
+    }
+  })
 }
 
 export async function showAssessmentManifest(vaultRoot: string, assessmentId: string) {

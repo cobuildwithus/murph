@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { afterEach, test, vi } from "vitest";
 
@@ -234,6 +237,76 @@ test("repairIntegrationIngests delegates to the core migration primitive", async
     maxBytes: 1024,
     vaultRoot: "fixture-vault",
   });
+});
+
+test("canonical export-pack materialization waits for the shared assistant runtime lock", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-export-pack-lock-"));
+  const packId = "shared-lock-pack";
+  const manifestPath = `exports/packs/${packId}/manifest.json`;
+  const files = [{
+    contents: `${JSON.stringify({
+      files: [{ path: manifestPath }],
+      format: "murph.export-pack.v1",
+      packId,
+    })}\n`,
+    path: manifestPath,
+  }];
+  const queryRuntime = {
+    ...createQueryRuntimeStub(),
+    buildExportPack: vi.fn(() => ({ files, packId })),
+    readVaultTolerant: vi.fn(async () => ({})),
+  };
+  const runtimeModule = {
+    createUnwiredMethod,
+    loadCoreRuntime: vi.fn(async () => {
+      throw new Error("loadCoreRuntime should not be called");
+    }),
+    loadImporterRuntime: vi.fn(async () => {
+      throw new Error("loadImporterRuntime should not be called");
+    }),
+    loadQueryRuntime: vi.fn(async () => queryRuntime),
+  };
+
+  try {
+    const integratedServicesModule = await importWithMocks<
+      typeof import("../src/usecases/integrated-services.ts")
+    >("../src/usecases/integrated-services.ts", {
+      "../src/usecases/runtime.js": () => runtimeModule,
+    });
+    const { withAssistantRuntimeWriteLock } = await import(
+      "../src/assistant-runtime-write-lock.ts"
+    );
+    const services = integratedServicesModule.createIntegratedVaultServices();
+    let beginExport!: () => void;
+    const exportStart = new Promise<void>((resolve) => {
+      beginExport = resolve;
+    });
+    let exportSettled = false;
+    const exportResult = exportStart
+      .then(async () => await services.query.exportPack({
+        from: "2026-08-01",
+        requestId: "shared-lock-export",
+        to: "2026-08-07",
+        vault: vaultRoot,
+      }))
+      .finally(() => {
+        exportSettled = true;
+      });
+
+    await withAssistantRuntimeWriteLock(vaultRoot, async () => {
+      beginExport();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(exportSettled, false);
+      await assert.rejects(readFile(path.join(vaultRoot, manifestPath)), {
+        code: "ENOENT",
+      });
+    });
+
+    assert.equal((await exportResult).packId, packId);
+    assert.equal(await readFile(path.join(vaultRoot, manifestPath), "utf8"), files[0]?.contents);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
 });
 
 test("repairWearableStorage apply surfaces dense raw byte metrics", async () => {

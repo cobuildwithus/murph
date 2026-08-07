@@ -38,10 +38,6 @@ import {
 } from '../src/assistant/turns.ts'
 import { createDeferred, createTempVaultContext } from './test-helpers.js'
 
-type AssistantStateWriteLockFormatter = (
-  metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null,
-) => string
-
 const cleanupPaths: string[] = []
 
 afterEach(async () => {
@@ -370,82 +366,6 @@ test('assistant runtime write lock surfaces held external metadata as a VaultCli
       assert.match(error.message, /existing-runtime-writer/u)
       assert.match(error.message, /pid \d+/u)
       assert.match(error.message, /2026-04-08T12:34:56.000Z/u)
-      return true
-    },
-  )
-})
-
-test('assistant runtime write lock falls back to a generic held-lock detail when metadata is unavailable', async () => {
-  vi.resetModules()
-
-  let capturedFormatHeldLockMessage: AssistantStateWriteLockFormatter | null = null
-
-  vi.doMock('../src/assistant/state-write-lock.js', () => ({
-    createAssistantStateWriteLock: (options: {
-      formatHeldLockMessage(metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null): string
-    }) => {
-      capturedFormatHeldLockMessage = options.formatHeldLockMessage
-      return {
-        clearWriteLock: async () => undefined,
-        inspectWriteLock: async () => ({ state: 'unlocked' }),
-        withWriteLock: async <TResult>(_paths: unknown, run: () => Promise<TResult>) =>
-          await run(),
-      }
-    },
-  }))
-
-  await import('../src/assistant/runtime-write-lock.ts')
-
-  const formatHeldLockMessage: (
-    metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null,
-  ) => string =
-    capturedFormatHeldLockMessage ??
-    ((_metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null) => {
-      throw new Error(
-        'Expected runtime write-lock mock to capture formatHeldLockMessage.',
-      )
-    })
-  assert.equal(
-    formatHeldLockMessage(null),
-    'Assistant runtime state is already being updated for this vault: another assistant runtime writer.',
-  )
-})
-
-test('assistant runtime write lock falls back to the generic held-lock message when metadata is missing', async () => {
-  vi.resetModules()
-  vi.doMock('../src/assistant/state-write-lock.ts', () => ({
-    createAssistantStateWriteLock: (options: {
-      formatHeldLockMessage(metadata: null): string
-      heldLockErrorCode: string
-    }) => ({
-      clearWriteLock: vi.fn(async () => undefined),
-      inspectWriteLock: vi.fn(async () => ({
-        state: 'unlocked' as const,
-      })),
-      withWriteLock: vi.fn(async () => {
-        throw new VaultCliError(
-          options.heldLockErrorCode,
-          options.formatHeldLockMessage(null),
-        )
-      }),
-    }),
-  }))
-
-  const runtimeWriteLock = await import('../src/assistant/runtime-write-lock.ts')
-
-  await assert.rejects(
-    () =>
-      runtimeWriteLock.withAssistantRuntimeWriteLock(
-        '/tmp/runtime-write-lock-generic',
-        async () => undefined,
-      ),
-    (error) => {
-      assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'ASSISTANT_RUNTIME_WRITE_LOCKED')
-      assert.equal(
-        error.message,
-        'Assistant runtime state is already being updated for this vault: another assistant runtime writer.',
-      )
       return true
     },
   )

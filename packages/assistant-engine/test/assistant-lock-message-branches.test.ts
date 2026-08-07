@@ -46,15 +46,9 @@ describe('assistant lock message branches', () => {
       resolveAssistantStatePaths,
     }))
 
-    const runtimeLock = await import('../src/assistant/runtime-write-lock.ts')
     const cronLock = await import('../src/assistant/cron/locking.ts')
     const turnLock = await import('../src/assistant/turn-lock.ts')
 
-    expect(
-      optionsByPrefix.get('assistant-runtime-write')?.formatHeldLockMessage(null),
-    ).toBe(
-      'Assistant runtime state is already being updated for this vault: another assistant runtime writer.',
-    )
     expect(
       optionsByPrefix.get('assistant-cron')?.formatHeldLockMessage(null),
     ).toBe('Assistant cron writes are already in progress.')
@@ -62,9 +56,6 @@ describe('assistant lock message branches', () => {
       optionsByPrefix.get('assistant-turn')?.formatHeldLockMessage(null),
     ).toBe('Assistant turn is already in progress for this vault.')
 
-    await runtimeLock.withAssistantRuntimeWriteLock('vault-a', async () => 'ok')
-    await runtimeLock.inspectAssistantRuntimeWriteLock('vault-b')
-    await runtimeLock.clearAssistantRuntimeWriteLock('vault-c')
     await cronLock.withAssistantCronWriteLock(
       {
         assistantStateRoot: 'state-root:cron',
@@ -76,9 +67,6 @@ describe('assistant lock message branches', () => {
       vault: 'vault-turn',
     })
 
-    expect(resolveAssistantStatePaths).toHaveBeenCalledWith('vault-a')
-    expect(resolveAssistantStatePaths).toHaveBeenCalledWith('vault-b')
-    expect(resolveAssistantStatePaths).toHaveBeenCalledWith('vault-c')
     expect(resolveAssistantStatePaths).toHaveBeenCalledWith('vault-turn')
   })
 })

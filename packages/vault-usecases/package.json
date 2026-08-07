@@ -27,6 +27,14 @@
       "types": "./dist/assistant-vault-paths.d.ts",
       "default": "./dist/assistant-vault-paths.js"
     },
+    "./assistant-state-write-lock": {
+      "types": "./dist/assistant-state-write-lock.d.ts",
+      "default": "./dist/assistant-state-write-lock.js"
+    },
+    "./assistant-runtime-write-lock": {
+      "types": "./dist/assistant-runtime-write-lock.d.ts",
+      "default": "./dist/assistant-runtime-write-lock.js"
+    },
     "./preferences": {
       "types": "./dist/preferences.d.ts",
       "default": "./dist/preferences.js"

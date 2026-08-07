@@ -14,29 +14,6 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/state-write-lock.ts')
 })
 
-test('assistant runtime write lock defines a generic fallback held-lock message', async () => {
-  let capturedOptions: CapturedLockOptions | null = null
-
-  vi.doMock('../src/assistant/state-write-lock.ts', () => ({
-    createAssistantStateWriteLock(options: CapturedLockOptions) {
-      capturedOptions = options
-      return {
-        clearWriteLock: vi.fn(),
-        inspectWriteLock: vi.fn(),
-        withWriteLock: vi.fn(),
-      }
-    },
-  }))
-
-  await import('../src/assistant/runtime-write-lock.ts')
-
-  const options = requireCapturedLockOptions(capturedOptions)
-  assert.equal(
-    options.formatHeldLockMessage(null),
-    'Assistant runtime state is already being updated for this vault: another assistant runtime writer.',
-  )
-})
-
 test('assistant cron write lock defines a generic fallback held-lock message', async () => {
   let capturedOptions: CapturedLockOptions | null = null
 

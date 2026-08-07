@@ -16,6 +16,9 @@ import type {
   AssistantOutboxIntent,
   AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { assistantVaultFileMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
+import { withAssistantRuntimeWriteLock } from '@murphai/vault-usecases/assistant-runtime-write-lock'
+import { materializeExportPack } from '@murphai/vault-usecases/helpers'
 
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
@@ -724,7 +727,7 @@ describe('assistant generated export-pack retirement', () => {
     await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('continues across packs whose combined uncompressed bytes exceed one inspection unit', async () => {
+  it('retires independent packs whose combined bytes exceed the per-pack ceiling', async () => {
     const setup = await createMultiExportPackDelivery(
       2,
       52 * 1024 * 1024,
@@ -742,18 +745,16 @@ describe('assistant generated export-pack retirement', () => {
     await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('scopes inspection budgets per candidate so a stale large pack cannot starve a later exact pack', async () => {
-    const payloadBytes = 52 * 1024 * 1024
-    const setup = await createMultiExportPackDelivery(2, payloadBytes)
+  it('treats an oversized pack as terminally ineligible and still retires a later exact pack', async () => {
+    const setup = await createMultiExportPackDelivery(2, [
+      assistantVaultFileMaxBytes + 1,
+      0,
+    ])
     await createDeliveryIntent({
       media: setup.media,
       status: 'sent',
       vaultRoot: setup.vaultRoot,
     })
-    await writeFile(
-      path.join(setup.packPaths[0]!, 'entities.json'),
-      Buffer.alloc(payloadBytes, 99),
-    )
 
     const result = await pruneQuiescentAssistantGeneratedDeliveryResidue({
       vault: setup.vaultRoot,
@@ -764,6 +765,67 @@ describe('assistant generated export-pack retirement', () => {
       isDirectory: expect.any(Function),
     })
     await expect(stat(setup.packPaths[1]!)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })).resolves.toMatchObject({ exportPacksPruned: 0, filesPruned: 0 })
+  }, 30_000)
+
+  it('retires a pack at the exact aggregate uncompressed-byte limit', async () => {
+    const setup = await createMultiExportPackDelivery(1, 'max-aggregate')
+    await createDeliveryIntent({
+      media: setup.media,
+      status: 'sent',
+      vaultRoot: setup.vaultRoot,
+    })
+
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })).resolves.toMatchObject({ exportPacksPruned: 1 })
+    await expect(stat(setup.packPaths[0]!)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
+  }, 30_000)
+
+  it('serializes retirement behind an in-progress canonical pack materialization', async () => {
+    const setup = await createExportPackDelivery('materialization-lock')
+    await createDeliveryIntent({
+      media: setup.media,
+      status: 'sent',
+      vaultRoot: setup.vaultRoot,
+    })
+    const replacementFiles = setup.packEntries.map(([filePath, contents]) => ({
+      contents: filePath.endsWith('/entities.json')
+        ? '{"records":[{"id":"replacement"}]}\n'
+        : contents,
+      path: filePath,
+    }))
+    let beginRetirement!: () => void
+    const retirementStart = new Promise<void>((resolve) => {
+      beginRetirement = resolve
+    })
+    let retirementSettled = false
+    const retirement = retirementStart
+      .then(async () => await pruneQuiescentAssistantGeneratedDeliveryResidue({
+        vault: setup.vaultRoot,
+      }))
+      .finally(() => {
+        retirementSettled = true
+      })
+
+    await withAssistantRuntimeWriteLock(setup.vaultRoot, async () => {
+      await rm(setup.packPath, { force: true, recursive: true })
+      await materializeExportPack(setup.vaultRoot, [replacementFiles[0]!])
+      beginRetirement()
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(retirementSettled).toBe(false)
+      await materializeExportPack(setup.vaultRoot, replacementFiles.slice(1))
+    })
+
+    await expect(retirement).resolves.toMatchObject({ exportPacksPruned: 0 })
+    await expect(stat(setup.packPath)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    })
     await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
@@ -949,7 +1011,7 @@ async function createDirectPackFileIntent(input: {
 
 async function createMultiExportPackDelivery(
   packCount: number,
-  payloadBytes = 0,
+  payloadBytes: number | readonly number[] | 'max-aggregate' = 0,
 ): Promise<{
   archive: Buffer
   archivePath: string
@@ -972,21 +1034,33 @@ async function createMultiExportPackDelivery(
       'assistant-context.md',
     ]
     const filePaths = fileNames.map((fileName) => `${basePath}/${fileName}`)
-    const values = new Map<string, string | Uint8Array>([
-      ['manifest.json', `${JSON.stringify({
+    const manifest = `${JSON.stringify({
         files: filePaths.map((filePath) => ({ path: filePath })),
         format: 'murph.export-pack.v1',
         packId,
-      }, null, 2)}\n`],
-      ['question-pack.json', '{"questions":[]}\n'],
+      }, null, 2)}\n`
+    const questionPack = '{"questions":[]}\n'
+    const defaultEntities = '{"records":[]}\n'
+    const dailySamples = '{"samples":[]}\n'
+    const assistantContext = '# Assistant context\n'
+    const fixedBytes = [manifest, questionPack, dailySamples, assistantContext]
+      .reduce((total, contents) => total + Buffer.byteLength(contents), 0)
+    const configuredPayloadBytes = resolveTestPackPayloadBytes(
+      payloadBytes,
+      index,
+      fixedBytes,
+    )
+    const values = new Map<string, string | Uint8Array>([
+      ['manifest.json', manifest],
+      ['question-pack.json', questionPack],
       [
         'entities.json',
-        payloadBytes > 0
-          ? Buffer.alloc(payloadBytes, index + 1)
-          : '{"records":[]}\n',
+        configuredPayloadBytes > 0
+          ? Buffer.alloc(configuredPayloadBytes, index + 1)
+          : defaultEntities,
       ],
-      ['daily-samples.json', '{"samples":[]}\n'],
-      ['assistant-context.md', '# Assistant context\n'],
+      ['daily-samples.json', dailySamples],
+      ['assistant-context.md', assistantContext],
     ])
     const packPath = path.join(context.vaultRoot, ...basePath.split('/'))
     packPaths.push(packPath)
@@ -1014,6 +1088,20 @@ async function createMultiExportPackDelivery(
     vaultRoot: context.vaultRoot,
   })
   return { archive, archivePath, media, packPaths, vaultRoot: context.vaultRoot }
+}
+
+function resolveTestPackPayloadBytes(
+  configured: number | readonly number[] | 'max-aggregate',
+  index: number,
+  fixedBytes: number,
+): number {
+  if (configured === 'max-aggregate') {
+    return assistantVaultFileMaxBytes - fixedBytes
+  }
+  if (typeof configured === 'number') {
+    return configured
+  }
+  return configured[index] ?? 0
 }
 
 async function createLargeExportPackDelivery(): Promise<{

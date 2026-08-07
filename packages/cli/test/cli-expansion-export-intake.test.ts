@@ -15,6 +15,7 @@ import {
 } from '../src/commands/export-intake-read-helpers.js'
 import { registerIntakeCommands } from '../src/commands/intake.js'
 import { materializeExportPack } from '@murphai/vault-usecases/helpers'
+import { withAssistantRuntimeWriteLock } from '@murphai/vault-usecases/assistant-runtime-write-lock'
 import {
   createIntegratedVaultServices,
   createUnwiredVaultServices,
@@ -549,6 +550,50 @@ test.sequential(
       await rm(vaultRoot, { recursive: true, force: true })
       await rm(outRoot, { recursive: true, force: true })
       await rm(outsideRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'explicit export-pack prune waits for the shared assistant runtime lock',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-pack-lock-'))
+
+    try {
+      await initializeVault({ vaultRoot })
+      const pack = buildExportPack(await readVault(vaultRoot), {
+        from: '2026-03-10',
+        to: '2026-03-12',
+        packId: 'locked-pack',
+        generatedAt: '2026-03-13T12:00:00.000Z',
+      })
+      await materializeExportPack(vaultRoot, pack.files)
+      const manifestPath = path.join(
+        vaultRoot,
+        'exports/packs/locked-pack/manifest.json',
+      )
+      let beginPrune!: () => void
+      const pruneStart = new Promise<void>((resolve) => {
+        beginPrune = resolve
+      })
+      let pruneSettled = false
+      const prune = pruneStart
+        .then(async () => await pruneStoredExportPack(vaultRoot, 'locked-pack'))
+        .finally(() => {
+          pruneSettled = true
+        })
+
+      await withAssistantRuntimeWriteLock(vaultRoot, async () => {
+        beginPrune()
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        assert.equal(pruneSettled, false)
+        await access(manifestPath)
+      })
+
+      assert.equal((await prune).pruned, true)
+      await assert.rejects(access(manifestPath), { code: 'ENOENT' })
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
     }
   },
 )

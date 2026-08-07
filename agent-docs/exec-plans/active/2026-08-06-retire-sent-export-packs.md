@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Goal
 
@@ -89,10 +89,12 @@ Updated: 2026-08-06
 7. [completed] Resolve final ReviewGPT round 2 archive starvation, local
    continuation, authority-retention, and complexity findings with one
    quiescent owner.
-8. [in progress] Resolve final ReviewGPT round 3 cross-archive starvation and
+8. [completed] Resolve final ReviewGPT round 3 cross-archive starvation and
    local-owner findings with a one-snapshot sweep and one coalesced assistantd
-   maintenance task; then push the exact remediation head and complete final
-   ReviewGPT plus exact-head CI.
+   maintenance task.
+9. [in progress] Resolve final ReviewGPT round 4 materialization/prune locking
+   and permanent oversized-pack deferral findings; then push the exact
+   remediation head and complete final ReviewGPT plus exact-head CI.
 
 ## Verification
 
@@ -111,7 +113,7 @@ Updated: 2026-08-06
   ownership, deletion/persistence ordering, 21-pack continuation, and abort
   recovery tests.
 - Focused quiescent-owner proof covers missing and unsafe earlier archives,
-  stale, over-budget, and active earlier pack candidates, cross-archive
+  stale, terminally oversized, and active earlier pack candidates, cross-archive
   progress, terminal-authority retention, authenticated request preemption,
   outbox-drain recovery, coalescing, shutdown, and abort recovery.
-- Pending final round 4 ReviewGPT and exact-head CI.
+- Pending final round 5 ReviewGPT and exact-head CI.

@@ -63,18 +63,6 @@ interface GeneratedExportPackCandidate {
   packId: string
 }
 
-interface GeneratedExportPackInspectionBudget {
-  archivedBytes: number
-  liveBytes: number
-}
-
-class GeneratedExportPackInspectionDeferredError extends Error {
-  constructor() {
-    super('Generated export-pack inspection exhausted its bounded unit.')
-    this.name = 'GeneratedExportPackInspectionDeferredError'
-  }
-}
-
 type GeneratedExportArchiveSnapshotRead =
   | { kind: 'invalid' }
   | { kind: 'missing' }
@@ -82,7 +70,6 @@ type GeneratedExportArchiveSnapshotRead =
 
 type GeneratedExportPackCandidateInspection =
   | { kind: 'candidate'; liveSnapshot: LiveExportPackSnapshot }
-  | { kind: 'deferred' }
   | { kind: 'ineligible' }
 
 interface GeneratedExportArchiveInspection {
@@ -273,21 +260,12 @@ async function inspectAssistantGeneratedExportArchive(input: {
       continue
     }
 
-    const budget: GeneratedExportPackInspectionBudget = {
-      archivedBytes: 0,
-      liveBytes: 0,
-    }
     const candidateInspection = await inspectGeneratedExportPackCandidate({
       archive: input.archive,
-      budget,
       candidate: possible,
       signal: input.signal,
       vault: input.vault,
     })
-    if (candidateInspection.kind === 'deferred') {
-      hasDeferredCandidate = true
-      continue
-    }
     if (candidateInspection.kind === 'ineligible') {
       continue
     }
@@ -331,18 +309,12 @@ function buildGeneratedExportPackCandidates(
 
 async function inspectGeneratedExportPackCandidate(input: {
   archive: Buffer
-  budget: GeneratedExportPackInspectionBudget
   candidate: GeneratedExportPackCandidate
   signal?: AbortSignal | null
   vault: string
 }): Promise<GeneratedExportPackCandidateInspection> {
   let archivedFiles: AssistantGeneratedExportPackRetirementFile[]
   try {
-    consumeGeneratedExportPackInspectionBudget(
-      input.budget,
-      'archivedBytes',
-      input.candidate.manifestEntry.uncompressedSize,
-    )
     const manifestBytes = (await readBoundedZipEntry(
       input.archive,
       input.candidate.manifestEntry,
@@ -377,6 +349,21 @@ async function inspectGeneratedExportPackCandidate(input: {
     const entriesByPath = new Map(
       input.candidate.entries.map((entry) => [entry.name, entry]),
     )
+    let aggregateUncompressedBytes = 0
+    for (const filePath of declaredPaths) {
+      const entry = entriesByPath.get(filePath)
+      if (
+        !entry
+        || !Number.isSafeInteger(entry.uncompressedSize)
+        || entry.uncompressedSize < 0
+        || entry.uncompressedSize
+          > assistantVaultFileMaxBytes - aggregateUncompressedBytes
+      ) {
+        return { kind: 'ineligible' }
+      }
+      aggregateUncompressedBytes += entry.uncompressedSize
+    }
+
     archivedFiles = []
     for (const filePath of declaredPaths) {
       input.signal?.throwIfAborted()
@@ -388,7 +375,6 @@ async function inspectGeneratedExportPackCandidate(input: {
         ? manifestBytes
         : await readGeneratedExportPackArchiveEntry({
             archive: input.archive,
-            budget: input.budget,
             entry,
             signal: input.signal,
           })
@@ -400,42 +386,25 @@ async function inspectGeneratedExportPackCandidate(input: {
     }
   } catch (error) {
     input.signal?.throwIfAborted()
-    return error instanceof GeneratedExportPackInspectionDeferredError
-      ? { kind: 'deferred' }
-      : { kind: 'ineligible' }
+    return { kind: 'ineligible' }
   }
-  try {
-    const liveSnapshot = await readLiveExportPackSnapshot({
-      basePath: input.candidate.basePath,
-      budget: input.budget,
-      expectedFiles: archivedFiles,
-      packId: input.candidate.packId,
-      signal: input.signal,
-      vault: input.vault,
-    })
-    return liveSnapshot
-      ? { kind: 'candidate', liveSnapshot }
-      : { kind: 'ineligible' }
-  } catch (error) {
-    input.signal?.throwIfAborted()
-    if (error instanceof GeneratedExportPackInspectionDeferredError) {
-      return { kind: 'deferred' }
-    }
-    throw error
-  }
+  const liveSnapshot = await readLiveExportPackSnapshot({
+    basePath: input.candidate.basePath,
+    expectedFiles: archivedFiles,
+    packId: input.candidate.packId,
+    signal: input.signal,
+    vault: input.vault,
+  })
+  return liveSnapshot
+    ? { kind: 'candidate', liveSnapshot }
+    : { kind: 'ineligible' }
 }
 
 async function readGeneratedExportPackArchiveEntry(input: {
   archive: Buffer
-  budget: GeneratedExportPackInspectionBudget
   entry: BoundedZipEntry
   signal?: AbortSignal | null
 }): Promise<Buffer> {
-  consumeGeneratedExportPackInspectionBudget(
-    input.budget,
-    'archivedBytes',
-    input.entry.uncompressedSize,
-  )
   return (await readBoundedZipEntry(input.archive, input.entry, {
     maxOutputBytes: input.entry.uncompressedSize,
     signal: input.signal,
@@ -612,7 +581,6 @@ async function readAssistantExportPackRootState(input: {
 
 async function readLiveExportPackSnapshot(input: {
   basePath: string
-  budget: GeneratedExportPackInspectionBudget
   expectedFiles: readonly AssistantGeneratedExportPackRetirementFile[]
   packId: string
   signal?: AbortSignal | null
@@ -688,11 +656,6 @@ async function readLiveExportPackSnapshot(input: {
     if (before.size !== expected.sizeBytes) {
       return null
     }
-    consumeGeneratedExportPackInspectionBudget(
-      input.budget,
-      'liveBytes',
-      before.size,
-    )
     const sha256 = await sha256FileInterruptible(
       absoluteFilePath,
       input.signal,
@@ -815,21 +778,6 @@ function outboxProvesExactSentArchiveClaim(
     exactClaims += 1
   }
   return exactClaims > 0
-}
-
-function consumeGeneratedExportPackInspectionBudget(
-  budget: GeneratedExportPackInspectionBudget,
-  key: keyof GeneratedExportPackInspectionBudget,
-  bytes: number,
-): void {
-  if (
-    !Number.isSafeInteger(bytes)
-    || bytes < 0
-    || budget[key] + bytes > assistantVaultFileMaxBytes
-  ) {
-    throw new GeneratedExportPackInspectionDeferredError()
-  }
-  budget[key] += bytes
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
