@@ -165,6 +165,26 @@ test('http json helpers cover swallowed body read failures, caller abort passthr
     (error) => error === passthrough,
   )
 
+  const bodyAbort = new AbortController()
+  const bodyAbortReason = new Error('caller aborted during body consumption')
+  await assert.rejects(
+    () =>
+      fetchJsonResponse({
+        consumeResponse: async () => {
+          bodyAbort.abort(bodyAbortReason)
+          throw new Error('body read interrupted')
+        },
+        createTransportError: () => new Error('should not wrap'),
+        fetchImplementation: async () => createJsonResponse({ available: true }),
+        headers: {},
+        method: 'POST',
+        signal: bodyAbort.signal,
+        timeoutMs: 50,
+        url: 'https://example.test',
+      }),
+    (error) => error === bodyAbortReason,
+  )
+
   const terminalHttpError = new Error('stop retrying')
   let attempts = 0
   await assert.rejects(
@@ -468,6 +488,145 @@ test('linq iMessage capability requires a literal available true response', asyn
   }
 })
 
+test('linq iMessage capability does not wait or retry after rate limiting', async () => {
+  vi.useFakeTimers()
+  const env = { LINQ_API_TOKEN: 'linq-token' } satisfies NodeJS.ProcessEnv
+  const fetchImplementation = vi.fn(async () =>
+    createJsonResponse({ code: 'RATE_LIMITED' }, {
+      headers: { 'Retry-After': '30' },
+      status: 429,
+    }))
+  try {
+    const rejection = expect(checkLinqIMessageCapability({
+      address: '+15550001',
+    }, { env, fetchImplementation })).rejects.toMatchObject({
+      code: 'LINQ_API_REQUEST_FAILED',
+      context: expect.objectContaining({
+        operation: 'check_imessage_capability',
+        retryable: false,
+        status: 429,
+      }),
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+    await rejection
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('linq iMessage capability uses its short read deadline without retrying', async () => {
+  vi.useFakeTimers()
+  const env = { LINQ_API_TOKEN: 'linq-token' } satisfies NodeJS.ProcessEnv
+  let abortedAt: number | null = null
+  const startedAt = Date.now()
+  const fetchImplementation = vi.fn<LinqFetch>(async (_url, init) =>
+    await new Promise<Response>((_resolve, reject) => {
+      const rejectOnAbort = () => {
+        abortedAt = Date.now()
+        reject(new DOMException('aborted', 'AbortError'))
+      }
+      if (init.signal?.aborted) {
+        rejectOnAbort()
+        return
+      }
+      init.signal?.addEventListener('abort', rejectOnAbort, { once: true })
+    }))
+  try {
+    const rejection = expect(checkLinqIMessageCapability({
+      address: '+15550001',
+    }, { env, fetchImplementation })).rejects.toMatchObject({
+      code: 'LINQ_API_REQUEST_FAILED',
+      context: expect.objectContaining({
+        operation: 'check_imessage_capability',
+        retryable: false,
+        timedOut: true,
+        timeoutMs: 2_500,
+      }),
+      message:
+        'Linq request POST /capability/check_imessage timed out after 2500ms.',
+    })
+    await vi.advanceTimersByTimeAsync(2_499)
+
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(abortedAt).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(1)
+    await rejection
+
+    expect(abortedAt).toBe(startedAt + 2_500)
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test.each([
+  { label: 'success', status: 200 },
+  { label: 'rate-limit error', status: 429 },
+])('linq iMessage capability keeps its deadline through a stalled $label body', async ({
+  status,
+}) => {
+  vi.useFakeTimers()
+  const env = { LINQ_API_TOKEN: 'linq-token' } satisfies NodeJS.ProcessEnv
+  let bodyAbortedAt: number | null = null
+  const startedAt = Date.now()
+  const fetchImplementation = vi.fn<LinqFetch>(async (_url, init) => {
+    const responseBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          status === 200 ? '{"available":' : '{"code":',
+        ))
+        const abortBody = () => {
+          bodyAbortedAt = Date.now()
+          controller.error(new DOMException('aborted', 'AbortError'))
+        }
+        if (init.signal?.aborted) {
+          abortBody()
+          return
+        }
+        init.signal?.addEventListener('abort', abortBody, { once: true })
+      },
+    })
+    return new Response(responseBody, {
+      headers: {
+        'content-type': 'application/json',
+        ...(status === 429 ? { 'retry-after': '30' } : {}),
+      },
+      status,
+    })
+  })
+  try {
+    const rejection = expect(checkLinqIMessageCapability({
+      address: '+15550001',
+    }, { env, fetchImplementation })).rejects.toMatchObject({
+      code: 'LINQ_API_REQUEST_FAILED',
+      context: expect.objectContaining({
+        operation: 'check_imessage_capability',
+        retryable: false,
+        timedOut: true,
+        timeoutMs: 2_500,
+      }),
+    })
+    await vi.advanceTimersByTimeAsync(2_499)
+
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(bodyAbortedAt).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(1)
+    await rejection
+
+    expect(bodyAbortedAt).toBe(startedAt + 2_500)
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 test('linq app-card failure diagnostics do not expose nutrition values', async () => {
   await assert.rejects(
     () => sendLinqIMessageAppCard({
@@ -503,11 +662,14 @@ test('linq app-card rejection classification permits only definitive pre-accepta
   const createError = (
     status: number,
     retryable: boolean,
+    linqFailureKind?: 'chat_not_found',
+    failureStage: 'http' | 'transport' = 'http',
   ): VaultCliError => new VaultCliError(
     'LINQ_API_REQUEST_FAILED',
     'Linq rejected the iMessage app card.',
     {
-      failureStage: 'http',
+      failureStage,
+      ...(linqFailureKind ? { linqFailureKind } : {}),
       method: 'POST',
       operation: 'send_imessage_app_card',
       path: '/chats/[chat]/messages',
@@ -522,11 +684,17 @@ test('linq app-card rejection classification permits only definitive pre-accepta
       createError(status, false),
     )).toBe(true)
   }
+  expect(isDefinitiveLinqIMessageAppCardRejection(
+    createError(404, false, 'chat_not_found'),
+  )).toBe(true)
   for (const status of [404, 408, 429, 500]) {
     expect(isDefinitiveLinqIMessageAppCardRejection(
       createError(status, status !== 404),
     )).toBe(false)
   }
+  expect(isDefinitiveLinqIMessageAppCardRejection(
+    createError(0, true, undefined, 'transport'),
+  )).toBe(false)
 })
 
 test('linq runtime serializes reply targets only for marked native replies', async () => {
@@ -2362,6 +2530,30 @@ test('linq runtime surfaces non-retryable transport, http, and configuration fai
       error.message ===
         'Linq request POST /webhook-subscriptions failed with HTTP 429.',
   )
+})
+
+test('linq runtime preserves an explicit pre-provider delivery failure', async () => {
+  const preProviderError = Object.assign(
+    new VaultCliError(
+      'HOSTED_BACKGROUND_DELIVERY_YIELDED',
+      'Hosted background delivery yielded before provider entry.',
+      { retryable: true },
+    ),
+    { deliveryMayHaveSucceeded: false as const },
+  )
+  const fetchImplementation: LinqFetch = vi.fn(async () => {
+    throw preProviderError
+  })
+
+  await expect(sendLinqChatMessage({
+    chatId: 'chat-pre-provider-failure',
+    idempotencyKey: 'message-pre-provider-failure',
+    message: 'hello',
+  }, {
+    env: { LINQ_API_TOKEN: 'linq-token' },
+    fetchImplementation,
+  })).rejects.toBe(preProviderError)
+  expect(fetchImplementation).toHaveBeenCalledOnce()
 })
 
 test('deleteLinqMessage treats missing provider messages as an idempotent success', async () => {

@@ -158,7 +158,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // on 2026-08-07. Against the exact merged-main baseline, the boundary removes
 // 168,095B from startup while adding 17,669B of lazy output. Ratchet all three
 // measurements while retaining the established cross-platform tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_902_746 + 32_768;
+//
+// Replacing the deferred Junction provider's one generated SDK serializer with
+// its five-field local predicate leaves entry and static startup bytes unchanged
+// while reducing total lazy output to 9,851,385B. Ratchet the total ceiling to
+// retain that removal without changing the startup tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_851_385 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_885_509;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
