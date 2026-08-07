@@ -478,6 +478,7 @@ export interface CodexAppServerTurnInput {
   excludeResumeTurns?: boolean
   model?: string | null
   modelProvider?: string | null
+  onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   outputSchema?: Readonly<Record<string, unknown>> | null
   onFirstAssistantResponseCompleted?: (() => void) | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
@@ -4441,6 +4442,8 @@ async function runCodexAppServerTurnOnProcess(
           privateDirectResponseCardAllowed: input.groupConversation === false,
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+          onboardingFirstReadCompletionTransitionAvailable:
+            input.onboardingFirstReadCompletionTransitionAvailable ?? false,
           productFeedbackRecorder: input.productFeedbackRecorder ?? null,
           progressDelivery:
             dynamicToolRequest.kind === 'send-progress-update'

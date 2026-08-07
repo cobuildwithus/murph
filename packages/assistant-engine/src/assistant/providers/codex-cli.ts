@@ -252,6 +252,8 @@ export async function executeCodexAssistantTurnAttempt(
     modelProvider: providerConfig.target.modelProvider ?? undefined,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     onFinishWithoutReplyRecorded: input.onFinishWithoutReplyRecorded ?? null,
+    onboardingFirstReadCompletionTransitionAvailable:
+      input.onboardingFirstReadCompletionTransitionAvailable ?? false,
     publicInternetFetch: input.publicInternetFetch ?? null,
     threadConfig: input.codexThreadConfig ?? null,
     onFirstAssistantResponseCompleted:
