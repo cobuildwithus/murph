@@ -30,6 +30,12 @@ export const HOSTED_STRIPE_BILLING_LIVE_ENV_KEYS = [
   HOSTED_STRIPE_BILLING_PORTAL_CONFIGURATION_ENV_KEY,
 ] as const;
 
+const HOSTED_STRIPE_BILLING_DEDICATED_ENV_KEYS = [
+  HOSTED_STRIPE_BILLING_SECRET_KEY_ENV,
+  HOSTED_STRIPE_BILLING_ACCOUNT_ID_ENV,
+  HOSTED_STRIPE_BILLING_RUN_ID_ENV,
+] as const;
+
 export interface HostedStripeBillingLiveConfig {
   accountId: string;
   privyAppId: string;
@@ -74,19 +80,18 @@ export function resolveHostedStripeBillingLiveConfig(
   environment: NodeJS.ProcessEnv,
 ): HostedStripeBillingLiveConfigResolution {
   const enabled = normalize(environment[HOSTED_STRIPE_BILLING_LIVE_ENABLED_ENV]);
-  const configuredFields = HOSTED_STRIPE_BILLING_LIVE_ENV_KEYS
-    .filter((key) => key !== HOSTED_STRIPE_BILLING_LIVE_ENABLED_ENV)
+  const configuredDedicatedFields = HOSTED_STRIPE_BILLING_DEDICATED_ENV_KEYS
     .filter((key) => normalize(environment[key]) !== null);
 
   if (enabled === null || enabled === "0") {
-    if (configuredFields.length > 0) {
+    if (configuredDedicatedFields.length > 0) {
       throw new HostedStripeBillingLiveConfigError({
         code: "partial",
-        fields: configuredFields,
+        fields: configuredDedicatedFields,
         message: [
           `${HOSTED_STRIPE_BILLING_LIVE_ENABLED_ENV}=1 is required when `
             + "dedicated Stripe sandbox configuration is present.",
-          `Configured fields: ${configuredFields.join(", ")}.`,
+          `Configured fields: ${configuredDedicatedFields.join(", ")}.`,
         ].join(" "),
       });
     }

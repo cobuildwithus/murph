@@ -25,12 +25,38 @@ const configuredEnvironment: NodeJS.ProcessEnv = {
   MURPH_HOSTED_STRIPE_BILLING_RUN_ID: "run_ci_12345678",
 };
 
+const sharedCatalogEnvironment: NodeJS.ProcessEnv = {
+  HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_pulse",
+  HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge",
+  HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: "price_familypulse",
+  HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY: "price_familyedge",
+  HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY:
+    "bpc_edge",
+};
+
 describe("resolveHostedStripeBillingLiveConfig", () => {
   it("keeps the live lane disabled when no dedicated sandbox contract is configured", () => {
     expect(resolveHostedStripeBillingLiveConfig({})).toEqual({
       configured: false,
       reason: "not_enabled",
     });
+  });
+
+  it("does not treat shared checkout catalog values as dedicated live authority", () => {
+    expect(resolveHostedStripeBillingLiveConfig(sharedCatalogEnvironment)).toEqual({
+      configured: false,
+      reason: "not_enabled",
+    });
+  });
+
+  it.each([
+    [HOSTED_STRIPE_BILLING_SECRET_KEY_ENV, "sk_test_never_echo_this_value"],
+    [HOSTED_STRIPE_BILLING_ACCOUNT_ID_ENV, "acct_partial"],
+    ["MURPH_HOSTED_STRIPE_BILLING_RUN_ID", "run_partial_12345678"],
+  ])("rejects dedicated %s authority without explicit activation", (key, value) => {
+    expect(() => resolveHostedStripeBillingLiveConfig({
+      [key]: value,
+    })).toThrowError(HostedStripeBillingLiveConfigError);
   });
 
   it("rejects partially configured authority without echoing a secret", () => {
@@ -53,6 +79,16 @@ describe("resolveHostedStripeBillingLiveConfig", () => {
     delete environment.MURPH_HOSTED_STRIPE_BILLING_RUN_ID;
     expect(() => resolveHostedStripeBillingLiveConfig(environment))
       .toThrow(/run_id/iu);
+  });
+
+  it("requires the complete shared catalog after explicit live activation", () => {
+    expect(() => resolveHostedStripeBillingLiveConfig({
+      [HOSTED_STRIPE_BILLING_LIVE_ENABLED_ENV]: "1",
+      [HOSTED_STRIPE_BILLING_SECRET_KEY_ENV]: "sk_test_dedicated_authority",
+      [HOSTED_STRIPE_BILLING_ACCOUNT_ID_ENV]: "acct_sandbox123",
+      MURPH_HOSTED_STRIPE_BILLING_RUN_ID: "run_ci_12345678",
+      NEXT_PUBLIC_PRIVY_APP_ID: "privytestbillingbrowser01",
+    })).toThrow(/price_id_launch_monthly/iu);
   });
 
   it("rejects live-mode authority and malformed catalog ids", () => {
@@ -96,6 +132,16 @@ describe("removeHostedStripeBillingLiveEnvironment", () => {
 });
 
 describe("partitionHostedStripeBillingLiveEnvironment", () => {
+  it("leaves shared catalog values available to an unrelated generic scenario", () => {
+    expect(partitionHostedStripeBillingLiveEnvironment({
+      environment: sharedCatalogEnvironment,
+      selectedScenarioNames: ["checkpoint-baseline"],
+    })).toEqual({
+      genericEnvironment: sharedCatalogEnvironment,
+      scenarioEnvironment: { NODE_ENV: undefined },
+    });
+  });
+
   it("moves writable Stripe authority into the sole live Vitest process", () => {
     const partitioned = partitionHostedStripeBillingLiveEnvironment({
       environment: {
