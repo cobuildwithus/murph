@@ -1125,6 +1125,12 @@ describe('assistant skill assets', () => {
     expect(actPrimitive).not.toMatch(/one small browser step|one small inspection/iu)
     expect(browserControlLoop).toMatch(/decision-bounded macro-step/iu)
     expect(browserControlLoop).not.toMatch(/Take one bounded action at a time/iu)
+    expect(browserControlLoop).not.toContain(
+      'Be sparing with progress messages during a browser run',
+    )
+    expect(browserControlLoop).not.toContain(
+      'at most one when the browser work starts',
+    )
     expect(raw).toMatch(
       /return the\s+resulting state from the same `computer_act` call/iu,
     )

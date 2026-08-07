@@ -1622,14 +1622,11 @@ describe("startHostedPulseTrialPaidPlan", () => {
       "sub_123",
       {
         billing_cycle_anchor: "now",
-        // The card lives on the customer here, so the resume must carry it onto
-        // the subscription or the cycle invoice it creates cannot be paid.
-        default_payment_method: "pm_123",
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
       },
       {
         idempotencyKey: buildExpectedStartPaidPulseIdempotencyKey(
-          "paused-resume-v1",
+          "paused-resume-v2",
         ),
       },
     );
@@ -2138,7 +2135,7 @@ function makeBillingRef(input: {
 }
 
 function buildExpectedStartPaidPulseIdempotencyKey(
-  operation?: "active-trial-end-now-v2" | "paused-resume-v1",
+  operation?: "active-trial-end-now-v2" | "paused-resume-v2",
   priceId = "price_pulse_recurring",
 ): string {
   const payload = {

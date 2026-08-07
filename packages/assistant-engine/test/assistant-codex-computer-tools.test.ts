@@ -97,15 +97,22 @@ describe("murph computer dynamic tools", () => {
     expect(actDescription.length).toBeLessThanOrEqual(320);
     expect(actDescription).toMatch(/macro-step/iu);
     expect(actDescription).toContain("current authorized run");
-    expect(actDescription).toContain("no missing or sensitive user input or final confirmation");
-    expect(actDescription).toContain("unknown outcome");
-    expect(actDescription).toContain("call computer_open before retrying or acting again");
+    expect(actDescription).toContain("No missing or sensitive input or final confirmation");
+    expect(actDescription).toContain("Before browser call two this turn");
+    expect(actDescription).toContain(
+      "call send_progress_update if available and not yet sent",
+    );
+    expect(actDescription).toContain("outcome uncertain");
+    expect(actDescription).toContain("call computer_open before retry/next action");
 
     expect(openDescription.length).toBeLessThanOrEqual(250);
-    expect(openDescription).toContain("current authorized Kernel browser run");
-    expect(openDescription).toContain("return runId, URL, title, and visible text");
-    expect(openDescription).toContain("after user handoff or any unknown browser outcome");
-    expect(openDescription).toContain("does not prove a prior effect failed");
+    expect(openDescription).toContain("authorized browser");
+    expect(openDescription).toContain("Returns runId, URL, title, text");
+    expect(openDescription).toContain("Before multi-step browsing each turn");
+    expect(openDescription).toContain("call send_progress_update if available");
+    expect(openDescription).toContain("prior-turn progress does not count");
+    expect(openDescription).toContain("reopen after handoff/uncertainty");
+    expect(openDescription).toContain("prior outcome stays unknown");
 
     expect(osControlDescription.length).toBeLessThanOrEqual(310);
     expect(osControlDescription).toContain("only when Playwright cannot operate");
@@ -136,6 +143,13 @@ describe("murph computer dynamic tools", () => {
       "computer_pause_for_user",
       "computer_finish_run",
     ]);
+
+    const unavailableProgressToolNames = resolveMurphDynamicTools({
+      computerToolsAvailable: true,
+      progressUpdatesAvailable: false,
+    }).map((tool) => tool.name);
+    expect(unavailableProgressToolNames).not.toContain("send_progress_update");
+    expect(unavailableProgressToolNames).toContain("computer_open");
   });
 
   it("keeps open profile keys off the model surface while sending fresh opens", async () => {
