@@ -1332,6 +1332,114 @@ export async function readHostedGroupSponsorshipPublicState(input: {
   return authorization ? "sponsored" : "not_sponsored";
 }
 
+/**
+ * Returns only whether the current monthly authorization can recover a low
+ * room without asking the conversation for more funding. Payer identity,
+ * limits, purchases, and refill state stay inside Web.
+ */
+export async function hasHostedGroupAutomaticRefillAvailable(input: {
+  beneficiaryMemberId: string;
+  now?: Date;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const now = requireValidDate(input.now ?? new Date());
+  const authorization =
+    await input.prisma.hostedGroupSponsorshipAuthorization.findFirst({
+      select: {
+        anchorDay: true,
+        anchorEndOfMonth: true,
+        id: true,
+        monthlyCapMinor: true,
+        payerMemberId: true,
+        pendingMonthlyCapMinor: true,
+        periodEndsAt: true,
+        periodStartedAt: true,
+      },
+      where: {
+        beneficiaryMemberId: input.beneficiaryMemberId,
+        status: HostedGroupSponsorshipAuthorizationStatus.active,
+      },
+    });
+  if (!authorization) {
+    return false;
+  }
+
+  const activation = await input.prisma.hostedUsageCreditPurchase.findFirst({
+    select: {
+      offerCode: true,
+      payerMemberId: true,
+      status: true,
+      stripeCustomerIdEncrypted: true,
+      stripePriceIdEncrypted: true,
+    },
+    where: {
+      groupSponsorshipAuthorizationId: authorization.id,
+      groupSponsorshipChargeOrdinal: 0,
+    },
+  });
+  if (
+    !authorization.payerMemberId ||
+    activation?.status !== HostedUsageCreditPurchaseStatus.fulfilled ||
+    activation.offerCode !== HOSTED_GROUP_SPONSORSHIP_REFILL_OFFER_CODE ||
+    activation.payerMemberId !== authorization.payerMemberId ||
+    !activation.stripePriceIdEncrypted ||
+    !activation.stripeCustomerIdEncrypted
+  ) {
+    return false;
+  }
+
+  let monthlyCapMinor = authorization.monthlyCapMinor;
+  let pendingMonthlyCapMinor = authorization.pendingMonthlyCapMinor;
+  let periodEndsAt = authorization.periodEndsAt;
+  let periodStartedAt = authorization.periodStartedAt;
+  let iterations = 0;
+  while (now.getTime() >= periodEndsAt.getTime()) {
+    periodStartedAt = periodEndsAt;
+    periodEndsAt = addHostedGroupSponsorshipCalendarMonth({
+      anchorDay: authorization.anchorDay,
+      anchorEndOfMonth: authorization.anchorEndOfMonth,
+      date: periodStartedAt,
+    });
+    if (pendingMonthlyCapMinor !== null) {
+      monthlyCapMinor = pendingMonthlyCapMinor;
+      pendingMonthlyCapMinor = null;
+    }
+    iterations += 1;
+    if (iterations > 1_200) {
+      throw new TypeError("Hosted group sponsorship period rollover is invalid.");
+    }
+  }
+
+  const purchases = await input.prisma.hostedUsageCreditPurchase.findMany({
+    select: {
+      cashAmountMinor: true,
+      groupSponsorshipChargeOrdinal: true,
+      status: true,
+    },
+    where: {
+      groupSponsorshipAuthorizationId: authorization.id,
+      groupSponsorshipPeriodStartedAt: periodStartedAt,
+    },
+  });
+  if (purchases.some((purchase) =>
+    (purchase.groupSponsorshipChargeOrdinal ?? 0) > 0 &&
+    PENDING_PURCHASE_STATUSES.includes(
+      purchase.status as (typeof PENDING_PURCHASE_STATUSES)[number],
+    )
+  )) {
+    return true;
+  }
+
+  const committedMinor = purchases.reduce((sum, purchase) =>
+    COMMITTED_PURCHASE_STATUSES.includes(
+      purchase.status as (typeof COMMITTED_PURCHASE_STATUSES)[number],
+    )
+      ? sum + purchase.cashAmountMinor
+      : sum, 0);
+  return committedMinor + HOSTED_GROUP_SPONSORSHIP_REFILL_AMOUNT_MINOR <=
+    monthlyCapMinor;
+}
+
 export async function readHostedGroupSponsorshipAuthorizationByPurchase(input: {
   prisma: HostedOnboardingReadClient;
   purchaseId: string;

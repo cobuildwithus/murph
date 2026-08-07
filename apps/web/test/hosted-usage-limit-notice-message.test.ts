@@ -16,10 +16,6 @@ vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
 }));
 
 import { projectHostedAiUsageLimitNoticeForDelivery } from "@/src/lib/hosted-execution/usage-limit-notice-message";
-import {
-  HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE,
-  renderUserFacingMessage,
-} from "@/src/lib/hosted-messages/user-facing-messages";
 
 describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
   beforeEach(() => {
@@ -32,7 +28,6 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
       fundingNeeded: true,
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      sponsorshipStatus: "not_sponsored",
     });
 
     const projected = await projectHostedAiUsageLimitNoticeForDelivery({
@@ -58,7 +53,6 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
       fundingNeeded: true,
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      sponsorshipStatus: "not_sponsored",
     });
 
     const project = async () => projectHostedAiUsageLimitNoticeForDelivery({
@@ -71,84 +65,28 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
     expect(await project()).toBe(await project());
   });
 
-  it("gives an exhausted sponsored room a private contribution path", async () => {
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
-      fundingNeeded: true,
-      fundingUrl:
-        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      sponsorshipStatus: "sponsored",
-    });
-    const productionNotice = renderUserFacingMessage({
-      context: {},
-      key: "linq.ai_usage.thread_limit_reached",
-      seed: "member_group_runtime",
-    }).text;
-
-    const projected = await projectHostedAiUsageLimitNoticeForDelivery({
-      memberId: "member_group_runtime",
-      message: productionNotice,
-      noticeCode: "thread_usage_limit_reached",
-      prisma: {} as never,
-    });
-
-    expect(projected).toBe(
-      `${HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE}\n\n`
-      + "More Murph time can be added privately here:\n"
-      + "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-    );
-    expect(projected).not.toBe(productionNotice);
-    expect(projected).not.toMatch(
-      /anyone|anybody|any one|any of you|one of you|someone|somebody|whoever|whichever|which of you|one person|tap|volunteer|cave|payer|\$|percent|remaining|balance|cap|refill|reset|month|back/iu,
-    );
-  });
-
-  it("keeps a sponsored pause neutral without current urgency", async () => {
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
-      fundingNeeded: false,
-      fundingUrl: null,
-      sponsorshipStatus: "sponsored",
-    });
-
-    await expect(projectHostedAiUsageLimitNoticeForDelivery({
-      memberId: "member_group_runtime",
-      message: "I'm out for the whole room until my time resets.",
-      noticeCode: "thread_usage_limit_reached",
-      prisma: {} as never,
-    })).resolves.toBe(HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE);
-  });
-
   it.each([
-    [
-      "https://checkout.stripe.test/session",
-      HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE,
-    ],
-    [
-      "https://[invalid",
-      HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE,
-    ],
-  ])("rejects a non-canonical sponsored group funding URL: %s", async (
-    fundingUrl,
-    expected,
-  ) => {
+    "https://checkout.stripe.test/session",
+    "https://[invalid",
+  ])("rejects a non-canonical group funding URL: %s", async (fundingUrl) => {
+    const message = "I'm out for the whole room until my time resets.";
     mocks.readHostedGroupUsageStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl,
-      sponsorshipStatus: "sponsored",
     });
 
     await expect(projectHostedAiUsageLimitNoticeForDelivery({
       memberId: "member_group_runtime",
-      message: "I'm out for the whole room until my time resets.",
+      message,
       noticeCode: "thread_usage_limit_reached",
       prisma: {} as never,
-    })).resolves.toBe(expected);
+    })).resolves.toBe(message);
   });
 
   it("leaves a stale group notice unchanged after capacity recovers", async () => {
     mocks.readHostedGroupUsageStatus.mockResolvedValue({
       fundingNeeded: false,
       fundingUrl: null,
-      sponsorshipStatus: "not_sponsored",
     });
 
     await expect(projectHostedAiUsageLimitNoticeForDelivery({

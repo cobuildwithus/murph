@@ -5,9 +5,6 @@ const HOME_REDIRECT_EXPLICIT_RESEND_PATTERN =
 const HOME_REDIRECT_RESEND_FALLBACK =
   "That message can't move between threads. Resend it to the number above."
 
-export const HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE =
-  "Murph is paused in this chat right now."
-
 /**
  * A percentage stands in for the hidden credit balance on the personal notices.
  * The group thread notice is excluded: its copy already says the chat is out,

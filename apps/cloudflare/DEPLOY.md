@@ -421,19 +421,19 @@ read-side tolerance is only the first deployment step.
 
 1. Deploy the Cloudflare Worker and runner bundle first with
    `container_rollout=immediate`. Require managed-container smoke to report the
-   new bundle fingerprint and drain older warm runners. During this phase, old
-   Web may still emit
-   `{capacityState,fundingUrl,periodEnd,remainingPercent?}`; the new runtime
-   validates that exact shape, derives only whether funding is needed, maps it
-   to `not_sponsored`, and discards the period and percentage.
+   new bundle fingerprint and drain older warm runners. The compatible runtime
+   accepts the current `{fundingNeeded,fundingUrl}` response, strips the
+   immediately preceding optional `sponsorshipStatus` field, and still accepts
+   the older `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response.
+   It derives only whether funding is needed from that oldest shape and
+   discards period, percentage, and funding-setup fields.
 2. Apply the additive capped-sponsorship migration, then deploy the compatible
    Web release. Confirm both the migration and new Web have converged before
    enabling monthly authorization creation or automatic refill admission. Web
-   must emit only `{fundingNeeded,fundingUrl,sponsorshipStatus}` before the
-   feature is enabled.
-3. Smoke one unsponsored and one sponsored group read. The runtime and assistant
-   may learn only `not_sponsored` or `sponsored`; quantitative fields must not
-   reappear.
+   now emits only `{fundingNeeded,fundingUrl}`.
+3. Smoke group reads with and without an active automatic sponsor. The runtime
+   and assistant may learn only funding urgency and the first-party capability;
+   funding setup and quantitative fields must not reappear.
 
 The first monthly authorization is the old-Web rollback floor. The preceding
 Web reconciliation code cannot activate that authorization, so after the first
@@ -451,20 +451,20 @@ restore group percentages, period boundaries, or other quantitative accounting
 to runtime or assistant policy.
 
 The current projection separates urgency from capability: `fundingNeeded`
-controls assistant-initiated depletion messaging independently of
-`sponsorshipStatus`, while a non-null `fundingUrl` may be used after an explicit
-funding request at any capacity. Deploy the Cloudflare runner bundle first,
-then Web. The new runner against old Web preserves the prior sponsored-room
-suppression until Web changes the boolean, while old runners against new Web
-could still suppress the proactive warning. After both deployments, smoke a
-low sponsored group and confirm Murph gives a link-free warning without payer,
-cap, amount, balance, or refill detail. Then smoke an exhausted sponsored group
-and confirm the deterministic notice uses the neutral pause sentence, one fixed
-factual private-recovery line, and the first-party link; opening it must
-preserve the existing automatic sponsor and offer only an additional one-time
-contribution. Also smoke an explicit funding
-request in a healthy unsponsored group and confirm Murph returns the first-party
-link without claiming the room needs funding.
+controls assistant-initiated depletion messaging, while a non-null `fundingUrl`
+may be used after an explicit funding request at any capacity. Deploy the
+Cloudflare runner bundle first, then Web: the new runtime safely strips the old
+producer's sponsorship field, while an old runtime rejects the new reduced
+shape. After both deployments, smoke a low room with automatic refill headroom
+or a pending refill and confirm Murph does not start a funding thread. Then
+smoke a low room with no automatic recovery and confirm Murph gives the ordinary
+link-free warning without payment-setup, payer, cap, amount, balance, or refill
+detail. Exhaust a room in each funding setup and confirm both receive the same
+ordinary pause contract plus the first-party link. Opening the link must still
+preserve the single-automatic-sponsor invariant and show the payment options
+appropriate to the authenticated payer. Also smoke an explicit funding request
+in a healthy room and confirm Murph returns the first-party link without
+claiming the room needs funding.
 
 ## Thread Usage Crossing Notice Rollout
 

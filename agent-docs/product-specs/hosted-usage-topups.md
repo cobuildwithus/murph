@@ -189,10 +189,10 @@ count, or automatic refill events. The exact payer privately sees the current
 period's fulfilled and pending amounts, maximum, period end, status, and
 management controls. A near-cap notice is private and revalidated against the
 current authorization. The room is notified only when the existing usage gate
-actually pauses work. A sponsored room receives a neutral pause sentence, one
-fixed factual private-recovery line, and the current first-party funding link,
-which offers another participant only a one-time contribution; the room copy
-exposes no private sponsorship details.
+actually pauses work. Every exhausted room receives the ordinary pause copy and
+the current first-party funding link. The message does not branch on or expose
+the current funding setup; the funding page separately preserves any active
+automatic sponsor and the single-sponsor billing invariant.
 
 ## Group Sponsorship Moment
 
@@ -470,15 +470,14 @@ current funding and referral state. If the room already has an automatic
 sponsor, the page preserves that single-sponsor invariant and offers the
 additional payer only a one-time contribution. Murph does not imply the room
 needs funding when `fundingNeeded` is false or disclose private sponsor facts.
-When `fundingNeeded` is true, the same capacity warning applies whether or not
-the room already has an automatic sponsor.
+For low capacity, Web sets that boolean only when no automatic refill is
+available or pending. The assistant receives no sponsorship-status field and
+uses the same warning and follow-up contract for every room.
 
 For a group exhaustion notice, delivery re-reads the current group usage
-projection. If the room is sponsored, Web uses the neutral sponsored pause
-sentence and still appends the current first-party funding link; the page owns
-the one-time-only path. If the room is unsponsored, Web appends the link to the
-ordinary group pause copy. Neither branch exposes payer, cap, amount, balance,
-purchase, or refill facts.
+projection and always appends the current first-party funding link to the
+ordinary group pause copy. This is one branchless message contract; it exposes
+no payment setup, payer, cap, amount, balance, purchase, or refill facts.
 
 Immediately before both the exhaustion crossing send and a later denied-gate
 retry, delivery re-reads the current personal usage-status projection. It
@@ -1267,10 +1266,10 @@ Current focused unit and component coverage exercises:
 - Family owner/member authorization, exact target freezing, former-member
   status/cancel-only recovery, all ordered target-conflict payment suppression,
   and payer-wide single-active purchase presentation;
-- group usage reads with only binary sponsorship/funding state, trusted
-  low-capacity next-turn context in both sponsorship states, the
-  route-authorized funding link, and sponsored exhaustion copy with a neutral
-  pause plus private one-time recovery path and no payer or accounting detail;
+- group usage reads with only funding urgency and the first-party URL,
+  automatic-refill suppression while low, ordinary low-capacity next-turn
+  context once automatic recovery is unavailable, and one route-authorized
+  exhaustion message with the funding link and no payer or accounting detail;
   and
 - cross-owner deletion plus payerless terminal refund/dispute reconciliation.
 

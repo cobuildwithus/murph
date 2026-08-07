@@ -442,22 +442,24 @@ inventing a billing menu:
   owner must make the change, while Family Edge has no higher current tier; and
 - a hosted group gets a proactive first heads-up: on the first trusted
   low-usage turn the assistant calls `murph.group action="read_usage"` once.
-  `fundingNeeded` reports low-capacity urgency independently of the binary
-  sponsorship state. When it is false, the heads-up is suppressed. When it is
-  true, the segment stays conversational, link-free, and route-neutral: it
+  `fundingNeeded` is the only assistant-facing urgency signal. It is false when
+  capacity is healthy and while a low room has an automatic refill available
+  or already pending; it is true when a low room has no automatic recovery and
+  whenever the room is exhausted. When false, the heads-up is suppressed. When
+  true, the segment stays conversational, link-free, and option-neutral: it
   calls the shared capacity "Murph time," says Murph may pause for the room,
   and asks whether they want Murph to check the options without naming or
-  counting any path. A sponsored room may receive only the additional binary
-  acknowledgment that Murph is sponsored in the chat; payer identity, cap,
-  charges, balance, percentages, message counts, and refill events stay
-  private. It never frames each text as a unit being purchased or spent. After
+  counting any path. The assistant receives no current sponsorship-status
+  field. Payer identity, payment setup, cap, charges, balance, percentages,
+  message counts, and refill events stay private. It never frames each text as
+  a unit being purchased or spent. After
   someone asks for the options, asks for more Murph time, asks how to keep the
   room going, or accepts the quick path, the assistant reads the options for
   that responding sender, using the exact accepted request-bearing message as
   participant authority rather than inferring one sender from the whole grouped
   turn. It refreshes current usage as needed, presents every returned earned
-  and sponsored path, and may include a returned first-party funding URL after
-  the applicable path instead of leading with it. `fundingNeeded` controls
+  and group-funding path, and may include a returned first-party funding URL
+  after the funding path instead of leading with it. `fundingNeeded` controls
   whether the assistant says the room currently needs more Murph time, not
   whether an explicitly requested funding capability exists.
   Playful payer nomination is allowed, but who actually paid, purchase status,
@@ -486,33 +488,31 @@ Classify a group-thread allowance from its source, never by comparing its
 numeric cap with a trial cap. `murph.plan_usage` still returns
 `group_not_supported`; group capacity is not projected as a personal plan or a
 synthetic personal allowance. The existing `murph.group` tool's `read_usage`
-action reports `healthy`, `low`, or `exhausted`, the current period end, the
-first-party funding URL, and the current period's usage remaining as an
-integer percentage. Web rounds the percentage down and clamps it to 0–100.
-The action never exposes internal USD-micro accounting, contributors, receipts,
-or payer identity.
+action reports only `fundingNeeded` and the current first-party funding URL.
+Web derives the boolean from current capacity plus automatic-refill
+availability and keeps the underlying healthy/low/exhausted state, period,
+percentage, funding setup, internal USD-micro accounting, contributors,
+receipts, and payer identity out of the assistant projection.
 
 Group low usage follows the same next-turn context path as personal usage: it
 never creates a standalone message, and the prompt asks Murph to finish the
 current request before mentioning the low capacity casually as "Murph time"
 and without a link. After someone asks for options, asks for more Murph time,
 or asks how to keep the room going, a current read may supply the funding link
-as part of the sponsored path; the assistant does not lead with it. Message
+as part of the group-funding path; the assistant does not lead with it. Message
 counts stay out of unsolicited and general-options copy; Murph gives the exact
 server-returned approximate count only when someone asks how much a path adds
 or a post-action confirmation requires it. A deterministic group exhaustion
 notice may use only the exact originating external-thread target after Web
 re-authorizes its persisted thread authority; no personal-home fallback is
 valid for an accepted group conversation. At delivery time Web rechecks the
-exhausted state and may append the group's funding link, using the owner join
-code when one exists or the signed funding-only locator when none does. For a
-sponsored room, Web replaces the reset-oriented base with a neutral pause
-sentence, one fixed factual private-recovery line, and the same current link;
-the funding page preserves the automatic sponsor and offers an additional payer
-only a one-time contribution. The notice does not name a payer, amount, cap,
-balance, or
-refill, claim that payment occurred, or add a separate scheduler or
-money-prompt lifecycle.
+exhausted state and appends the group's funding link to the ordinary group pause
+copy, using the owner join code when one exists or the signed funding-only
+locator when none does. This notice has one behavior regardless of current
+funding setup. The funding page separately preserves any active automatic
+sponsor and the single-sponsor billing invariant. The notice does not expose
+payment setup, name a payer, amount, cap, balance, or refill, claim that payment
+occurred, or add a separate scheduler or money-prompt lifecycle.
 
 ## Non-Goals
 

@@ -4,10 +4,7 @@ import type { PrismaClient } from "@prisma/client";
 import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 
 import { readHostedGroupUsageStatus } from "../hosted-groups/group-usage-funding";
-import {
-  HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE,
-  renderUserFacingMessage,
-} from "../hosted-messages/user-facing-messages";
+import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import type { HostedAiUsageLimitNoticeCode } from "./usage-allowance";
 import { readHostedPersonalAiUsageStatus } from "./usage-status";
 
@@ -27,38 +24,27 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
         prisma: input.prisma,
         runtimeMemberId: input.memberId,
       });
-      const pauseMessage = status?.sponsorshipStatus === "sponsored"
-        ? HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE
-        : input.message;
       if (
         !status?.fundingNeeded
         || !status.fundingUrl
       ) {
-        return pauseMessage;
+        return input.message;
       }
       let fundingUrl: URL;
       try {
         fundingUrl = new URL(status.fundingUrl, `${MURPH_PRODUCT_ORIGIN}/`);
       } catch {
-        return pauseMessage;
+        return input.message;
       }
       if (fundingUrl.origin !== MURPH_PRODUCT_ORIGIN) {
-        return pauseMessage;
+        return input.message;
       }
-      if (status.sponsorshipStatus === "sponsored") {
-        return `${pauseMessage}\n\nMore Murph time can be added privately here:\n${fundingUrl.toString()}`;
-      }
-      /**
-       * Only this branch knows a public funding ask is timely right now, so it
-       * owns the ask. Sponsored rooms use fixed factual copy above so the
-       * generic unsponsored prompt cannot nominate or pressure a payer.
-       */
       const funding = renderUserFacingMessage({
         context: { fundingUrl: fundingUrl.toString() },
         key: "linq.ai_usage.thread_limit_funding",
         seed: input.memberId,
       });
-      return `${pauseMessage}\n\n${funding.text}`;
+      return `${input.message}\n\n${funding.text}`;
     }
 
     const usageStatus = await readHostedPersonalAiUsageStatus({

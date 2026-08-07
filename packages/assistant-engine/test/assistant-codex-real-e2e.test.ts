@@ -2363,21 +2363,21 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
       const groupWorkingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-group-usage-options-e2e-'),
       )
-      const sponsoredGroupWorkingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-sponsored-group-usage-e2e-'),
+      const fundingPrivacyWorkingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-funding-privacy-e2e-'),
       )
       let privatePlanUsageReads = 0
       const privateGroupActions: string[] = []
       const groupActions: string[] = []
-      const sponsoredGroupActions: string[] = []
+      const fundingPrivacyActions: string[] = []
       const fundingUrl =
         'https://www.withmurph.ai/groups/fund/e2e_usage_options'
 
       try {
         const privateSkillsRoot = path.join(privateWorkingDirectory, 'skills')
         const groupSkillsRoot = path.join(groupWorkingDirectory, 'skills')
-        const sponsoredGroupSkillsRoot = path.join(
-          sponsoredGroupWorkingDirectory,
+        const fundingPrivacySkillsRoot = path.join(
+          fundingPrivacyWorkingDirectory,
           'skills',
         )
         await Promise.all([
@@ -2394,11 +2394,11 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             slug: 'hosted-low-usage',
           }),
           materializeAssistantSkill({
-            skillsRoot: sponsoredGroupSkillsRoot,
+            skillsRoot: fundingPrivacySkillsRoot,
             slug: 'group-chat',
           }),
           materializeAssistantSkill({
-            skillsRoot: sponsoredGroupSkillsRoot,
+            skillsRoot: fundingPrivacySkillsRoot,
             slug: 'hosted-low-usage',
           }),
         ])
@@ -2537,7 +2537,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                       usage: {
                         fundingNeeded: true,
                         fundingUrl,
-                        sponsorshipStatus: 'not_sponsored',
                       },
                     },
                   }
@@ -2603,7 +2602,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(groupResult.finalMessage).toContain('$3.50 of cost-weighted usage credit')
         expect(groupResult.finalMessage).not.toMatch(/(?:^|\n)---(?:\n|$)/u)
 
-        const sponsoredGroupResult = await executeRealCodexAppServerTurn({
+        const fundingPrivacyResult = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
@@ -2615,7 +2614,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           dynamicTools: [MURPH_GROUP_TOOL],
           env: {
             ...config.env,
-            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: sponsoredGroupSkillsRoot,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: fundingPrivacySkillsRoot,
           },
           excludeResumeTurns: true,
           hostedToolContext: {
@@ -2624,10 +2623,10 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             currentHostedMailboxItemIds: () => [],
             groupTool: {
               request: async (request) => {
-                sponsoredGroupActions.push(request.action)
+                fundingPrivacyActions.push(request.action)
                 if (request.action !== 'read_usage') {
                   throw new Error(
-                    `Unexpected sponsored group usage action: ${request.action}`,
+                    `Unexpected group funding privacy action: ${request.action}`,
                   )
                 }
                 return {
@@ -2637,7 +2636,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                     usage: {
                       fundingNeeded: false,
                       fundingUrl: null,
-                      sponsorshipStatus: 'sponsored',
                     },
                   },
                 }
@@ -2654,21 +2652,21 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             'Is Murph sponsored here? Tell the room only what everyone needs to know.',
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
-          workingDirectory: sponsoredGroupWorkingDirectory,
+          workingDirectory: fundingPrivacyWorkingDirectory,
         })
 
-        expect(sponsoredGroupActions).toEqual(['read_usage'])
-        expect(sponsoredGroupResult.finalMessage).toMatch(
-          /Murph is sponsored in (?:this|the) chat/iu,
+        expect(fundingPrivacyActions).toEqual(['read_usage'])
+        expect(fundingPrivacyResult.finalMessage).toMatch(
+          /private|can't|cannot|don't have|not available/iu,
         )
-        expect(sponsoredGroupResult.finalMessage).not.toMatch(
-          /(?:\$|charged|maximum|monthly cap|payer|percent|balance|remaining|refill|purchase|funding link|runs? low|deplet)/iu,
+        expect(fundingPrivacyResult.finalMessage).not.toMatch(
+          /(?:Murph is sponsored|\$|charged|maximum|monthly cap|payer|percent|balance|remaining|refill|purchase|funding link|runs? low|deplet)/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
           privateWorkingDirectory,
           groupWorkingDirectory,
-          sponsoredGroupWorkingDirectory,
+          fundingPrivacyWorkingDirectory,
           ...config.temporaryPaths,
         ])
       }
@@ -2733,7 +2731,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                       usage: {
                         fundingNeeded: true,
                         fundingUrl,
-                        sponsorshipStatus: 'not_sponsored',
                       },
                     },
                   }
@@ -2835,15 +2832,15 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
   )
 
   it(
-    'keeps a sponsored low-usage heads-up link-free and offers only one-time funding after a bare yes',
+    'keeps a low-usage heads-up link-free and offers every current path after a bare yes',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-sponsored-low-usage-heads-up-e2e-'),
+        path.join(tmpdir(), 'murph-unified-low-usage-heads-up-e2e-'),
       )
       const groupActions: string[] = []
       const fundingUrl =
-        'https://www.withmurph.ai/groups/fund/e2e_sponsored_low_usage_options'
+        'https://www.withmurph.ai/groups/fund/e2e_unified_low_usage_options'
 
       try {
         const skillsRoot = path.join(workingDirectory, 'skills')
@@ -2891,7 +2888,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                       usage: {
                         fundingNeeded: true,
                         fundingUrl,
-                        sponsorshipStatus: 'sponsored',
                       },
                     },
                   }
@@ -2926,7 +2922,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                   }
                 }
                 throw new Error(
-                  `Unexpected sponsored low-usage action: ${request.action}`,
+                  `Unexpected unified low-usage action: ${request.action}`,
                 )
               },
             },
@@ -2981,9 +2977,9 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(activeGroupPathIndex).toBeGreaterThanOrEqual(0)
         expect(fundingUrlIndex).toBeGreaterThan(newPersonPathIndex)
         expect(fundingUrlIndex).toBeGreaterThan(activeGroupPathIndex)
-        expect(second.finalMessage).toMatch(/one-time|contribut/iu)
+        expect(second.finalMessage).toMatch(/sponsor|fund/iu)
         expect(second.finalMessage).not.toMatch(
-          /monthly sponsorship|second sponsor|new sponsor|payer|charged|maximum|monthly cap|balance|remaining|percent|refill/iu,
+          /one-time|monthly sponsorship|second sponsor|new sponsor|payer|charged|maximum|monthly cap|balance|remaining|percent|refill/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -3002,11 +2998,11 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
       const healthyGroupWorkingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-healthy-group-funding-e2e-'),
       )
-      const sponsoredGroupWorkingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-sponsored-group-contribution-e2e-'),
+      const oneTimeGroupWorkingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-one-time-group-contribution-e2e-'),
       )
       const healthyGroupActions: string[] = []
-      const sponsoredGroupActions: string[] = []
+      const oneTimeGroupActions: string[] = []
       const fundingUrl =
         'https://www.withmurph.ai/groups/fund/e2e_direct_funding'
 
@@ -3015,8 +3011,8 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           healthyGroupWorkingDirectory,
           'skills',
         )
-        const sponsoredSkillsRoot = path.join(
-          sponsoredGroupWorkingDirectory,
+        const oneTimeSkillsRoot = path.join(
+          oneTimeGroupWorkingDirectory,
           'skills',
         )
         await Promise.all([
@@ -3029,11 +3025,11 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             slug: 'hosted-low-usage',
           }),
           materializeAssistantSkill({
-            skillsRoot: sponsoredSkillsRoot,
+            skillsRoot: oneTimeSkillsRoot,
             slug: 'group-chat',
           }),
           materializeAssistantSkill({
-            skillsRoot: sponsoredSkillsRoot,
+            skillsRoot: oneTimeSkillsRoot,
             slug: 'hosted-low-usage',
           }),
         ])
@@ -3072,7 +3068,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                     usage: {
                       fundingNeeded: false,
                       fundingUrl,
-                      sponsorshipStatus: 'not_sponsored',
                     },
                   },
                 }
@@ -3100,7 +3095,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           /referr|mission|earn|runs? low|deplet|remaining|percent/iu,
         )
 
-        const sponsoredResult = await executeRealCodexAppServerTurn({
+        const oneTimeResult = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
@@ -3112,7 +3107,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           dynamicTools: [MURPH_GROUP_TOOL],
           env: {
             ...config.env,
-            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: sponsoredSkillsRoot,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: oneTimeSkillsRoot,
           },
           excludeResumeTurns: true,
           hostedToolContext: {
@@ -3121,10 +3116,10 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             currentHostedMailboxItemIds: () => [],
             groupTool: {
               request: async (request) => {
-                sponsoredGroupActions.push(request.action)
+                oneTimeGroupActions.push(request.action)
                 if (request.action !== 'read_usage') {
                   throw new Error(
-                    `Unexpected sponsored group contribution action: ${request.action}`,
+                    `Unexpected one-time group contribution action: ${request.action}`,
                   )
                 }
                 return {
@@ -3134,7 +3129,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                     usage: {
                       fundingNeeded: false,
                       fundingUrl,
-                      sponsorshipStatus: 'sponsored',
                     },
                   },
                 }
@@ -3153,19 +3147,19 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           ].join(' '),
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
-          workingDirectory: sponsoredGroupWorkingDirectory,
+          workingDirectory: oneTimeGroupWorkingDirectory,
         })
 
-        expect(sponsoredGroupActions).toEqual(['read_usage'])
-        expect(sponsoredResult.finalMessage).toContain(fundingUrl)
-        expect(sponsoredResult.finalMessage).toMatch(/one-time|contribut/iu)
-        expect(sponsoredResult.finalMessage).not.toMatch(
+        expect(oneTimeGroupActions).toEqual(['read_usage'])
+        expect(oneTimeResult.finalMessage).toContain(fundingUrl)
+        expect(oneTimeResult.finalMessage).toMatch(/one-time|contribut/iu)
+        expect(oneTimeResult.finalMessage).not.toMatch(
           /referr|mission|earn|payer|charged|maximum|monthly cap|balance|refill|remaining|percent|runs? low|deplet/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
           healthyGroupWorkingDirectory,
-          sponsoredGroupWorkingDirectory,
+          oneTimeGroupWorkingDirectory,
           ...config.temporaryPaths,
         ])
       }

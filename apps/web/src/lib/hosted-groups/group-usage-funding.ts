@@ -14,7 +14,7 @@ import {
   classifyHostedGroupUsageCapacity,
 } from "./group-usage-capacity";
 import {
-  readHostedGroupSponsorshipPublicState,
+  hasHostedGroupAutomaticRefillAvailable,
 } from "./group-sponsorship-authorization";
 
 // A group funding locator is either the group's owner-created opaque join
@@ -44,7 +44,6 @@ export interface HostedGroupUsageStatus {
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
-  sponsorshipStatus: "not_sponsored" | "sponsored";
 }
 
 // Accepts the full funding-locator namespace: an owner-created join code or
@@ -128,19 +127,21 @@ export async function readHostedGroupUsageStatus(input: {
     return null;
   }
 
-  const sponsorshipStatus = await readHostedGroupSponsorshipPublicState({
-    beneficiaryMemberId: input.runtimeMemberId,
-    prisma,
-  });
-
   const capacityState = classifyHostedGroupUsageCapacity({
     limitUsdMicros: decision.limitUsdMicros,
     remainingUsdMicros: decision.remainingUsdMicros,
   });
-  // Capacity urgency is independent of the room's private payment path. A
-  // live sponsor changes what the funding page offers, not whether the room
-  // needs a timely warning before Murph pauses.
-  const fundingNeeded = capacityState !== "healthy";
+  // Exhaustion always gets a recovery link. While merely low, keep the room
+  // out of the billing loop only when Web can prove an automatic refill is
+  // available or already pending.
+  const automaticRefillAvailable = capacityState === "low"
+    ? await hasHostedGroupAutomaticRefillAvailable({
+        beneficiaryMemberId: input.runtimeMemberId,
+        prisma,
+      }).catch(() => false)
+    : false;
+  const fundingNeeded = capacityState === "exhausted" ||
+    (capacityState === "low" && !automaticRefillAvailable);
 
   // A group without an owner-created join code (including one with no
   // HostedGroup row at all) still gets a funding URL through the signed
@@ -153,7 +154,6 @@ export async function readHostedGroupUsageStatus(input: {
     fundingUrl: locator
       ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
       : null,
-    sponsorshipStatus,
   };
 }
 
