@@ -1481,6 +1481,46 @@ purpose/version metadata, status, and Charge, and then calls the same grant,
 refund, and dispute owners. Browser state and synchronous PaymentIntent
 responses never grant credit.
 
+Stripe failure email is a best-effort observability projection at these shared
+Web-owned boundaries, not a billing owner. A provider rejection that aborts
+the complete website or assistant billing action, a new verified canonical
+payment-failure event, and the first failed local event-reconciliation attempt
+schedule a plain-text Resend alert through the existing operational sender and
+recipient allowlist. Checkout ownership spans its mandatory price read,
+customer provisioning, saved-card preparation, and Checkout Session
+creation/resume. Paid-plan upgrades, paid-trial transitions, and scheduled plan
+switches own their complete provider-backed action in the same way; individual
+SDK calls do not independently own email. The
+Family direct-paid action derives one complete provider-effect identity from
+the current plan, current Price, target Price, and seat count, and a stale
+Session restart rebinds reporting to the replacement checkout attempt. Paid
+Family capacity changes reuse the exact capacity-update idempotency identity;
+member-tier swaps reuse their persisted transition identity. Provider failures
+abort those complete actions and alert once, while already-applied capacity,
+successful updates, and domain-only conflicts remain silent. Explicit
+group-sponsorship recovery is another checkout action owner; a capacity-only
+reactivation makes no provider request and remains silent. Family checkout
+returns a Murph redirect that performs one final mandatory Session read; a
+provider rejection there reports only after the unique blind Session key still
+resolves to a current checkout attempt, so unknown or stale public IDs remain
+silent. The
+central Stripe diagnostic logger is not alert eligibility because cleanup races
+and recovery reads also log safely absorbed rejections. Alert content is
+limited to bounded error tokens, operation/event type, an opaque stable
+operation-attempt or Stripe request/event correlation, HTTP status, and
+live/test mode. When an SDK adapter replaces a raw provider error with a hosted
+error, only the validated opaque Stripe request id crosses that internal
+boundary in a frozen non-serialized correlation record; client-visible details
+retain only request-id presence. Member identity, contact details, checkout
+contents, raw errors, and provider payloads are excluded. The correlation
+parser is a dependency-free Stripe
+field boundary: the general onboarding runtime stays free of `server-only`,
+Next request-lifecycle, and alert-delivery imports because production migration
+line sync and standalone Stripe tooling also import that runtime. Stripe
+receipts retain retry authority, and alert configuration or delivery failure
+cannot alter checkout results, webhook
+acknowledgement, entitlement, or reconciliation state.
+
 Established Linq direct messages and established external-thread group messages
 resolve only a narrow blind-index/member-id preflight target and unwrap the
 mailbox-payload ingress root before the planner transaction opens. The direct

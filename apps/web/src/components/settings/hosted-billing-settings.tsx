@@ -135,16 +135,25 @@ export function HostedBillingSettings(props: {
       currentBillingPhase: props.currentBillingPhase,
       currentCheckoutOffer: props.currentCheckoutOffer,
     });
+  const pulseTrialRecoverable =
+    !familyCurrent &&
+    props.canStartPaidPulse === true &&
+    currentPlanCode === "launch_monthly" &&
+    isHostedPulseTrialBillingState({
+      currentBillingPhase: props.currentBillingPhase,
+      currentCheckoutOffer: props.currentCheckoutOffer,
+    });
   const groupCurrent =
     ownPaidBillingActive && currentPlanCode === "launch_group_monthly";
   const pulseCurrent =
     (ownPaidBillingActive && currentPlanCode === "launch_monthly") ||
-    pulseTrialActive;
+    pulseTrialActive ||
+    pulseTrialRecoverable;
   const edgeCurrent =
     ownPaidBillingActive && currentPlanCode === "launch_edge_monthly";
   const usageTopUpOffers = props.usageTopUpOffers ?? [];
 
-  const isPulseTrial = pulseTrialActive;
+  const isPulseTrial = pulseTrialActive || pulseTrialRecoverable;
   const pulseTrialBillingContinuationPending =
     props.pulseTrialBillingContinuationPending === true;
   const hasPendingGroupSwitch =
@@ -168,7 +177,7 @@ export function HostedBillingSettings(props: {
               : hasPendingGroupSwitch
                 ? null
                 : props.canSwitchToGroup === true
-                  ? isPulseTrial
+                  ? pulseTrialActive
                     ? (
                         <StartPaidPulseButton
                           block
@@ -188,7 +197,7 @@ export function HostedBillingSettings(props: {
                           Choose {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
                         </HostedPlanChangeButton>
                       )
-                  : isPulseTrial && props.canStartPaidPulse === true
+                  : pulseTrialActive && props.canStartPaidPulse === true
                     ? (
                         <StartPaidPulseButton
                           block

@@ -330,6 +330,46 @@ Last verified: 2026-08-06
   Stripe webhooks remain the retry and local-reconciliation owner after the
   customer confirms the change; the unsigned return query is display/polling
   context only and never entitlement authority.
+- Stripe failure email reuses the shared operational Resend transport as a
+  best-effort projection, never a retry or billing owner. Only an action owner
+  schedules a metadata-only operation alert when a Stripe rejection actually
+  aborts the complete billing action. Checkout owners cover mandatory price
+  lookup, customer provisioning, saved-card preparation, and Checkout Session
+  creation/resume; paid-plan upgrades, paid-trial transitions, and scheduled
+  plan switches likewise report only after the complete provider-backed action
+  fails. No individual provider call is a separate alert occurrence. Family
+  replacement attempts rebind alert identity to the current
+  attempt, while direct paid upgrades include the complete current-plan,
+  current-Price, target-Price, and seat-count provider effect. Paid Family
+  capacity changes reuse the exact Stripe capacity-update idempotency identity,
+  and member-tier swaps reuse their persisted transition identity. Their
+  already-applied, successful, and domain-only outcomes remain silent. An
+  explicit
+  group-sponsorship recovery owns a terminal provider rejection, but a
+  no-charge capacity reactivation remains silent. The final Murph-owned Family
+  redirect reports a blocking Session-read rejection only when the unique blind
+  Session binding still names a current attempt; unknown, cleared, or stale
+  public IDs remain log-only. The central diagnostic
+  logger remains log-only because it also
+  observes recovered reads and cleanup races. Provider adapters that translate
+  a terminal Stripe rejection retain only the validated opaque request id in a
+  frozen non-serialized correlation record,
+  so distinct provider requests do not collapse onto the action fallback key;
+  the client-visible hosted error still exposes presence only. The pure
+  correlation parser introduces no Next or alert-delivery dependency into the
+  general onboarding runtime used by production line sync and standalone Stripe
+  tooling. Newly recorded, verified `checkout.session.async_payment_failed`,
+  `payment_intent.payment_failed`, `invoice.payment_failed`, and
+  `invoice.finalization_failed` receipts schedule event-scoped alerts; and only
+  the first failed local reconciliation attempt schedules a reconciliation
+  alert. Stable opaque operation-attempt and event-derived keys provide
+  provider replay defense inside Resend's external idempotency window.
+  Duplicate webhook receipts do not
+  schedule another payment alert, later local reconciliation attempts do not
+  schedule another reconciliation alert, and missing configuration or send
+  failure cannot change the original checkout, webhook, retry, poison, or
+  entitlement outcome. There is no new queue, cursor, retry loop, or persisted
+  alert state.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.
