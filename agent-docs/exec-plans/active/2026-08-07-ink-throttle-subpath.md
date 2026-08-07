@@ -52,12 +52,14 @@ Updated: 2026-08-07
 
 1. [complete] Confirm current Ink, latest Ink, and upstream source retain the
    compatibility-barrel import; reproduce current import cost.
-2. [in progress] Create the one-line pnpm package patch and lockfile metadata.
-3. [pending] Add only the minimum executable regression proof needed to keep the
-   patched import from drifting.
-4. [pending] Run focused tests, typecheck, dependency guards, frozen install,
-   and before/after benchmarks.
-5. [pending] Commit, push, open the PR, and complete specialist review plus CI.
+2. [complete] Create the one-line pnpm package patch and lockfile metadata.
+3. [complete] Keep regression proof at the existing dependency boundary: the
+   patch checksum and frozen install fail closed if the one-line patch drifts,
+   while the existing Ink UI suite executes the installed package.
+4. [complete] Run focused tests, package coverage, typecheck/build, dependency
+   guards, frozen install, rendered-output comparison, and before/after
+   benchmarks.
+5. [in progress] Push, open the PR, and complete specialist review plus CI.
 6. [pending] Close this plan through the final scoped commit and prove current
    base mergeability.
 
@@ -67,6 +69,9 @@ Updated: 2026-08-07
   and current upstream source still import the same broad barrel.
 - Keep this separate from the Cloudflare image-layer optimization because it
   affects only local Ink CLI startup.
+- Do not add a repository-owned source-shape test for pnpm's patch file. The
+  patch checksum already owns application integrity, and the Ink UI suite owns
+  executable behavior.
 
 ## Verification
 
@@ -76,3 +81,16 @@ Updated: 2026-08-07
 - Fresh-process isolated and full Ink import benchmark before/after.
 - `git diff --check`, exact-head required CI, preliminary specialist review,
   and mergeability proof.
+
+## Evidence
+
+- Frozen install and dependency-policy guard passed on the rebased candidate.
+- Assistant CLI typecheck and build passed.
+- Focused Ink UI test: 7 passed; package coverage: 22 files and 128 tests
+  passed, with 94.07% statement and 85.84% branch coverage.
+- The unpatched and patched Ink modules exposed identical export keys and
+  identical `renderToString` output for the focused smoke case.
+- In 41 alternating fresh-process samples, the compatibility barrel measured
+  90.585 ms p50 versus 6.661 ms for the throttle subpath. Full Ink import
+  measured 222.809 ms p50 unpatched versus 143.184 ms patched: -79.625 ms and
+  -35.74%. These measurements apply only to local CLI first rendering.
