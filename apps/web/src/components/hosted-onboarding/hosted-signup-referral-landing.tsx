@@ -57,8 +57,7 @@ export function HostedSignupReferralLanding(props: {
             Meet Murph
           </h1>
           <p className="max-w-md text-lg leading-8 text-pretty text-muted-foreground">
-            Murph reads your wearables and bloodwork, figures out what actually
-            works for you, and texts you when it matters.
+            Your personal health AI. Health is hard, don&apos;t do it alone.
           </p>
         </div>
 
