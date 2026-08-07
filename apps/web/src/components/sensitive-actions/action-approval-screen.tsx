@@ -5,11 +5,34 @@ import { cn } from "@/src/lib/utils";
 
 type BadgeTone = "primary" | "muted";
 
+export const ACTION_APPROVAL_RECORDED_DESCRIPTION =
+  "Approval recorded. Murph will continue only if this request is still pending.";
+
+export const ACTION_APPROVAL_DENIED_DESCRIPTION =
+  "Murph will not continue with this action.";
+
+export function ActionApprovalDecisionFallback({
+  decision,
+}: {
+  decision: "approved" | "denied";
+}) {
+  return (
+    <p className="mt-5 text-sm leading-6 text-muted-foreground">
+      {decision === "approved" ? (
+        <>{ACTION_APPROVAL_RECORDED_DESCRIPTION} Return to the Murph thread where
+          you requested this file.</>
+      ) : (
+        <>Denied. {ACTION_APPROVAL_DENIED_DESCRIPTION} Return to the Murph thread
+          where this request started.</>
+      )}
+    </p>
+  );
+}
+
 interface ActionApprovalScreenProps {
   badgeIcon: LucideIcon;
   badgeTone?: BadgeTone;
   body: ReactNode;
-  caveat?: ReactNode;
   children?: ReactNode;
   title: string;
 }
@@ -18,7 +41,6 @@ export function ActionApprovalScreen({
   badgeIcon: BadgeIcon,
   badgeTone = "primary",
   body,
-  caveat,
   children,
   title,
 }: ActionApprovalScreenProps) {
@@ -55,17 +77,6 @@ export function ActionApprovalScreen({
           <div className="mt-5 text-[15px] leading-[1.6] text-muted-foreground text-pretty">
             {body}
           </div>
-
-          {caveat ? (
-            <div className="mt-6">
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5a6e32]">
-                Only applies to this request
-              </p>
-              <p className="mt-1.5 text-[13px] leading-[1.55] text-muted-foreground">
-                {caveat}
-              </p>
-            </div>
-          ) : null}
 
           {children}
         </article>

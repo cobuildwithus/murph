@@ -87,11 +87,11 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   normalizeAssistantExecutionContext,
+  resolveAssistantExecutionDefaultTarget,
+  resolveAssistantExecutionOperatorDefaults,
   type AssistantHostedProgressDeliveryDependencies,
   type AssistantExecutionContext,
 } from './execution-context.js'
-import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
-import { resolveAssistantExecutionOperatorDefaults } from './execution-context.js'
 import {
   executeCodexTurnWithRecovery,
   resolveAssistantCodexThreadScope,
@@ -139,14 +139,12 @@ import {
   requestAssistantVaultFileSend,
   resolveAssistantVaultFileSendTargetFingerprint,
 } from './vault-file-send.js'
-import type {
-  AssistantAcceptedTurnInputJournal,
-  AssistantAcceptedTurnInputItemInput,
-  AssistantAcceptedTurnInputTranscriptRef,
-} from './active-turn-input-journal.js'
 import {
   assertAssistantAcceptedTurnInputAssistantInputEventsExist,
   assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist,
+  type AssistantAcceptedTurnInputJournal,
+  type AssistantAcceptedTurnInputItemInput,
+  type AssistantAcceptedTurnInputTranscriptRef,
 } from './active-turn-input-journal.js'
 import {
   createAssistantActiveTurnNotActiveError,
@@ -782,6 +780,10 @@ export async function sendAssistantMessageLocal(
           && actionApprovalPort != null
           && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
           && vaultFileSendTargetFingerprint !== null
+        const pendingVaultFilesAvailable =
+          input.deliverResponse === true
+          && currentAudienceReplyDeliveryAvailable
+          && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               computerToolsAvailable: hostedComputerToolsAvailable,
@@ -806,6 +808,7 @@ export async function sendAssistantMessageLocal(
                   acceptedInputItemsForProviderRequest,
                 ),
               messageInput: input,
+              pendingVaultFilesAvailable,
               route,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
@@ -2056,7 +2059,10 @@ export async function sendAssistantMessageLocal(
           providerResult.productFeedbackCandidate ?? null
         const productFeedbackCandidateSink =
           executionContext?.hosted?.productFeedbackCandidateSink ?? null
-        if (productFeedbackCandidate && productFeedbackCandidateSink) {
+        if (
+          productFeedbackCandidate &&
+          productFeedbackCandidateSink
+        ) {
           try {
             productFeedbackCandidateSink.acceptProductFeedbackCandidate(
               productFeedbackCandidate,

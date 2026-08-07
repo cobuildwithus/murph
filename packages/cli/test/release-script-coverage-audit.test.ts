@@ -960,6 +960,7 @@ describe('monorepo release flow coverage audit', () => {
       [
         "'@cobuild/repo-tools@0.1.15': patches/@cobuild__repo-tools@0.1.15.patch",
         'incur@0.4.5: patches/incur@0.4.5.patch',
+        'ink@6.8.0: patches/ink@6.8.0.patch',
       ],
     )
     expect(
@@ -4372,7 +4373,7 @@ exit 1
       name: '@murphai/hosted-execution',
     }))
     expect(summary.packages).toContainEqual(expect.objectContaining({
-      bundledExternalDependencies: ['incur'],
+      bundledExternalDependencies: ['incur', 'ink'],
       bundledWorkspaceDependencies: expect.arrayContaining([
         '@murphai/assistant-cli',
         '@murphai/assistant-engine',
@@ -4513,12 +4514,15 @@ exit 1
     expect(cliPackageJson.dependencies?.tokenx).toBe('^1.3.0')
     expect(cliPackageJson.dependencies?.yaml).toBe('^2.8.2')
     expect(cliPackageJson.bundleDependencies).toContain('incur')
+    expect(cliPackageJson.bundleDependencies).toContain('ink')
     expect(packPublishables).toContain('resolveBundledExternalDependencies')
     expect(packPublishables).toContain('copyExternalBundledDependency')
     expect(packPublishables).toContain('stripBundledDependencyMetadata')
     expect(packPublishables).toContain("path.join(targetDir, 'package.json')")
     expect(packPublishables).toContain('shouldSkipExternalPayloadArtifact')
     expect(packPublishables).toContain("path.basename(sourcePath) === 'node_modules'")
+    expect(packPublishables).toContain('isNonRuntimeIncurPayloadPath')
+    expect(packPublishables).toContain('/(?:^|\\/)[^/]+\\.test\\.[cm]?[jt]sx?$/u')
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)
@@ -4606,6 +4610,42 @@ exit 1
           'cli-surface-contract.generated.json',
         )
         expect(existsSync(installedArtifactPath)).toBe(true)
+
+        const installedIncurDirectory = path.join(
+          installRoot,
+          'package',
+          'node_modules',
+          'incur',
+        )
+        expect(existsSync(path.join(installedIncurDirectory, 'dist', 'index.js'))).toBe(true)
+        expect(existsSync(path.join(installedIncurDirectory, 'src', 'index.ts'))).toBe(true)
+        for (const testSource of [
+          'Cli.test.ts',
+          'Fetch.test.ts',
+          'Mcp.test.ts',
+          'Skill.test.ts',
+          'e2e.test.ts',
+        ]) {
+          expect(existsSync(path.join(installedIncurDirectory, 'src', testSource))).toBe(false)
+        }
+
+        const installedInkRuntime = readFileSync(
+          path.join(
+            installRoot,
+            'package',
+            'node_modules',
+            'ink',
+            'build',
+            'ink.js',
+          ),
+          'utf8',
+        )
+        expect(installedInkRuntime).toContain(
+          "import throttle from 'es-toolkit/compat/throttle';",
+        )
+        expect(installedInkRuntime).not.toContain(
+          "import { throttle } from 'es-toolkit/compat';",
+        )
 
         const installedArtifact = JSON.parse(
           readFileSync(installedArtifactPath, 'utf8'),

@@ -234,7 +234,9 @@ test('sendAssistantMessageLocal hands off product feedback only after durable re
   })
 
   expect(acceptProductFeedbackCandidate).toHaveBeenCalledOnce()
-  expect(acceptProductFeedbackCandidate).toHaveBeenCalledWith(productFeedbackCandidate)
+  expect(acceptProductFeedbackCandidate).toHaveBeenCalledWith(
+    productFeedbackCandidate,
+  )
   expect(
     acceptProductFeedbackCandidate.mock.invocationCallOrder[0],
   ).toBeGreaterThan(
@@ -5805,6 +5807,8 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   assert.ok(progressDelivery)
   assert.ok(hostedToolContext)
   assert.equal(hostedToolContext.computerToolsAvailable, false)
+  assert.equal(hostedToolContext.pendingVaultFilesAvailable, true)
+  assert.equal(hostedToolContext.vaultFileSendAvailable, false)
   await progressDelivery.send('Checking the iMessage thread.')
 
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)

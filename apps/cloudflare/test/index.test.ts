@@ -3046,7 +3046,9 @@ describe("cloudflare worker routes", () => {
       });
 
       const response = await runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId:
+          "web-ingress-33333333-3333-4333-8333-333333333333",
         userId: "test-user",
       });
 
@@ -3062,6 +3064,11 @@ describe("cloudflare worker routes", () => {
         userId: "test-user",
         workspaceVersion: "7",
       });
+      expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+        runtimeInvocationOrchestrationAttemptId:
+          "web-ingress-33333333-3333-4333-8333-333333333333",
+        triggeredByWebDirect: true,
+      });
       await vi.waitFor(() =>
         expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
           active_attempt_id: null,
@@ -3074,11 +3081,14 @@ describe("cloudflare worker routes", () => {
     it("sends activation diagnostics for an active fence wake", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const activeWakeEnsureProcessing = vi.fn<
+        NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>
+      >(async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }));
       const { ensureProcessing, invoke, runner, sql } = createRuntimeControlRunnerHarness({
-        ensureProcessing: vi.fn(async () => ({
-          action: "woken" as const,
-          kind: "accepted" as const,
-        })),
+        ensureProcessing: activeWakeEnsureProcessing,
       });
       const token = await writeRuntimeControlFenceForTest({
         runner,
@@ -3088,7 +3098,9 @@ describe("cloudflare worker routes", () => {
       });
 
       const response = await runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId:
+          "web-ingress-44444444-4444-4444-8444-444444444444",
         userId: "test-user",
       });
 
@@ -3106,6 +3118,14 @@ describe("cloudflare worker routes", () => {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runtimeConsentLockAcquiredAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            triggeredByWebDirect: true,
             userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
           },
           processingMode: "default",
@@ -3113,6 +3133,9 @@ describe("cloudflare worker routes", () => {
         },
         userId: "test-user",
       });
+      expect(
+        activeWakeEnsureProcessing.mock.calls[0]?.[0].activeRuntime?.orchestration,
+      ).not.toHaveProperty("runtimeInvocationOrchestrationAttemptId");
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
         active_attempt_id: token.attemptId,
@@ -3154,6 +3177,13 @@ describe("cloudflare worker routes", () => {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runtimeConsentLockAcquiredAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
           },
           processingMode: "default",

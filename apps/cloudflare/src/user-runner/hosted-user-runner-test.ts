@@ -32,6 +32,25 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     this.testState = args[0];
   }
 
+  installRuntimeProcessingStateTimingHooksForTest(input: {
+    afterBindUser?: () => void;
+    afterReadState?: () => void;
+  }): void {
+    const bindUser = this.stateStore.bindUser.bind(this.stateStore);
+    const readState = this.stateStore.readState.bind(this.stateStore);
+
+    this.stateStore.bindUser = async (userId) => {
+      const boundUserId = await bindUser(userId);
+      input.afterBindUser?.();
+      return boundUserId;
+    };
+    this.stateStore.readState = async () => {
+      const record = await readState();
+      input.afterReadState?.();
+      return record;
+    };
+  }
+
   async runUntilIdleForTest(input: { userId: string }): Promise<HostedWorkspaceInvocationResult> {
     await this.stateStore.bindUser(input.userId);
     const record = await this.stateStore.readState();

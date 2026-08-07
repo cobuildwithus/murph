@@ -86,6 +86,7 @@ import {
   type JunctionBulkTriggerHistoricalPullResult,
   type JunctionHistoricalPullSnapshot,
   type JunctionProviderConnection,
+  type JunctionWindowInput,
 } from "./junction-client.ts";
 import { resolveJunctionDeviceConnectRouteByProviderSlug } from "../config/connect-routes.ts";
 import {
@@ -2097,19 +2098,22 @@ export function createJunctionDeviceSyncProvider(
         continue;
       }
 
+      const request: JunctionWindowInput = {
+        resource,
+        signal: context.signal ?? null,
+        userId: context.account.externalAccountId,
+        windowStart,
+        windowEnd,
+      };
+      if (options.dateQueryFormat) {
+        request.dateQueryFormat = options.dateQueryFormat;
+      }
       snapshots[resource] = await fetchOptionalJunctionResourceRecords(
         context,
         "summary",
         resource,
         skippedOptionalResources,
-        () => client.listSummary({
-          resource,
-          signal: context.signal ?? null,
-          userId: context.account.externalAccountId,
-          windowStart,
-          windowEnd,
-          ...(options.dateQueryFormat ? { dateQueryFormat: options.dateQueryFormat } : {}),
-        }),
+        () => client.listSummary(request),
       );
     }
 
@@ -2186,15 +2190,18 @@ export function createJunctionDeviceSyncProvider(
       const chunkWindowStart = new Date(chunkStart).toISOString();
       const chunkWindowEnd = new Date(chunkEnd).toISOString();
       try {
-        const chunkRecords = await client.listTimeseries({
+        const request: JunctionWindowInput = {
           resource,
           signal: context.signal ?? null,
           sourceProviderSlug,
           userId: context.account.externalAccountId,
           windowStart: chunkWindowStart,
           windowEnd: chunkWindowEnd,
-          ...(options.dateQueryFormat ? { dateQueryFormat: options.dateQueryFormat } : {}),
-        });
+        };
+        if (options.dateQueryFormat) {
+          request.dateQueryFormat = options.dateQueryFormat;
+        }
+        const chunkRecords = await client.listTimeseries(request);
         records.push(
           ...filterJunctionTimeseriesRecordsToWindow(
             chunkRecords,

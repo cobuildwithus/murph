@@ -204,6 +204,7 @@ export type CloudflareHostedControlRuntimeEnsureProcessingResponse =
 export interface CloudflareHostedControlRuntimeEnsureProcessingTiming {
   directEnsureRequestStartedAtEpochMs: number;
   directEnsureResponseReceivedAtEpochMs: number;
+  orchestrationAttemptId: string;
   tokenAcquiredAtEpochMs: number;
   tokenAcquireStartedAtEpochMs: number;
 }
@@ -384,6 +385,8 @@ export function createCloudflareHostedControlClient(
           },
           method: "POST",
         },
+        runtimeEnsureProcessingOrchestrationAttemptId:
+          input.orchestrationAttemptId,
         timeoutMs: options.timeoutMs,
       });
     },
@@ -1297,6 +1300,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
   ) => void;
   onRequestAttempted?: () => Promise<void> | void;
+  runtimeEnsureProcessingOrchestrationAttemptId?: string;
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
@@ -1379,11 +1383,14 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     && tokenAcquiredAtEpochMs !== null
     && directEnsureRequestStartedAtEpochMs !== null
     && directEnsureResponseReceivedAtEpochMs !== null
+    && input.runtimeEnsureProcessingOrchestrationAttemptId !== undefined
   ) {
     try {
       input.onRuntimeEnsureProcessingTiming?.({
         directEnsureRequestStartedAtEpochMs,
         directEnsureResponseReceivedAtEpochMs,
+        orchestrationAttemptId:
+          input.runtimeEnsureProcessingOrchestrationAttemptId,
         tokenAcquiredAtEpochMs,
         tokenAcquireStartedAtEpochMs,
       });

@@ -8,6 +8,7 @@ import {
   HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES,
   HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
+  hostedClinicalRecordsConnectLinkRequestSchema,
   hostedClinicalRecordsFetchPageRequestSchema,
   hostedClinicalRecordsRetrievalScopeSchema,
   parseHostedClinicalRecordsFetchPageResponse,
@@ -40,7 +41,21 @@ describe("clinical records hosted execution contracts", () => {
       ok: true,
     };
 
+    expect(hostedClinicalRecordsConnectLinkRequestSchema.parse({})).toEqual({});
+    expect(hostedClinicalRecordsConnectLinkRequestSchema.parse({
+      requestKey: `scheduled_${HASH}`,
+    })).toEqual({ requestKey: `scheduled_${HASH}` });
+    expect(() => hostedClinicalRecordsConnectLinkRequestSchema.parse({
+      requestKey: `ain_${"b".repeat(32)}`,
+    })).toThrow();
+
     expect(parseHostedClinicalRecordsConnectLinkResponse(response)).toEqual(response);
+    expect(parseHostedClinicalRecordsConnectLinkResponse({
+      connectUrl:
+        "https://app.example.test/records/connect?launch=clinical-records",
+      expiresAt: null,
+      ok: true,
+    })).toMatchObject({ expiresAt: null, ok: true });
     expect(parseHostedClinicalRecordsConnectLinkResponse({
       ...response,
       connectUrl: `http://127.0.0.1:3000/records/connect#clinicalRecordsIntent=${claim}`,
@@ -51,6 +66,8 @@ describe("clinical records hosted execution contracts", () => {
       `http://app.example.test/records/connect#clinicalRecordsIntent=${claim}`,
       `https://app.example.test/settings#clinicalRecordsIntent=${claim}`,
       `https://app.example.test/records/connect?claim=${claim}#clinicalRecordsIntent=${claim}`,
+      "https://app.example.test/records/connect?launch=other",
+      "https://app.example.test/records/connect?launch=clinical-records&memberId=other",
       "https://app.example.test/records/connect#clinicalRecordsIntent=invalid",
       `https://app.example.test/records/connect#clinicalRecords%49ntent=${claim}`,
       `https://app.example.test/records/connect#clinicalRecordsIntent=${claim}&memberId=other`,

@@ -64,7 +64,7 @@ describe("legacy Stripe usage item migration", () => {
     const clean = makeSubscription({ legacy: false });
     const client = makeClient({
       byPrice: new Map([["price_pulse", [candidate]]]),
-      retrieved: clean,
+      retrieved: [candidate, clean],
     });
 
     await expect(runHostedStripeLegacyUsageMigration({
@@ -82,6 +82,66 @@ describe("legacy Stripe usage item migration", () => {
         /^hosted-legacy-usage-item-delete:[a-f0-9]{64}$/u,
       ),
       itemId: "si_legacy_usage",
+    });
+  });
+
+  test("accepts an already-clean exact replay without deleting again", async () => {
+    const candidate = makeSubscription({ legacy: true });
+    const clean = makeSubscription({ legacy: false });
+    const client = makeClient({
+      byPrice: new Map([["price_pulse", [candidate]]]),
+      retrieved: clean,
+    });
+
+    await expect(runHostedStripeLegacyUsageMigration({
+      apply: true,
+      client,
+      expectedCandidateSubscriptions: 1,
+      knownPlanPriceIds: KNOWN_PLAN_PRICES,
+    })).resolves.toMatchObject({
+      migratedItems: 0,
+      migratedSubscriptions: 1,
+    });
+    expect(client.deleteLegacyItem).not.toHaveBeenCalled();
+  });
+
+  test("refuses deletion when the audited plan item identity changes", async () => {
+    const candidate = makeSubscription({ legacy: true });
+    const changed = makeSubscription({
+      legacy: true,
+      planItemId: "si_replaced_plan",
+    });
+    const client = makeClient({
+      byPrice: new Map([["price_pulse", [candidate]]]),
+      retrieved: changed,
+    });
+
+    await expect(runHostedStripeLegacyUsageMigration({
+      apply: true,
+      client,
+      expectedCandidateSubscriptions: 1,
+      knownPlanPriceIds: KNOWN_PLAN_PRICES,
+    })).rejects.toThrow("candidate identity changed after audit");
+    expect(client.deleteLegacyItem).not.toHaveBeenCalled();
+  });
+
+  test("audits candidates discovered through the Group plan price", async () => {
+    const candidate = makeSubscription({
+      legacy: true,
+      planPriceId: "price_group",
+    });
+    const client = makeClient({
+      byPrice: new Map([["price_group", [candidate]]]),
+    });
+
+    await expect(runHostedStripeLegacyUsageMigration({
+      apply: false,
+      client,
+      knownPlanPriceIds: KNOWN_PLAN_PRICES,
+    })).resolves.toMatchObject({
+      candidateItems: 1,
+      candidateSubscriptions: 1,
+      scanned: 1,
     });
   });
 
@@ -121,11 +181,14 @@ describe("legacy Stripe usage item migration", () => {
 
 function makeClient(input: {
   byPrice: Map<string, HostedStripeLegacyUsageMigrationSubscription[]>;
-  retrieved?: HostedStripeLegacyUsageMigrationSubscription;
+  retrieved?:
+    | HostedStripeLegacyUsageMigrationSubscription
+    | readonly HostedStripeLegacyUsageMigrationSubscription[];
 }): HostedStripeLegacyUsageMigrationClient & {
   deleteLegacyItem: ReturnType<typeof vi.fn>;
 } {
   const deleteLegacyItem = vi.fn(async () => undefined);
+  let retrieveIndex = 0;
   return {
     deleteLegacyItem,
     async *listSubscriptionsByPrice(priceId) {
@@ -134,7 +197,17 @@ function makeClient(input: {
       }
     },
     async retrieveSubscription(subscriptionId) {
-      return input.retrieved ?? makeSubscription({
+      if (Array.isArray(input.retrieved)) {
+        const retrieved = input.retrieved[retrieveIndex]
+          ?? input.retrieved.at(-1);
+        retrieveIndex += 1;
+        if (retrieved) {
+          return retrieved;
+        }
+      } else if (input.retrieved) {
+        return input.retrieved;
+      }
+      return makeSubscription({
         id: subscriptionId,
         legacy: false,
       });
@@ -149,10 +222,15 @@ function makeSubscription(input: {
   legacy: boolean;
   legacyQuantity?: number;
   pendingUpdate?: boolean;
+  planItemId?: string;
+  planPriceId?: string;
   unknown?: boolean;
 }): HostedStripeLegacyUsageMigrationSubscription {
   const items: HostedStripeLegacyUsageMigrationItem[] = [
-    makePlanItem("si_plan", "price_pulse"),
+    makePlanItem(
+      input.planItemId ?? "si_plan",
+      input.planPriceId ?? "price_pulse",
+    ),
   ];
   if (input.duplicatePlan) {
     items.push(makePlanItem("si_plan_duplicate", "price_edge"));

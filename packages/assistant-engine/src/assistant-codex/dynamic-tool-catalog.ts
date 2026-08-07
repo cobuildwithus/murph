@@ -67,6 +67,9 @@ import {
   MURPH_LABS_TOOL,
 } from './dynamic-tools/labs.js'
 import {
+  MURPH_PENDING_VAULT_FILES_TOOL,
+} from './dynamic-tools/pending-vault-files.js'
+import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
 } from './dynamic-tools/group-room-model.js'
 import {
@@ -100,6 +103,9 @@ export type {
 export { MURPH_AUTOMATION_TOOL } from './dynamic-tools/automation.js'
 export { MURPH_DEVICE_TOOL } from './dynamic-tools/device.js'
 export { MURPH_LABS_TOOL } from './dynamic-tools/labs.js'
+export {
+  MURPH_PENDING_VAULT_FILES_TOOL,
+} from './dynamic-tools/pending-vault-files.js'
 export {
   MURPH_GROUP_ROOM_MODEL_TOOL,
 } from './dynamic-tools/group-room-model.js'
@@ -242,7 +248,7 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_response_card',
   description:
-    'Attach one private-direct response card only when the current accepted member message explicitly requests it, during managed meal closeout, or for an unambiguous update to the single active tracked workout whose table was explicitly established earlier. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. V2 adds fiber and nullable goal snapshots. Keep a goal null unless current active canonical goals prove exactly one daily target for that metric and unit; otherwise freeze the exact target and Murph\'s context-aware status without a universal threshold. Use compact_table only for an explicit table or structured-tracker request, or for that unambiguous active tracked-workout update; with no active table or multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update the canonical workout, re-read it successfully, and copy only that verified snapshot with its exact evt_<ULID> reference and canonical UTC snapshot instant. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
+    'Attach one private-direct response card only when the current accepted member message or the saved instructions for the exact scheduled automation occurrence explicitly request it, during managed meal closeout, or for an unambiguous update to the single active tracked workout whose table was explicitly established earlier. Occurrence authority alone is not card intent. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. V2 adds fiber and nullable goal snapshots. Keep a goal null unless current active canonical goals prove exactly one daily target for that metric and unit; otherwise freeze the exact target and Murph\'s context-aware status without a universal threshold. Use compact_table only for an explicit table or structured-tracker request, or for that unambiguous active tracked-workout update; with no active table or multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update the canonical workout, re-read it successfully, and copy only that verified snapshot with its exact evt_<ULID> reference and canonical UTC snapshot instant. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -257,7 +263,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    `Generate one image with GPT Image 2 only when the user requests an image, a known preference supports visual help, or a loaded skill or product flow explicitly marks images welcome and privacy-safe. Optionally use ordered reference images from vault media or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, whenever Murph itself appears in a generated image. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted runs start generation in the background and return immediately; when generation finishes, private media is provided in a later trusted system input. Local runs remain synchronous and also save the image under CODEX_HOME/generated_images.`,
+    `Generate one image with GPT Image 2 only when the user requests an image, a known preference supports visual help, or a loaded skill or product flow explicitly marks images welcome and privacy-safe. Optionally use ordered reference images from vault media or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, whenever Murph itself appears in a generated image. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted accepted-message turns start generation in the background and receive private media in a later trusted system input. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response. Local runs remain synchronous and also save the image under CODEX_HOME/generated_images.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -476,7 +482,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
   description:
-    'Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update tone and voice. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Treat a request about how Murph should keep writing as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
+    'Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update tone and voice from current accepted input or an exact scheduled automation occurrence. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Treat a request about how Murph should keep writing as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
   inputSchema: {
     oneOf: [
       {
@@ -1267,6 +1273,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ASK_GROK_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
+  MURPH_PENDING_VAULT_FILES_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
@@ -1312,6 +1319,7 @@ export interface MurphDynamicToolAvailability {
   labsAvailable?: boolean | null
   planUsageAvailable?: boolean | null
   imessageContactAvailable?: boolean | null
+  imageGenerationAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
   groupAssistantConfigurationAvailable?: boolean | null
@@ -1327,6 +1335,7 @@ export interface MurphDynamicToolAvailability {
   physicalNotesAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
+  pendingVaultFilesAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
   askGrokAvailable?: boolean | null
 }
@@ -1370,8 +1379,10 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
+    [MURPH_GENERATE_IMAGE_TOOL, defaultOn((a) => a.imageGenerationAvailable)],
     [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
+    [MURPH_PENDING_VAULT_FILES_TOOL, defaultOff((a) => a.pendingVaultFilesAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
     [MURPH_SEND_PHYSICAL_NOTE_TOOL, defaultOff((a) => a.physicalNotesAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(

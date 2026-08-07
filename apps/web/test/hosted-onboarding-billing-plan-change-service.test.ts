@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type Stripe from "stripe";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn<(task: () => Promise<void>) => void>(),
   getPrisma: vi.fn(),
   prismaClient: {
     hostedMember: {
@@ -25,6 +26,10 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+vi.mock("next/server", () => ({
+  after: mocks.after,
+}));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -42,6 +47,12 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import { upgradeHostedBillingPlan } from "@/src/lib/hosted-onboarding/billing-plan-change-service";
+import {
+  createResendFetch,
+  makeStripeProviderError,
+  readResendRequest,
+  stubAlertEnvironment,
+} from "./support/hosted-stripe-alert-fixture";
 
 describe("upgradeHostedBillingPlan", () => {
   beforeEach(() => {
@@ -84,6 +95,7 @@ describe("upgradeHostedBillingPlan", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   test("creates an exact Stripe plan confirmation after two short owner checks", async () => {
@@ -161,9 +173,83 @@ describe("upgradeHostedBillingPlan", () => {
     );
   });
 
-  test("returns no-action when the local billing owner is already on target", async () => {
+  test("delivers request-id-free plan upgrade failures with stable replay identity", async () => {
+    stubAlertEnvironment();
+    const fetchMock = createResendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.stripe.billingPortal.sessions.create.mockRejectedValue(
+      makeStripeProviderError(),
+    );
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(upgradeHostedBillingPlan({
+        expectedCurrentPlanCode: "launch_monthly",
+        memberId: "member_fixture",
+        targetPlanCode: "launch_edge_monthly",
+      })).rejects.toMatchObject({
+        code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
+        httpStatus: 502,
+      });
+    }
+
+    expect(mocks.after).toHaveBeenCalledTimes(2);
+    for (const [task] of mocks.after.mock.calls) {
+      await task();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstRequest = readResendRequest(fetchMock, 0);
+    const secondRequest = readResendRequest(fetchMock, 1);
+    expect(secondRequest.idempotencyKey).toBe(firstRequest.idempotencyKey);
+    expect(secondRequest.body).toBe(firstRequest.body);
+    expect(firstRequest.body).toContain("operation: billing.plan-upgrade");
+    expect(firstRequest.body).not.toContain("member_fixture");
+  });
+
+  test("preserves distinct Stripe request identity through plan upgrade errors", async () => {
+    stubAlertEnvironment();
+    const fetchMock = createResendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.stripe.billingPortal.sessions.create
+      .mockRejectedValueOnce(makeStripeProviderError({
+        requestId: "req_first_failure",
+      }))
+      .mockRejectedValue(makeStripeProviderError({
+        requestId: "req_second_failure",
+      }));
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(upgradeHostedBillingPlan({
+        expectedCurrentPlanCode: "launch_monthly",
+        memberId: "member_fixture",
+        targetPlanCode: "launch_edge_monthly",
+      })).rejects.toMatchObject({
+        code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
+        details: { requestIdPresent: true },
+        httpStatus: 502,
+      });
+    }
+
+    expect(mocks.after).toHaveBeenCalledTimes(3);
+    for (const [task] of mocks.after.mock.calls) {
+      await task();
+    }
+
+    const firstRequest = readResendRequest(fetchMock, 0);
+    const secondRequest = readResendRequest(fetchMock, 1);
+    const replayedSecondRequest = readResendRequest(fetchMock, 2);
+    expect(firstRequest.idempotencyKey).not.toBe(secondRequest.idempotencyKey);
+    expect(firstRequest.body).toContain("req_first_failure");
+    expect(secondRequest.body).toContain("req_second_failure");
+    expect(replayedSecondRequest).toEqual(secondRequest);
+  });
+
+  test("proves local plan equality against a live exact Stripe subscription", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue(
       makeBillingRef({ currentBillingPlanCode: "launch_edge_monthly" }),
+    );
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(
+      makeSubscription({ priceId: "price_edge" }),
     );
 
     await expect(upgradeHostedBillingPlan({
@@ -174,7 +260,8 @@ describe("upgradeHostedBillingPlan", () => {
       billingPlanCode: "launch_edge_monthly",
       status: "already_on_plan",
     });
-    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
   });
 
   test("returns no-action when Stripe applied the target before local reconciliation", async () => {
@@ -191,7 +278,63 @@ describe("upgradeHostedBillingPlan", () => {
       status: "already_on_plan",
     });
     expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
   });
+
+
+  test.each([
+    ["a schedule", { schedule: "sub_sched_fixture" }],
+    ["a pending update", { pendingUpdate: true }],
+  ])(
+    "rejects an exact target item when Stripe also has %s",
+    async (_label, subscriptionState) => {
+      mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(
+        makeSubscription({
+          priceId: "price_edge",
+          ...subscriptionState,
+        }),
+      );
+
+      await expect(upgradeHostedBillingPlan({
+        memberId: "member_fixture",
+        targetPlanCode: "launch_edge_monthly",
+      })).rejects.toMatchObject({
+        code: "schedule" in subscriptionState
+          ? "HOSTED_BILLING_PLAN_CHANGE_ALREADY_SCHEDULED"
+          : "HOSTED_BILLING_PLAN_CHANGE_PENDING",
+        httpStatus: 409,
+      });
+      expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([
+    ["trialing status", { status: "trialing" as const }],
+    ["past-due status", { status: "past_due" as const }],
+    ["scheduled cancellation", { cancelAt: 1_800_000_000 }],
+    ["period-end cancellation", { cancelAtPeriodEnd: true }],
+    ["collection pause", { pauseCollection: true }],
+    ["manual invoices", { collectionMethod: "send_invoice" as const }],
+  ])(
+    "does not treat an exact target item with %s as already active",
+    async (_label, subscriptionState) => {
+      mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(
+        makeSubscription({
+          priceId: "price_edge",
+          ...subscriptionState,
+        }),
+      );
+
+      await expect(upgradeHostedBillingPlan({
+        memberId: "member_fixture",
+        targetPlanCode: "launch_edge_monthly",
+      })).rejects.toMatchObject({
+        code: "HOSTED_BILLING_PLAN_UPGRADE_SOURCE_INVALID",
+        httpStatus: 409,
+      });
+      expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    },
+  );
 
   test("fails closed while a previous Stripe pending update exists", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(
@@ -315,6 +458,7 @@ function makePlanConfig(input: {
       launch_monthly: "price_pulse",
     }[input.billingPlanCode],
     stripe: mocks.stripe,
+    stripeLiveMode: true,
   };
 }
 
@@ -339,10 +483,16 @@ function makeBillingRef(input: {
 }
 
 function makeSubscription(input: {
+  cancelAt?: number;
+  cancelAtPeriodEnd?: boolean;
+  collectionMethod?: Stripe.Subscription.CollectionMethod;
   customer?: string;
+  pauseCollection?: boolean;
   pendingUpdate?: boolean;
   priceId?: string;
+  schedule?: string;
   secondItem?: boolean;
+  status?: Stripe.Subscription.Status;
 } = {}): Stripe.Subscription {
   const items: Array<{
     id: string;
@@ -385,6 +535,9 @@ function makeSubscription(input: {
     });
   }
   return {
+    cancel_at: input.cancelAt ?? null,
+    cancel_at_period_end: input.cancelAtPeriodEnd ?? false,
+    collection_method: input.collectionMethod ?? "charge_automatically",
     customer: input.customer ?? "cus_fixture",
     id: "sub_fixture",
     items: { data: items },
@@ -398,7 +551,10 @@ function makeSubscription(input: {
           trial_from_plan: null,
         }
       : null,
-    schedule: null,
-    status: "active",
+    pause_collection: input.pauseCollection
+      ? { behavior: "void", resumes_at: null }
+      : null,
+    schedule: input.schedule ?? null,
+    status: input.status ?? "active",
   } as Stripe.Subscription;
 }

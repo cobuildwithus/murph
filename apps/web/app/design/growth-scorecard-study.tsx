@@ -32,8 +32,18 @@ const MESSAGE_SNAPSHOTS = GROWTH_DATES
     snapshotDate.setUTCDate(snapshotDate.getUTCDate() + 1);
     const messages = DAILY_MESSAGE_VOLUMES[messageIndex] ?? 0;
     const trackingAvailable = messageIndex >= MESSAGE_TRACKING_START_INDEX;
+    const activityIndex = messageIndex - 10;
+    const activeUsersTrailing7Days = activityIndex >= 0 && activityIndex !== 13
+      ? 68 + activityIndex * 2
+      : null;
 
     return [{
+      activeUsersPriorDay: activeUsersTrailing7Days === null
+        ? null
+        : activityIndex === 8
+          ? activeUsersTrailing7Days
+          : 12 + ((activityIndex * 5) % 17),
+      activeUsersTrailing7Days,
       inboundMessagesPriorDay: trackingAvailable
         ? Math.floor(messages * 0.45)
         : null,
@@ -132,6 +142,8 @@ const WEEKLY_ROWS: HostedGrowthDashboard["weeklyRows"] = [
 
 const STUDY_INPUT = {
   activeUsers: {
+    today: 22,
+    todayComplete: true,
     trailing30Days: 143,
     trailing30DaysComplete: true,
     trailing7Days: 87,
@@ -163,6 +175,8 @@ const STUDY_INPUT = {
 const NO_SUPPORTING_BASELINES_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
+    today: 0,
+    todayComplete: true,
     trailing30Days: 0,
     trailing30DaysComplete: true,
     trailing7Days: 0,
@@ -191,6 +205,8 @@ const NO_SUPPORTING_BASELINES_INPUT = {
 const PARTIAL_MAU_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
+    today: 22,
+    todayComplete: true,
     trailing30Days: 119,
     trailing30DaysComplete: false,
     trailing7Days: 87,
@@ -203,6 +219,8 @@ const PARTIAL_MAU_INPUT = {
 const PARTIAL_WEEKLY_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
+    today: 19,
+    todayComplete: false,
     trailing30Days: 119,
     trailing30DaysComplete: false,
     trailing7Days: 82,
@@ -219,7 +237,7 @@ export function GrowthScorecardStudy() {
       data-design-study="ops-weekly-growth-compass"
       id="ops-weekly-growth-compass"
     >
-      <div id="growth-message-volume-charts">
+      <div id="growth-charts">
         <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Thirty-day movement
         </div>

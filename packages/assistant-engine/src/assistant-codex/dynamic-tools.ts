@@ -2,6 +2,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationModelToolRequest,
+  type HostedRuntimeAssistantPersonalizationToolAuthority,
 } from '@murphai/hosted-execution/assistant-personalization'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
@@ -105,8 +106,10 @@ import {
 } from '../assistant/group-shared-read-limits.js'
 import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newsletter-automation.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
-import type {
-  AssistantHostedToolContext,
+import {
+  createAssistantHostedScheduledRequestKey,
+  type AssistantHostedInvocationScope,
+  type AssistantHostedToolContext,
 } from '../assistant/hosted-tool-context.js'
 import type {
   AssistantProviderUsageDraft,
@@ -166,6 +169,11 @@ import {
   readLabsDynamicToolRequest,
   type LabsDynamicToolRequest,
 } from './dynamic-tools/labs.js'
+import {
+  executePendingVaultFilesDynamicTool,
+  readPendingVaultFilesDynamicToolRequest,
+  type PendingVaultFilesDynamicToolRequest,
+} from './dynamic-tools/pending-vault-files.js'
 import {
   executeGroupRoomModelDynamicTool,
   readGroupRoomModelDynamicToolRequest,
@@ -975,6 +983,7 @@ export type MurphDynamicToolRequest =
   | AutomationDynamicToolRequest
   | DeviceDynamicToolRequest
   | LabsDynamicToolRequest
+  | PendingVaultFilesDynamicToolRequest
   | GroupRoomModelDynamicToolRequest
   | AssistantStyleDynamicToolRequest
   | {
@@ -1122,6 +1131,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'personalization'
       request: HostedRuntimeAssistantPersonalizationModelToolRequest
+      toolCallId?: string
     }
   | {
       kind: 'plan-usage'
@@ -1217,6 +1227,14 @@ export function readMurphDynamicToolRequest(
     return labsRequest
   }
 
+  const pendingVaultFilesRequest = readPendingVaultFilesDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (pendingVaultFilesRequest) {
+    return pendingVaultFilesRequest
+  }
+
   const groupRoomModelRequest = readGroupRoomModelDynamicToolRequest({
     arguments: request.arguments,
     tool: request.tool,
@@ -1236,6 +1254,7 @@ export function readMurphDynamicToolRequest(
   const assistantStyleRequest = readAssistantStyleDynamicToolRequest({
     arguments: request.arguments,
     tool: request.tool,
+    toolCallId: request.toolCallId,
   })
   if (assistantStyleRequest) {
     return assistantStyleRequest
@@ -1456,6 +1475,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'personalization',
         request: parsed.request,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
     case MURPH_ASSISTANT_CONFIGURATION_TOOL.name: {
@@ -1727,6 +1747,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid device arguments')
     case 'invalid-labs-arguments':
       return toolTextResult(false, 'invalid labs arguments')
+    case 'invalid-pending-vault-files-arguments':
+      return toolTextResult(false, 'invalid pending vault-file arguments')
     case 'invalid-group-room-model-arguments':
       return toolTextResult(false, 'invalid group room-model arguments')
     case 'invalid-connected-apps-arguments':
@@ -1904,11 +1926,20 @@ export async function executeMurphDynamicToolRequest(input: {
         request: input.request,
       })
     }
+    case 'pending-vault-files-list':
+    case 'pending-vault-files-cancel':
+      return await executePendingVaultFilesDynamicTool({
+        request: input.request,
+        userActionScope:
+          input.hostedToolContext?.currentUserActionScope?.() ?? null,
+        vaultRoot: input.vaultRoot?.trim() || null,
+      })
     case 'assistant-style': {
       const hostedToolContext = input.hostedToolContext ?? null
       return await executeAssistantStyleDynamicTool({
-        assistantInputId:
-          hostedToolContext?.currentAssistantInputId?.() ?? null,
+        authority: resolveHostedAssistantPersonalizationToolAuthority(
+          hostedToolContext,
+        ),
         available: input.assistantStyleSettingsAvailable === true,
         hosted: hostedToolContext != null,
         hostedPersonalizationTool:
@@ -2261,34 +2292,33 @@ export async function executeMurphDynamicToolRequest(input: {
           brief: input.request.brief,
           conversationScope,
         })
-        const groupRequester = conversationScope === 'group'
+        const groupMessageRef = conversationScope === 'group'
+          ? input.request.messageRef
+          : null
+        if (
+          conversationScope === 'group'
+          && (
+            !groupMessageRef
+            || groupMessageRef !== userActionScope?.acceptedInputIds.at(-1)
+          )
+        ) {
+          return toolTextResult(
+            false,
+            'group phone calling requires the exact current accepted Message ref from the requesting participant',
+          )
+        }
+        const groupRequester = conversationScope === 'group' && groupMessageRef
           ? await authorizeDynamicToolParticipant({
               authorizer: input.authorizeAcceptedMessageTarget ?? null,
               deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
-              messageRef: input.request.messageRef ?? '',
+              messageRef: groupMessageRef,
             })
           : null
-        if (conversationScope === 'group') {
-          const confirmationInputId = input.request.messageRef
-          if (!groupRequester) {
-            return toolTextResult(
-              false,
-              'group phone calling requires the exact accepted Message ref from the participant who confirmed the call preview',
-            )
-          }
-          const previewAuthority = confirmationInputId
-            ? await hostedToolContext
-              .currentGroupPhoneCallPreviewAuthority?.({
-                brief,
-                confirmationInputId,
-              })
-            : null
-          if (!previewAuthority) {
-            return toolTextResult(
-              false,
-              'group phone calling requires an exact preview that was successfully delivered before the referenced current confirmation; deliver or repeat the complete preview, stop, and ask the room to confirm it in a later message',
-            )
-          }
+        if (conversationScope === 'group' && !groupRequester) {
+          return toolTextResult(
+            false,
+            'group phone calling requires the exact current accepted Message ref from the requesting participant',
+          )
         }
         const result = await phoneCalls.start({
           brief,
@@ -2344,20 +2374,32 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
 
+      const invocationScope = hostedToolContext.currentInvocationScope?.() ?? null
       const userActionScope = hostedToolContext.currentUserActionScope?.() ?? null
-      if (
-        !userActionScope
-        || userActionScope.conversationScope !== 'direct'
-        || userActionScope.acceptedInputIds.length === 0
-      ) {
+      const conversationScope =
+        invocationScope?.conversationScope ??
+        userActionScope?.conversationScope ??
+        null
+      const hasAuthority =
+        invocationScope !== null ||
+        (userActionScope?.acceptedInputIds.length ?? 0) > 0
+      if (conversationScope !== 'direct' || !hasAuthority) {
         return toolTextResult(
           false,
-          'Clinical Records connection links require current user input in a private conversation',
+          'Clinical Records connection links require current user input in a private conversation or exact private scheduled automation authority',
         )
       }
 
       try {
         const result = await connectLinkTool.createConnectLink({
+          ...(invocationScope?.origin.kind === 'automation_occurrence'
+            ? {
+                requestKey: createAssistantHostedScheduledRequestKey({
+                  operation: 'clinical-records-connect-link',
+                  origin: invocationScope.origin,
+                }),
+              }
+            : {}),
           signal: input.abortSignal ?? null,
         })
         return toolTextResult(true, safeToolPayloadText({
@@ -2397,6 +2439,7 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executePersonalizationTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
+        toolCallId: input.request.toolCallId ?? null,
       })
     case 'assistant-configuration':
       return await executeAssistantConfigurationTool({
@@ -2485,6 +2528,8 @@ export async function executeMurphDynamicToolRequest(input: {
         input.hostedToolContext?.imageGenerationLauncher ?? null
       const userActionScope =
         input.hostedToolContext?.currentUserActionScope?.() ?? null
+      const invocationScope =
+        input.hostedToolContext?.currentInvocationScope?.() ?? null
       const explicitOriginAssistantInputId = input.request.messageRef
         && userActionScope?.acceptedInputIds.includes(input.request.messageRef)
         ? await authorizeDynamicToolEffectOrigin({
@@ -2501,10 +2546,21 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
       const originAssistantInputId = explicitOriginAssistantInputId
-        ?? input.hostedToolContext?.currentAssistantInputId?.()
+        ?? (invocationScope?.origin.kind === 'accepted_input'
+          ? invocationScope.origin.assistantInputId
+          : invocationScope === null
+            ? input.hostedToolContext?.currentAssistantInputId?.() ?? null
+            : null)
         ?? null
       const originAssistantInputIdExact = explicitOriginAssistantInputId !== null
-      const imageGenerationScopeId = userActionScope?.originSessionId ?? null
+      const acceptedInvocationSessionId =
+        invocationScope?.origin.kind === 'accepted_input'
+          ? invocationScope.originSessionId ?? null
+          : null
+      const imageGenerationScopeId =
+        acceptedInvocationSessionId ??
+        userActionScope?.originSessionId ??
+        null
       const providerRequestOrdinal = input.nextUsageOrdinal()
       const operationId =
         captureIdempotencyKey
@@ -2647,9 +2703,14 @@ export async function executeMurphDynamicToolRequest(input: {
           'connected apps are unavailable without hosted connected-app transport',
         )
       }
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
       return await executeConnectedAppsDynamicTool({
         abortSignal: input.abortSignal ?? null,
         connectedApps,
+        emailSendAuthorized:
+          userActionScope?.conversationScope === 'direct'
+          && userActionScope.acceptedInputIds.length > 0,
         request: input.request,
       })
     }
@@ -3021,26 +3082,52 @@ function isHostedBillingPlanQuoteStaleError(error: unknown): boolean {
     && Reflect.get(error, 'code') === 'HOSTED_BILLING_PLAN_QUOTE_STALE'
 }
 
+function resolveHostedAssistantPersonalizationToolAuthority(
+  hostedToolContext: AssistantHostedToolContext | null,
+): HostedRuntimeAssistantPersonalizationToolAuthority | null {
+  const invocationScope: AssistantHostedInvocationScope | null =
+    hostedToolContext?.currentInvocationScope?.() ?? null
+  if (invocationScope?.origin.kind === 'accepted_input') {
+    return { assistantInputId: invocationScope.origin.assistantInputId }
+  }
+  if (invocationScope?.origin.kind === 'automation_occurrence') {
+    return {
+      automationId: invocationScope.origin.automationId,
+      occurrenceAt: invocationScope.origin.occurrenceAt,
+    }
+  }
+  const assistantInputId =
+    hostedToolContext?.currentAssistantInputId?.() ?? null
+  return assistantInputId ? { assistantInputId } : null
+}
+
 async function executePersonalizationTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedRuntimeAssistantPersonalizationModelToolRequest
+  toolCallId: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const personalizationTool = input.hostedToolContext?.personalizationTool ?? null
   if (!personalizationTool) {
     return toolTextResult(false, 'personalization is unavailable for this turn')
   }
 
-  const assistantInputId = input.request.action === 'update'
-    ? input.hostedToolContext?.currentAssistantInputId?.() ?? null
+  const authority = input.request.action === 'update'
+    ? resolveHostedAssistantPersonalizationToolAuthority(
+        input.hostedToolContext,
+      )
     : null
-  if (input.request.action === 'update' && assistantInputId === null) {
+  if (input.request.action === 'update' && authority === null) {
     return toolTextResult(false, 'personalization is unavailable for this turn')
   }
 
   try {
     const result = await personalizationTool.request(
       input.request,
-      assistantInputId === null ? undefined : { assistantInputId },
+      authority === null
+        ? undefined
+        : input.toolCallId
+          ? { ...authority, toolCallId: input.toolCallId }
+          : authority,
     )
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {

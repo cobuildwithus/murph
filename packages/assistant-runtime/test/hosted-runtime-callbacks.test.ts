@@ -475,7 +475,7 @@ beforeEach(() => {
     new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]),
   );
   mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
-    async ({ intent }) => intent,
+    async ({ intent }) => ({ applied: true, intent }),
   );
   mocks.resetAssistantOutboxPreparedDispatchById.mockResolvedValue(null);
   mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue(null);
@@ -1456,7 +1456,7 @@ describe("hosted runtime callbacks", () => {
         abandonedIntent,
       );
       mocks.saveAssistantOutboxIntentIfUnchanged.mockResolvedValueOnce(
-        abandonedIntent,
+        { applied: true, intent: abandonedIntent },
       );
 
       await expect(collectHostedAssistantDeliverySideEffects({
@@ -1763,7 +1763,7 @@ describe("hosted runtime callbacks", () => {
     });
     mocks.deferAssistantVaultFileApprovalCheck.mockReturnValue(deferredIntent);
     mocks.saveAssistantOutboxIntentIfUnchanged.mockResolvedValueOnce(
-      deferredIntent,
+      { applied: true, intent: deferredIntent },
     );
 
     await expect(collectHostedAssistantDeliverySideEffects({
@@ -8496,7 +8496,7 @@ describe("hosted runtime callbacks", () => {
     mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
       async ({ intent }) => {
         storedIntent = intent;
-        return intent;
+        return { applied: true, intent };
       },
     );
     mocks.sendTelegramMessage.mockResolvedValue({
@@ -10139,7 +10139,7 @@ describe("hosted runtime callbacks", () => {
     mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
       async ({ intent }) => {
         storedIntent = intent;
-        return intent;
+        return { applied: true, intent };
       },
     );
     const assertRecentInbound = vi.fn(async (request: {
@@ -10422,7 +10422,7 @@ describe("hosted runtime callbacks", () => {
     mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
       async ({ intent }) => {
         storedIntent = intent;
-        return intent;
+        return { applied: true, intent };
       },
     );
     const assertRecentInbound = vi.fn(async (request: {
@@ -10556,7 +10556,7 @@ describe("hosted runtime callbacks", () => {
     mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
       async ({ intent }) => {
         storedIntent = intent;
-        return intent;
+        return { applied: true, intent };
       },
     );
     const assertRecentInbound = vi.fn(async (request: {
@@ -11565,18 +11565,36 @@ describe("hosted runtime callbacks", () => {
 
   it.each([
     {
+      ambiguous: true,
       failureStage: "transport",
       method: "POST",
       path: "/attachments",
+      status: undefined,
     },
     {
+      ambiguous: true,
+      failureStage: "http",
+      method: "POST",
+      path: "/attachments",
+      status: 200,
+    },
+    {
+      ambiguous: false,
+      failureStage: "http",
+      method: "POST",
+      path: "/attachments",
+      status: 400,
+    },
+    {
+      ambiguous: false,
       failureStage: "http",
       method: "PUT",
       path: "[presigned-upload]",
+      status: 503,
     },
   ] as const)(
-    "keeps Linq attachment $method failures before the final message send",
-    async ({ failureStage, method, path }) => {
+    "classifies Linq attachment $method $failureStage status $status before the final message send",
+    async ({ ambiguous, failureStage, method, path, status }) => {
       const effect = createEffect({
         bindingDeliveryTarget: "linq_chat_123",
         channel: "linq",
@@ -11590,6 +11608,7 @@ describe("hosted runtime callbacks", () => {
         path,
         provider: "linq",
         retryable: false,
+        ...(status === undefined ? {} : { status }),
       } satisfies Record<string, string | number | boolean | null>;
       const providerError = new VaultCliError(
         "LINQ_API_REQUEST_FAILED",
@@ -11647,20 +11666,28 @@ describe("hosted runtime callbacks", () => {
       await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
       expect(capturedError).toBe(providerError);
-      expect(capturedError).not.toHaveProperty("deliveryMayHaveSucceeded");
+      if (ambiguous) {
+        expect(capturedError).toMatchObject({ deliveryMayHaveSucceeded: true });
+      } else {
+        expect(capturedError).not.toHaveProperty("deliveryMayHaveSucceeded");
+      }
       expect(outcomes).toEqual([
         expect.objectContaining({
           deliveryStatus: "failed",
           retryable: false,
         }),
       ]);
-      expect(recordDeliveryOutcome).toHaveBeenCalledWith(
-        expect.objectContaining({
-          failureCode: "LINQ_API_REQUEST_FAILED",
-          providerMessageId: null,
-        }),
-        expect.objectContaining({ signal: expect.any(AbortSignal) }),
-      );
+      if (ambiguous) {
+        expect(recordDeliveryOutcome).not.toHaveBeenCalled();
+      } else {
+        expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+          expect.objectContaining({
+            failureCode: "LINQ_API_REQUEST_FAILED",
+            providerMessageId: null,
+          }),
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        );
+      }
     },
   );
 
