@@ -262,6 +262,7 @@ test("a published comparator stays neutral while keeping its bound visible", () 
     referenceRangeLabel: "<5.7%",
     referenceRangeSourceLabel: "Reviewed source · not the reporting lab's range",
     referenceRangeTitle: "Published adult comparator",
+    referenceRangeTone: "context",
     unit: "percent",
   }));
 
