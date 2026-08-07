@@ -2983,6 +2983,7 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('REVIEW_GPT_CONTEXT_ANCHOR_HEAD')
     expect(fullPackageScript).toContain('REVIEW_GPT_REVIEW_PHASE')
     expect(fullPackageScript).toContain('REVIEW_GPT_RENDERED_EVIDENCE_PATHS')
+    expect(fullPackageScript).toContain('REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS')
     expect(fullPackageScript).toContain('review-phase.json')
     expect(fullPackageScript).toContain('rendered-evidence.txt')
     expect(fullPackageScript).toContain('review-round.json')
@@ -3199,6 +3200,16 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         'audit-packages/desktop.png',
         'redacted rendered evidence\n',
       )
+      writeHarnessFile(
+        harnessRoot,
+        'audit-packages/managed-skill/SKILL.md',
+        '# Managed skill evidence\n',
+      )
+      writeHarnessFile(
+        harnessRoot,
+        '.artifacts/review-gpt/managed-skill.test.ts',
+        'export const managedSkillProof = true\n',
+      )
 
       const invokePackager = (
         name: string,
@@ -3245,6 +3256,10 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
         REVIEW_GPT_ROUND_NUMBER: '',
         REVIEW_GPT_RENDERED_EVIDENCE_PATHS: 'audit-packages/desktop.png',
+        REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS: [
+          'audit-packages/managed-skill/SKILL.md',
+          '.artifacts/review-gpt/managed-skill.test.ts',
+        ].join('\n'),
       })
       expect(preliminary.result.status, preliminary.result.stderr).toBe(0)
       const preliminaryMetadata = JSON.parse(
@@ -3277,6 +3292,10 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         ),
       ).toBe('redacted rendered evidence\n')
       const preliminaryEntries = listZipEntries(preliminary.zipPath)
+      const supplementalSkillPath =
+        'review-gpt-pr-context/supplemental-evidence/01-SKILL.md'
+      const supplementalProofPath =
+        'review-gpt-pr-context/supplemental-evidence/02-managed-skill.test.ts'
       expect(preliminaryEntries).toEqual(
         expect.arrayContaining([
           'agent-docs/FRONTEND.md',
@@ -3288,13 +3307,59 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           '.crabbox.yaml',
           'agent-docs/prompts/coverage-write.md',
           packagedEvidencePath,
+          supplementalSkillPath,
+          supplementalProofPath,
           'review-gpt-pr-context/review-phase.json',
           'review-gpt-pr-context/rendered-evidence.txt',
+          'review-gpt-pr-context/supplemental-evidence.txt',
         ]),
       )
       expect(preliminaryEntries).not.toContain('audit-packages/desktop.png')
       expect(preliminaryEntries).not.toContain(
+        'audit-packages/managed-skill/SKILL.md',
+      )
+      expect(preliminaryEntries).not.toContain(
+        '.artifacts/review-gpt/managed-skill.test.ts',
+      )
+      expect(
+        execFileSync(
+          'unzip',
+          ['-p', preliminary.zipPath, 'review-gpt-pr-context/supplemental-evidence.txt'],
+          { encoding: 'utf8' },
+        ),
+      ).toBe(
+        `audit-packages/managed-skill/SKILL.md\t${supplementalSkillPath}\n` +
+        `.artifacts/review-gpt/managed-skill.test.ts\t${supplementalProofPath}\n`,
+      )
+      expect(
+        execFileSync('unzip', ['-p', preliminary.zipPath, supplementalSkillPath], {
+          encoding: 'utf8',
+        }),
+      ).toBe('# Managed skill evidence\n')
+      expect(
+        execFileSync('unzip', ['-p', preliminary.zipPath, supplementalProofPath], {
+          encoding: 'utf8',
+        }),
+      ).toBe('export const managedSkillProof = true\n')
+      expect(preliminaryEntries).not.toContain(
         'review-gpt-pr-context/review-round.json',
+      )
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const finalWithSupplementalEvidence = invokePackager(
+        'final-with-supplemental-evidence',
+        firstHead,
+        {
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_ROUND_NUMBER: '1',
+          REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS:
+            'audit-packages/managed-skill/SKILL.md',
+        },
+      )
+      expect(finalWithSupplementalEvidence.result.status).not.toBe(0)
+      expect(finalWithSupplementalEvidence.result.stderr).toContain(
+        'supplemental evidence is allowed only for the preliminary specialist review',
       )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
