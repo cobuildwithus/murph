@@ -1,6 +1,6 @@
 # Hosted cold-path phase telemetry
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-06
 
@@ -11,7 +11,8 @@ Updated: 2026-08-06
 - Use the evidence to select only deletion, deferral, or overlap changes that
   improve end-to-end p50 without weakening durability, provider authority,
   current-input authority, or recovery behavior.
-- Keep every benchmark and proof local; do not deploy or merge this work.
+- Keep every benchmark and proof local. Do not deploy this work; merge is
+  authorized once the required exact-head gates pass.
 
 ## Constraints
 
@@ -86,12 +87,22 @@ Updated: 2026-08-06
 - PASS: final ReviewGPT round 2 found no qualifying findings. Its explanatory
   follow-up clarified that a speculative App Server failure can cause eleven
   raw monotonic reads while still producing the same ten final boundaries.
-- PASS after the clean base-only rebase: the changed provider-start tests pass
-  independently (six assistant-engine and four assistant-runtime cases), the
-  hosted runtime-control suite passes 32 tests, and assistant-engine,
-  assistant-runtime, and hosted-execution typechecks pass.
+- PASS after clean reconciliation onto `main`, including the completion-receipt
+  change: the affected local-service provider split passes independently, the
+  four affected assistant-runtime cases pass, the hosted runtime-control suite
+  passes 32 tests, and assistant-engine, assistant-runtime, and hosted-execution
+  typechecks pass.
+- PASS: the combined four-file assistant-engine run completed 506 tests before
+  the unrelated local-service worker exhausted the shared host's 4 GB heap; the
+  exact affected local-service case passes in a fresh isolated process.
 - NON-BLOCKING HARNESS LIMIT: broad shared-host runs exhausted the Vitest worker
   heap or timed out two unrelated long-running entrypoint cases under heavy
   parallel load. The exact changed tests pass in isolated fresh processes, and
   GitHub Actions owns the broad exact-head suite.
-- Pending: push the rebased candidate and require green exact-head CI.
+- PASS: exact-head GitHub Actions completed successfully on the reconciled
+  candidate, including app verification, assistant/platform/CLI coverage,
+  release build/typecheck, both CLI host matrices, frontend proof, artifact
+  hygiene, and the runner permission sandbox gate.
+- Authorized: merge after the plan-closure head passes exact-head CI. Deployment
+  remains out of scope.
+Completed: 2026-08-06
