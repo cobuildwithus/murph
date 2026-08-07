@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
 
 import {
-  JoinInviteCenteredShell,
-} from "@/src/components/hosted-onboarding/join-invite-shell";
-import { buttonVariants } from "@/src/components/ui/button";
+  HostedSignupReferralLanding,
+  type HostedSignupReferralLandingState,
+} from "@/src/components/hosted-onboarding/hosted-signup-referral-landing";
 import {
   readHostedSignupReferralLink,
 } from "@/src/lib/hosted-growth/signup-referral";
@@ -12,23 +11,21 @@ import {
   isHostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
+import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  description: "Join Murph, your private health assistant.",
+  ...createMurphPageMetadata({
+    description: "Join Murph, your private health assistant.",
+    title: "Join Murph",
+  }),
   referrer: "no-referrer",
   robots: {
     follow: false,
     index: false,
   },
-  title: "Join Murph",
 };
-
-type HostedSignupReferralLandingState =
-  | "available"
-  | "busy"
-  | "unavailable";
 
 export default async function HostedSignupReferralPage(props: {
   params: Promise<{ referralCode: string }>;
@@ -60,102 +57,11 @@ export default async function HostedSignupReferralPage(props: {
     }
   }
 
-  if (state === "unavailable") {
-    return (
-      <HostedSignupReferralMessage
-        eyebrow="Referral link"
-        message="Ask the person who shared it to send their current Murph link."
-        title="This link isn’t available"
-      />
-    );
-  }
-
-  if (state === "busy") {
-    return (
-      <HostedSignupReferralMessage
-        action={(
-          <form
-            action={`/r/${encodeURIComponent(referralCode)}/claim`}
-            method="post"
-          >
-            <button
-              className={buttonVariants({ size: "lg" })}
-              type="submit"
-            >
-              Try again
-            </button>
-          </form>
-        )}
-        eyebrow="Referral link"
-        message="A lot of people have used this link recently. Wait a little while, then try again."
-        title="Try again soon"
-      />
-    );
-  }
-
   return (
-    <JoinInviteCenteredShell>
-      <div className="space-y-8">
-        <div className="space-y-3">
-          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            You&apos;re invited
-          </p>
-          <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-            Meet Murph
-          </h1>
-          <p className="max-w-md text-base leading-7 text-muted-foreground">
-            A private health assistant that gets more useful as it learns what
-            matters to you.
-          </p>
-        </div>
-
-        <form
-          action={`/r/${encodeURIComponent(referralCode)}/claim`}
-          method="post"
-        >
-          <button
-            aria-describedby="referral-attribution-note"
-            className={buttonVariants({ size: "lg" })}
-            type="submit"
-          >
-            Join Murph
-          </button>
-        </form>
-
-        <p
-          className="max-w-sm text-xs leading-5 text-muted-foreground"
-          id="referral-attribution-note"
-        >
-          Continuing creates your own private Murph setup. Murph records who
-          shared this link only for referral attribution; they cannot see your
-          conversations or health information.
-        </p>
-      </div>
-    </JoinInviteCenteredShell>
-  );
-}
-
-function HostedSignupReferralMessage(props: {
-  action?: ReactNode;
-  eyebrow: string;
-  message: string;
-  title: string;
-}) {
-  return (
-    <JoinInviteCenteredShell>
-      <div className="space-y-3">
-        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-          {props.eyebrow}
-        </p>
-        <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-          {props.title}
-        </h1>
-        <p className="max-w-md text-base leading-7 text-muted-foreground">
-          {props.message}
-        </p>
-        {props.action ? <div className="pt-3">{props.action}</div> : null}
-      </div>
-    </JoinInviteCenteredShell>
+    <HostedSignupReferralLanding
+      referralCode={referralCode}
+      state={state}
+    />
   );
 }
 

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/src/components/ui/button";
 
-type CopyState =
+export type HostedSignupReferralLinkButtonState =
   | "copied"
   | "copy_error"
   | "copying"
@@ -13,9 +13,11 @@ type CopyState =
   | "ready";
 
 interface ReferralLinkState {
+  announcement: string;
   identityKey: string;
+  inputSignupUrl: string | null;
   signupUrl: string | null;
-  status: CopyState;
+  status: HostedSignupReferralLinkButtonState;
 }
 
 export function HostedSignupReferralLinkButton(props: {
@@ -28,7 +30,9 @@ export function HostedSignupReferralLinkButton(props: {
   );
   // Effects run after paint. Deriving a safe identity-scoped view here prevents
   // the prior account's ready URL from surviving even one transition frame.
+  const inputSignupUrl = props.signupUrl ?? null;
   const state = storedState.identityKey === props.identityKey
+    && storedState.inputSignupUrl === inputSignupUrl
     ? storedState
     : createReferralLinkState(props.identityKey, props.signupUrl);
 
@@ -36,15 +40,9 @@ export function HostedSignupReferralLinkButton(props: {
     const identityKey = props.identityKey;
     const generation = ++requestGeneration.current;
     if (props.signupUrl) {
-      setStoredState(createReferralLinkState(identityKey, props.signupUrl));
       return;
     }
 
-    setStoredState({
-      identityKey,
-      signupUrl: null,
-      status: "loading",
-    });
     const controller = new AbortController();
     void loadHostedSettingsSignupReferralLink(controller.signal)
       .then((signupUrl) => {
@@ -55,7 +53,9 @@ export function HostedSignupReferralLinkButton(props: {
           return;
         }
         setStoredState({
+          announcement: "",
           identityKey,
+          inputSignupUrl: null,
           signupUrl,
           status: "ready",
         });
@@ -68,7 +68,9 @@ export function HostedSignupReferralLinkButton(props: {
           return;
         }
         setStoredState({
+          announcement: "Could not load the referral link.",
           identityKey,
+          inputSignupUrl: null,
           signupUrl: null,
           status: "load_error",
         });
@@ -82,10 +84,13 @@ export function HostedSignupReferralLinkButton(props: {
     }
 
     const identityKey = props.identityKey;
+    const currentInputSignupUrl = props.signupUrl ?? null;
     if (!state.signupUrl) {
       const generation = ++requestGeneration.current;
       setStoredState({
+        announcement: "",
         identityKey,
+        inputSignupUrl: currentInputSignupUrl,
         signupUrl: null,
         status: "loading",
       });
@@ -95,7 +100,9 @@ export function HostedSignupReferralLinkButton(props: {
           return;
         }
         setStoredState({
+          announcement: "Referral link ready to copy.",
           identityKey,
+          inputSignupUrl: currentInputSignupUrl,
           signupUrl,
           status: "ready",
         });
@@ -104,7 +111,9 @@ export function HostedSignupReferralLinkButton(props: {
           return;
         }
         setStoredState({
+          announcement: "Could not load the referral link.",
           identityKey,
+          inputSignupUrl: currentInputSignupUrl,
           signupUrl: null,
           status: "load_error",
         });
@@ -115,7 +124,9 @@ export function HostedSignupReferralLinkButton(props: {
     const generation = requestGeneration.current;
     const signupUrl = state.signupUrl;
     setStoredState({
+      announcement: "",
       identityKey,
+      inputSignupUrl: currentInputSignupUrl,
       signupUrl,
       status: "copying",
     });
@@ -123,7 +134,9 @@ export function HostedSignupReferralLinkButton(props: {
       await navigator.clipboard.writeText(signupUrl);
       if (generation === requestGeneration.current) {
         setStoredState({
+          announcement: "Referral link copied.",
           identityKey,
+          inputSignupUrl: currentInputSignupUrl,
           signupUrl,
           status: "copied",
         });
@@ -131,7 +144,9 @@ export function HostedSignupReferralLinkButton(props: {
     } catch {
       if (generation === requestGeneration.current) {
         setStoredState({
+          announcement: "Could not copy the referral link.",
           identityKey,
+          inputSignupUrl: currentInputSignupUrl,
           signupUrl,
           status: "copy_error",
         });
@@ -139,30 +154,30 @@ export function HostedSignupReferralLinkButton(props: {
     }
   }
 
-  const label =
-    state.status === "loading"
-      ? "Loading..."
-      : state.status === "copying"
-        ? "Copying..."
-        : state.status === "copied"
-          ? "Copied"
-          : state.status === "load_error"
-            ? "Reload link"
-            : state.status === "copy_error"
-              ? "Try copy again"
-              : "Copy link";
+  return (
+    <HostedSignupReferralLinkButtonView
+      announcement={state.announcement}
+      onAction={handleAction}
+      status={state.status}
+    />
+  );
+}
+
+export function HostedSignupReferralLinkButtonView(props: {
+  announcement?: string;
+  onAction: () => void;
+  status: HostedSignupReferralLinkButtonState;
+}) {
+  const label = readHostedSignupReferralLinkButtonLabel(props.status);
+  const busy = props.status === "loading" || props.status === "copying";
 
   return (
     <>
       <Button
-        aria-label={
-          state.status === "load_error"
-            ? "Reload your Murph referral link"
-            : "Copy your Murph referral link"
-        }
-        className="h-auto px-0"
-        disabled={state.status === "loading" || state.status === "copying"}
-        onClick={handleAction}
+        aria-busy={busy ? "true" : undefined}
+        aria-label={`${label} — your Murph referral link`}
+        className="h-auto px-0 aria-busy:cursor-wait"
+        onClick={props.onAction}
         size="sm"
         type="button"
         variant="link"
@@ -170,18 +185,38 @@ export function HostedSignupReferralLinkButton(props: {
         {label}
       </Button>
       <span aria-live="polite" className="sr-only">
-        {state.status === "copied"
-          ? "Referral link copied."
-          : state.status === "load_error"
-            ? "Could not load the referral link."
-            : state.status === "copy_error"
-              ? "Could not copy the referral link."
-              : state.status === "ready"
-                ? "Referral link ready to copy."
-                : ""}
+        {props.announcement ?? readDefaultAnnouncement(props.status)}
       </span>
     </>
   );
+}
+
+function readHostedSignupReferralLinkButtonLabel(
+  status: HostedSignupReferralLinkButtonState,
+): string {
+  return status === "loading"
+    ? "Loading..."
+    : status === "copying"
+      ? "Copying..."
+      : status === "copied"
+        ? "Copied"
+        : status === "load_error"
+          ? "Reload link"
+          : status === "copy_error"
+            ? "Try copy again"
+            : "Copy link";
+}
+
+function readDefaultAnnouncement(
+  status: HostedSignupReferralLinkButtonState,
+): string {
+  return status === "copied"
+    ? "Referral link copied."
+    : status === "load_error"
+      ? "Could not load the referral link."
+      : status === "copy_error"
+        ? "Could not copy the referral link."
+        : "";
 }
 
 function createReferralLinkState(
@@ -189,7 +224,9 @@ function createReferralLinkState(
   signupUrl?: string | null,
 ): ReferralLinkState {
   return {
+    announcement: "",
     identityKey,
+    inputSignupUrl: signupUrl ?? null,
     signupUrl: signupUrl ?? null,
     status: signupUrl ? "ready" : "loading",
   };

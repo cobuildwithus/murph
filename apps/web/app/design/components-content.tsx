@@ -160,6 +160,7 @@ import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environm
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
+import { SignupReferralComponentStudy } from "./signup-referral-study";
 
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
@@ -1955,6 +1956,16 @@ export function ComponentsContent() {
               </div>
             ))}
           </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Signup referral link actions">
+          <p className="text-sm text-muted-foreground">
+            The real copy action keeps loading, clipboard, and recovery states
+            distinct without moving keyboard focus away from the control.
+          </p>
+          <SignupReferralComponentStudy />
         </Section>
 
         <Separator />

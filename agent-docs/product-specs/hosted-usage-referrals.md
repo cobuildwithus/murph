@@ -326,6 +326,22 @@ identity.
 
 ## Deployment and rollback
 
+The existing conversational-referral ledger rollout remains a prerequisite and
+keeps its original expand/drain/contract order:
+
+1. Keep `HOSTED_USAGE_REFERRALS_ENABLED` unset while the expand-only referral
+   schema and entry-keyed grant projection are deployed with compatible Web
+   readers and writers.
+2. Apply
+   `20260728030000_hosted_usage_referral_credit_entry_constraints` while that
+   gate remains disabled.
+3. Prove the compatible Web deployment is current, wait for the previous Vercel
+   function window to drain, then apply the DML-only contract migration
+   `20260728031000_resynchronize_hosted_usage_credit_purchase_grants`.
+4. Enable `HOSTED_USAGE_REFERRALS_ENABLED=1` only after purchase and grant
+   projections converge, then deploy the matching runtime and assistant
+   packages.
+
 The stable-link surface is Web-only and schema-free. Deploy the `/r/<token>`
 landing page, explicit claim route, authenticated Settings endpoint, runtime
 handler, and completion-notice presenter together before sharing stable URLs.

@@ -69,6 +69,9 @@ describe("HostedSignupReferralLinkButton", () => {
         (button) => button.textContent,
       ),
     ).toEqual(["Copy link", "Copy link"]);
+    expect(rendered.container.textContent).not.toContain(
+      "Referral link ready to copy.",
+    );
 
     await rendered.cleanup();
   });
@@ -137,7 +140,7 @@ describe("HostedSignupReferralLinkButton", () => {
 
     expect(rendered.button.textContent).toBe("Reload link");
     expect(rendered.button.getAttribute("aria-label")).toBe(
-      "Reload your Murph referral link",
+      "Reload link — your Murph referral link",
     );
     expect(rendered.container.textContent).toContain(
       "Could not load the referral link.",
@@ -180,6 +183,41 @@ describe("HostedSignupReferralLinkButton", () => {
       "Could not copy the referral link.",
     );
 
+    await rendered.cleanup();
+  });
+
+  it("keeps the busy action focusable and aligns its accessible name", async () => {
+    let resolveClipboardWrite: (() => void) | undefined;
+    const clipboardWrite = new Promise<void>((resolve) => {
+      resolveClipboardWrite = resolve;
+    });
+    const rendered = await renderClientComponent(
+      React.createElement(HostedSignupReferralLinkButton, {
+        identityKey: IDENTITY_KEY,
+        signupUrl: SIGNUP_URL,
+      }),
+    );
+    vi.stubGlobal("navigator", {
+      clipboard: {
+        writeText: vi.fn().mockReturnValue(clipboardWrite),
+      },
+    });
+
+    await React.act(async () => {
+      rendered.button.click();
+      await Promise.resolve();
+    });
+
+    expect(rendered.button.disabled).toBe(false);
+    expect(rendered.button.getAttribute("aria-label")).toBe(
+      "Copying... — your Murph referral link",
+    );
+    expect(rendered.button.getAttribute("aria-busy")).toBe("true");
+
+    await React.act(async () => {
+      resolveClipboardWrite?.();
+      await clipboardWrite;
+    });
     await rendered.cleanup();
   });
 });
