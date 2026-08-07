@@ -90,6 +90,7 @@ describe("hosted onboarding auto trial enrollment route", () => {
         suspendedAt: null,
       },
       prisma: { prisma: true },
+      pulseTrialStartSource: "web_onboarding",
     });
   });
 

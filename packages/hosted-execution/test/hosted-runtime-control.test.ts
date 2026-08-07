@@ -1593,7 +1593,9 @@ describe("hosted runtime control contracts", () => {
         systemMailboxMaintenanceMs: 3,
         memberPreferencesPrePlanningMs: 4,
         automationBootstrapMs: 5,
+        outboxScanBytesRead: 8_192,
         outboxScanElapsedMs: 23,
+        outboxScanFilesRead: 10,
         outboxScanPerformed: true,
         receiptScanBytesRead: 4_096,
         receiptScanElapsedMs: 19,
@@ -1692,6 +1694,7 @@ describe("hosted runtime control contracts", () => {
 
     for (const unsafePreProvider of [
       { receiptScanPerformed: 1 }, // boolean leaf must stay boolean
+      { outboxScanBytesRead: -1 }, // counts must be non-negative
       { receiptScanBytesRead: -1 }, // counts must be non-negative
       { outboxScanElapsedMs: "23" }, // durations must stay numeric
       { mailboxImportDoneToAssistantPhaseMs: -1 }, // durations must be non-negative
@@ -1967,6 +1970,7 @@ describe("hosted runtime control contracts", () => {
       existing: {
         schemaVersion: 1,
         preProvider: {
+          outboxScanBytesRead: -1,
           outboxScanPerformed: true,
           receiptScanBytesRead: -1,
           receiptScanPath: 1,
@@ -1976,6 +1980,8 @@ describe("hosted runtime control contracts", () => {
       incoming: {
         schemaVersion: 1,
         preProvider: {
+          outboxScanBytesRead: 8_192,
+          outboxScanFilesRead: 10,
           outboxScanPerformed: false,
           receiptScanBytesRead: 4_096,
           receiptScanFilesRead: 12,
@@ -1986,6 +1992,8 @@ describe("hosted runtime control contracts", () => {
     });
 
     expect(historyMerged.value.preProvider).toEqual({
+      outboxScanBytesRead: 8_192,
+      outboxScanFilesRead: 10,
       outboxScanPerformed: true,
       receiptScanBytesRead: 4_096,
       receiptScanFilesRead: 12,

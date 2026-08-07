@@ -949,6 +949,8 @@ export async function projectHostedLinqLineForProviderEventTx(input: {
   }
 
   switch (input.event.eventType) {
+    case "chat.group_icon_updated":
+    case "chat.group_icon_update_failed":
     case "message.edited":
       return false;
     case "message.received":
