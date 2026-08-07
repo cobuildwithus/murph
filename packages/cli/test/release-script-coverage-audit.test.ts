@@ -3210,6 +3210,11 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         '.artifacts/review-gpt/managed-skill.test.ts',
         'export const managedSkillProof = true\n',
       )
+      writeHarnessFile(
+        harnessRoot,
+        'audit-packages/too-large.txt',
+        'x'.repeat(2 * 1024 * 1024 + 1),
+      )
 
       const invokePackager = (
         name: string,
@@ -3362,6 +3367,50 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         'supplemental evidence is allowed only for the preliminary specialist review',
       )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const supplementalEvidenceRejections = [
+        {
+          expectedError:
+            'supplemental evidence paths must be repo-relative and boundary-safe',
+          name: 'supplemental-traversal',
+          paths: '../managed-skill/SKILL.md',
+        },
+        {
+          expectedError: 'supplemental evidence must be a supported text or code file',
+          name: 'supplemental-unsupported-extension',
+          paths: 'audit-packages/desktop.png',
+        },
+        {
+          expectedError: 'supplemental evidence is limited to 12 explicit files',
+          name: 'supplemental-too-many-files',
+          paths: Array.from(
+            { length: 13 },
+            () => 'audit-packages/managed-skill/SKILL.md',
+          ).join('\n'),
+        },
+        {
+          expectedError: 'supplemental evidence is limited to 2 MiB in total',
+          name: 'supplemental-too-large',
+          paths: 'audit-packages/too-large.txt',
+        },
+      ]
+      for (const rejection of supplementalEvidenceRejections) {
+        const rejected = invokePackager(rejection.name, firstHead, {
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+          REVIEW_GPT_ROUND_NUMBER: '',
+          REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS: rejection.paths,
+        })
+        expect(rejected.result.status, rejection.name).not.toBe(0)
+        expect(rejected.result.stderr, rejection.name).toContain(
+          rejection.expectedError,
+        )
+        expect(
+          existsSync(path.join(harnessRoot, 'review-gpt-pr-context')),
+          rejection.name,
+        ).toBe(false)
+      }
 
       const preliminaryWithFinalRound = invokePackager(
         'preliminary-with-final-round',
