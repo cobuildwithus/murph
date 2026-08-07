@@ -260,10 +260,9 @@ capacity, membership, and direct-paid authority before committing candidates
 and activating members sequentially. A member that appears after preparation
 has no matching candidate and fails with the typed required-candidate error;
 the retry prepares from the new authoritative snapshot instead of signing
-under the transaction. Preparation always includes the owner because a Family
-conversion may clear that owner's reused direct-subscription reference inside
-the transaction; other currently direct-paid members are skipped and rechecked
-transactionally.
+under the transaction. Preparation includes every active member because the
+locked owner must distinguish an owner handoff from a sponsored-member direct
+subscription race without signing under the transaction.
 
 Activation still performs the separate control/ingress prewarm decrypts while
 the owning transaction is open. At six members those twelve decrypts bring the
@@ -281,14 +280,18 @@ group status, clears the current Family subscription/item binding, and keeps the
 customer plus event freshness watermark so both direct and Family checkout can
 recover without allowing an older event to reclaim billing. An older unbound
 attempt remains an ambiguous claim and requires support rather than permitting
-a blind second provider start. A directly paid beneficiary is not claimed
-because active Family reconciliation deliberately skips that member.
+a blind second provider start. A non-owner sponsored member may not retain a bound live direct subscription.
+Invite acceptance rejects that state with the existing recoverable transfer
+error. If Family sponsorship and direct Checkout race, the locked Family claim
+wins without disabling sponsored access, and every Checkout, subscription, and
+invoice replay for the different personal subscription remains in the existing
+receipt-owned cancellation path until Stripe confirms terminal cleanup. The
+owner exception remains limited to the exact direct subscription being handed
+to the Family group.
 
 If a direct checkout opened before Family billing claimed the member and
 completes afterward, reconciliation leaves it unbound and cancels that
-superseded subscription after the database transaction. An already accepted
-direct subscription remains the owner when its Checkout, subscription, or
-invoice event is replayed after a later Family attempt. When that exact
+superseded subscription after the database transaction. When the exact owner
 subscription has since been handed to the Family group, its immutable direct
 Checkout replay is a no-op: the current Family group subscription binding
 proves that it is the same provider identity, so reconciliation neither

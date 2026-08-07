@@ -310,7 +310,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Core member plan">
+      <StudySection title="Subscription and sponsored billing">
         <GroupMemberPlanStudy />
       </StudySection>
 

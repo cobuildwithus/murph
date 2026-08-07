@@ -34,6 +34,7 @@ import {
   canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlan,
+  parseHostedBillingPhase,
   parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
@@ -313,13 +314,22 @@ export default async function SettingsPage({
     billingRef?.currentBillingPlanCode,
   );
   const directPlanUpdateTarget =
-    planChangeReturn === "launch_edge_monthly"
-      || planChangeReturn === "launch_monthly"
+    !activeFamilyOwner &&
+    !sponsoredMember &&
+    (
+      planChangeReturn === "launch_edge_monthly" ||
+      planChangeReturn === "launch_monthly"
+    )
       ? planChangeReturn
       : null;
+  const directPlanUpdateActive =
+    directPlanUpdateTarget !== null &&
+    authenticatedMember !== null &&
+    hasHostedMemberOwnActiveBilling(authenticatedMember) &&
+    parseHostedBillingPhase(billingRef?.currentBillingPhase) === "paid" &&
+    currentPlanCode === directPlanUpdateTarget;
   const planChangePending =
-    directPlanUpdateTarget !== null
-    && currentPlanCode !== directPlanUpdateTarget;
+    directPlanUpdateTarget !== null && !directPlanUpdateActive;
   const scheduledPlanCode = parseHostedBillingPlanCode(
     billingRef?.scheduledBillingPlanCode,
   );
@@ -470,7 +480,7 @@ export default async function SettingsPage({
         ) : null}
         {directPlanUpdateTarget ? (
           <HostedPlanUpdateReturn
-            active={currentPlanCode === directPlanUpdateTarget}
+            active={directPlanUpdateActive}
             targetPlanCode={directPlanUpdateTarget}
           />
         ) : null}
