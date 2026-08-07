@@ -1548,6 +1548,7 @@ describe("hosted runtime control contracts", () => {
         extractMs: 11,
         encryptedBytes: 12,
         plainBytes: 13,
+        replaySafeReadMaxAttempt: 1,
       },
       boot: { nodeStartupMs: 14, restoreWasCold: true },
       wake: {

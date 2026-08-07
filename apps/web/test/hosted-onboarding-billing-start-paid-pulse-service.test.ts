@@ -4,6 +4,18 @@ import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type Stripe from "stripe";
 
+type StripeBillingPortalSessionCreateMock = (
+  ...args: Parameters<Stripe["billingPortal"]["sessions"]["create"]>
+) => Promise<unknown>;
+type StripeSubscriptionRetrieveMock = (
+  ...args: Parameters<Stripe["subscriptions"]["retrieve"]>
+) => Promise<unknown>;
+type StripeSubscriptionResumeMock = (
+  ...args: Parameters<Stripe["subscriptions"]["resume"]>
+) => Promise<unknown>;
+type StripeSubscriptionUpdateMock = (
+  ...args: Parameters<Stripe["subscriptions"]["update"]>
+) => Promise<unknown>;
 
 const mocks = vi.hoisted(() => ({
   assertHostedBillingPlanSelectable: vi.fn(),
@@ -25,13 +37,13 @@ const mocks = vi.hoisted(() => ({
   stripe: {
     billingPortal: {
       sessions: {
-        create: vi.fn(),
+        create: vi.fn<StripeBillingPortalSessionCreateMock>(),
       },
     },
     subscriptions: {
-      retrieve: vi.fn(),
-      resume: vi.fn(),
-      update: vi.fn(),
+      retrieve: vi.fn<StripeSubscriptionRetrieveMock>(),
+      resume: vi.fn<StripeSubscriptionResumeMock>(),
+      update: vi.fn<StripeSubscriptionUpdateMock>(),
     },
   },
 }));
@@ -138,8 +150,8 @@ describe("startHostedPulseTrialPaidPlan", () => {
       trialEnd: null,
     }));
     mocks.stripe.subscriptions.update.mockImplementation(
-      async (_subscriptionId: string, params: Stripe.SubscriptionUpdateParams) =>
-        params.trial_end === "now"
+      async (_subscriptionId: string, params?: Stripe.SubscriptionUpdateParams) =>
+        params?.trial_end === "now"
           ? makeSubscription({
             latestInvoice: makeInvoice({ status: "draft" }),
             status: "active",
@@ -1618,17 +1630,19 @@ describe("startHostedPulseTrialPaidPlan", () => {
         ),
       },
     );
+    const expectedResumeParams: Stripe.SubscriptionResumeParams = {
+      billing_cycle_anchor: "now",
+      expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
+    };
+    const expectedResumeRequestOptions: Stripe.RequestOptions = {
+      idempotencyKey: buildExpectedStartPaidPulseIdempotencyKey(
+        "paused-resume-v2",
+      ),
+    };
     expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledWith(
       "sub_123",
-      {
-        billing_cycle_anchor: "now",
-        expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
-      },
-      {
-        idempotencyKey: buildExpectedStartPaidPulseIdempotencyKey(
-          "paused-resume-v2",
-        ),
-      },
+      expectedResumeParams,
+      expectedResumeRequestOptions,
     );
     expect(
       mocks.stripe.subscriptions.update.mock.invocationCallOrder[0],
