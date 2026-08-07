@@ -102,7 +102,7 @@ describe("post-bundle dependency pruning", () => {
     const zodPackageName = ["zo", "d"].join("");
     await writeFile(
       path.join(bundleDir, "dist", "consumer.js"),
-      `import { object } from "${zodPackageName}/v3"\n`,
+      `import "${zodPackageName}/v3"\n`,
       "utf8",
     );
 

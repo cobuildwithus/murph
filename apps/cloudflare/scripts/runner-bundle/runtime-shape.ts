@@ -74,7 +74,7 @@ async function assertRunnerUsesRetainedZodRuntimeSurfaces(
     }
     const source = await readFile(entryPath, "utf8");
     const importPattern =
-      /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)["'](zod(?:\/[^"']*)?)["']/gu;
+      /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)["'](zod(?:\/[^"']*)?)["']/gu;
 
     for (const match of source.matchAll(importPattern)) {
       const specifier = match[1];
