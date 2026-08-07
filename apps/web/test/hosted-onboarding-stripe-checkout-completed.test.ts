@@ -253,6 +253,7 @@ describe("applyStripeCheckoutCompleted", () => {
     mocks.readHostedAccountGroupStripeBillingRef.mockResolvedValue({
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_family_monthly",
+      stripeCustomerId: "cus_family",
       stripeSubscriptionId: "sub_family",
     });
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
@@ -284,10 +285,15 @@ describe("applyStripeCheckoutCompleted", () => {
       status: "canceled",
     });
     mocks.cleanupHostedStandardCheckoutLoser.mockResolvedValue(undefined);
-    mocks.retrieveStripeSubscription.mockImplementation(async (subscriptionId: string) => ({
-      ...makePulseTrialSubscription(),
-      id: subscriptionId,
-    }));
+    mocks.retrieveStripeSubscription.mockImplementation(
+      async (subscriptionId: string) =>
+        subscriptionId === "sub_family"
+          ? makeActiveFamilySubscription()
+          : {
+              ...makePulseTrialSubscription(),
+              id: subscriptionId,
+            },
+    );
     mocks.writeHostedMemberStripeBillingRef.mockResolvedValue({
       lastStripeEventCreatedAt: new Date("2025-04-12T00:00:00.000Z"),
       memberId: "member_123",
@@ -866,6 +872,14 @@ describe("applyStripeCheckoutCompleted", () => {
       subscriptionId: "sub_superseded",
     })).resolves.toBeUndefined();
 
+    expect(mocks.retrieveStripeSubscription).toHaveBeenNthCalledWith(
+      1,
+      "sub_superseded",
+    );
+    expect(mocks.retrieveStripeSubscription).toHaveBeenNthCalledWith(
+      2,
+      "sub_family",
+    );
     expect(mocks.cleanupHostedStandardCheckoutLoser).toHaveBeenCalledWith({
       stripe,
       stripeSubscriptionId: "sub_superseded",
@@ -879,6 +893,137 @@ describe("applyStripeCheckoutCompleted", () => {
       });
     expect(mocks.terminalizeHostedFamilySponsoredDirectBillingTx)
       .toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["ended", makeActiveFamilySubscription({ status: "canceled" })],
+    ["unpaid", makeActiveFamilySubscription({ status: "unpaid" })],
+    ["replaced", makeActiveFamilySubscription({ id: "sub_family_replacement" })],
+    ["owned by another customer", makeActiveFamilySubscription({
+      customer: "cus_other",
+    })],
+    ["not a Family subscription", makeActiveFamilySubscription({
+      metadata: { kind: "hosted_member_plan" },
+    })],
+    ["on another billing plan", makeActiveFamilySubscription({
+      metadata: { billingPlanCode: "launch_monthly" },
+    })],
+    ["bound to another group", makeActiveFamilySubscription({
+      metadata: { accountGroupId: "hbag_other" },
+    })],
+    ["bound to another owner", makeActiveFamilySubscription({
+      metadata: { ownerMemberId: "member_other" },
+    })],
+  ])("keeps direct paid billing when Stripe Family authority is %s", async (
+    _case,
+    familySubscription,
+  ) => {
+    const familyClaim = {
+      groupId: "hbag_family",
+      kind: "active_sponsorship" as const,
+      ownerMemberId: "member_owner",
+    };
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(familyClaim);
+    const directSubscription = {
+      ...makePulseTrialSubscription(),
+      id: "sub_superseded",
+      status: "active",
+    };
+    mocks.retrieveStripeSubscription
+      .mockResolvedValueOnce(directSubscription)
+      .mockResolvedValueOnce(familySubscription);
+    const tx = { __tag: "tx" };
+    const prisma = {
+      $transaction: vi.fn(async (
+        run: (transaction: typeof tx) => Promise<unknown>,
+      ) => run(tx)),
+    };
+    const stripe = {
+      subscriptions: {
+        cancel: mocks.cancelStripeSubscription,
+        retrieve: mocks.retrieveStripeSubscription,
+      },
+    };
+
+    await expect(cleanupHostedFamilySponsoredDirectSubscription({
+      checkoutSessionId: "cs_123",
+      memberId: "member_123",
+      prisma: prisma as never,
+      refundCheckoutPayment: true,
+      sourceEventId: "evt_checkout_cleanup_after_family_end",
+      stripe: stripe as never,
+      subscriptionId: "sub_superseded",
+    })).rejects.toBeInstanceOf(
+      HostedStripeFamilySponsoredCleanupPendingError,
+    );
+
+    expect(mocks.retrieveStripeSubscription).toHaveBeenNthCalledWith(
+      1,
+      "sub_superseded",
+    );
+    expect(mocks.retrieveStripeSubscription).toHaveBeenNthCalledWith(
+      2,
+      "sub_family",
+    );
+    expect(mocks.cleanupHostedStandardCheckoutLoser).not.toHaveBeenCalled();
+    expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx)
+      .not.toHaveBeenCalled();
+    expect(mocks.terminalizeHostedFamilySponsoredDirectBillingTx)
+      .not.toHaveBeenCalled();
+  });
+
+  it("keeps direct paid billing when the current Family subscription is missing at Stripe", async () => {
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue({
+      groupId: "hbag_family",
+      kind: "active_sponsorship",
+      ownerMemberId: "member_owner",
+    });
+    mocks.retrieveStripeSubscription
+      .mockResolvedValueOnce({
+        ...makePulseTrialSubscription(),
+        id: "sub_superseded",
+        status: "active",
+      })
+      .mockRejectedValueOnce({ code: "resource_missing" });
+    const tx = { __tag: "tx" };
+    const prisma = {
+      $transaction: vi.fn(async (
+        run: (transaction: typeof tx) => Promise<unknown>,
+      ) => run(tx)),
+    };
+
+    await expect(cleanupHostedFamilySponsoredDirectSubscription({
+      checkoutSessionId: "cs_123",
+      memberId: "member_123",
+      prisma: prisma as never,
+      refundCheckoutPayment: true,
+      sourceEventId: "evt_checkout_cleanup_missing_family_authority",
+      stripe: {
+        subscriptions: {
+          cancel: mocks.cancelStripeSubscription,
+          retrieve: mocks.retrieveStripeSubscription,
+        },
+      } as never,
+      subscriptionId: "sub_superseded",
+    })).rejects.toBeInstanceOf(
+      HostedStripeFamilySponsoredCleanupPendingError,
+    );
+
+    expect(mocks.retrieveStripeSubscription).toHaveBeenNthCalledWith(
+      1,
+      "sub_superseded",
+    );
+    expect(mocks.retrieveStripeSubscription).toHaveBeenNthCalledWith(
+      2,
+      "sub_family",
+    );
+    expect(mocks.cleanupHostedStandardCheckoutLoser).not.toHaveBeenCalled();
+    expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx)
+      .not.toHaveBeenCalled();
+    expect(mocks.terminalizeHostedFamilySponsoredDirectBillingTx)
+      .not.toHaveBeenCalled();
   });
 
   it("keeps direct paid billing when Family sponsorship ended before cleanup started", async () => {
@@ -1863,6 +2008,29 @@ function makePulseTrialCheckoutSession(): Record<string, unknown> {
     mode: "subscription",
     status: "complete",
     subscription: makePulseTrialSubscription(),
+  };
+}
+
+function makeActiveFamilySubscription(overrides: {
+  customer?: string;
+  id?: string;
+  metadata?: Partial<Record<
+    "accountGroupId" | "billingPlanCode" | "kind" | "ownerMemberId",
+    string
+  >>;
+  status?: string;
+} = {}): Record<string, unknown> {
+  return {
+    customer: overrides.customer ?? "cus_family",
+    id: overrides.id ?? "sub_family",
+    metadata: {
+      accountGroupId: "hbag_family",
+      billingPlanCode: "launch_family_monthly",
+      kind: "hosted_family_plan",
+      ownerMemberId: "member_owner",
+      ...overrides.metadata,
+    },
+    status: overrides.status ?? "active",
   };
 }
 

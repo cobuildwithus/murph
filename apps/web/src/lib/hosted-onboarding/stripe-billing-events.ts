@@ -944,10 +944,14 @@ export async function cleanupHostedFamilySponsoredDirectSubscription(input: {
         groupId: familyClaim.groupId,
         prisma: tx,
       });
+      const familyStripeCustomerId = familyBillingRef?.stripeCustomerId ?? null;
+      const familyStripeSubscriptionId =
+        familyBillingRef?.stripeSubscriptionId ?? null;
       if (
         familyBillingRef?.currentBillingPhase !== "paid"
         || familyBillingRef.currentBillingPlanCode !== HOSTED_FAMILY_BILLING_PLAN_CODE
-        || !familyBillingRef.stripeSubscriptionId
+        || !familyStripeCustomerId
+        || !familyStripeSubscriptionId
       ) {
         throw new HostedStripeFamilySponsoredCleanupPendingError();
       }
@@ -990,11 +994,61 @@ export async function cleanupHostedFamilySponsoredDirectSubscription(input: {
         const matchesDirectOwner = metadataMemberId === input.memberId
           || directBillingRef?.stripeSubscriptionId === input.subscriptionId;
         if (
-          subscription.id === familyBillingRef.stripeSubscriptionId
+          subscription.id === familyStripeSubscriptionId
           || subscription.metadata?.kind === HOSTED_FAMILY_STRIPE_METADATA_KIND
           || !matchesDirectOwner
         ) {
           throw new HostedStripeFamilySponsoredCleanupPendingError();
+        }
+
+        const requiresLiveFamilyAuthority = input.refundCheckoutPayment
+          || (
+            subscription.status !== "canceled"
+            && subscription.status !== "incomplete_expired"
+          );
+        if (requiresLiveFamilyAuthority) {
+          let currentFamilySubscription: Stripe.Subscription;
+          try {
+            currentFamilySubscription = await withHostedStripeFailureLog(
+              "subscription.retrieve.family-sponsored-authority",
+              () => stripe.subscriptions.retrieve(familyStripeSubscriptionId),
+            );
+          } catch (error) {
+            if (
+              error
+              && typeof error === "object"
+              && Reflect.get(error, "code") === "resource_missing"
+            ) {
+              throw new HostedStripeFamilySponsoredCleanupPendingError();
+            }
+            throw hostedOnboardingError({
+              cause: error,
+              code: "HOSTED_FAMILY_SPONSORED_CHECKOUT_CLEANUP_FAILED",
+              httpStatus: 502,
+              message:
+                "Murph could not verify current Family billing authority. Try again.",
+              retryable: true,
+            });
+          }
+
+          if (
+            currentFamilySubscription.id !== familyStripeSubscriptionId
+            || currentFamilySubscription.status !== "active"
+            || coerceStripeObjectId(currentFamilySubscription.customer)
+              !== familyStripeCustomerId
+            || currentFamilySubscription.metadata?.kind
+              !== HOSTED_FAMILY_STRIPE_METADATA_KIND
+            || currentFamilySubscription.metadata?.billingPlanCode
+              !== HOSTED_FAMILY_BILLING_PLAN_CODE
+            || normalizeNullableString(
+              currentFamilySubscription.metadata?.accountGroupId,
+            ) !== familyClaim.groupId
+            || normalizeNullableString(
+              currentFamilySubscription.metadata?.ownerMemberId,
+            ) !== familyClaim.ownerMemberId
+          ) {
+            throw new HostedStripeFamilySponsoredCleanupPendingError();
+          }
         }
 
         if (input.refundCheckoutPayment) {

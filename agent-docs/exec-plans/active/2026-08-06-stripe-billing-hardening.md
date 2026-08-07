@@ -108,6 +108,12 @@ Updated: 2026-08-07
   existing Family owner lock before the sponsored member lock. Preserve a
   conflicting Checkout attempt until that guarded cleanup commits so a Family
   authority change can retry the receipt and bind direct billing instead.
+- Treat the local paid Family binding as a projection, not cancellation or
+  refund authority. Immediately before an irreversible direct-subscription
+  cleanup, require Stripe to return the exact active Family subscription,
+  customer, plan metadata, group, and owner. A missing, terminal, unpaid, or
+  mismatched provider object preserves the direct subscription for receipt
+  replay; no new queue or billing state machine is needed.
 
 ## Verification
 
@@ -132,6 +138,14 @@ Updated: 2026-08-07
   ESLint, and diff checks. Production aggregate proof confirms every current
   non-owner Family sponsorship has the paid active Family identity required by
   the guard.
-- Remaining: push the candidate, run exact-head preliminary specialists and
-  final ReviewGPT round 1 concurrently with GitHub Actions, resolve any accepted
-  findings, then close this plan with final exact-head evidence.
+- ReviewGPT round 5 found that the local Family projection could lag a terminal
+  provider transition. ReviewGPT's claimed attachment was absent from the
+  thread, so it returned the complete 397-line unified diff inline; the diff
+  passed `git apply --check` against the reviewed head before application. The
+  provider-authority correction plus expanded mismatch controls pass 732
+  changed-surface tests, Web typecheck, focused ESLint, diff checks, a fresh
+  165-migration deploy, and 10/10 serial PostgreSQL webhook/lock-order tests.
+- The preliminary specialist gate passed on the first candidate. Remaining:
+  push the provider-authoritative candidate, run the next exact-head final
+  ReviewGPT round concurrently with GitHub Actions, resolve any accepted
+  findings, and close this plan with final exact-head evidence.

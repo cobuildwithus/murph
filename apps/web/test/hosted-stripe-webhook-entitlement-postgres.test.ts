@@ -293,7 +293,11 @@ describe.skipIf(!runPostgresProof)(
       const continueRemoval = createDeferred();
       const cleanupPid = await readBackendPid(cleanupClient);
       const stripe = buildFamilyCleanupStripe({
+        familyCustomerId: fixture.familyCustomerId,
+        familySubscriptionId: fixture.familySubscriptionId,
+        groupId: fixture.groupId,
         memberId: fixture.memberId,
+        ownerMemberId: fixture.ownerMemberId,
         subscriptionId: fixture.directSubscriptionId,
       });
 
@@ -393,7 +397,11 @@ describe.skipIf(!runPostgresProof)(
           providerReached.resolve();
           await continueProvider.promise;
         },
+        familyCustomerId: fixture.familyCustomerId,
+        familySubscriptionId: fixture.familySubscriptionId,
+        groupId: fixture.groupId,
         memberId: fixture.memberId,
+        ownerMemberId: fixture.ownerMemberId,
         subscriptionId: fixture.directSubscriptionId,
       });
       const cleanup = cleanupHostedFamilySponsoredDirectSubscription({
@@ -421,7 +429,15 @@ describe.skipIf(!runPostgresProof)(
         await expect(cleanup).resolves.toBeUndefined();
         await expect(removal).resolves.toBe(true);
 
-        expect(stripe.retrieve).toHaveBeenCalledOnce();
+        expect(stripe.retrieve).toHaveBeenCalledTimes(2);
+        expect(stripe.retrieve).toHaveBeenNthCalledWith(
+          1,
+          fixture.directSubscriptionId,
+        );
+        expect(stripe.retrieve).toHaveBeenNthCalledWith(
+          2,
+          fixture.familySubscriptionId,
+        );
         expect(stripe.cancel).toHaveBeenCalledOnce();
         await expect(readHostedMemberBillingSnapshot({
           memberId: fixture.memberId,
@@ -444,6 +460,54 @@ describe.skipIf(!runPostgresProof)(
           removalClient.$disconnect(),
           observer.$disconnect(),
         ]);
+      }
+    });
+
+    it("preserves direct billing when Stripe ended Family authority before its local projection", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await seedFamilySponsoredDirectCleanupFixture(prisma);
+      const stripe = buildFamilyCleanupStripe({
+        familyCustomerId: fixture.familyCustomerId,
+        familyStatus: "canceled",
+        familySubscriptionId: fixture.familySubscriptionId,
+        groupId: fixture.groupId,
+        memberId: fixture.memberId,
+        ownerMemberId: fixture.ownerMemberId,
+        subscriptionId: fixture.directSubscriptionId,
+      });
+
+      try {
+        await expect(cleanupHostedFamilySponsoredDirectSubscription({
+          memberId: fixture.memberId,
+          prisma,
+          sourceEventId: `evt_family_provider_ended_${fixture.fixtureId}`,
+          stripe: stripe.client,
+          subscriptionId: fixture.directSubscriptionId,
+        })).rejects.toBeInstanceOf(
+          HostedStripeFamilySponsoredCleanupPendingError,
+        );
+
+        expect(stripe.retrieve).toHaveBeenNthCalledWith(
+          1,
+          fixture.directSubscriptionId,
+        );
+        expect(stripe.retrieve).toHaveBeenNthCalledWith(
+          2,
+          fixture.familySubscriptionId,
+        );
+        expect(stripe.cancel).not.toHaveBeenCalled();
+        await expect(readHostedMemberBillingSnapshot({
+          memberId: fixture.memberId,
+          prisma,
+        })).resolves.toMatchObject({
+          billingRef: {
+            stripeSubscriptionId: fixture.directSubscriptionId,
+          },
+          core: { billingStatus: HostedBillingStatus.active },
+        });
+      } finally {
+        await deleteFamilyCleanupFixture(prisma, fixture);
+        await prisma.$disconnect();
       }
     });
 
@@ -1907,6 +1971,7 @@ interface FamilyCleanupFixture {
   checkoutSessionId: string;
   directCustomerId: string;
   directSubscriptionId: string;
+  familyCustomerId: string;
   familySubscriptionId: string;
   fixtureId: string;
   groupId: string;
@@ -1925,6 +1990,7 @@ async function seedFamilySponsoredDirectCleanupFixture(
     checkoutSessionId: `cs_cleanup_${fixtureId}`,
     directCustomerId: `cus_direct_cleanup_${fixtureId}`,
     directSubscriptionId: `sub_direct_cleanup_${fixtureId}`,
+    familyCustomerId: `cus_family_authority_${fixtureId}`,
     familySubscriptionId: `sub_family_authority_${fixtureId}`,
     fixtureId,
     groupId: `hbag_cleanup_${fixtureId}`,
@@ -1971,7 +2037,7 @@ async function seedFamilySponsoredDirectCleanupFixture(
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_family_monthly",
       groupId: fixture.groupId,
-      stripeCustomerId: `cus_family_authority_${fixtureId}`,
+      stripeCustomerId: fixture.familyCustomerId,
       stripeSubscriptionId: fixture.familySubscriptionId,
       tx,
     })
@@ -2032,10 +2098,15 @@ async function deleteFamilyCleanupFixture(
 
 function buildFamilyCleanupStripe(input: {
   beforeRetrieve?: () => Promise<void>;
+  familyCustomerId: string;
+  familyStatus?: Stripe.Subscription["status"];
+  familySubscriptionId: string;
+  groupId: string;
   memberId: string;
+  ownerMemberId: string;
   subscriptionId: string;
 }) {
-  const subscription: Stripe.Subscription = {
+  const directSubscription: Stripe.Subscription = {
     id: input.subscriptionId,
     metadata: {
       billingPlanCode: "launch_monthly",
@@ -2044,12 +2115,31 @@ function buildFamilyCleanupStripe(input: {
     },
     status: "active",
   } as never;
-  const retrieve = vi.fn(async () => {
+  const familySubscription: Stripe.Subscription = {
+    customer: input.familyCustomerId,
+    id: input.familySubscriptionId,
+    metadata: {
+      accountGroupId: input.groupId,
+      billingPlanCode: "launch_family_monthly",
+      kind: "hosted_family_plan",
+      ownerMemberId: input.ownerMemberId,
+    },
+    status: input.familyStatus ?? "active",
+  } as never;
+  const retrieve = vi.fn(async (subscriptionId: string) => {
     await input.beforeRetrieve?.();
-    return subscription;
+    if (subscriptionId === input.subscriptionId) {
+      return directSubscription;
+    }
+    if (subscriptionId === input.familySubscriptionId) {
+      return familySubscription;
+    }
+    throw Object.assign(new Error("Stripe subscription was not found."), {
+      code: "resource_missing",
+    });
   });
   const cancel = vi.fn(async () => ({
-    ...subscription,
+    ...directSubscription,
     status: "canceled" as const,
   }));
   const listInvoices = vi.fn(async () => ({
