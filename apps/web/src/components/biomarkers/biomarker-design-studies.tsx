@@ -505,6 +505,7 @@ export function BiomarkerReferenceContextStudy() {
             referenceRangeLabel="98 to 107 mmol/L"
             referenceRangeSourceLabel="Mayo Clinic Laboratories adult serum reference interval · not the reporting lab's range"
             referenceRangeTitle="Published adult comparator"
+            referenceRangeTone="context"
             unit="mmol/L"
           />
         </div>
