@@ -14,9 +14,6 @@ import type {
   HostedExecutionAssistantAskOrigin,
 } from '@murphai/hosted-execution/contracts'
 import type {
-  HostedPhoneCallBrief,
-} from '@murphai/hosted-execution/phone-calls'
-import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
@@ -57,10 +54,6 @@ import {
 } from './return-contact-kind.js'
 import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
 import type { AssistantConversationScope } from './conversation-policy.js'
-import {
-  type AssistantGroupPhoneCallPreviewAuthority,
-  resolveDeliveredAssistantGroupPhoneCallPreviewAuthority,
-} from './group-phone-call-preview-authority.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -141,10 +134,6 @@ export interface AssistantHostedToolContext {
   claimIMessageContactAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
-  currentGroupPhoneCallPreviewAuthority?(input?: {
-    brief?: HostedPhoneCallBrief
-    confirmationInputId?: string
-  }): Promise<AssistantGroupPhoneCallPreviewAuthority | null>
   closeNewsletterCapability?(): void
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -407,22 +396,6 @@ export function createAssistantHostedToolContext(input: {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
-    },
-    currentGroupPhoneCallPreviewAuthority: async (authorityInput) => {
-      const deliveryContext = readDeliveryContext()
-      return await resolveDeliveredAssistantGroupPhoneCallPreviewAuthority({
-        acceptedInputIds:
-          input.getUserActionAcceptedInputIds?.() ?? [],
-        ...(authorityInput?.brief === undefined
-          ? {}
-          : { brief: authorityInput.brief }),
-        channel: deliveryContext.messageInput.channel,
-        ...(authorityInput?.confirmationInputId === undefined
-          ? {}
-          : { confirmationInputId: authorityInput.confirmationInputId }),
-        sessionId: deliveryContext.session.sessionId,
-        vault: deliveryContext.messageInput.vault,
-      })
     },
     currentScheduledAutomationAuthority: () => {
       const deliveryContext = readDeliveryContext()

@@ -1744,7 +1744,6 @@ text(JSON.stringify(result));
     const authorizations: unknown[] = []
     const groupRequests: unknown[] = []
     const phoneCallStarts: unknown[] = []
-    const previewAuthorityChecks: unknown[] = []
     const userActionScope = {
       acceptedInputIds: [messageRef],
       conversationId: 'conversation_group_effect',
@@ -1755,12 +1754,6 @@ text(JSON.stringify(result));
     }
     const hostedToolContext: AssistantHostedToolContext = {
       computerToolsAvailable: false,
-      currentGroupPhoneCallPreviewAuthority: async (input) => {
-        previewAuthorityChecks.push(input)
-        return input?.confirmationInputId === messageRef
-          ? { assistantInputId: messageRef }
-          : null
-      },
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
       currentUserActionScope: () => userActionScope,
@@ -1874,22 +1867,6 @@ text(JSON.stringify(result));
     expect(groupRequests).toEqual([{
       action: 'revoke_own_email_share',
       participant,
-    }])
-    expect(previewAuthorityChecks).toEqual([{
-      brief: {
-        allowTransferToUser: false,
-        callerName: 'Murph',
-        goal: 'Confirm the office opening time.',
-        instructions: ['Ask only for the opening time.'],
-        shareableFacts: {},
-        successCriteria: 'The office states its opening time.',
-        timeZone: 'America/New_York',
-        to: {
-          label: 'The office',
-          phoneNumber: '+12125550123',
-        },
-      },
-      confirmationInputId: messageRef,
     }])
     expect(phoneCallStarts).toEqual([
       expect.objectContaining({
