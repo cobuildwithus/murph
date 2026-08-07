@@ -35,8 +35,8 @@ Success means:
 
 ## State
 
-Implementation and focused local proof complete. Exact-head PR review and CI in
-progress. The preliminary coverage/privacy pass found that the generic event
+Implementation, focused local proof, and the exact-head PR review are complete.
+The preliminary coverage/privacy pass found that the generic event
 builder could still derive health projections and admit nonnumeric failure
 codes; the accepted narrow parser-boundary correction and unrelated-event
 telemetry regression coverage are complete and locally verified. Final review
@@ -46,3 +46,13 @@ accepted correction records that state as request-unconfirmed without retrying.
 Final review round 3 found that the neutral label also covered completed HTTP
 rejections. The accepted three-way classification now records an accepted
 response, a structured HTTP rejection, or an ambiguous transport outcome.
+Final review round 4 passed the full corrected snapshot with no qualifying
+findings. Exact-head CI passed the host matrices, build/typecheck, app
+verification, fixture coverage, hygiene, viewport, and design-proof checks.
+Its two package-coverage shards are blocked by deterministic pre-existing
+failures on unchanged assistant-runtime and CLI routing tests; the same broad
+workflow is failing on `main`, and focused local reproduction confirms those
+failures do not exercise this plan's Linq request or webhook paths.
+Status: completed
+Updated: 2026-08-06
+Completed: 2026-08-06
