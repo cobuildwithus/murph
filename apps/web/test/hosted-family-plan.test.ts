@@ -3796,6 +3796,7 @@ describe("hosted Family plan", () => {
       lastStripeEventCreatedAt: eventCreatedAt,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([]);
     tx.hostedMemberBillingRef.findUnique.mockResolvedValue(null);
 
     await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
@@ -3807,6 +3808,31 @@ describe("hosted Family plan", () => {
       runtimeRecheckMemberIds: ["member_owner"],
     });
 
+    expect(tx.hostedMember.update).not.toHaveBeenCalled();
+    expect(tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("replays the current active Family owner wake after a newer event", async () => {
+    const tx = createTxMock();
+    const eventCreatedAt = new Date("2026-07-15T12:30:00.000Z");
+    const billingRef = createBillingRefMock({
+      lastStripeEventCreatedAt: new Date("2026-07-15T12:31:00.000Z"),
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([]);
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValue(null);
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: { eventCreatedAt },
+      subscription: makeFamilyStripeSubscription(),
+      tx,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+      runtimeRecheckMemberIds: ["member_owner"],
+    });
+
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
     expect(tx.hostedMember.update).not.toHaveBeenCalled();
     expect(tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
   });
@@ -4565,7 +4591,7 @@ describe("hosted Family plan", () => {
   it("does not activate family members from a stale active Stripe subscription event", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([]);
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
       billedSeatCount: 4,
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_family_monthly",

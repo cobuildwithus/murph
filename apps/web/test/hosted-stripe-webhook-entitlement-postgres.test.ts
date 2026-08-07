@@ -998,6 +998,7 @@ describe.skipIf(!runPostgresProof)(
       const stripeCustomerId = `cus_family_handoff_${fixtureId}`;
       const stripeSubscriptionId = `sub_family_handoff_${fixtureId}`;
       const stripeEventId = `evt_family_handoff_${fixtureId}`;
+      const newerStripeEventId = `evt_family_handoff_newer_${fixtureId}`;
       const pulsePriceId = `price_pulse_family_handoff_${fixtureId}`;
       const edgePriceId = `price_edge_family_handoff_${fixtureId}`;
       const familyPulsePriceId = `price_family_pulse_handoff_${fixtureId}`;
@@ -1005,6 +1006,7 @@ describe.skipIf(!runPostgresProof)(
       const webhookSecret = "whsec_hosted_family_handoff_fixture";
       const nowSeconds = Math.floor(Date.now() / 1_000);
       const eventCreatedAt = new Date(nowSeconds * 1_000);
+      const newerEventCreatedAt = new Date((nowSeconds + 1) * 1_000);
       const periodStart = new Date((nowSeconds - 60) * 1_000);
       const periodEnd = new Date(
         (nowSeconds + 30 * 24 * 60 * 60) * 1_000,
@@ -1025,8 +1027,16 @@ describe.skipIf(!runPostgresProof)(
         eventId: stripeEventId,
         subscription,
       });
+      const newerEvent = buildSubscriptionUpdatedEvent({
+        created: nowSeconds + 1,
+        eventId: newerStripeEventId,
+        subscription,
+      });
       const stripeFixture = await startHostedStripeHttpFixture({
-        events: { [stripeEventId]: event },
+        events: {
+          [newerStripeEventId]: newerEvent,
+          [stripeEventId]: event,
+        },
         subscriptions: { [stripeSubscriptionId]: subscription },
       });
       const runtimeGlobals = readHostedStripeRuntimeGlobals();
@@ -1178,6 +1188,32 @@ describe.skipIf(!runPostgresProof)(
           expect.objectContaining({ userId: ownerMemberId }),
         );
 
+        await postSignedHostedStripeEvent({
+          event: newerEvent,
+          stripe: stripeFixture.stripe,
+          webhookSecret,
+        });
+        await expect(processRecordedHostedStripeWebhookEvent({
+          eventId: newerStripeEventId,
+          prisma,
+          timeoutMs: 5_000,
+        })).resolves.toEqual({ accepted: true, required: false });
+        await expect(readStripeReceiptProof({
+          eventId: newerStripeEventId,
+          prisma,
+        })).resolves.toMatchObject({
+          attemptCount: 1,
+          processedAt: expect.any(Date),
+          status: HostedStripeEventStatus.completed,
+        });
+        await expect(prisma.hostedAccountGroupBillingRef.findUniqueOrThrow({
+          select: { lastStripeEventCreatedAt: true },
+          where: { groupId },
+        })).resolves.toEqual({
+          lastStripeEventCreatedAt: newerEventCreatedAt,
+        });
+        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(1);
+
         await makeStripeReceiptImmediatelyRetryable({
           eventId: stripeEventId,
           prisma,
@@ -1215,7 +1251,7 @@ describe.skipIf(!runPostgresProof)(
         clearHostedStripeFixtureEnvironment(runtimeGlobals);
         await stripeFixture.stop();
         await prisma.hostedStripeEvent.deleteMany({
-          where: { eventId: stripeEventId },
+          where: { eventId: { in: [newerStripeEventId, stripeEventId] } },
         });
         await prisma.hostedAccountGroup.deleteMany({ where: { id: groupId } });
         await prisma.hostedMember.deleteMany({ where: { id: ownerMemberId } });

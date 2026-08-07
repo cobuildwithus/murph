@@ -1777,32 +1777,53 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     return buildEmptyHostedFamilyStripeSubscriptionResult();
   }
 
-  const match = await findHostedAccountGroupForStripeObject({
+  const stripeMatchInput = {
     accountGroupId: normalizeNullableString(input.subscription.metadata?.accountGroupId),
     checkoutAttemptId: normalizeNullableString(input.subscription.metadata?.checkoutAttemptId),
     customerId: coerceStripeObjectId(input.subscription.customer),
     customerLookupAllowed: false,
-    prisma: input.tx,
     subscriptionId: input.subscription.id,
+  };
+  const match = await findHostedAccountGroupForStripeObject({
+    ...stripeMatchInput,
+    prisma: input.tx,
   });
   if (!match) {
     return buildEmptyHostedFamilyStripeSubscriptionResult();
   }
-  const { billingRef: matchedBillingRef, group } = match;
   await assertHostedFamilyOwnerIsPersonalMember({
-    ownerMemberId: group.ownerMemberId,
+    ownerMemberId: match.group.ownerMemberId,
     prisma: input.tx,
   });
   const eventCreatedAt = input.dispatchContext.eventCreatedAt ?? null;
-  const recheckOwnerOnExactActiveEventReplay = Boolean(
+  await lockHostedMemberRow(input.tx, match.group.ownerMemberId);
+  const lockedMatch = await findHostedAccountGroupForStripeObject({
+    ...stripeMatchInput,
+    prisma: input.tx,
+  });
+  if (
+    !lockedMatch
+    || lockedMatch.group.ownerMemberId !== match.group.ownerMemberId
+  ) {
+    return {
+      activations: [],
+      groupId: match.group.id,
+      runtimeRecheckMemberIds: [],
+    };
+  }
+  const { billingRef: matchedBillingRef, group } = lockedMatch;
+  const currentActiveFamilySubscription = Boolean(
     eventCreatedAt
     && input.subscription.status === "active"
     && group.billingStatus === HostedBillingStatus.active
     && matchedBillingRef?.currentBillingPhase === "paid"
     && matchedBillingRef.currentBillingPlanCode === HOSTED_FAMILY_BILLING_PLAN_CODE
     && matchedBillingRef.stripeSubscriptionId === input.subscription.id
-    && matchedBillingRef.lastStripeEventCreatedAt?.getTime()
-      === eventCreatedAt.getTime()
+  );
+  const recheckOwnerOnExactActiveEventReplay = Boolean(
+    currentActiveFamilySubscription
+    && matchedBillingRef?.lastStripeEventCreatedAt?.getTime()
+      === eventCreatedAt?.getTime()
   );
   if (isHostedFamilyStripeEventStale({
     billingRef: matchedBillingRef,
@@ -1816,26 +1837,9 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
           ? await readHostedFamilyRuntimeRecheckMemberIdsForEventTx({
               eventCreatedAt,
               groupId: group.id,
-              tx: input.tx,
-            })
-          : [],
-    };
-  }
-
-  const eventFreshUnderOwnerLock = await lockHostedFamilyBillingReconciliationTx({
-    eventCreatedAt,
-    group,
-    tx: input.tx,
-  });
-  if (!eventFreshUnderOwnerLock) {
-    return {
-      activations: [],
-      groupId: group.id,
-      runtimeRecheckMemberIds:
-        group.billingStatus === HostedBillingStatus.active
-          ? await readHostedFamilyRuntimeRecheckMemberIdsForEventTx({
-              eventCreatedAt,
-              groupId: group.id,
+              ownerMemberId: currentActiveFamilySubscription
+                ? group.ownerMemberId
+                : null,
               tx: input.tx,
             })
           : [],
@@ -2099,6 +2103,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
 async function readHostedFamilyRuntimeRecheckMemberIdsForEventTx(input: {
   eventCreatedAt: Date | null;
   groupId: string;
+  ownerMemberId: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<string[]> {
   if (!input.eventCreatedAt) {
@@ -2114,7 +2119,12 @@ async function readHostedFamilyRuntimeRecheckMemberIdsForEventTx(input: {
       usagePlanTransitionKind: "plan_upgrade",
     },
   });
-  return memberships.map((membership) => membership.memberId);
+  return [
+    ...new Set([
+      ...memberships.map((membership) => membership.memberId),
+      ...(input.ownerMemberId ? [input.ownerMemberId] : []),
+    ]),
+  ];
 }
 
 export async function createHostedFamilyBillingCheckout(input: {
@@ -5854,27 +5864,6 @@ function readHostedLegacySyntheticFamilyStripeBinding(event: Stripe.Event): {
   }
 
   return null;
-}
-
-async function lockHostedFamilyBillingReconciliationTx(input: {
-  eventCreatedAt: Date | null;
-  group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
-  tx: Prisma.TransactionClient;
-}): Promise<boolean> {
-  await lockHostedMemberRow(input.tx, input.group.ownerMemberId);
-  const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
-    select: {
-      lastStripeEventCreatedAt: true,
-    },
-    where: {
-      groupId: input.group.id,
-    },
-  });
-
-  return !isHostedFamilyStripeEventStale({
-    billingRef,
-    eventCreatedAt: input.eventCreatedAt,
-  });
 }
 
 function isHostedFamilyStripeEventStale(input: {
