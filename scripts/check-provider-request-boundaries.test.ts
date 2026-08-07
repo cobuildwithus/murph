@@ -67,6 +67,12 @@ describe("check-provider-request-boundaries", () => {
     ].join("\n"))).toEqual([2]);
   });
 
+  it("blocks spreads on direct hosted Stripe factory chains", () => {
+    expect(blockedLines([
+      "requireHostedStripeApi().subscriptions.update(subscriptionId, { ...params });",
+    ].join("\n"))).toEqual([1]);
+  });
+
   it("blocks spreads in Stripe request options", () => {
     expect(blockedLines([
       "const options = { ...baseOptions, idempotencyKey: key };",
@@ -139,7 +145,7 @@ describe("check-provider-request-boundaries", () => {
     ].join("\n"))).toEqual([3, 5]);
   });
 
-  it("rejects inferred object variables passed as provider request params", () => {
+  it("rejects untyped object-literal variables passed as provider request params", () => {
     expect(
       findProviderRequestBoundaryViolations(
         "apps/web/src/example.ts",

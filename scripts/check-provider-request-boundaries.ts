@@ -70,6 +70,9 @@ const providerSourceMarkers = [
   "retell-sdk",
   "stripe",
 ] as const;
+const providerClientFactoryNames = new Set([
+  "requireHostedStripeApi",
+]);
 const providerRequestTypeNamePattern =
   /(?:ConnectionOptions|MediaPart|MessageContent|Params?(?:NonStreaming|Streaming)?|RequestOptions|TextPart)$/u;
 
@@ -685,7 +688,10 @@ function isProviderMemberPath(
   clientNames: ReadonlySet<string>,
 ): boolean {
   const clientIndex = pathParts.findIndex(
-    (part) => clientNames.has(part) || part.toLowerCase() === "stripe",
+    (part) =>
+      clientNames.has(part) ||
+      providerClientFactoryNames.has(part) ||
+      part.toLowerCase() === "stripe",
   );
   return clientIndex >= 0 && pathParts.length > clientIndex + 1;
 }
@@ -897,7 +903,7 @@ function formatViolationKind(kind: ProviderRequestBoundaryViolationKind): string
     case "object-spread":
       return "contains an object spread";
     case "untyped-request-object":
-      return "passes an inferred object variable";
+      return "passes an untyped object-literal variable";
   }
 }
 

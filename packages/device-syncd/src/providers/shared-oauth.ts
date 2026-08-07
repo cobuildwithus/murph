@@ -35,14 +35,19 @@ import type {
 
 type ProviderApiErrorDiagnosticValue = boolean | number | string | null | undefined;
 
-type OAuthTokenRequestExtraParameters = Readonly<Record<string, string>> & {
-  client_id?: never;
-  client_secret?: never;
-  code?: never;
-  grant_type?: never;
-  redirect_uri?: never;
-  refresh_token?: never;
-};
+const oauthTokenRequestProtocolOwnedFields = [
+  "client_id",
+  "client_secret",
+  "code",
+  "grant_type",
+  "redirect_uri",
+  "refresh_token",
+] as const;
+const oauthTokenRequestProtocolOwnedFieldSet: ReadonlySet<string> = new Set(
+  oauthTokenRequestProtocolOwnedFields,
+);
+type OAuthTokenRequestExtraParameters = Readonly<Record<string, string>> &
+  Partial<Record<(typeof oauthTokenRequestProtocolOwnedFields)[number], never>>;
 
 type OAuthAuthorizationExtraSearchParameters = Readonly<
   Record<string, string | null | undefined>
@@ -485,7 +490,7 @@ function appendOAuthTokenRequestExtraParameters(
   extraParameters: OAuthTokenRequestExtraParameters | undefined,
 ): Record<string, string> {
   for (const [key, value] of Object.entries(extraParameters ?? {})) {
-    if (Object.hasOwn(parameters, key)) {
+    if (oauthTokenRequestProtocolOwnedFieldSet.has(key)) {
       throw new TypeError(
         `OAuth token request extra parameters must not override protocol-owned field ${key}.`,
       );

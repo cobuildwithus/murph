@@ -825,6 +825,32 @@ test("shared oauth helpers reject extension parameters that override protocol-ow
   );
   assert.equal(exchangeRequests, 0);
 
+  await assert.rejects(
+    () => exchangeOAuthAuthorizationCode({
+      async postTokenRequest() {
+        exchangeRequests += 1;
+        return {
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+        };
+      },
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      callbackUrl: "https://sync.example.test/oauth/callback",
+      code: "auth-code",
+      tokenResponseToAuthTokens(payload) {
+        return tokenResponseToAuthTokens(payload, () => new Error("missing access token"));
+      },
+      buildMissingRefreshTokenError: () => new Error("missing refresh token"),
+      extraParameters: dynamicStringRecord(
+        "refresh_token",
+        "unexpected-refresh-token",
+      ),
+    }),
+    /must not override protocol-owned field refresh_token/u,
+  );
+  assert.equal(exchangeRequests, 0);
+
   let refreshRequests = 0;
   await assert.rejects(
     () => refreshOAuthTokens({
@@ -848,6 +874,28 @@ test("shared oauth helpers reject extension parameters that override protocol-ow
       ),
     }),
     /must not override protocol-owned field refresh_token/u,
+  );
+  assert.equal(refreshRequests, 0);
+
+  await assert.rejects(
+    () => refreshOAuthTokens({
+      async postTokenRequest() {
+        refreshRequests += 1;
+        return {
+          access_token: "refreshed-access-token",
+          refresh_token: "rotated-refresh-token",
+        };
+      },
+      account: createAccount(),
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      tokenResponseToAuthTokens(payload) {
+        return tokenResponseToAuthTokens(payload, () => new Error("missing access token"));
+      },
+      buildMissingRefreshTokenError: () => new Error("missing refresh token"),
+      extraParameters: dynamicStringRecord("code", "unexpected-code"),
+    }),
+    /must not override protocol-owned field code/u,
   );
   assert.equal(refreshRequests, 0);
 
