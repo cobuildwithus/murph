@@ -1,4 +1,4 @@
-import * as z from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import type {
   AssistantResponseMedia,
   AssistantSession,

@@ -12,7 +12,7 @@ import type {
 import type { ConnectorRestartPolicy } from '@murphai/inboxd/runtime'
 import type { EventSource, MealNutrition } from '@murphai/contracts'
 import type { RuntimePaths } from '@murphai/runtime-state/node'
-import { z } from 'zod'
+import type * as z from '@murphai/contracts/zod-runtime'
 import type { AgentmailApiClient } from '@murphai/operator-config/agentmail-runtime'
 import { inboxPromotionStoreSchema } from '@murphai/operator-config/inbox-cli-contracts'
 import type {
