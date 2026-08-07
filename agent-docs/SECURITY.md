@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-05
+Last verified: 2026-08-06
 
 ## Non-Negotiable Rules
 
@@ -676,6 +676,7 @@ Last verified: 2026-08-05
 - Hosted generated voice memos are Worker-mediated ElevenLabs plus channel-native delivery effects. Store only bounded transcript/config metadata plus Linq attachment references or Telegram delivery-time generation references in assistant runtime/outbox records; never write generated audio bytes, ElevenLabs request text beyond the intended transcript field, provider secrets, presigned upload headers, or Telegram multipart audio bodies into logs, docs, fixtures, or user-facing output.
 - Hosted snapshot path diagnostics may use a Worker-derived HMAC key from `HOSTED_LOG_FINGERPRINT_SECRET`, passed only through the runner job diagnostics object for metadata-only path hashes. The container CPU watchdog may log only PID, numeric CPU attribution, and a fixed-allowlist executable basename derived from `/proc/<pid>/exe`, with an allowlisted Linux `comm` value as the readlink-unavailable fallback. A successfully read non-allowlisted executable never falls back to `comm`; arbitrary `comm` values and the symlink target path are never retained across samples or logged. It must not log command lines, argv, file paths, prompts, request bodies, transcripts, vault contents, or a Worker fingerprint secret. Do not put the raw Worker fingerprint secret or raw `HOSTED_LOG_FINGERPRINT_SECRET` env key in forwarded env, platform env, user env, hosted runtime env, logs, container env, or persisted artifacts.
 - The container fatal-report sink (`runner-control.worker/v1/container-fatal`, handled in `apps/cloudflare/src/runner-egress-intercept.ts`) is deliberately reachable without a bound user or write fence: the unattributable container deaths it exists to record happen outside any invocation, when neither exists. Its only effect is a sanitized, size-capped, per-isolate rate-limited worker log line; it must never forward to the Durable Object, never inject credentials, and never persist beyond worker logs. Any code running in a hosted container can post to it, so treat its log lines as container-asserted diagnostics (correlate with DO lifecycle stop events), not authenticated facts.
+- Linq group-icon outcome observability may retain only bounded identifier suffixes, a blind chat lookup key, terminal status and timestamp, payload shape/hash, and the documented numeric failure code. The accepted-request log and durable outcome row must never retain the old or new icon URL, changed-by handle, raw callback values, or provider prose.
 - Crabbox verification is a secret-free trust boundary, not a deployment lane.
   The local dispatcher must rebuild the Crabbox CLI environment from non-secret
   host/config paths instead of passing through the parent environment and use
