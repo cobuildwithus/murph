@@ -1138,6 +1138,25 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Upgrade to Edge/);
   });
 
+  test("keeps the server-authorized recovery action for a paused Pulse trial", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      canStartPaidPulse: true,
+      billingStatus: "paused",
+      currentBillingPhase: "trial",
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentBillingPlanCode: "launch_monthly",
+    }));
+
+    assert.match(markup, /Start Pulse plan/);
+    assert.doesNotMatch(markup, /Pulse is not active/);
+  });
+
   test("suppresses every Start Pulse action with action-neutral copy while continuation is pending", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
     const usageStatus = buildUsageStatus({
