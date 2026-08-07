@@ -14,8 +14,9 @@ message-bound effects.
   retry boundaries.
 - Channel, audience, group, and verified-human restrictions remain authoritative.
 - Failed provider or delivery work does not commit misleading product feedback.
-- Clinical Records keeps one live short-lived intent and never resurrects an
-  OAuth flow that has started or completed.
+- Scheduled Clinical Records delivery does not create or rotate an intent; the
+  existing one-live, short-lived claim begins only after the member opens the
+  authenticated launcher as current human action.
 - No new durable state owner, queue, scheduler, migration, dependency, or
   compatibility layer is introduced.
 
@@ -44,3 +45,30 @@ message-bound effects.
 - Preliminary `completion-specialists` ReviewGPT pass with product-experience
   and coverage lenses.
 - Final `pr-review` ReviewGPT loop through `ROUND_OUTCOME: PASS`.
+
+## Review evidence
+
+- The preliminary specialist pass required a production-faithful scheduled
+  image-to-delivery scenario and clearer saved-instruction authority for
+  response cards. Both are covered in the candidate; the proposed removal of
+  scheduled cards was rejected because explicit private-direct scheduled card
+  requests are intended product behavior.
+- Final ReviewGPT round 1 found three correctness gaps: delayed scheduled
+  preferences could overwrite newer state, queue-only feedback could be lost or
+  accepted at the wrong boundary, and Clinical Records created a short-lived
+  intent before scheduled delivery. The candidate now orders scheduled fields
+  by trusted occurrence time while retaining only referenced structural causal
+  rows, stages feedback until confirmed delivery or committed no-reply, and
+  creates the Clinical Records intent only after the authenticated launcher is
+  opened.
+- Focused owner suites pass, including 278 assistant-runtime phase tests and a
+  Strict Mode launcher replay test. The full-stack scheduled-image scenario
+  observed the expected image upload, attachment, and Linq delivery, then timed
+  out waiting for global runtime quiescence during repeated local database-pool
+  pressure after the asserted send.
+- The provider-visible request remains within the measured input budget. Exact
+  deterministic rerendering of the three amended descriptions on the captured
+  requests yields 133,078 bytes for individual scheduled Murph (+0.3590%) and
+  105,212 bytes for group scheduled Murph (+0.1828%) versus base. Exact model
+  token totals remain unavailable because the pinned local provider does not
+  expose tokenizer usage for the selected model.

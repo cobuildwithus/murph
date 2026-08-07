@@ -234,7 +234,10 @@ test('sendAssistantMessageLocal hands off product feedback only after durable re
   })
 
   expect(acceptProductFeedbackCandidate).toHaveBeenCalledOnce()
-  expect(acceptProductFeedbackCandidate).toHaveBeenCalledWith(productFeedbackCandidate)
+  expect(acceptProductFeedbackCandidate).toHaveBeenCalledWith(
+    productFeedbackCandidate,
+    { disposition: 'delivered' },
+  )
   expect(
     acceptProductFeedbackCandidate.mock.invocationCallOrder[0],
   ).toBeGreaterThan(

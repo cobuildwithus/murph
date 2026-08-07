@@ -38,6 +38,7 @@ import {
 import {
   CLINICAL_RECORD_CONNECT_START_PATH,
   parseClinicalProviderSearchResponse,
+  parseClinicalRecordConnectIntentResponse,
   parseClinicalRecordConnectStartResponse,
   type ClinicalProviderFacilityContract,
   type ClinicalProviderSearchResultContract,
@@ -45,12 +46,21 @@ import {
 import { cn } from "@/src/lib/utils";
 
 const PROVIDER_SEARCH_PATH = "/api/clinical-records/providers/search";
+const CONNECT_INTENT_PATH = "/api/clinical-records/connect-intents";
 
-export function RecordsConnectClient({ authenticated }: { authenticated: boolean }) {
+export function RecordsConnectClient({
+  authenticated,
+  launchConnectIntent = false,
+}: {
+  authenticated: boolean;
+  launchConnectIntent?: boolean;
+}) {
   const [intentClaim, setIntentClaim] = useState<string | null | undefined>(undefined);
+  const [launchFailed, setLaunchFailed] = useState(false);
   const [consentRequired, setConsentRequired] = useState<boolean | null>(null);
   const authOpenedRef = useRef(false);
   const capturedIntentRef = useRef<string | null | undefined>(undefined);
+  const launchPromiseRef = useRef<Promise<string> | null>(null);
   const { openAuthDialog } = useAuth();
 
   useLayoutEffect(() => {
@@ -74,7 +84,7 @@ export function RecordsConnectClient({ authenticated }: { authenticated: boolean
   useEffect(() => {
     if (
       authenticated
-      || !intentClaim
+      || (!intentClaim && !launchConnectIntent)
       || authOpenedRef.current
     ) {
       return;
@@ -82,13 +92,56 @@ export function RecordsConnectClient({ authenticated }: { authenticated: boolean
 
     authOpenedRef.current = true;
     openAuthDialog();
-  }, [authenticated, intentClaim, openAuthDialog]);
+  }, [authenticated, intentClaim, launchConnectIntent, openAuthDialog]);
 
-  if (intentClaim === undefined) {
+  useEffect(() => {
+    if (
+      !launchConnectIntent
+      || !authenticated
+      || intentClaim !== null
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const launchPromise = launchPromiseRef.current ?? requestHostedOnboardingJson<unknown>({
+      method: "POST",
+      payload: {},
+      url: CONNECT_INTENT_PATH,
+    }).then((response) => parseClinicalRecordConnectIntentResponse(response).claim);
+    launchPromiseRef.current = launchPromise;
+    void launchPromise
+      .then((claim) => {
+        if (cancelled) return;
+        const fragment = new URLSearchParams({
+          clinicalRecordsIntent: claim,
+        }).toString();
+        window.history.replaceState(null, "", `/records/connect#${fragment}`);
+        setIntentClaim(claim);
+      })
+      .catch(() => {
+        if (!cancelled) setLaunchFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated, intentClaim, launchConnectIntent]);
+
+  if (
+    intentClaim === undefined
+    || (
+      launchConnectIntent
+      && authenticated
+      && intentClaim === null
+      && !launchFailed
+    )
+  ) {
     return <ConnectPageSkeleton />;
   }
 
   if (!intentClaim) {
+    if (launchConnectIntent && !authenticated) {
+      return <AuthRequiredState onSignIn={openAuthDialog} />;
+    }
     return <UnavailableIntentState />;
   }
 

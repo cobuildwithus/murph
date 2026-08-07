@@ -82,7 +82,7 @@ describe("assistant product feedback", () => {
     })).toBeNull();
   });
 
-  it("accepts scheduled feedback only after a committed skip or successful send", () => {
+  it("stages scheduled feedback after a committed skip or queued delivery", () => {
     const scheduledInput = {
       scheduledInvocationAuthority: {
         automationId: "automation_feedback",
@@ -99,16 +99,19 @@ describe("assistant product feedback", () => {
     })).toBe(true);
     expect(shouldAcceptAssistantProductFeedbackCandidate({
       input: scheduledInput,
+      outcome: { kind: "queued" },
+      responseDisposition: null,
+    })).toBe(true);
+    expect(shouldAcceptAssistantProductFeedbackCandidate({
+      input: scheduledInput,
       outcome: { kind: "not-requested" },
       responseDisposition: "none",
     })).toBe(true);
-    for (const kind of ["failed", "queued"] as const) {
-      expect(shouldAcceptAssistantProductFeedbackCandidate({
-        input: scheduledInput,
-        outcome: { kind },
-        responseDisposition: null,
-      })).toBe(false);
-    }
+    expect(shouldAcceptAssistantProductFeedbackCandidate({
+      input: scheduledInput,
+      outcome: { kind: "failed" },
+      responseDisposition: null,
+    })).toBe(false);
     expect(shouldAcceptAssistantProductFeedbackCandidate({
       input: { ...scheduledInput, scheduledOccurrenceAt: "other" },
       outcome: { kind: "failed" },

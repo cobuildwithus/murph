@@ -149,10 +149,15 @@ Assistant link creation reuses the same signed Web control boundary through
 `/api/internal/clinical-records/connect-link`. Message-authorized calls use an
 empty object; the route derives the member from the active runtime fence and
 returns the existing short-lived first-party connect URL. Scheduled calls may add only a typed
-`scheduled_<sha256>` request key derived from the exact occurrence. Same-key retries
-reuse one unstarted live intent, while a link whose OAuth flow started or completed
-is never resurrected. A verified private current request or exact scheduled
-automation occurrence may invoke that same owner; neither path can choose a member,
+`scheduled_<sha256>` request key derived from the exact occurrence. That form returns
+one stable authenticated browser launcher without creating an intent, rotating the
+member's current intent, or starting the 15-minute claim TTL. After the member opens
+the launcher and authenticates, the existing browser POST creates the ordinary
+single-use intent as current human action. Queued delivery and same-occurrence retry
+therefore cannot invalidate a newer human link, resurrect a started or completed
+OAuth flow, or expire the scheduled link before delivery. A verified private current
+request or exact scheduled automation occurrence may invoke that same owner; neither
+path can choose a member,
 provider, or destination in tool arguments. Once an import is queued, the retrieval
 runtime uses three signed POST operations:
 

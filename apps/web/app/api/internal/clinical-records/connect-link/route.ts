@@ -9,6 +9,7 @@ import { requireClinicalRecordsRuntimeWriteFence } from "@/src/lib/clinical-reco
 import { requireHostedCloudflareCallbackRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { requireHostedRuntimeActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
 import { readJsonObject } from "@/src/lib/http";
+import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 
 const MAX_BODY_BYTES = 4 * 1_024;
 
@@ -32,11 +33,17 @@ export const POST = withClinicalJsonError(async (request: Request) => {
     await readJsonObject(request, { limitBytes: MAX_BODY_BYTES }),
   );
   if (!parsed.success) throw invalidBodyError();
-  const intent = await createClinicalRecordConnectIntent({
-    memberId,
-    ...(parsed.data.requestKey ? { requestKey: parsed.data.requestKey } : {}),
-    request,
-  });
+  if (parsed.data.requestKey) {
+    const baseUrl = resolveHostedPublicBaseUrl() ?? new URL(request.url).origin;
+    const connectUrl = new URL("/records/connect", `${baseUrl}/`);
+    connectUrl.searchParams.set("launch", "clinical-records");
+    return clinicalJsonOk({
+      connectUrl: connectUrl.toString(),
+      expiresAt: null,
+      ok: true,
+    });
+  }
+  const intent = await createClinicalRecordConnectIntent({ memberId, request });
   return clinicalJsonOk({
     connectUrl: intent.connectUrl,
     expiresAt: intent.expiresAt,

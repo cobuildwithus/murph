@@ -1370,9 +1370,11 @@ new delivery primitive. The daily-nutrition V1 contract remains readable for
 retained effects and already-sent messages. V2 keeps the same card kind and
 adds canonical fiber totals plus nullable frozen goal snapshots. Targets come
 only from current active canonical goals; the one-message semantic status is
-not persisted goal progress. Ordinary private-direct interactive turns and the
-managed meal closeout share this one attachment tool; other scheduled turns do
-not receive it. Because a card replaces the whole final response, it is only
+not persisted goal progress. Ordinary private-direct interactive turns, exact
+private-direct scheduled turns, and the managed meal closeout share this one
+attachment tool. Scheduled use requires saved instructions that explicitly
+request a card; occurrence authority alone is not card intent. Because a card
+replaces the whole final response, it is only
 eligible when the card alone completely satisfies the current request. New
 accepted input in the same live turn invalidates an earlier card-only decision,
 and attachment is rejected after the delivery context advances. Every

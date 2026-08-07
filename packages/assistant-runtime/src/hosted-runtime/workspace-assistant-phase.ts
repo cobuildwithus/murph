@@ -1701,7 +1701,10 @@ export async function runHostedWorkspaceAssistantPhase(
   };
   const productFeedbackCandidates = new Map<
     string,
-    HostedRuntimeProductFeedbackRecord
+    {
+      disposition: "committed_non_reply" | "delivered" | "delivery_pending";
+      feedback: HostedRuntimeProductFeedbackRecord;
+    }
   >();
   const recordDeferredUsage = (
     record: AssistantUsageRecord,
@@ -1814,10 +1817,14 @@ export async function runHostedWorkspaceAssistantPhase(
               productFeedbackCandidateSink: {
                 acceptProductFeedbackCandidate(
                   feedback: HostedRuntimeProductFeedbackRecord,
+                  context: {
+                    disposition:
+                      "committed_non_reply" | "delivered" | "delivery_pending";
+                  },
                 ) {
                   productFeedbackCandidates.set(
                     feedback.idempotencyKey,
-                    feedback,
+                    { disposition: context.disposition, feedback },
                   );
                 },
                 // Support escalations are recorded through the Web callback
@@ -2588,9 +2595,14 @@ export async function runHostedWorkspaceAssistantPhase(
       progressed,
       systemMailboxWakeAt,
     });
-    const hasPostCommitProviderCleanup = providerCleanupDue
+    const hasCommittedNonReplyProductFeedback =
+      assistantMetrics.assistantAutomationProductFeedbackCandidates?.some(
+        (candidate) => candidate.disposition === "committed_non_reply",
+      ) === true;
+    const hasPostCommitWork = providerCleanupDue
       || deliveryEffects.length > 0
-      || providerCleanupStateQueued;
+      || providerCleanupStateQueued
+      || hasCommittedNonReplyProductFeedback;
 
     const phaseProgressed = progressed || providerCleanupDue;
     const redactedStatus = buildHostedWorkspaceAssistantPhaseRedactedStatus({
@@ -2613,7 +2625,7 @@ export async function runHostedWorkspaceAssistantPhase(
     }
 
     const result = mergeContinuingSystemMailboxResult({
-      ...(hasPostCommitProviderCleanup
+      ...(hasPostCommitWork
         ? {
             afterCheckpointKeepsForegroundImportLoop: true,
             afterCheckpoint: async () => {
@@ -2634,6 +2646,14 @@ export async function runHostedWorkspaceAssistantPhase(
                 && !providerCleanupDue
                 && !providerCleanupStateQueued
               ) {
+                await recordHostedProductFeedbackAfterMemberDelivery({
+                  candidates:
+                    assistantMetrics.assistantAutomationProductFeedbackCandidates
+                    ?? [],
+                  currentTurnDeliveryIntentIds: [],
+                  outcomes: [],
+                  port: input.runtime.platform.productFeedbackPort ?? null,
+                });
                 return {
                   checkpointReason: "assistant_runtime_commit",
                   nextWakeAt: baseNextWakeAt,
@@ -5983,7 +6003,12 @@ async function runForegroundAssistantReplyPhase(input: {
     progressed,
     systemMailboxWakeAt: input.systemMailboxWakeAt,
   });
-  const hasPostCommitProviderCleanup = deliveryEffects.length > 0;
+  const hasCommittedNonReplyProductFeedback =
+    input.assistantMetrics.assistantAutomationProductFeedbackCandidates?.some(
+      (candidate) => candidate.disposition === "committed_non_reply",
+    ) === true;
+  const hasPostCommitWork = deliveryEffects.length > 0
+    || hasCommittedNonReplyProductFeedback;
 
   const redactedStatus = buildHostedWorkspaceAssistantPhaseRedactedStatus({
     deliveryEffectCount: deliveryEffects.length,
@@ -6007,7 +6032,7 @@ async function runForegroundAssistantReplyPhase(input: {
   }
 
   return {
-    ...(hasPostCommitProviderCleanup
+    ...(hasPostCommitWork
       ? {
           afterCheckpointKeepsForegroundImportLoop: true,
           afterCheckpoint: async () => {
@@ -6018,6 +6043,22 @@ async function runForegroundAssistantReplyPhase(input: {
               input.skippedDeviceSyncWake,
               input.systemMailboxWake,
             ]);
+            if (deliveryEffects.length === 0) {
+              await recordHostedProductFeedbackAfterMemberDelivery({
+                candidates:
+                  input.assistantMetrics.assistantAutomationProductFeedbackCandidates
+                  ?? [],
+                currentTurnDeliveryIntentIds: [],
+                outcomes: [],
+                port: input.input.runtime.platform.productFeedbackPort ?? null,
+              });
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: baseNextWake.at,
+                nextWakeReason: baseNextWake.reason,
+                redactedStatus: { nextWakeAt: baseNextWake.at },
+              };
+            }
             const postDelivery = await drainHostedPostCheckpointDelivery({
               assistantMetrics: input.assistantMetrics,
               assistantDeliveryEffects: deliveryEffects,
@@ -6375,7 +6416,10 @@ async function drainHostedPostCheckpointDelivery(input: {
 }
 
 async function recordHostedProductFeedbackAfterMemberDelivery(input: {
-  candidates: readonly HostedRuntimeProductFeedbackRecord[];
+  candidates: readonly {
+    disposition: "committed_non_reply" | "delivered" | "delivery_pending";
+    feedback: HostedRuntimeProductFeedbackRecord;
+  }[];
   currentTurnDeliveryIntentIds: readonly string[];
   outcomes: readonly HostedAssistantDeliveryOutcome[];
   port: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["productFeedbackPort"];
@@ -6383,17 +6427,26 @@ async function recordHostedProductFeedbackAfterMemberDelivery(input: {
   if (
     !input.port
     || input.candidates.length === 0
-    || !input.outcomes.some((outcome) =>
-      outcome.deliveryStatus === "sent"
-      && input.currentTurnDeliveryIntentIds.includes(outcome.effectId)
-    )
   ) {
     return;
   }
 
+  const currentTurnDelivered = input.outcomes.some((outcome) =>
+    outcome.deliveryStatus === "sent"
+    && input.currentTurnDeliveryIntentIds.includes(outcome.effectId)
+  );
+  const accepted = input.candidates.filter((candidate) =>
+    candidate.disposition === "committed_non_reply"
+    || candidate.disposition === "delivered"
+    || currentTurnDelivered
+  );
+  if (accepted.length === 0) {
+    return;
+  }
+
   await Promise.allSettled(
-    input.candidates.map((candidate) =>
-      input.port?.recordProductFeedback(candidate)
+    accepted.map((candidate) =>
+      input.port?.recordProductFeedback(candidate.feedback)
     ),
   );
 }

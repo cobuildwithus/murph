@@ -51,6 +51,12 @@ describe("clinical records hosted execution contracts", () => {
 
     expect(parseHostedClinicalRecordsConnectLinkResponse(response)).toEqual(response);
     expect(parseHostedClinicalRecordsConnectLinkResponse({
+      connectUrl:
+        "https://app.example.test/records/connect?launch=clinical-records",
+      expiresAt: null,
+      ok: true,
+    })).toMatchObject({ expiresAt: null, ok: true });
+    expect(parseHostedClinicalRecordsConnectLinkResponse({
       ...response,
       connectUrl: `http://127.0.0.1:3000/records/connect#clinicalRecordsIntent=${claim}`,
     })).toMatchObject({ ok: true });
@@ -60,6 +66,8 @@ describe("clinical records hosted execution contracts", () => {
       `http://app.example.test/records/connect#clinicalRecordsIntent=${claim}`,
       `https://app.example.test/settings#clinicalRecordsIntent=${claim}`,
       `https://app.example.test/records/connect?claim=${claim}#clinicalRecordsIntent=${claim}`,
+      "https://app.example.test/records/connect?launch=other",
+      "https://app.example.test/records/connect?launch=clinical-records&memberId=other",
       "https://app.example.test/records/connect#clinicalRecordsIntent=invalid",
       `https://app.example.test/records/connect#clinicalRecords%49ntent=${claim}`,
       `https://app.example.test/records/connect#clinicalRecordsIntent=${claim}&memberId=other`,

@@ -86,7 +86,10 @@ function readCardToolRequest(argumentsValue: unknown) {
 describe('murph.attach_response_card', () => {
   it('describes the private on-demand canonical-read contract', () => {
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'current accepted member message or exact scheduled automation occurrence explicitly requests it',
+      'saved instructions for the exact scheduled automation occurrence explicitly request it',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Occurrence authority alone is not card intent',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'single active tracked workout whose table was explicitly established earlier',

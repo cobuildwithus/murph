@@ -79,7 +79,7 @@ const hostedClinicalRecordsConnectUrlSchema = z.string().url().max(2_048).refine
 
 export const hostedClinicalRecordsConnectLinkResponseSchema = z.object({
   connectUrl: hostedClinicalRecordsConnectUrlSchema,
-  expiresAt: clinicalIsoDateTimeSchema,
+  expiresAt: clinicalIsoDateTimeSchema.nullable(),
   ok: z.literal(true),
 }).strict();
 
@@ -263,8 +263,18 @@ function isHostedClinicalRecordsConnectUrl(value: string): boolean {
     || url.username.length > 0
     || url.password.length > 0
     || url.pathname !== "/records/connect"
-    || url.search.length > 0
   ) {
+    return false;
+  }
+
+  if (
+    url.hash.length === 0
+    && url.searchParams.size === 1
+    && url.searchParams.get("launch") === "clinical-records"
+  ) {
+    return true;
+  }
+  if (url.search.length > 0) {
     return false;
   }
 

@@ -8177,7 +8177,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
       async (laneInput) => {
         laneInput.executionContext.hosted?.productFeedbackCandidateSink
-          ?.acceptProductFeedbackCandidate(feedback);
+          ?.acceptProductFeedbackCandidate(feedback, {
+            disposition: "delivery_pending",
+          });
         return {
           assistantAutomationCurrentTurnDeliveryIntentIds: [
             deliveryEffect.effectId,
@@ -8228,6 +8230,88 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       recorded: true,
     });
     await postCheckpointPromise;
+  });
+
+  it("does not record queued product feedback when the current delivery fails", async () => {
+    const deliveryEffect = createDeliveryEffect();
+    const feedback = {
+      idempotencyKey: "feedback-after-failed-delivery",
+      kind: "feature_request" as const,
+      relatedChangelogItemIds: [],
+      summary: "Speculative: support the missing Murph path.",
+    };
+    const recordProductFeedback = vi.fn();
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async (laneInput) => {
+        laneInput.executionContext.hosted?.productFeedbackCandidateSink
+          ?.acceptProductFeedbackCandidate(feedback, {
+            disposition: "delivery_pending",
+          });
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [
+            deliveryEffect.effectId,
+          ],
+          assistantAutomationProgressed: true,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "SYNTHETIC_DELIVERY_FAILURE",
+        effectId: deliveryEffect.effectId,
+      }),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      runtimeProductFeedbackPort: { recordProductFeedback },
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(recordProductFeedback).not.toHaveBeenCalled();
+  });
+
+  it("records committed scheduled no-reply feedback after the checkpoint", async () => {
+    const feedback = {
+      idempotencyKey: "feedback-after-committed-no-reply",
+      kind: "feature_request" as const,
+      relatedChangelogItemIds: [],
+      summary: "Speculative: support the missing Murph path.",
+    };
+    const recordProductFeedback = vi.fn(async () => ({
+      feedbackId: "feedback_no_reply_synthetic",
+      recorded: true,
+    }));
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async (laneInput) => {
+        laneInput.executionContext.hosted?.productFeedbackCandidateSink
+          ?.acceptProductFeedbackCandidate(feedback, {
+            disposition: "committed_non_reply",
+          });
+        return {
+          assistantAutomationProgressed: true,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      runtimeProductFeedbackPort: { recordProductFeedback },
+    }));
+
+    expect(recordProductFeedback).not.toHaveBeenCalled();
+    await result.afterCheckpoint?.();
+    expect(recordProductFeedback).toHaveBeenCalledExactlyOnceWith(feedback);
   });
 
   it("records support escalations through the port inside the turn instead of the post-delivery flush", async () => {

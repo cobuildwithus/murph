@@ -61,6 +61,7 @@ interface HostedRuntimeAssistantPersonalityTransactionResult {
 
 interface HostedRuntimeAssistantPreferenceWriteAuthority {
   occurredAt: string;
+  preferenceOrderOccurredAt?: string;
   preferenceCausalSeq?: string;
   updateId?: string;
 }
@@ -117,6 +118,12 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
           causalOrigin: "turn",
           memberId: input.memberId,
           occurredAt: writeAuthority.occurredAt,
+          ...(writeAuthority.preferenceOrderOccurredAt === undefined
+            ? {}
+            : {
+                preferenceOrderOccurredAt:
+                  writeAuthority.preferenceOrderOccurredAt,
+              }),
           ...(writeAuthority.preferenceCausalSeq === undefined
             ? {}
             : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
@@ -202,6 +209,12 @@ async function handleHostedRuntimeAssistantPersonalityUpdate(input: {
       causalOrigin: "turn",
       memberId: input.memberId,
       occurredAt: writeAuthority.occurredAt,
+      ...(writeAuthority.preferenceOrderOccurredAt === undefined
+        ? {}
+        : {
+            preferenceOrderOccurredAt:
+              writeAuthority.preferenceOrderOccurredAt,
+          }),
       ...(writeAuthority.preferenceCausalSeq === undefined
         ? {}
         : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
@@ -332,6 +345,7 @@ async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
   if ("automationId" in input.authority) {
     return {
       occurredAt: input.authority.occurrenceAt,
+      preferenceOrderOccurredAt: input.authority.occurrenceAt,
       updateId: createHash("sha256")
         .update(JSON.stringify({
           automationId: input.authority.automationId,

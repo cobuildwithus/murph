@@ -2039,6 +2039,12 @@ export async function sendAssistantMessageLocal(
           try {
             productFeedbackCandidateSink.acceptProductFeedbackCandidate(
               productFeedbackCandidate,
+              {
+                disposition: resolveAssistantProductFeedbackCandidateDisposition({
+                  outcome: finalDeliveryOutcome,
+                  responseDisposition: finalResponseDisposition,
+                }),
+              },
             )
           } catch {
             // Optional feedback cannot affect the completed assistant turn.
@@ -2157,10 +2163,23 @@ export function shouldAcceptAssistantProductFeedbackCandidate(input: {
   if (!exactScheduledOccurrence) {
     return true
   }
-  return input.outcome.kind === 'sent' || (
+  return input.outcome.kind === 'sent' || input.outcome.kind === 'queued' || (
     input.outcome.kind === 'not-requested' &&
     input.responseDisposition === 'none'
   )
+}
+
+function resolveAssistantProductFeedbackCandidateDisposition(input: {
+  outcome: { kind: AssistantDeliveryOutcome['kind'] }
+  responseDisposition: 'none' | null
+}): 'committed_non_reply' | 'delivered' | 'delivery_pending' {
+  if (
+    input.outcome.kind === 'not-requested'
+    && input.responseDisposition === 'none'
+  ) {
+    return 'committed_non_reply'
+  }
+  return input.outcome.kind === 'sent' ? 'delivered' : 'delivery_pending'
 }
 
 function assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget(input: {

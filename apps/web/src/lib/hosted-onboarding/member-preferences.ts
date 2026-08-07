@@ -66,6 +66,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
   causalOrigin?: "event" | "turn";
   memberId: string;
   occurredAt: string;
+  preferenceOrderOccurredAt?: string;
   preferenceCausalSeq?: string;
   preferences: HostedMemberAssistantPreferencesUpdate;
   prisma: Prisma.TransactionClient;
@@ -109,6 +110,36 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       "Assistant preference update cannot provide both source sequence and update identity.",
     );
   }
+  if (
+    input.preferenceOrderOccurredAt !== undefined
+    && input.updateId === undefined
+  ) {
+    throw new TypeError(
+      "Assistant preference logical ordering requires update identity.",
+    );
+  }
+
+  const preferenceLogicalOrder = input.preferenceOrderOccurredAt === undefined
+    ? {}
+    : {
+        currentOccurredAt:
+          await readHostedAssistantPreferenceOccurredAtByCausalSeq({
+            currentCausalSeq: {
+              persona: member.assistantPersonaCausalSeq,
+              personality: {
+                detail: member.assistantDetailCausalSeq,
+                humor: member.assistantHumorCausalSeq,
+                push: member.assistantPushCausalSeq,
+                unhinged: member.assistantUnhingedCausalSeq,
+              },
+              tone: member.assistantToneCausalSeq,
+              voice: member.assistantVoiceCausalSeq,
+            },
+            memberId: input.memberId,
+            prisma: input.prisma,
+          }),
+        preferenceOrderOccurredAt: input.preferenceOrderOccurredAt,
+      };
 
   let append: Awaited<ReturnType<typeof appendHostedMailboxEnvelopeTx>> | null =
     null;
@@ -145,6 +176,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       voice: member.assistantVoice,
     },
     preferences: input.preferences,
+    ...preferenceLogicalOrder,
     ...(requestedCausalSeq === null
       ? {}
       : {
@@ -421,23 +453,42 @@ function resolveApplicableAssistantPreferences(input: {
     tone: bigint | null;
     voice: bigint | null;
   };
+  currentOccurredAt?: {
+    persona: Date | null | undefined;
+    personality: Record<AssistantPersonalitySettingId, Date | null | undefined>;
+    tone: Date | null | undefined;
+    voice: Date | null | undefined;
+  };
+  preferenceOrderOccurredAt?: string;
   preferences: HostedMemberAssistantPreferencesUpdate;
 }): {
   appliedFields: AssistantPreferenceFieldId[];
   preferences: HostedExecutionMemberPreferences;
 } | null {
-  const personaApplicable = input.causalSeq === undefined
-    || input.currentCausalSeq?.persona === null
-    || input.currentCausalSeq?.persona === undefined
-    || input.causalSeq >= input.currentCausalSeq.persona;
-  const toneApplicable = input.causalSeq === undefined
-    || input.currentCausalSeq?.tone === null
-    || input.currentCausalSeq?.tone === undefined
-    || input.causalSeq >= input.currentCausalSeq.tone;
-  const voiceApplicable = input.causalSeq === undefined
-    || input.currentCausalSeq?.voice === null
-    || input.currentCausalSeq?.voice === undefined
-    || input.causalSeq >= input.currentCausalSeq.voice;
+  const personaApplicable = isAssistantPreferenceFieldApplicable({
+    causalSeq: input.causalSeq,
+    currentCausalSeq: input.currentCausalSeq?.persona,
+    currentOccurredAt: input.currentOccurredAt?.persona,
+    currentValue: input.current.persona,
+    preferenceOrderOccurredAt: input.preferenceOrderOccurredAt,
+    requestedValue: input.preferences.persona,
+  });
+  const toneApplicable = isAssistantPreferenceFieldApplicable({
+    causalSeq: input.causalSeq,
+    currentCausalSeq: input.currentCausalSeq?.tone,
+    currentOccurredAt: input.currentOccurredAt?.tone,
+    currentValue: input.current.tone,
+    preferenceOrderOccurredAt: input.preferenceOrderOccurredAt,
+    requestedValue: input.preferences.tone,
+  });
+  const voiceApplicable = isAssistantPreferenceFieldApplicable({
+    causalSeq: input.causalSeq,
+    currentCausalSeq: input.currentCausalSeq?.voice,
+    currentOccurredAt: input.currentOccurredAt?.voice,
+    currentValue: input.current.voice,
+    preferenceOrderOccurredAt: input.preferenceOrderOccurredAt,
+    requestedValue: input.preferences.voice,
+  });
   const persona = personaApplicable && input.preferences.persona !== undefined
     ? input.preferences.persona
     : undefined;
@@ -462,10 +513,12 @@ function resolveApplicableAssistantPreferences(input: {
     if (!isAssistantPreferenceFieldApplicable({
       causalSeq: input.causalSeq,
       currentCausalSeq: input.currentCausalSeq?.personality[settingId],
+      currentOccurredAt: input.currentOccurredAt?.personality[settingId],
       currentValue: readStoredAssistantPersonalityScore(
         input.current.personality,
         settingId,
       ),
+      preferenceOrderOccurredAt: input.preferenceOrderOccurredAt,
       requestedValue: requestedScore,
     })) {
       continue;
@@ -496,12 +549,34 @@ function resolveApplicableAssistantPreferences(input: {
   };
 }
 
-function isAssistantPreferenceFieldApplicable(input: {
+function isAssistantPreferenceFieldApplicable<T>(input: {
   causalSeq: bigint | undefined;
   currentCausalSeq: bigint | null | undefined;
-  currentValue: number | null;
-  requestedValue: number | null;
+  currentOccurredAt: Date | null | undefined;
+  currentValue: T;
+  preferenceOrderOccurredAt: string | undefined;
+  requestedValue: T | undefined;
 }): boolean {
+  if (input.requestedValue === undefined) {
+    return false;
+  }
+  if (input.preferenceOrderOccurredAt !== undefined) {
+    if (input.currentCausalSeq == null) {
+      return true;
+    }
+    if (!input.currentOccurredAt) {
+      return false;
+    }
+    const requestedAt = Date.parse(input.preferenceOrderOccurredAt);
+    const currentAt = input.currentOccurredAt.getTime();
+    if (!Number.isFinite(requestedAt)) {
+      throw new TypeError("Assistant preference logical ordering time is invalid.");
+    }
+    if (requestedAt !== currentAt) {
+      return requestedAt > currentAt;
+    }
+    return input.requestedValue === input.currentValue;
+  }
   if (input.causalSeq === undefined || input.currentCausalSeq == null) {
     return true;
   }
@@ -512,6 +587,59 @@ function isAssistantPreferenceFieldApplicable(input: {
     return false;
   }
   return input.requestedValue !== input.currentValue;
+}
+
+async function readHostedAssistantPreferenceOccurredAtByCausalSeq(input: {
+  currentCausalSeq: {
+    persona: bigint | null;
+    personality: Record<AssistantPersonalitySettingId, bigint | null>;
+    tone: bigint | null;
+    voice: bigint | null;
+  };
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<{
+  persona: Date | null | undefined;
+  personality: Record<AssistantPersonalitySettingId, Date | null | undefined>;
+  tone: Date | null | undefined;
+  voice: Date | null | undefined;
+}> {
+  const causalSeqs = [
+    input.currentCausalSeq.persona,
+    ...assistantPersonalitySettingIds.map(
+      (settingId) => input.currentCausalSeq.personality[settingId],
+    ),
+    input.currentCausalSeq.tone,
+    input.currentCausalSeq.voice,
+  ].filter((causalSeq): causalSeq is bigint => causalSeq !== null);
+  const items = causalSeqs.length === 0
+    ? []
+    : await input.prisma.hostedMailboxItem.findMany({
+        select: { causalSeq: true, occurredAt: true },
+        where: {
+          causalSeq: { in: [...new Set(causalSeqs)] },
+          userId: input.memberId,
+        },
+      });
+  const occurredAtByCausalSeq = new Map(
+    items.flatMap((item) => item.causalSeq === null
+      ? []
+      : [[item.causalSeq, item.occurredAt] as const]),
+  );
+  const readOccurredAt = (causalSeq: bigint | null) => causalSeq === null
+    ? null
+    : occurredAtByCausalSeq.get(causalSeq);
+  return {
+    persona: readOccurredAt(input.currentCausalSeq.persona),
+    personality: {
+      detail: readOccurredAt(input.currentCausalSeq.personality.detail),
+      humor: readOccurredAt(input.currentCausalSeq.personality.humor),
+      push: readOccurredAt(input.currentCausalSeq.personality.push),
+      unhinged: readOccurredAt(input.currentCausalSeq.personality.unhinged),
+    },
+    tone: readOccurredAt(input.currentCausalSeq.tone),
+    voice: readOccurredAt(input.currentCausalSeq.voice),
+  };
 }
 
 function readStoredAssistantPersonalityScore(

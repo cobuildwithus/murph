@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   act,
   createElement,
+  StrictMode,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
@@ -134,6 +135,54 @@ describe("Clinical Records connect page", () => {
     expect(loadingStatus.getAttribute("aria-busy")).toBe("true");
     expect(loadingStatus.getAttribute("aria-label")).toBe("Preparing records connection");
     expect(queueMicrotask).toHaveBeenCalled();
+  });
+
+  it("creates the short-lived claim only after an authenticated launcher opens", async () => {
+    const claim = `cr_${"l".repeat(32)}`;
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      claim,
+      expiresAt: "2026-07-16T18:15:00.000Z",
+      ok: true,
+    });
+    const { RecordsConnectClient } = await import(
+      "../app/(dashboard)/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(
+        StrictMode,
+        null,
+        createElement(RecordsConnectClient, {
+          authenticated: true,
+          launchConnectIntent: true,
+        }),
+      ),
+      {
+        location: {
+          hash: "",
+          href: "https://join.example.test/records/connect?launch=clinical-records",
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "?launch=clinical-records",
+        },
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledExactlyOnceWith({
+        method: "POST",
+        payload: {},
+        url: "/api/clinical-records/connect-intents",
+      });
+      expect(rendered.replaceState).toHaveBeenCalledWith(
+        null,
+        "",
+        `/records/connect#clinicalRecordsIntent=${claim}`,
+      );
+      expect(rendered.container.textContent).toContain(
+        "Review how Murph uses your health data",
+      );
+    });
   });
 
   it("scrubs the claim, sends it only in the SMART start body, and closes a committed BFCache flow", async () => {

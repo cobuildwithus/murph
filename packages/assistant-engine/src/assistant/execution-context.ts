@@ -242,6 +242,9 @@ export interface AssistantHostedActionApprovalPort {
 export interface AssistantHostedProductFeedbackCandidateSink {
   acceptProductFeedbackCandidate(
     feedback: HostedRuntimeProductFeedbackRecord,
+    context: {
+      disposition: 'committed_non_reply' | 'delivered' | 'delivery_pending'
+    },
   ): void
   deliverProductSupportEscalation?(
     feedback: HostedRuntimeProductFeedbackRecord,

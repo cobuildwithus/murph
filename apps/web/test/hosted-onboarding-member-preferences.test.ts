@@ -891,6 +891,89 @@ describe("hosted member assistant preferences", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  it("keeps a newer human preference ahead of a delayed scheduled callback", async () => {
+    const member = {
+      assistantDetail: null as number | null,
+      assistantDetailCausalSeq: null as bigint | null,
+      assistantHumor: null as number | null,
+      assistantHumorCausalSeq: null as bigint | null,
+      assistantPush: null as number | null,
+      assistantPushCausalSeq: null as bigint | null,
+      assistantTone: "formal" as string | null,
+      assistantToneCausalSeq: 20n as bigint | null,
+      assistantVoice: null as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 20n, occurredAt: new Date("2026-07-08T12:05:00.000Z") },
+    ]);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: { causalSeq: 21n, id: "mailbox_delayed_schedule" },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferenceOrderOccurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: { tone: "casual" },
+      prisma,
+      updateId: "scheduled_tone",
+    })).resolves.toMatchObject({
+      appliedFields: [],
+      assistantTone: "formal",
+      dispatch: { mailboxItemId: "mailbox_delayed_schedule" },
+      updated: false,
+    });
+    expect(member).toMatchObject({
+      assistantTone: "formal",
+      assistantToneCausalSeq: 20n,
+    });
+  });
+
+  it("orders scheduled preference fields by occurrence instead of callback time", async () => {
+    const member = {
+      assistantDetail: 3 as number | null,
+      assistantDetailCausalSeq: 30n as bigint | null,
+      assistantHumor: 4 as number | null,
+      assistantHumorCausalSeq: 31n as bigint | null,
+      assistantPush: null as number | null,
+      assistantPushCausalSeq: null as bigint | null,
+      assistantTone: null as string | null,
+      assistantVoice: null as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member, [
+      { causalSeq: 30n, occurredAt: new Date("2026-07-08T11:55:00.000Z") },
+      { causalSeq: 31n, occurredAt: new Date("2026-07-08T12:05:00.000Z") },
+    ]);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: { causalSeq: 32n, id: "mailbox_scheduled_fields" },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferenceOrderOccurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: { personality: { detail: 7, humor: 8 } },
+      prisma,
+      updateId: "scheduled_personality",
+    })).resolves.toMatchObject({
+      appliedFields: ["detail"],
+      assistantPersonality: { detail: 7, humor: 4 },
+      updated: true,
+    });
+    expect(member).toMatchObject({
+      assistantDetail: 7,
+      assistantDetailCausalSeq: 32n,
+      assistantHumor: 4,
+      assistantHumorCausalSeq: 31n,
+    });
+  });
+
   it("applies mixed personality intent field-locally when one dial is stale", async () => {
     const member = {
       assistantDetail: 6 as number | null,
@@ -1133,10 +1216,13 @@ function createPreferencesPrismaDouble(member: {
   assistantVoice: string | null;
   assistantVoiceCausalSeq?: bigint | null;
   id: string;
-}): Prisma.TransactionClient {
+}, mailboxItems: Array<{ causalSeq: bigint; occurredAt: Date }> = []): Prisma.TransactionClient {
   member.assistantUnhinged ??= null;
   member.assistantUnhingedCausalSeq ??= null;
   return {
+    hostedMailboxItem: {
+      findMany: vi.fn(async () => mailboxItems),
+    },
     hostedMember: {
       findUnique: vi.fn(async () => ({ ...member })),
       update: vi.fn(async (input: {
