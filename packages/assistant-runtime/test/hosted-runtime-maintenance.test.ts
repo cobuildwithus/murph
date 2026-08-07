@@ -3710,7 +3710,9 @@ describe("runHostedAssistantAutomationLane", () => {
       mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
     automationPassInput.onProviderRequestStarted?.({
       autoReplyHistory: {
+        outboxScanBytesRead: 8_192,
         outboxScanElapsedMs: 23,
+        outboxScanFilesRead: 10,
         outboxScanPerformed: true,
         receiptScanBytesRead: 4_096,
         receiptScanElapsedMs: 19,
@@ -3735,7 +3737,9 @@ describe("runHostedAssistantAutomationLane", () => {
         at: "2026-04-08T00:00:01.000Z",
         phaseBreakdown: {
           preProvider: {
+            outboxScanBytesRead: 8_192,
             outboxScanElapsedMs: 23,
+            outboxScanFilesRead: 10,
             outboxScanPerformed: true,
             receiptScanBytesRead: 4_096,
             receiptScanElapsedMs: 19,

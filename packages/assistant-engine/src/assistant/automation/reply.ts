@@ -19,6 +19,7 @@ import { createHostedDeliveryId } from '../hosted-delivery-id.js'
 import {
   listAssistantOutboxIntents,
   type AssistantOutboxDispatchMode,
+  type AssistantOutboxInventoryScanMetrics,
 } from '../outbox.js'
 import {
   isAssistantProviderConnectionLostError,
@@ -155,7 +156,9 @@ type AssistantAutoReplyOutboxIntent =
   Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]
 
 export interface AssistantAutoReplyHistoryMetrics {
+  outboxScanBytesRead?: number
   outboxScanElapsedMs?: number
+  outboxScanFilesRead?: number
   outboxScanPerformed: boolean
   receiptScanBytesRead?: number
   receiptScanElapsedMs?: number
@@ -4095,6 +4098,7 @@ export function createAssistantAutoReplyHistoryReader(input: {
   let outboxIntents:
     | Promise<readonly AssistantAutoReplyOutboxIntent[]>
     | null = null
+  let outboxScanMetrics: AssistantOutboxInventoryScanMetrics | null = null
   let outboxScanElapsedMs: number | null = null
   let receiptScanMetrics: AssistantTurnReceiptScanMetrics | null = null
   let receipts:
@@ -4104,6 +4108,12 @@ export function createAssistantAutoReplyHistoryReader(input: {
   return {
     readMetrics() {
       return {
+        ...(outboxScanMetrics === null
+          ? {}
+          : {
+              outboxScanBytesRead: outboxScanMetrics.bytesRead,
+              outboxScanFilesRead: outboxScanMetrics.filesRead,
+            }),
         ...(outboxScanElapsedMs === null ? {} : { outboxScanElapsedMs }),
         outboxScanPerformed: outboxScanElapsedMs !== null,
         ...(receiptScanMetrics === null
@@ -4121,7 +4131,9 @@ export function createAssistantAutoReplyHistoryReader(input: {
       outboxIntents ??= (async () => {
         const startedAt = Date.now()
         try {
-          return await listAssistantOutboxIntents(input.vault)
+          return await listAssistantOutboxIntents(input.vault, (metrics) => {
+            outboxScanMetrics = metrics
+          })
         } finally {
           outboxScanElapsedMs = Math.max(0, Date.now() - startedAt)
         }
