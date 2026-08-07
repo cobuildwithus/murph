@@ -37,7 +37,7 @@ export function HostedSignupReferralLanding(props: {
           </form>
         )}
         eyebrow="Referral link"
-        message="A lot of people have used this link recently. Wait a little while, then try again."
+        message="Murph couldn’t open setup just now. Wait a moment, then try this link again."
         title="Try again soon"
       />
     );

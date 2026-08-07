@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
@@ -21,6 +21,10 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 describe("hosted signup referral UX", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.readHostedSignupReferralLink.mockResolvedValue({
@@ -83,7 +87,8 @@ describe("hosted signup referral UX", () => {
     }));
 
     assert.match(markup, /Try again soon/);
-    assert.match(markup, /Wait a little while/);
+    assert.match(markup, /Wait a moment/);
+    assert.match(markup, /try this link again/);
     assert.match(markup, /action="\/r\/busy_referral\/claim"/);
     assert.match(markup, />Try again<\/button>/);
     assert.doesNotMatch(markup, />Join Murph</);
@@ -115,6 +120,71 @@ describe("hosted signup referral UX", () => {
       "https://www.withmurph.ai/r/stable_referral?status=busy",
     );
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("keeps an unexpected claim failure in the retryable HTML journey", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.claimHostedSignupReferralLink.mockRejectedValueOnce(
+      new Error("Synthetic control-root KMS timeout. Bearer route-secret"),
+    );
+    const route = await import("../app/r/[referralCode]/claim/route");
+    const request = new Request(
+      "https://www.withmurph.ai/r/stable_referral/claim",
+      {
+        headers: { Origin: "https://www.withmurph.ai" },
+        method: "POST",
+      },
+    );
+    const response = await route.POST(request, {
+      params: Promise.resolve({ referralCode: "stable_referral" }),
+    });
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("content-type") ?? "").not.toContain(
+      "application/json",
+    );
+    expect(response.headers.get("location")).toBe(
+      "https://www.withmurph.ai/r/stable_referral?status=busy",
+    );
+    const page = await import("../app/r/[referralCode]/page");
+    const markup = renderToStaticMarkup(await page.default({
+      params: Promise.resolve({ referralCode: "stable_referral" }),
+      searchParams: Promise.resolve({ status: "busy" }),
+    }));
+    assert.match(markup, /Try again soon/);
+    assert.match(markup, /action="\/r\/stable_referral\/claim"/);
+    assert.match(markup, />Try again<\/button>/);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted onboarding route failed.",
+      expect.objectContaining({
+        errorMessage:
+          "Synthetic control-root KMS timeout. Bearer <redacted-secret>",
+        operationName: "signup-referral.claim",
+        requestMethod: "POST",
+      }),
+    );
+  });
+
+  it("renders the retryable landing when referral validation is temporarily unavailable", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.readHostedSignupReferralLink.mockRejectedValueOnce(
+      new Error("Synthetic Prisma acquisition timeout."),
+    );
+    const page = await import("../app/r/[referralCode]/page");
+    const markup = renderToStaticMarkup(await page.default({
+      params: Promise.resolve({ referralCode: "stable_referral" }),
+    }));
+
+    assert.match(markup, /Try again soon/);
+    assert.match(markup, /action="\/r\/stable_referral\/claim"/);
+    assert.doesNotMatch(markup, />Join Murph</);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted onboarding route failed.",
+      expect.objectContaining({
+        operationName: "signup-referral.read",
+        requestMethod: "GET",
+      }),
+    );
   });
 
   it("keeps invalid claim origins as hard authorization failures", async () => {

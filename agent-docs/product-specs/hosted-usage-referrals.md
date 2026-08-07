@@ -95,10 +95,15 @@ referral attribution, and that the referrer cannot see the recipient's
 conversations or health information.
 
 Known unavailable links render a human-readable recovery state instead of a
-generic 404. A temporarily exhausted claim allowance renders `Try again soon`
-with a same-origin `Try again` action that retries the claim without requiring
-the recipient to reconstruct a clean URL. Invalid cross-origin submissions
-remain hard authorization failures and are never disguised as a link problem.
+generic 404. A temporarily exhausted claim allowance or unexpected read/claim
+dependency failure renders `Try again soon` with a same-origin `Try again`
+action that retries the same stable link without requiring the recipient to
+reconstruct a clean URL. The native form route redirects to this HTML state
+rather than exposing a JSON API error, while the secret-safe hosted-onboarding
+logger retains operational evidence. The claim transaction rolls target member,
+identity, crypto envelope, and invite state back before that recovery appears.
+Invalid cross-origin submissions remain hard authorization failures and are
+never disguised as a link problem.
 
 An explicit same-origin `POST /r/<token>/claim` creates a fresh ordinary
 `/join/<inviteCode>` invite and placeholder member. Every claimant—including a
@@ -407,9 +412,10 @@ enabling it:
 7. smoke one cap rejection and one self-referral rejection;
 8. exercise the 50-claims-per-hour boundary and confirm the rejected claim
    creates no placeholder member or invite;
-9. verify invalid-origin claims remain 403 while known unavailable and busy
-   links render their human-readable landing states and the busy retry succeeds
-   after the rolling limit clears;
+9. verify invalid-origin claims remain 403 while known unavailable, busy, and
+   temporary dependency-failure paths render human-readable landing states;
+   confirm a failed control-root provision leaves no target state and the same
+   stable-link retry succeeds after the dependency recovers;
 10. switch between two authenticated Settings accounts without a full page
    reload and confirm neither referral action can render or copy the prior
    account's link.

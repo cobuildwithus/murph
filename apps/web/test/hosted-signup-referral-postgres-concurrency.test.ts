@@ -911,6 +911,115 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       60_000,
     );
 
+    it("rolls back failed target crypto provisioning and reuses the same link after recovery", async () => {
+      if (!databaseUrl) {
+        throw new Error("DATABASE_URL is required for this proof.");
+      }
+
+      const fixtureId = randomUUID();
+      const referrerMemberId = `member_claim_retry_${fixtureId}`;
+      const now = new Date();
+      const restoreCryptoEnv = configureHostedSignupClaimLocalCryptoForTest();
+      const validLocalWrapKey = process.env.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
+
+      try {
+        await observer.hostedMember.create({
+          data: {
+            billingStatus: "active",
+            id: referrerMemberId,
+          },
+        });
+        const [baselineMemberCount, baselineIdentityCount, baselineEnvelope] =
+          await Promise.all([
+            observer.hostedMember.count(),
+            observer.hostedMemberIdentity.count(),
+            observer.$queryRaw<Array<{ count: number }>>`
+              SELECT COUNT(*)::int AS count
+              FROM "hosted_user_crypto_envelope"
+            `,
+          ]);
+        const referralUrl = (await issueHostedSignupReferralLink({
+          now,
+          prisma: observer,
+          publicBaseUrl: "https://www.withmurph.ai",
+          referrerMemberId,
+        })).signupUrl;
+        const referralCode = decodeURIComponent(
+          new URL(referralUrl).pathname.slice("/r/".length),
+        );
+
+        process.env.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY =
+          Buffer.alloc(31, 7).toString("base64");
+        await expect(claimHostedSignupReferralLink({
+          now,
+          prisma: observer,
+          publicBaseUrl: "https://www.withmurph.ai",
+          referralCode,
+        })).rejects.toThrow();
+        await expect(Promise.all([
+          observer.hostedMember.count(),
+          observer.hostedMemberIdentity.count(),
+          observer.hostedInvite.count({ where: { referrerMemberId } }),
+          observer.$queryRaw<Array<{ count: number }>>`
+            SELECT COUNT(*)::int AS count
+            FROM "hosted_user_crypto_envelope"
+          `,
+        ])).resolves.toEqual([
+          baselineMemberCount,
+          baselineIdentityCount,
+          0,
+          baselineEnvelope,
+        ]);
+
+        if (!validLocalWrapKey) {
+          throw new TypeError("Expected the configured local KMS wrap key.");
+        }
+        process.env.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY = validLocalWrapKey;
+        const claimed = await claimHostedSignupReferralLink({
+          now,
+          prisma: observer,
+          publicBaseUrl: "https://www.withmurph.ai",
+          referralCode,
+        });
+        expect(claimed.signupUrl).toMatch(
+          /^https:\/\/www\.withmurph\.ai\/join\//u,
+        );
+        const retryInvite = await observer.hostedInvite.findFirstOrThrow({
+          select: { memberId: true },
+          where: { referrerMemberId },
+        });
+        await expect(Promise.all([
+          observer.hostedMember.count(),
+          observer.hostedMemberIdentity.count({
+            where: { memberId: retryInvite.memberId },
+          }),
+          observer.hostedInvite.count({ where: { referrerMemberId } }),
+        ])).resolves.toEqual([
+          baselineMemberCount + 1,
+          1,
+          1,
+        ]);
+      } finally {
+        const claimedMemberIds = (
+          await observer.hostedInvite.findMany({
+            select: { memberId: true },
+            where: { referrerMemberId },
+          })
+        ).map(({ memberId }) => memberId);
+        await observer.hostedInvite.deleteMany({
+          where: { referrerMemberId },
+        });
+        await observer.hostedMember.deleteMany({
+          where: {
+            id: { in: [referrerMemberId, ...claimedMemberIds] },
+          },
+        });
+        await observer.$disconnect();
+        restoreCryptoEnv();
+      }
+    }, 30_000);
+
     it("admits only one concurrent claim at the 49-to-50 boundary", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for this proof.");

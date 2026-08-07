@@ -10,6 +10,9 @@ import {
 import {
   isHostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
+import {
+  logHostedOnboardingRouteFailure,
+} from "@/src/lib/hosted-onboarding/http";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
@@ -53,7 +56,12 @@ export default async function HostedSignupReferralPage(props: {
     ) {
       state = "unavailable";
     } else {
-      throw error;
+      logHostedOnboardingRouteFailure({
+        error,
+        operationName: "signup-referral.read",
+        requestMethod: "GET",
+      });
+      state = "busy";
     }
   }
 
