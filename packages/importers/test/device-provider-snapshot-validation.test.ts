@@ -1,4 +1,4 @@
-import { ZodError } from "zod";
+import { ZodError } from "@murphai/contracts/zod-runtime";
 import { describe, expect, it } from "vitest";
 
 import {

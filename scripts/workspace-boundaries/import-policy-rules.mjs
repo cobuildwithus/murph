@@ -339,6 +339,17 @@ export function verifyWorkspaceImportPolicy({
   const relativeFilePath = path.relative(repoRoot, filePath).replace(/\\/g, "/");
 
   if (
+    (specifier === "zod" || specifier.startsWith("zod/"))
+    && sourceMember !== "packages/contracts"
+    && !(
+      sourceMember === "packages/gateway-core"
+      && specifier === "zod/v4"
+    )
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} directly; runner-graph consumers must use @murphai/contracts/zod-runtime, while gateway-core may retain only its narrow zod/v4 adapter to preserve the acyclic package boundary.`;
+  }
+
+  if (
     isWorkspacePackageSpecifier(specifier)
     && importsEmptyBindingsFromSpecifier(source, specifier)
   ) {

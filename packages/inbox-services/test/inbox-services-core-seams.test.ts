@@ -8,6 +8,7 @@ import {
   tryKillProcess,
   type ProcessIdentity,
 } from '@murphai/runtime-state/node'
+import * as z from '@murphai/contracts/zod-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { expect, test, vi } from 'vitest'
 
@@ -278,7 +279,6 @@ test('shared utility helpers normalize inbox metadata and paths', async () => {
     const jsonPath = path.join(tempDir, 'nested', 'value.json')
     await writeJsonFile(jsonPath, { ok: true })
     assert.equal(await fileExists(jsonPath), true)
-    const { z } = await import('zod')
     assert.deepEqual(
       await readJsonWithSchema(jsonPath, z.object({ ok: z.boolean() }), 'BROKEN', 'broken'),
       { ok: true },

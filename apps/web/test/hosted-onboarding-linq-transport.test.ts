@@ -4071,6 +4071,54 @@ describe("hosted Linq webhook transport", () => {
         vi.useRealTimers();
       }
     });
+
+    it("renders canonical privacy-safe rotating group setup copy", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(dispatchNow);
+      const lookupKey = arrangeAssignableRecoveryLine();
+      const { prisma } = createHostedLinqLineCapacityPrisma({
+        maxNewConversationsPerDay: 3,
+        phoneNumberLookupKey: lookupKey,
+        proactiveConversationCount: 0,
+        proactiveConversationDayUtc: dispatchDayUtc,
+      });
+      const effect = createHostedWebhookLinqMessageSideEffect({
+        chatId: "chat-group-inactive-sender",
+        occurredAt: "2026-03-27T11:59:00.000Z",
+        replyToMessageId: "message-group-inactive-sender",
+        sourceEventId: "event-group-inactive-sender",
+        template: "group_setup",
+      });
+
+      try {
+        await expect(drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        })).resolves.toEqual({ sentCount: 1, skipped: [] });
+
+        expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            chatId: "chat-group-inactive-sender",
+            idempotencyKey: effect.effectId,
+            message: expect.stringMatching(
+              /(?:active on Murph|active Murph member)/iu,
+            ),
+            replyToMessageId: "message-group-inactive-sender",
+          }),
+        );
+        const sentMessage = vi.mocked(sendHostedLinqChatMessage).mock.calls[0]?.[0]
+          .message;
+        expect(sentMessage).toContain("https://join.test/groups/start");
+        expect(sentMessage).not.toContain(
+          "someone in this chat needs to finish setting up Murph",
+        );
+        expect(sentMessage).not.toMatch(
+          /\b(?:account|access|billing|payment|subscription|trial|you|your)\b/iu,
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
 
