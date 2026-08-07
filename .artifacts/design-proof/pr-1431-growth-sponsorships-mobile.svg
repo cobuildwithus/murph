@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="2030" viewBox="0 0 780 2030">
+<rect width="780" height="2030" fill="#f5f0e8"/>
+<text x="32" y="45" font-family="DM Mono, Menlo, monospace" font-size="19" font-weight="500" fill="#736a58" text-anchor="start" letter-spacing="3">GROUP SPONSORSHIP ACCOUNTING</text>
+<text x="32" y="145" font-family="Fraunces, Georgia, serif" font-size="42" font-weight="600" fill="#2d3436" text-anchor="start">Group sponsorships</text>
+<text x="32" y="225" font-family="DM Sans, Arial, sans-serif" font-size="28" font-weight="400" fill="#736a58" text-anchor="start">Monthly sponsorships are capped usage</text>
+<text x="32" y="272" font-family="DM Sans, Arial, sans-serif" font-size="28" font-weight="400" fill="#736a58" text-anchor="start">authorizations, not subscriptions, so their caps and</text>
+<text x="32" y="319" font-family="DM Sans, Arial, sans-serif" font-size="28" font-weight="400" fill="#736a58" text-anchor="start">charges stay outside plan MRR. Gross charges are</text>
+<text x="32" y="366" font-family="DM Sans, Arial, sans-serif" font-size="28" font-weight="400" fill="#736a58" text-anchor="start">fulfilled live-mode payments in the current UTC month</text>
+<text x="32" y="413" font-family="DM Sans, Arial, sans-serif" font-size="28" font-weight="400" fill="#736a58" text-anchor="start">and do not net refunds or disputes; usage is exact</text>
+<text x="32" y="460" font-family="DM Sans, Arial, sans-serif" font-size="28" font-weight="400" fill="#736a58" text-anchor="start">sponsor-funded credit consumed in the same window.</text>
+<rect x="32" y="520" width="716" height="218" rx="20" fill="#fffcf6" stroke="#d8c6aa" stroke-width="2"/>
+<text x="65" y="581" font-family="DM Mono, Menlo, monospace" font-size="25" font-weight="500" fill="#736a58" text-anchor="start" letter-spacing="3">GROSS SPONSOR CHARGES MTD</text>
+<text x="65" y="646" font-family="Fraunces, Georgia, serif" font-size="50" font-weight="600" fill="#2d3436" text-anchor="start">$35.00</text>
+<text x="65" y="703" font-family="DM Sans, Arial, sans-serif" font-size="22" font-weight="400" fill="#736a58" text-anchor="start">4 fulfilled payments · refunds not netted</text>
+<rect x="32" y="762" width="716" height="218" rx="20" fill="#fffcf6" stroke="#d8c6aa" stroke-width="2"/>
+<text x="65" y="823" font-family="DM Mono, Menlo, monospace" font-size="25" font-weight="500" fill="#736a58" text-anchor="start" letter-spacing="3">SPONSORED USAGE MTD</text>
+<text x="65" y="888" font-family="Fraunces, Georgia, serif" font-size="50" font-weight="600" fill="#2d3436" text-anchor="start">$4.25</text>
+<text x="65" y="945" font-family="DM Sans, Arial, sans-serif" font-size="22" font-weight="400" fill="#736a58" text-anchor="start">Actual funded usage consumed</text>
+<rect x="32" y="1004" width="716" height="218" rx="20" fill="#fffcf6" stroke="#d8c6aa" stroke-width="2"/>
+<text x="65" y="1065" font-family="DM Mono, Menlo, monospace" font-size="25" font-weight="500" fill="#736a58" text-anchor="start" letter-spacing="3">REMAINING SPONSORED USAGE</text>
+<text x="65" y="1130" font-family="Fraunces, Georgia, serif" font-size="50" font-weight="600" fill="#2d3436" text-anchor="start">$11.75</text>
+<text x="65" y="1187" font-family="DM Sans, Arial, sans-serif" font-size="22" font-weight="400" fill="#736a58" text-anchor="start">Current unspent fulfilled sponsorship credit</text>
+<rect x="32" y="1246" width="716" height="218" rx="20" fill="#fffcf6" stroke="#d8c6aa" stroke-width="2"/>
+<text x="65" y="1307" font-family="DM Mono, Menlo, monospace" font-size="25" font-weight="500" fill="#736a58" text-anchor="start" letter-spacing="3">ACTIVE MONTHLY CAP</text>
+<text x="65" y="1372" font-family="Fraunces, Georgia, serif" font-size="50" font-weight="600" fill="#2d3436" text-anchor="start">$30.00/mo</text>
+<text x="65" y="1429" font-family="DM Sans, Arial, sans-serif" font-size="22" font-weight="400" fill="#736a58" text-anchor="start">2 active capped authorizations · maximum, not MRR</text>
+<rect x="32" y="1496" width="716" height="458" rx="20" fill="#fffcf6" stroke="#d8c6aa" stroke-width="2"/>
+<rect x="33" y="1497" width="714" height="80" rx="19" fill="#ede3d3"/>
+<text x="50" y="1548" font-family="DM Mono, Menlo, monospace" font-size="18" font-weight="500" fill="#736a58" text-anchor="start" letter-spacing="2">SOURCE</text>
+<text x="440" y="1534" font-family="DM Mono, Menlo, monospace" font-size="18" font-weight="500" fill="#736a58" text-anchor="middle" letter-spacing="2">PAYMENT</text>
+<text x="440" y="1561" font-family="DM Mono, Menlo, monospace" font-size="18" font-weight="500" fill="#736a58" text-anchor="middle" letter-spacing="2">S</text>
+<text x="625" y="1534" font-family="DM Mono, Menlo, monospace" font-size="18" font-weight="500" fill="#736a58" text-anchor="middle" letter-spacing="2">GROSS CHARGES</text>
+<text x="625" y="1561" font-family="DM Mono, Menlo, monospace" font-size="18" font-weight="500" fill="#736a58" text-anchor="middle" letter-spacing="2">MTD</text>
+<path d="M33 1577 H747" stroke="#d8c6aa" stroke-width="2"/>
+<text x="50" y="1631" font-family="DM Sans, Arial, sans-serif" font-size="25" font-weight="400" fill="#2d3436" text-anchor="start">Monthly sponsorship</text>
+<text x="50" y="1668" font-family="DM Sans, Arial, sans-serif" font-size="25" font-weight="400" fill="#2d3436" text-anchor="start">charges</text>
+<text x="483" y="1652" font-family="DM Sans, Arial, sans-serif" font-size="25" font-weight="400" fill="#2d3436" text-anchor="middle">3</text>
+<text x="730" y="1652" font-family="DM Sans, Arial, sans-serif" font-size="25" font-weight="400" fill="#2d3436" text-anchor="end">$15.00</text>
+<path d="M33 1702 H747" stroke="#d8c6aa" stroke-width="2"/>
+<text x="50" y="1756" font-family="DM Sans, Arial, sans-serif" font-size="25" font-weight="400" fill="#2d3436" text-anchor="start">One-time</text>
+<text x="50" y="1793" font-family="DM Sans, Arial, sans-serif" font-size="25" font-weight="400" fill="#2d3436" text-anchor="start">contributions</text>
+<text x="483" y="1777" font-family="DM Sans, Arial, sans-serif" font-size="25" font-weight="400" fill="#2d3436" text-anchor="middle">1</text>
+<text x="730" y="1777" font-family="DM Sans, Arial, sans-serif" font-size="25" font-weight="400" fill="#2d3436" text-anchor="end">$20.00</text>
+<path d="M33 1827 H747" stroke="#d8c6aa" stroke-width="2"/>
+<text x="50" y="1881" font-family="DM Sans, Arial, sans-serif" font-size="25" font-weight="600" fill="#2d3436" text-anchor="start">Gross sponsorship</text>
+<text x="50" y="1918" font-family="DM Sans, Arial, sans-serif" font-size="25" font-weight="600" fill="#2d3436" text-anchor="start">charges</text>
+<text x="483" y="1902" font-family="DM Sans, Arial, sans-serif" font-size="25" font-weight="600" fill="#2d3436" text-anchor="middle">4</text>
+<text x="730" y="1902" font-family="DM Sans, Arial, sans-serif" font-size="25" font-weight="600" fill="#2d3436" text-anchor="end">$35.00</text>
+</svg>
