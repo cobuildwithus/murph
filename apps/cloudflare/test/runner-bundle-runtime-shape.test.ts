@@ -1,19 +1,9 @@
-import {
-  access,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { assertPrunedRunnerDependenciesAreBundled } from "../scripts/runner-bundle/bundle-shared.js";
 import {
   pruneBundledRunnerDependencies,
   rewriteRuntimeBinWrappers,
@@ -31,13 +21,111 @@ afterEach(async () => {
 });
 
 describe("post-bundle dependency pruning", () => {
-  it("removes the installed Junction SDK without touching sibling packages", async () => {
-    const bundleDir = await mkdtemp(path.join(tmpdir(), "murph-runner-runtime-shape-"));
+  it("removes unused Zod variants while retaining the live root and v4 runtimes", async () => {
+    const bundleDir = await mkdtemp(
+      path.join(tmpdir(), "murph-runner-runtime-shape-"),
+    );
+    const zodPackageDir = path.join(bundleDir, "node_modules", "zod");
+    const siblingSourcePath = path.join(
+      bundleDir,
+      "node_modules",
+      "another-package",
+      "src",
+      "index.js",
+    );
+
+    temporaryDirectories.push(bundleDir);
+    const retainedZodPaths = [
+      path.join(zodPackageDir, "index.js"),
+      path.join(zodPackageDir, "v4", "classic", "index.js"),
+      path.join(zodPackageDir, "v4", "core", "index.js"),
+      path.join(zodPackageDir, "v4", "locales", "en.js"),
+    ];
+    const removedZodPaths = [
+      path.join(zodPackageDir, "src", "index.ts"),
+      path.join(zodPackageDir, "v3", "index.js"),
+      path.join(zodPackageDir, "mini", "index.js"),
+      path.join(zodPackageDir, "v4-mini", "index.js"),
+      path.join(zodPackageDir, "v4", "mini", "index.js"),
+    ];
+
+    await Promise.all(
+      [...retainedZodPaths, ...removedZodPaths].map(async (filePath) => {
+        await mkdir(path.dirname(filePath), { recursive: true });
+        await writeFile(filePath, "export const retained = true\n", "utf8");
+      }),
+    );
+    await mkdir(path.dirname(siblingSourcePath), { recursive: true });
+    await mkdir(path.join(bundleDir, "dist"), { recursive: true });
+    await writeFile(
+      path.join(zodPackageDir, "package.json"),
+      JSON.stringify({ name: "zod", version: "4.4.3" }),
+      "utf8",
+    );
+    await writeFile(siblingSourcePath, "retained when required\n", "utf8");
+    const zodPackageName = ["zo", "d"].join("");
+    await writeFile(
+      path.join(bundleDir, "dist", "consumer.js"),
+      [
+        `import "${zodPackageName}"`,
+        `import "${zodPackageName}/v4"`,
+        `import "${zodPackageName}/v4/core"`,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await pruneBundledRunnerDependencies(bundleDir);
+
+    await expect(access(zodPackageDir)).resolves.toBeUndefined();
+    for (const retainedPath of retainedZodPaths) {
+      await expect(access(retainedPath)).resolves.toBeUndefined();
+    }
+    for (const removedPath of removedZodPaths) {
+      await expect(access(removedPath)).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    await expect(readFile(siblingSourcePath, "utf8")).resolves.toBe(
+      "retained when required\n",
+    );
+  });
+
+  it("rejects imports of a Zod surface selected for removal", async () => {
+    const bundleDir = await mkdtemp(
+      path.join(tmpdir(), "murph-runner-runtime-shape-"),
+    );
+
+    temporaryDirectories.push(bundleDir);
+    await mkdir(path.join(bundleDir, "node_modules", "zod", "v3"), {
+      recursive: true,
+    });
+    await mkdir(path.join(bundleDir, "dist"), { recursive: true });
+    const zodPackageName = ["zo", "d"].join("");
+    await writeFile(
+      path.join(bundleDir, "dist", "consumer.js"),
+      `import { object } from "${zodPackageName}/v3"\n`,
+      "utf8",
+    );
+
+    await expect(
+      pruneBundledRunnerDependencies(bundleDir),
+    ).rejects.toThrow(/imports zod\/v3/);
+  });
+
+  it("removes the installed Junction SDK after staged consumers are runtime-free", async () => {
+    const bundleDir = await mkdtemp(
+      path.join(tmpdir(), "murph-runner-runtime-shape-"),
+    );
+    const junctionPackageName = ["@junction-api", "sdk"].join("/");
     const junctionPackageDir = path.join(
       bundleDir,
       "node_modules",
       "@junction-api",
       "sdk",
+    );
+    const consumerPackageDir = path.join(
+      bundleDir,
+      "node_modules",
+      "runtime-consumer",
     );
     const siblingPackageJsonPath = path.join(
       bundleDir,
@@ -49,10 +137,25 @@ describe("post-bundle dependency pruning", () => {
 
     temporaryDirectories.push(bundleDir);
     await mkdir(junctionPackageDir, { recursive: true });
+    await mkdir(consumerPackageDir, { recursive: true });
     await mkdir(path.dirname(siblingPackageJsonPath), { recursive: true });
     await writeFile(
       path.join(junctionPackageDir, "package.json"),
-      JSON.stringify({ name: "@junction-api/sdk", version: "1.2.0" }),
+      JSON.stringify({ name: junctionPackageName, version: "1.2.0" }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(consumerPackageDir, "package.json"),
+      JSON.stringify({
+        dependencies: { [junctionPackageName]: "1.2.0" },
+        name: "runtime-consumer",
+        version: "1.0.0",
+      }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(consumerPackageDir, "index.js"),
+      "export const runtimeFree = true;\n",
       "utf8",
     );
     await writeFile(
@@ -71,18 +174,50 @@ describe("post-bundle dependency pruning", () => {
     );
   });
 
-  it("rejects an emitted bundle that still resolves the pruned SDK", () => {
-    expect(() =>
-      assertPrunedRunnerDependenciesAreBundled([
-        "./chunk.js",
-        "node:fs",
-      ]),
-    ).not.toThrow();
-    expect(() =>
-      assertPrunedRunnerDependenciesAreBundled([
-        "@junction-api/sdk/serialization",
-      ]),
-    ).toThrow(/leaves @junction-api\/sdk\/serialization unresolved/);
+  it("rejects a staged package that still imports the Junction SDK", async () => {
+    const bundleDir = await mkdtemp(
+      path.join(tmpdir(), "murph-runner-runtime-shape-"),
+    );
+    const junctionPackageName = ["@junction-api", "sdk"].join("/");
+    const junctionPackageDir = path.join(
+      bundleDir,
+      "node_modules",
+      "@junction-api",
+      "sdk",
+    );
+    const consumerPackageDir = path.join(
+      bundleDir,
+      "node_modules",
+      "runtime-consumer",
+    );
+
+    temporaryDirectories.push(bundleDir);
+    await mkdir(junctionPackageDir, { recursive: true });
+    await mkdir(consumerPackageDir, { recursive: true });
+    await writeFile(
+      path.join(junctionPackageDir, "package.json"),
+      JSON.stringify({ name: junctionPackageName, version: "1.2.0" }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(consumerPackageDir, "package.json"),
+      JSON.stringify({
+        dependencies: { [junctionPackageName]: "1.2.0" },
+        name: "runtime-consumer",
+        version: "1.0.0",
+      }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(consumerPackageDir, "index.js"),
+      `import "${junctionPackageName}/serialization";\n`,
+      "utf8",
+    );
+
+    await expect(
+      pruneBundledRunnerDependencies(bundleDir),
+    ).rejects.toThrow(/imports @junction-api\/sdk\/serialization/);
+    await expect(access(junctionPackageDir)).resolves.toBeUndefined();
   });
 });
 
