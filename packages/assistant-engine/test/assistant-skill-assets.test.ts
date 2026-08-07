@@ -2000,6 +2000,9 @@ describe('assistant skill assets', () => {
     expect(root.replace(/\s+/gu, ' ')).toContain(
       'A vague opener—including bare “Let’s continue” without a visible onboarding referent—and generic saved records—even a goal plus aspiration readiness and all six areas—do not establish onboarding stage.',
     )
+    expect(root.replace(/\s+/gu, ' ')).toContain(
+      'This skill may create only the scheduled early-stall check-in defined in `references/persistence-recovery-follow-up.md` and the post-completion first-personal-read one-shot defined in `references/return-launch-completion.md`.',
+    )
     for (const movedSection of [
       '## Delegating onboarding work',
       '### 3. Find one or two aspiration anchors',
