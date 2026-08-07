@@ -80,6 +80,10 @@ import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
 import {
+  readAllowedHostedLinqOperation,
+  type HostedLinqProviderOperation,
+} from "./runner-egress-linq-policy.ts";
+import {
   isHostedProviderEgressCredential,
   verifyHostedProviderEgressCredential,
 } from "./hosted-provider-egress-credential.ts";
@@ -3761,7 +3765,7 @@ async function maybeHandleLinqRequest(input: {
     return null;
   }
 
-  const providerOperation = readAllowedLinqOperation(
+  const providerOperation = readAllowedHostedLinqOperation(
     input.request.method,
     pathMatch.pathnameSuffix,
   );
@@ -3970,59 +3974,6 @@ function readBearerCredential(headers: Headers): string | null {
 
 function hasHeaderCredentialSentinel(headers: Headers, name: string): boolean {
   return headers.get(name)?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
-}
-
-type HostedLinqProviderOperation =
-  | "attachment_create"
-  | "attachment_read"
-  | "chat_create"
-  | "message_delete"
-  | "message_send"
-  | "phone_numbers_list"
-  | "reaction_create"
-  | "read_receipt_send"
-  | "typing_start"
-  | "typing_stop"
-  | "voice_memo_send";
-
-function readAllowedLinqOperation(
-  method: string,
-  pathnameSuffix: string,
-): HostedLinqProviderOperation | null {
-  if (method === "GET" && pathnameSuffix === "/phone_numbers") {
-    return "phone_numbers_list";
-  }
-  if (method === "GET" && /^\/attachments\/[^/]+$/u.test(pathnameSuffix)) {
-    return "attachment_read";
-  }
-  if (method === "POST" && pathnameSuffix === "/attachments") {
-    return "attachment_create";
-  }
-  if (method === "POST" && pathnameSuffix === "/chats") {
-    return "chat_create";
-  }
-  if (method === "POST" && /^\/messages\/[^/]+\/reactions$/u.test(pathnameSuffix)) {
-    return "reaction_create";
-  }
-  if (method === "POST" && /^\/chats\/[^/]+\/voicememo$/u.test(pathnameSuffix)) {
-    return "voice_memo_send";
-  }
-  if (method === "POST" && /^\/chats\/[^/]+\/messages$/u.test(pathnameSuffix)) {
-    return "message_send";
-  }
-  if (method === "POST" && /^\/chats\/[^/]+\/typing$/u.test(pathnameSuffix)) {
-    return "typing_start";
-  }
-  if (method === "POST" && /^\/chats\/[^/]+\/read$/u.test(pathnameSuffix)) {
-    return "read_receipt_send";
-  }
-  if (method === "DELETE" && /^\/chats\/[^/]+\/typing$/u.test(pathnameSuffix)) {
-    return "typing_stop";
-  }
-  if (method === "DELETE" && /^\/messages\/[^/]+$/u.test(pathnameSuffix)) {
-    return "message_delete";
-  }
-  return null;
 }
 
 function readTelegramSentinelOperation(pathname: string): string | null {
