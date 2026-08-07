@@ -57,7 +57,7 @@ const PULSE_FEATURES = [
   "Private personal health assistant",
   "Questions, decisions, plans, and follow-through",
   "Sync your health data",
-  "Chat via iMessage, Telegram, or email",
+  "Chat with Murph via iMessage, Telegram, or email",
   "Experiments when you need a clear answer",
   "Access to the most capable AI models",
 ];

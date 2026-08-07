@@ -184,6 +184,42 @@ describe("hosted browser vault replica store", () => {
     expect(bucket.objects.size).toBe(0);
   });
 
+  it("records the planned replica reference before writing the encrypted object", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const store = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey: createTestRootKey(42),
+      rootKeyId: "runtime-root-current",
+      userId: "user_123",
+    });
+    const replica = await createBrowserVaultReplica({
+      metricPoints: [],
+      generatedAt: "2026-04-17T00:00:00.000Z",
+      sourceBundleHash: "a".repeat(64),
+      vault: createVaultReadModel({
+        entities: [],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    });
+    let plannedObjectKey: string | null = null;
+
+    await expect(store.writeBrowserVaultReplica({
+      beforeWrite: async (replicaRef) => {
+        plannedObjectKey = replicaRef.objectKey;
+        expect(bucket.objects.size).toBe(0);
+        throw new Error("orphan candidate recording failed");
+      },
+      replica,
+      userId: "user_123",
+    })).rejects.toThrow("orphan candidate recording failed");
+
+    expect(plannedObjectKey).toMatch(
+      /^users\/hsn_[0-9a-f]{24}\/browser-vault-replicas\/[0-9a-f]{48}\.json$/u,
+    );
+    expect(bucket.objects.size).toBe(0);
+  });
+
   it("keeps legacy generations readable and rejects invalid generation metadata", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const store = createHostedBrowserVaultReplicaStore({
