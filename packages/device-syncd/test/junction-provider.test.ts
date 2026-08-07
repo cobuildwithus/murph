@@ -7941,6 +7941,46 @@ test("Junction historical sleep completion webhooks fetch the bounded summary wi
   }
 });
 
+test("Junction keeps the SDK completion envelope's ISO week-date acceptance without its runtime", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      summaryResources: ["sleep"],
+      timeseriesResources: [],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "historical.data.sleep.created",
+      user_id: "junction-user-1",
+      client_user_id: "murph_blinded",
+      data: {
+        user_id: "junction-user-1",
+        start_date: "2026-W14-3",
+        end_date: "2026-W14-4",
+        is_final: true,
+        provider: "garmin",
+      },
+    },
+    messageId: "msg_historical_week_date_completion",
+    timestamp: "1775260800",
+  });
+
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-04T00:00:00.000Z",
+  });
+
+  assert.equal(parsed.dataSourceProviderSlug, null);
+  assert.equal(parsed.jobs.length, 1);
+  assert.equal(parsed.jobs[0]?.kind, "resource");
+  assert.equal("webhookDataJson" in (parsed.jobs[0]?.payload ?? {}), false);
+});
+
 test("Junction rejects webhooks with only a client_user_id and no Junction user_id", async () => {
   const provider = createJunctionProvider(
     async (input) => {
