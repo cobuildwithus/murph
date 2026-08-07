@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Goal
 
@@ -51,6 +51,10 @@ Updated: 2026-08-06
 3. Risk: catalog extraction changes schema identity or availability order.
    Mitigation: move existing declarations unchanged and run existing catalog,
    planning, prompt, and dynamic execution tests.
+4. Risk: the import await lets a later stdout event advance mutable delivery
+   context before an earlier tool request captures its owner.
+   Mitigation: capture the request-time ordinal before the first await and use
+   that immutable value throughout parsing, execution, and patch application.
 
 ## Tasks
 
@@ -72,6 +76,10 @@ Updated: 2026-08-06
   lets it register its execution and then aborts/drains the work. The existing
   immediate turn-failure image-generation regression caught and now proves this
   ordering boundary.
+- Capture each accepted tool request's delivery-context ordinal before awaiting
+  the lazy runtime. This preserves the former synchronous request-observation
+  semantics even when a completed steered user message follows the tool call in
+  the same stdout batch.
 - Keep malformed computer requests in the serialized command queue. They are
   still computer actions from the provider's perspective, even though parsing
   produces an error request rather than an executable action.
@@ -85,8 +93,8 @@ Updated: 2026-08-06
 ## Verification
 
 - Production runner assembly passed: entry 1,729,822 B; static closure
-  8,423,625 B; total output 10,298,362 B. Against the exact clean-main baseline,
-  the static closure is 172,618 B smaller while the lazy split adds 15,808 B to
+  8,423,496 B; total output 10,298,233 B. Against the exact clean-main baseline,
+  the static closure is 172,747 B smaller while the lazy split adds 15,679 B to
   total output. The static byte budget is ratcheted to the new measurement and
   rejects `dynamic-tools.js` if it re-enters the boot closure.
 - Twenty alternating Docker amd64-emulation samples per arm measured baseline
@@ -105,3 +113,11 @@ Updated: 2026-08-06
   fork memory ceiling and its Vitest parent did not terminate after the worker
   OOM. The exact owned test session was interrupted after the crash; focused
   proof and exact-head CI remain the applicable gates.
+- Final ReviewGPT round 1 found that the new import await preceded delivery-
+  context capture, so a later steered `user_message` in the same stdout batch
+  could rebind an earlier accepted request. The production-shaped regression
+  failed against that reviewed head with no-reply ordinal `[1]`, then passed
+  with `[0]` after moving capture before the await. The same turn proves both
+  the first import and cached import path, keeps preflight/execution ordinals at
+  `0` and `1`, and leaves the latest follow-up reply visible. All five focused
+  dynamic-runtime tests and Assistant Engine typecheck pass.

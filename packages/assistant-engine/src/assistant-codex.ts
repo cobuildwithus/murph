@@ -4095,6 +4095,8 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    const dynamicToolRequestDeliveryContextOrdinal =
+      currentDeliveryContextOrdinal()
     let dynamicToolRuntime: MurphDynamicToolRuntime
     try {
       dynamicToolRuntime = await loadMurphDynamicToolRuntime()
@@ -4261,8 +4263,6 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const dynamicToolRequestDeliveryContextOrdinal =
-      currentDeliveryContextOrdinal()
     const dynamicToolDeliveryContextOrdinal =
       dynamicToolRequest.kind === 'finish-without-reply' ||
       dynamicToolRequest.kind === 'react-to-message' ||
