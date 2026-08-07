@@ -43,6 +43,7 @@ jobs:
           apps/web/app/design/sections-content.tsx
           apps/web/app/groups/fund/[joinCode]/page.tsx
           apps/web/prisma/schema.prisma
+          apps/web/scripts/run-prisma-migrate-deploy.ts
           apps/web/src/components/hosted-groups/group-funding-supporters.tsx
           apps/web/src/lib/hosted-groups/group-sponsorship-store.ts
           apps/web/src/lib/hosted-groups/group-tool.ts
@@ -50,6 +51,7 @@ jobs:
           apps/web/test/hosted-group-sponsorship-migration.test.ts
           apps/web/test/hosted-group-sponsorship-store.test.ts
           apps/web/test/hosted-group-tool.test.ts
+          apps/web/test/production-migration-guard.test.ts
           docs/contracts/00-invariants.md
           packages/assistant-engine/src/assistant-codex/dynamic-tool-catalog.ts
           packages/assistant-engine/src/assistant-codex/dynamic-tools.ts
