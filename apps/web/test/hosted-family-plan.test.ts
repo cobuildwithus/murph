@@ -3617,8 +3617,8 @@ describe("hosted Family plan", () => {
       groupId: "hbag_family",
     });
 
-    expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenCalledTimes(3);
-    expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenNthCalledWith(3, {
+    expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenCalledTimes(5);
+    expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenNthCalledWith(5, {
       orderBy: {
         memberId: "asc",
       },
@@ -4590,7 +4590,9 @@ describe("hosted Family plan", () => {
 
   it("does not activate family members from a stale active Stripe subscription event", async () => {
     const tx = createTxMock();
-    tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([]);
+    tx.hostedAccountGroupMembership.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
       billedSeatCount: 4,
       currentBillingPhase: null,
@@ -5903,7 +5905,7 @@ describe("hosted Family plan", () => {
       tx,
     })).resolves.toBeNull();
 
-    expect(tx.$queryRaw).toHaveBeenCalledOnce();
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
   });
 

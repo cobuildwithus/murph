@@ -331,7 +331,7 @@ async function findHostedUsageCreditStripeSessionForExpiredAttempt(input: {
   while (true) {
     let page: Stripe.ApiList<Stripe.Checkout.Session>;
     try {
-      page = await input.stripe.checkout.sessions.list({
+      const listParams: Stripe.Checkout.SessionListParams = {
         created: {
           gte: Math.max(
             0,
@@ -341,8 +341,11 @@ async function findHostedUsageCreditStripeSessionForExpiredAttempt(input: {
         },
         customer: customerId,
         limit: 100,
-        ...(startingAfter ? { starting_after: startingAfter } : {}),
-      });
+      };
+      if (startingAfter) {
+        listParams.starting_after = startingAfter;
+      }
+      page = await input.stripe.checkout.sessions.list(listParams);
     } catch (error) {
       throw buildHostedUsageCreditStripeUnavailableError(
         error,

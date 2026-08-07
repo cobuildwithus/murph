@@ -39,17 +39,26 @@ const MEAL_PHOTO_CAPTURE_ENROLLMENT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MEAL_PHOTO_CAPTURE_TOKEN_BYTES = 32;
 const MEAL_PHOTO_CAPTURE_ENROLLMENT_ID_BYTES = 16;
 const MEAL_PHOTO_CAPTURE_SECRET_BYTES = 32;
+const MEAL_PHOTO_CAPTURE_MAX_AUTHORITY_REVISION = 2_147_483_647;
 const MEAL_PHOTO_CAPTURE_SECRET_SCOPE = "meal-photo-capture-idempotency";
 const MEAL_PHOTO_CAPTURE_ENROLLMENT_TABLE = "hosted_meal_photo_capture_enrollment";
 const MEAL_PHOTO_CAPTURE_SECRET_FIELD = "idempotency_secret_encrypted";
-const MEAL_PHOTO_CAPTURE_ALLOWED_ENROLLMENT_KEYS = new Set([
+const MEAL_PHOTO_CAPTURE_V1_ALLOWED_ENROLLMENT_KEYS = new Set([
   "appInstallationId",
   "appVersion",
   "schemaVersion",
 ]);
-const MEAL_PHOTO_CAPTURE_ALLOWED_REVOCATION_KEYS = new Set([
+const MEAL_PHOTO_CAPTURE_V2_ALLOWED_ENROLLMENT_KEYS = new Set([
+  ...MEAL_PHOTO_CAPTURE_V1_ALLOWED_ENROLLMENT_KEYS,
+  "authorityRevision",
+]);
+const MEAL_PHOTO_CAPTURE_V1_ALLOWED_REVOCATION_KEYS = new Set([
   "appInstallationId",
   "schemaVersion",
+]);
+const MEAL_PHOTO_CAPTURE_V2_ALLOWED_REVOCATION_KEYS = new Set([
+  ...MEAL_PHOTO_CAPTURE_V1_ALLOWED_REVOCATION_KEYS,
+  "authorityRevision",
 ]);
 const JPEG_START_OF_FRAME_MARKERS = new Set([
   0xc0,
@@ -70,16 +79,37 @@ const JPEG_APPLICATION_MARKER_MIN = 0xe0;
 const JPEG_APPLICATION_MARKER_MAX = 0xef;
 const JPEG_COMMENT_MARKER = 0xfe;
 
-export interface MealPhotoCaptureEnrollmentRequest {
+interface MealPhotoCaptureEnrollmentRequestV1 {
   appInstallationId: string;
   appVersion: string;
   schemaVersion: 1;
 }
 
-export interface MealPhotoCaptureRevocationRequest {
+interface MealPhotoCaptureEnrollmentRequestV2 {
+  appInstallationId: string;
+  appVersion: string;
+  authorityRevision: number;
+  schemaVersion: 2;
+}
+
+export type MealPhotoCaptureEnrollmentRequest =
+  | MealPhotoCaptureEnrollmentRequestV1
+  | MealPhotoCaptureEnrollmentRequestV2;
+
+interface MealPhotoCaptureRevocationRequestV1 {
   appInstallationId: string;
   schemaVersion: 1;
 }
+
+interface MealPhotoCaptureRevocationRequestV2 {
+  appInstallationId: string;
+  authorityRevision: number;
+  schemaVersion: 2;
+}
+
+export type MealPhotoCaptureRevocationRequest =
+  | MealPhotoCaptureRevocationRequestV1
+  | MealPhotoCaptureRevocationRequestV2;
 
 export async function revokeAllMealPhotoCaptureEnrollmentsForMember(input: {
   memberId: string;
@@ -97,9 +127,13 @@ export async function revokeAllMealPhotoCaptureEnrollmentsForMember(input: {
     }
     const result = await tx.hostedMealPhotoCaptureEnrollment.updateMany({
       data: {
+        activatedAt: null,
+        expiresAt: null,
+        idempotencySecretEncrypted: null,
         revokeReason: "health_data_consent_withdrawn",
         revokedAt: now,
         updatedAt: now,
+        uploadTokenHash: null,
       },
       where: {
         memberId: input.memberId,
@@ -135,21 +169,46 @@ export interface ValidatedMealPhotoUpload {
 export function parseMealPhotoCaptureEnrollmentRequest(
   body: Record<string, unknown>,
 ): MealPhotoCaptureEnrollmentRequest {
-  assertExactKeys(body, MEAL_PHOTO_CAPTURE_ALLOWED_ENROLLMENT_KEYS, "enrollment");
+  const schemaVersion = parseSchemaVersion(body.schemaVersion);
+  assertExactKeys(
+    body,
+    schemaVersion === 1
+      ? MEAL_PHOTO_CAPTURE_V1_ALLOWED_ENROLLMENT_KEYS
+      : MEAL_PHOTO_CAPTURE_V2_ALLOWED_ENROLLMENT_KEYS,
+    "enrollment",
+  );
+  const appInstallationId = parseCanonicalInstallationId(body.appInstallationId);
+  const appVersion = parseAppVersion(body.appVersion);
+  if (schemaVersion === 1) {
+    return { appInstallationId, appVersion, schemaVersion: 1 };
+  }
   return {
-    appInstallationId: parseCanonicalInstallationId(body.appInstallationId),
-    appVersion: parseAppVersion(body.appVersion),
-    schemaVersion: parseSchemaVersion(body.schemaVersion),
+    appInstallationId,
+    appVersion,
+    authorityRevision: parseAuthorityRevision(body.authorityRevision),
+    schemaVersion: 2,
   };
 }
 
 export function parseMealPhotoCaptureRevocationRequest(
   body: Record<string, unknown>,
 ): MealPhotoCaptureRevocationRequest {
-  assertExactKeys(body, MEAL_PHOTO_CAPTURE_ALLOWED_REVOCATION_KEYS, "revocation");
+  const schemaVersion = parseSchemaVersion(body.schemaVersion);
+  assertExactKeys(
+    body,
+    schemaVersion === 1
+      ? MEAL_PHOTO_CAPTURE_V1_ALLOWED_REVOCATION_KEYS
+      : MEAL_PHOTO_CAPTURE_V2_ALLOWED_REVOCATION_KEYS,
+    "revocation",
+  );
+  const appInstallationId = parseCanonicalInstallationId(body.appInstallationId);
+  if (schemaVersion === 1) {
+    return { appInstallationId, schemaVersion: 1 };
+  }
   return {
-    appInstallationId: parseCanonicalInstallationId(body.appInstallationId),
-    schemaVersion: parseSchemaVersion(body.schemaVersion),
+    appInstallationId,
+    authorityRevision: parseAuthorityRevision(body.authorityRevision),
+    schemaVersion: 2,
   };
 }
 
@@ -176,17 +235,36 @@ export async function issueMealPhotoCaptureEnrollment(input: {
         },
       },
     });
+    assertMealPhotoCaptureAuthorityRevisionCanAdvance({
+      currentRevision: existing?.authorityRevision ?? 0,
+      currentState: readMealPhotoCaptureAuthorityState(existing),
+      operation: "enroll",
+      request: input.request,
+    });
     const enrollmentId = existing?.id ?? generateMealPhotoCaptureEnrollmentId();
-    const idempotencySecret = existing && !existing.revokedAt
+    let reusableEncryptedSecret: string | null = null;
+    if (existing && !existing.revokedAt) {
+      if (
+        !existing.uploadTokenHash
+        || !existing.idempotencySecretEncrypted
+        || !existing.expiresAt
+      ) {
+        throw new Error(
+          "Active meal photo capture enrollment has incomplete credentials.",
+        );
+      }
+      reusableEncryptedSecret = existing.idempotencySecretEncrypted;
+    }
+    const idempotencySecret = reusableEncryptedSecret
       ? await openMealPhotoCaptureIdempotencySecret({
           enrollmentId,
           memberId: input.memberId,
           prisma: tx,
-          value: existing.idempotencySecretEncrypted,
+          value: reusableEncryptedSecret,
         })
       : generateMealPhotoCaptureIdempotencySecret();
-    const idempotencySecretEncrypted = existing && !existing.revokedAt
-      ? existing.idempotencySecretEncrypted
+    const idempotencySecretEncrypted = reusableEncryptedSecret
+      ? reusableEncryptedSecret
       : await sealMealPhotoCaptureIdempotencySecret({
           enrollmentId,
           memberId: input.memberId,
@@ -195,9 +273,12 @@ export async function issueMealPhotoCaptureEnrollment(input: {
         });
     const uploadToken = generateMealPhotoCaptureToken();
     const expiresAt = new Date(now.getTime() + MEAL_PHOTO_CAPTURE_ENROLLMENT_TTL_MS);
+    const activatedAt = input.request.schemaVersion === 1 ? now : null;
 
     await tx.hostedMealPhotoCaptureEnrollment.upsert({
       create: {
+        activatedAt,
+        authorityRevision: readRequestedAuthorityRevision(input.request),
         createdAt: now,
         expiresAt,
         id: enrollmentId,
@@ -210,6 +291,8 @@ export async function issueMealPhotoCaptureEnrollment(input: {
         uploadTokenHash: hashMealPhotoCaptureValue(uploadToken),
       },
       update: {
+        activatedAt,
+        authorityRevision: readRequestedAuthorityRevision(input.request),
         expiresAt,
         idempotencySecretEncrypted,
         revokeReason: null,
@@ -242,20 +325,91 @@ export async function revokeMealPhotoCaptureEnrollmentForMember(input: {
   const now = input.now ?? new Date();
   return input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
-    const result = await tx.hostedMealPhotoCaptureEnrollment.updateMany({
-      data: {
+    const installationIdHash = hashMealPhotoCaptureValue(input.request.appInstallationId);
+    const existing = await tx.hostedMealPhotoCaptureEnrollment.findUnique({
+      where: {
+        memberId_installationIdHash: {
+          installationIdHash,
+          memberId: input.memberId,
+        },
+      },
+    });
+    if (input.request.schemaVersion === 1) {
+      assertMealPhotoCaptureAuthorityRevisionCanAdvance({
+        currentRevision: existing?.authorityRevision ?? 0,
+        currentState: readMealPhotoCaptureAuthorityState(existing),
+        operation: "revoke",
+        request: input.request,
+      });
+      if (!existing || existing.revokedAt) {
+        return { revoked: false };
+      }
+      const result = await tx.hostedMealPhotoCaptureEnrollment.updateMany({
+        data: {
+          activatedAt: null,
+          expiresAt: null,
+          idempotencySecretEncrypted: null,
+          revokeReason: "member_disabled",
+          revokedAt: now,
+          updatedAt: now,
+          uploadTokenHash: null,
+        },
+        where: {
+          id: existing.id,
+          revokedAt: null,
+        },
+      });
+      return { revoked: result.count > 0 };
+    }
+
+    if (
+      existing
+      && input.request.authorityRevision === existing.authorityRevision
+      && existing.revokedAt
+    ) {
+      return { revoked: true };
+    }
+    assertMealPhotoCaptureAuthorityRevisionCanAdvance({
+      currentRevision: existing?.authorityRevision ?? 0,
+      currentState: readMealPhotoCaptureAuthorityState(existing),
+      operation: "revoke",
+      request: input.request,
+    });
+    const enrollmentId = existing?.id ?? generateMealPhotoCaptureEnrollmentId();
+    await tx.hostedMealPhotoCaptureEnrollment.upsert({
+      create: {
+        activatedAt: null,
+        authorityRevision: input.request.authorityRevision,
+        createdAt: now,
+        expiresAt: null,
+        id: enrollmentId,
+        idempotencySecretEncrypted: null,
+        installationIdHash,
+        memberId: input.memberId,
         revokeReason: "member_disabled",
         revokedAt: now,
         updatedAt: now,
+        uploadTokenHash: null,
+      },
+      update: {
+        activatedAt: null,
+        authorityRevision: input.request.authorityRevision,
+        expiresAt: null,
+        idempotencySecretEncrypted: null,
+        revokeReason: "member_disabled",
+        revokedAt: now,
+        updatedAt: now,
+        uploadTokenHash: null,
       },
       where: {
-        installationIdHash: hashMealPhotoCaptureValue(input.request.appInstallationId),
-        memberId: input.memberId,
-        revokedAt: null,
+        memberId_installationIdHash: {
+          installationIdHash,
+          memberId: input.memberId,
+        },
       },
     });
 
-    return { revoked: result.count > 0 };
+    return { revoked: true };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
@@ -269,9 +423,10 @@ export async function revokeMealPhotoCaptureEnrollmentForScopedToken(input: {
     throw mealPhotoCaptureAuthRequired();
   }
   const now = input.now ?? new Date();
+  const uploadTokenHash = hashMealPhotoCaptureValue(token);
   const enrollment = await input.prisma.hostedMealPhotoCaptureEnrollment.findUnique({
     where: {
-      uploadTokenHash: hashMealPhotoCaptureValue(token),
+      uploadTokenHash,
     },
   });
   if (!enrollment || enrollment.revokedAt) {
@@ -280,15 +435,30 @@ export async function revokeMealPhotoCaptureEnrollmentForScopedToken(input: {
 
   return input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, enrollment.memberId);
+    const current = await tx.hostedMealPhotoCaptureEnrollment.findUnique({
+      where: { id: enrollment.id },
+    });
+    if (
+      !current
+      || current.revokedAt
+      || current.uploadTokenHash !== uploadTokenHash
+    ) {
+      throw mealPhotoCaptureAuthRequired();
+    }
     const result = await tx.hostedMealPhotoCaptureEnrollment.updateMany({
       data: {
+        activatedAt: null,
+        expiresAt: null,
+        idempotencySecretEncrypted: null,
         revokeReason: "scoped_token_revoked",
         revokedAt: now,
         updatedAt: now,
+        uploadTokenHash: null,
       },
       where: {
         id: enrollment.id,
         revokedAt: null,
+        uploadTokenHash,
       },
     });
 
@@ -297,6 +467,63 @@ export async function revokeMealPhotoCaptureEnrollmentForScopedToken(input: {
     }
 
     return { revoked: true };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+export async function activateMealPhotoCaptureEnrollmentForScopedToken(input: {
+  now?: Date;
+  prisma: PrismaClient;
+  token: string;
+}): Promise<{ activated: true }> {
+  const token = normalizeMealPhotoCaptureToken(input.token);
+  if (!token) {
+    throw mealPhotoCaptureAuthRequired();
+  }
+  const now = input.now ?? new Date();
+  const uploadTokenHash = hashMealPhotoCaptureValue(token);
+  const enrollment = await input.prisma.hostedMealPhotoCaptureEnrollment.findUnique({
+    where: { uploadTokenHash },
+  });
+  if (!enrollment || enrollment.revokedAt) {
+    throw mealPhotoCaptureAuthRequired();
+  }
+
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, enrollment.memberId);
+    await lockHostedMemberSponsoredAccessRows(tx, enrollment.memberId);
+    const current = await tx.hostedMealPhotoCaptureEnrollment.findUnique({
+      where: { id: enrollment.id },
+    });
+    if (
+      !current
+      || current.revokedAt
+      || current.uploadTokenHash !== uploadTokenHash
+      || !current.idempotencySecretEncrypted
+      || !current.expiresAt
+      || current.expiresAt <= now
+    ) {
+      throw mealPhotoCaptureAuthRequired();
+    }
+    await assertHostedHistoricalLaunchConsentGranted({
+      memberId: current.memberId,
+      prisma: tx,
+    });
+    await assertActiveHostedMemberAccessAllowed({
+      memberId: current.memberId,
+      prisma: tx,
+    });
+    if (current.activatedAt || current.authorityRevision === 0) {
+      return { activated: true };
+    }
+
+    await tx.hostedMealPhotoCaptureEnrollment.update({
+      data: {
+        activatedAt: now,
+        updatedAt: now,
+      },
+      where: { id: current.id },
+    });
+    return { activated: true };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
@@ -315,7 +542,15 @@ export async function requireActiveMealPhotoCaptureEnrollment(input: {
       uploadTokenHash: hashMealPhotoCaptureValue(token),
     },
   });
-  if (!enrollment || enrollment.revokedAt || enrollment.expiresAt <= now) {
+  if (
+    !enrollment
+    || (!enrollment.activatedAt && enrollment.authorityRevision > 0)
+    || enrollment.revokedAt
+    || !enrollment.expiresAt
+    || !enrollment.idempotencySecretEncrypted
+    || !enrollment.uploadTokenHash
+    || enrollment.expiresAt <= now
+  ) {
     throw mealPhotoCaptureAuthRequired();
   }
 
@@ -378,12 +613,16 @@ export async function assertMealPhotoCaptureRequestHasNoBody(request: Request): 
     body = await readRawBodyBuffer(request, { limitBytes: 1 });
   } catch (error) {
     if (error instanceof RangeError) {
-      throw mealPhotoCaptureRequestInvalid("Scoped revocation does not accept a request body.");
+      throw mealPhotoCaptureRequestInvalid(
+        "Scoped meal-photo authority changes do not accept a request body.",
+      );
     }
     throw error;
   }
   if (body.byteLength !== 0) {
-    throw mealPhotoCaptureRequestInvalid("Scoped revocation does not accept a request body.");
+    throw mealPhotoCaptureRequestInvalid(
+      "Scoped meal-photo authority changes do not accept a request body.",
+    );
   }
 }
 
@@ -458,11 +697,25 @@ function parseAppVersion(value: unknown): string {
   return normalized;
 }
 
-function parseSchemaVersion(value: unknown): 1 {
-  if (value !== 1) {
-    throw mealPhotoCaptureRequestInvalid("schemaVersion must be 1.");
+function parseSchemaVersion(value: unknown): 1 | 2 {
+  if (value !== 1 && value !== 2) {
+    throw mealPhotoCaptureRequestInvalid("schemaVersion must be 1 or 2.");
   }
-  return 1;
+  return value;
+}
+
+function parseAuthorityRevision(value: unknown): number {
+  if (
+    typeof value !== "number"
+    || !Number.isInteger(value)
+    || value <= 0
+    || value > MEAL_PHOTO_CAPTURE_MAX_AUTHORITY_REVISION
+  ) {
+    throw mealPhotoCaptureRequestInvalid(
+      `authorityRevision must be an integer between 1 and ${MEAL_PHOTO_CAPTURE_MAX_AUTHORITY_REVISION}.`,
+    );
+  }
+  return value;
 }
 
 function assertExactKeys(
@@ -477,6 +730,47 @@ function assertExactKeys(
       );
     }
   }
+}
+
+function readRequestedAuthorityRevision(
+  request: MealPhotoCaptureEnrollmentRequest | MealPhotoCaptureRevocationRequest,
+): number {
+  return request.schemaVersion === 1 ? 0 : request.authorityRevision;
+}
+
+function assertMealPhotoCaptureAuthorityRevisionCanAdvance(input: {
+  currentRevision: number;
+  currentState: "active" | "prepared" | "revoked";
+  operation: "enroll" | "revoke";
+  request: MealPhotoCaptureEnrollmentRequest | MealPhotoCaptureRevocationRequest;
+}): void {
+  if (
+    input.request.schemaVersion === 1
+      ? input.currentRevision === 0
+      : input.request.authorityRevision > input.currentRevision
+  ) {
+    return;
+  }
+  throw mealPhotoCaptureAuthorityRevisionConflict({
+    currentRevision: input.currentRevision,
+    currentState: input.currentState,
+    operation: input.operation,
+  });
+}
+
+function readMealPhotoCaptureAuthorityState(
+  enrollment: {
+    activatedAt: Date | null;
+    authorityRevision: number;
+    revokedAt: Date | null;
+  } | null,
+): "active" | "prepared" | "revoked" {
+  if (enrollment?.revokedAt) {
+    return "revoked";
+  }
+  return enrollment && enrollment.authorityRevision > 0 && !enrollment.activatedAt
+    ? "prepared"
+    : "active";
 }
 
 function parseCapturedAt(value: string | null): string {
@@ -686,6 +980,24 @@ function mealPhotoCaptureRequestInvalid(message: string) {
     code: "MEAL_PHOTO_CAPTURE_REQUEST_INVALID",
     httpStatus: 400,
     message,
+  });
+}
+
+function mealPhotoCaptureAuthorityRevisionConflict(input: {
+  currentRevision: number;
+  currentState: "active" | "prepared" | "revoked";
+  operation: "enroll" | "revoke";
+}) {
+  return hostedOnboardingError({
+    code: "MEAL_PHOTO_CAPTURE_AUTHORITY_REVISION_CONFLICT",
+    details: {
+      currentAuthorityRevision: input.currentRevision,
+      currentAuthorityState: input.currentState,
+      requestedOperation: input.operation,
+    },
+    httpStatus: 409,
+    message: "Meal photo capture authority changed. Retry from the current state.",
+    retryable: false,
   });
 }
 

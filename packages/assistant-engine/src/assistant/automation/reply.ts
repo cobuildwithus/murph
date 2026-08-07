@@ -19,12 +19,16 @@ import { createHostedDeliveryId } from '../hosted-delivery-id.js'
 import {
   listAssistantOutboxIntents,
   type AssistantOutboxDispatchMode,
+  type AssistantOutboxInventoryScanMetrics,
 } from '../outbox.js'
 import {
   isAssistantProviderConnectionLostError,
   isAssistantProviderStalledError,
 } from '../provider-failure-diagnostics.js'
 import type { AssistantProviderRequestStartTiming } from '../providers/types.js'
+import type {
+  AssistantProviderStartCriticalPathContext,
+} from '../provider-start-critical-path.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import type {
@@ -155,7 +159,9 @@ type AssistantAutoReplyOutboxIntent =
   Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]
 
 export interface AssistantAutoReplyHistoryMetrics {
+  outboxScanBytesRead?: number
   outboxScanElapsedMs?: number
+  outboxScanFilesRead?: number
   outboxScanPerformed: boolean
   receiptScanBytesRead?: number
   receiptScanElapsedMs?: number
@@ -425,6 +431,7 @@ export function createAssistantAutoReplyGroupContext(
 export async function processAssistantAutoReplyGroup(input: {
   allowSelfAuthored: boolean
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   context: AssistantAutoReplyGroupContext
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
@@ -528,6 +535,7 @@ export async function processAssistantAutoReplyGroup(input: {
 async function resolveAssistantAutoReplyGroupOutcome(input: {
   allowSelfAuthored: boolean
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   context: AssistantAutoReplyGroupContext
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
@@ -683,6 +691,9 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     bindingDeliveryTarget: decision.bindingDeliveryTarget,
     ...(input.beforeProviderAcceptedInputs
       ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+      : {}),
+    ...(input.providerStartCriticalPath
+      ? { providerStartCriticalPath: input.providerStartCriticalPath }
       : {}),
     captureIds: context.optionalInboxCaptureIds,
     inputIds: context.inputIds,
@@ -2061,6 +2072,7 @@ async function executeAssistantAutoReply(input: {
   assistantStyleSettingsAuthorized?: boolean
   bindingDeliveryTarget: string | null
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   captureIds: readonly string[]
   inputIds: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
@@ -2123,6 +2135,9 @@ async function executeAssistantAutoReply(input: {
       ...(input.beforeProviderAcceptedInputs
         ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
         : {}),
+      ...(input.providerStartCriticalPath
+        ? { providerStartCriticalPath: input.providerStartCriticalPath }
+        : {}),
       operatorAuthority: input.operatorAuthority,
       persistUserPromptOnFailure: false,
       prompt: input.prompt,
@@ -2170,6 +2185,9 @@ async function executeAssistantAutoReply(input: {
             ...(event.codexAppServerInitializeMs === undefined
               ? {}
               : { codexAppServerInitializeMs: event.codexAppServerInitializeMs }),
+            ...(event.providerStartCriticalPath === undefined
+              ? {}
+              : { providerStartCriticalPath: event.providerStartCriticalPath }),
             ...(event.codexAppServerPreProviderMs === undefined
               ? {}
               : { codexAppServerPreProviderMs: event.codexAppServerPreProviderMs }),
@@ -4095,6 +4113,7 @@ export function createAssistantAutoReplyHistoryReader(input: {
   let outboxIntents:
     | Promise<readonly AssistantAutoReplyOutboxIntent[]>
     | null = null
+  let outboxScanMetrics: AssistantOutboxInventoryScanMetrics | null = null
   let outboxScanElapsedMs: number | null = null
   let receiptScanMetrics: AssistantTurnReceiptScanMetrics | null = null
   let receipts:
@@ -4104,6 +4123,12 @@ export function createAssistantAutoReplyHistoryReader(input: {
   return {
     readMetrics() {
       return {
+        ...(outboxScanMetrics === null
+          ? {}
+          : {
+              outboxScanBytesRead: outboxScanMetrics.bytesRead,
+              outboxScanFilesRead: outboxScanMetrics.filesRead,
+            }),
         ...(outboxScanElapsedMs === null ? {} : { outboxScanElapsedMs }),
         outboxScanPerformed: outboxScanElapsedMs !== null,
         ...(receiptScanMetrics === null
@@ -4121,7 +4146,9 @@ export function createAssistantAutoReplyHistoryReader(input: {
       outboxIntents ??= (async () => {
         const startedAt = Date.now()
         try {
-          return await listAssistantOutboxIntents(input.vault)
+          return await listAssistantOutboxIntents(input.vault, (metrics) => {
+            outboxScanMetrics = metrics
+          })
         } finally {
           outboxScanElapsedMs = Math.max(0, Date.now() - startedAt)
         }
