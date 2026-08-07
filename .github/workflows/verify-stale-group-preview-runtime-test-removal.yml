@@ -25,7 +25,7 @@ jobs:
         run: |
           python scripts/remove-stale-group-preview-runtime-test.py
           git diff --check
-          if git grep -n -E 'ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING|currentGroupPhoneCallPreviewAuthority|resolveDeliveredAssistantGroupPhoneCallPreviewAuthority|AssistantGroupPhoneCallPreviewAuthority|group-phone-call-preview-authority|GROUP CALL PREVIEW|preview delivery receipt' -- packages; then
+          if git grep -n -E 'ASSISTANT_GROUP_PHONE_CALL_NO_TRANSFER_LINE|ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING|hasDeliveredAssistantGroupPhoneCallPreview|renderAssistantGroupPhoneCallPreview|currentGroupPhoneCallPreviewAuthority|resolveDeliveredAssistantGroupPhoneCallPreviewAuthority|AssistantGroupPhoneCallPreviewAuthority|group-phone-call-preview-authority|GROUP CALL PREVIEW|preview delivery receipt' -- packages; then
             echo 'Legacy group-call preview machinery or acceptance coverage remains.' >&2
             exit 1
           fi
