@@ -96,6 +96,11 @@ privacy, authorization, or provider boundaries.
   literal park wording. Later foundation or contextual-return evidence after a
   saved aspiration establishes that the reflect-and-park transition already
   occurred; existing records without evidence that onboarding began do not.
+- Enforce the relationship promise and bundled minimal identity at the first
+  root-to-aspiration transition while that exchange is visible. After
+  later-stage progression is established, absence of those early messages from
+  bounded history does not prove omission; recover a root step only when the
+  current or visible conversation affirmatively says it never happened.
 - Keep member facts in their existing canonical owners: goals, memory,
   regimens, supplements, conditions, allergies, records, devices, Habitat,
   experiments, automations, and group state. Assistant runtime state is not
@@ -116,6 +121,19 @@ privacy, authorization, or provider boundaries.
 - The onboarding skill owns conversation policy. The system-prompt overlay
   routes the open lifecycle into that skill, and the managed automation resumes
   it when a useful continuation exists.
+- The skill uses one package-owned progressive-disclosure asset. Its top-level
+  `SKILL.md` is a complete router capped at 12 KiB and directly owns the goal,
+  bounded resume check, immediate-need override, relationship promise, exact
+  welcome, and minimal-identity checkpoint. Aspiration/foundation/delegation,
+  persistence/recovery/follow-up, and return/launch/completion each live in one
+  directly referenced file under the same skill asset. A rule has one owner;
+  references do not restate the top-level policy or each other.
+- A fresh greeting or vague first message reads only the compact top-level
+  skill plus the one bounded `assistant onboarding resume-context` snapshot.
+  It does not preload a later-stage reference. A later or resumed turn reads
+  only the reference that owns its current decision; a turn that genuinely
+  crosses a stage boundary may read each newly relevant owner. All reference
+  files ship with the assistant-engine skill asset.
 - Hosted activation may start the first Linq conversation only after atomically
   reserving that line's proactive-conversation capacity for the current UTC
   day. A full preferred line falls through to another healthy line; when every

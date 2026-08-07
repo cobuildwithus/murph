@@ -25,10 +25,15 @@ import {
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS,
 } from '../src/assistant/onboarding-first-personal-read-automation.js'
 
-async function readOnboardingSkill(): Promise<string> {
+async function readOnboardingCompletionGuidance(): Promise<string> {
   const skillsRoot = resolveAssistantSkillsRoot()
   const raw = await readFile(
-    path.join(skillsRoot, 'murph-onboarding', 'SKILL.md'),
+    path.join(
+      skillsRoot,
+      'murph-onboarding',
+      'references',
+      'return-launch-completion.md',
+    ),
     'utf8',
   )
   return raw.replace(/\s+/gu, ' ')
@@ -308,7 +313,7 @@ describe('onboarding first personal read', () => {
   })
 
   it('keeps onboarding responsible only for invoking the fixed action', async () => {
-    const onboarding = await readOnboardingSkill()
+    const onboarding = await readOnboardingCompletionGuidance()
     const firstReadIndex = onboarding.indexOf(
       `{"action":"${MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION}"}`,
     )
