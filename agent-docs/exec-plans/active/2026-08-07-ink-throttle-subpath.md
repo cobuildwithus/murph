@@ -27,7 +27,10 @@ Updated: 2026-08-07
   declaration, lockfile, and the existing public-CLI bundling path required to
   carry that patch into npm installs.
 - Out of scope: upgrading Ink, changing Murph's Ink UI, changing hosted runner
-  boot, or introducing a Murph-owned throttle implementation.
+  boot/reply behavior, or introducing a Murph-owned throttle implementation.
+  The shared pnpm patch is intentionally present in the next runner bundle's
+  installed external Ink copy even though that copy is excluded from the
+  hosted entrypoint's static boot graph.
 
 ## Constraints
 
@@ -52,6 +55,10 @@ Updated: 2026-08-07
    Mitigation: bundle patched Ink through the existing external-dependency
    release path, promote its already-installed runtime dependencies explicitly,
    and inspect the real packed tarball in the release test.
+5. Risk: describing the change as local-only hides its runner artifact impact.
+   Mitigation: keep one shared patch, update both Cloudflare bundle-contract
+   mirrors, assemble the real runner bundle, prove its installed Ink is patched,
+   and prove the hosted entrypoint still excludes Ink from its input graph.
 
 ## Tasks
 
@@ -74,7 +81,10 @@ Updated: 2026-08-07
 - Patch Ink 6.8.0 instead of upgrading to Ink 7.1.1 because the latest release
   and current upstream source still import the same broad barrel.
 - Keep this separate from the Cloudflare image-layer optimization because it
-  affects only local Ink CLI startup.
+  has a different performance goal: the import optimization affects first Ink
+  rendering, not hosted boot. Runner assembly still carries the same patched
+  external Ink copy so public CLI and runner dependency resolution do not
+  diverge.
 - Do not add a repository-owned source-shape test for pnpm's patch file. The
   patch checksum already owns application integrity, and the Ink UI suite owns
   executable behavior.
@@ -110,6 +120,11 @@ Updated: 2026-08-07
 - The two Cloudflare bundle-closure contracts were updated to recognize Ink as
   an external bundled dependency while keeping it out of workspace build
   closure; 14 focused tests and Cloudflare typecheck passed.
+- Final ReviewGPT round 1 accepted one affected-surface finding: the shared
+  patch changes the next runner artifact even though it does not change the
+  hosted boot graph. The two stale contract assertions were already corrected
+  on the test-only follow-up head; runner assembly and disclosure proof remain
+  before remediation review.
 - In 41 alternating fresh-process samples, the compatibility barrel measured
   90.585 ms p50 versus 6.661 ms for the throttle subpath. Full Ink import
   measured 222.809 ms p50 unpatched versus 143.184 ms patched: -79.625 ms and
