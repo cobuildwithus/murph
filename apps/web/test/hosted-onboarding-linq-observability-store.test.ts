@@ -5472,7 +5472,26 @@ function createObservabilityPrismaFixture() {
   const hostedLinqDeliveryCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryFindFirst = vi.fn().mockResolvedValue(null);
   const hostedLinqDeliveryFindMany = vi.fn().mockResolvedValue([]);
-  const hostedLinqDeliveryFindUnique = vi.fn().mockResolvedValue(null);
+  const hostedLinqDeliveryFindUnique = vi.fn<
+    (input: unknown) => Promise<unknown>
+  >().mockResolvedValue(null);
+  const prismaHostedLinqDeliveryFindUnique = vi.fn(async (input: {
+    select?: Record<string, boolean>;
+  }) => {
+    const delivery = await hostedLinqDeliveryFindUnique(input);
+    if (
+      !isRecord(delivery)
+      || input.select?.participantPhoneEncrypted !== true
+    ) {
+      return delivery;
+    }
+    return {
+      memberId: null,
+      participantPhoneEncrypted: null,
+      participantPhoneLookupKey: null,
+      ...delivery,
+    };
+  });
   const hostedLinqDeliveryUpdate = vi.fn().mockResolvedValue(undefined);
   const hostedLinqDeliveryUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryUpsert = vi.fn().mockResolvedValue({ id: "hld_123" });
@@ -5528,7 +5547,7 @@ function createObservabilityPrismaFixture() {
       createMany: hostedLinqDeliveryCreateMany,
       findFirst: hostedLinqDeliveryFindFirst,
       findMany: hostedLinqDeliveryFindMany,
-      findUnique: hostedLinqDeliveryFindUnique,
+      findUnique: prismaHostedLinqDeliveryFindUnique,
       update: hostedLinqDeliveryUpdate,
       updateMany: hostedLinqDeliveryUpdateMany,
       upsert: hostedLinqDeliveryUpsert,
@@ -5595,6 +5614,10 @@ function createObservabilityPrismaFixture() {
     prisma,
     transaction,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function requireParsedProviderEvent(event: HostedLinqWebhookEvent) {

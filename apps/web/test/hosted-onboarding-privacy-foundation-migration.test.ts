@@ -80,6 +80,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "inferenceConnection HostedInferenceConnection?",
     'initialOnboardingCompletedAt DateTime? @default(now()) @map("initial_onboarding_completed_at")',
     "linqContactCardShares HostedLinqContactCardShare[]",
+    "linqDeliveries HostedLinqDelivery[]",
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
     "pendingGroupSetup HostedPendingGroupSetup?",
@@ -1074,6 +1075,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260805160000_hosted_usage_plan_reset_epoch",
       "20260805230000_meal_photo_authority_revision",
       "20260806170000_hosted_pulse_trial_start_source",
+      "20260806200000_hosted_linq_delivery_participant_claim",
       "migration_lock.toml",
     ]);
     expect(hostedPendingGroupSetupMigrationSql).toContain(
