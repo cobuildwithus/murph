@@ -6,7 +6,7 @@ import { useState } from "react";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import {
   ACTION_APPROVAL_PENDING_CAVEAT,
-  ACTION_APPROVAL_RECORDED_DESCRIPTION,
+  ActionApprovalDecisionFallback,
   ActionApprovalScreen,
 } from "@/src/components/sensitive-actions/action-approval-screen";
 import { AuthButton } from "@/src/components/ui/auth-button";
@@ -19,7 +19,12 @@ import type { SensitiveActionChallengeResponse } from "@/src/lib/sensitive-actio
 
 import { useSensitiveActionAuthorization } from "./use-sensitive-action-authorization";
 
-type Submission = "approving" | "denying" | "returning" | null;
+type Submission =
+  | "approving"
+  | "denying"
+  | "returning-approved"
+  | "returning-denied"
+  | null;
 
 export function ActionApprovalCard({
   approval,
@@ -73,8 +78,16 @@ export function ActionApprovalCard({
       typeof response.redirectTo === "string" && response.redirectTo.length > 0
         ? response.redirectTo
         : null;
+    const returningSubmission = response.status === "approved"
+      ? "returning-approved"
+      : response.status === "denied"
+        ? "returning-denied"
+        : null;
+    if (!returningSubmission) {
+      throw new Error("Secure approval returned an unsupported decision.");
+    }
     setRedirectTo(nextRedirectTo);
-    setSubmission("returning");
+    setSubmission(returningSubmission);
     if (nextRedirectTo) {
       window.location.assign(nextRedirectTo);
     }
@@ -87,13 +100,24 @@ export function ActionApprovalCard({
     ? "Sign in to approve"
     : authorization.setup.pendingLabel
     ?? (submission === "approving" ? "Verifying approval…" : "Approve with passkey");
+  const returningDecision = submission === "returning-approved"
+    ? "approved"
+    : submission === "returning-denied"
+      ? "denied"
+      : null;
   const busyStatus = authorization.setup.pendingLabel
     ?? (submission === "approving"
       ? "Verifying approval…"
       : submission === "denying"
         ? "Denying…"
-        : submission === "returning"
-          ? "Approval recorded. Returning to Murph…"
+        : returningDecision === "approved"
+          ? redirectTo
+            ? "Approval recorded. Returning to Murph…"
+            : "Approval recorded."
+          : returningDecision === "denied"
+            ? redirectTo
+              ? "Denied. Returning to Murph…"
+              : "Denied."
           : null);
   const surfacedError = error ?? authorization.setup.error;
 
@@ -146,7 +170,7 @@ export function ActionApprovalCard({
           </p>
         ) : null}
 
-        {submission === "returning" ? (
+        {returningDecision ? (
           redirectTo ? (
             <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
               Redirecting…{" "}
@@ -155,10 +179,7 @@ export function ActionApprovalCard({
               </a>
             </p>
           ) : (
-            <p className="mt-5 text-sm leading-6 text-muted-foreground">
-              {ACTION_APPROVAL_RECORDED_DESCRIPTION} Return to the Murph thread
-              where you requested this file.
-            </p>
+            <ActionApprovalDecisionFallback decision={returningDecision} />
           )
         ) : null}
       </div>

@@ -253,6 +253,7 @@ describe("action approval page", () => {
       markup,
       /Return to the Murph conversation where this request started\./,
     );
+    assert.match(markup, /Murph will not continue with this action\./);
     assert.equal(markup.includes("I denied the request."), false);
     assert.equal(markup.includes("and send:"), false);
   });

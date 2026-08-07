@@ -11,6 +11,27 @@ export const ACTION_APPROVAL_PENDING_CAVEAT =
 export const ACTION_APPROVAL_RECORDED_DESCRIPTION =
   "Approval recorded. Murph will continue only if this request is still pending.";
 
+export const ACTION_APPROVAL_DENIED_DESCRIPTION =
+  "Murph will not continue with this action.";
+
+export function ActionApprovalDecisionFallback({
+  decision,
+}: {
+  decision: "approved" | "denied";
+}) {
+  return (
+    <p className="mt-5 text-sm leading-6 text-muted-foreground">
+      {decision === "approved" ? (
+        <>{ACTION_APPROVAL_RECORDED_DESCRIPTION} Return to the Murph thread where
+          you requested this file.</>
+      ) : (
+        <>Denied. {ACTION_APPROVAL_DENIED_DESCRIPTION} Return to the Murph thread
+          where this request started.</>
+      )}
+    </p>
+  );
+}
+
 interface ActionApprovalScreenProps {
   badgeIcon: LucideIcon;
   badgeTone?: BadgeTone;

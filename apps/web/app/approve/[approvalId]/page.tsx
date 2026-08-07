@@ -11,6 +11,7 @@ import { redirect } from "next/navigation";
 import { ActionApprovalAuthRequiredState } from "@/src/components/sensitive-actions/action-approval-auth-required";
 import { ActionApprovalCard } from "@/src/components/sensitive-actions/action-approval-card";
 import {
+  ACTION_APPROVAL_DENIED_DESCRIPTION,
   ACTION_APPROVAL_RECORDED_DESCRIPTION,
   ActionApprovalScreen,
 } from "@/src/components/sensitive-actions/action-approval-screen";
@@ -189,7 +190,7 @@ function terminalContent(
     case "denied":
       return {
         actionLabel: "Return to Murph",
-        description: "Murph will not continue with this action.",
+        description: ACTION_APPROVAL_DENIED_DESCRIPTION,
         icon: XCircle,
         title: "Denied",
       };
