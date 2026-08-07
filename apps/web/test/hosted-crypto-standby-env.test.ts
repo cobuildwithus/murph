@@ -17,6 +17,8 @@ import {
 describe("hosted crypto standby environment preflight", () => {
   it("accepts structurally valid Web standby keyrings", () => {
     expect(listHostedCryptoStandbyEnvErrors({
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+        "cloudflare-automation:v1",
       HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
         "authority-v2": {
           publicKeyPem:
@@ -37,6 +39,7 @@ describe("hosted crypto standby environment preflight", () => {
             status: "disabled",
           },
         }),
+      HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "authority-v1",
     })).toEqual([]);
   });
 
@@ -97,6 +100,26 @@ describe("hosted crypto standby environment preflight", () => {
     })).toEqual([HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR]);
   });
 
+  it("rejects a public standby that collides with the active recipient", () => {
+    expect(listHostedCryptoStandbyEnvErrors({
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+        "cloudflare-automation:v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON:
+        JSON.stringify({
+          "cloudflare-automation:v1": {
+            publicJwk: {
+              crv: "P-256",
+              kty: "EC",
+              x: "standby-public-x",
+              y: "standby-public-y",
+            },
+            recipient: "cloudflare-automation-secret",
+            status: "disabled",
+          },
+        }),
+    })).toEqual([HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR]);
+  });
+
   it("requires and matches all three payloads for pre-mutation acceptance", async () => {
     expect(() => assertHostedCryptoStandbyEnv(
       {},
@@ -106,6 +129,8 @@ describe("hosted crypto standby environment preflight", () => {
     const standbyRecipient = await generateHostedUserRecipientKeyPair();
     expect(() => assertHostedCryptoStandbyEnv(
       {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+          "cloudflare-automation:v1",
         HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
           "authority-v2": {
             publicKeyPem:
@@ -129,6 +154,10 @@ describe("hosted crypto standby environment preflight", () => {
               status: "disabled",
             },
           }),
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "authority-v1",
+        HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION: "authority-v2",
+        HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID:
+          "cloudflare-automation:v2",
       },
       { requireCompletePreload: true },
     )).not.toThrow();

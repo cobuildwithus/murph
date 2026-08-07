@@ -111,6 +111,15 @@ Updated: 2026-08-07
    public/private pair before provider mutation. Focused tests cover the Web
    crypto-context owner and Worker unwrap owner; rollback remains the recorded
    ready Web deployment with all active single-key variables unchanged.
+6. Risk: isolated JSON validation reports completion for a proposed entry whose
+   ID is overwritten by the required active overlay or whose status cannot
+   verify/decrypt a future standby envelope.
+   Mitigation: final ReviewGPT round 3 identified this review-induced gap. Keep
+   the same shared pure owner, pass the existing active IDs into both provider
+   gates, and reject optional collisions. Complete mode additionally takes two
+   explicit non-secret proposed IDs, requires their exact `verify_only` /
+   `disabled` / `decrypt_only` states, constructs the effective runtime rings,
+   and proves a synthetic envelope with the proposed signer and recipient.
 
 ## Tasks
 
@@ -137,6 +146,9 @@ Updated: 2026-08-07
   The round-2 retrospective identified one shared lower contract, a Web build
   gate, a Worker deploy gate, and complete-pair acceptance as the smallest
   correction for the repeated validation-boundary mechanism.
+- Continue that same decision after the round-3 review-induced finding: prove
+  the proposed generation survives the existing active overlay and is usable,
+  without adding a deployment owner, persisted state, or rotation lifecycle.
 - Generate and preload keys only after the exact pushed implementation head has
   passed focused proof, CI, and both ReviewGPT gates. Merge the reviewed
   contract to public `main`, deploy from the protected private workflow's

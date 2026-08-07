@@ -475,6 +475,10 @@ function appendHostedCryptoKeyringInvariantErrors(
 ): void {
   try {
     assertHostedCryptoStandbyKeyringJsons({
+      activeAuthorityKeyVersionName:
+        source.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+      activeCloudflareRecipientKeyId:
+        source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
       authorityVerifyKeyringJson:
         source.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON,
       cloudflarePrivateKeyringJson:

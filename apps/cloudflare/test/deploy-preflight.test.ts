@@ -393,6 +393,18 @@ describe("deploy preflight helpers", () => {
       HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
     ],
     [
+      "a verify-only authority entry shadowed by the required key",
+      {
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1": {
+            publicKeyPem: "private-keyring-canary",
+            status: "verify_only",
+          },
+        }),
+      },
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+    ],
+    [
       "a private JWK without d",
       {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
@@ -466,6 +478,26 @@ describe("deploy preflight helpers", () => {
               },
               recipient: "cloudflare-automation-secret",
               status: "active",
+            },
+          }),
+      },
+      HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "a decrypt-only private entry shadowed by the required key",
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          JSON.stringify({
+            "cloudflare-automation:v1": {
+              privateJwk: {
+                crv: "P-256",
+                d: "private-keyring-canary",
+                kty: "EC",
+                x: "standby-public-x",
+                y: "standby-public-y",
+              },
+              recipient: "cloudflare-automation-secret",
+              status: "decrypt_only",
             },
           }),
       },

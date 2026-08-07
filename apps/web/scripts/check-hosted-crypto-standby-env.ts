@@ -22,12 +22,20 @@ export function listHostedCryptoStandbyEnvErrors(
 
   try {
     assertHostedCryptoStandbyKeyringJsons({
+      activeAuthorityKeyVersionName:
+        source.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION,
+      activeCloudflareRecipientKeyId:
+        source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
       authorityVerifyKeyringJson:
         source.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON,
       cloudflarePrivateKeyringJson:
         source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON,
       cloudflarePublicKeyringJson:
         source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON,
+      proposedAuthorityKeyVersionName:
+        source.HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION,
+      proposedCloudflareRecipientKeyId:
+        source.HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID,
       requireCompletePreload: input.requireCompletePreload,
     });
     return [];

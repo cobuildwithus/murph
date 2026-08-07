@@ -820,11 +820,19 @@ Web build and Worker deploy preflight must use the same runtime-state standby
 acceptance contract before either provider can promote code. It rejects
 malformed or active optional entries, rejects private material in Web's public
 ring or a private keyring in Web runtime, and permits Cloudflare entries only
-for `cloudflare-automation-secret`. Before any provider mutation, load all three
-proposed payloads from approved secret stores into the process environment and
-run the Web `hosted-crypto:env-check` script with
-`--require-complete-preload`; complete mode requires all rings and matches each
-Cloudflare public/private entry by key id and P-256 public coordinates.
+for `cloudflare-automation-secret`. Both provider gates also reject an optional
+entry that collides with the required active authority or Cloudflare key ID,
+because runtime overlay would otherwise replace it. Before any provider
+mutation, load all three proposed payloads from approved secret stores into the
+process environment together with the current active IDs and the operator-only
+`HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION` and
+`HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID`. Run the Web
+`hosted-crypto:env-check` script with `--require-complete-preload`; complete
+mode requires the intended `verify_only` / `disabled` / `decrypt_only` entries
+to survive under distinct proposed IDs and matches every Cloudflare
+public/private entry by key id and P-256 public coordinates. The two proposed
+ID inputs are non-secret one-shot validation metadata; do not add them to a
+provider runtime.
 Validation errors identify only the configuration field. Do not put values in
 arguments or bypass either gate.
 

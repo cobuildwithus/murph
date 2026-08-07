@@ -469,8 +469,12 @@ Last verified: 2026-08-07
   file. Web build and Worker deploy preflight must share one runtime-state
   acceptance contract for optional standby rings. Before provider mutation,
   complete-preload validation must require all three authority/public/private
-  payloads and match the Cloudflare public/private P-256 coordinates by key id;
-  errors may name fields but must never reproduce values. Record the current
+  payloads, reject required-active-ID collisions, require the intended
+  `verify_only` / `disabled` / `decrypt_only` statuses under explicit proposed
+  IDs, and match the Cloudflare public/private P-256 coordinates by key id;
+  errors may name fields but must never reproduce values. Proposed IDs are
+  non-secret one-shot operator validation metadata, not provider runtime
+  configuration. Record the current
   ready Web deployment, deploy Web first, and prove the unchanged active Web
   crypto context before changing the Worker; a build success is not runtime
   proof. A standby preload must not mutate envelope key references. Activation,

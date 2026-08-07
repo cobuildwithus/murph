@@ -58,6 +58,8 @@ export const HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR =
   "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON must be a valid non-active Cloudflare automation private standby keyring.";
 export const HOSTED_CRYPTO_COMPLETE_STANDBY_PRELOAD_ERROR =
   "Hosted crypto complete standby preload requires authority, Cloudflare public, and Cloudflare private keyrings.";
+export const HOSTED_CRYPTO_COMPLETE_STANDBY_IDENTIFIERS_ERROR =
+  "Hosted crypto complete standby preload requires active and proposed authority and Cloudflare key identifiers.";
 export const HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR =
   "Hosted crypto Cloudflare public and private standby keyrings must contain matching P-256 keypairs.";
 
@@ -68,9 +70,13 @@ export const HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR =
  * All thrown messages are field-only and safe to surface from provider gates.
  */
 export function assertHostedCryptoStandbyKeyringJsons(input: {
+  activeAuthorityKeyVersionName?: string | null;
+  activeCloudflareRecipientKeyId?: string | null;
   authorityVerifyKeyringJson?: string | null;
   cloudflarePrivateKeyringJson?: string | null;
   cloudflarePublicKeyringJson?: string | null;
+  proposedAuthorityKeyVersionName?: string | null;
+  proposedCloudflareRecipientKeyId?: string | null;
   requireCompletePreload?: boolean;
 }): void {
   const authorityEntries = readHostedAuthorityStandbyEntries(
@@ -82,6 +88,37 @@ export function assertHostedCryptoStandbyKeyringJsons(input: {
   const privateEntries = readHostedCloudflarePrivateStandbyEntries(
     input.cloudflarePrivateKeyringJson,
   );
+  const activeAuthorityKeyVersionName = normalizeOptionalString(
+    input.activeAuthorityKeyVersionName,
+  );
+  const activeCloudflareRecipientKeyId = normalizeOptionalString(
+    input.activeCloudflareRecipientKeyId,
+  );
+
+  if (
+    activeAuthorityKeyVersionName
+    && authorityEntries.some(
+      (entry) => entry.keyVersionName === activeAuthorityKeyVersionName,
+    )
+  ) {
+    throw new TypeError(HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR);
+  }
+  if (
+    activeCloudflareRecipientKeyId
+    && publicEntries.some(
+      (entry) => entry.recipientKeyId === activeCloudflareRecipientKeyId,
+    )
+  ) {
+    throw new TypeError(HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR);
+  }
+  if (
+    activeCloudflareRecipientKeyId
+    && privateEntries.some(
+      (entry) => entry.recipientKeyId === activeCloudflareRecipientKeyId,
+    )
+  ) {
+    throw new TypeError(HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR);
+  }
 
   if (!input.requireCompletePreload) {
     return;
@@ -92,6 +129,40 @@ export function assertHostedCryptoStandbyKeyringJsons(input: {
     || privateEntries.length === 0
   ) {
     throw new TypeError(HOSTED_CRYPTO_COMPLETE_STANDBY_PRELOAD_ERROR);
+  }
+
+  const proposedAuthorityKeyVersionName = normalizeOptionalString(
+    input.proposedAuthorityKeyVersionName,
+  );
+  const proposedCloudflareRecipientKeyId = normalizeOptionalString(
+    input.proposedCloudflareRecipientKeyId,
+  );
+  if (
+    !activeAuthorityKeyVersionName
+    || !activeCloudflareRecipientKeyId
+    || !proposedAuthorityKeyVersionName
+    || !proposedCloudflareRecipientKeyId
+  ) {
+    throw new TypeError(HOSTED_CRYPTO_COMPLETE_STANDBY_IDENTIFIERS_ERROR);
+  }
+
+  const proposedAuthorityEntry = authorityEntries.find(
+    (entry) => entry.keyVersionName === proposedAuthorityKeyVersionName,
+  );
+  if (proposedAuthorityEntry?.status !== "verify_only") {
+    throw new TypeError(HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR);
+  }
+  const proposedPublicEntry = publicEntries.find(
+    (entry) => entry.recipientKeyId === proposedCloudflareRecipientKeyId,
+  );
+  if (proposedPublicEntry?.status !== "disabled") {
+    throw new TypeError(HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR);
+  }
+  const proposedPrivateEntry = privateEntries.find(
+    (entry) => entry.recipientKeyId === proposedCloudflareRecipientKeyId,
+  );
+  if (proposedPrivateEntry?.status !== "decrypt_only") {
+    throw new TypeError(HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR);
   }
 
   const privateEntriesById = new Map(
