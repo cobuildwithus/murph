@@ -22,8 +22,10 @@ describe('assistant research guidance', () => {
     })
 
     expect(prompt).toContain('{"mode":"focused"}')
-    expect(prompt).toContain('compact lowercase non-identifying profile categories')
-    expect(prompt).toContain('never send arbitrary question prose')
+    expect(prompt).toContain('exact server-owned public concepts')
+    expect(prompt).toContain('research payload-schema --format json')
+    expect(prompt).toContain('otherwise make no Exa call')
+    expect(prompt).toContain('Never send arbitrary values or question prose')
     expect(prompt).toContain('`resultIndex` maps to a returned result')
     expect(prompt).toContain('source title, web URL')
     expect(prompt).toContain('no usable current source')

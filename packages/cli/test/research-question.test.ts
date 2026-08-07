@@ -6,15 +6,43 @@ import {
   registerResearchCommands,
 } from '../src/commands/research.js'
 import {
+  createPayloadSchemaResult,
+} from '../src/commands/payload-schema-command.js'
+import {
   fetchExaResearchScoutCandidates,
 } from '../src/research-scout-client.js'
+import {
+  researchScoutProfileSchema,
+} from '../src/research-scout.js'
 import { vaultCliCommandDescriptors } from '../src/vault-cli-command-manifest.js'
 
 const FOCUSED_PROFILE = {
   mode: 'focused',
-  topics: ['creatine', 'cognitive performance'],
+  topics: ['cognition'],
+  supplements: ['creatine'],
   conditionsOrConcerns: ['healthy adults'],
+  goals: ['cognitive performance'],
 } as const
+
+const FOCUSED_PROFILE_FIELDS = [
+  'topics',
+  'biomarkers',
+  'behaviors',
+  'supplements',
+  'conditionsOrConcerns',
+  'goals',
+  'activeExperiments',
+] as const
+
+const PRIVATE_FOCUSED_VALUES = [
+  'sampleperson recurring headaches',
+  'TeSt SuBjEcT supplement use'.toLowerCase(),
+  'examplelab staff sleep',
+  'participant 7304 headache',
+  'tenant at 456 sample boulevard',
+  'passphrase demo-access',
+  'intake summary persistent sleeplessness',
+] as const
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -64,12 +92,23 @@ describe('focused structured research', () => {
     expect(help).toContain('focused structured scope')
     expect(help).toContain('compact non-identifying tag profile')
     expect(help).toContain('{"mode":"focused"}')
+    expect(help).toContain('exact server-owned public concepts')
+    expect(help).toContain('supplements=[caffeine, creatine')
     expect(help).toContain('--input @file.json')
     expect(help).toContain('--input -')
     expect(help).toContain(
       'resultIndex maps to a returned source with a title, web URL',
     )
     expect(help).toContain('otherwise report no usable current source')
+
+    const payloadSchema = createPayloadSchemaResult({
+      command: 'research scout --input',
+      schema: researchScoutProfileSchema,
+    })
+    const serializedPayloadSchema = JSON.stringify(payloadSchema.schema)
+    expect(serializedPayloadSchema).toContain('cognition, memory')
+    expect(serializedPayloadSchema).toContain('creatine, magnesium')
+    expect(serializedPayloadSchema).toContain('healthy adults, insomnia')
   })
 
   it('keeps the static command manifest aligned with both scout modes', () => {
@@ -99,6 +138,8 @@ describe('focused structured research', () => {
     expect(scout?.description).toContain('focused structured scope')
     expect(scout?.description).toContain('compact non-identifying tags')
     expect(scout?.hint).toContain('{"mode":"focused"}')
+    expect(scout?.hint).toContain('exact server-owned public concepts')
+    expect(scout?.hint).toContain('conditionsOrConcerns=[adults, anxiety')
     expect(scout?.hint).toContain('resultIndex maps to a returned source')
     expect(scout?.hint).toContain('without fabricating or repeating')
   })
@@ -147,7 +188,10 @@ describe('focused structured research', () => {
     expect(requestBody.type).toBe('deep-reasoning')
     expect(requestBody.category).toBe('research paper')
     expect(requestBody.query).toEqual(
-      expect.stringContaining('Topics: creatine, cognitive performance'),
+      expect.stringContaining('Topics: cognition'),
+    )
+    expect(requestBody.query).toEqual(
+      expect.stringContaining('Supplements: creatine'),
     )
     expect(requestBody.query).not.toEqual(
       expect.stringContaining('Question:'),
@@ -195,6 +239,38 @@ describe('focused structured research', () => {
       },
       fetchImpl,
     })).rejects.toThrow()
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('rejects private-shaped values in every focused field before any Exa request', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    for (const field of FOCUSED_PROFILE_FIELDS) {
+      for (const value of PRIVATE_FOCUSED_VALUES) {
+        await expect(fetchExaResearchScoutCandidates({
+          profile: {
+            mode: 'focused',
+            topics: [],
+            biomarkers: [],
+            behaviors: [],
+            supplements: [],
+            conditionsOrConcerns: [],
+            goals: [],
+            activeExperiments: [],
+            [field]: [value],
+          },
+          since: '2021-01-01T00:00:00.000Z',
+          until: '2026-08-06T00:00:00.000Z',
+          maxCandidates: 6,
+        }, {
+          env: {
+            EXA_API_KEY: 'exa-test-token',
+          },
+          fetchImpl,
+        })).rejects.toThrow(/exact server-owned public concepts/u)
+      }
+    }
 
     expect(fetchImpl).not.toHaveBeenCalled()
   })

@@ -604,6 +604,10 @@ text(result.output);
       },
     })
     await writeFile(fakeVaultCli, `#!/bin/sh
+if [ "$*" = "research payload-schema --format json" ]; then
+  printf '%s\\n' '{"schemaVersion":"murph.payload-schema.v1","schema":{"properties":{"topics":{"items":{"description":"Focused values: cognition."}},"supplements":{"items":{"description":"Focused values: creatine."}},"conditionsOrConcerns":{"items":{"description":"Focused values: adults, healthy adults."}},"goals":{"items":{"description":"Focused values: cognitive performance."}}}}}'
+  exit 0
+fi
 request="$(cat)"
 printf '%s\\n' "$request" >> "research-request.log"
 case "$request" in
@@ -636,7 +640,18 @@ esac
       {
         customToolCall: {
           input: `
-const input = JSON.stringify({mode: "focused", topics: ["creatine", "cognitive performance"], conditionsOrConcerns: ["adults"]});
+const result = await tools.exec_command({
+  cmd: "./vault-cli research payload-schema --format json",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const input = JSON.stringify({mode: "focused", topics: ["cognition"], supplements: ["creatine"], conditionsOrConcerns: ["adults"], goals: ["cognitive performance"]});
 const result = await tools.exec_command({
   cmd: "printf '%s' '" + input + "' | ./vault-cli research scout --input - --since 2020-01-01 --until 2026-08-06",
 });
@@ -658,7 +673,7 @@ text(result.output);
         EXA_API_KEY: 'configured-sentinel',
       },
       progressDelivery,
-      prompt: 'Check current creatine-and-memory evidence for <PRIVATE_PERSON>, then explain the useful result and its main limitation.',
+      prompt: 'Check current creatine-and-memory evidence relevant to Caseperson, then explain the useful result and its main limitation.',
       sandbox: 'danger-full-access',
     })
 
@@ -671,16 +686,22 @@ text(result.output);
     expect(sourced.finalMessage).toContain(
       'https://example.test/research/creatine-cognition-review',
     )
+    expect(
+      scenario.stub.requestSummariesSinceBaseline()
+        .flatMap((summary) => summary.customToolCallOutputs ?? [])
+        .join('\n'),
+    ).toContain('Focused values: creatine')
     const providerQuestion = (await readFile(requestLog, 'utf8')).trim()
     expect(providerQuestion).toContain('"mode":"focused"')
-    expect(providerQuestion).toContain('"topics":["creatine","cognitive performance"]')
-    expect(providerQuestion).not.toContain('<PRIVATE_PERSON>')
+    expect(providerQuestion).toContain('"topics":["cognition"]')
+    expect(providerQuestion).toContain('"supplements":["creatine"]')
+    expect(providerQuestion.toLowerCase()).not.toContain('caseperson')
 
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const input = JSON.stringify({mode: "focused", topics: ["meal timing", "sleep timing"], conditionsOrConcerns: ["adults"]});
+const input = JSON.stringify({mode: "focused", behaviors: ["meal timing", "sleep timing"], conditionsOrConcerns: ["adults"]});
 const result = await tools.exec_command({
   cmd: "printf '%s' '" + input + "' | ./vault-cli research scout --input - --since 2025-01-01 --until 2026-08-06",
 });

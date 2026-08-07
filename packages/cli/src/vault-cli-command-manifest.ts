@@ -120,7 +120,10 @@ import {
   foodLabelSearchResultSchema,
 } from './food-labels.js'
 import { registerResearchCommands } from './commands/research.js'
-import { researchScoutResultSchema } from './research-scout.js'
+import {
+  RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE,
+  researchScoutResultSchema,
+} from './research-scout.js'
 import { registerRouteCommands } from './commands/route.js'
 import {
   knowledgeChallengeScoreCommandDescription,
@@ -977,7 +980,7 @@ export const vaultCliCommandDescriptors = [
         description:
           'Search Exa for bounded human-research candidates from one focused structured scope or compact non-identifying tags without writing vault records.',
         hint:
-          'Requires EXA_API_KEY. Pass {"mode":"focused"} plus compact lowercase non-identifying profile fields through stdin or @file JSON; omit mode for broad discovery. Never include names, organizations, private notes, or personal data. Trust only candidates whose resultIndex maps to a returned source with a title, web URL, and enough publication metadata for the claim; otherwise report no usable current source without fabricating or repeating the lookup blindly.',
+          `Requires EXA_API_KEY. Pass {"mode":"focused"} plus exact server-owned public concepts through stdin or @file JSON; omit mode for broad discovery. Focused values: ${RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE}. If the question cannot be represented exactly, make no Exa call. Never include arbitrary values, names, organizations, private notes, or personal data. Trust only candidates whose resultIndex maps to a returned source with a title, web URL, and enough publication metadata for the claim; otherwise report no usable current source without fabricating or repeating the lookup blindly.`,
         output: researchScoutResultSchema,
       },
     ],

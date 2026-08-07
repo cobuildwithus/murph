@@ -147,13 +147,85 @@ const unsafeResearchScoutTagPatterns = [
   /\b(?:a1c|hba1c|ldl|hdl|apo\s?b|hs-?crp|crp|glucose|triglycerides?|tsh|ferritin|vitamin d|25-?oh|testosterone|cortisol|alt|ast|egfr|gfr|creatinine|hemoglobin|platelets?)\b[^a-z0-9]{0,12}\d+(?:\.\d+)?\b/iu,
   /\b(?:i|i'm|ive|i've|me|my|mine)\b/iu,
 ] as const;
-const scientificResearchTagPattern = /\b(?:phase|type|complex) i\b/gu;
-const publicationYearRangeTagPattern = /\b(?:19|20)\d{2}\s*-\s*(?:19|20)\d{2}\b/gu;
 
 const researchScoutCategoryTagPattern = /^[a-z0-9](?:[a-z0-9 /-]*[a-z0-9])?$/u;
 type ResearchScoutProfileField =
   typeof EXA_RESEARCH_SCOUT_QUERY_PROFILE_SECTIONS[number]["field"];
 type ResearchScoutTagProfileShape = Record<ResearchScoutProfileField, readonly string[]>;
+
+export const RESEARCH_SCOUT_FOCUSED_CONCEPTS_BY_FIELD = {
+  topics: [
+    "cardiometabolic risk",
+    "cognition",
+    "memory",
+    "metabolic health",
+    "mitochondrial complex i",
+    "phase i trials",
+    "recovery",
+    "sleep",
+    "sleep duration",
+    "sleep regularity",
+    "systematic reviews",
+    "type i interferon signaling",
+    "us guidelines",
+  ],
+  biomarkers: [
+    "apob",
+    "glucose",
+    "hba1c",
+    "hdl cholesterol",
+    "hs-crp",
+    "ldl cholesterol",
+  ],
+  behaviors: [
+    "exercise",
+    "meal timing",
+    "morning light",
+    "resistance training",
+    "screen curfew",
+    "sleep timing",
+    "yoga",
+  ],
+  supplements: [
+    "caffeine",
+    "creatine",
+    "magnesium",
+    "omega-3",
+    "vitamin d",
+  ],
+  conditionsOrConcerns: [
+    "adults",
+    "anxiety",
+    "healthy adults",
+    "insomnia",
+    "menopause",
+    "migraine",
+    "older adults",
+    "parkinsons disease",
+    "sleep deprivation",
+  ],
+  goals: [
+    "better recovery",
+    "cardiometabolic health",
+    "cognitive performance",
+    "longevity",
+    "memory",
+    "sleep quality",
+  ],
+  activeExperiments: [
+    "creatine supplementation",
+    "meal timing",
+    "morning light",
+    "resistance training",
+    "screen curfew",
+  ],
+} as const satisfies Record<ResearchScoutProfileField, readonly string[]>;
+
+export const RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE =
+  EXA_RESEARCH_SCOUT_QUERY_PROFILE_SECTIONS.map(
+    (section) =>
+      `${section.field}=[${RESEARCH_SCOUT_FOCUSED_CONCEPTS_BY_FIELD[section.field].join(", ")}]`,
+  ).join("; ");
 
 export function isSafeResearchScoutProfileTag(value: string): boolean {
   const tag = value.trim();
@@ -166,16 +238,22 @@ export function isSafeResearchScoutProfileTag(value: string): boolean {
   if (!researchScoutCategoryTagPattern.test(tag)) {
     return false;
   }
-  const tagWithoutPublicScientificTerms = tag
-    .replace(scientificResearchTagPattern, "")
-    .replace(publicationYearRangeTagPattern, "");
-  return !unsafeResearchScoutTagPatterns.some((pattern) =>
-    pattern.test(tagWithoutPublicScientificTerms)
-  );
+  return !unsafeResearchScoutTagPatterns.some((pattern) => pattern.test(tag));
+}
+
+function isAllowedFocusedResearchScoutConcept(
+  field: ResearchScoutProfileField,
+  value: string,
+): boolean {
+  const concepts: readonly string[] =
+    RESEARCH_SCOUT_FOCUSED_CONCEPTS_BY_FIELD[field];
+  return concepts.includes(value);
 }
 
 const unsafeResearchScoutTagMessage =
   "Research scout profile tags must be broad lowercase non-identifying categories, not raw values, dates, contacts, proper nouns, organizations, or notes.";
+const unsupportedFocusedResearchScoutConceptMessage =
+  "Focused research scout values must be exact server-owned public concepts listed in the command guidance.";
 
 const tagSchema = z
   .string()
@@ -205,6 +283,41 @@ const researchScoutTagProfileShape = {
   activeExperiments: z.array(longerTagSchema).max(12).default([]),
 } as const;
 
+function createFocusedCapableResearchScoutValuesSchema(
+  field: ResearchScoutProfileField,
+  maxItems: number,
+  maxLength: number,
+) {
+  return z.array(
+    z
+      .string()
+      .trim()
+      .min(1)
+      .max(maxLength)
+      .describe(
+        `Focused values: ${RESEARCH_SCOUT_FOCUSED_CONCEPTS_BY_FIELD[field].join(", ")}.`,
+      ),
+  ).max(maxItems).default([]);
+}
+
+const focusedCapableResearchScoutProfileShape = {
+  topics: createFocusedCapableResearchScoutValuesSchema("topics", 24, 80),
+  biomarkers: createFocusedCapableResearchScoutValuesSchema("biomarkers", 24, 80),
+  behaviors: createFocusedCapableResearchScoutValuesSchema("behaviors", 24, 80),
+  supplements: createFocusedCapableResearchScoutValuesSchema("supplements", 24, 80),
+  conditionsOrConcerns: createFocusedCapableResearchScoutValuesSchema(
+    "conditionsOrConcerns",
+    16,
+    120,
+  ),
+  goals: createFocusedCapableResearchScoutValuesSchema("goals", 16, 120),
+  activeExperiments: createFocusedCapableResearchScoutValuesSchema(
+    "activeExperiments",
+    12,
+    120,
+  ),
+} as const;
+
 export const researchScoutTagProfileSchema = z
   .object(researchScoutTagProfileShape)
   .strict();
@@ -214,7 +327,7 @@ const emptyFocusedResearchScoutProfileMessage =
 
 export const researchScoutProfileSchema = z
   .object({
-    ...researchScoutTagProfileShape,
+    ...focusedCapableResearchScoutProfileShape,
     mode: z.literal("focused").optional(),
   })
   .strict()
@@ -224,6 +337,22 @@ export const researchScoutProfileSchema = z
         code: z.ZodIssueCode.custom,
         message: emptyFocusedResearchScoutProfileMessage,
         path: ["mode"],
+      });
+    }
+    for (const section of EXA_RESEARCH_SCOUT_QUERY_PROFILE_SECTIONS) {
+      profile[section.field].forEach((value, index) => {
+        const valid = profile.mode === "focused"
+          ? isAllowedFocusedResearchScoutConcept(section.field, value)
+          : isSafeResearchScoutProfileTag(value);
+        if (!valid) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: profile.mode === "focused"
+              ? unsupportedFocusedResearchScoutConceptMessage
+              : unsafeResearchScoutTagMessage,
+            path: [section.field, index],
+          });
+        }
       });
     }
   });
@@ -685,7 +814,11 @@ function parseResearchScoutProfileQuery(
     if (!line.startsWith(prefix)) {
       return null;
     }
-    const tags = parseSafeResearchScoutTags(line.slice(prefix.length), section);
+    const tags = parseSafeResearchScoutTags(
+      line.slice(prefix.length),
+      section,
+      mode,
+    );
     if (tags === null) {
       return null;
     }
@@ -722,9 +855,11 @@ function resolveResearchScoutSystemPrompt(
 function parseSafeResearchScoutTags(
   rawValue: string,
   section: {
+    field: ResearchScoutProfileField;
     maxItems: number;
     maxLength: number;
   },
+  mode?: "focused",
 ): string[] | null {
   if (rawValue === "none") {
     return [];
@@ -738,7 +873,9 @@ function parseSafeResearchScoutTags(
     || tags.length > section.maxItems
     || !tags.every((tag) =>
       tag.length <= section.maxLength
-      && isSafeResearchScoutProfileTag(tag)
+      && (mode === "focused"
+        ? isAllowedFocusedResearchScoutConcept(section.field, tag)
+        : isSafeResearchScoutProfileTag(tag))
     )
   ) {
     return null;

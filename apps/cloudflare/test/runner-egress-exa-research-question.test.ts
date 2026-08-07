@@ -27,16 +27,36 @@ const WRITE_FENCE_HEADERS = {
   [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: 'member_123',
 } as const
 
+const FOCUSED_QUERY_LABELS_BY_FIELD = {
+  topics: 'Topics',
+  biomarkers: 'Biomarkers',
+  behaviors: 'Behaviors',
+  supplements: 'Supplements',
+  conditionsOrConcerns: 'Conditions or concerns',
+  goals: 'Goals',
+  activeExperiments: 'Active experiments',
+} as const
+
+const PRIVATE_FOCUSED_VALUES = [
+  'sampleperson recurring headaches',
+  'TeSt SuBjEcT supplement use'.toLowerCase(),
+  'examplelab staff sleep',
+  'participant 7304 headache',
+  'tenant at 456 sample boulevard',
+  'passphrase demo-access',
+  'intake summary persistent sleeplessness',
+] as const
+
 function createFocusedRequestBody() {
   return buildExaResearchScoutRequest({
     profile: {
       mode: 'focused',
-      topics: ['creatine', 'cognitive performance'],
+      topics: ['cognition'],
       biomarkers: [],
       behaviors: [],
-      supplements: [],
+      supplements: ['creatine'],
       conditionsOrConcerns: ['healthy adults'],
-      goals: [],
+      goals: ['cognitive performance'],
       activeExperiments: [],
     },
     since: '2021-01-01T00:00:00.000Z',
@@ -144,6 +164,52 @@ describe('hosted Exa egress for focused structured scopes', () => {
       generation: '7',
       userId: 'member_123',
     })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects private-shaped values in every focused query field before upstream fetch', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-06T12:00:00.000Z'))
+
+    const requestBody = createFocusedRequestBody()
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('unexpected'))
+    vi.stubGlobal('fetch', fetchMock)
+    const validateRuntimeWriteFence = vi.fn(async () => true)
+
+    for (const [field, label] of Object.entries(FOCUSED_QUERY_LABELS_BY_FIELD)) {
+      for (const value of PRIVATE_FOCUSED_VALUES) {
+        const linePrefix = `${label}: `
+        const unsafeRequestBody = {
+          ...requestBody,
+          query: requestBody.query
+            .split('\n')
+            .map((line) =>
+              line.startsWith(linePrefix) ? `${linePrefix}${value}` : line
+            )
+            .join('\n'),
+        }
+        const response = await hostedRunnerIntercept(
+          new Request('https://api.exa.ai/search', {
+            body: JSON.stringify(unsafeRequestBody),
+            headers: {
+              ...WRITE_FENCE_HEADERS,
+              'content-type': 'application/json; charset=utf-8',
+              'x-api-key': HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+            },
+            method: 'POST',
+          }),
+          createExaTestEnv(validateRuntimeWriteFence),
+          { containerId: `opaque-${field}-container-id` },
+        )
+
+        expect(response.status).toBe(403)
+      }
+    }
+
+    expect(validateRuntimeWriteFence).toHaveBeenCalledTimes(
+      Object.keys(FOCUSED_QUERY_LABELS_BY_FIELD).length
+        * PRIVATE_FOCUSED_VALUES.length,
+    )
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })

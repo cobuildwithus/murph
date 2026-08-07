@@ -10,9 +10,31 @@ import {
 
 const FOCUSED_PROFILE = {
   mode: "focused",
-  topics: ["creatine", "cognitive performance"],
+  topics: ["cognition"],
+  supplements: ["creatine"],
   conditionsOrConcerns: ["healthy adults"],
+  goals: ["cognitive performance"],
 } as const;
+
+const FOCUSED_PROFILE_FIELDS = [
+  "topics",
+  "biomarkers",
+  "behaviors",
+  "supplements",
+  "conditionsOrConcerns",
+  "goals",
+  "activeExperiments",
+] as const;
+
+const PRIVATE_FOCUSED_VALUES = [
+  "sampleperson recurring headaches",
+  "TeSt SuBjEcT supplement use".toLowerCase(),
+  "examplelab staff sleep",
+  "participant 7304 headache",
+  "tenant at 456 sample boulevard",
+  "passphrase demo-access",
+  "intake summary persistent sleeplessness",
+] as const;
 
 const PARSED_FOCUSED_PROFILE = researchScoutProfileSchema.parse(
   FOCUSED_PROFILE,
@@ -36,8 +58,10 @@ describe("focused structured Exa research", () => {
     expect(request.query).toContain(
       "What does high-quality recent human research show for this focused structured scope?",
     );
-    expect(request.query).toContain("Topics: creatine, cognitive performance");
+    expect(request.query).toContain("Topics: cognition");
+    expect(request.query).toContain("Supplements: creatine");
     expect(request.query).toContain("Conditions or concerns: healthy adults");
+    expect(request.query).toContain("Goals: cognitive performance");
     expect(request.query).not.toContain("Question:");
     expect(request.systemPrompt).toContain("focused structured scope");
     expect(parseExaResearchScoutRequestBody(request)).toEqual({
@@ -52,19 +76,40 @@ describe("focused structured Exa research", () => {
   });
 
   it.each([
-    { topics: ["us guidelines", "creatine"] },
-    { topics: ["phase i trials", "insomnia treatment"] },
+    { topics: ["us guidelines"] },
+    { topics: ["phase i trials"], conditionsOrConcerns: ["insomnia"] },
     { topics: ["type i interferon signaling"] },
-    { topics: ["mitochondrial complex i", "parkinsons disease"] },
-    { topics: ["creatine cognition evidence 2010-2020"] },
+    {
+      topics: ["mitochondrial complex i"],
+      conditionsOrConcerns: ["parkinsons disease"],
+    },
   ])("allows useful compact focused scope: %j", (scope) => {
-    expect(researchScoutProfileSchema.parse({
-      mode: "focused",
-      ...scope,
-    })).toMatchObject({
+    const profile = researchScoutProfileSchema.parse({
       mode: "focused",
       ...scope,
     });
+    expect(profile).toMatchObject({
+      mode: "focused",
+      ...scope,
+    });
+    const request = buildExaResearchScoutRequest({
+      profile,
+      since: FOCUSED_INPUT.since,
+      until: FOCUSED_INPUT.until,
+      maxCandidates: FOCUSED_INPUT.maxCandidates,
+    });
+    expect(parseExaResearchScoutRequestBody(request)?.profile).toEqual(profile);
+  });
+
+  it("rejects every private-shaped value in every focused field", () => {
+    for (const field of FOCUSED_PROFILE_FIELDS) {
+      for (const value of PRIVATE_FOCUSED_VALUES) {
+        expect(researchScoutProfileSchema.safeParse({
+          mode: "focused",
+          [field]: [value],
+        }).success).toBe(false);
+      }
+    }
   });
 
   it.each([
