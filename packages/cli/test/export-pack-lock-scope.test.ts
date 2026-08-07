@@ -118,6 +118,14 @@ async function within<T>(promise: Promise<T>, label: string): Promise<T> {
   }
 }
 
+function deferred(): Promise<void> & { resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>((ready) => {
+    resolve = ready
+  })
+  return Object.assign(promise, { resolve })
+}
+
 test.sequential(
   'external materialization waits out a manifest-first canonical rewrite',
   async () => {
@@ -125,18 +133,9 @@ test.sequential(
     const outRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-output-'))
     const aliasParent = `${outRoot}-alias-parent`
     const aliasOut = path.join(aliasParent, path.basename(outRoot))
-    let releaseWriter!: () => void
-    const writerRelease = new Promise<void>((resolve) => {
-      releaseWriter = resolve
-    })
-    let reportWriterPaused!: () => void
-    const writerPaused = new Promise<void>((resolve) => {
-      reportWriterPaused = resolve
-    })
-    let reportExternalClassified!: () => void
-    const externalClassified = new Promise<void>((resolve) => {
-      reportExternalClassified = resolve
-    })
+    const writerRelease = deferred()
+    const writerPaused = deferred()
+    const externalClassified = deferred()
 
     try {
       await initializeVault({ vaultRoot })
@@ -180,7 +179,7 @@ test.sequential(
           && candidate.endsWith('.tmp')
         ) {
           paused = true
-          reportWriterPaused()
+          writerPaused.resolve()
           await writerRelease
         }
       })
@@ -197,7 +196,7 @@ test.sequential(
       })
       directoriesSharePhysicalIdentityHook.mockImplementation(async (left, right) => {
         if (left === vaultRoot && right === aliasOut) {
-          reportExternalClassified()
+          externalClassified.resolve()
         }
       })
       const external = materializeStoredExportPack({
@@ -209,7 +208,7 @@ test.sequential(
       await new Promise<void>((resolve) => setImmediate(resolve))
       assert.equal(externalSnapshotStarted, false)
 
-      releaseWriter()
+      writerRelease.resolve()
       await writer
       const result = await external
 
@@ -222,7 +221,7 @@ test.sequential(
         )
       }
     } finally {
-      releaseWriter()
+      writerRelease.resolve()
       await rm(aliasParent, { force: true })
       await rm(vaultRoot, { force: true, recursive: true })
       await rm(outRoot, { force: true, recursive: true })
@@ -235,14 +234,8 @@ test.sequential(
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-read-'))
     const outRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-output-'))
-    let releaseRead!: () => void
-    const readRelease = new Promise<void>((resolve) => {
-      releaseRead = resolve
-    })
-    let reportReadStarted!: () => void
-    const readStarted = new Promise<void>((resolve) => {
-      reportReadStarted = resolve
-    })
+    const readRelease = deferred()
+    const readStarted = deferred()
 
     try {
       await initializeVault({ vaultRoot })
@@ -258,7 +251,7 @@ test.sequential(
         if (relativePath !== targetFile.path) return
         targetResolveCount += 1
         if (targetResolveCount === 2) {
-          reportReadStarted()
+          readStarted.resolve()
           await readRelease
         }
       })
@@ -273,14 +266,14 @@ test.sequential(
         withAssistantRuntimeWriteLock(vaultRoot, async () => 'acquired' as const),
         'complete external read held the runtime lock',
       )
-      releaseRead()
+      readRelease.resolve()
 
       const result = await materialization
       assert.equal(lockOutcome, 'acquired')
       assert.equal(result.rebuilt, false)
       await access(path.join(outRoot, `exports/packs/${pack.packId}/manifest.json`))
     } finally {
-      releaseRead()
+      readRelease.resolve()
       await rm(vaultRoot, { force: true, recursive: true })
       await rm(outRoot, { force: true, recursive: true })
     }
@@ -292,14 +285,8 @@ test.sequential(
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-change-'))
     const outRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-output-'))
-    let releaseRead!: () => void
-    const readRelease = new Promise<void>((resolve) => {
-      releaseRead = resolve
-    })
-    let reportReadStarted!: () => void
-    const readStarted = new Promise<void>((resolve) => {
-      reportReadStarted = resolve
-    })
+    const readRelease = deferred()
+    const readStarted = deferred()
 
     try {
       await initializeVault({ vaultRoot })
@@ -315,7 +302,7 @@ test.sequential(
         if (relativePath !== targetFile.path) return
         targetResolveCount += 1
         if (targetResolveCount === 2) {
-          reportReadStarted()
+          readStarted.resolve()
           await readRelease
         }
       })
@@ -333,7 +320,7 @@ test.sequential(
             : file
         )))
       })
-      releaseRead()
+      readRelease.resolve()
 
       await within(
         assert.rejects(materialization, { code: 'export_pack_changed' }),
@@ -341,7 +328,7 @@ test.sequential(
       )
       await assert.rejects(access(path.join(outRoot, 'exports')), { code: 'ENOENT' })
     } finally {
-      releaseRead()
+      readRelease.resolve()
       await rm(vaultRoot, { force: true, recursive: true })
       await rm(outRoot, { force: true, recursive: true })
     }
@@ -353,14 +340,8 @@ test.sequential(
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-scope-'))
     const outRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-output-'))
-    let releaseRebuild!: () => void
-    const rebuildRelease = new Promise<void>((resolve) => {
-      releaseRebuild = resolve
-    })
-    let reportRebuildStarted!: () => void
-    const rebuildStarted = new Promise<void>((resolve) => {
-      reportRebuildStarted = resolve
-    })
+    const rebuildRelease = deferred()
+    const rebuildStarted = deferred()
 
     try {
       await initializeVault({ vaultRoot })
@@ -382,7 +363,7 @@ test.sequential(
         { code: 'ENOENT' },
       )
       readVaultTolerantMock.mockImplementation(async () => {
-        reportRebuildStarted()
+        rebuildStarted.resolve()
         await rebuildRelease
         return readModel
       })
@@ -398,7 +379,7 @@ test.sequential(
         lockAttempt,
         'external reconstruction held the runtime lock',
       )
-      releaseRebuild()
+      rebuildRelease.resolve()
 
       const result = await materialization
       assert.equal(lockOutcome, 'acquired')
@@ -413,7 +394,7 @@ test.sequential(
         pack.packId,
       )
     } finally {
-      releaseRebuild()
+      rebuildRelease.resolve()
       await rm(vaultRoot, { force: true, recursive: true })
       await rm(outRoot, { force: true, recursive: true })
     }
@@ -426,14 +407,8 @@ test.sequential(
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-retire-'))
     const aliasParent = `${vaultRoot}-alias-parent`
     const aliasVault = path.join(aliasParent, path.basename(vaultRoot))
-    let releaseRebuild!: () => void
-    const rebuildRelease = new Promise<void>((resolve) => {
-      releaseRebuild = resolve
-    })
-    let reportRebuildStarted!: () => void
-    const rebuildStarted = new Promise<void>((resolve) => {
-      reportRebuildStarted = resolve
-    })
+    const rebuildRelease = deferred()
+    const rebuildStarted = deferred()
 
     try {
       await initializeVault({ vaultRoot })
@@ -456,7 +431,7 @@ test.sequential(
         { code: 'ENOENT' },
       )
       readVaultTolerantMock.mockImplementation(async () => {
-        reportRebuildStarted()
+        rebuildStarted.resolve()
         await rebuildRelease
         return readModel
       })
@@ -485,7 +460,7 @@ test.sequential(
         }),
         'retirement did not acquire the runtime lock',
       )
-      releaseRebuild()
+      rebuildRelease.resolve()
 
       await within(
         assert.rejects(materialization, { code: 'not_found' }),
@@ -493,7 +468,7 @@ test.sequential(
       )
       await assert.rejects(access(packDirectory), { code: 'ENOENT' })
     } finally {
-      releaseRebuild()
+      rebuildRelease.resolve()
       await rm(aliasParent, { force: true })
       await rm(vaultRoot, { force: true, recursive: true })
     }
@@ -508,14 +483,8 @@ test.sequential(
     )
     const aliasParent = `${vaultRoot}-alias-parent`
     const aliasVault = path.join(aliasParent, path.basename(vaultRoot))
-    let releaseRebuild!: () => void
-    const rebuildRelease = new Promise<void>((resolve) => {
-      releaseRebuild = resolve
-    })
-    let reportRebuildStarted!: () => void
-    const rebuildStarted = new Promise<void>((resolve) => {
-      reportRebuildStarted = resolve
-    })
+    const rebuildRelease = deferred()
+    const rebuildStarted = deferred()
 
     try {
       await initializeVault({ vaultRoot })
@@ -553,7 +522,7 @@ sampleStreams: []
       readVaultTolerantMock.mockImplementation(async () => {
         rebuildReadCount += 1
         if (rebuildReadCount === 1) {
-          reportRebuildStarted()
+          rebuildStarted.resolve()
           await rebuildRelease
           return olderReadModel
         }
@@ -592,7 +561,7 @@ sampleStreams: []
         vault: vaultRoot,
       })
       assert.equal(newerMaterialization.rebuilt, true)
-      releaseRebuild()
+      rebuildRelease.resolve()
 
       await within(
         assert.rejects(materialization, { code: 'export_pack_changed' }),
@@ -613,7 +582,7 @@ sampleStreams: []
         )
       }
     } finally {
-      releaseRebuild()
+      rebuildRelease.resolve()
       await rm(aliasParent, { force: true })
       await rm(vaultRoot, { force: true, recursive: true })
     }

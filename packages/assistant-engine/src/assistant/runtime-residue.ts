@@ -40,8 +40,9 @@ import {
   resolveSupportedAssistantVaultFileContentType,
 } from './generated-delivery-files.js'
 import {
+  collectSentAssistantGeneratedExportArchiveMedia,
   retireSentAssistantExportPacks,
-  type SentAssistantGeneratedExportArchive,
+  sameAssistantVaultFileDescriptor,
   type SentAssistantExportPackRetirementResult,
 } from './generated-export-pack-retirement.js'
 import {
@@ -155,25 +156,12 @@ async function retireQuiescentAssistantExportPacks(input: {
         signal: input.signal,
         vault: input.vault,
       })
-      if (!outbox.trusted) {
-        return null
-      }
-      const media = [...collectSentAssistantGeneratedExportArchiveMedia(
-        outbox.records,
-      ).values()].sort((left, right) => left.ref.localeCompare(right.ref))
-      const resolved: SentAssistantGeneratedExportArchive[] = []
-      for (const file of media) {
-        input.signal?.throwIfAborted()
-        resolved.push({
-          archivePath: await resolveAssistantVaultPath(
-            input.vault,
-            file.ref,
-            'file path',
-          ),
-          file,
-        })
-      }
-      return resolved
+      if (!outbox.trusted) return null
+      return [...collectSentAssistantGeneratedExportArchiveMedia(
+        outbox.records.map(({ record }) => record),
+      ).values()].sort((left, right) =>
+        left.ref.localeCompare(right.ref),
+      )
     },
     input.signal,
   )
@@ -197,54 +185,6 @@ function emptySentAssistantExportPackRetirementResult(): SentAssistantExportPack
     inventoryTrusted: true,
     packsPruned: 0,
   }
-}
-
-function collectSentAssistantGeneratedExportArchiveMedia(
-  records: readonly PersistedRecord<AssistantOutboxIntent>[],
-): Map<string, AssistantVaultFileResponseMedia> {
-  const byRef = new Map<string, AssistantVaultFileResponseMedia>()
-  const conflictedRefs = new Set<string>()
-  for (const { record } of records) {
-    if (record.status !== 'sent') {
-      continue
-    }
-    const matchingMedia = record.media.filter(
-      (media): media is AssistantVaultFileResponseMedia =>
-        media.kind === 'vault_file'
-        && media.contentType === 'application/zip'
-        && isAssistantGeneratedDeliveryRef(media.ref)
-        && media.ref.toLowerCase().endsWith('.zip'),
-    )
-    if (record.media.length !== 1 || matchingMedia.length !== 1) {
-      for (const media of matchingMedia) {
-        byRef.delete(media.ref)
-        conflictedRefs.add(media.ref)
-      }
-      continue
-    }
-    const file = matchingMedia[0]
-    if (!file || conflictedRefs.has(file.ref)) {
-      continue
-    }
-    const existing = byRef.get(file.ref)
-    if (!existing || sameAssistantVaultFileDescriptor(existing, file)) {
-      byRef.set(file.ref, file)
-    } else {
-      byRef.delete(file.ref)
-      conflictedRefs.add(file.ref)
-    }
-  }
-  return byRef
-}
-
-function sameAssistantVaultFileDescriptor(
-  left: AssistantVaultFileResponseMedia,
-  right: AssistantVaultFileResponseMedia,
-): boolean {
-  return left.ref === right.ref
-    && left.contentType === right.contentType
-    && left.sizeBytes === right.sizeBytes
-    && left.sha256 === right.sha256
 }
 
 export async function pruneQuiescentAssistantGeneratedDeliveryResidue(input: {
@@ -432,7 +372,7 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
 }
 
 async function planAssistantGeneratedDeliveryPrune(input: {
-  completedExportPackArchives: readonly SentAssistantGeneratedExportArchive[]
+  completedExportPackArchives: readonly AssistantVaultFileResponseMedia[]
   outbox: Inventory<PersistedRecord<AssistantOutboxIntent>>
   priorOutboxInventoryTrusted: boolean
   signal?: AbortSignal | null
@@ -451,8 +391,9 @@ async function planAssistantGeneratedDeliveryPrune(input: {
     string,
     AssistantVaultFileResponseMedia[]
   >()
-  const sentExportArchiveByRef =
-    collectSentAssistantGeneratedExportArchiveMedia(input.outbox.records)
+  const sentExportArchiveByRef = collectSentAssistantGeneratedExportArchiveMedia(
+    input.outbox.records.map(({ record }) => record),
+  )
   for (const { record } of input.outbox.records) {
     if (!isActiveAssistantOutboxDeliveryIntent(record)) {
       continue
@@ -570,16 +511,16 @@ async function planAssistantGeneratedDeliveryPrune(input: {
     const activeMedia = activeMediaByRef.get(ref) ?? []
     const retainedForActiveMedia =
       await assistantGeneratedDeliveryFileMatchesActiveMedia({
-      activeMedia,
-      filePath: absolutePath,
-      ref,
-      signal: input.signal,
-      stats,
-    })
+        activeMedia,
+        filePath: absolutePath,
+        ref,
+        signal: input.signal,
+        stats,
+      })
     const sentArchive = sentExportArchiveByRef.get(ref)
     const completedArchive = input.completedExportPackArchives.find(
-      ({ file }) => file.ref === ref,
-    )?.file
+      (file) => file.ref === ref,
+    )
     const retirementComplete = !sentArchive || (
       completedArchive !== undefined
       && sameAssistantVaultFileDescriptor(sentArchive, completedArchive)

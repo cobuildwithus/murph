@@ -355,33 +355,14 @@ async function tryReadFilesForMaterialization(
   }
 }
 
-function directoryEntryKind(entry: Dirent) {
-  if (entry.isFile()) return 'file'
-  if (entry.isDirectory()) return 'directory'
-  if (entry.isSymbolicLink()) return 'symbolic-link'
-  if (entry.isBlockDevice()) return 'block-device'
-  if (entry.isCharacterDevice()) return 'character-device'
-  if (entry.isFIFO()) return 'fifo'
-  if (entry.isSocket()) return 'socket'
-  return 'unknown'
-}
-
-function serializeDirectoryInventory(entries: readonly Dirent[]) {
-  return JSON.stringify(entries
-    .map((entry) => [entry.name, directoryEntryKind(entry)] as const)
-    .sort(([left], [right]) => left.localeCompare(right)))
-}
-
-function serializeExpectedExportPackInventory(manifest: ExportPackManifest) {
+function expectedStoredExportPackFileNames(manifest: ExportPackManifest) {
   const expectedRoot = packDirectory(manifest.packId)
-  return JSON.stringify(manifest.files
-    .map((file) => {
-      if (path.posix.dirname(file.path) !== expectedRoot) {
-        throw new Error('Stored export-pack manifest contains a nested file.')
-      }
-      return [path.posix.basename(file.path), 'file'] as const
-    })
-    .sort(([left], [right]) => left.localeCompare(right)))
+  return manifest.files.map((file) => {
+    if (path.posix.dirname(file.path) !== expectedRoot) {
+      throw new Error('Stored export-pack manifest contains a nested file.')
+    }
+    return path.posix.basename(file.path)
+  }).sort((left, right) => left.localeCompare(right))
 }
 
 function fileIdentityMatches(left: Stats, right: Stats) {
@@ -420,15 +401,18 @@ async function captureStoredExportPackIdentity(
   if (!root.isDirectory() || root.isSymbolicLink()) {
     throw new Error('Stored export-pack root is not a directory.')
   }
-  const inventory = serializeDirectoryInventory(entries)
-  if (inventory !== serializeExpectedExportPackInventory(manifest)) {
+  const names = entries
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right))
+  const expectedNames = expectedStoredExportPackFileNames(manifest)
+  if (
+    entries.some((entry) => !entry.isFile())
+    || names.length !== expectedNames.length
+    || names.some((name, index) => name !== expectedNames[index])
+  ) {
     throw new Error('Stored export-pack inventory is not exact.')
   }
-  return {
-    files,
-    inventory,
-    root,
-  }
+  return { files, root }
 }
 
 function storedExportPackIdentityMatches(
@@ -437,7 +421,6 @@ function storedExportPackIdentityMatches(
 ) {
   return (
     fileIdentityMatches(left.root, right.root)
-    && left.inventory === right.inventory
     && left.files.length === right.files.length
     && left.files.every((identity, index) => {
       const current = right.files[index]

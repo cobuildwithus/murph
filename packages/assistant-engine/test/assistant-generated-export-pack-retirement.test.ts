@@ -25,7 +25,6 @@ import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../src/assistant/generated-delivery-files.ts'
 import {
-  buildAssistantGeneratedDeliveryRetirement,
   refIsEqualToOrBeneath,
 } from '../src/assistant/generated-export-pack-retirement.ts'
 import {
@@ -82,75 +81,42 @@ describe('assistant generated export-pack retirement', () => {
     )).toBe(false)
   })
 
-  it('records only an exact generated ZIP copy of an unchanged derived pack', async () => {
-    const setup = await createExportPackDelivery('exact')
-
-    expect(setup.retirement).toEqual({
-      archiveRef: setup.media.ref,
-      archiveSha256: setup.media.sha256,
-      kind: 'sent_export_packs_v1',
-      packs: [{
-        basePath: setup.packBasePath,
-        files: expect.arrayContaining(setup.packEntries.map(([filePath, contents]) => ({
-          path: filePath,
-          sha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
-          sizeBytes: Buffer.byteLength(contents),
-        }))),
-        packId: setup.packId,
-      }],
-    })
-  })
-
-  it('does not claim arbitrary, incomplete, or stale ZIP exports', async () => {
-    const setup = await createExportPackDelivery('unsafe')
-    const ordinaryArchive = createTestZip([
-      ['exports/user-files/report.json', '{}'],
-    ])
-    const ordinaryRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/ordinary.zip`
-    const ordinaryPath = path.join(setup.vaultRoot, ...ordinaryRef.split('/'))
-    await writeFile(ordinaryPath, ordinaryArchive)
-    const ordinaryMedia = await resolveAssistantVaultFileResponseMedia({
-      ref: ordinaryRef,
+  it.each([
+    { kind: 'ordinary ZIP' as const },
+    { kind: 'incomplete ZIP' as const },
+    { kind: 'hardlinked live file' as const },
+  ])('refuses an otherwise sent $kind', async ({ kind }) => {
+    const setup = await createExportPackDelivery(`unsafe-${kind.split(' ')[0]}`)
+    let media = setup.media
+    let linkedPath: string | null = null
+    if (kind === 'hardlinked live file') {
+      linkedPath = path.join(setup.vaultRoot, 'exports', 'linked-entities.json')
+      await link(path.join(setup.packPath, 'entities.json'), linkedPath)
+    } else {
+      const archive = createTestZip(kind === 'ordinary ZIP'
+        ? [['exports/user-files/report.json', '{}']]
+        : setup.packEntries.slice(0, 1))
+      await writeFile(setup.archivePath, archive)
+      media = mediaForArchive(setup.media, archive)
+    }
+    await createDeliveryIntent({
+      media,
+      status: 'sent',
       vaultRoot: setup.vaultRoot,
     })
 
-    await expect(buildAssistantGeneratedDeliveryRetirement({
-      archiveBytes: ordinaryArchive,
-      file: ordinaryMedia,
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
       vault: setup.vaultRoot,
-    })).resolves.toBeNull()
-
-    const incompleteArchive = createTestZip(setup.packEntries.slice(0, 1))
-    const incompleteMedia = mediaForArchive(setup.media, incompleteArchive)
-    await expect(buildAssistantGeneratedDeliveryRetirement({
-      archiveBytes: incompleteArchive,
-      file: incompleteMedia,
-      vault: setup.vaultRoot,
-    })).resolves.toBeNull()
-
-    const entityPath = path.join(
-      setup.vaultRoot,
-      ...setup.packEntries[1]![0].split('/'),
-    )
-    await writeFile(entityPath, '{"records":["changed"]}\n')
-    await expect(buildAssistantGeneratedDeliveryRetirement({
-      archiveBytes: setup.archive,
-      file: setup.media,
-      vault: setup.vaultRoot,
-    })).resolves.toBeNull()
-  })
-
-  it('does not claim a live pack file with another hard link', async () => {
-    const setup = await createExportPackDelivery('hardlinked')
-    const entitiesPath = path.join(setup.packPath, 'entities.json')
-    const linkedPath = path.join(setup.vaultRoot, 'exports', 'linked-entities.json')
-    await link(entitiesPath, linkedPath)
-
-    await expect(buildAssistantGeneratedDeliveryRetirement({
-      archiveBytes: setup.archive,
-      file: setup.media,
-      vault: setup.vaultRoot,
-    })).resolves.toBeNull()
+    })).resolves.toMatchObject({ exportPacksPruned: 0, filesPruned: 1 })
+    await expect(stat(setup.packPath)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    })
+    await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    if (linkedPath) {
+      await expect(stat(linkedPath)).resolves.toMatchObject({
+        isFile: expect.any(Function),
+      })
+    }
   })
 
   it('keeps the sent transition free of cleanup and retires the pack at quiescence', async () => {
@@ -975,7 +941,6 @@ async function createExportPackDelivery(
   packEntries: Array<readonly [string, string]>
   packId: string
   packPath: string
-  retirement: Awaited<ReturnType<typeof buildAssistantGeneratedDeliveryRetirement>>
   vaultRoot: string
 }> {
   const context = existingVaultRoot
@@ -1020,11 +985,6 @@ async function createExportPackDelivery(
     ref,
     vaultRoot: context.vaultRoot,
   })
-  const retirement = await buildAssistantGeneratedDeliveryRetirement({
-    archiveBytes: archive,
-    file: media,
-    vault: context.vaultRoot,
-  })
   return {
     archive,
     archivePath,
@@ -1033,7 +993,6 @@ async function createExportPackDelivery(
     packEntries,
     packId,
     packPath,
-    retirement,
     vaultRoot: context.vaultRoot,
   }
 }
