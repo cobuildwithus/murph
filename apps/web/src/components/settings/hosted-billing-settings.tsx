@@ -128,8 +128,12 @@ export function HostedBillingSettings(props: {
   const sponsoredMember = familyState === "sponsored";
   const ownBillingActive = props.billingStatus === "active" && !familyCurrent;
   const ownPaidBillingActive = ownBillingActive && currentPhase === "paid";
+  const pausedPulseTrialRecoveryAvailable =
+    props.billingStatus === "paused" &&
+    props.canStartPaidPulse === true &&
+    !familyCurrent;
   const pulseTrialActive =
-    ownBillingActive &&
+    (ownBillingActive || pausedPulseTrialRecoveryAvailable) &&
     currentPlanCode === "launch_monthly" &&
     isHostedPulseTrialBillingState({
       currentBillingPhase: props.currentBillingPhase,

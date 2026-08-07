@@ -61,6 +61,7 @@ export function GroupMemberPlanStudy() {
             authenticated
             billingStatus="paused"
             canStartPaidPulse
+            currentBillingPhase="trial"
             currentBillingPlanCode="launch_monthly"
             currentCheckoutOffer="pulse_trial_7d"
             groupPaymentMethodSaved
