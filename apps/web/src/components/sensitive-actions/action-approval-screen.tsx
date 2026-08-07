@@ -5,9 +5,6 @@ import { cn } from "@/src/lib/utils";
 
 type BadgeTone = "primary" | "muted";
 
-export const ACTION_APPROVAL_PENDING_CAVEAT =
-  "Approval applies only while Murph still has this request pending. It cannot undo a cancellation from the conversation. Murph must ask again if the file, destination, or any other detail changes.";
-
 export const ACTION_APPROVAL_RECORDED_DESCRIPTION =
   "Approval recorded. Murph will continue only if this request is still pending.";
 
@@ -36,7 +33,6 @@ interface ActionApprovalScreenProps {
   badgeIcon: LucideIcon;
   badgeTone?: BadgeTone;
   body: ReactNode;
-  caveat?: ReactNode;
   children?: ReactNode;
   title: string;
 }
@@ -45,7 +41,6 @@ export function ActionApprovalScreen({
   badgeIcon: BadgeIcon,
   badgeTone = "primary",
   body,
-  caveat,
   children,
   title,
 }: ActionApprovalScreenProps) {
@@ -82,17 +77,6 @@ export function ActionApprovalScreen({
           <div className="mt-5 text-[15px] leading-[1.6] text-muted-foreground text-pretty">
             {body}
           </div>
-
-          {caveat ? (
-            <div className="mt-6">
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5a6e32]">
-                Only applies to this request
-              </p>
-              <p className="mt-1.5 text-[13px] leading-[1.55] text-muted-foreground">
-                {caveat}
-              </p>
-            </div>
-          ) : null}
 
           {children}
         </article>
