@@ -5823,7 +5823,9 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       preProviderLabel,
     );
     breakdown.preProvider = {
+      ...requireOptionalNonNegativeInteger(preProvider, "mailboxImportDoneToAssistantPhaseMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "workspaceAssistantPreAutomationMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationLaneToAssistantServiceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "executionTargetHydrateMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "systemMailboxMaintenanceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "memberPreferencesPrePlanningMs", preProviderLabel),
@@ -5875,17 +5877,20 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       providerLabel,
     );
     breakdown.provider = {
+      ...requireOptionalNonNegativeInteger(provider, "assistantServicePreLockMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerInitializeMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerPreProviderMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerSpawnReadyMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadResumeMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadStartMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerWarmReuseMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexProcessPreparationMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "turnLockWaitMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "sessionResolveMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "promptBuildMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "admissionMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "preProviderSetupMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "providerPlanAndGateMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "linqEgressGuardMs", providerLabel),
     };
   }

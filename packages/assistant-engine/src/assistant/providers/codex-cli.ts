@@ -288,6 +288,9 @@ export async function executeCodexAssistantTurnAttempt(
         : undefined,
     onProgress: input.onEvent ?? undefined,
     onProviderRequestStarted: input.onProviderRequestStarted ?? undefined,
+    ...(input.providerStartCriticalPath
+      ? { providerStartCriticalPath: input.providerStartCriticalPath }
+      : {}),
     onTraceEvent: input.onTraceEvent,
     productFeedbackRecorder: input.productFeedbackRecorder ?? null,
     progressDelivery: input.progressDelivery ?? undefined,

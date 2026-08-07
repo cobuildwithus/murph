@@ -56,10 +56,12 @@ import {
   type AssistantHostedGroupSharedReader,
   type AssistantHostedImageGenerationLauncher,
   type AssistantInputEventRecord,
+  type AssistantProviderStartCriticalPathContext,
   type MurphManagedAutomationDiagnosticStage,
   type MurphOnboardingFollowupDiagnostic,
   type AssistantTurnEnvironment,
   type HostedAssistantTurnTimingStage,
+  stampAssistantProviderStartCriticalPath,
 } from "@murphai/assistant-engine";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
@@ -321,6 +323,7 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
   currentAssistantInputId?: () => string | null;
   imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
@@ -1694,6 +1697,10 @@ function buildHostedAutomationToolResponse(input: {
 export async function runHostedWorkspaceAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
+  const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    input.providerStartCriticalPath,
+    "assistantPhaseStartedAtMonotonicMs",
+  );
   const assistantPhaseStartedAt = Date.now();
   const channelAbortController = new AbortController();
   const releaseChannelAbortRelay = relayHostedAssistantPhaseAbortSignal(
@@ -2210,6 +2217,9 @@ export async function runHostedWorkspaceAssistantPhase(
               systemMailboxMaintenanceMs,
               workspaceAssistantPreAutomationMs: elapsedSince(assistantPhaseStartedAt),
             },
+            ...(providerStartCriticalPath
+              ? { providerStartCriticalPath }
+              : {}),
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
             ...(input.beforeProviderAcceptedInputs

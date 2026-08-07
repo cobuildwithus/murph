@@ -1586,7 +1586,9 @@ describe("hosted runtime control contracts", () => {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
       },
       preProvider: {
+        mailboxImportDoneToAssistantPhaseMs: 29,
         workspaceAssistantPreAutomationMs: 11,
+        automationLaneToAssistantServiceMs: 7,
         executionTargetHydrateMs: 2,
         systemMailboxMaintenanceMs: 3,
         memberPreferencesPrePlanningMs: 4,
@@ -1606,17 +1608,20 @@ describe("hosted runtime control contracts", () => {
         terminalNonReplyCommittedAtEpochMs: 1_777_000_000_125,
       },
       provider: {
+        assistantServicePreLockMs: 5,
         codexAppServerInitializeMs: 7,
         codexAppServerPreProviderMs: 17,
         codexAppServerSpawnReadyMs: 1,
         codexAppServerThreadResumeMs: 9,
         codexAppServerThreadStartMs: 0,
         codexAppServerWarmReuseMs: 0,
+        codexProcessPreparationMs: 3,
         turnLockWaitMs: 1,
         sessionResolveMs: 2,
         promptBuildMs: 3,
         admissionMs: 4,
         preProviderSetupMs: 5,
+        providerPlanAndGateMs: 13,
         linqEgressGuardMs: 6,
       },
     };
@@ -1650,6 +1655,7 @@ describe("hosted runtime control contracts", () => {
       { sessionResolveMs: { secret: 1 } }, // object leaf
       { sessionResolveMs: [1, 2, 3] }, // array leaf
       { codexAppServerWarmReuseMs: "0" }, // numeric leaf must stay numeric
+      { providerPlanAndGateMs: 1.5 }, // durations must stay integer milliseconds
       { networkToken: 1 }, // unknown sub key
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({
@@ -1691,6 +1697,7 @@ describe("hosted runtime control contracts", () => {
       { outboxScanBytesRead: -1 }, // counts must be non-negative
       { receiptScanBytesRead: -1 }, // counts must be non-negative
       { outboxScanElapsedMs: "23" }, // durations must stay numeric
+      { mailboxImportDoneToAssistantPhaseMs: -1 }, // durations must be non-negative
       { receiptScanFilesRead: 12, receiptScanPath: 1 }, // arbitrary metadata is forbidden
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({
