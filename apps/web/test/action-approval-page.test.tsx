@@ -156,6 +156,11 @@ describe("action approval page", () => {
       markup,
       /Return to the Murph conversation where this request started\./,
     );
+    assert.match(
+      markup,
+      /Approval recorded\. Murph will continue only if this request is still pending\./,
+    );
+    assert.equal(markup.includes("Head back to Murph to continue."), false);
     assert.equal(markup.includes("I approved the secure request."), false);
     assert.equal(markup.includes('href="'), false);
   });

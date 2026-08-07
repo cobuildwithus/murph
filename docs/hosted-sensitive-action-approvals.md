@@ -77,7 +77,10 @@ Once delivery preparation or dispatch advances the outbox owner, cancellation
 refuses. The outbox remains the effect owner:
 cancellation adds no approval-row state and does not rewrite the historical
 approval decision, so a delayed approval observation cannot revive an intent
-that cancellation already terminalized. Cancellation does not unlink files.
+that cancellation already terminalized. Cancellation-coded abandonment also
+does not repair the initiating turn receipt: that receipt continues to describe
+the approval-link reply that was actually delivered, while the cancellation
+turn reports its own result. Cancellation does not unlink files.
 The existing quiescent runtime-residue pass remains the sole byte-deletion
 owner and applies its complete inventory and fingerprint contract before the
 next encrypted workspace checkpoint. Canonical and user-owned vault files
@@ -98,6 +101,11 @@ remain outside that cleanup authority.
 The mailbox row is a durable shoulder tap, not authorization evidence or outcome payload. The runtime observes the outcome through `actionApprovalPort.read()`, whose read-only result includes the current opaque approval-cycle owner for every status. The runtime refuses to apply an observation to a different parked owner, then consumes the matching approved generation again at the final delivery boundary.
 
 Consumption closes the authorization generation against replay but does not rewrite the member's historical decision. Runtime approval reads and later consume attempts therefore report the consumed generation as expired, while the member-facing approval page continues to present that row as approved. A genuinely elapsed, unconsumed approval still presents as expired.
+
+The browser records only the approval decision. Its pending and approved states
+state that Murph continues only while the runtime still has the request pending;
+a cancellation from the conversation remains authoritative, and an old approval
+link cannot reactivate the cancelled delivery.
 
 ## Asynchronous outcome primitives
 

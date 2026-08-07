@@ -21,6 +21,7 @@ import type {
 } from '../src/assistant/hosted-tool-context.ts'
 import * as assistantOutbox from '../src/assistant/outbox.ts'
 import { pruneAssistantRuntimeResidue } from '../src/assistant/runtime-residue.ts'
+import * as assistantTurns from '../src/assistant/turns.ts'
 import {
   applyAssistantVaultFileSendApprovalResult,
   requestAssistantVaultFileSend,
@@ -66,6 +67,9 @@ describe('pending generated vault-file cancellation', () => {
     )
     expect(MURPH_PENDING_VAULT_FILES_TOOL.description).toContain(
       'not_pending means only that the intent is no longer cancellable',
+    )
+    expect(MURPH_PENDING_VAULT_FILES_TOOL.description).toContain(
+      'old approval link cannot revive',
     )
     expect(resolveMurphDynamicTools({})).not.toContain(
       MURPH_PENDING_VAULT_FILES_TOOL,
@@ -180,6 +184,88 @@ describe('pending generated vault-file cancellation', () => {
     expect(cleanup.generatedDeliveryFilesPruned).toBe(1)
     await expect(stat(pending.ownedPath)).rejects.toMatchObject({
       code: 'ENOENT',
+    })
+  })
+
+  it('preserves the initiating turn receipt when cancellation commits', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-cancel-receipt-',
+    )
+    tempRoots.push(parentRoot)
+    const sessionId = 'session-cancel-receipt'
+    const approvalId = `haa_${'b'.repeat(32)}`
+    const turnId = `turn_${approvalId.slice(4)}`
+    await assistantTurns.createAssistantTurnReceipt({
+      deliveryRequested: true,
+      prompt: 'Prepare the generated report.',
+      provider: 'codex-cli',
+      providerModel: 'gpt-5.6-terra',
+      sessionId,
+      startedAt: '2026-08-06T18:00:00.000Z',
+      turnId,
+      vault: vaultRoot,
+    })
+    const pending = await createPendingGeneratedVaultFileSend({
+      approvalId,
+      filename: 'receipt.zip',
+      fileText: 'receipt bytes',
+      sessionId,
+      vaultRoot,
+    })
+    const originalReplyIntentId = `outbox_${'f'.repeat(32)}`
+    await assistantTurns.updateAssistantTurnReceipt({
+      mutate: (receipt) => ({
+        ...receipt,
+        completedAt: '2026-08-06T18:01:00.000Z',
+        deliveryDisposition: 'sent',
+        deliveryIntentId: originalReplyIntentId,
+        status: 'completed',
+        updatedAt: '2026-08-06T18:01:00.000Z',
+      }),
+      turnId,
+      vault: vaultRoot,
+    })
+    const receiptWrite = vi.spyOn(assistantTurns, 'updateAssistantTurnReceipt')
+      .mockRejectedValueOnce(new Error('injected receipt write failure'))
+
+    await expect(cancelPendingAssistantGeneratedVaultFileSends({
+      intentIds: [pending.intentId],
+      now: new Date('2026-08-06T18:05:00.000Z'),
+      originSessionId: sessionId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      results: [{
+        intentId: pending.intentId,
+        status: 'cancelled',
+      }],
+    })
+    expect(receiptWrite).not.toHaveBeenCalled()
+    await expect(assistantTurns.readAssistantTurnReceipt(vaultRoot, turnId))
+      .resolves.toMatchObject({
+        completedAt: '2026-08-06T18:01:00.000Z',
+        deliveryDisposition: 'sent',
+        deliveryIntentId: originalReplyIntentId,
+        status: 'completed',
+      })
+    await expect(assistantOutbox.readAssistantOutboxIntent(
+      vaultRoot,
+      pending.intentId,
+    )).resolves.toMatchObject({
+      lastError: {
+        code: 'ASSISTANT_VAULT_FILE_SEND_CANCELLED',
+      },
+      status: 'abandoned',
+    })
+
+    await expect(cancelPendingAssistantGeneratedVaultFileSends({
+      intentIds: [pending.intentId],
+      originSessionId: sessionId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      results: [{
+        intentId: pending.intentId,
+        status: 'already_cancelled',
+      }],
     })
   })
 

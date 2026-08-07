@@ -47,6 +47,12 @@ test("announces the disabled approval controls while approval is pending", async
   }));
 
   try {
+    expect(rendered.container.textContent).toContain(
+      "Approval applies only while Murph still has this request pending.",
+    );
+    expect(rendered.container.textContent).toContain(
+      "It cannot undo a cancellation from the conversation.",
+    );
     expect(rendered.container.querySelector("[role='status']")).toBeNull();
     expect(rendered.container.querySelector("[aria-busy='true']")).toBeNull();
 
@@ -64,6 +70,49 @@ test("announces the disabled approval controls while approval is pending", async
     ).toBe(true);
     expect(status?.getAttribute("aria-live")).toBe("polite");
     expect(status?.textContent).toBe("Verifying approval…");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("records approval without promising that a cancelled request will run", async () => {
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce({
+      message: "approval challenge",
+      token: "challenge-token",
+    })
+    .mockResolvedValueOnce({ redirectTo: null });
+  mocks.signChallenge.mockResolvedValue({
+    signature: `0x${"a".repeat(130)}`,
+    token: "challenge-token",
+  });
+  const rendered = await renderClientComponent(createElement(ActionApprovalCard, {
+    approval: {
+      approvalId: "approval-test",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      presentation: {
+        body: "Allow the requested action.",
+        title: "Approve action",
+      },
+      returnContactKind: null,
+      status: "pending",
+    },
+  }));
+
+  try {
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await vi.waitFor(() => {
+        expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    expect(rendered.container.textContent).toContain(
+      "Approval recorded. Murph will continue only if this request is still pending.",
+    );
+    expect(rendered.container.textContent).not.toContain(
+      "Approval saved.",
+    );
   } finally {
     await rendered.cleanup();
   }

@@ -4,7 +4,11 @@ import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
-import { ActionApprovalScreen } from "@/src/components/sensitive-actions/action-approval-screen";
+import {
+  ACTION_APPROVAL_PENDING_CAVEAT,
+  ACTION_APPROVAL_RECORDED_DESCRIPTION,
+  ActionApprovalScreen,
+} from "@/src/components/sensitive-actions/action-approval-screen";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import type {
@@ -16,9 +20,6 @@ import type { SensitiveActionChallengeResponse } from "@/src/lib/sensitive-actio
 import { useSensitiveActionAuthorization } from "./use-sensitive-action-authorization";
 
 type Submission = "approving" | "denying" | "returning" | null;
-
-const APPROVAL_CAVEAT =
-  "Murph must ask again if the file, destination, or any other detail changes.";
 
 export function ActionApprovalCard({
   approval,
@@ -92,7 +93,7 @@ export function ActionApprovalCard({
       : submission === "denying"
         ? "Denying…"
         : submission === "returning"
-          ? "Approval saved. Returning to Murph…"
+          ? "Approval recorded. Returning to Murph…"
           : null);
   const surfacedError = error ?? authorization.setup.error;
 
@@ -100,7 +101,7 @@ export function ActionApprovalCard({
     <ActionApprovalScreen
       badgeIcon={ShieldCheck}
       body={<p className="break-words">{approval.presentation.body}</p>}
-      caveat={APPROVAL_CAVEAT}
+      caveat={ACTION_APPROVAL_PENDING_CAVEAT}
       title={approval.presentation.title}
     >
       {surfacedError ? (
@@ -155,7 +156,8 @@ export function ActionApprovalCard({
             </p>
           ) : (
             <p className="mt-5 text-sm leading-6 text-muted-foreground">
-              Approval saved. Return to the Murph thread where you requested this file.
+              {ACTION_APPROVAL_RECORDED_DESCRIPTION} Return to the Murph thread
+              where you requested this file.
             </p>
           )
         ) : null}

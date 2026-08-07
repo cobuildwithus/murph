@@ -5,6 +5,12 @@ import { cn } from "@/src/lib/utils";
 
 type BadgeTone = "primary" | "muted";
 
+export const ACTION_APPROVAL_PENDING_CAVEAT =
+  "Approval applies only while Murph still has this request pending. It cannot undo a cancellation from the conversation. Murph must ask again if the file, destination, or any other detail changes.";
+
+export const ACTION_APPROVAL_RECORDED_DESCRIPTION =
+  "Approval recorded. Murph will continue only if this request is still pending.";
+
 interface ActionApprovalScreenProps {
   badgeIcon: LucideIcon;
   badgeTone?: BadgeTone;
