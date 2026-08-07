@@ -163,7 +163,7 @@ Updated: 2026-08-06
 - Exact-head CI then exposed a distinct declaration-build requirement: emitted
   schemas still name Zod types, and a clean parallel Importers build could not
   resolve Clinical Records' emitted `zod/v4` references after every non-owner
-  declaration was removed. The nine schema packages now retain Zod only as a
+  declaration was removed. The private schema consumers retain Zod only as a
   build-time dev dependency. A frozen install creates their development links,
   while the exact production assembly reports `devDependencies: skipped` and
   stages no package-local Zod copies for those consumers.
@@ -171,3 +171,16 @@ Updated: 2026-08-06
   policy, package cycles, and the exact production runner assembly pass after
   that correction. Bundle bytes remain exactly 1,729,632 B entry, 8,182,922 B
   static closure, and 9,862,735 B total.
+- Final ReviewGPT round 3 found the public-package exception: Hosted Execution's
+  exported declarations name concrete `zod/v4` types, but the release packer
+  removes dev dependencies. An isolated typed consumer could therefore fail to
+  resolve those declarations even though repository builds pass. Hosted
+  Execution now keeps the same Zod version as an install-time dependency; its
+  package-surface test locks that classification while all source imports still
+  route through Contracts.
+- The five publishable packages were built and packed through the real release
+  script. A no-hoist temporary consumer installed the packed Contracts, Gateway
+  Core, and Hosted Execution artifacts with no ambient root Zod and compiled
+  the subscription and physical-notes public subpaths with `skipLibCheck: false`.
+  The production assembly still stages only one root Zod copy and the
+  bundle bytes remain exactly unchanged.

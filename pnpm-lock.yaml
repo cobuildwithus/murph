@@ -737,7 +737,6 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
-    devDependencies:
       zod:
         specifier: ^4.4.3
         version: 4.4.3

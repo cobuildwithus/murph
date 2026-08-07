@@ -186,9 +186,7 @@
     "@murphai/gateway-core": "workspace:*",
     "@murphai/health-metrics": "workspace:*",
     "@murphai/importers": "workspace:*",
-    "@murphai/runtime-state": "workspace:*"
-  },
-  "devDependencies": {
+    "@murphai/runtime-state": "workspace:*",
     "zod": "^4.4.3"
   },
   "bundleDependencies": [
