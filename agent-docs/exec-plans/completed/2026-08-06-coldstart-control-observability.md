@@ -1,6 +1,6 @@
 # Cold-start control-plane observability
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-06
 
@@ -225,6 +225,16 @@ Updated: 2026-08-06
   launch-owned evidence remains fail closed.
 - Corrected default report contract: 2 passed, 1 opt-in fixture skipped.
 - Corrected real PostgreSQL report fixture: 3 passed.
+- ReviewGPT final round 8: PASS with no qualifying findings. Model verification
+  recorded the requested `gpt-5.6-sol` target and the `gpt-5-6-pro` response
+  slug against exact head `a0ff6e913e81e2f6bf8b885c120df04382ddd549`.
+- Exact reviewed-head GitHub Actions: Repo Hygiene, Frontend Design Proof, Web
+  Viewport Overflow, and Murph Host Support passed. A duplicate superseded
+  Frontend Design Proof run was cancelled after the successful run completed.
+- Parent final diff review: no remaining correctness, privacy, reliability,
+  deployment, or hot-path-latency finding.
+- GitHub mergeability proof: mergeable with no conflict; the PR is behind the
+  moving base branch, which does not require a ReviewGPT rerun.
 - `git diff --check`: passed.
-- Pending: corrected-head ReviewGPT round 8, exact-head CI, parent final review, plan
-  closure, and mergeability proof.
+- Pending: none.
+Completed: 2026-08-06
