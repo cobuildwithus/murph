@@ -128,12 +128,16 @@ export function HostedBillingSettings(props: {
   const sponsoredMember = familyState === "sponsored";
   const ownBillingActive = props.billingStatus === "active" && !familyCurrent;
   const ownPaidBillingActive = ownBillingActive && currentPhase === "paid";
-  const pausedPulseTrialRecoveryAvailable =
-    props.billingStatus === "paused" &&
-    props.canStartPaidPulse === true &&
-    !familyCurrent;
   const pulseTrialActive =
-    (ownBillingActive || pausedPulseTrialRecoveryAvailable) &&
+    ownBillingActive &&
+    currentPlanCode === "launch_monthly" &&
+    isHostedPulseTrialBillingState({
+      currentBillingPhase: props.currentBillingPhase,
+      currentCheckoutOffer: props.currentCheckoutOffer,
+    });
+  const pulseTrialRecoverable =
+    !familyCurrent &&
+    props.canStartPaidPulse === true &&
     currentPlanCode === "launch_monthly" &&
     isHostedPulseTrialBillingState({
       currentBillingPhase: props.currentBillingPhase,
@@ -143,12 +147,13 @@ export function HostedBillingSettings(props: {
     ownPaidBillingActive && currentPlanCode === "launch_group_monthly";
   const pulseCurrent =
     (ownPaidBillingActive && currentPlanCode === "launch_monthly") ||
-    pulseTrialActive;
+    pulseTrialActive ||
+    pulseTrialRecoverable;
   const edgeCurrent =
     ownPaidBillingActive && currentPlanCode === "launch_edge_monthly";
   const usageTopUpOffers = props.usageTopUpOffers ?? [];
 
-  const isPulseTrial = pulseTrialActive;
+  const isPulseTrial = pulseTrialActive || pulseTrialRecoverable;
   const pulseTrialBillingContinuationPending =
     props.pulseTrialBillingContinuationPending === true;
   const hasPendingGroupSwitch =

@@ -53,7 +53,7 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
-        label="Payment method saved before starting Core"
+        label="Paused Pulse trial ready to resume after payment recovery"
         state="payment-recovery"
       >
         <div inert>
