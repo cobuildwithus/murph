@@ -179,6 +179,13 @@ class HostedRunnerContainerShuttingDownError extends Error {
   }
 }
 
+class RunnerContainerShellPrewarmSupersededError extends Error {
+  constructor() {
+    super("Hosted runner shell prewarm was superseded by authoritative readiness.");
+    this.name = "RunnerContainerShellPrewarmSupersededError";
+  }
+}
+
 interface HostedExecutionContainerInvokeRequest {
   job: HostedExecutionRunnerJobInput;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
@@ -198,10 +205,15 @@ export interface RunnerContainerEnsureReadyForProcessingResult {
   kind: "ready";
 }
 
-export interface RunnerContainerPrewarmShellResult {
-  action: "already_started" | "start_issued";
-  kind: "started";
-}
+export type RunnerContainerPrewarmShellResult =
+  | {
+      action: "already_started" | "start_issued";
+      kind: "started";
+    }
+  | {
+      action: "superseded";
+      kind: "superseded";
+    };
 
 interface HostedExecutionContainerRunnerInput {
   job: HostedExecutionRunnerJobInput;
@@ -483,6 +495,10 @@ export class RunnerContainer extends Container {
   private lastActivityObservedStage: string | null = null;
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
+  private shellPrewarmOperation: {
+    abortController: AbortController;
+    result: Promise<RunnerContainerPrewarmShellResult>;
+  } | null = null;
   private stopGeneration = 0;
   private stopObservers = new Set<() => void>();
   private warmShellInvalidatedByUnsettledDestroy = false;
@@ -718,6 +734,7 @@ export class RunnerContainer extends Container {
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
     this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+    this.supersedeShellPrewarmForAuthoritativeReadiness();
     return await this.withLifecycleLock(async () => {
       const logContext: RunnerContainerLogContext = {
         userId: input.userId,
@@ -747,28 +764,67 @@ export class RunnerContainer extends Container {
   ): Promise<RunnerContainerPrewarmShellResult> {
     this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-    return await this.withLifecycleLock(async () => {
-      const status = readContainerStatus(await this.getState());
-      if (!isRunnerContainerStopped(status)) {
-        return { action: "already_started", kind: "started" };
-      }
+    const existing = this.shellPrewarmOperation;
+    if (existing) {
+      return await existing.result;
+    }
 
-      const logContext: RunnerContainerLogContext = {
-        userId: input.userId,
-      };
-      this.currentLogContext = logContext;
-      try {
-        await this.start(undefined, {
-          portToCheck: RUNNER_PORT,
-          signal: AbortSignal.timeout(input.timeoutMs),
-        });
-        return { action: "start_issued", kind: "started" };
-      } finally {
-        if (this.currentLogContext === logContext) {
-          this.currentLogContext = null;
+    const abortController = new AbortController();
+    const result = this.withLifecycleLock(
+      async (): Promise<RunnerContainerPrewarmShellResult> => {
+        const signal = combineRunnerContainerAbortSignals(
+          abortController.signal,
+          AbortSignal.timeout(input.timeoutMs),
+        );
+        try {
+          throwIfRunnerContainerOperationAborted(signal);
+          const status = readContainerStatus(await this.getState());
+          throwIfRunnerContainerOperationAborted(signal);
+          if (!isRunnerContainerStopped(status)) {
+            return { action: "already_started", kind: "started" };
+          }
+
+          const logContext: RunnerContainerLogContext = {
+            userId: input.userId,
+          };
+          this.currentLogContext = logContext;
+          try {
+            await this.start(undefined, {
+              portToCheck: RUNNER_PORT,
+              signal,
+            });
+            return { action: "start_issued", kind: "started" };
+          } finally {
+            if (this.currentLogContext === logContext) {
+              this.currentLogContext = null;
+            }
+          }
+        } catch (error) {
+          if (
+            abortController.signal.reason
+              instanceof RunnerContainerShellPrewarmSupersededError
+          ) {
+            return { action: "superseded", kind: "superseded" };
+          }
+          throw error;
         }
+      },
+      {
+        blockPointerlessWake: false,
+      },
+    );
+    const operation = {
+      abortController,
+      result,
+    };
+    this.shellPrewarmOperation = operation;
+    try {
+      return await result;
+    } finally {
+      if (this.shellPrewarmOperation === operation) {
+        this.shellPrewarmOperation = null;
       }
-    });
+    }
   }
 
   async abortWorkspaceInvocation(input: {
@@ -2632,6 +2688,15 @@ export class RunnerContainer extends Container {
       () => undefined,
     );
     return next;
+  }
+
+  private supersedeShellPrewarmForAuthoritativeReadiness(): void {
+    const operation = this.shellPrewarmOperation;
+    if (operation && !operation.abortController.signal.aborted) {
+      operation.abortController.abort(
+        new RunnerContainerShellPrewarmSupersededError(),
+      );
+    }
   }
 
   private recordRecentReadinessProof(userId: string): void {

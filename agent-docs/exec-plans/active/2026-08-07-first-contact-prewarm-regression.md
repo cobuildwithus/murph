@@ -21,6 +21,9 @@ Updated: 2026-08-07
   not.
 - The ordinary committed conversation signal remains the first runtime wake and
   the deferred activation continuation remains ordered after that handoff.
+- Duplicate shell hints coalesce, and authoritative readiness supersedes any
+  stalled hint before entering the lifecycle queue so the hint cannot consume
+  the authoritative startup budget.
 - Enrollment failure, provider redelivery, signup fallback, typing feedback,
   active-member wakes, and Assistant Ask direct wakes remain unchanged.
 - Focused Web tests and typecheck pass, and the hosted-local foreground scenario
@@ -78,6 +81,13 @@ Updated: 2026-08-07
   against the deterministic container before enrollment can overlap platform
   startup without touching the authority path; the ordinary post-Temporal
   direct ensure still owns readiness, workspace state, fencing, and processing.
+- Preliminary specialist ReviewGPT found that the first implementation held the
+  shared lifecycle lock while awaiting shell startup for up to 20 seconds. That
+  material finding was accepted: duplicate hints now coalesce and the ordinary
+  readiness RPC aborts/supersedes an in-progress hint before taking the lock.
+  A deterministic deferred-start regression proves authoritative readiness
+  proceeds within its own budget, and the Web ordering regression leaves the
+  prewarm promise unresolved while enrollment and conversation handoff finish.
 
 ## Risks and mitigations
 
@@ -85,6 +95,8 @@ Updated: 2026-08-07
    Mitigation: route directly to the deterministic container and expose a
    dedicated RPC that calls only `start()` after validating stopped state; unit
    tests prove no `UserRunner`, readiness wait, workspace call, fence, or invoke.
+   The hint does not block pointerless wakes, duplicate hints coalesce, and
+   authoritative readiness aborts it before joining the lifecycle queue.
 2. Risk: enrollment fails after starting a shell.
    Mitigation: the shell has no work or owner and expires through the existing
    idle lifecycle; enrollment failure keeps its current signup fallback.
@@ -125,5 +137,7 @@ Updated: 2026-08-07
   one-owner, mailbox, provider, and delivery assertions. Completed on isolated
   Blacksmith with a 693 ms provider-start p50 improvement and 662 ms delivery
   p50 improvement across six measured samples per variant.
+- Post-finding focused remediation proof: 187 RunnerContainer tests and 184 Web
+  instant-start/direct-wake tests passed; Cloudflare and Web typechecks passed.
 - Preliminary `completion-specialists`, final ReviewGPT, and required exact-head
   GitHub Actions.

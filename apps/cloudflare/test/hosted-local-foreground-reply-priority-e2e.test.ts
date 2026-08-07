@@ -484,7 +484,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       inserted: true,
     });
 
-    const shellPrewarmResponse = await requireScenario().harness.request(
+    const shellPrewarmResponsePromise = requireScenario().harness.request(
       buildCloudflareHostedControlRuntimeShellPrewarmPath(identity.userId),
       {
         body: "{}",
@@ -495,10 +495,6 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         method: "POST",
       },
     );
-    expect(shellPrewarmResponse.status).toBe(202);
-    await expect(shellPrewarmResponse.json()).resolves.toEqual({
-      accepted: true,
-    });
     await expect(readActiveRuntimeFenceForTest(identity.userId)).resolves.toBeNull();
 
     const providerRequestBaseline = countAssistantProviderInputs(inboundText);
@@ -524,6 +520,11 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       reason: "wake-appended-active-member",
+    });
+    const shellPrewarmResponse = await shellPrewarmResponsePromise;
+    expect(shellPrewarmResponse.status).toBe(202);
+    await expect(shellPrewarmResponse.json()).resolves.toEqual({
+      accepted: true,
     });
 
     const conversationItem = await readHostedMailboxItemForTest({

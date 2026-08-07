@@ -1583,6 +1583,59 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
+  it("lets authoritative readiness supersede a stalled shell prewarm", async () => {
+    const startEntered = createDeferred<void>();
+    const start = vi.fn(async (
+      _startOptions: unknown,
+      waitOptions?: { signal?: AbortSignal },
+    ) => {
+      const signal = waitOptions?.signal;
+      if (!signal) {
+        throw new Error("Expected shell prewarm to carry an abort signal.");
+      }
+      startEntered.resolve();
+      await new Promise<void>((_resolve, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      });
+    });
+    const { container, startAndWaitForPorts } = createContainerDouble({ start });
+
+    const firstPrewarm = container.prewarmShell({
+      timeoutMs: 20_000,
+      userId: "member_123",
+    });
+    await startEntered.promise;
+    const duplicatePrewarm = container.prewarmShell({
+      timeoutMs: 20_000,
+      userId: "member_123",
+    });
+    const authoritativeReadiness = container.ensureReadyForProcessing({
+      timeoutMs: 8_000,
+      userId: "member_123",
+    });
+
+    await expect(firstPrewarm).resolves.toEqual({
+      action: "superseded",
+      kind: "superseded",
+    });
+    await expect(duplicatePrewarm).resolves.toEqual({
+      action: "superseded",
+      kind: "superseded",
+    });
+    await expect(authoritativeReadiness).resolves.toEqual({
+      action: "started",
+      kind: "ready",
+    });
+    expect(start).toHaveBeenCalledOnce();
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+  });
+
   it("reuses immediate startup readiness proof for the following workspace invocation", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 

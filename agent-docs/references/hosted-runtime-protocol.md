@@ -976,9 +976,12 @@ a `UserRunner`, read access or workspace state, select a mailbox owner, create a
 fence, wait for readiness, or invoke work. The active-member replan durably
 appends the original conversation item and Web awaits that conversation-mailbox
 Temporal signal; only then may the ordinary Linq direct ensure start and own
-readiness plus all runtime authority. The signal reconciles both the foreground
-conversation lane and the already-durable activation item. Web then runs the
-deferred activation continuation so the existing best-effort activation signal
+readiness plus all runtime authority. Duplicate shell hints coalesce, and an
+authoritative readiness request supersedes and aborts an in-progress shell hint
+before entering the container lifecycle queue, so a degraded best-effort start
+cannot consume the authoritative startup budget. The signal reconciles both the
+foreground conversation lane and the already-durable activation item. Web then
+runs the deferred activation continuation so the existing best-effort activation signal
 and pending group-join confirmation reconciliation remain intact. If replan,
 delivery, or the conversation wake fails after activation commits, Web runs the
 same continuation immediately. A process death between the activation commit

@@ -5213,9 +5213,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
     const ensureRuntimeProcessing = vi.fn();
-    const prewarmRuntimeShell = vi.fn(async () => {
+    const prewarmRuntimeShell = vi.fn(() => {
       callOrder.push("shell-prewarm");
-      return { accepted: true as const };
+      return new Promise<{ accepted: true }>(() => undefined);
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
