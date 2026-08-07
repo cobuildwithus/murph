@@ -134,6 +134,13 @@ Updated: 2026-08-06
   owner while leaving all unmarked direct-thread recovery behavior intact.
   ReviewGPT's production hunk is unchanged; parent validation narrowed its
   total-fetch assertion to ignore the existing best-effort typing cleanup.
+- Accept final round 4's symmetric pre-provider finding. The same wrapper also
+  converted explicit `deliveryMayHaveSucceeded: false` provenance before the
+  first reservation into generic confirmation-pending state. Rethrow that
+  explicit false fact unchanged before generic conversion, so the existing
+  callback resets the same prepared intent immediately; unmarked transport
+  failures retain the established confirmation-pending policy. This completes
+  the retrospective's single before/after-reservation rule without new state.
 
 ## Verification
 
@@ -197,3 +204,11 @@ Updated: 2026-08-06
   transport 57/57, and assistant-engine outbox/retry/cron 306/306.
 - Post-remediation package typechecks for operator-config, assistant-engine,
   and assistant-runtime passed.
+- Pre-provider direct-materialization remediation proof: hosted provider effects
+  21/21 and the real hosted Linq outbox matrix 9/9 passed. The redacted route
+  makes no reservation, upload, or final chat request before defer, resets the
+  same intent, then sends it once on the later non-yielding drain with no
+  successor intent.
+- Final owner suites passed again after that patch: hosted callbacks 215/215,
+  Linq transport 57/57, assistant-engine outbox/retry/cron 306/306, and all
+  three package typechecks.

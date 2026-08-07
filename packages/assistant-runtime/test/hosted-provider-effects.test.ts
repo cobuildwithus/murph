@@ -832,6 +832,64 @@ describe("hosted provider effects", () => {
     expect(createChatCalls).toHaveLength(1);
   });
 
+  it("preserves provider-skipped provenance through direct-thread materialization", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async () => {
+      throw Object.assign(
+        new Error("Fresh input preempted the attachment reservation."),
+        {
+          assistantDeliveryFailureClass: "transient" as const,
+          assistantDeliveryResumeTrigger: "fresh_foreground_input" as const,
+          deliveryMayHaveSucceeded: false as const,
+          retryable: true as const,
+        },
+      );
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
+      media: [{
+        alt: "Private generated image",
+        contentType: "image/png",
+        filename: "generated.png",
+        kind: "vault_image",
+        ref: "raw/captures/generated.png",
+        sha256: "a".repeat(64),
+        sizeBytes: 12,
+        source: "gpt-image-2",
+      }],
+      message: "hello",
+      target: "h1_111111111111111111111111",
+      targetKind: "thread",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation,
+      loadVaultImage: async () => new Uint8Array(12),
+    })).rejects.toMatchObject({
+      assistantDeliveryFailureClass: "transient",
+      assistantDeliveryResumeTrigger: "fresh_foreground_input",
+      code: "LINQ_API_REQUEST_FAILED",
+      context: expect.objectContaining({
+        assistantDeliveryFailureClass: "transient",
+        assistantDeliveryResumeTrigger: "fresh_foreground_input",
+        failureStage: "transport",
+        operation: "create_attachment_upload",
+        retryable: false,
+      }),
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+    assert.equal(
+      String(fetchImplementation.mock.calls[0]?.[0]),
+      "https://api.linqapp.com/api/partner/v3/attachments",
+    );
+  });
+
   it("preserves attachment-reservation ambiguity through direct-thread materialization", async () => {
     const fetchImplementation = vi.fn<typeof fetch>(async () => {
       throw Object.assign(new Error("Fresh input preempted the final Linq request."), {

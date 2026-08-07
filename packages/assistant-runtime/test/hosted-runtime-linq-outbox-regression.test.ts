@@ -36,31 +36,63 @@ afterEach(async () => {
   await Promise.all(cleanupTasks.splice(0).map((cleanup) => cleanup()));
 });
 
-it("defers a real hosted Linq attachment before provider entry and later sends the same outbox intent", async () => {
+it.each([
+  {
+    homeRoute: null,
+    key: "provider-skipped",
+    label: "existing-thread private image",
+    target: "linq_chat_hosted_provider_skipped",
+  },
+  {
+    homeRoute: {
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+    },
+    key: "redacted-direct-provider-skipped",
+    label: "redacted direct-materialization private image",
+    target: "h1_222222222222222222222222",
+  },
+] as const)("defers a real hosted Linq $label before provider entry and later sends the same outbox intent", async ({
+  homeRoute,
+  key,
+  target,
+}) => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
   const fixture = await createHostedLinqAttachmentFixture({
-    key: "provider-skipped",
-    target: "linq_chat_hosted_provider_skipped",
+    ...(homeRoute ? { homeRoute } : {}),
+    key,
+    target,
   });
+  const providerMessageId = `linq_${key}_sent`;
   const providerFetch = vi.fn<typeof fetch>(async (request) => {
     const url = String(request);
     if (url.endsWith("/attachments")) {
       return new Response(JSON.stringify({
-        attachment_id: "attachment_hosted_provider_skipped",
+        attachment_id: `attachment_${key}`,
         expires_at: "2026-08-06T21:00:00.000Z",
         http_method: "PUT",
         required_headers: {
           "content-type": "image/png",
         },
-        upload_url: "https://uploads.example.test/private/provider-skipped",
+        upload_url: `https://uploads.example.test/private/${key}`,
       }), {
         headers: { "Content-Type": "application/json" },
       });
     }
-    if (url.endsWith(`/chats/${fixture.target}/messages`)) {
+    if (homeRoute && url.endsWith("/chats")) {
       return new Response(JSON.stringify({
-        message: { id: "linq_hosted_provider_skipped_sent" },
+        chat: {
+          id: `materialized_${key}`,
+          message: { id: providerMessageId },
+        },
+      }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (!homeRoute && url.endsWith(`/chats/${fixture.target}/messages`)) {
+      return new Response(JSON.stringify({
+        message: { id: providerMessageId },
       }), {
         headers: { "Content-Type": "application/json" },
       });
@@ -74,6 +106,14 @@ it("defers a real hosted Linq attachment before provider entry and later sends t
     providerFetch,
     publicInternetFetch,
   });
+  const reservationCalls = () => providerFetch.mock.calls.filter(([request]) =>
+    String(request).endsWith("/attachments")
+  );
+  const messageCalls = () => providerFetch.mock.calls.filter(([request]) =>
+    String(request).endsWith(
+      homeRoute ? "/chats" : `/chats/${fixture.target}/messages`,
+    )
+  );
   expect(fixture.intent.deliveryTransportIdempotent).toBe(true);
   const firstPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
     assistantDeliveryEffects: [fixture.effect],
@@ -100,7 +140,8 @@ it("defers a real hosted Linq attachment before provider entry and later sends t
   expect(onBackgroundDeliveryYield).toHaveBeenCalledWith({
     yieldedEffectCount: 1,
   });
-  expect(providerFetch).not.toHaveBeenCalled();
+  expect(reservationCalls()).toHaveLength(0);
+  expect(messageCalls()).toHaveLength(0);
   expect(publicInternetFetch).not.toHaveBeenCalled();
   await expect(readAssistantOutboxIntent(
     fixture.vaultRoot,
@@ -134,11 +175,12 @@ it("defers a real hosted Linq attachment before provider entry and later sends t
     expect.objectContaining({
       deliveryStatus: "sent",
       effectId: fixture.intent.intentId,
-      providerMessageId: "linq_hosted_provider_skipped_sent",
+      providerMessageId,
       retryable: false,
     }),
   ]);
-  expect(providerFetch).toHaveBeenCalledTimes(2);
+  expect(reservationCalls()).toHaveLength(1);
+  expect(messageCalls()).toHaveLength(1);
   expect(publicInternetFetch).toHaveBeenCalledTimes(1);
   await expect(listAssistantOutboxIntents(fixture.vaultRoot)).resolves.toEqual([
     expect.objectContaining({
