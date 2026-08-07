@@ -633,6 +633,20 @@ non-repeat only. The existing occurrence-scoped cron/outbox identity freezes
 exact member-facing text after an outbox intent exists, and a failed ledger
 write does not suppress an otherwise sound first read.
 
+Adding the fieldless action changes the shared `murph.automation` tool contract,
+so rollout intentionally rotates native provider threads beyond onboarding. On
+the first post-deploy turn of a pre-existing automation-capable private session
+or eligible non-email group session, the stored contract fingerprint no longer
+matches. The planner must not resume a provider thread under a different tool
+schema: it starts a fresh thread with at most 24 committed messages, 4,000 bytes
+per message, and 12,000 bytes total, then returns to native resume after that
+replacement thread succeeds. Rolling back the schema can cause the same session
+to rotate a second time. Rollout proof uses one pre-existing private session and
+one pre-existing eligible group session: each first turn starts fresh and
+replies with bounded continuity, and each second turn resumes its replacement
+thread. Do not add a compatibility flag, dual schema, migration, or session
+reconciler around this safety boundary.
+
 ## Finite Scheduled Continuation
 
 The onboarding follow-up automation is one finite three-day recovery window,
