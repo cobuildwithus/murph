@@ -189,7 +189,9 @@ count, or automatic refill events. The exact payer privately sees the current
 period's fulfilled and pending amounts, maximum, period end, status, and
 management controls. A near-cap notice is private and revalidated against the
 current authorization. The room is notified only when the existing usage gate
-actually pauses work, using neutral language without a funding prompt.
+actually pauses work. A sponsored room receives a neutral pause sentence plus
+the current first-party funding link, which offers another participant only a
+one-time contribution; the room copy exposes no private sponsorship details.
 
 ## Group Sponsorship Moment
 
@@ -466,7 +468,16 @@ missions. A broad request for every option or a way to earn usage reads both
 current funding and referral state. If the room already has an automatic
 sponsor, the page preserves that single-sponsor invariant and offers the
 additional payer only a one-time contribution. Murph does not imply the room
-needs funding or disclose private sponsor facts.
+needs funding when `fundingNeeded` is false or disclose private sponsor facts.
+When `fundingNeeded` is true, the same capacity warning applies whether or not
+the room already has an automatic sponsor.
+
+For a group exhaustion notice, delivery re-reads the current group usage
+projection. If the room is sponsored, Web uses the neutral sponsored pause
+sentence and still appends the current first-party funding link; the page owns
+the one-time-only path. If the room is unsponsored, Web appends the link to the
+ordinary group pause copy. Neither branch exposes payer, cap, amount, balance,
+purchase, or refill facts.
 
 Immediately before both the exhaustion crossing send and a later denied-gate
 retry, delivery re-reads the current personal usage-status projection. It
@@ -1256,8 +1267,10 @@ Current focused unit and component coverage exercises:
   status/cancel-only recovery, all ordered target-conflict payment suppression,
   and payer-wide single-active purchase presentation;
 - group usage reads with only binary sponsorship/funding state, trusted
-  low-capacity next-turn context, the route-authorized unsponsored funding
-  link, and neutral sponsored pause copy with no payer or depletion detail; and
+  low-capacity next-turn context in both sponsorship states, the
+  route-authorized funding link, and sponsored exhaustion copy with a neutral
+  pause plus private one-time recovery path and no payer or accounting detail;
+  and
 - cross-owner deletion plus payerless terminal refund/dispute reconciliation.
 
 These suites do not prove a real Stripe test-mode webhook or deployed browser

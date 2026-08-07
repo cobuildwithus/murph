@@ -118,7 +118,7 @@ describe("hosted group usage funding", () => {
     });
   });
 
-  it("collapses every live sponsorship state to a private-safe room projection", async () => {
+  it("keeps sponsored-room urgency while projecting only binary sponsorship", async () => {
     const prisma = {
       hostedGroup: {
         findUnique: vi.fn(async () => ({ joinCode: "group_join_code_1234" })),
@@ -141,9 +141,63 @@ describe("hosted group usage funding", () => {
       prisma: prisma as never,
       runtimeMemberId: "member_group_runtime",
     })).resolves.toEqual({
-      fundingNeeded: false,
+      fundingNeeded: true,
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+      sponsorshipStatus: "sponsored",
+    });
+  });
+
+  it("does not create urgency for a healthy sponsored room", async () => {
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({ joinCode: "group_join_code_1234" })),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+    mocks.readHostedAiUsageGate.mockResolvedValue({
+      allowanceSource: "thread_container",
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      remainingUsdMicros: 3_000_000n,
+    });
+    mocks.readHostedGroupSponsorshipPublicState.mockResolvedValue("sponsored");
+
+    await expect(readHostedGroupUsageStatus({
+      prisma: prisma as never,
+      runtimeMemberId: "member_group_runtime",
+    })).resolves.toMatchObject({
+      fundingNeeded: false,
+      sponsorshipStatus: "sponsored",
+    });
+  });
+
+  it("projects urgency before a sponsored room is exhausted", async () => {
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({ joinCode: "group_join_code_1234" })),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+    mocks.readHostedAiUsageGate.mockResolvedValue({
+      allowanceSource: "thread_container",
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      remainingUsdMicros: 900_000n,
+    });
+    mocks.readHostedGroupSponsorshipPublicState.mockResolvedValue("sponsored");
+
+    await expect(readHostedGroupUsageStatus({
+      prisma: prisma as never,
+      runtimeMemberId: "member_group_runtime",
+    })).resolves.toMatchObject({
+      fundingNeeded: true,
       sponsorshipStatus: "sponsored",
     });
   });

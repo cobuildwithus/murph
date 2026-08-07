@@ -71,10 +71,11 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
     expect(await project()).toBe(await project());
   });
 
-  it("replaces the real production reset notice with one neutral sponsored pause", async () => {
+  it("gives an exhausted sponsored room a private contribution path", async () => {
     mocks.readHostedGroupUsageStatus.mockResolvedValue({
-      fundingNeeded: false,
-      fundingUrl: null,
+      fundingNeeded: true,
+      fundingUrl:
+        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
       sponsorshipStatus: "sponsored",
     });
     const productionNotice = renderUserFacingMessage({
@@ -90,11 +91,57 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
       prisma: {} as never,
     });
 
-    expect(projected).toBe(HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE);
+    expect(projected.startsWith(`${HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE}\n\n`))
+      .toBe(true);
+    expect(projected.endsWith(
+      "\nhttps://www.withmurph.ai/groups/fund/group_join_code_1234",
+    )).toBe(true);
     expect(projected).not.toBe(productionNotice);
     expect(projected).not.toMatch(
-      /payer|sponsor|\$|percent|remaining|message|conserve|reset|month|fund/iu,
+      /payer|\$|percent|remaining|balance|cap|refill|reset|month/iu,
     );
+  });
+
+  it("keeps a sponsored pause neutral without current urgency", async () => {
+    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+      fundingNeeded: false,
+      fundingUrl: null,
+      sponsorshipStatus: "sponsored",
+    });
+
+    await expect(projectHostedAiUsageLimitNoticeForDelivery({
+      memberId: "member_group_runtime",
+      message: "I'm out for the whole room until my time resets.",
+      noticeCode: "thread_usage_limit_reached",
+      prisma: {} as never,
+    })).resolves.toBe(HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE);
+  });
+
+  it.each([
+    [
+      "https://checkout.stripe.test/session",
+      HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE,
+    ],
+    [
+      "https://[invalid",
+      "I'm out for the whole room until my time resets.",
+    ],
+  ])("rejects a non-canonical sponsored group funding URL: %s", async (
+    fundingUrl,
+    expected,
+  ) => {
+    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+      fundingNeeded: true,
+      fundingUrl,
+      sponsorshipStatus: "sponsored",
+    });
+
+    await expect(projectHostedAiUsageLimitNoticeForDelivery({
+      memberId: "member_group_runtime",
+      message: "I'm out for the whole room until my time resets.",
+      noticeCode: "thread_usage_limit_reached",
+      prisma: {} as never,
+    })).resolves.toBe(expected);
   });
 
   it("leaves a stale group notice unchanged after capacity recovers", async () => {

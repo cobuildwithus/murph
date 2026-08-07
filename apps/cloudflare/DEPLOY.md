@@ -451,15 +451,19 @@ restore group percentages, period boundaries, or other quantitative accounting
 to runtime or assistant policy.
 
 The current projection separates urgency from capability: `fundingNeeded`
-controls assistant-initiated depletion messaging, while a non-null `fundingUrl`
-may be used after an explicit funding request at any capacity. For that behavior,
-deploy the Cloudflare runner bundle first, then Web. Old Web leaves a healthy
-group's URL null, so the first step is inert; old runners may ignore a healthy
-URL from new Web, so the opposite skew is incomplete but safe. After both
-deployments, smoke an explicit funding request in a healthy unsponsored group
-and confirm Murph returns the first-party link without claiming the room needs
-funding. Open the link and confirm both monthly sponsorship and one-time
-contribution are available.
+controls assistant-initiated depletion messaging independently of
+`sponsorshipStatus`, while a non-null `fundingUrl` may be used after an explicit
+funding request at any capacity. Deploy the Cloudflare runner bundle first,
+then Web. The new runner against old Web preserves the prior sponsored-room
+suppression until Web changes the boolean, while old runners against new Web
+could still suppress the proactive warning. After both deployments, smoke a
+low sponsored group and confirm Murph gives a link-free warning without payer,
+cap, amount, balance, or refill detail. Then smoke an exhausted sponsored group
+and confirm the deterministic notice uses the neutral pause sentence plus the
+first-party link; opening it must preserve the existing automatic sponsor and
+offer only an additional one-time contribution. Also smoke an explicit funding
+request in a healthy unsponsored group and confirm Murph returns the first-party
+link without claiming the room needs funding.
 
 ## Thread Usage Crossing Notice Rollout
 

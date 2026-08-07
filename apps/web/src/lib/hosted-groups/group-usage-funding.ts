@@ -137,8 +137,10 @@ export async function readHostedGroupUsageStatus(input: {
     limitUsdMicros: decision.limitUsdMicros,
     remainingUsdMicros: decision.remainingUsdMicros,
   });
-  const fundingNeeded =
-    sponsorshipStatus === "not_sponsored" && capacityState !== "healthy";
+  // Capacity urgency is independent of the room's private payment path. A
+  // live sponsor changes what the funding page offers, not whether the room
+  // needs a timely warning before Murph pauses.
+  const fundingNeeded = capacityState !== "healthy";
 
   // A group without an owner-created join code (including one with no
   // HostedGroup row at all) still gets a funding URL through the signed

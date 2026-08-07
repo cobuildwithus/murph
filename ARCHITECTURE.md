@@ -899,10 +899,14 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   response. It maps the preceding shape to `not_sponsored`, derives only the
   funding boolean, and discards period and percentage fields before they reach
   assistant policy. In the current shape, `fundingNeeded` expresses urgency
-  while `fundingUrl` remains the capability for an explicit contribution at
-  any valid group-capacity state. Assistant policy uses the boolean only for
+  from the shared capacity state independently of `sponsorshipStatus`, while
+  `fundingUrl` remains the capability for an explicit contribution at any
+  valid group-capacity state. Assistant policy uses the boolean only for
   proactive depletion messaging and may share the returned URL after an
-  explicit funding request even when the boolean is false. Deploy that reader
+  explicit funding request even when the boolean is false. A Web-owned
+  exhaustion projection may append that current URL in either sponsorship
+  state; sponsored rooms retain neutral pause copy and the funding page admits
+  only an additional one-time contribution. Deploy that reader
   throughout Cloudflare/runner before Web begins emitting the current shape.
   Because the preceding producer cannot represent an active monthly
   sponsorship, the Web switch becomes a forward-only tandem cutover once

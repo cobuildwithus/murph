@@ -205,6 +205,12 @@ describe('assistant hosted low-usage skill', () => {
       'Keep this first mention link-free and route-neutral',
     )
     expect(normalizedSkill).toContain(
+      '`fundingNeeded` is the capacity-urgency signal in either sponsorship state',
+    )
+    expect(normalizedSkill).toContain(
+      'it does not suppress the low-capacity warning',
+    )
+    expect(normalizedSkill).toContain(
       'do not name or count earned, sponsored, paid, funding, or referral paths',
     )
     expect(normalizedSkill).toContain(
@@ -234,7 +240,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain("Match the room's energy")
     expect(normalizedSkill).toContain('without naming or singling out a nonpayer')
     expect(normalizedSkill).toContain('guilt-trip, call out nonpayers')
-    expect(skill).toContain('skip the heads-up entirely')
+    expect(normalizedSkill).toContain('skip the heads-up entirely')
     expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')
     expect(normalizedSkill).toContain('If no funding URL is returned')
@@ -269,6 +275,12 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(normalizedSkill).toContain(
       'does not make explicit funding unavailable',
+    )
+    expect(normalizedSkill).toContain(
+      'the room needs more Murph time to avoid or recover from a pause',
+    )
+    expect(normalizedSkill).toContain(
+      'The deterministic Web-owned exhaustion notice may include its own current first-party recovery link',
     )
     expect(normalizedSkill).not.toContain(
       'Share a returned first-party funding URL only when `fundingNeeded` is true',

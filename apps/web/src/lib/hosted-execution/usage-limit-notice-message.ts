@@ -27,31 +27,31 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
         prisma: input.prisma,
         runtimeMemberId: input.memberId,
       });
-      if (status?.sponsorshipStatus === "sponsored") {
-        return HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE;
-      }
+      const pauseMessage = status?.sponsorshipStatus === "sponsored"
+        ? HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE
+        : input.message;
       if (
         !status?.fundingNeeded
         || !status.fundingUrl
       ) {
-        return input.message;
+        return pauseMessage;
       }
       const fundingUrl = new URL(status.fundingUrl, `${MURPH_PRODUCT_ORIGIN}/`);
       if (fundingUrl.origin !== MURPH_PRODUCT_ORIGIN) {
-        return input.message;
+        return pauseMessage;
       }
       /**
        * Only this branch knows a public funding ask is timely right now, so it
-       * owns the ask. A live monthly sponsorship suppresses this branch,
-       * leaving only the neutral group pause notice without payer or amount
-       * details. Explicit funding capability is projected separately.
+       * owns the ask. A live monthly sponsorship keeps the neutral pause copy
+       * while the same first-party URL offers an additional private one-time
+       * contribution. No payer, amount, cap, or refill detail enters the room.
        */
       const funding = renderUserFacingMessage({
         context: { fundingUrl: fundingUrl.toString() },
         key: "linq.ai_usage.thread_limit_funding",
         seed: input.memberId,
       });
-      return `${input.message}\n\n${funding.text}`;
+      return `${pauseMessage}\n\n${funding.text}`;
     }
 
     const usageStatus = await readHostedPersonalAiUsageStatus({
