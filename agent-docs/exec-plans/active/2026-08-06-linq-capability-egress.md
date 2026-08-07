@@ -96,6 +96,43 @@ Updated: 2026-08-06
   A later inbound could therefore supersede a frozen participant fallback in a
   loop or rewrite a frozen thread fallback before exact claim validation,
   leaving the accepted reply without either card or deterministic text.
+- Final ReviewGPT round 14 disproved the participant half of that correction.
+  The claimed row froze only the assigned Murph line; every fresh drain still
+  decrypted the member's current verified phone. If that phone changed after a
+  possibly successful provider request, the same provider idempotency key could
+  be replayed to a different recipient. The line-change tests retained the same
+  participant and therefore did not exercise the requirement-level identity
+  invariant.
+
+## Round 14 requirement retrospective
+
+The original stale-chat recovery requirement is to complete the already
+accepted in-chat reply exactly once even when the provider rejects Web's still-
+current chat identity. The participant-addressed `/chats` operation is the only
+available deterministic recovery when no replacement thread exists, so deleting
+that branch would restore the production failure instead of simplifying the
+owner model. Re-deriving the participant from current member identity is also
+invalid: a provider call may already have begun, and provider idempotency binds
+one key to one exact request rather than authorizing the key for a newer phone.
+
+The selected design keeps the participant recovery but makes the existing Web
+`HostedLinqDelivery` row the complete effect owner. At the first provider claim,
+that row binds the member, source line, provider key, and an encrypted, row-bound
+snapshot plus blind index of the exact participant recipient. A later drain
+decrypts only that snapshot. Missing legacy snapshot state or any member, line,
+recipient, source, or key mismatch fails closed before provider entry; it never
+falls back to current identity.
+
+The product disposition after a verified-phone change is exact replay to the
+original claimed participant. The member lock proves that recipient was current
+when the effect crossed the provider fence, and a later identity change governs
+future effects only. This is necessary because the first provider call may have
+succeeded before its outcome was lost; changing or canceling the request cannot
+undo that effect and would make its idempotency semantics unknowable. Account
+deletion remains authoritative: the member relation cascades the delivery row
+and its encrypted recipient after the existing runtime/provider cleanup fence.
+The schema extension is nullable for rolling deployment and legacy rows, but
+new participant fallback claims require the complete snapshot atomically.
 
 ## Success criteria
 
@@ -167,8 +204,10 @@ Updated: 2026-08-06
 - A newer home may supersede stale recovery only while no fallback delivery row
   exists. Once Web claims the fallback row, its exact thread or
   participant/assigned-line target is the source of truth for every fresh
-  drain. Later home changes cannot mutate that effect; mismatches fail closed
-  before local persistence or provider entry.
+  drain. A claimed participant row includes its member owner and row-bound
+  encrypted recipient snapshot, so later home, assigned-line, or verified-phone
+  changes cannot mutate that effect; mismatches and legacy incomplete rows fail
+  closed before local persistence or provider entry.
 - Every error raised by the pre-provider dispatch-control boundary, including
   the liveness check before capability preflight, emits a sanitized structured
   warning and retains its original typed retry/control semantics through the
@@ -188,7 +227,8 @@ Updated: 2026-08-06
 ## Constraints
 
 - No new row, queue, retry owner, external provider call, credential, or
-  dependency; reuse the existing delivery rows and engagement transaction.
+  dependency; extend the existing delivery row and engagement transaction with
+  the minimum encrypted participant identity needed for exact replay.
 - Keep provider request and response bodies, phone numbers, chat ids, member
   ids, idempotency keys, and raw error text out of durable diagnostics.
 - Preserve the current single-effect outbox transition and use its existing
@@ -203,7 +243,10 @@ Updated: 2026-08-06
 1. [x] Add the exact Linq capability operation and policy-denial diagnostic.
 2. [x] Add caught-failure diagnostics without changing text recovery.
 3. [x] Run focused tests, typechecks, documentation checks, and privacy review.
-4. [ ] Push the exact candidate and complete ReviewGPT plus CI gates.
+4. [x] Prove and correct post-claim route reselection for changed home lines.
+5. [ ] Persist and verify the exact claimed participant recipient after the
+   round 14 requirement retrospective.
+6. [ ] Push the exact candidate and complete ReviewGPT plus CI gates.
 
 ## Verification log
 
@@ -367,3 +410,9 @@ Updated: 2026-08-06
   member's current assigned line and proves Web decrypts and reauthorizes the
   frozen claimed line rather than substituting the new home line. Prepared Web
   typecheck and both documentation checks pass.
+- Final ReviewGPT round 14 found that the claimed participant recipient itself
+  was still re-derived from mutable member identity. The requirement
+  retrospective above rejects deletion of the only same-home recovery path and
+  selects an encrypted recipient snapshot on the existing member-owned delivery
+  row, with exact original-recipient replay after claim and fail-closed handling
+  for incomplete legacy rows.
