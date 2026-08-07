@@ -214,25 +214,35 @@ cannot disagree. A hit uses primary sage. A miss uses Tailwind `red-700` as a
 deliberate binary target exception because the standard sienna warning token
 reads brown rather than the explicitly required red; always pair either color
 with `10% target hit` or `Below 10% target` text. A missing comparison stays
-neutral and must not claim that a snapshot exists. Active-user windows must not
-present intentionally retired group-sender evidence as an exact count: prefix
-an affected WAU or MAU with `At least`, explain the private evidence retirement
-in the supporting copy, and withhold a week-over-week rate when either compared
-window is incomplete.
+neutral and must not claim that a snapshot exists. Keep **Messaged Murph today**
+and **Messaged Murph · last 7 days** as prominent supporting readings beside the MRR
+lead; both count distinct people across personal and attributable group chats.
+Each person belongs to the UTC window when Murph durably receives their message,
+not the provider-reported event time. Describe them as retained senders. Account
+deletion removes personal and owned-group source rows; activity retained in
+another member's shared-group container follows normal content retention
+instead of an analytics-side deletion trail.
+Active-user windows must not present intentionally retired group-sender evidence
+as an exact count: prefix an affected today, WAU, or MAU count with `At least`,
+explain the private evidence retirement in the supporting copy, and withhold a
+week-over-week rate when either compared window is incomplete.
 
-Follow the scorecard with the existing two-column chart grid. Lead that grid
-with **Total messages sent**, a thin sage cumulative line seeded from the
+Follow the scorecard with the existing two-column chart grid. Begin with one
+full-width **People who messaged Murph** chart: a solid sage
+trailing-seven-day line and a dashed sand completed-day line, both built from
+anonymous daily snapshots. Keep the daily line above the rolling line so equal
+values remain distinguishable without color. Then
+show **Total messages sent**, a thin sage cumulative line seeded from the
 established historical base, and **Messages sent per day**, restrained sage
-bars for completed UTC days. Both derive from the existing daily growth
-snapshots. Shift each snapshot's prior-day counts onto the date when the
-messages occurred and always preserve the exact 30 completed-day UTC spine.
-Leave absent snapshots and legacy unknown counts as chart gaps rather than
-zeros. Once tracking has begun, an unavailable day also ends the exact
-cumulative line until the missing evidence is reconciled; later known daily
-bars may still render. State that the daily total combines inbound messages
-across supported channels with tracked Linq replies. Give each keyboard-enabled
-chart one visible focus surface named by its heading. Keep acquisition and
-revenue snapshots as the second chart row.
+bars for completed UTC days. Shift each snapshot's prior-day counts onto the
+UTC date when Murph received the activity and always preserve the exact 30
+completed-day UTC spine. Leave absent snapshots, incomplete sender windows, and
+legacy unknown counts as chart gaps rather than zeros. Once message tracking has begun, an
+unavailable day also ends the exact cumulative line until the missing evidence
+is reconciled; later known daily bars may still render. State that the daily
+message total combines inbound messages across supported channels with tracked
+Linq replies. Give each keyboard-enabled chart one visible focus surface named
+by its heading. Keep acquisition and revenue snapshots after the message charts.
 
 Below the chart grid, show trial-start provenance in one flat bordered surface:
 30-day UTC totals for Direct iMessage, Website, Companion, and Unknown followed

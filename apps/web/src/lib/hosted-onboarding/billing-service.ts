@@ -57,7 +57,7 @@ import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeCheckoutConfig,
 } from "./runtime";
-import { withHostedStripeFailureLog } from "./stripe-error-log";
+import { withHostedStripeActionFailureAlert } from "./stripe-error-log";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -191,7 +191,7 @@ export async function createHostedBillingCheckout(
       routing: invite.member.routing,
     });
 
-    const { priceId, stripe } = requireHostedStripeCheckoutConfig({
+    const { priceId, stripe, stripeLiveMode } = requireHostedStripeCheckoutConfig({
       billingPlanCode,
     });
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
@@ -207,6 +207,7 @@ export async function createHostedBillingCheckout(
       prisma,
       publicBaseUrl,
       stripe,
+      stripeLiveMode,
       verifiedEmailAddress,
     });
 
@@ -255,6 +256,7 @@ async function createOrReuseHostedBillingCheckoutAttempt(input: {
   prisma: PrismaClient;
   publicBaseUrl: string;
   stripe: Stripe;
+  stripeLiveMode: boolean;
   verifiedEmailAddress: string | null;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
   for (let attemptIndex = 0; attemptIndex < 3; attemptIndex += 1) {
@@ -286,10 +288,17 @@ async function createOrReuseHostedBillingCheckoutAttempt(input: {
       return { alreadyActive: true, url: null };
     }
 
-    const outcome = await runHostedBillingCheckoutAttempt({
-      ...input,
-      prepared,
-    });
+    const outcome = await withHostedStripeActionFailureAlert(
+      {
+        operationIdentity: prepared.attempt.attemptId,
+        operationName: "billing.checkout",
+        stripeLiveMode: input.stripeLiveMode,
+      },
+      () => runHostedBillingCheckoutAttempt({
+        ...input,
+        prepared,
+      }),
+    );
     if (outcome.kind === "restart") {
       continue;
     }
@@ -409,14 +418,12 @@ async function runHostedBillingCheckoutAttempt(input: {
   prisma: PrismaClient;
   publicBaseUrl: string;
   stripe: Stripe;
+  stripeLiveMode: boolean;
 }): Promise<HostedBillingCheckoutAttemptOutcome> {
   const currentAttempt = input.prepared.attempt;
   if (currentAttempt.stripeCheckoutSessionId) {
-    const session = await withHostedStripeFailureLog(
-      "checkout.sessions.retrieve.billing-start",
-      () => input.stripe.checkout.sessions.retrieve(
-        currentAttempt.stripeCheckoutSessionId as string,
-      ),
+    const session = await input.stripe.checkout.sessions.retrieve(
+      currentAttempt.stripeCheckoutSessionId,
     );
     assertHostedBillingCheckoutSessionMatchesAttempt({
       attempt: currentAttempt,
@@ -570,9 +577,9 @@ async function runHostedBillingCheckoutAttempt(input: {
     maxNetworkRetries: HOSTED_BILLING_CHECKOUT_REQUEST_OPTIONS.maxNetworkRetries,
     timeout: HOSTED_BILLING_CHECKOUT_REQUEST_OPTIONS.timeout,
   };
-  const session = await withHostedStripeFailureLog(
-    "checkout.sessions.create.billing-start",
-    () => input.stripe.checkout.sessions.create(checkoutParams, requestOptions),
+  const session = await input.stripe.checkout.sessions.create(
+    checkoutParams,
+    requestOptions,
   );
   assertHostedBillingCheckoutSessionMatchesAttempt({
     attempt: currentAttempt,

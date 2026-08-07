@@ -91,28 +91,33 @@ describe("hosted preference handoff sweeper", () => {
 
   it("bounds a hung handoff so the recovery sweep can finish", async () => {
     const requestHandoff = vi.fn(() => new Promise<never>(() => {}));
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(0);
 
-    const result = await runHostedPreferenceHandoffSweeper({
-      handoffTimeoutMs: 1,
-      hasActiveAccess: vi.fn(async () => true),
-      logger: buildLogger(),
-      requestHandoff,
-      store: buildStore([{
+    try {
+      const result = await runHostedPreferenceHandoffSweeper({
+        handoffTimeoutMs: 1,
+        hasActiveAccess: vi.fn(async () => true),
+        logger: buildLogger(),
+        requestHandoff,
+        store: buildStore([{
+          mailboxItemId: "mailbox_preference_hung",
+          userId: "member_preference_hung",
+        }]),
+      });
+
+      expect(result).toMatchObject({
+        handoffAccepted: 0,
+        handoffAttempted: 1,
+        handoffFailed: 1,
+      });
+      expect(requestHandoff).toHaveBeenCalledWith({
+        abortSignal: expect.any(AbortSignal),
+        expectedUserId: "member_preference_hung",
         mailboxItemId: "mailbox_preference_hung",
-        userId: "member_preference_hung",
-      }]),
-    });
-
-    expect(result).toMatchObject({
-      handoffAccepted: 0,
-      handoffAttempted: 1,
-      handoffFailed: 1,
-    });
-    expect(requestHandoff).toHaveBeenCalledWith({
-      abortSignal: expect.any(AbortSignal),
-      expectedUserId: "member_preference_hung",
-      mailboxItemId: "mailbox_preference_hung",
-    });
+      });
+    } finally {
+      dateNow.mockRestore();
+    }
   });
 
   it("skips inactive owners and keeps each sweep bounded", async () => {

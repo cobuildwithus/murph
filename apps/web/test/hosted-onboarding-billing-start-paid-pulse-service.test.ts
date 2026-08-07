@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { HostedBillingStatus } from "@prisma/client";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type Stripe from "stripe";
 
 type StripeBillingPortalSessionCreateMock = (
@@ -18,6 +18,7 @@ type StripeSubscriptionUpdateMock = (
 ) => Promise<unknown>;
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn<(task: () => Promise<void>) => void>(),
   assertHostedBillingPlanSelectable: vi.fn(),
   applyStripeInvoicePaid: vi.fn(),
   getPrisma: vi.fn(),
@@ -46,6 +47,10 @@ const mocks = vi.hoisted(() => ({
       update: vi.fn<StripeSubscriptionUpdateMock>(),
     },
   },
+}));
+
+vi.mock("next/server", () => ({
+  after: mocks.after,
 }));
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
@@ -95,6 +100,12 @@ import {
   startHostedPulseTrialPaidPlan,
   startHostedTrialPaidPlan,
 } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-service";
+import {
+  createResendFetch,
+  makeStripeProviderError,
+  readResendRequest,
+  stubAlertEnvironment,
+} from "./support/hosted-stripe-alert-fixture";
 
 describe("startHostedPulseTrialPaidPlan", () => {
   beforeEach(() => {
@@ -133,6 +144,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
             ? "price_group_recurring"
             : "price_pulse_recurring",
         stripe: mocks.stripe,
+        stripeLiveMode: true,
       }),
     );
     mocks.requireValidatedHostedStripeBillingPlanConfig.mockImplementation(
@@ -167,6 +179,11 @@ describe("startHostedPulseTrialPaidPlan", () => {
             trialEnd: null,
           }),
     );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   test("ends an active Pulse trial with allow_incomplete and returns billing_pending while Stripe is settling", async () => {
@@ -315,6 +332,40 @@ describe("startHostedPulseTrialPaidPlan", () => {
       return_url: "https://join.example.test/settings#subscription",
     });
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("alerts when cardless Group payment setup fails at Stripe", async () => {
+    stubAlertEnvironment();
+    const fetchMock = createResendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.scheduleHostedBillingPlanSwitch.mockResolvedValueOnce({
+      billingPlanCode: "launch_group_monthly",
+      status: "payment_method_required",
+    });
+    mocks.stripe.billingPortal.sessions.create.mockRejectedValueOnce(
+      makeStripeProviderError(),
+    );
+
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "conversation",
+      targetPlanCode: "launch_group_monthly",
+      timing: "at_trial_end",
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_UNAVAILABLE",
+      httpStatus: 502,
+    });
+
+    expect(mocks.after).toHaveBeenCalledTimes(1);
+    const alertTask = mocks.after.mock.calls[0]?.[0];
+    expect(alertTask).toBeTypeOf("function");
+    await alertTask?.();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(readResendRequest(fetchMock, 0).body).toContain(
+      "operation: billing.start-paid-trial",
+    );
   });
 
   test("rechecks Group eligibility inside the billing lock before Stripe mutation", async () => {
@@ -632,6 +683,46 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });
 
+  test("delivers request-id-free start-paid failures with stable replay identity", async () => {
+    stubAlertEnvironment();
+    const fetchMock = createResendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: null,
+        defaultSource: null,
+      }),
+      defaultPaymentMethod: null,
+      defaultSource: null,
+    }));
+    mocks.stripe.billingPortal.sessions.create.mockRejectedValue(
+      makeStripeProviderError(),
+    );
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(startHostedPulseTrialPaidPlan({
+        memberId: "member_123",
+        now: new Date("2026-05-06T00:00:00.000Z"),
+      })).rejects.toMatchObject({
+        code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_UNAVAILABLE",
+        httpStatus: 502,
+      });
+    }
+
+    expect(mocks.after).toHaveBeenCalledTimes(2);
+    for (const [task] of mocks.after.mock.calls) {
+      await task();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstRequest = readResendRequest(fetchMock, 0);
+    const secondRequest = readResendRequest(fetchMock, 1);
+    expect(secondRequest.idempotencyKey).toBe(firstRequest.idempotencyKey);
+    expect(secondRequest.body).toBe(firstRequest.body);
+    expect(firstRequest.body).toContain("operation: billing.start-paid-trial");
+    expect(firstRequest.body).not.toContain("member_123");
+  });
+
   test("fails retryably when Stripe portal creation omits the session URL", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: makeCustomer({
@@ -689,6 +780,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       trial_end: "now",
     });
     expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
   });
 
   test("reconciles when the member-lock transaction fails after Stripe succeeds", async () => {
