@@ -1138,37 +1138,33 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Upgrade to Edge/);
   });
 
-  test("keeps the server-authorized recovery action for a paused Pulse trial", async () => {
-    const { HostedBillingSettings } = await import(
-      "@/src/components/settings/hosted-billing-settings"
-    );
+  test("shows only the authorized Pulse recovery action for a paused Pulse trial", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
-    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+    const recoveryProps = {
       payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
-      canStartPaidPulse: true,
       billingStatus: "paused",
       currentBillingPhase: "trial",
       currentCheckoutOffer: "pulse_trial_7d",
       currentBillingPlanCode: "launch_monthly",
+    } as const;
+    const eligibleMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      ...recoveryProps,
+      canStartPaidPulse: true,
+      canSwitchToGroup: false,
       showGroupPlan: true,
     }));
-    const pendingMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
-      payerMemberId: TEST_PAYER_MEMBER_ID,
-      authenticated: true,
-      canStartPaidPulse: true,
-      billingStatus: "paused",
-      currentBillingPhase: "trial",
-      currentCheckoutOffer: "pulse_trial_7d",
-      currentBillingPlanCode: "launch_monthly",
-      pulseTrialBillingContinuationPending: true,
-      showGroupPlan: true,
+    const ineligibleMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      ...recoveryProps,
+      canStartPaidPulse: false,
     }));
 
-    assert.match(markup, /Start Pulse plan/);
-    assert.doesNotMatch(markup, /Start Core/);
-    assert.doesNotMatch(markup, /Pulse is not active/);
-    assert.doesNotMatch(pendingMarkup, /Start (?:Core|Pulse plan)/);
+    assert.match(eligibleMarkup, /Start Pulse plan/);
+    assert.doesNotMatch(eligibleMarkup, />Start Core<\/button>/);
+    assert.doesNotMatch(eligibleMarkup, />Choose Pulse<\/button>/);
+    assert.doesNotMatch(ineligibleMarkup, /Start Pulse plan/);
+    assert.match(ineligibleMarkup, />Choose Pulse<\/button>/);
   });
 
   test("suppresses every Start Pulse action with action-neutral copy while continuation is pending", async () => {

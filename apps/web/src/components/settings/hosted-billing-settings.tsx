@@ -177,7 +177,7 @@ export function HostedBillingSettings(props: {
               : hasPendingGroupSwitch
                 ? null
                 : props.canSwitchToGroup === true
-                  ? isPulseTrial
+                  ? pulseTrialActive
                     ? (
                         <StartPaidPulseButton
                           block

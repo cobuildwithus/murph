@@ -2292,34 +2292,33 @@ export async function executeMurphDynamicToolRequest(input: {
           brief: input.request.brief,
           conversationScope,
         })
-        const groupRequester = conversationScope === 'group'
+        const groupMessageRef = conversationScope === 'group'
+          ? input.request.messageRef
+          : null
+        if (
+          conversationScope === 'group'
+          && (
+            !groupMessageRef
+            || groupMessageRef !== userActionScope?.acceptedInputIds.at(-1)
+          )
+        ) {
+          return toolTextResult(
+            false,
+            'group phone calling requires the exact current accepted Message ref from the requesting participant',
+          )
+        }
+        const groupRequester = conversationScope === 'group' && groupMessageRef
           ? await authorizeDynamicToolParticipant({
               authorizer: input.authorizeAcceptedMessageTarget ?? null,
               deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
-              messageRef: input.request.messageRef ?? '',
+              messageRef: groupMessageRef,
             })
           : null
-        if (conversationScope === 'group') {
-          const confirmationInputId = input.request.messageRef
-          if (!groupRequester) {
-            return toolTextResult(
-              false,
-              'group phone calling requires the exact accepted Message ref from the participant who confirmed the call preview',
-            )
-          }
-          const previewAuthority = confirmationInputId
-            ? await hostedToolContext
-              .currentGroupPhoneCallPreviewAuthority?.({
-                brief,
-                confirmationInputId,
-              })
-            : null
-          if (!previewAuthority) {
-            return toolTextResult(
-              false,
-              'group phone calling requires an exact preview that was successfully delivered before the referenced current confirmation; deliver or repeat the complete preview, stop, and ask the room to confirm it in a later message',
-            )
-          }
+        if (conversationScope === 'group' && !groupRequester) {
+          return toolTextResult(
+            false,
+            'group phone calling requires the exact current accepted Message ref from the requesting participant',
+          )
         }
         const result = await phoneCalls.start({
           brief,
