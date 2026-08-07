@@ -1966,7 +1966,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           preparedDispatchByIntentId,
           vaultRoot: input.vaultRoot,
         });
-        if (isHostedBackgroundDeliveryYieldedError(error)) {
+        if (isHostedBackgroundDeliveryDeferredError(error)) {
           recordHostedLinqTypingStopStillPendingEffects({
             effects: input.assistantDeliveryEffects.slice(pendingTypingStopEffectIndex),
             linqDeliveryContexts,
@@ -2183,6 +2183,18 @@ function markHostedDeliveryMayHaveSucceeded(error: unknown): unknown {
   });
 }
 
+function markHostedLinqAttachmentReservationMayHaveSucceeded(
+  error: unknown,
+): unknown {
+  const markedError = typeof error === "object" && error !== null
+    ? error
+    : new Error("Hosted Linq attachment reservation may have succeeded.");
+  return Object.assign(markedError, {
+    deliveryMayHaveSucceeded: true,
+    linqAttachmentReservationMayHaveSucceeded: true,
+  });
+}
+
 function markHostedDeliveryPreProviderRetryable(error: unknown): unknown {
   if (typeof error === "object" && error !== null) {
     return Object.assign(error, {
@@ -2249,12 +2261,38 @@ function isHostedLinqProviderOutcomeAmbiguous(error: unknown): boolean {
   if (typeof error !== "object" || error === null) {
     return false;
   }
+  if (hostedDeliveryErrorProvesProviderWasSkipped(error)) {
+    return false;
+  }
   if (
     error instanceof VaultCliError
     && error.code === "LINQ_API_REQUEST_FAILED"
     && error.context?.operation === "create_attachment_upload"
   ) {
-    return false;
+    const method = error.context.method;
+    const status = error.context.status;
+    if (method === "PUT") {
+      return false;
+    }
+    if (
+      method === "POST"
+      && error.context.failureStage === "http"
+      && typeof status === "number"
+      && status >= 200
+      && status <= 299
+    ) {
+      return true;
+    }
+    if (
+      method === "POST"
+      && error.context.failureStage === "http"
+      && typeof status === "number"
+      && status >= 400
+      && status <= 499
+      && status !== 408
+    ) {
+      return false;
+    }
   }
   if (
     "deliveryMayHaveSucceeded" in error
@@ -2301,11 +2339,32 @@ function isHostedBackgroundDeliveryYieldedError(
   return error instanceof HostedBackgroundDeliveryYieldedError;
 }
 
+function isHostedBackgroundDeliveryDeferredError(error: unknown): boolean {
+  if (isHostedBackgroundDeliveryYieldedError(error)) {
+    return true;
+  }
+  if (!hostedDeliveryErrorProvesProviderWasSkipped(error)) {
+    return false;
+  }
+
+  const errorRecord = error as Record<string, unknown>;
+  const context =
+    typeof errorRecord.context === "object" && errorRecord.context !== null
+      ? errorRecord.context as Record<string, unknown>
+      : null;
+  return (
+    errorRecord.assistantDeliveryResumeTrigger
+    ?? context?.assistantDeliveryResumeTrigger
+  ) === "fresh_foreground_input";
+}
+
 function assertHostedBackgroundDeliveryNotYielded(input: {
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
 }): void {
   if (input.shouldYieldBackgroundDelivery?.() === true) {
-    throw new HostedBackgroundDeliveryYieldedError();
+    throw markHostedDeliveryPreProviderRetryable(
+      new HostedBackgroundDeliveryYieldedError(),
+    );
   }
 }
 
@@ -2791,7 +2850,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           }),
         shouldRethrowDispatchError: ({ error }) =>
           input.preparedDispatch !== null
-          && isHostedBackgroundDeliveryYieldedError(error),
+          && isHostedBackgroundDeliveryDeferredError(error),
       },
       dependencies: {
         sendEmail: async (request) => {
@@ -3411,7 +3470,10 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
   providerDispatchEntered: boolean;
   signal: AbortSignal | null;
 }): boolean {
-  return (input.signal?.aborted === true || isHostedBackgroundDeliveryYieldedError(input.error))
+  return (
+    input.signal?.aborted === true
+    || isHostedBackgroundDeliveryDeferredError(input.error)
+  )
     && input.mirrorState.sendingStartedAt !== null
     && !input.mirrorState.intent?.delivery
     && input.mirrorState.intent?.deliveryConfirmationPending !== true
@@ -3611,6 +3673,8 @@ function createHostedAssistantLinqSendDependency(input: {
       attemptedAt: Date;
       idempotencyKey: string | null;
     } | null = null;
+    const hasVerifiedVaultAttachment =
+      verifiedVaultFiles.size > 0 || verifiedVaultImages.size > 0;
     const readProviderAttempt = () => providerAttempt;
     const createMessageFetchBoundary = (
       deliveryIdempotencyKey: string | null,
@@ -3619,6 +3683,9 @@ function createHostedAssistantLinqSendDependency(input: {
         try {
           await assertHostedDeliveryCanEnterProvider(input);
         } catch (error) {
+          if (providerAttempt && hasVerifiedVaultAttachment) {
+            throw markHostedLinqAttachmentReservationMayHaveSucceeded(error);
+          }
           throw markHostedDeliveryPreProvider(error);
         }
       },
@@ -3684,6 +3751,9 @@ function createHostedAssistantLinqSendDependency(input: {
         } catch (error) {
           if (isHostedLinqProviderOutcomeAmbiguous(error)) {
             throw error;
+          }
+          if (providerAttempt && hasVerifiedVaultAttachment) {
+            throw markHostedLinqAttachmentReservationMayHaveSucceeded(error);
           }
           throw markHostedDeliveryPreProvider(error);
         }
@@ -3870,7 +3940,10 @@ function createHostedAssistantLinqSendDependency(input: {
         });
         throw markHostedDeliveryMayHaveSucceeded(error);
       }
-      if (isHostedLinqProviderOutcomeAmbiguous(error)) {
+      if (
+        hostedDeliveryErrorProvesProviderWasSkipped(error)
+        || isHostedLinqProviderOutcomeAmbiguous(error)
+      ) {
         throw markHostedDeliveryMayHaveSucceeded(error);
       }
       queueHostedAssistantLinqDeliveryOutcomeWrite({
