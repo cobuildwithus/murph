@@ -43,11 +43,14 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  createAssistantProviderStartCriticalPathContext,
   flushPendingAssistantRuntimeIssueWrites,
   findAssistantSessionIdByCodexThreadId,
   getAssistantCronStatus,
+  readAssistantProviderStartMonotonicTickMs,
   recordAssistantRuntimeIssueInputsBestEffort,
   resolveAssistantDiagnosticsPolicy,
+  type AssistantProviderStartCriticalPathContext,
 } from "@murphai/assistant-engine";
 import {
   prepareHostedCodexAssistantProcess,
@@ -1618,10 +1621,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       runnerInput: baseRunnerInput,
       requestId,
     });
+    const initialMailboxImportDoneAtMonotonicMs =
+      readAssistantProviderStartMonotonicTickMs();
     assertRuntimeNotAborted();
     activeWorkspace = initialMailboxImportResult.workspace ?? activeWorkspace;
     const initialMailboxImport = initialMailboxImportResult.result;
     const mailboxImportDoneAt = new Date().toISOString();
+    const initialProviderStartCriticalPath =
+      (initialMailboxImport.importResult.assistantInputIds?.length ?? 0) > 0
+        ? createAssistantProviderStartCriticalPathContext(
+            initialMailboxImportDoneAtMonotonicMs,
+          )
+        : null;
     emitPhaseLog({
       details: {
         bootstrapPending: initialMailboxImportResult.bootstrapPending,
@@ -1942,6 +1953,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
       initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
       initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
+      providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
       requestId: string;
       signal?: AbortSignal;
       workspace: HostedWorkspaceState | null;
@@ -1979,6 +1991,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           initialMailboxImportContext: passInput.initialMailboxImportContext ?? null,
           initialMailboxPrefetch: passInput.initialMailboxPrefetch ?? null,
           requestId: passInput.requestId,
+          ...(passInput.providerStartCriticalPath
+            ? {
+                providerStartCriticalPath:
+                  passInput.providerStartCriticalPath,
+              }
+            : {}),
           runtimePassDiagnostics: {
             foreground: passForeground,
             ordinal: passOrdinal,
@@ -2899,6 +2917,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
         initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
         initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
+        providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
         latencySeed?: HostedRuntimeWakeLatencySeed | null;
         invocationLocalProjectedAssistantWakeKey?: string | null;
         preserveDueAssistantWakeOnNoProgress?: boolean;
@@ -2949,6 +2968,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             initialMailboxImportContext: singleWakeInput.initialMailboxImportContext
               ?? createHostedRuntimeWakeInitialImportContext(singleWakeInput.latencySeed ?? null),
             initialMailboxPrefetch: singleWakeInput.initialMailboxPrefetch ?? null,
+            ...(singleWakeInput.providerStartCriticalPath
+              ? {
+                  providerStartCriticalPath:
+                    singleWakeInput.providerStartCriticalPath,
+                }
+              : {}),
             requestId: `${requestId}:${singleWakeInput.requestIdKind}:${idleWakeOrdinal}`,
             signal: singleWakeInput.signal,
             workspace: passWorkspace,
@@ -2976,6 +3001,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           options.shutdownSignal?.aborted !== true
           && (rerunAssistantInputBatch || continueForegroundCausalPass)
         ) {
+          // The mailbox-import boundary belongs only to the first foreground
+          // pass. A rerun is a new causal pass and must not inherit that tick.
           passResult = await runSingleForegroundPass({
             foregroundCausalOnly:
               rerunAssistantInputBatch === null
@@ -3410,6 +3437,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         initialMailboxImportContext,
         initialMailboxPrefetch: initialMailboxImportResult.prefetch,
         latencySeed: null,
+        ...(initialProviderStartCriticalPath
+          ? { providerStartCriticalPath: initialProviderStartCriticalPath }
+          : {}),
         requestIdKind: "idle-wake",
       });
       const committedInboxMediaRetentionWakeDue = isHostedInboxMediaRetentionWakeDue({

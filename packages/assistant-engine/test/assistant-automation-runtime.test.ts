@@ -1642,6 +1642,69 @@ describe('assistant automation scanner', () => {
     }
   })
 
+  it('consumes provider-start timing only when the first group reaches the provider', async () => {
+    const captures = [
+      createCaptureSummary({
+        captureId: 'capture-timing-no-provider',
+        occurredAt: '2026-04-08T00:01:00.000Z',
+      }),
+      createCaptureSummary({
+        captureId: 'capture-timing-first-provider',
+        occurredAt: '2026-04-08T00:02:00.000Z',
+      }),
+      createCaptureSummary({
+        captureId: 'capture-timing-later-provider',
+        occurredAt: '2026-04-08T00:03:00.000Z',
+      }),
+    ]
+    const providerStartCriticalPath = {
+      mailboxImportDoneAtMonotonicMs: 10,
+    }
+    const receivedCriticalPaths: unknown[] = []
+    const onProviderRequestStarted = vi.fn()
+    scannerReplyMocks.processAssistantAutoReplyGroup.mockImplementation(
+      async (groupInput) => {
+        receivedCriticalPaths.push(groupInput.providerStartCriticalPath)
+        if (receivedCriticalPaths.length > 1) {
+          await groupInput.onProviderRequestStarted?.({
+            assistantInputIds: [],
+            providerRequestOrdinal: 0,
+            source: 'telegram',
+            startedAt: '2026-04-08T00:10:00.000Z',
+          })
+        }
+        return {
+          advanceCursor: true,
+          failed: 0,
+          replied: 0,
+          skipped: 1,
+          stopScanning: false,
+        }
+      },
+    )
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCaptures(captures),
+      onProviderRequestStarted,
+      providerStartCriticalPath,
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(receivedCriticalPaths).toEqual([
+      providerStartCriticalPath,
+      providerStartCriticalPath,
+      undefined,
+    ])
+    expect(onProviderRequestStarted).toHaveBeenCalledTimes(2)
+  })
+
   it('advances the auto-reply channel cursor with the processed assistant input cursor', async () => {
     const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
     const onProviderEvent = vi.fn()

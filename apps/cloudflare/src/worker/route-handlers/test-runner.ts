@@ -74,7 +74,10 @@ interface HostedLocalTestRunnerContainerStubLike {
   beginShutdownCheckpointGracefulStopForTest?(
     input: { userId: string },
   ): Promise<{ ok: true }>;
-  dropActiveOperationForTest?(input: { userId: string }): Promise<{ ok: true }>;
+  dropActiveOperationForTest?(input: {
+    loseCompletedInvocationResult?: boolean;
+    userId: string;
+  }): Promise<{ ok: true }>;
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
   foregroundPriorityOrderingControlForTest?(
     input: HostedLocalForegroundPriorityOrderingControlInput,
@@ -159,7 +162,10 @@ function hasHostedLocalTestRunnerContainerShutdownCheckpointPublicationBarrierCo
 function hasHostedLocalTestRunnerContainerActiveOperationControl(
   stub: object,
 ): stub is HostedLocalTestRunnerContainerStubLike & {
-  dropActiveOperationForTest(input: { userId: string }): Promise<{ ok: true }>;
+  dropActiveOperationForTest(input: {
+    loseCompletedInvocationResult?: boolean;
+    userId: string;
+  }): Promise<{ ok: true }>;
 } {
   return "dropActiveOperationForTest" in stub
     && typeof stub.dropActiveOperationForTest === "function";
@@ -738,7 +744,12 @@ export async function handleTestContainerActiveOperationDropRoute(
   if (!hasHostedLocalTestRunnerContainerActiveOperationControl(stub)) {
     throw new Error("Hosted runner container test active-operation drop RPC is unavailable.");
   }
-  return json(await stub.dropActiveOperationForTest({ userId }));
+  return json(await stub.dropActiveOperationForTest({
+    ...(context.url.searchParams.get("loseCompletedInvocationResult") === "1"
+      ? { loseCompletedInvocationResult: true }
+      : {}),
+    userId,
+  }));
 }
 
 export async function handleTestStartStuckInvocationRoute(
