@@ -78,9 +78,12 @@ Last verified: 2026-08-06
   entry, Web returns a typed superseded disposition without claiming or
   contacting Linq. The runtime persists that newer thread under the same stale
   fallback identity, emits a metadata-only event, and retries the outbox. Every
-  pre-provider dispatch-control error also emits a sanitized structured warning
-  and retains its typed retry/control semantics through the Linq HTTP wrapper;
-  it is never rewritten as a generic provider transport error.
+  pre-provider dispatch-control error, including a liveness yield before the
+  read-only capability request, also emits a sanitized structured warning and
+  retains its typed retry/control semantics through the Linq HTTP wrapper. The
+  channel runtime rethrows that marker without persisting text fallback, so the
+  next drain retains the exact card and provider-idempotent key instead of
+  rewriting the interruption as a generic capability or transport failure.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
 - Health-data withdrawal commits its revocation boundary, then waits for the

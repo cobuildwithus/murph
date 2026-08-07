@@ -3420,6 +3420,24 @@ function createHostedProviderFetchBoundary(input: {
 }): typeof fetch {
   let providerEntryPromise: Promise<void> | null = null;
   let providerEntryIdentity: string | null = null;
+  const rethrowProviderDispatchControlError = (error: unknown): never => {
+    if (error instanceof Error) {
+      Object.assign(error, { providerDispatchControl: true });
+    }
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        eventType:
+          "assistant.delivery.provider_dispatch_control_error",
+        providerDispatchPhase: "pre_provider",
+      },
+      error,
+      level: "warn",
+      message: "Hosted delivery stopped at the pre-provider dispatch control boundary.",
+      phase: "outbox",
+    });
+    throw error;
+  };
   const enterProviderDispatch = () => {
     if (!input.onProviderDispatchEntered) {
       return Promise.resolve();
@@ -3429,30 +3447,17 @@ function createHostedProviderFetchBoundary(input: {
       providerEntryIdentity = identity;
       providerEntryPromise = Promise.resolve().then(
         input.onProviderDispatchEntered,
-      ).catch((error: unknown) => {
-        if (error instanceof Error) {
-          Object.assign(error, { providerDispatchControl: true });
-        }
-        emitHostedExecutionStructuredLog({
-          component: "assistant-delivery",
-          details: {
-            eventType:
-              "assistant.delivery.provider_dispatch_control_error",
-            providerDispatchPhase: "pre_provider",
-          },
-          error,
-          level: "warn",
-          message: "Hosted delivery stopped at the pre-provider dispatch control boundary.",
-          phase: "outbox",
-        });
-        throw error;
-      });
+      ).catch(rethrowProviderDispatchControlError);
     }
     return providerEntryPromise;
   };
 
   return (async (request, init) => {
-    await (input.assertProviderEntryLive ?? input.assertLive)?.();
+    try {
+      await (input.assertProviderEntryLive ?? input.assertLive)?.();
+    } catch (error) {
+      rethrowProviderDispatchControlError(error);
+    }
     const fetchImplementation = requireHostedProviderFetch(
       input.providerFetch,
       input.operation,

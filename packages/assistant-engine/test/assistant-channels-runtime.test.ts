@@ -1682,6 +1682,37 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
   })
 
+  it('does not convert a marked pre-provider capability yield into text fallback', async () => {
+    const providerDispatchControlError = Object.assign(new VaultCliError(
+      'HOSTED_BACKGROUND_DELIVERY_YIELDED',
+      'Hosted background delivery yielded before provider entry.',
+      { retryable: true },
+    ), {
+      providerDispatchControl: true,
+    })
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    runtimeMocks.checkLinqIMessageCapability.mockRejectedValue(
+      providerDispatchControlError,
+    )
+
+    await expect(sendLinqMessage({
+      card: NUTRITION_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      idempotencyKey: 'card-pre-provider-yield',
+      message: NUTRITION_CARD_TEXT,
+      target: 'private-thread-pre-provider-yield',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      persistAppCardTextFallback,
+    })).rejects.toBe(providerDispatchControlError)
+
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+  })
+
   it('promotes an exact card replay to text only after definitive rejection', async () => {
     const onAppCardFallbackError = vi.fn()
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)

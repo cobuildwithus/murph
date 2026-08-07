@@ -794,6 +794,10 @@ function isLinqAppCardFallbackUnsafeError(error: unknown): boolean {
         && error.deliveryMayHaveSucceeded === true
       )
       || (
+        'providerDispatchControl' in error
+        && error.providerDispatchControl === true
+      )
+      || (
         error instanceof VaultCliError
         && error.code === 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING'
       )

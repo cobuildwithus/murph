@@ -1162,6 +1162,87 @@ describe('assistant outbox runtime', () => {
     expect(sendLinq).toHaveBeenCalledTimes(2)
   })
 
+  it('retains the exact Linq app card after a pre-provider control retry', async () => {
+    await useActualOutboundDeliveryImplementation()
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-card-pre-provider-control-',
+    )
+    const intent = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      message: 'ignored model prose',
+      sessionId: 'session-response-card-pre-provider-control',
+      threadId: 'thread-response-card-pre-provider-control',
+      threadIsDirect: true,
+      turnId: 'turn-response-card-pre-provider-control',
+      vault: vaultRoot,
+    })
+    const originalIdempotencyKey = `assistant-outbox:${intent.intentId}`
+    const providerDispatchControlError = Object.assign(new VaultCliError(
+      'HOSTED_BACKGROUND_DELIVERY_YIELDED',
+      'Hosted background delivery yielded before provider entry.',
+      { retryable: true },
+    ), {
+      providerDispatchControl: true,
+    })
+    const sendLinq = vi.fn<
+      NonNullable<AssistantChannelDependencies['sendLinq']>
+    >()
+      .mockRejectedValueOnce(providerDispatchControlError)
+      .mockResolvedValueOnce({
+        idempotencyKey: originalIdempotencyKey,
+        providerMessageId: 'native-card-after-pre-provider-control',
+        providerThreadId: null,
+        target: 'thread-response-card-pre-provider-control',
+        targetKind: 'thread',
+      })
+
+    const yielded = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-07-31T01:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(yielded.intent).toMatchObject({
+      card: NUTRITION_RESPONSE_CARD,
+      delivery: null,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: originalIdempotencyKey,
+      status: 'retryable',
+    })
+    expect(yielded.deliveryError).toMatchObject({
+      code: 'HOSTED_BACKGROUND_DELIVERY_YIELDED',
+    })
+    expect(sendLinq.mock.calls[0]?.[0]).toMatchObject({
+      card: NUTRITION_RESPONSE_CARD,
+      idempotencyKey: originalIdempotencyKey,
+    })
+
+    const resumed = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-07-31T01:15:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(resumed.intent).toMatchObject({
+      card: NUTRITION_RESPONSE_CARD,
+      deliveryIdempotencyKey: originalIdempotencyKey,
+      status: 'sent',
+    })
+    expect(sendLinq.mock.calls[1]?.[0]).toMatchObject({
+      card: NUTRITION_RESPONSE_CARD,
+      idempotencyKey: originalIdempotencyKey,
+    })
+    expect(sendLinq.mock.calls[1]?.[0]).not.toHaveProperty(
+      'linqAppCardReplay',
+    )
+  })
+
   it('persists an authorized text-fallback target before restart replay', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-card-fallback-restart-',

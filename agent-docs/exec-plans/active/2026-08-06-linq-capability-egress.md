@@ -87,6 +87,10 @@ Updated: 2026-08-06
   Inspection through the actual hosted fetch boundary then proved the typed
   retry was itself being replaced by a generic Linq transport error, erasing
   its control semantics and the useful failure classification.
+- Final ReviewGPT round 12 exposed that the read-only capability boundary ran
+  its pre-request liveness check outside that preservation catch. A foreground
+  yield there could therefore be genericized as a capability failure and
+  irreversibly clear the native card to text before any provider request.
 
 ## Success criteria
 
@@ -155,10 +159,11 @@ Updated: 2026-08-06
   fallback identity, records a metadata-only event, and retries so the next
   drain sends exactly once to that thread. Missing authority remains
   confirmation-pending.
-- Every error raised by the pre-provider dispatch-control boundary emits a
-  sanitized structured warning and retains its original typed retry/control
-  semantics through the Linq HTTP wrapper instead of becoming a generic
-  provider transport error.
+- Every error raised by the pre-provider dispatch-control boundary, including
+  the liveness check before capability preflight, emits a sanitized structured
+  warning and retains its original typed retry/control semantics through the
+  Linq HTTP wrapper instead of becoming a generic provider transport error or
+  persisted text fallback.
 - Exhausted provider-message `429` responses after dispatch admission are
   confirmation-pending; a capability-only `429` may still select deterministic
   text fallback before message dispatch.
@@ -327,3 +332,14 @@ Updated: 2026-08-06
   PostgreSQL lifecycle cases. Typechecks pass for assistant engine, assistant
   runtime, operator config, prepared Web, and Cloudflare; documentation
   gardening and drift checks also pass.
+- Final ReviewGPT round 12 found the uncovered capability-preflight liveness
+  yield. Failing-first channel and hosted-callback regressions reproduced the
+  unwanted text transition before the correction. The shared pre-provider
+  boundary now marks and logs liveness errors as control errors, and the
+  channel runtime preserves that marker rather than selecting fallback.
+- Focused round 12 proof passes 164 assistant-engine channel/outbox tests, 254
+  hosted provider/callback tests, and 57 operator-config Linq HTTP tests. The
+  production-shaped two-drain case proves the first drain makes no capability
+  or message request and persists no fallback; the second sends the original
+  `imessage_app` card under the same key. All three affected package typechecks
+  and both documentation checks pass.

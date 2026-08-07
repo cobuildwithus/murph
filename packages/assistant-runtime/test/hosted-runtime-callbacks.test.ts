@@ -9103,6 +9103,225 @@ describe("hosted runtime callbacks", () => {
     )).toHaveLength(1);
   });
 
+  it("keeps the original card across a capability-preflight foreground yield", async () => {
+    const idempotencyKey = "assistant-outbox:intent_capability_yield";
+    const providerMessagePartTypes: string[] = [];
+    const card = {
+      kind: "daily_nutrition" as const,
+      localDate: "2026-07-31",
+      mealCount: 1,
+      totals: {
+        calories: { mealCount: 1, total: 500 },
+        carbsGrams: { mealCount: 1, total: 55 },
+        fatGrams: { mealCount: 1, total: 18 },
+        proteinGrams: { mealCount: 1, total: 35 },
+      },
+    };
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_capability_yield",
+      deliveryPhase: "background_retry",
+      effectId: "intent_capability_yield",
+      payload: createPayload({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "direct-card-thread",
+        card,
+        channel: "linq",
+        explicitTarget: "direct-card-thread",
+        idempotencyKey,
+        transportIdempotent: true,
+      }),
+    });
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    let yieldAtNextProviderCheck = false;
+    let capabilityYieldEnabled = true;
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+    }) => {
+      if (request.authorityCheckOnly) {
+        if (capabilityYieldEnabled) {
+          yieldAtNextProviderCheck = true;
+        }
+        return {};
+      }
+      return { providerDispatchClaimed: true };
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({ available: true }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/chats/direct-card-thread/messages")) {
+        const body = typeof init?.body === "string"
+          ? JSON.parse(init.body) as {
+              message?: {
+                idempotency_key?: string;
+                parts?: Array<{ type?: string }>;
+              };
+            }
+          : {};
+        const partType = body.message?.parts?.[0]?.type;
+        expect(body.message?.idempotency_key).toBe(idempotencyKey);
+        if (partType) {
+          providerMessagePartTypes.push(partType);
+        }
+        return new Response(JSON.stringify({
+          message: {
+            id: partType === "imessage_app"
+              ? "native-card-after-yield"
+              : "unexpected-text-after-yield",
+          },
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+    const sendRequest = {
+      card,
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey,
+      message: "Nutrition summary",
+      persistAppCardTextFallback,
+      target: "direct-card-thread",
+      targetKind: "thread" as const,
+      threadIsDirect: true,
+    };
+    let yieldedError: unknown = null;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(
+        {
+          card,
+          delivery: null,
+          deliveryIdempotencyKey: idempotencyKey,
+          deliveryTransportIdempotent: true,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+    mocks.useActualLinqMessage = true;
+    mocks.dispatchAssistantOutboxIntent
+      .mockImplementationOnce(async (request) => {
+        try {
+          await request.dependencies.sendLinq(sendRequest);
+        } catch (error) {
+          yieldedError = error;
+          expect(error).toMatchObject({
+            code: "HOSTED_BACKGROUND_DELIVERY_YIELDED",
+            providerDispatchControl: true,
+          });
+          expect(request.dispatchHooks?.shouldRethrowDispatchError?.({
+            error,
+            intent: { intentId: effect.effectId },
+            vault: HOSTED_WAKE.vaultRoot,
+          })).toBe(true);
+          throw error;
+        }
+        throw new Error("expected capability-preflight foreground yield");
+      })
+      .mockImplementationOnce(async ({ dependencies }) => {
+        const delivery = await dependencies.sendLinq(sendRequest);
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            idempotencyKey,
+            providerMessageId: delivery.providerMessageId,
+            providerThreadId: delivery.providerThreadId,
+            target: delivery.target,
+            targetKind: "thread",
+          }),
+          intentId: effect.effectId,
+          status: "sent",
+        });
+      });
+    const drainInput = {
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      preparedDispatches: [{
+        intentId: effect.effectId,
+        preparedDispatchToken: "prepared-dispatch-token-capability-yield",
+        previousDispatchState: createPreparedPreviousDispatchState({
+          deliveryIdempotencyKey: idempotencyKey,
+          deliveryTransportIdempotent: true,
+        }),
+      }],
+      providerFetch,
+      shouldYieldBackgroundDelivery: () => {
+        if (!yieldAtNextProviderCheck) {
+          return false;
+        }
+        yieldAtNextProviderCheck = false;
+        return true;
+      },
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    };
+
+    await expect(drainHostedPreparedAssistantDeliveries(drainInput))
+      .resolves.toEqual([]);
+
+    expect(yieldedError).toMatchObject({
+      code: "HOSTED_BACKGROUND_DELIVERY_YIELDED",
+      providerDispatchControl: true,
+    });
+    expect(providerFetch.mock.calls.filter(([input]) => {
+      const url = String(input);
+      return url.endsWith("/capability/check_imessage")
+        || url.endsWith("/chats/direct-card-thread/messages");
+    })).toHaveLength(0);
+    expect(providerMessagePartTypes).toEqual([]);
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          eventType: "assistant.delivery.provider_dispatch_control_error",
+          providerDispatchPhase: "pre_provider",
+        }),
+        level: "warn",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog.mock.calls.some(([entry]) =>
+      entry.details?.eventType
+        === "assistant.delivery.linq_app_card_fallback_error"
+    )).toBe(false);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryIdempotencyKey: idempotencyKey,
+        intentId: effect.effectId,
+      }),
+    );
+
+    capabilityYieldEnabled = false;
+    await expect(drainHostedPreparedAssistantDeliveries(drainInput))
+      .resolves.toEqual([
+        expect.objectContaining({
+          deliveryStatus: "sent",
+          effectId: effect.effectId,
+        }),
+      ]);
+
+    expect(providerFetch.mock.calls.filter(([input]) =>
+      String(input).endsWith("/capability/check_imessage")
+    )).toHaveLength(1);
+    expect(providerFetch.mock.calls.filter(([input]) =>
+      String(input).endsWith("/chats/direct-card-thread/messages")
+    )).toHaveLength(1);
+    expect(providerMessagePartTypes).toEqual(["imessage_app"]);
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled();
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+  });
+
   it("marks an exhausted native-card rate limit as confirmation-pending", async () => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",
