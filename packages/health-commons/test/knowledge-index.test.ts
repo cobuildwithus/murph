@@ -126,6 +126,7 @@ describe("Health Commons knowledge SQLite projection", () => {
       });
 
       expect(result.focus).toBe("cardiovascular");
+      expect(result.topicResolved).toBe(true);
       expect(result.items).toHaveLength(1);
       expect(result.items).toContainEqual(expect.objectContaining({
         entityKey: "experiment_family:dry-sauna",
@@ -153,6 +154,15 @@ describe("Health Commons knowledge SQLite projection", () => {
         kind: "safety",
         sources: [expect.objectContaining({ pmid: "29849692" })],
       });
+      const broad = searchHealthCommonsKnowledgeIndex({
+        databasePath: firstPath,
+        focus: "overall evidence",
+        query: "dry sauna",
+      });
+      expect(broad.topicResolved).toBe(true);
+      expect(broad.items).toEqual([
+        expect.objectContaining({ kind: "claim", entityKey: "experiment_family:dry-sauna" }),
+      ]);
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });
     }
@@ -211,7 +221,7 @@ describe("Health Commons knowledge SQLite projection", () => {
         focus: "heat",
         query: "shared heat",
       }))
-        .toMatchObject({ items: [], safety: null });
+        .toMatchObject({ items: [], safety: null, topicResolved: false });
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });
     }
