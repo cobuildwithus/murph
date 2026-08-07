@@ -10,6 +10,7 @@ import {
 } from "@murphai/health-commons/runtime";
 
 import {
+  assertPrunedRunnerDependenciesAreBundled,
   RUNNER_BUNDLE_SHARED_EXTERNALS,
   RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS,
 } from "./bundle-shared.js";
@@ -136,6 +137,11 @@ export async function bundleInstalledVaultCliBinary(
 
   assertVaultCliBundleInputsStayExternal(Object.keys(buildResult.metafile.inputs));
   assertVaultCliBundleInlinesSingleCopies(Object.keys(buildResult.metafile.inputs));
+  assertPrunedRunnerDependenciesAreBundled(
+    Object.values(buildResult.metafile.outputs).flatMap((output) =>
+      output.imports.map((imported) => imported.path),
+    ),
+  );
   const bundleBytes = assertVaultCliBundleWithinBudgets(buildResult.metafile);
   console.log(
     `vault-cli bundle size: total ${bundleBytes.totalBytes}B of ${VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET}B budget, entry ${bundleBytes.entryBytes}B of ${VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET}B budget`,

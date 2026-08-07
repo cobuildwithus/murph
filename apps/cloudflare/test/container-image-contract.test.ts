@@ -110,7 +110,7 @@ describe("hosted runner container image contract", () => {
       'import { runPnpmCommand } from "./runner-bundle/process.js";',
     );
     expect(bundleAssemblyScript).toContain(
-      'import {\n  pruneRunnerBundle,\n  rewriteRuntimeBinWrappers,\n  rewriteRuntimePackageManifest,\n} from "./runner-bundle/runtime-shape.js";',
+      'import {\n  pruneBundledRunnerDependencies,\n  pruneRunnerBundle,\n  rewriteRuntimeBinWrappers,\n  rewriteRuntimePackageManifest,\n} from "./runner-bundle/runtime-shape.js";',
     );
     expect(bundleAssemblyScript).toContain(
       'import {\n  buildHostedRunnerWorkspaceArtifacts,\n  packWorkspacePackageArtifacts,\n  stageHostedRunnerRuntimeArtifact,\n} from "./runner-bundle/workspace-artifacts.js";',
@@ -202,12 +202,24 @@ describe("hosted runner container image contract", () => {
     const bundleVaultCliCallIndex = bundleAssemblyScript.indexOf(
       "await bundleInstalledVaultCliBinary(stagingBundleDir);",
     );
+    const bundleEntrypointCallIndex = bundleAssemblyScript.indexOf(
+      "await bundleRunnerContainerEntrypoint(stagingBundleDir);",
+    );
+    const pruneBundledDependenciesCallIndex = bundleAssemblyScript.indexOf(
+      "await pruneBundledRunnerDependencies(stagingBundleDir);",
+    );
     const materializeFinalBundleCallIndex = bundleAssemblyScript.indexOf(
       "await materializeFinalRunnerBundle(",
     );
     expect(rewriteBinWrappersCallIndex).toBeGreaterThan(-1);
     expect(bundleVaultCliCallIndex).toBeGreaterThan(rewriteBinWrappersCallIndex);
-    expect(materializeFinalBundleCallIndex).toBeGreaterThan(bundleVaultCliCallIndex);
+    expect(bundleEntrypointCallIndex).toBeGreaterThan(bundleVaultCliCallIndex);
+    expect(pruneBundledDependenciesCallIndex).toBeGreaterThan(
+      bundleEntrypointCallIndex,
+    );
+    expect(materializeFinalBundleCallIndex).toBeGreaterThan(
+      pruneBundledDependenciesCallIndex,
+    );
     expect(runtimeShapeScript).toContain(
       'removeBundlePathIfPresent(path.join(bundleDir, "README.md"))',
     );

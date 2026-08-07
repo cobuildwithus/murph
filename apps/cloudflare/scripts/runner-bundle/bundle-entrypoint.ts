@@ -9,6 +9,7 @@ import {
 } from "@murphai/health-commons/runtime";
 
 import {
+  assertPrunedRunnerDependenciesAreBundled,
   RUNNER_BUNDLE_SHARED_EXTERNALS,
   RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS,
 } from "./bundle-shared.js";
@@ -212,6 +213,11 @@ export async function bundleRunnerContainerEntrypoint(
   });
   assertRunnerEntrypointBundleInputsStayExternal(
     Object.keys(buildResult.metafile.inputs),
+  );
+  assertPrunedRunnerDependenciesAreBundled(
+    Object.values(buildResult.metafile.outputs).flatMap((output) =>
+      output.imports.map((imported) => imported.path),
+    ),
   );
   const entryOutputPath = findRunnerEntrypointBundleEntryOutputPath(
     buildResult.metafile,

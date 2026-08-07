@@ -46,3 +46,28 @@ export const RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS = [
   "/yoga-layout/",
   "/zxing-wasm/",
 ] as const;
+
+// These packages are build inputs only. Both production bundles must inline
+// every runtime reference before runtime-shape removes the installed copies.
+// Keep this list explicit: removing an arbitrary transitive dependency would
+// make a later lazy path fail only in a production container.
+export const RUNNER_BUNDLE_PRUNED_AFTER_BUNDLING_PACKAGE_NAMES = [
+  "zod",
+] as const;
+
+export function assertPrunedRunnerDependenciesAreBundled(
+  outputImportSpecifiers: readonly string[],
+): void {
+  for (const packageName of RUNNER_BUNDLE_PRUNED_AFTER_BUNDLING_PACKAGE_NAMES) {
+    const unresolvedImport = outputImportSpecifiers.find(
+      (specifier) =>
+        specifier === packageName || specifier.startsWith(`${packageName}/`),
+    );
+
+    if (unresolvedImport) {
+      throw new Error(
+        `runner bundle leaves ${unresolvedImport} unresolved even though ${packageName} is removed from the production payload; inline the dependency or retain its installed package.`,
+      );
+    }
+  }
+}

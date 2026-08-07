@@ -5,7 +5,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  pruneRunnerBundle,
+  assertPrunedRunnerDependenciesAreBundled,
+} from "../scripts/runner-bundle/bundle-shared.js";
+import {
+  pruneBundledRunnerDependencies,
   rewriteRuntimeBinWrappers,
   rewriteRuntimePackageManifest,
 } from "../scripts/runner-bundle/runtime-shape.js";
@@ -20,46 +23,57 @@ afterEach(async () => {
   );
 });
 
-describe("runner bundle runtime manifest rewriting", () => {
-  it("removes only the unused Zod payloads while retaining its v4 runtime and other package sources", async () => {
-    const bundleDir = await mkdtemp(path.join(tmpdir(), "murph-runner-runtime-shape-"));
-    const removedPaths = [
-      ["zod", "locales", "index.js"],
-      ["zod", "mini", "index.js"],
-      ["zod", "src", "index.ts"],
-      ["zod", "v3", "index.js"],
-      ["zod", "v4-mini", "index.js"],
-    ] as const;
-    const retainedPaths = [
-      ["zod", "index.js"],
-      ["zod", "package.json"],
-      ["zod", "v4", "classic", "external.js"],
-      ["zod", "v4", "core", "index.js"],
-      ["zod", "v4", "locales", "en.js"],
-      ["another-package", "src", "index.js"],
-    ] as const;
+describe("post-bundle dependency pruning", () => {
+  it("removes the installed Zod package without touching sibling package sources", async () => {
+    const bundleDir = await mkdtemp(
+      path.join(tmpdir(), "murph-runner-runtime-shape-"),
+    );
+    const zodPackageDir = path.join(bundleDir, "node_modules", "zod");
+    const siblingSourcePath = path.join(
+      bundleDir,
+      "node_modules",
+      "another-package",
+      "src",
+      "index.js",
+    );
 
     temporaryDirectories.push(bundleDir);
-    for (const relativePath of [...removedPaths, ...retainedPaths]) {
-      const filePath = path.join(bundleDir, "node_modules", ...relativePath);
-      await mkdir(path.dirname(filePath), { recursive: true });
-      await writeFile(filePath, "retained when required\n", "utf8");
-    }
+    await mkdir(zodPackageDir, { recursive: true });
+    await mkdir(path.dirname(siblingSourcePath), { recursive: true });
+    await writeFile(
+      path.join(zodPackageDir, "package.json"),
+      JSON.stringify({ name: "zod", version: "4.4.3" }),
+      "utf8",
+    );
+    await writeFile(siblingSourcePath, "retained when required\n", "utf8");
 
-    await pruneRunnerBundle(bundleDir);
+    await pruneBundledRunnerDependencies(bundleDir);
 
-    for (const relativePath of removedPaths) {
-      await expect(
-        access(path.join(bundleDir, "node_modules", ...relativePath)),
-      ).rejects.toMatchObject({ code: "ENOENT" });
-    }
-    for (const relativePath of retainedPaths) {
-      await expect(
-        readFile(path.join(bundleDir, "node_modules", ...relativePath), "utf8"),
-      ).resolves.toBe("retained when required\n");
-    }
+    await expect(access(zodPackageDir)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(readFile(siblingSourcePath, "utf8")).resolves.toBe(
+      "retained when required\n",
+    );
   });
 
+  it("rejects a production bundle that leaves root or subpath Zod imports unresolved", () => {
+    expect(() =>
+      assertPrunedRunnerDependenciesAreBundled([
+        "./chunk.js",
+        "node:fs",
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      assertPrunedRunnerDependenciesAreBundled(["zod"]),
+    ).toThrow(/leaves zod unresolved/);
+    expect(() =>
+      assertPrunedRunnerDependenciesAreBundled(["zod\/v4"]),
+    ).toThrow(/leaves zod\/v4 unresolved/);
+  });
+});
+
+describe("runner bundle runtime manifest rewriting", () => {
   it("keeps installed optional dependencies and drops missing ones from the final bundle manifest", async () => {
     const bundleDir = await mkdtemp(path.join(tmpdir(), "murph-runner-runtime-shape-"));
 
