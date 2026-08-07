@@ -1,0 +1,76 @@
+name: Agent sponsor-context source export
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    if: >-
+      github.event.pull_request.number == 1420 &&
+      github.event.pull_request.head.ref == 'agent/group-funding-supporters' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Rebase export candidate onto current main
+        run: |
+          set -euo pipefail
+          git config user.name "murph-audit-export"
+          git config user.email "murph-audit-export@users.noreply.github.com"
+          git fetch --no-tags origin main
+          git rebase origin/main
+
+      - name: Package bounded source set
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/sponsor-context-source
+          cat > /tmp/sponsor-context-source/paths.txt <<'EOF'
+          ARCHITECTURE.md
+          agent-docs/SECURITY.md
+          agent-docs/product-specs/hosted-usage-topups.md
+          apps/cloudflare/DEPLOY.md
+          apps/web/app/design/group-usage-funding-study.tsx
+          apps/web/app/design/sections-content.tsx
+          apps/web/app/groups/fund/[joinCode]/page.tsx
+          apps/web/prisma/schema.prisma
+          apps/web/src/components/hosted-groups/group-funding-supporters.tsx
+          apps/web/src/lib/hosted-groups/group-sponsorship-store.ts
+          apps/web/src/lib/hosted-groups/group-tool.ts
+          apps/web/test/hosted-group-funding-page.test.tsx
+          apps/web/test/hosted-group-sponsorship-migration.test.ts
+          apps/web/test/hosted-group-sponsorship-store.test.ts
+          apps/web/test/hosted-group-tool.test.ts
+          docs/contracts/00-invariants.md
+          packages/assistant-engine/src/assistant-codex/dynamic-tool-catalog.ts
+          packages/assistant-engine/test/assistant-codex-group-tool.test.ts
+          packages/hosted-execution/src/parsers/runtime-control.ts
+          packages/hosted-execution/src/runtime-control.ts
+          packages/hosted-execution/test/parsers.test.ts
+          EOF
+          while IFS= read -r path; do
+            mkdir -p "/tmp/sponsor-context-source/files/$(dirname "$path")"
+            cp "$path" "/tmp/sponsor-context-source/files/$path"
+          done < /tmp/sponsor-context-source/paths.txt
+          git rev-parse HEAD > /tmp/sponsor-context-source/rebased-head.txt
+          git rev-parse origin/main > /tmp/sponsor-context-source/main-head.txt
+          git rev-parse origin/main^{tree} > /tmp/sponsor-context-source/main-tree.txt
+          git diff --binary origin/main -- > /tmp/sponsor-context-source/existing-pr.patch
+          tar -C /tmp/sponsor-context-source -czf /tmp/sponsor-context-source.tar.gz .
+
+      - name: Upload source bundle
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: sponsor-context-source
+          path: /tmp/sponsor-context-source.tar.gz
+          if-no-files-found: error
+          retention-days: 2
