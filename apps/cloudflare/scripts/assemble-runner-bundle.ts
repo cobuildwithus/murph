@@ -21,6 +21,7 @@ import {
 } from "./runner-bundle/dependency-install.js";
 import { materializeFinalRunnerBundle } from "./runner-bundle/final-bundle.js";
 import {
+  pruneBundledRunnerDependencies,
   pruneRunnerBundle,
   rewriteRuntimeBinWrappers,
   rewriteRuntimePackageManifest,
@@ -144,6 +145,7 @@ async function assembleRunnerBundle(): Promise<void> {
     await rewriteRuntimeBinWrappers(stagingBundleDir);
     await bundleInstalledVaultCliBinary(stagingBundleDir);
     await bundleRunnerContainerEntrypoint(stagingBundleDir);
+    await pruneBundledRunnerDependencies(stagingBundleDir);
     await materializeFinalRunnerBundle(
       stagingBundleDir,
       runnerBundleDeployRoot,
