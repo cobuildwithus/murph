@@ -1950,6 +1950,7 @@ export function ComponentsContent() {
                 <HostedAiUsageActivity
                   activity={preview.activity}
                   missionContactOption={preview.contactOption}
+                  signupReferralUrl="https://example.com/r/design-referral"
                 />
               </div>
             ))}

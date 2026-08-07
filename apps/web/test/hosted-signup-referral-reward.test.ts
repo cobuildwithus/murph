@@ -211,7 +211,7 @@ describe("hosted signup referral rewards", () => {
   it("fails closed when attribution becomes ambiguous under lock", async () => {
     const { introducedMemberId, prisma, referrerMemberId, tx } = createPrisma({
       referrerRows: [
-        { referrerMemberId },
+        { referrerMemberId: REFERRER_MEMBER_ID },
         { referrerMemberId: "member_other_referrer" },
       ],
     });

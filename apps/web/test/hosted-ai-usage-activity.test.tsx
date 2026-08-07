@@ -452,6 +452,7 @@ describe("readHostedAiUsageActivity", () => {
       credits: [],
       missions: [],
       missionsEnabled: true,
+      referralIdentityKey: "member_123",
     });
   });
 });
@@ -502,6 +503,7 @@ describe("HostedAiUsageActivity", () => {
         kind: "text",
         label: "Messages",
       },
+      signupReferralUrl: "https://example.com/r/test-referral",
     }));
 
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
@@ -564,6 +566,7 @@ describe("HostedAiUsageActivity", () => {
         missionsEnabled: true,
       },
       missionContactOption: null,
+      signupReferralUrl: "https://example.com/r/test-referral",
     }));
     const historyIndex = markup.indexOf(">History");
 
@@ -603,6 +606,7 @@ describe("HostedAiUsageActivity", () => {
         kind: "text",
         label: "Messages",
       },
+      signupReferralUrl: "https://example.com/r/test-referral",
     }));
 
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
@@ -629,6 +633,7 @@ describe("HostedAiUsageActivity", () => {
         missionsEnabled: true,
       },
       missionContactOption: null,
+      signupReferralUrl: "https://example.com/r/test-referral",
     }));
 
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
@@ -655,6 +660,7 @@ describe("HostedAiUsageActivity", () => {
         kind: "text",
         label: "Messages",
       },
+      signupReferralUrl: "https://example.com/r/test-referral",
     }));
 
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);

@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
+import { isHostedMailboxLane } from "@murphai/hosted-execution/runtime-control";
 
 import {
   signalHostedMailboxAppendRuntime,
@@ -129,11 +130,15 @@ export async function recoverPendingHostedUsageReferrals(input: {
     try {
       await signalHostedMailboxAppendRuntime({
         expectedUserId: celebration.userId,
-        knownCheckpoint: {
-          lane: celebration.lane,
-          laneSeq: celebration.laneSeq.toString(),
-          userId: celebration.userId,
-        },
+        ...(isHostedMailboxLane(celebration.lane)
+          ? {
+              knownCheckpoint: {
+                lane: celebration.lane,
+                laneSeq: celebration.laneSeq.toString(),
+                userId: celebration.userId,
+              },
+            }
+          : {}),
         mailboxItemId: celebration.id,
         prisma,
       });

@@ -25,10 +25,7 @@ describe("HostedSignupReferralLinkButton", () => {
       }),
     );
     const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(rendered.window.navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    });
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
 
     await React.act(async () => {
       rendered.button.click();
@@ -88,10 +85,7 @@ describe("HostedSignupReferralLinkButton", () => {
       }),
     );
     const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(rendered.window.navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    });
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
 
     await rendered.rerender(
       React.createElement(HostedSignupReferralLinkButton, {
@@ -169,9 +163,8 @@ describe("HostedSignupReferralLinkButton", () => {
         signupUrl: SIGNUP_URL,
       }),
     );
-    Object.defineProperty(rendered.window.navigator, "clipboard", {
-      configurable: true,
-      value: {
+    vi.stubGlobal("navigator", {
+      clipboard: {
         writeText: vi.fn().mockRejectedValue(
           new DOMException("Clipboard unavailable", "NotAllowedError"),
         ),
