@@ -1772,7 +1772,13 @@ describe("hosted runtime latency dashboard store", () => {
           invokeReceivedAtEpochMs: 1_777_000_000_000,
           containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
         },
-        restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
+        restore: {
+          sizeGuardMs: 1,
+          objectFetchResponseHeadersMs: 2,
+          objectFetchBodyReadMs: 3,
+          decryptMs: 5,
+          extractMs: 7,
+        },
         boot: { nodeStartupMs: 4200, restoreWasCold: true },
         wake: {
           runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,
@@ -1814,7 +1820,13 @@ describe("hosted runtime latency dashboard store", () => {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
         containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
       },
-      restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
+      restore: {
+        sizeGuardMs: 1,
+        objectFetchResponseHeadersMs: 2,
+        objectFetchBodyReadMs: 3,
+        decryptMs: 5,
+        extractMs: 7,
+      },
       boot: { nodeStartupMs: 4200, restoreWasCold: true },
       wake: {
         runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,
@@ -1876,7 +1888,13 @@ describe("hosted runtime latency dashboard store", () => {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
         containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
       },
-      restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
+      restore: {
+        sizeGuardMs: 1,
+        objectFetchResponseHeadersMs: 2,
+        objectFetchBodyReadMs: 3,
+        decryptMs: 5,
+        extractMs: 7,
+      },
       boot: { nodeStartupMs: 4200, restoreWasCold: true },
       wake: {
         runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,
@@ -1928,7 +1946,13 @@ describe("hosted runtime latency dashboard store", () => {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
         containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
       },
-      restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
+      restore: {
+        sizeGuardMs: 1,
+        objectFetchResponseHeadersMs: 2,
+        objectFetchBodyReadMs: 3,
+        decryptMs: 5,
+        extractMs: 7,
+      },
       boot: { nodeStartupMs: 4200, restoreWasCold: true },
       wake: {
         runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,

@@ -115,6 +115,7 @@ export async function ensureHostedCompanionMemberId(input: {
       },
       now,
       prisma,
+      pulseTrialStartSource: "companion_onboarding",
       ...(input.suppressSignupWelcome === undefined
         ? {}
         : { suppressSignupWelcome: input.suppressSignupWelcome }),

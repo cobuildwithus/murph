@@ -1019,7 +1019,16 @@ Hosted reply-latency telemetry records only boundaries observed by their owning
 process. Its ingress `acceptedAt` value copies the mailbox row's PostgreSQL
 `created_at`; because that default uses transaction-start time, the interval
 from `acceptedAt` includes the remainder of the append transaction and must not
-be labeled row-insert or commit latency. The web-owned `provider_started` field
+be labeled row-insert or commit latency. On a cold workspace restore,
+`restore.objectFetchMs` remains the retry-inclusive wall clock for the whole
+replay-safe object step. The final successful GET attempt also records
+`objectFetchResponseHeadersMs` from request start until Fetch resolves the
+response headers, and `objectFetchBodyReadMs` from validated headers until
+stream EOF. Body consumption overlaps streamed hash/decrypt work and its
+backpressure, so it is not pure network-transfer latency. These two bounded
+numbers are appended to the existing in-memory staged phase breakdown; they do
+not add a request, awaited reporting step, per-chunk timer, or separate log.
+The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
 `assistant_milestone` events for Linq typing request start/acceptance and the
