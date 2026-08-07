@@ -1396,15 +1396,18 @@ existing direct Linq chat owns native-card delivery without a reverse map or a
 new-chat workaround. Same-route inputs accepted during the live turn may update
 the reply message, reaction capability, and delivery idempotency inputs, but do
 not recreate the explicit-target override or replace the turn's thread binding.
-Linq owns the
-noninteractive static transcript layout, which carries the date, meal count,
-available totals, an explicit partial marker, and the first available exact V2
-goal plus its frozen status in canonical metric order. Its required URL is a
-fixed, non-sensitive HTTPS product URL rather than encoded card state. The
+Linq explicitly requests interactive transcript rendering. A recipient with
+the shipping Messages extension sees the extension-owned SwiftUI balloon; a
+recipient without it sees the same provider-owned static layout carrying the
+date, meal count, available totals, explicit partial marker, and first
+available exact V2 goal plus its frozen status. The required HTTPS URL keeps
+the immutable V1 or V2 presentation snapshot in a bounded Base64URL fragment
+that the extension decodes offline. Encoding is not encryption, so that
+fragment may contain only the same private-direct card values and never member
+identity, canonical record references, credentials, or other authority. The
 fallback body remains value-free and names a truthful text-recovery action to
-avoid Apple data-detector downgrade; the installed extension does not own
-balloon visibility. No card API, database, auth path, cleanup owner, extension
-network read, or second queue exists.
+avoid Apple data-detector downgrade. No card API, database, auth path, cleanup
+owner, extension network read, or second queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
@@ -2370,7 +2373,8 @@ flows inside the local TypeScript workspace.
 ## Tracked Compact Table Response Cards
 
 Compact table response cards reuse the existing outbox-owned immutable effect
-and provider-rendered static Linq balloon. A compact card is a bounded
+and interactive Messages-extension balloon, with Linq's static layout retained
+for recipients without the extension. A compact card is a bounded
 presentation snapshot, never a mutable tracker: canonical workout events remain
 the only workout authority, qualitative set annotations live on canonical set
 notes, and an update is complete only after a successful workout re-read
@@ -2389,10 +2393,11 @@ the same bounded health-related values visible in the immutable message, but it
 must never contain a member identity, canonical record reference, credential,
 or other authority. The provider request rejects encoded URLs at 2,048
 characters, while the contract applies the same aggregate bound before
-delivery. Nutrition cards keep their existing fixed HTTPS URL and
-provider-rendered summary layout. The Messages extension remains offline and
-read-only. This adds no card API, database, background synchronization owner,
-authentication surface, or mutable message state.
+delivery. Nutrition V1 and V2 cards use the same bounded fragment family
+without a tracking field, while the provider-rendered summary remains their
+fallback layout. The Messages extension remains offline and read-only. This
+adds no card API, database, background synchronization owner, authentication
+surface, or mutable message state.
 
 ## Scheduled assistant tool authority
 

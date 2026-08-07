@@ -436,7 +436,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       expect(requireLinqStub().readObservedMessageText(overlapForegroundSend)).toBeNull();
       expect(requireLinqStub().readObservedMessageAppCard(overlapForegroundSend)).toMatchObject({
         fallback_text: "Ask Murph for this card in text",
-        interactive: false,
+        interactive: true,
         layout: {
           caption: "Jul 28 · 3 meals",
           subcaption: "1,490.25 cal",
@@ -444,7 +444,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
           trailing_subcaption: "34.75g fat",
         },
         type: "imessage_app",
-        url: "https://murph.ai",
+        url: expect.stringMatching(/^https:\/\/murph\.ai\/#murph-card=/u),
       });
       expect(requireLinqStub().countObservedSends(reminderPath))
         .toBe(overlapForegroundSendBaselineCount + 1);

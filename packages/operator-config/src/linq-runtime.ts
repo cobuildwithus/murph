@@ -203,7 +203,7 @@ type LinqIMessageAppCardRequest = {
         bundle_id: 'ai.withmurph.app.messages'
         app_store_id: 6786145859
       }
-      interactive: false
+      interactive: true
       url: string
       fallback_text: typeof LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT
       layout: LinqIMessageAppLayout
@@ -705,7 +705,7 @@ export async function sendLinqIMessageAppCard(
           bundle_id: 'ai.withmurph.app.messages',
           app_store_id: 6786145859,
         },
-        interactive: false,
+        interactive: true,
         url: buildLinqIMessageAppCardUrl(input.card),
         fallback_text: LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
         layout: buildLinqIMessageAppLayout(input.card),
