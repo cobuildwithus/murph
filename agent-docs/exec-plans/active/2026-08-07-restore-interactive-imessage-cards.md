@@ -52,7 +52,7 @@ Updated: 2026-08-07
 1. [x] Restore interactive Linq app-card requests and bounded nutrition URLs.
 2. [x] Align exact request, cross-card, hosted egress, and journey coverage.
 3. [x] Update current response-card ownership and rollout docs.
-4. [ ] Run focused verification and inspect the complete diff.
+4. [x] Run focused verification and inspect the complete diff.
 5. [ ] Push a PR candidate, complete required ReviewGPT/CI gates, and resolve
    every accepted finding.
 6. [ ] Capture physical-device transcript proof and close the task plan.
@@ -66,8 +66,11 @@ Updated: 2026-08-07
 
 ## Verification
 
-- Commands to run: focused operator-config response-card/provider tests,
-  affected Cloudflare hosted-runtime tests, package typechecks, docs drift,
-  diff/privacy inspection, exact-head CI, and required ReviewGPT passes.
-- Expected outcomes: all scripted checks pass; physical Messages proof remains
-  the only non-local gate and must show the real custom transcript cards.
+- Passing local proof: 81 focused operator-config tests, eight hosted provider
+  egress tests, operator-config and Cloudflare typechecks, docs drift, and
+  diff/privacy inspection.
+- Hosted-local journey gap: runner preparation timed out while generating the
+  unrelated Assistant CLI surface manifest, before the scenario started. The
+  exact-head CI run remains the broad journey owner.
+- Remaining proof: exact-head CI, both required ReviewGPT stages, and physical
+  Messages sends showing the real custom transcript cards.
