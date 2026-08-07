@@ -2,6 +2,7 @@ import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
 import {
   assistantCronJobSchema,
   type AssistantCronJob,
+  type AssistantDeliveryError,
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantStatePaths } from '../store/paths.js'
@@ -51,10 +52,9 @@ export interface AssistantCronPendingDeliveryRepairResult {
 type TerminalAssistantCronDeliveryOutcome =
   | {
       at: string
-      failureCode: string | null
+      error: AssistantDeliveryError
       failureStatus: 'abandoned' | 'failed' | 'missing'
       kind: 'failed'
-      message: string
     }
   | {
       at: string
@@ -234,11 +234,13 @@ export async function repairPendingAssistantCronDeliveries(input: {
         paths,
         terminal: {
           at: now.toISOString(),
-          failureCode: 'ASSISTANT_CRON_PENDING_DELIVERY_INTENT_MISSING',
+          error: {
+            code: 'ASSISTANT_CRON_PENDING_DELIVERY_INTENT_MISSING',
+            message:
+              'Assistant cron pending delivery outbox intent is no longer available.',
+          },
           failureStatus: 'missing',
           kind: 'failed',
-          message:
-            'Assistant cron pending delivery outbox intent is no longer available.',
         },
         vault: input.vault,
       })
@@ -357,7 +359,7 @@ function reconcileLocalAssistantCronJobAfterDelivery(input: {
         new Date(input.terminal.at),
       ),
       lastFailedAt: input.terminal.at,
-      lastError: input.terminal.message,
+      lastError: input.terminal.error.message,
       consecutiveFailures: 0,
     },
   })
@@ -416,7 +418,7 @@ function reconcileCanonicalAssistantCronRuntimeAfterDelivery(input: {
             : null),
         retryAfterAt,
         lastFailedAt: input.terminal.at,
-        lastError: input.terminal.message,
+        lastError: input.terminal.error.message,
         consecutiveFailures: failureCount,
       },
     }
@@ -430,7 +432,7 @@ function reconcileCanonicalAssistantCronRuntimeAfterDelivery(input: {
       pendingOccurrenceAt: null,
       retryAfterAt: null,
       lastFailedAt: input.terminal.at,
-      lastError: input.terminal.message,
+      lastError: input.terminal.error.message,
       consecutiveFailures: 0,
     },
   }
@@ -445,7 +447,7 @@ function assistantCronTerminalDeliveryConsumesOccurrence(
   }
 
   if (
-    terminal.failureCode === 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE' &&
+    terminal.error.code === 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE' &&
     source?.kind === 'automation' &&
     isRecognizedMurphOnboardingFollowupAutomation(source) &&
     !isCurrentMurphOnboardingFollowupAutomation(source)
@@ -455,10 +457,7 @@ function assistantCronTerminalDeliveryConsumesOccurrence(
 
   if (
     terminal.failureStatus !== 'failed' ||
-    assistantDeliveryErrorPreventsFreshIntentRetry({
-      code: terminal.failureCode,
-      message: terminal.message,
-    })
+    assistantDeliveryErrorPreventsFreshIntentRetry(terminal.error)
   ) {
     return true
   }
@@ -484,16 +483,18 @@ function resolveTerminalAssistantCronDeliveryOutcome(
   }
 
   if (intent.status === 'failed' || intent.status === 'abandoned') {
+    const error = intent.lastError ?? {
+      code: null,
+      message:
+        intent.status === 'abandoned'
+          ? 'Outbound assistant delivery ended ambiguously.'
+          : 'Outbound assistant delivery failed.',
+    }
     return {
       at: intent.updatedAt,
-      failureCode: intent.lastError?.code ?? null,
+      error,
       failureStatus: intent.status,
       kind: 'failed',
-      message:
-        intent.lastError?.message ??
-        (intent.status === 'abandoned'
-          ? 'Outbound assistant delivery ended ambiguously.'
-          : 'Outbound assistant delivery failed.'),
     }
   }
 

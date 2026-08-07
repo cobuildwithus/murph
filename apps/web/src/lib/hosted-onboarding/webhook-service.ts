@@ -369,6 +369,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         duplicate: providerResult.duplicate,
         eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
         eventType,
+        ...(providerEvent.eventType === "chat.group_icon_updated"
+          || providerEvent.eventType === "chat.group_icon_update_failed"
+            ? {
+                chatIdSuffix: toHostedOnboardingLogIdSuffix(providerEvent.linqChatId),
+                failureCode: providerEvent.failureCode,
+                providerStatus: providerEvent.providerStatus,
+              }
+            : {}),
         responseReason,
       });
       return response;
