@@ -22,7 +22,10 @@ jobs:
           fetch-depth: 0
 
       - name: Apply guarded source and test edits
-        run: python scripts/apply-group-call-cleanup.py
+        run: |
+          python scripts/apply-group-call-cleanup.py
+          python scripts/fix-group-call-cleanup-generated-syntax.py
+          git diff --check
 
       - name: Reject residual preview authority machinery
         run: |
@@ -59,8 +62,13 @@ jobs:
 
       - name: Commit verified cleanup and remove temporary automation
         run: |
-          rm scripts/apply-group-call-cleanup.py
-          rm .github/workflows/apply-group-call-cleanup.yml
+          git checkout origin/main -- .github/workflows/repo-hygiene.yml
+          rm -f \
+            .github/group-call-cleanup-trigger \
+            .github/group-call-cleanup-verifier-v2-trigger \
+            .github/workflows/apply-group-call-cleanup.yml \
+            scripts/apply-group-call-cleanup.py \
+            scripts/fix-group-call-cleanup-generated-syntax.py
           git add -A
           git diff --cached --check
           git config user.name 'github-actions[bot]'
