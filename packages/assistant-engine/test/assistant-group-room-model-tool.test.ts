@@ -366,6 +366,9 @@ describe('authenticated group room-model tool', () => {
     expect(MURPH_GROUP_ROOM_MODEL_TOOL.description).toContain(
       'If show fails or a write reports stale state, stop.',
     )
+    expect(MURPH_GROUP_ROOM_MODEL_TOOL.description).toContain(
+      'must fit the 8 KiB UTF-8 body limit',
+    )
   })
 
   it('fails closed on malformed or conflicting fixed-page state', async () => {

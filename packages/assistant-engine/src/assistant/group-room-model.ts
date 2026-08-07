@@ -30,7 +30,6 @@ export const ASSISTANT_GROUP_ROOM_MODEL_SLUG =
   GROUP_ROOM_MODEL_KNOWLEDGE_SLUG
 export const ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE =
   GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_TYPE
-export const ASSISTANT_GROUP_ROOM_MODEL_PROMPT_MAX_BYTES = 6 * 1024
 export const ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES =
   GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES
 
@@ -148,7 +147,7 @@ export async function readAssistantGroupRoomModelState(
     if (
       !body ||
       !status ||
-      !assistantGroupRoomModelBodyFitsPrompt(body) ||
+      !assistantGroupRoomModelBodyFitsPage(body) ||
       containsHostedRuntimeRawParticipantHandle(body)
     ) {
       return { kind: 'unavailable' }
@@ -355,12 +354,12 @@ function assertAssistantGroupRoomModelBodyValid(body: string): void {
       'Group room-model body must contain durable room guidance.',
     )
   }
-  if (!assistantGroupRoomModelBodyFitsPrompt(body)) {
+  if (!assistantGroupRoomModelBodyFitsPage(body)) {
     throw new VaultCliError(
-      'group_room_model_prompt_too_large',
-      'Group room-model body does not fit the complete advisory prompt.',
+      'group_room_model_body_too_large',
+      'Group room-model body exceeds the authored-content limit.',
       {
-        maxPromptBytes: ASSISTANT_GROUP_ROOM_MODEL_PROMPT_MAX_BYTES,
+        maxBodyBytes: ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES,
       },
     )
   }
@@ -372,11 +371,10 @@ function assertAssistantGroupRoomModelBodyValid(body: string): void {
   }
 }
 
-function assistantGroupRoomModelBodyFitsPrompt(body: string): boolean {
+function assistantGroupRoomModelBodyFitsPage(body: string): boolean {
   return (
-    assistantConversationHistoryUtf8Bytes(
-      renderAssistantGroupRoomModelPrompt(body),
-    ) <= ASSISTANT_GROUP_ROOM_MODEL_PROMPT_MAX_BYTES
+    assistantConversationHistoryUtf8Bytes(body) <=
+      ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES
   )
 }
 

@@ -149,10 +149,11 @@ One dedicated owner reads, replaces, or deletes the fixed page. Generic
 knowledge show, list, search, append, upsert, and generated index surfaces
 exclude it. Every mutation passes the digest returned by the immediately prior
 show and compares that digest under the same fixed-page lock, so a concurrent
-rewrite cannot be lost. Replacement validates the normalized body and complete
-6 KiB advisory envelope before writing; ordinary prompts never truncate an
-accepted page. Raw `Sender:` handles remain transient evidence attribution and
-cannot be persisted in the page.
+rewrite cannot be lost. Replacement validates the normalized body against the
+fixed 8 KiB UTF-8 authored-content boundary before writing. Ordinary prompts
+render the complete accepted page without revalidating it against a
+wrapper-dependent byte ceiling. Raw `Sender:` handles remain transient evidence
+attribution and cannot be persisted in the page.
 
 Ordinary authenticated hosted group-chat turns read that fixed page directly
 from the same group vault and append a bounded rendering to dynamic turn
