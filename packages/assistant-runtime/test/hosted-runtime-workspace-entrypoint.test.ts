@@ -30774,11 +30774,13 @@ def finish_turn(turn_id, message):
     send({
         "method": "item/completed",
         "params": {
+            "completedAtMs": 1,
             "item": {
                 "id": "assistant-image-failure-" + str(turn_ordinal),
+                "memoryCitation": None,
                 "phase": "final_answer",
                 "text": message,
-                "type": "agent_message",
+                "type": "agentMessage",
             },
             "threadId": thread_id,
             "turnId": turn_id,
@@ -30787,9 +30789,17 @@ def finish_turn(turn_id, message):
     send({
         "method": "turn/completed",
         "params": {
-            "status": "completed",
             "threadId": thread_id,
-            "turnId": turn_id,
+            "turn": {
+                "completedAt": 1,
+                "durationMs": 1,
+                "error": None,
+                "id": turn_id,
+                "items": [],
+                "itemsView": "full",
+                "startedAt": 0,
+                "status": "completed",
+            },
         },
     })
 
@@ -30831,7 +30841,19 @@ for line in sys.stdin:
         send({"id": request.get("id"), "result": {"turn": {"id": turn_id}}})
         send({
             "method": "turn/started",
-            "params": {"threadId": thread_id, "turnId": turn_id},
+            "params": {
+                "threadId": thread_id,
+                "turn": {
+                    "completedAt": None,
+                    "durationMs": None,
+                    "error": None,
+                    "id": turn_id,
+                    "items": [],
+                    "itemsView": "full",
+                    "startedAt": 0,
+                    "status": "inProgress",
+                },
+            },
         })
         params = request.get("params") or {}
         serialized_input = json.dumps(params.get("input", params))
@@ -30851,6 +30873,7 @@ for line in sys.stdin:
                     "prompt": "Edit image 1 so the subject faces left.",
                     "referenceImageRefs": [${JSON.stringify(input.referenceImageRef)}],
                 },
+                "callId": "image-failure-call-" + str(turn_ordinal),
                 "namespace": "murph",
                 "threadId": thread_id,
                 "tool": "generate_image",
