@@ -580,9 +580,8 @@ test("HomePage shows blocked Pulse usage with an add-usage action", async () => 
 
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Pulse usage/u);
   assert.match(markup, /Resets in 6 days/);
-  assert.match(markup, /New replies and other AI work are blocked/);
-  assert.match(markup, /until you add usage or your included usage resets/);
-  assert.match(markup, /You can add more usage now/);
+  assert.match(markup, /New AI work is paused until you add usage or your allowance resets/);
+  assert.doesNotMatch(markup, /You can add more usage now/);
   assert.match(markup, />Add usage</);
   assert.match(markup, /href="\/settings\?addUsage=true#subscription"/);
   assert.equal(mocks.readHostedAiUsageGate.mock.calls.length, 1);
@@ -713,13 +712,13 @@ test("HomePage shows blocked Edge usage with an add-usage action", async () => {
 
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Edge usage/u);
   assert.match(markup, /Resets in 6 days/);
-  assert.match(markup, /New replies and other AI work are blocked/);
-  assert.match(markup, /until you add usage or your included usage resets/);
+  assert.match(markup, /New AI work is paused until you add usage or your allowance resets/);
+  assert.doesNotMatch(markup, /You can add more usage now/);
   assert.match(markup, />Add usage</);
   assert.match(markup, /href="\/settings\?addUsage=true#subscription"/);
 });
 
-test("HomePage shows a blocked Family usage notice without a personal action", async () => {
+test("HomePage shows a blocked Family usage notice with the fallback add-usage action", async () => {
   mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
     allowanceSource: "family_sponsored_plan",
@@ -744,12 +743,12 @@ test("HomePage shows a blocked Family usage notice without a personal action", a
   const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /used 100% of your included usage this month/u);
-  assert.match(markup, /Other Family members have separate allowances/u);
-  assert.match(markup, /New replies and other AI work are blocked/);
-  assert.match(markup, /until your included usage resets/);
+  assert.doesNotMatch(markup, /Other Family members have separate allowances/u);
+  assert.match(markup, /New AI work is paused until more usage is added or your allowance resets/);
   assert.doesNotMatch(markup, /shared allowance|Family(?:&#x27;|')s included usage/u);
   assert.match(markup, /Resets in 6 days/);
-  assert.doesNotMatch(markup, />Add usage</);
+  assert.match(markup, />Add usage</);
+  assert.match(markup, /href="\/settings\?addUsage=true#subscription"/);
 });
 
 test("HomePage shows blocked trial usage with the existing Start Pulse action", async () => {
