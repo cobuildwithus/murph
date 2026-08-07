@@ -3179,6 +3179,81 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      "owner code to signed funding locator",
+      "group_join_code_1234",
+      "gf1.member_group_runtime.signed_funding_locator",
+    ],
+    [
+      "signed funding locator to owner code",
+      "gf1.member_group_runtime.signed_funding_locator",
+      "group_join_code_1234",
+    ],
+  ] as const)(
+    "matches one group purchase by beneficiary across %s",
+    async (_direction, firstLocator, secondLocator) => {
+      const fake = createFakePrisma();
+      const targetFor = (joinCode: string) => ({
+        displayName: "Sunday sleep crew",
+        fundingPath: `/groups/fund/${encodeURIComponent(joinCode)}`,
+        joinCode,
+        kind: "friends",
+        runtimeMemberId: "member_group_runtime",
+      });
+      mocks.readHostedGroupUsageFundingTargetByJoinCode
+        .mockResolvedValueOnce(targetFor(firstLocator))
+        .mockResolvedValueOnce(targetFor(secondLocator));
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+
+      const first = await createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode: firstLocator,
+        now: NOW,
+        offerCode: "usage_10_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+      });
+
+      await expect(readHostedActiveUsageCreditPurchaseForPayer({
+        beneficiaryMemberId: "member_group_runtime",
+        now: new Date(NOW.getTime() + 500),
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+        serverApprovedPayableTargets: [{
+          beneficiaryMemberId: "member_group_runtime",
+          groupJoinCode: secondLocator,
+          kind: "group",
+        }],
+      })).resolves.toMatchObject({
+        url: "https://checkout.stripe.test/session",
+        target: {
+          beneficiaryMemberId: "member_group_runtime",
+          groupJoinCode: firstLocator,
+          kind: "group",
+        },
+      });
+
+      const recovered = await createHostedGroupUsageCreditCheckout({
+        clientRequestKey: "same_group_new_locator_key",
+        joinCode: secondLocator,
+        now: new Date(NOW.getTime() + 1_000),
+        offerCode: "usage_10_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+      });
+      expect(recovered).toMatchObject({
+        purchaseId: first.purchaseId,
+        recovered: true,
+      });
+      expect(recovered).not.toHaveProperty("targetConflict");
+      expect(fake.purchases.size).toBe(1);
+      expect(mocks.stripeCheckoutCreate).toHaveBeenCalledOnce();
+    },
+  );
+
   it("recovers only the active checkout for the same funding target", async () => {
     const fake = createFakePrisma();
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>

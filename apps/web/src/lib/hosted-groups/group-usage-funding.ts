@@ -204,7 +204,7 @@ export async function readHostedGroupUsageFundingTargetByLocator(input: {
       where: { memberId: runtimeMemberId },
     }),
     prisma.hostedGroup.findUnique({
-      select: { displayName: true, joinCode: true, kind: true },
+      select: { displayName: true, kind: true },
       where: { runtimeMemberId },
     }),
     hasHostedRuntimeActiveAccess(runtimeMemberId, { prisma }),
@@ -212,12 +212,11 @@ export async function readHostedGroupUsageFundingTargetByLocator(input: {
   if (!container || !hasActiveAccess) {
     return null;
   }
-  const canonicalLocator = group?.joinCode ?? input.locator;
 
   return {
     displayName: normalizeNullableString(group?.displayName ?? null),
-    fundingPath: buildHostedGroupUsageFundingPath(canonicalLocator),
-    joinCode: canonicalLocator,
+    fundingPath: buildHostedGroupUsageFundingPath(input.locator),
+    joinCode: input.locator,
     kind: group?.kind ?? "custom",
     runtimeMemberId,
   };

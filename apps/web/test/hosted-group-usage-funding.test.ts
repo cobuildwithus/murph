@@ -400,7 +400,7 @@ describe("hosted group usage funding", () => {
     });
   });
 
-  it("canonicalizes owner and signed locators to one purchase target", async () => {
+  it("keeps a signed funding locator private from an owner-created join code", async () => {
     const locator =
       buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
     const group = {
@@ -418,22 +418,23 @@ describe("hosted group usage funding", () => {
       },
     };
 
-    const [ownerTarget, signedTarget] = await Promise.all([
-      readHostedGroupUsageFundingTargetByJoinCode({
-        joinCode: group.joinCode,
-        prisma: prisma as never,
-      }),
-      readHostedGroupUsageFundingTargetByJoinCode({
-        joinCode: locator ?? "",
-        prisma: prisma as never,
-      }),
-    ]);
+    const signedTarget = await readHostedGroupUsageFundingTargetByJoinCode({
+      joinCode: locator ?? "",
+      prisma: prisma as never,
+    });
 
-    expect(signedTarget).toEqual(ownerTarget);
     expect(signedTarget).toMatchObject({
-      fundingPath: "/groups/fund/group_join_code_1234",
-      joinCode: "group_join_code_1234",
+      fundingPath: `/groups/fund/${encodeURIComponent(locator ?? "")}`,
+      joinCode: locator,
       runtimeMemberId: "member_group_runtime",
+    });
+    expect(signedTarget).not.toEqual(expect.objectContaining({
+      fundingPath: expect.stringContaining(group.joinCode),
+      joinCode: group.joinCode,
+    }));
+    expect(prisma.hostedGroup.findUnique).toHaveBeenCalledWith({
+      select: { displayName: true, kind: true },
+      where: { runtimeMemberId: "member_group_runtime" },
     });
   });
 

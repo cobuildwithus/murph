@@ -518,11 +518,13 @@ exhausted state in the existing notice claim and sends the group's funding link
 with one neutral group pause contract. The mandatory action URL uses a signed
 funding-only locator derived from the runtime member, so private sponsor state,
 group display data, join-code preference, and access lookups cannot remove it
-before the claim. When an authenticated signed locator resolves to a group with
-an owner-created join code, the funding-page target resolver canonicalizes its
-funding path and purchase identity to that durable code. A codeless room keeps
-the signed locator, so every valid entry point for one room shares one exact
-purchase target. This notice has one behavior regardless of current
+before the claim. The funding page keeps an authenticated signed locator in its
+funding path, client endpoints, and purchase return URL; it never exchanges the
+funding-only capability for an owner-created enrollment code. After target
+authorization, group purchases identify the exact destination by the resolved
+beneficiary runtime member rather than by the route locator, so either valid
+funding entry point resumes the same purchase without exposing join authority.
+This notice has one behavior regardless of current
 funding setup: it says Murph is paused, identifies the link as private options
 to add more time, and says the room may instead wait for reset. It does not use
 rotating payer-pressure copy or promise immediate restoration. The funding page
