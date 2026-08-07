@@ -132,6 +132,9 @@ import {
 import {
   createEncryptedWorkspaceSnapshotFile,
 } from "../src/workspace-snapshot-local.ts";
+import {
+  assertEstablishedR2ColdStartAttempt,
+} from "./helpers/hosted-local-cold-start-benchmark.js";
 
 function requireFetchCallArgs(
   call: readonly unknown[] | undefined,
@@ -1597,6 +1600,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       expect(restoreTimings?.encryptedBytes).toBe(encrypted.encryptedByteSize);
       expect(restoreTimings?.plainBytes).toBe(encrypted.totalPlainBytes);
+      expect(restoreTimings?.replaySafeReadMaxAttempt).toBe(1);
       expect(restoreTimings?.objectFetchResponseHeadersMs).toBe(25);
       expect(restoreTimings?.objectFetchBodyReadMs).toBe(30);
       expect(
@@ -1833,6 +1837,26 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         workspaceSnapshotRestoreAttempt: 1,
         workspaceSnapshotRestoreStep: "object_fetch",
       }));
+      expect(restoreTimings).toMatchObject({ replaySafeReadMaxAttempt: 2 });
+      expect(() => assertEstablishedR2ColdStartAttempt({
+        expectedEncryptedBytes: encrypted.encryptedByteSize,
+        expectedPlainBytes: encrypted.totalPlainBytes,
+        runtimeLogs: [{
+          attemptId: "runtime_write_123",
+          level: "info",
+          phase: "idle",
+        }],
+        successfulAttemptId: "runtime_write_123",
+        trace: {
+          phaseBreakdown: {
+            schemaVersion: 1,
+            boot: { restoreWasCold: true },
+            restore: restoreTimings ?? {},
+          },
+          runtimeAttemptId: "runtime_write_123",
+        },
+        workspaceWriteFenceGeneration: "1",
+      })).toThrow("recovered workspace snapshot restore");
       const serializedLogs = JSON.stringify(readWorkspaceSnapshotDiagnosticLogs());
       expect(serializedLogs).not.toContain(objectKey);
       expect(serializedLogs).not.toContain(snapshotId);
@@ -6733,6 +6757,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     };
     const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
+    const replacedReplicaRef = createBrowserVaultReplicaRef("a".repeat(64));
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ replicaRef }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -6752,7 +6777,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     });
 
-    const result = await platform.browserVaultReplicaPort!.write({ replica });
+    const result = await platform.browserVaultReplicaPort!.write({
+      replica,
+      replacedReplicaRef,
+    });
 
     expect(result).toEqual(replicaRef);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -6763,7 +6791,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
-    await expect(request.json()).resolves.toEqual({ replica });
+    await expect(request.json()).resolves.toEqual({
+      replica,
+      replacedReplicaRef,
+    });
   });
 
   it("exposes callback-only browser-vault writes without legacy provider delivery effects", async () => {

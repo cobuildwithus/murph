@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "./zod-runtime.ts";
 
 export const COMPANION_HRV_RMSSD_SCHEMA =
   "murph.companion.overnight-prv-rmssd.v1";

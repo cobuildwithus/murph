@@ -7,10 +7,13 @@ import {
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
   type AssistantInputSource,
+  type AssistantProviderStartCriticalPathContext,
+  type AssistantProviderStartCriticalPathTiming,
   type AssistantRunEvent,
   type AssistantTurnEnvironment,
   type AssistantTurnConversationInputQuery,
   runAssistantAutomationPass,
+  stampAssistantProviderStartCriticalPath,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
@@ -154,11 +157,16 @@ export async function runHostedAssistantAutomationLane(input: {
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
 }): Promise<HostedAssistantAutomationLaneMetrics> {
+  const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    input.providerStartCriticalPath,
+    "automationLaneStartedAtMonotonicMs",
+  );
   const startedAt = Date.now();
   const freshAssistantInputIds = input.freshAssistantInputIds ?? [];
   const resolveReadiness = async () => {
@@ -209,6 +217,7 @@ export async function runHostedAssistantAutomationLane(input: {
           idleCheckpointDelayMs: input.idleCheckpointDelayMs ?? null,
           now: input.now ?? null,
           preProviderPhase: input.preProviderPhase ?? null,
+          ...(providerStartCriticalPath ? { providerStartCriticalPath } : {}),
           runtimeAttemptId: input.runtimeAttemptId ?? null,
           ...(input.beforeProviderAcceptedInputs
             ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
@@ -286,6 +295,7 @@ export async function runHostedAssistantAutomation(
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
     beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
+    providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
     shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
 ): Promise<{
@@ -439,6 +449,12 @@ export async function runHostedAssistantAutomation(
       drainOutbox: false,
       ...(options?.beforeProviderAcceptedInputs
         ? { beforeProviderAcceptedInputs: options.beforeProviderAcceptedInputs }
+        : {}),
+      ...(options?.providerStartCriticalPath
+        ? {
+            providerStartCriticalPath:
+              options.providerStartCriticalPath,
+          }
         : {}),
       executionContext,
       ...(options?.operationScope ? { operationScope: options.operationScope } : {}),
@@ -760,6 +776,7 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
   latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
   preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
   preProviderSetupMs?: number;
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathTiming;
   promptBuildMs?: number;
   providerRequestOrdinal: number;
   runtimeAttemptId?: string | null;
@@ -783,6 +800,16 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
   > = {
     ...(input.preProviderPhase ?? {}),
     ...(input.autoReplyHistory ?? {}),
+    ...(input.providerStartCriticalPath
+      ? {
+          automationLaneToAssistantServiceMs:
+            input.providerStartCriticalPath.automationLaneToAssistantServiceMs,
+          mailboxImportDoneToAssistantPhaseMs:
+            input.providerStartCriticalPath.mailboxImportDoneToAssistantPhaseMs,
+          workspaceAssistantPreAutomationMs:
+            input.providerStartCriticalPath.workspaceAssistantPreAutomationMs,
+        }
+      : {}),
   };
   const provider: NonNullable<
     HostedRuntimeLatencyPhaseBreakdown["provider"]
@@ -812,6 +839,21 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
     ...(input.preProviderSetupMs === undefined
       ? {}
       : { preProviderSetupMs: input.preProviderSetupMs }),
+    ...(input.providerStartCriticalPath
+      ? {
+          assistantServicePreLockMs:
+            input.providerStartCriticalPath.assistantServicePreLockMs,
+          codexAppServerPreProviderMs:
+            input.providerStartCriticalPath.codexAppServerPreProviderMs,
+          codexProcessPreparationMs:
+            input.providerStartCriticalPath.codexProcessPreparationMs,
+          preProviderSetupMs:
+            input.providerStartCriticalPath.preProviderSetupMs,
+          providerPlanAndGateMs:
+            input.providerStartCriticalPath.providerPlanAndGateMs,
+          turnLockWaitMs: input.providerStartCriticalPath.turnLockWaitMs,
+        }
+      : {}),
   };
 
   void recordHostedAssistantProviderStartLatencyTraceWithRetry(input.latencyTracePort, {

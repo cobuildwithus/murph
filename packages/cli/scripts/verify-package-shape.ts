@@ -12,6 +12,7 @@ interface PackageJsonShape {
   name?: string
   private?: boolean
   dependencies?: Record<string, string | undefined>
+  devDependencies?: Record<string, string | undefined>
   optionalDependencies?: Record<string, string | undefined>
   bundleDependencies?: string[]
   main?: string
@@ -129,6 +130,14 @@ assert(
 assert(
   packageJson.dependencies?.incur === '0.4.5',
   'package.json must keep incur pinned until the upstream lazy optional dependency fix is released.',
+)
+assert(
+  packageJson.dependencies?.zod === '^4.4.3',
+  'package.json must install Zod because the published CLI bundles private declarations that name zod/v4.',
+)
+assert(
+  packageJson.devDependencies?.zod === undefined,
+  'package.json must not classify Zod as dev-only while published bundled declarations require it.',
 )
 const bundledIncurRuntimeDependencies: Record<string, string> = {
   '@cfworker/json-schema': '^4.1.1',

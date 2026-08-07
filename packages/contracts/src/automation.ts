@@ -1,4 +1,4 @@
-import * as z from "zod";
+import * as z from "./zod-runtime.ts";
 
 import { CONTRACT_SCHEMA_VERSION, FRONTMATTER_DOC_TYPES } from "./constants.ts";
 import {

@@ -26,7 +26,7 @@ import type {
   UpsertEventResult,
 } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 import { loadJsonInputObject } from '../json-input.js'
 import { loadRuntimeModule } from '../runtime-import.js'
