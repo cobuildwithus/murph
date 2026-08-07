@@ -29,6 +29,7 @@ import {
   isHostedLinqGroupLineRecoverySourceRefForEffect,
   parseHostedLinqGroupLineRecoverySourceRef,
 } from "./linq-group-line-recovery";
+import { HOSTED_LINQ_GROUP_SETUP_TEMPLATE } from "./linq-group-setup";
 import {
   compareHostedLinqProviderEventProgress,
   createHostedLinqProviderEventProgress,
@@ -2692,7 +2693,10 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
           input.data.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
           && input.delivery.source !== input.source
         )
-        || input.delivery.sourceRef !== input.data.sourceRef
+        || (
+          input.data.template !== HOSTED_LINQ_GROUP_SETUP_TEMPLATE
+          && input.delivery.sourceRef !== input.data.sourceRef
+        )
         || input.delivery.targetKind !== input.data.targetKind
         || input.delivery.template !== input.data.template
       )
@@ -3118,7 +3122,8 @@ function isHostedLinqPinnedTargetDeliveryTemplate(
   template: string | null | undefined,
 ): boolean {
   return isHostedLinqInviteSignupDeliveryTemplate(template)
-    || template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE;
+    || template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+    || template === HOSTED_LINQ_GROUP_SETUP_TEMPLATE;
 }
 
 function assertHostedLinqDeliveryGroupJoinContext(input: {

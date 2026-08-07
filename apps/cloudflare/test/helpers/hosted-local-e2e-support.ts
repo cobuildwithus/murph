@@ -447,6 +447,7 @@ export interface HostedLocalAssistantProviderStubState {
 export interface HostedLocalAssistantProviderStubRequest {
   body: string;
   method: string;
+  observedAtEpochMs?: number;
   url: string;
 }
 
@@ -946,6 +947,7 @@ export async function startAssistantProviderStubServer(input: {
   let responsesApiRequestBodyCount = 0;
 
   const server = createServer(async (request, response) => {
+    const observedAtEpochMs = Date.now();
     const requestMethod = request.method ?? "GET";
     const requestUrl = request.url ?? "/";
     if (
@@ -966,6 +968,7 @@ export async function startAssistantProviderStubServer(input: {
     const requestRecord = {
       body,
       method: requestMethod,
+      observedAtEpochMs,
       url: requestUrl,
     } satisfies HostedLocalAssistantProviderStubRequest;
     input.onRequest?.(requestRecord);

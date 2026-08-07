@@ -24,6 +24,9 @@ describe("hosted local Linq provider stub", () => {
       const response = await fetch(`${stub.baseUrl}/chats/chat_direct`);
 
       expect(response.status).toBe(200);
+      expect(Number.isSafeInteger(stub.observedRequests[0]?.observedAtEpochMs)).toBe(
+        true,
+      );
       await expect(response.json()).resolves.toEqual({
         handles: [],
         id: "chat_direct",
