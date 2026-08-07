@@ -48,10 +48,10 @@ test("announces the disabled approval controls while approval is pending", async
 
   try {
     expect(rendered.container.textContent).toContain(
-      "Approval applies only while Murph still has this request pending.",
+      "Allow the requested action.",
     );
-    expect(rendered.container.textContent).toContain(
-      "It cannot undo a cancellation from the conversation.",
+    expect(rendered.container.textContent).not.toContain(
+      "Approval applies only while Murph still has this request pending.",
     );
     expect(rendered.container.querySelector("[role='status']")).toBeNull();
     expect(rendered.container.querySelector("[aria-busy='true']")).toBeNull();
