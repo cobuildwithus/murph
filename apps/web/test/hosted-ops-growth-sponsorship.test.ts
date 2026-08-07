@@ -11,8 +11,9 @@ import {
 vi.mock("server-only", () => ({}));
 
 describe("hosted ops growth sponsorship metrics", () => {
-  it("separates verified monthly charges from one-time contributions", async () => {
+  it("separates live fulfilled sponsorship charges and sums the active monthly cap", async () => {
     const queryRaw = vi.fn().mockResolvedValue([{
+      activeMonthlyCapUsdCents: 3_000n,
       activeMonthlySponsorships: 2n,
       monthlyPaidPurchasesThisMonth: 3n,
       monthlyPaidThisMonthUsdCents: 1_500n,
@@ -30,6 +31,7 @@ describe("hosted ops growth sponsorship metrics", () => {
     } as HostedGrowthSponsorshipQueryClient);
 
     expect(metrics).toEqual({
+      activeMonthlyCapUsdCents: 3_000,
       activeMonthlySponsorships: 2,
       available: true,
       monthlyPaidPurchasesThisMonth: 3,
@@ -44,8 +46,13 @@ describe("hosted ops growth sponsorship metrics", () => {
     expect(queryRaw).toHaveBeenCalledTimes(1);
     const queryParts = queryRaw.mock.calls[0]?.[0] as TemplateStringsArray;
     const queryText = queryParts.join("?");
-    expect(queryText).toContain('"group_sponsorship_authorization_id"');
-    expect(queryText).toContain('"hosted_group_sponsorship_moment"');
+    expect(queryText).toContain('purchase."status" = \'fulfilled\'');
+    expect(queryText).toContain('purchase."stripe_live_mode" = TRUE');
+    expect(queryText).toContain('"hosted_thread_container"');
+    expect(queryText).toContain('authorization."monthly_cap_minor"');
+    expect(queryText).toContain(
+      'activation_purchase."group_sponsorship_charge_ordinal" = 0',
+    );
     expect(queryText).toContain("usage_entry.\"kind\" = 'usage_debit'");
     expect(queryText).toContain('sponsorship_purchase."paid_at"');
 
@@ -74,9 +81,44 @@ describe("hosted ops growth sponsorship metrics", () => {
     errorSpy.mockRestore();
   });
 
-  it("renders sponsorship cash and usage without presenting either as MRR", () => {
+  it("fails soft when a database aggregate cannot be represented safely", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const unsafeValue = BigInt(Number.MAX_SAFE_INTEGER) + 1n;
+
+    await expect(readHostedGrowthSponsorshipMetrics(
+      new Date("2026-08-07T19:43:59.000Z"),
+      {
+        $queryRaw: vi.fn().mockResolvedValue([{
+          activeMonthlyCapUsdCents: unsafeValue,
+          activeMonthlySponsorships: 0n,
+          monthlyPaidPurchasesThisMonth: 0n,
+          monthlyPaidThisMonthUsdCents: 0n,
+          oneTimePaidPurchasesThisMonth: 0n,
+          oneTimePaidThisMonthUsdCents: 0n,
+          paidPurchasesThisMonth: 0n,
+          paidThisMonthUsdCents: 0n,
+          remainingUsageUsdMicros: 0n,
+          usageConsumedThisMonthUsdMicros: 0n,
+        }]),
+      } as HostedGrowthSponsorshipQueryClient,
+    )).resolves.toEqual({ available: false });
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Failed to read hosted growth sponsorship metrics.",
+      expect.any(TypeError),
+    );
+    const loggedError = errorSpy.mock.calls[0]?.[1];
+    expect(loggedError).toBeInstanceOf(TypeError);
+    expect((loggedError as Error).message).toContain(
+      "activeMonthlyCapUsdCents",
+    );
+
+    errorSpy.mockRestore();
+  });
+
+  it("renders sponsorship charges, usage, and active cap without calling them MRR", () => {
     const markup = renderToStaticMarkup(createElement(GrowthSponsorships, {
       metrics: {
+        activeMonthlyCapUsdCents: 3_000,
         activeMonthlySponsorships: 2,
         available: true,
         monthlyPaidPurchasesThisMonth: 3,
@@ -88,17 +130,23 @@ describe("hosted ops growth sponsorship metrics", () => {
         remainingUsageUsdMicros: 11_750_000,
         usageConsumedThisMonthUsdMicros: 4_250_000,
       },
+      titleId: "test-growth-sponsorship-title",
     }));
 
+    expect(markup).toContain('aria-labelledby="test-growth-sponsorship-title"');
     expect(markup).toContain("Group sponsorships");
     expect(markup).toContain("not subscriptions");
-    expect(markup).toContain("Sponsor payments MTD");
+    expect(markup).toContain,"Gross sponsor charges MTD");
     expect(markup).toContain("$35");
+    expect(markup).toContain("refunds not netted");
     expect(markup).toContain("Sponsored usage MTD");
-    expect(markup).toContain("$4.25");
-    expect(markup).toContain("Remaining sponsored usage");
+    expect(markup).toContain,"$4.25");
+    expect(markup).toContain,"Remaining sponsored usage");
     expect(markup).toContain("$11.75");
-    expect(markup).toContain("Monthly sponsorship charges");
+    expect(markup).toContain,"Active monthly cap");
+    expect(markup).toContain("$30/mo");
+    expect(markup).toContain("2 active capped authorizations");
+    expect(markup).toContain,"Monthly sponsorship charges");
     expect(markup).toContain("One-time contributions");
     expect(markup).not.toContain("Sponsorship MRR");
   });
@@ -109,6 +157,6 @@ describe("hosted ops growth sponsorship metrics", () => {
     }));
 
     expect(markup).toContain("Sponsorship metrics unavailable");
-    expect(markup).toContain("Plan MRR");
+    expect(markup).toContain,"Plan MRR");
   });
 });

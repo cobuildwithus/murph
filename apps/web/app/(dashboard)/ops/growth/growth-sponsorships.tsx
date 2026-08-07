@@ -10,22 +10,27 @@ import {
 
 interface GrowthSponsorshipsProps {
   metrics: HostedGrowthSponsorshipMetrics;
+  titleId?: string;
 }
 
-export function GrowthSponsorships({ metrics }: GrowthSponsorshipsProps) {
+export function GrowthSponsorships({
+  metrics,
+  titleId = "growth-sponsorship-title",
+}: GrowthSponsorshipsProps) {
   return (
-    <section aria-labelledby="growth-sponsorship-title" className="flex flex-col gap-4">
+    <section aria-labelledby={titleId} className="flex flex-col gap-4">
       <div>
         <h2
           className="font-serif text-xl font-semibold tracking-tight text-foreground"
-          id="growth-sponsorship-title"
+          id={titleId}
         >
           Group sponsorships
         </h2>
         <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
           Monthly sponsorships are capped usage authorizations, not subscriptions,
-          so they stay outside plan MRR. Cash is verified sponsorship payments in
-          the current UTC month; usage is exact sponsor-funded credit consumed in
+          so their caps and charges stay outside plan MRR. Gross charges are
+          fulfilled live-mode payments in the current UTC month and do not net
+          refunds or disputes; usage is exact sponsor-funded credit consumed in
           the same window.
         </p>
       </div>
@@ -34,11 +39,11 @@ export function GrowthSponsorships({ metrics }: GrowthSponsorshipsProps) {
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <SponsorshipMetric
-              helper={`${formatInteger(metrics.paidPurchasesThisMonth)} verified ${pluralize(
+              helper={`${formatInteger(metrics.paidPurchasesThisMonth)} fulfilled ${pluralize(
                 metrics.paidPurchasesThisMonth,
                 "payment",
-              )}`}
-              label="Sponsor payments MTD"
+              )} · refunds not netted`}
+              label="Gross sponsor charges MTD"
               value={formatCashCurrency(metrics.paidThisMonthUsdCents)}
             />
             <SponsorshipMetric
@@ -47,14 +52,17 @@ export function GrowthSponsorships({ metrics }: GrowthSponsorshipsProps) {
               value={formatUsageCurrency(metrics.usageConsumedThisMonthUsdMicros)}
             />
             <SponsorshipMetric
-              helper="Current unspent credit across all sponsorships"
+              helper="Current unspent fulfilled sponsorship credit"
               label="Remaining sponsored usage"
               value={formatUsageCurrency(metrics.remainingUsageUsdMicros)}
             />
             <SponsorshipMetric
-              helper="Active capped authorizations"
-              label="Active monthly sponsorships"
-              value={formatInteger(metrics.activeMonthlySponsorships)}
+              helper={`${formatInteger(metrics.activeMonthlySponsorships)} active capped ${pluralize(
+                metrics.activeMonthlySponsorships,
+                "authorization",
+              )} · maximum, not MRR`}
+              label="Active monthly cap"
+              value={formatMonthlyCap(metrics.activeMonthlyCapUsdCents)}
             />
           </div>
 
@@ -64,7 +72,7 @@ export function GrowthSponsorships({ metrics }: GrowthSponsorshipsProps) {
                 <TableRow>
                   <TableHead>Source</TableHead>
                   <TableHead className="text-right">Payments</TableHead>
-                  <TableHead className="text-right">Paid this month</TableHead>
+                  <TableHead className="text-right">Gross charges MTD</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -87,7 +95,9 @@ export function GrowthSponsorships({ metrics }: GrowthSponsorshipsProps) {
                   </TableCell>
                 </TableRow>
                 <TableRow>
-                  <TableCell className="font-medium">Total sponsorship</TableCell>
+                  <TableCell className="font-medium">
+                    Gross sponsorship charges
+                  </TableCell>
                   <TableCell className="text-right font-medium">
                     {formatInteger(metrics.paidPurchasesThisMonth)}
                   </TableCell>
@@ -144,6 +154,10 @@ function formatCashCurrency(valueUsdCents: number): string {
     maximumFractionDigits: 2,
     style: "currency",
   }).format(valueUsdCents / 100);
+}
+
+function formatMonthlyCap(valueUsdCents: number): string {
+  return `${formatCashCurrency(valueUsdCents)}/mo`;
 }
 
 function formatUsageCurrency(valueUsdMicros: number): string {

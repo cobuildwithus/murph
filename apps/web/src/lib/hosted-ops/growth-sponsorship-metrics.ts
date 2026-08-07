@@ -9,6 +9,7 @@ export type HostedGrowthSponsorshipQueryClient = Pick<
 
 export type HostedGrowthSponsorshipMetrics =
   | {
+      activeMonthlyCapUsdCents: number;
       activeMonthlySponsorships: number;
       available: true;
       monthlyPaidPurchasesThisMonth: number;
@@ -25,6 +26,7 @@ export type HostedGrowthSponsorshipMetrics =
     };
 
 interface HostedGrowthSponsorshipQueryRow {
+  activeMonthlyCapUsdCents: bigint;
   activeMonthlySponsorships: bigint;
   monthlyPaidPurchasesThisMonth: bigint;
   monthlyPaidThisMonthUsdCents: bigint;
@@ -73,17 +75,32 @@ export async function readHostedGrowthSponsorshipMetrics(
           purchase."id",
           purchase."cash_amount_minor",
           purchase."group_sponsorship_authorization_id",
+          purchase."group_sponsorship_charge_ordinal",
           purchase."paid_at",
           purchase."remaining_credit_usd_micros"
         FROM "hosted_usage_credit_purchase" AS purchase
         WHERE purchase."cash_currency" = 'usd'
-          AND (
-            purchase."group_sponsorship_authorization_id" IS NOT NULL
-            OR EXISTS (
-              SELECT 1
-              FROM "hosted_group_sponsorship_moment" AS moment
-              WHERE moment."purchase_id" = purchase."id"
-            )
+          AND purchase."status" = 'fulfilled'
+          AND purchase."stripe_live_mode" = TRUE
+          AND EXISTS (
+            SELECT 1
+            FROM "hosted_thread_container" AS container
+            WHERE container."member_id" = purchase."beneficiary_member_id"
+          )
+      ),
+      active_monthly_sponsorships AS (
+        SELECT
+          COUNT(*)::bigint AS "activeMonthlySponsorships",
+          COALESCE(SUM(authorization."monthly_cap_minor"), 0)::bigint
+            AS "activeMonthlyCapUsdCents"
+        FROM "hosted_group_sponsorship_authorization" AS authorization
+        WHERE authorization."status" = 'active'
+          AND EXISTS (
+            SELECT 1
+            FROM sponsorship_purchases AS activation_purchase
+            WHERE activation_purchase."group_sponsorship_authorization_id" =
+              authorization."id"
+              AND activation_purchase."group_sponsorship_charge_ordinal" = 0
           )
       ),
       payments_this_month AS (
@@ -107,11 +124,8 @@ export async function readHostedGrowthSponsorshipMetrics(
           AND usage_entry."effective_at" < bounds.captured_at
       )
       SELECT
-        (
-          SELECT COUNT(*)::bigint
-          FROM "hosted_group_sponsorship_authorization"
-          WHERE "status" = 'active'
-        ) AS "activeMonthlySponsorships",
+        active_monthly_sponsorships."activeMonthlyCapUsdCents",
+        active_monthly_sponsorships."activeMonthlySponsorships",
         (
           SELECT COUNT(*)::bigint
           FROM payments_this_month
@@ -146,6 +160,7 @@ export async function readHostedGrowthSponsorshipMetrics(
         ) AS "remainingUsageUsdMicros",
         usage_this_month."usageConsumedThisMonthUsdMicros"
       FROM usage_this_month
+      CROSS JOIN active_monthly_sponsorships
     `;
     const row = rows[0];
     if (!row) {
@@ -153,6 +168,10 @@ export async function readHostedGrowthSponsorshipMetrics(
     }
 
     return {
+      activeMonthlyCapUsdCents: toSafeNonNegativeNumber(
+        row.activeMonthlyCapUsdCents,
+        "activeMonthlyCapUsdCents",
+      ),
       activeMonthlySponsorships: toSafeNonNegativeNumber(
         row.activeMonthlySponsorships,
         "activeMonthlySponsorships",
