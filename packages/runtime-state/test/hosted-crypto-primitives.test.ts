@@ -3,10 +3,14 @@ import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 
 import {
+  assertHostedCryptoStandbyKeyringJsons,
   createHostedAuthorityVerifyKeyring,
   createHostedDataKeyEnvelopeWithDomainRoot,
   createHostedRecipientPrivateKeyring,
   generateHostedUserRecipientKeyPair,
+  HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+  HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR,
+  HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR,
   parseHostedDataKeyEnvelope,
   selectHostedAuthorityVerifyPublicKeyPem,
   selectHostedRecipientPrivateKeyForDecrypt,
@@ -150,4 +154,105 @@ test("hosted crypto keyrings select old verify and decrypt keys by id", async ()
       recipientKeyId: "cf-key-missing",
     }),
   ).toThrow(/not available for decrypt/u);
+});
+
+test("hosted crypto standby acceptance matches complete Cloudflare keypairs", async () => {
+  const standbyRecipient = await generateHostedUserRecipientKeyPair();
+  const authorityVerifyKeyringJson = JSON.stringify({
+    "authority-v2": {
+      publicKeyPem:
+        "-----BEGIN PUBLIC KEY-----\nstandby\n-----END PUBLIC KEY-----",
+      status: "verify_only",
+    },
+  });
+  const cloudflarePublicKeyringJson = JSON.stringify({
+    "cloudflare-automation:v2": {
+      publicJwk: standbyRecipient.publicKeyJwk,
+      recipient: "cloudflare-automation-secret",
+      status: "disabled",
+    },
+  });
+  const cloudflarePrivateKeyringJson = JSON.stringify({
+    "cloudflare-automation:v2": {
+      privateJwk: standbyRecipient.privateKeyJwk,
+      recipient: "cloudflare-automation-secret",
+      status: "decrypt_only",
+    },
+  });
+
+  expect(() => assertHostedCryptoStandbyKeyringJsons({
+    authorityVerifyKeyringJson,
+    cloudflarePrivateKeyringJson,
+    cloudflarePublicKeyringJson,
+    requireCompletePreload: true,
+  })).not.toThrow();
+
+  const otherRecipient = await generateHostedUserRecipientKeyPair();
+  expect(() => assertHostedCryptoStandbyKeyringJsons({
+    authorityVerifyKeyringJson,
+    cloudflarePrivateKeyringJson: JSON.stringify({
+      "cloudflare-automation:v2": {
+        privateJwk: otherRecipient.privateKeyJwk,
+        recipient: "cloudflare-automation-secret",
+        status: "decrypt_only",
+      },
+    }),
+    cloudflarePublicKeyringJson,
+    requireCompletePreload: true,
+  })).toThrow(HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR);
+});
+
+test.each([
+  [
+    "malformed authority JSON",
+    {
+      authorityVerifyKeyringJson: '{"standby-secret-canary"',
+    },
+    HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+  ],
+  [
+    "active authority material",
+    {
+      authorityVerifyKeyringJson: JSON.stringify({
+        "authority-v2": {
+          publicKeyPem: "standby-secret-canary",
+          status: "active",
+        },
+      }),
+    },
+    HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+  ],
+  [
+    "private material in the public ring",
+    {
+      cloudflarePublicKeyringJson: JSON.stringify({
+        "cloudflare-automation:v2": {
+          publicJwk: {
+            crv: "P-256",
+            d: "standby-secret-canary",
+            kty: "EC",
+            x: "public-x",
+            y: "public-y",
+          },
+          recipient: "cloudflare-automation-secret",
+          status: "disabled",
+        },
+      }),
+    },
+    HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR,
+  ],
+] as const)("rejects %s with a field-only error", (
+  _name,
+  input,
+  expectedError,
+) => {
+  let message = "";
+  try {
+    assertHostedCryptoStandbyKeyringJsons(input);
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+
+  expect(message).toBe(expectedError);
+  expect(message).not.toContain("standby-secret-canary");
 });

@@ -816,13 +816,26 @@ Cloudflare, and confirm production envelope key-reference aggregates are
 unchanged. Provider inspection and logs must show names, scopes, statuses, and
 counts only—not keyring JSON, PEM bodies, JWKs, or production rows.
 
-Worker deploy preflight must parse both optional keyrings through the same
-runtime-state keyring constructors before Wrangler is reachable. It overlays
-the unchanged required active values, rejects malformed entries and additional
-active keys, and permits private standby entries only for
-`cloudflare-automation-secret`. Validation errors identify the configuration
-field without reproducing keyring or private-key content. Do not bypass this
-gate for a preload.
+Web build and Worker deploy preflight must use the same runtime-state standby
+acceptance contract before either provider can promote code. It rejects
+malformed or active optional entries, rejects private material in Web's public
+ring or a private keyring in Web runtime, and permits Cloudflare entries only
+for `cloudflare-automation-secret`. Before any provider mutation, load all three
+proposed payloads from approved secret stores into the process environment and
+run the Web `hosted-crypto:env-check` script with
+`--require-complete-preload`; complete mode requires all rings and matches each
+Cloudflare public/private entry by key id and P-256 public coordinates.
+Validation errors identify only the configuration field. Do not put values in
+arguments or bypass either gate.
+
+Record the current ready Vercel production deployment before preload. Deploy
+Web first, then prove the unchanged active Web crypto-context path against
+current envelopes before changing the Worker. A successful build alone is not
+proof; restore the recorded Web deployment if that live check fails. After the
+protected Cloudflare deploy, require Worker preflight, managed-container smoke,
+and unchanged privacy-safe envelope-reference aggregates. The current active
+Vercel deployment and unchanged active single-key bindings remain the rollback
+floor throughout standby preload.
 
 The Cloudflare private keyring's canonical deploy hop renders the ignored
 `apps/cloudflare/.deploy/worker-secrets.json` payload under a mode-`0700`

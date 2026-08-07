@@ -780,6 +780,20 @@ Hosted managed crypto:
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON` for additional
   `disabled` Cloudflare automation public keys during standby preload
+- The production build runs `hosted-crypto:env-check` before Next.js. It parses
+  every configured standby ring through the shared runtime-state acceptance
+  contract, rejects active entries, private material in the public ring, and
+  any private keyring configured in Web runtime, and reports field-only errors
+  without echoing key material. Before changing
+  a provider, load the three proposed payloads from their approved secret
+  stores into the process environment and run
+  `pnpm --dir apps/web hosted-crypto:env-check -- --require-complete-preload`;
+  complete mode also requires matching Cloudflare public/private entries.
+- Record the current ready Vercel production deployment before preload. Deploy
+  Web first and prove that its active hosted crypto context still reads the
+  current ingress/runtime envelopes before changing the Worker. A failed Web
+  proof rolls back to that recorded deployment; a successful build alone is
+  not runtime proof.
 - production Vercel OIDC / GCP Workload Identity Federation:
   `HOSTED_CRYPTO_GCP_PROJECT_NUMBER`,
   `HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL`,

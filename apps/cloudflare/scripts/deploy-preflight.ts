@@ -10,8 +10,7 @@ import {
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution/env";
 import {
-  createHostedAuthorityVerifyKeyring,
-  createHostedRecipientPrivateKeyring,
+  assertHostedCryptoStandbyKeyringJsons,
 } from "@murphai/runtime-state";
 
 import { readHostedDeployAutomationTimeouts } from "./deploy-automation/environment.ts";
@@ -20,7 +19,6 @@ import {
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
 } from "./deploy-automation/worker-optional-vars.ts";
 import {
-  isObjectRecord,
   normalizeOptionalString,
   readBooleanEnv,
 } from "./deploy-automation/shared.ts";
@@ -475,86 +473,15 @@ function appendHostedCryptoKeyringInvariantErrors(
   source: EnvSource,
   errors: string[],
 ): void {
-  const activeAuthorityKeyVersionName = normalizeOptionalString(
-    source.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
-  );
-  const activeAuthorityPublicKeyPem = normalizeOptionalString(
-    source.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
-  );
-  const authorityVerifyKeyringJson = normalizeOptionalString(
-    source.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON,
-  );
-  if (
-    authorityVerifyKeyringJson
-    && activeAuthorityKeyVersionName
-    && activeAuthorityPublicKeyPem
-  ) {
-    try {
-      createHostedAuthorityVerifyKeyring({
-        activeKeyVersionName: activeAuthorityKeyVersionName,
-        activePublicKeyPem: activeAuthorityPublicKeyPem,
-        keyringJson: authorityVerifyKeyringJson,
-      });
-      const configuredKeyring: unknown = JSON.parse(authorityVerifyKeyringJson);
-      if (
-        isObjectRecord(configuredKeyring)
-        && Object.values(configuredKeyring).some(
-          (entry) => isObjectRecord(entry) && entry.status === "active",
-        )
-      ) {
-        errors.push(
-          "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON must contain only non-active standby entries.",
-        );
-      }
-    } catch {
-      errors.push(
-        "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON must be a valid hosted authority verify keyring.",
-      );
-    }
-  }
-
-  const activeCloudflareRecipientKeyId = normalizeOptionalString(
-    source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
-  );
-  const activeCloudflarePrivateJwk = normalizeOptionalString(
-    source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
-  );
-  const cloudflarePrivateKeyringJson = normalizeOptionalString(
-    source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON,
-  );
-  if (
-    cloudflarePrivateKeyringJson
-    && activeCloudflareRecipientKeyId
-    && activeCloudflarePrivateJwk
-  ) {
-    try {
-      createHostedRecipientPrivateKeyring({
-        activePrivateJwk: JSON.parse(activeCloudflarePrivateJwk),
-        activeRecipient: "cloudflare-automation-secret",
-        activeRecipientKeyId: activeCloudflareRecipientKeyId,
-        keyringJson: cloudflarePrivateKeyringJson,
-      });
-      const configuredKeyring: unknown = JSON.parse(cloudflarePrivateKeyringJson);
-      if (
-        isObjectRecord(configuredKeyring)
-        && Object.values(configuredKeyring).some(
-          (entry) =>
-            isObjectRecord(entry)
-            && (
-              entry.recipient !== "cloudflare-automation-secret"
-              || entry.status === "active"
-            ),
-        )
-      ) {
-        errors.push(
-          "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON must contain only non-active cloudflare-automation-secret entries.",
-        );
-      }
-    } catch {
-      errors.push(
-        "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON must be a valid hosted Cloudflare automation private keyring.",
-      );
-    }
+  try {
+    assertHostedCryptoStandbyKeyringJsons({
+      authorityVerifyKeyringJson:
+        source.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON,
+      cloudflarePrivateKeyringJson:
+        source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON,
+    });
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : "Hosted crypto standby keyrings are invalid.");
   }
 }
 

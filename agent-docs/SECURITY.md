@@ -466,7 +466,14 @@ Last verified: 2026-08-07
   local deploy must remove that exact generated file after success or failure.
   The file is never a source of truth. Private JWK values must never enter CLI
   argument values, logs, tracked or review artifacts, or any other plaintext
-  file. A standby preload must not mutate envelope key references. Activation,
+  file. Web build and Worker deploy preflight must share one runtime-state
+  acceptance contract for optional standby rings. Before provider mutation,
+  complete-preload validation must require all three authority/public/private
+  payloads and match the Cloudflare public/private P-256 coordinates by key id;
+  errors may name fields but must never reproduce values. Record the current
+  ready Web deployment, deploy Web first, and prove the unchanged active Web
+  crypto context before changing the Worker; a build success is not runtime
+  proof. A standby preload must not mutate envelope key references. Activation,
   re-signing, rewrapping, and retirement require an explicit production
   mutation owner, a reader-complete compatibility window that retains the
   current Cloudflare private key, and aggregate proof of zero old active or

@@ -16,6 +16,9 @@ Updated: 2026-08-07
 - The public Cloudflare deploy renderer forwards the optional authority verify
   keyring and Cloudflare automation private keyring through the existing
   private workflow mappings, with focused regression coverage.
+- Web build and Worker deploy preflight share one standby-keyring acceptance
+  contract; complete preload validates all three payloads and matches the
+  Cloudflare public/private pair before any provider mutation.
 - A live rotation runbook documents ownership, safe deploy order, rollback
   floor, secret handling, the boundary before activation, and the proof needed
   by a future envelope migration and retirement.
@@ -96,7 +99,18 @@ Updated: 2026-08-07
 4. Risk: Web and Worker deploy skew breaks production during preload.
    Mitigation: land the missing deploy contract first, preserve the existing
    required active single-key variables, add only non-active keyring entries,
-   and check both live surfaces after each provider update.
+   record the current ready Web deployment, deploy Web first, prove its active
+   crypto-context path before Worker mutation, and check both live surfaces
+   after each provider update.
+5. Risk: validating only the Worker plane allows malformed Web standby
+   configuration to pass deployment and later poison Web crypto-context refresh.
+   Mitigation: the repeated-mechanism ReviewGPT finding keeps the end-to-end
+   preload scope and moves the existing pure standby acceptance contract into
+   shared runtime-state ownership. The Web build and Worker preflight both use
+   it, while complete-preload mode requires all payloads and a matching P-256
+   public/private pair before provider mutation. Focused tests cover the Web
+   crypto-context owner and Worker unwrap owner; rollback remains the recorded
+   ready Web deployment with all active single-key variables unchanged.
 
 ## Tasks
 
@@ -106,17 +120,23 @@ Updated: 2026-08-07
    and a durable rotation runbook.
 3. Run focused proof, commit/push the candidate, open the PR, and complete
    required ReviewGPT and CI gates.
-4. Merge and deploy the keyring contract; verify live Web/Worker readiness.
-5. Create a new non-exportable GCP authority-signing key version and new P-256
+4. Add the shared Web/Worker standby validation found in final ReviewGPT round
+   2, then complete the final ReviewGPT and CI gates on the remediated head.
+5. Merge and deploy the keyring contract; verify live Web/Worker readiness.
+6. Create a new non-exportable GCP authority-signing key version and new P-256
    Cloudflare automation keypair; preload both generations without switching
    active writers.
-6. Verify live bindings and unchanged production envelope references, record
+7. Verify live bindings and unchanged production envelope references, record
    the separately blocked activation phase, and archive the plan/worktree.
 
 ## Decisions
 
 - Keep the existing runtime keyring abstractions and private workflow mappings;
   fix the missing public renderer boundary instead of adding another owner.
+- Keep the end-to-end preload rather than narrowing it to Worker configuration.
+  The round-2 retrospective identified one shared lower contract, a Web build
+  gate, a Worker deploy gate, and complete-pair acceptance as the smallest
+  correction for the repeated validation-boundary mechanism.
 - Generate and preload keys only after the exact pushed implementation head has
   passed focused proof, CI, and both ReviewGPT gates. Merge the reviewed
   contract to public `main`, deploy from the protected private workflow's

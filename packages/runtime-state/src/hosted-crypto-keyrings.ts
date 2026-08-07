@@ -50,6 +50,68 @@ export type HostedRecipientPrivateKeyring = Readonly<
   Record<string, HostedRecipientPrivateKeyringEntry>
 >;
 
+export const HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR =
+  "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON must be a valid non-active hosted authority standby keyring.";
+export const HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR =
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON must be a valid non-active Cloudflare automation public standby keyring.";
+export const HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR =
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON must be a valid non-active Cloudflare automation private standby keyring.";
+export const HOSTED_CRYPTO_COMPLETE_STANDBY_PRELOAD_ERROR =
+  "Hosted crypto complete standby preload requires authority, Cloudflare public, and Cloudflare private keyrings.";
+export const HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR =
+  "Hosted crypto Cloudflare public and private standby keyrings must contain matching P-256 keypairs.";
+
+/**
+ * Shared deploy-time acceptance contract for optional hosted crypto keyrings.
+ * It intentionally validates only non-active compatibility entries; required
+ * active values remain owned by each runtime's existing single-key variables.
+ * All thrown messages are field-only and safe to surface from provider gates.
+ */
+export function assertHostedCryptoStandbyKeyringJsons(input: {
+  authorityVerifyKeyringJson?: string | null;
+  cloudflarePrivateKeyringJson?: string | null;
+  cloudflarePublicKeyringJson?: string | null;
+  requireCompletePreload?: boolean;
+}): void {
+  const authorityEntries = readHostedAuthorityStandbyEntries(
+    input.authorityVerifyKeyringJson,
+  );
+  const publicEntries = readHostedCloudflarePublicStandbyEntries(
+    input.cloudflarePublicKeyringJson,
+  );
+  const privateEntries = readHostedCloudflarePrivateStandbyEntries(
+    input.cloudflarePrivateKeyringJson,
+  );
+
+  if (!input.requireCompletePreload) {
+    return;
+  }
+  if (
+    authorityEntries.length === 0
+    || publicEntries.length === 0
+    || privateEntries.length === 0
+  ) {
+    throw new TypeError(HOSTED_CRYPTO_COMPLETE_STANDBY_PRELOAD_ERROR);
+  }
+
+  const privateEntriesById = new Map(
+    privateEntries.map((entry) => [entry.recipientKeyId, entry] as const),
+  );
+  if (
+    publicEntries.length !== privateEntries.length
+    || publicEntries.some((publicEntry) => {
+      const privateEntry = privateEntriesById.get(publicEntry.recipientKeyId);
+      return !privateEntry
+        || privateEntry.privateJwk.crv !== publicEntry.publicJwk.crv
+        || privateEntry.privateJwk.kty !== publicEntry.publicJwk.kty
+        || privateEntry.privateJwk.x !== publicEntry.publicJwk.x
+        || privateEntry.privateJwk.y !== publicEntry.publicJwk.y;
+    })
+  ) {
+    throw new TypeError(HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR);
+  }
+}
+
 export function createHostedAuthorityVerifyKeyring(input: {
   activeKeyVersionName: string;
   activePublicKeyPem: string;
@@ -202,6 +264,78 @@ export function selectHostedRecipientPrivateKeyForDecrypt(input: {
   }
 
   return entry;
+}
+
+function readHostedAuthorityStandbyEntries(
+  value: string | null | undefined,
+): HostedAuthorityVerifyKeyringEntry[] {
+  try {
+    const entries = parseHostedAuthorityVerifyKeyringJson(value);
+    if (entries.some((entry) => entry.status === "active")) {
+      throw new TypeError(HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR);
+    }
+    return entries;
+  } catch {
+    throw new TypeError(HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR);
+  }
+}
+
+function readHostedCloudflarePublicStandbyEntries(
+  value: string | null | undefined,
+): HostedRecipientPublicKeyringEntry[] {
+  try {
+    const entries = parseHostedRecipientPublicKeyringJson(value);
+    const rawKeyring = parseOptionalJsonRecord(
+      value,
+      "Hosted recipient public keyring JSON",
+    );
+    const containsPrivateMaterial = rawKeyring
+      ? Object.values(rawKeyring).some((rawEntry) => {
+          const entry = requireRecord(
+            rawEntry,
+            "Hosted recipient public standby entry",
+          );
+          const publicJwk = requireRecord(
+            entry.publicJwk,
+            "Hosted recipient public standby JWK",
+          );
+          return Object.hasOwn(publicJwk, "d");
+        })
+      : false;
+    if (
+      containsPrivateMaterial
+      || entries.some(
+        (entry) =>
+          entry.recipient !== "cloudflare-automation-secret"
+          || entry.status === "active",
+      )
+    ) {
+      throw new TypeError(HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR);
+    }
+    return entries;
+  } catch {
+    throw new TypeError(HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR);
+  }
+}
+
+function readHostedCloudflarePrivateStandbyEntries(
+  value: string | null | undefined,
+): HostedRecipientPrivateKeyringEntry[] {
+  try {
+    const entries = parseHostedRecipientPrivateKeyringJson(value);
+    if (
+      entries.some(
+        (entry) =>
+          entry.recipient !== "cloudflare-automation-secret"
+          || entry.status === "active",
+      )
+    ) {
+      throw new TypeError(HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR);
+    }
+    return entries;
+  } catch {
+    throw new TypeError(HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR);
+  }
 }
 
 function parseHostedAuthorityVerifyKeyringJson(

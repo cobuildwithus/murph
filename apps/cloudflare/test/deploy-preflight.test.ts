@@ -1,6 +1,10 @@
 import {
   HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+  HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
+} from "@murphai/runtime-state";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -350,7 +354,7 @@ describe("deploy preflight helpers", () => {
         HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON:
           '{"private-keyring-canary"',
       },
-      "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON must be a valid hosted authority verify keyring.",
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
     ],
     [
       "an invalid authority status",
@@ -362,7 +366,7 @@ describe("deploy preflight helpers", () => {
           },
         }),
       },
-      "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON must be a valid hosted authority verify keyring.",
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
     ],
     [
       "an additional active authority",
@@ -374,7 +378,7 @@ describe("deploy preflight helpers", () => {
           },
         }),
       },
-      "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON must be a valid hosted authority verify keyring.",
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
     ],
     [
       "an active authority entry shadowed by the required key",
@@ -386,7 +390,7 @@ describe("deploy preflight helpers", () => {
           },
         }),
       },
-      "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON must contain only non-active standby entries.",
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
     ],
     [
       "a private JWK without d",
@@ -405,7 +409,7 @@ describe("deploy preflight helpers", () => {
             },
           }),
       },
-      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON must be a valid hosted Cloudflare automation private keyring.",
+      HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
     ],
     [
       "a non-Cloudflare private recipient",
@@ -425,7 +429,7 @@ describe("deploy preflight helpers", () => {
             },
           }),
       },
-      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON must contain only non-active cloudflare-automation-secret entries.",
+      HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
     ],
     [
       "an additional active private recipient",
@@ -445,7 +449,7 @@ describe("deploy preflight helpers", () => {
             },
           }),
       },
-      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON must be a valid hosted Cloudflare automation private keyring.",
+      HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
     ],
     [
       "an active private entry shadowed by the required key",
@@ -465,7 +469,7 @@ describe("deploy preflight helpers", () => {
             },
           }),
       },
-      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON must contain only non-active cloudflare-automation-secret entries.",
+      HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
     ],
   ] as const)("rejects %s without disclosing keyring values", (
     _name,

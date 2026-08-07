@@ -82,6 +82,8 @@ afterEach(() => {
 test("web runtime crypto context reads already-provisioned signed ingress and runtime envelopes", async () => {
   const signer = await generateP256SigningKeyPair();
   const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const standbySigner = await generateP256SigningKeyPair();
+  const standbyCloudflareRecipient = await generateP256EcdhKeyPair();
   const encryptCalls: GcpKmsEncryptInput[] = [];
   const signCalls: GcpKmsAsymmetricSignInput[] = [];
   gcpKmsMock.client = createLocalKmsClient({
@@ -90,6 +92,19 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
     signer: signer.privateKey,
   });
   stubHostedCryptoEnv({
+    authorityVerifyKeyringJson: JSON.stringify({
+      "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/2": {
+        publicKeyPem: standbySigner.publicKeyPem,
+        status: "verify_only",
+      },
+    }),
+    cloudflarePublicKeyringJson: JSON.stringify({
+      "cloudflare-automation:v2": {
+        publicJwk: standbyCloudflareRecipient.publicJwk,
+        recipient: "cloudflare-automation-secret",
+        status: "disabled",
+      },
+    }),
     cloudflarePublicJwk: cloudflareRecipient.publicJwk,
     signerPublicKeyPem: signer.publicKeyPem,
   });
@@ -2282,6 +2297,8 @@ function restoreHostedSecureBoxTestCodec(): void {
 }
 
 function stubHostedCryptoEnv(input: {
+  authorityVerifyKeyringJson?: string;
+  cloudflarePublicKeyringJson?: string;
   cloudflarePublicJwk: JsonWebKey;
   signerPublicKeyPem: string;
 }): void {
@@ -2297,6 +2314,18 @@ function stubHostedCryptoEnv(input: {
     input.signerPublicKeyPem.replace(/\n/gu, "\\n"),
   );
   vi.stubEnv("HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME", WEB_WRAP_KEY_NAME);
+  if (input.authorityVerifyKeyringJson) {
+    vi.stubEnv(
+      "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON",
+      input.authorityVerifyKeyringJson,
+    );
+  }
+  if (input.cloudflarePublicKeyringJson) {
+    vi.stubEnv(
+      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON",
+      input.cloudflarePublicKeyringJson,
+    );
+  }
 }
 
 async function generateP256EcdhKeyPair(): Promise<{
