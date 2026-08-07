@@ -1,6 +1,6 @@
 # Bound hosted outbox inventory scan latency
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-06
 
@@ -56,8 +56,8 @@ Updated: 2026-08-06
 1. [x] Add bounded parallel inventory reads and byte/file scan metrics.
 2. [x] Add focused concurrency, ordering, quarantine, and telemetry coverage.
 3. [x] Run focused tests, package typecheck, and direct diff/privacy review.
-4. [ ] Push the exact candidate and run required ReviewGPT gates with CI.
-5. [ ] Resolve findings, close this plan through the scoped final commit, and
+4. [x] Push the exact candidate and run required ReviewGPT gates with CI.
+5. [x] Resolve findings, close this plan through the scoped final commit, and
    hand off deployment verification.
 
 ## Verification log
@@ -90,7 +90,10 @@ Updated: 2026-08-06
   owner; the PR contract now names creation/dedupe, delivery/wake, newsletter,
   vault-file, status, daemon, and CLI consumers and their representative proof.
 - Final ReviewGPT round 2 passed with no findings after the scope correction.
-- A later automatic main merge exposed an unrelated upstream expectation drift:
-  hosted conversation identities now include `sessionId: null`. The approved
-  four-line expectation alignment passed both affected test files (285 tests)
-  and the `packages/assistant-runtime` typecheck.
+- A later main merge exposed unrelated upstream expectation drift: hosted
+  conversation identities now include `sessionId: null`, and exact-session CLI
+  input preserves the saved participant binding. After merging current `main`,
+  both affected assistant-runtime test files passed (286 tests), the focused
+  CLI state test passed (34 tests), and the `packages/assistant-runtime`
+  typecheck passed.
+Completed: 2026-08-06
