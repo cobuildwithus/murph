@@ -45,7 +45,8 @@ Updated: 2026-08-07
 
 1. [x] Add the two bounded warning boundaries and focused privacy regressions.
 2. [x] Update the current owner contracts and run focused verification.
-3. [ ] Push the exact candidate and open the replacement PR.
+3. [x] Push the exact candidate and open replacement PR #1428; close superseded
+   PR #1354 with the replacement link.
 4. [ ] Run the preliminary coverage pass, final ReviewGPT gate, and exact-head
    CI concurrently; resolve accepted findings without widening scope.
 5. [ ] Complete parent review, close this plan, and close PR #1354 with the
