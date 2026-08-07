@@ -175,7 +175,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Secure approval pending and recorded states">
-        <ActionApprovalLifecycleStudy />
+        <div id="action-approval-lifecycle">
+          <ActionApprovalLifecycleStudy />
+        </div>
       </StudySection>
 
       <Separator />
