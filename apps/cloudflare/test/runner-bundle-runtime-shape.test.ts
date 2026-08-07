@@ -110,7 +110,6 @@ describe("post-bundle dependency pruning", () => {
       pruneBundledRunnerDependencies(bundleDir),
     ).rejects.toThrow(/imports zod\/v3/);
   });
-
 });
 
 describe("runner bundle runtime manifest rewriting", () => {
