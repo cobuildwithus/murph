@@ -149,3 +149,10 @@ Updated: 2026-08-07
   push the provider-authoritative candidate, run the next exact-head final
   ReviewGPT round concurrently with GitHub Actions, resolve any accepted
   findings, and close this plan with final exact-head evidence.
+- The final candidate is merged with current `main`. The one semantic conflict
+  preserves `main`'s newer all-active-Family-member lock while retaining exact
+  Stripe-event replay wake derivation. After Prisma regeneration, Web typecheck,
+  focused ESLint, 732 changed-surface tests, a fresh 166-migration deploy, and
+  10/10 PostgreSQL webhook/lock-order tests pass. The new SDK-typed Stripe
+  request guard also passes; its merge-exposed subscription-resume probe now
+  starts without unsupported top-level `await`, with focused contract coverage.

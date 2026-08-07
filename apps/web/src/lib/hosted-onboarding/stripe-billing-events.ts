@@ -1834,25 +1834,25 @@ async function resolveHostedStripeInvoicePaymentIdentity(input: {
 async function listHostedStripeRefundsForPaymentIdentity(
   paymentIdentity: HostedStripePaymentIdentity,
 ): Promise<Stripe.Refund[]> {
-  const selector = paymentIdentity.chargeId
-    ? { charge: paymentIdentity.chargeId }
-    : paymentIdentity.paymentIntentId
-      ? { payment_intent: paymentIdentity.paymentIntentId }
-      : null;
-  if (!selector) {
+  if (!paymentIdentity.chargeId && !paymentIdentity.paymentIntentId) {
     return [];
   }
 
   const refunds: Stripe.Refund[] = [];
   let startingAfter: string | undefined;
   for (let pageNumber = 0; pageNumber < HOSTED_STRIPE_REFUND_LIST_MAX_PAGES; pageNumber += 1) {
+    const params: Stripe.RefundListParams = { limit: 100 };
+    if (paymentIdentity.chargeId) {
+      params.charge = paymentIdentity.chargeId;
+    } else if (paymentIdentity.paymentIntentId) {
+      params.payment_intent = paymentIdentity.paymentIntentId;
+    }
+    if (startingAfter) {
+      params.starting_after = startingAfter;
+    }
     const page = await withHostedStripeFailureLog(
       "refunds.list.current-entitlement",
-      () => requireHostedStripeApi().refunds.list({
-        ...selector,
-        limit: 100,
-        ...(startingAfter ? { starting_after: startingAfter } : {}),
-      }),
+      () => requireHostedStripeApi().refunds.list(params),
     );
     refunds.push(...page.data);
     if (!page.has_more) {
