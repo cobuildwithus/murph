@@ -415,7 +415,31 @@ remains authoritative over analytics: the projection never decrypts a row after
 its content-retirement marker is set, reports any affected rolling count as a
 lower bound, and withholds a week-over-week comparison when either weekly
 window has incomplete group-sender evidence. Missing unretired content remains
-an integrity failure.
+an integrity failure. The existing authenticated daily growth snapshot is the
+only durable history owner for these anonymous aggregates: at each UTC date it
+stores the completed prior-day and completed trailing-seven-day distinct-sender
+counts only when their group evidence is complete. These windows use durable
+mailbox receipt (`HostedMailboxItem.createdAt`) so a provider event delivered
+after the daily capture cannot later rewrite a completed day; provider event
+time remains payload/decryption and conversation evidence only. The date-keyed
+upsert makes
+same-day cron and ops-page retries idempotent. An attribution integrity failure
+is reported and creates null activity values only when no same-date row exists;
+on retry it leaves any existing activity values untouched while still updating
+the snapshot's revenue, member, and message aggregates. The cron returns a
+failure after that legacy snapshot write so monitoring and an authenticated
+manual rerun can recover the same date; Vercel does not retry failed cron
+invocations automatically. The ops-page snapshot-capture branch may also
+recover the date before the normal live dashboard read. That read retains its
+existing integrity-fail behavior for missing unretired group evidence. Legacy
+or incomplete windows stay null, and the existing 30-day snapshot projection
+shifts each row onto the completed day its
+windows ended instead of reconstructing identities after mailbox expiry. These
+metrics count the retained sender population received by Murph at read or
+capture time. Account
+deletion removes personal and owned group-container rows; activity retained in
+another member's shared-group container follows normal content retention
+instead of a durable deletion-timestamp trail in anonymous analytics.
 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 
