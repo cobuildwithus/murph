@@ -24,7 +24,9 @@ Updated: 2026-08-07
 - New key material is generated with platform or operating-system CSPRNGs;
   authority private material remains non-exportable in GCP KMS, and the
   Cloudflare private JWK is never printed, placed in command arguments, or
-  written into the repository.
+  written into tracked or review artifacts. Its only plaintext-file hop is the
+  ignored, permission-restricted Wrangler secrets payload on the ephemeral
+  deploy worker.
 - Web and Worker retain the current active generation while accepting the new
   generation only in non-active standby states.
 - Aggregate database proof shows that preloading did not alter active envelope
@@ -60,7 +62,8 @@ Updated: 2026-08-07
     proves retirement safe.
   - GCP KMS owns authority private signing material. Cloudflare automation uses
     P-256 ECDH JWKs, with private material confined to secure local transfer,
-    GitHub Environment secrets, and Worker secrets.
+    GitHub Environment secrets, Worker secrets, and the ignored mode-`0600`
+    Wrangler secrets payload on a mode-`0700` ephemeral deploy directory.
   - Provider audits show names/scopes only. No `.env` contents, key values, or
     production row contents may enter logs or durable artifacts.
 - Product/process constraints:
@@ -86,7 +89,10 @@ Updated: 2026-08-07
 3. Risk: Exportable Cloudflare private material leaks through shell history,
    arguments, files, logs, or review artifacts.
    Mitigation: generate in memory, persist only in an approved secure store,
-   stream values over stdin/API bodies, and verify provider metadata only.
+   stream values over stdin/API bodies, restrict the canonical Wrangler
+   secrets payload to its ignored mode-`0600` file on the ephemeral deploy
+   worker, remove that exact file after any direct/local deploy, and verify
+   provider metadata only.
 4. Risk: Web and Worker deploy skew breaks production during preload.
    Mitigation: land the missing deploy contract first, preserve the existing
    required active single-key variables, add only non-active keyring entries,
@@ -112,9 +118,10 @@ Updated: 2026-08-07
 - Keep the existing runtime keyring abstractions and private workflow mappings;
   fix the missing public renderer boundary instead of adding another owner.
 - Generate and preload keys only after the exact pushed implementation head has
-  passed focused proof, CI, and both ReviewGPT gates. Deploy that immutable
-  reviewed ref, complete live proof, archive the plan, and merge the resulting
-  docs-only final head after its CI rerun.
+  passed focused proof, CI, and both ReviewGPT gates. Merge the reviewed
+  contract to public `main`, deploy from the protected private workflow's
+  public-`main` checkout, complete standby preload and live proof, then archive
+  this plan in a follow-up docs-only PR.
 
 ## Verification
 

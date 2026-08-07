@@ -457,12 +457,20 @@ Last verified: 2026-08-07
   generation while optional keyrings add only `verify_only`, `decrypt_only`,
   or `disabled` compatibility entries. Authority private signing material must
   remain non-exportable in GCP KMS; an exportable Cloudflare private JWK may
-  exist only in approved secret stores and secret provider inputs, never in
-  arguments, files, logs, or review artifacts. A standby preload must not
-  mutate envelope key references. Activation, re-signing, rewrapping, and
-  retirement require an explicit production mutation owner, a reader-complete
-  compatibility window that retains the current Cloudflare private key, and
-  aggregate proof of zero old active or `decrypt_only` references before old
+  exist only in approved secret stores and secret provider inputs. The sole
+  plaintext-file exception is the ignored
+  `apps/cloudflare/.deploy/worker-secrets.json` payload rendered for Wrangler:
+  its parent must be mode `0700`, the file mode `0600`, and the file may be
+  consumed only through Wrangler's `--secrets-file`. Protected production
+  deploys run on an ephemeral worker whose disposal owns cleanup; any direct or
+  local deploy must remove that exact generated file after success or failure.
+  The file is never a source of truth. Private JWK values must never enter CLI
+  argument values, logs, tracked or review artifacts, or any other plaintext
+  file. A standby preload must not mutate envelope key references. Activation,
+  re-signing, rewrapping, and retirement require an explicit production
+  mutation owner, a reader-complete compatibility window that retains the
+  current Cloudflare private key, and aggregate proof of zero old active or
+  `decrypt_only` references before old
   material is disabled or removed.
 - Clinical provider egress is allowlist-derived, never caller-URL-derived. The
   committed directory and SMART discovery pin HTTPS origins; FHIR continuation

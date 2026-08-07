@@ -816,6 +816,25 @@ Cloudflare, and confirm production envelope key-reference aggregates are
 unchanged. Provider inspection and logs must show names, scopes, statuses, and
 counts only—not keyring JSON, PEM bodies, JWKs, or production rows.
 
+Worker deploy preflight must parse both optional keyrings through the same
+runtime-state keyring constructors before Wrangler is reachable. It overlays
+the unchanged required active values, rejects malformed entries and additional
+active keys, and permits private standby entries only for
+`cloudflare-automation-secret`. Validation errors identify the configuration
+field without reproducing keyring or private-key content. Do not bypass this
+gate for a preload.
+
+The Cloudflare private keyring's canonical deploy hop renders the ignored
+`apps/cloudflare/.deploy/worker-secrets.json` payload under a mode-`0700`
+directory with mode `0600`, then supplies that file only as Wrangler's
+`--secrets-file`. The protected production workflow runs on an ephemeral
+worker, so worker disposal removes the payload. A direct or local deploy must
+remove that exact generated file after both success and failure. It is an
+ephemeral transport, not a source of truth; the approved local secret store and
+protected GitHub Environment secret remain the owners. Never place private JWK
+values in CLI argument values, logs, tracked or review artifacts, or any other
+plaintext file.
+
 Standby preload is not authority activation or envelope rotation. Do not change
 an active key id/version, re-sign or rewrap domain-root envelopes, disable a
 current key, or remove compatibility entries until a separately reviewed
