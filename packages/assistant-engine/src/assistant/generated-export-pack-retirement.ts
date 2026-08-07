@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, type Stats } from 'node:fs'
-import { lstat, readFile, readdir, rm } from 'node:fs/promises'
+import { lstat, readFile, readdir, rmdir, unlink } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
@@ -32,7 +32,7 @@ interface ArchivedExportPackFile {
 }
 
 interface ExportPackIdentity {
-  files: Stats[]
+  files: Array<{ name: string; stats: Stats }>
   root: Stats
 }
 
@@ -402,7 +402,14 @@ async function deleteProvenAssistantExportPack(input: {
         return 'complete'
       }
       input.signal?.throwIfAborted()
-      await rm(input.liveSnapshot.absoluteBasePath, { recursive: true })
+      for (const file of input.liveSnapshot.files) {
+        await unlink(path.join(
+          input.liveSnapshot.absoluteBasePath,
+          path.posix.basename(file.path),
+        ))
+        input.signal?.throwIfAborted()
+      }
+      await rmdir(input.liveSnapshot.absoluteBasePath)
       input.signal?.throwIfAborted()
       return 'pruned'
     },
@@ -500,9 +507,15 @@ async function readLiveExportPackSnapshot(input: {
   })
   if (!before) return null
 
-  for (const file of input.expectedFiles) {
+  const expectedByName = new Map(input.expectedFiles.map((file) => [
+    path.posix.basename(file.path),
+    file,
+  ]))
+  for (const { name } of before.files) {
     input.signal?.throwIfAborted()
-    const absolutePath = path.join(absoluteBasePath, path.posix.basename(file.path))
+    const file = expectedByName.get(name)
+    if (!file) return null
+    const absolutePath = path.join(absoluteBasePath, name)
     if (await sha256FileInterruptible(absolutePath, input.signal) !== file.sha256) {
       return null
     }
@@ -512,14 +525,19 @@ async function readLiveExportPackSnapshot(input: {
     expectedFiles: input.expectedFiles,
     signal: input.signal,
   })
-  return after && exportPackIdentityMatches(before, after)
-    ? {
-        absoluteBasePath,
-        basePath: input.basePath,
-        files: input.expectedFiles.map((file) => ({ ...file })),
-        identity: after,
-      }
-    : null
+  if (!after || !exportPackIdentityMatches(before, after)) return null
+  const files: ArchivedExportPackFile[] = []
+  for (const { name } of after.files) {
+    const file = expectedByName.get(name)
+    if (!file) return null
+    files.push({ ...file })
+  }
+  return {
+    absoluteBasePath,
+    basePath: input.basePath,
+    files,
+    identity: after,
+  }
 }
 
 async function readExportPackIdentity(input: {
@@ -534,27 +552,29 @@ async function readExportPackIdentity(input: {
 
     const entries = await readdir(input.absoluteBasePath, { withFileTypes: true })
     input.signal?.throwIfAborted()
-    const expectedNames = input.expectedFiles
-      .map((file) => path.posix.basename(file.path))
-      .sort((left, right) => left.localeCompare(right))
+    const expectedByName = new Map(input.expectedFiles.map((file) => [
+      path.posix.basename(file.path),
+      file,
+    ]))
     if (
-      entries.some((entry) => !entry.isFile() || entry.isSymbolicLink())
-      || !sameStrings(
-        entries
-          .map((entry) => entry.name)
-          .sort((left, right) => left.localeCompare(right)),
-        expectedNames,
-      )
+      expectedByName.size !== input.expectedFiles.length
+      || entries.some((entry) => (
+        !entry.isFile()
+        || entry.isSymbolicLink()
+        || !expectedByName.has(entry.name)
+      ))
     ) {
       return null
     }
 
-    const files: Stats[] = []
-    for (const expected of input.expectedFiles) {
+    const files: ExportPackIdentity['files'] = []
+    for (const entry of entries.sort((left, right) => (
+      left.name.localeCompare(right.name)
+    ))) {
       input.signal?.throwIfAborted()
-      const stats = await lstat(
-        path.join(input.absoluteBasePath, path.posix.basename(expected.path)),
-      )
+      const expected = expectedByName.get(entry.name)
+      if (!expected) return null
+      const stats = await lstat(path.join(input.absoluteBasePath, entry.name))
       if (
         !stats.isFile()
         || stats.isSymbolicLink()
@@ -563,7 +583,7 @@ async function readExportPackIdentity(input: {
       ) {
         return null
       }
-      files.push(stats)
+      files.push({ name: entry.name, stats })
     }
     const finalRoot = await lstat(input.absoluteBasePath)
     input.signal?.throwIfAborted()
@@ -591,9 +611,10 @@ function exportPackIdentityMatches(
 ): boolean {
   return fileStatsMatch(left.root, right.root)
     && left.files.length === right.files.length
-    && left.files.every((stats, index) => (
+    && left.files.every((file, index) => (
       right.files[index] !== undefined
-      && fileStatsMatch(stats, right.files[index])
+      && file.name === right.files[index].name
+      && fileStatsMatch(file.stats, right.files[index].stats)
     ))
 }
 

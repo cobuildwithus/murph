@@ -156,6 +156,107 @@ describe('assistant generated export-pack retirement', () => {
     await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it.each([
+    { missing: ['manifest.json'], seed: 'manifest', state: 'missing manifest' },
+    { missing: ['entities.json'], seed: 'payload', state: 'missing payload' },
+    {
+      missing: ['manifest.json', 'entities.json'],
+      seed: 'empty',
+      state: 'empty directory',
+    },
+  ])('resumes an interrupted retirement from a $state', async ({ missing, seed }) => {
+    const setup = await createExportPackDelivery(`partial-${seed}`)
+    await createDeliveryIntent({
+      media: setup.media,
+      status: 'sent',
+      vaultRoot: setup.vaultRoot,
+    })
+    await Promise.all(missing.map(async (fileName) => {
+      await rm(path.join(setup.packPath, fileName))
+    }))
+
+    const result = await pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })
+    await expect(stat(setup.packPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(result).toMatchObject({ exportPacksPruned: 1, filesPruned: 1 })
+  })
+
+  it('defers a partial exact pack while a direct-file delivery is active', async () => {
+    const setup = await createExportPackDelivery('partial-active')
+    const directMedia = await resolveAssistantVaultFileResponseMedia({
+      ref: `${setup.packBasePath}/entities.json`,
+      vaultRoot: setup.vaultRoot,
+    })
+    await createDirectPackFileIntent({
+      deliveryConfirmationPending: false,
+      media: directMedia,
+      seed: 'partial-active',
+      status: 'pending',
+      vaultRoot: setup.vaultRoot,
+    })
+    await createDeliveryIntent({
+      media: setup.media,
+      status: 'sent',
+      vaultRoot: setup.vaultRoot,
+    })
+    await rm(path.join(setup.packPath, 'manifest.json'))
+
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })).resolves.toMatchObject({ exportPacksPruned: 0, filesPruned: 0 })
+    await expect(stat(setup.packPath)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    })
+    await expect(stat(setup.archivePath)).resolves.toMatchObject({
+      size: setup.archive.byteLength,
+    })
+  })
+
+  it.each([
+    'changed',
+    'extra',
+    'nested',
+    'symlink',
+    'hardlink',
+  ])('refuses an unsafe $kind partial-retirement state', async (kind) => {
+    const setup = await createExportPackDelivery(`partial-unsafe-${kind}`)
+    const entityPath = path.join(setup.packPath, 'entities.json')
+    const externalPath = path.join(setup.vaultRoot, `partial-${kind}.json`)
+    await createDeliveryIntent({
+      media: setup.media,
+      status: 'sent',
+      vaultRoot: setup.vaultRoot,
+    })
+    await rm(path.join(setup.packPath, 'manifest.json'))
+    if (kind === 'changed') {
+      await writeFile(entityPath, '{"records":["changed"]}\n')
+    } else if (kind === 'extra') {
+      await writeFile(path.join(setup.packPath, 'extra.json'), '{}\n')
+    } else if (kind === 'nested') {
+      await mkdir(path.join(setup.packPath, 'nested'))
+    } else if (kind === 'symlink') {
+      await writeFile(externalPath, '{"external":"unchanged"}\n')
+      await rm(entityPath)
+      await symlink(externalPath, entityPath)
+    } else {
+      await link(entityPath, externalPath)
+    }
+
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })).resolves.toMatchObject({ exportPacksPruned: 0 })
+    await expect(stat(setup.packPath)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    })
+    if (kind === 'symlink') {
+      await expect(readFile(externalPath, 'utf8')).resolves.toContain('unchanged')
+    } else if (kind === 'hardlink') {
+      await expect(readFile(externalPath, 'utf8')).resolves.toContain('records')
+    }
+  })
+
   it('keeps provider success terminal when immediate cleanup refuses stale evidence', async () => {
     const setup = await createExportPackDelivery('sent-stale-archive')
     await createAssistantTurnReceipt({
