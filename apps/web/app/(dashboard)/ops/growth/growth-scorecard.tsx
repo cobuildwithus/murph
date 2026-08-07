@@ -67,6 +67,7 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
             </div>
             <div className="mt-6 grid gap-4 border-t border-border/60 pt-4 sm:grid-cols-2">
               <SupportingRevenueMetric
+                helper="Recurring subscriptions only; sponsorship stays separate"
                 label="Current MRR"
                 value={formatCurrency(input.mrrUsdCents)}
               />
