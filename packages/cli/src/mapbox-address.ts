@@ -1,6 +1,6 @@
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 import { MAPBOX_GEOCODING_API_VERSION } from './mapbox-route-contracts.js'
 import {

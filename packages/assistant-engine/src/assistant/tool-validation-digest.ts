@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 export const SAFE_TOOL_CALL_VALIDATION_DIGEST_SCHEMA =
   'murph.tool-call-validation-digest.v1'
