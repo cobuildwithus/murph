@@ -142,8 +142,10 @@ describe("hosted ops growth sponsorship metrics", () => {
     expect(markup).toContain('aria-labelledby="test-growth-sponsorship-title"');
     expect(markup).toContain("Group sponsorships");
     expect(markup).toContain("not subscriptions");
+    expect(markup).toContain("retained sponsorship ledger");
     expect(markup).toContain("Gross sponsor charges MTD");
     expect(markup).toContain("$35");
+    expect(markup).toContain("retained fulfilled payments");
     expect(markup).toContain("refunds not netted");
     expect(markup).toContain("Sponsored usage MTD");
     expect(markup).toContain("$4.25");
