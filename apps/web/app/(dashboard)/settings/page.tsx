@@ -318,6 +318,7 @@ export default async function SettingsPage({
     !sponsoredMember &&
     (
       planChangeReturn === "launch_edge_monthly" ||
+      planChangeReturn === "launch_max_monthly" ||
       planChangeReturn === "launch_monthly"
     )
       ? planChangeReturn
@@ -335,12 +336,16 @@ export default async function SettingsPage({
   );
   const hasScheduledPlanChange = scheduledPlanCode !== null;
   const groupPlanConfigured = settingsData?.groupPlanAvailable === true;
-  const showGroupPlan = resolveVisibleHostedBillingPlanCodes({
+  const maxPlanConfigured = settingsData?.maxPlanAvailable === true;
+  const visiblePlanCodes = resolveVisibleHostedBillingPlanCodes({
     currentPlanCode,
     groupPlanConfigured,
     hasConfirmedGroupMembership,
+    maxPlanConfigured,
     scheduledPlanCode,
-  }).includes("launch_group_monthly");
+  });
+  const showGroupPlan = visiblePlanCodes.includes("launch_group_monthly");
+  const showMaxPlan = visiblePlanCodes.includes("launch_max_monthly");
   const canUpgradeToPulse =
     !hasScheduledPlanChange &&
     authenticatedMember !== null &&
@@ -359,6 +364,30 @@ export default async function SettingsPage({
       currentBillingPhase: billingRef?.currentBillingPhase,
       currentBillingPlanCode: billingRef?.currentBillingPlanCode,
       currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+      targetPlanCode: "launch_edge_monthly",
+    });
+  const canUpgradeToMax =
+    !hasScheduledPlanChange &&
+    maxPlanConfigured &&
+    authenticatedMember !== null &&
+    hasHostedMemberOwnActiveBilling(authenticatedMember) &&
+    canUpgradeHostedBillingPlan({
+      currentBillingPhase: billingRef?.currentBillingPhase,
+      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+      targetPlanCode: "launch_max_monthly",
+    });
+  const canSwitchToEdge =
+    !hasScheduledPlanChange &&
+    authenticatedMember !== null &&
+    canScheduleHostedBillingPlanChange({
+      billingStatus: authenticatedMember.billingStatus,
+      currentBillingPhase: billingRef?.currentBillingPhase,
+      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+      stripeCustomerId: billingRef?.stripeCustomerId,
+      stripeSubscriptionId: billingRef?.stripeSubscriptionId,
+      suspendedAt: authenticatedMember.suspendedAt,
       targetPlanCode: "launch_edge_monthly",
     });
   const canSwitchToGroup =
@@ -488,6 +517,7 @@ export default async function SettingsPage({
           authenticated={authenticated}
           billingStatus={authenticatedMember?.billingStatus}
           canStartFamily={canStartFamily}
+          canSwitchToEdge={canSwitchToEdge}
           canSwitchToGroup={canSwitchToGroup}
           familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
           groupPaymentMethodSaved={groupPaymentMethodSaved}
@@ -507,7 +537,9 @@ export default async function SettingsPage({
           }
           canUpgradeToPulse={canUpgradeToPulse}
           canUpgradeToEdge={canUpgradeToEdge}
+          canUpgradeToMax={canUpgradeToMax}
           showGroupPlan={showGroupPlan}
+          showMaxPlan={showMaxPlan}
           canSwitchToPulse={
             !hasScheduledPlanChange &&
             canSwitchHostedBillingPlanToPulse({
@@ -753,6 +785,9 @@ async function readSettingsPageData(input: {
     && await isHostedBillingPlanSelectionAvailable({
       billingPlanCode: "launch_group_monthly",
     });
+  const maxPlanAvailable = await isHostedBillingPlanSelectionAvailable({
+    billingPlanCode: "launch_max_monthly",
+  });
   const usageStatus = await readHostedPersonalAiUsageStatus({
     memberId,
     prisma,
@@ -799,6 +834,7 @@ async function readSettingsPageData(input: {
     hasConfirmedGroupMembership,
     inferenceConnection,
     freshPrivySession: await freshPrivySessionPromise,
+    maxPlanAvailable,
     secureApprovalStatus: await secureApprovalStatusPromise,
     settingsSnapshot,
     usageActivity,
