@@ -1,6 +1,6 @@
 # Lazy-load dynamic-tool execution
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-07
 
@@ -141,6 +141,10 @@ Decision: continue the complete catalog/runtime separation as one change.
   baseline, the static closure is 168,095 B smaller while the lazy split adds
   17,669 B to total output. The static byte budget is ratcheted to the new
   measurement and rejects `dynamic-tools.js` if it re-enters the boot closure.
+- Merging current main exposed one stale root-Zod import in the extracted eager
+  catalog. The production locale guard failed the assembly, the catalog was
+  routed through `@murphai/contracts/zod-runtime`, and the complete assembly
+  then passed with only the English locale in the static closure.
 - Twenty alternating Docker amd64-emulation samples per arm measured baseline
   versus candidate p50 1,126.0/1,079.5 ms and p90 1,202.1/1,195.0 ms; paired
   median delta was -27.3 ms. Excluding the candidate image's first layer-cold
@@ -148,11 +152,17 @@ Decision: continue the complete catalog/runtime separation as one change.
   emulation; the deterministic result is the 172,618 B closure reduction.
 - Ten fresh candidate containers measured the deferred chunk import at a 10.4
   ms median after entrypoint readiness.
+- A post-merge ten-pair alternating Docker run on the currently contended local
+  host measured baseline/candidate p50 2,264.6/2,351.2 ms and a mixed-sign
+  paired median of +19.8 ms. This run is not directionally useful and does not
+  replace the earlier controlled comparison; the exact static-closure reduction
+  remains the reliable combined-head proof.
 - Production assembly's lazy-chunk boot probe passed, and a normal container
   health smoke returned healthy as the non-root `runner` user.
-- Assistant Engine and Cloudflare typechecks passed. Focused Assistant Engine
-  catalog/planning/runtime tests passed (191 tests), the failure/abort ordering
-  regression passed, and Cloudflare bundle tests passed (35 tests).
+- Assistant Engine and Cloudflare typechecks passed. The post-merge focused
+  Assistant Engine catalog/planning/runtime selection passed 529 tests, the
+  failure/abort ordering regression passed, and the combined Cloudflare bundle
+  guard passed 42 tests.
 - The package-wide Assistant Engine suite reached the existing roughly 4 GiB
   fork memory ceiling and its Vitest parent did not terminate after the worker
   OOM. The exact owned test session was interrupted after the crash; focused
@@ -165,3 +175,7 @@ Decision: continue the complete catalog/runtime separation as one change.
   the first import and cached import path, keeps preflight/execution ordinals at
   `0` and `1`, and leaves the latest follow-up reply visible. All five focused
   dynamic-runtime tests and Assistant Engine typecheck pass.
+- Final ReviewGPT round 3 accepted the requirement-level retrospective, verified
+  the round-one ownership correction against the complete exact-head snapshot,
+  and returned PASS with no remaining qualifying finding.
+Completed: 2026-08-07
