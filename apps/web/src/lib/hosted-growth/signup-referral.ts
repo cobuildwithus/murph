@@ -79,7 +79,7 @@ export function buildHostedSignupReferralUrl(
 
 function buildHostedClaimedSignupUrl(
   inviteCode: string,
-  publicBaseUrl = requireHostedOnboardingPublicBaseUrl(),
+  publicBaseUrl: string,
 ): string {
   return new URL(
     `/join/${encodeURIComponent(inviteCode)}`,
@@ -140,6 +140,10 @@ export async function claimHostedSignupReferralLink(input: {
   const now = input.now ?? new Date();
   assertHostedSignupReferralLinkCurrent(now);
   const token = requireHostedSignupReferralToken(input.referralCode);
+  const publicBaseUrl = new URL(
+    "/",
+    input.publicBaseUrl ?? requireHostedOnboardingPublicBaseUrl(),
+  ).toString();
 
   const prisma = input.prisma ?? getPrisma();
   const invite = await prisma.$transaction(
@@ -155,7 +159,7 @@ export async function claimHostedSignupReferralLink(input: {
     expiresAt: invite.expiresAt,
     signupUrl: buildHostedClaimedSignupUrl(
       invite.inviteCode,
-      input.publicBaseUrl,
+      publicBaseUrl,
     ),
   };
 }

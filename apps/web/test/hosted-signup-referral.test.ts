@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   getHostedOnboardingEnvironment: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedAppSessionHmacKey: vi.fn(() => Buffer.alloc(32, 7)),
+  requireHostedOnboardingPublicBaseUrl: vi.fn(
+    () => "https://www.withmurph.ai",
+  ),
   upsertHostedMemberIdentity: vi.fn(),
 }));
 
@@ -22,7 +25,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 }));
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: mocks.getHostedOnboardingEnvironment,
-  requireHostedOnboardingPublicBaseUrl: () => "https://www.withmurph.ai",
+  requireHostedOnboardingPublicBaseUrl:
+    mocks.requireHostedOnboardingPublicBaseUrl,
 }));
 vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => {
   const original =
@@ -43,6 +47,7 @@ import {
   issueHostedSignupReferralLink,
   readHostedSignupReferralLink,
 } from "@/src/lib/hosted-growth/signup-referral";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 function createPrisma(input: {
   claimLockAcquired?: boolean;
@@ -102,6 +107,9 @@ describe("hosted signup referral links", () => {
     });
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedAppSessionHmacKey.mockReturnValue(Buffer.alloc(32, 7));
+    mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue(
+      "https://www.withmurph.ai",
+    );
     mocks.upsertHostedMemberIdentity.mockResolvedValue({});
   });
 
@@ -217,6 +225,31 @@ describe("hosted signup referral links", () => {
       },
     });
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
+  });
+
+  it("requires the final signup origin before opening the claim transaction", async () => {
+    const { prisma } = createPrisma();
+    const issued = await issueHostedSignupReferralLink({
+      prisma: prisma as never,
+      publicBaseUrl: "https://www.withmurph.ai",
+      referrerMemberId: "member_referrer",
+    });
+    mocks.requireHostedOnboardingPublicBaseUrl.mockImplementationOnce(() => {
+      throw hostedOnboardingError({
+        code: "HOSTED_ONBOARDING_PUBLIC_BASE_URL_REQUIRED",
+        httpStatus: 500,
+        message: "The public base URL is unavailable.",
+      });
+    });
+
+    await expect(claimHostedSignupReferralLink({
+      prisma: prisma as never,
+      referralCode: readReferralToken(issued.signupUrl),
+    })).rejects.toMatchObject({
+      code: "HOSTED_ONBOARDING_PUBLIC_BASE_URL_REQUIRED",
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.createHostedMember).not.toHaveBeenCalled();
   });
 
   it("takes the referrer row only after target provisioning and rechecks authority", async () => {

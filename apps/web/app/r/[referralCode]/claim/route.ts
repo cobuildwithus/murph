@@ -25,9 +25,26 @@ export async function POST(
       context.params,
       "referralCode",
     );
-    assertHostedOnboardingMutationOrigin(request);
   } catch (error) {
     return jsonError(error);
+  }
+
+  try {
+    assertHostedOnboardingMutationOrigin(request);
+  } catch (error) {
+    if (isHostedSignupReferralOriginRejection(error)) {
+      return jsonError(error);
+    }
+    logHostedOnboardingRouteFailure({
+      error,
+      operationName: "signup-referral.origin",
+      requestMethod: request.method,
+    });
+    return redirectToHostedSignupReferralLanding({
+      referralCode,
+      request,
+      status: "busy",
+    });
   }
 
   try {
@@ -38,31 +55,50 @@ export async function POST(
     response.headers.set("Cache-Control", "private, no-store");
     return response;
   } catch (error) {
-    if (!isHostedOnboardingError(error)) {
+    const isPermanentFailure =
+      isPermanentHostedSignupReferralClaimError(error);
+    if (
+      !isPermanentFailure
+      && !isExpectedHostedSignupReferralClaimRetry(error)
+    ) {
       logHostedOnboardingRouteFailure({
         error,
         operationName: "signup-referral.claim",
         requestMethod: request.method,
       });
-      return redirectToHostedSignupReferralLanding({
-        referralCode,
-        request,
-        status: "busy",
-      });
     }
-
-    const status = (
-      error.code === "HOSTED_SIGNUP_REFERRAL_CLAIM_LIMIT_REACHED"
-      || error.code === "HOSTED_SIGNUP_REFERRAL_CLAIM_BUSY"
-    )
-      ? "busy"
-      : "unavailable";
     return redirectToHostedSignupReferralLanding({
       referralCode,
       request,
-      status,
+      status: isPermanentFailure ? "unavailable" : "busy",
     });
   }
+}
+
+function isHostedSignupReferralOriginRejection(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && (
+      error.code === "HOSTED_ONBOARDING_ORIGIN_MISMATCH"
+      || error.code === "HOSTED_ONBOARDING_ORIGIN_REQUIRED"
+    );
+}
+
+function isExpectedHostedSignupReferralClaimRetry(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && (
+      error.code === "HOSTED_SIGNUP_REFERRAL_CLAIM_BUSY"
+      || error.code === "HOSTED_SIGNUP_REFERRAL_CLAIM_LIMIT_REACHED"
+    );
+}
+
+function isPermanentHostedSignupReferralClaimError(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && (
+      error.code === "HOSTED_MEMBER_SUSPENDED"
+      || error.code === "HOSTED_SIGNUP_REFERRAL_LINK_EXPIRED"
+      || error.code === "HOSTED_SIGNUP_REFERRAL_LINK_NOT_FOUND"
+      || error.code === "HOSTED_SIGNUP_REFERRER_NOT_FOUND"
+    );
 }
 
 function redirectToHostedSignupReferralLanding(input: {

@@ -96,14 +96,16 @@ conversations or health information.
 
 Known unavailable links render a human-readable recovery state instead of a
 generic 404. A temporarily exhausted claim allowance or unexpected read/claim
-dependency failure renders `Try again soon` with a same-origin `Try again`
-action that retries the same stable link without requiring the recipient to
-reconstruct a clean URL. The native form route redirects to this HTML state
-rather than exposing a JSON API error, while the secret-safe hosted-onboarding
-logger retains operational evidence. The claim transaction rolls target member,
-identity, crypto envelope, and invite state back before that recovery appears.
-Invalid cross-origin submissions remain hard authorization failures and are
-never disguised as a link problem.
+dependency or server-configuration failure renders `Try again soon` with a
+same-origin `Try again` action that retries the same stable link without
+requiring the recipient to reconstruct a clean URL. The native form route
+redirects to this HTML state rather than exposing a JSON API error, while the
+secret-safe hosted-onboarding logger retains operational evidence. The final
+public signup origin is resolved and validated before the claim transaction
+opens, and transaction failures roll target member, identity, crypto envelope,
+and invite state back before that recovery appears. Invalid cross-origin
+submissions remain hard authorization failures and are never disguised as a
+link problem.
 
 An explicit same-origin `POST /r/<token>/claim` creates a fresh ordinary
 `/join/<inviteCode>` invite and placeholder member. Every claimant—including a

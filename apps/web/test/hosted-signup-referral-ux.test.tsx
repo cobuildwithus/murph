@@ -165,6 +165,95 @@ describe("hosted signup referral UX", () => {
     );
   });
 
+  it("keeps origin configuration failures in the retryable HTML journey", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementationOnce(() => {
+      throw new TypeError(
+        "Synthetic allowed-origin configuration failure. Bearer route-secret",
+      );
+    });
+    const route = await import("../app/r/[referralCode]/claim/route");
+    const response = await route.POST(
+      new Request(
+        "https://www.withmurph.ai/r/stable_referral/claim",
+        {
+          headers: { Origin: "https://www.withmurph.ai" },
+          method: "POST",
+        },
+      ),
+      {
+        params: Promise.resolve({ referralCode: "stable_referral" }),
+      },
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("content-type") ?? "").not.toContain(
+      "application/json",
+    );
+    expect(response.headers.get("location")).toBe(
+      "https://www.withmurph.ai/r/stable_referral?status=busy",
+    );
+    expect(mocks.claimHostedSignupReferralLink).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted onboarding route failed.",
+      expect.objectContaining({
+        errorMessage:
+          "Synthetic allowed-origin configuration failure. Bearer <redacted-secret>",
+        operationName: "signup-referral.origin",
+        requestMethod: "POST",
+      }),
+    );
+  });
+
+  it("keeps typed server claim failures retryable while permanent links stay unavailable", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const route = await import("../app/r/[referralCode]/claim/route");
+    const request = () => new Request(
+      "https://www.withmurph.ai/r/stable_referral/claim",
+      {
+        headers: { Origin: "https://www.withmurph.ai" },
+        method: "POST",
+      },
+    );
+    mocks.claimHostedSignupReferralLink.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_ONBOARDING_PUBLIC_BASE_URL_REQUIRED",
+        httpStatus: 500,
+        message: "The public base URL is unavailable.",
+      }),
+    );
+
+    const retryable = await route.POST(request(), {
+      params: Promise.resolve({ referralCode: "stable_referral" }),
+    });
+    expect(retryable.status).toBe(303);
+    expect(retryable.headers.get("location")).toBe(
+      "https://www.withmurph.ai/r/stable_referral?status=busy",
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted onboarding route failed.",
+      expect.objectContaining({
+        operationName: "signup-referral.claim",
+        requestMethod: "POST",
+      }),
+    );
+
+    mocks.claimHostedSignupReferralLink.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_SIGNUP_REFERRAL_LINK_NOT_FOUND",
+        httpStatus: 404,
+        message: "That Murph referral link is no longer available.",
+      }),
+    );
+    const permanent = await route.POST(request(), {
+      params: Promise.resolve({ referralCode: "stable_referral" }),
+    });
+    expect(permanent.status).toBe(303);
+    expect(permanent.headers.get("location")).toBe(
+      "https://www.withmurph.ai/r/stable_referral?status=unavailable",
+    );
+  });
+
   it("renders the retryable landing when referral validation is temporarily unavailable", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     mocks.readHostedSignupReferralLink.mockRejectedValueOnce(

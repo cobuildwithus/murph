@@ -1020,6 +1020,121 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     }, 30_000);
 
+    it("rejects a missing public signup origin before claim state can commit", async () => {
+      if (!databaseUrl) {
+        throw new Error("DATABASE_URL is required for this proof.");
+      }
+
+      const fixtureId = randomUUID();
+      const referrerMemberId = `member_claim_origin_${fixtureId}`;
+      const now = new Date();
+      const restoreCryptoEnv = configureHostedSignupClaimLocalCryptoForTest();
+      const originEnvironment = configureHostedSignupClaimOriginForTest();
+      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
+
+      try {
+        await observer.hostedMember.create({
+          data: {
+            billingStatus: "active",
+            id: referrerMemberId,
+          },
+        });
+        const [baselineMemberCount, baselineIdentityCount, baselineEnvelope] =
+          await Promise.all([
+            observer.hostedMember.count(),
+            observer.hostedMemberIdentity.count(),
+            observer.$queryRaw<Array<{ count: number }>>`
+              SELECT COUNT(*)::int AS count
+              FROM "hosted_user_crypto_envelope"
+            `,
+          ]);
+        const referralUrl = (await issueHostedSignupReferralLink({
+          now,
+          prisma: observer,
+          publicBaseUrl: "https://www.withmurph.ai",
+          referrerMemberId,
+        })).signupUrl;
+        const referralCode = decodeURIComponent(
+          new URL(referralUrl).pathname.slice("/r/".length),
+        );
+        const route = await import("../app/r/[referralCode]/claim/route");
+        const request = () => new Request(
+          `https://www.withmurph.ai/r/${encodeURIComponent(referralCode)}/claim`,
+          {
+            headers: { Origin: "https://www.withmurph.ai" },
+            method: "POST",
+          },
+        );
+
+        const retryable = await route.POST(request(), {
+          params: Promise.resolve({ referralCode }),
+        });
+        expect(retryable.status).toBe(303);
+        expect(retryable.headers.get("content-type") ?? "").not.toContain(
+          "application/json",
+        );
+        expect(retryable.headers.get("location")).toBe(
+          `https://www.withmurph.ai/r/${encodeURIComponent(referralCode)}?status=busy`,
+        );
+        await expect(Promise.all([
+          observer.hostedMember.count(),
+          observer.hostedMemberIdentity.count(),
+          observer.hostedInvite.count({ where: { referrerMemberId } }),
+          observer.$queryRaw<Array<{ count: number }>>`
+            SELECT COUNT(*)::int AS count
+            FROM "hosted_user_crypto_envelope"
+          `,
+        ])).resolves.toEqual([
+          baselineMemberCount,
+          baselineIdentityCount,
+          0,
+          baselineEnvelope,
+        ]);
+
+        originEnvironment.setPublicBaseUrl("https://www.withmurph.ai");
+        const claimed = await route.POST(request(), {
+          params: Promise.resolve({ referralCode }),
+        });
+        expect(claimed.status).toBe(303);
+        expect(claimed.headers.get("location")).toMatch(
+          /^https:\/\/www\.withmurph\.ai\/join\//u,
+        );
+        const retryInvite = await observer.hostedInvite.findFirstOrThrow({
+          select: { memberId: true },
+          where: { referrerMemberId },
+        });
+        await expect(Promise.all([
+          observer.hostedMember.count(),
+          observer.hostedMemberIdentity.count({
+            where: { memberId: retryInvite.memberId },
+          }),
+          observer.hostedInvite.count({ where: { referrerMemberId } }),
+        ])).resolves.toEqual([
+          baselineMemberCount + 1,
+          1,
+          1,
+        ]);
+      } finally {
+        const claimedMemberIds = (
+          await observer.hostedInvite.findMany({
+            select: { memberId: true },
+            where: { referrerMemberId },
+          })
+        ).map(({ memberId }) => memberId);
+        await observer.hostedInvite.deleteMany({
+          where: { referrerMemberId },
+        });
+        await observer.hostedMember.deleteMany({
+          where: {
+            id: { in: [referrerMemberId, ...claimedMemberIds] },
+          },
+        });
+        await observer.$disconnect();
+        originEnvironment.restore();
+        restoreCryptoEnv();
+      }
+    }, 30_000);
+
     it("admits only one concurrent claim at the 49-to-50 boundary", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for this proof.");
@@ -1229,5 +1344,57 @@ function configureHostedSignupClaimLocalCryptoForTest(): () => void {
         process.env[key] = value;
       }
     }
+  };
+}
+
+const SIGNUP_CLAIM_ORIGIN_ENV_KEYS = [
+  "HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS",
+  "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+  "HOSTED_WEB_BASE_URL",
+  "VERCEL_PROJECT_PRODUCTION_URL",
+] as const;
+
+function configureHostedSignupClaimOriginForTest(): {
+  restore(): void;
+  setPublicBaseUrl(value: string | null): void;
+} {
+  const previous = new Map(
+    SIGNUP_CLAIM_ORIGIN_ENV_KEYS.map((key) => [key, process.env[key]]),
+  );
+  const runtimeGlobals = globalThis as typeof globalThis & {
+    __murphHostedOnboardingEnv?: unknown;
+  };
+  const previousEnvironment = runtimeGlobals.__murphHostedOnboardingEnv;
+  process.env.HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS =
+    "https://www.withmurph.ai";
+  process.env.HOSTED_WEB_BASE_URL = "";
+  process.env.VERCEL_PROJECT_PRODUCTION_URL = "";
+
+  const setPublicBaseUrl = (value: string | null): void => {
+    if (value === null) {
+      delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+    } else {
+      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = value;
+    }
+    delete runtimeGlobals.__murphHostedOnboardingEnv;
+  };
+  setPublicBaseUrl(null);
+
+  return {
+    restore() {
+      for (const [key, value] of previous) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      if (previousEnvironment === undefined) {
+        delete runtimeGlobals.__murphHostedOnboardingEnv;
+      } else {
+        runtimeGlobals.__murphHostedOnboardingEnv = previousEnvironment;
+      }
+    },
+    setPublicBaseUrl,
   };
 }
