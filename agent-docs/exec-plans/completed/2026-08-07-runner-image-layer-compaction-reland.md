@@ -1,6 +1,6 @@
 # runner-image-layer-compaction-reland
 
-Status: active
+Status: completed
 Created: 2026-08-07
 Updated: 2026-08-07
 
@@ -56,8 +56,8 @@ Updated: 2026-08-07
 1. [complete] Reinspect the closed experiment and current `origin/main`.
 2. [complete] Apply the smallest current-tree Dockerfile/test/docs change.
 3. [complete] Run focused tests and current real-image parity/size proof.
-4. [in progress] Commit, push, open the PR, and complete ReviewGPT plus CI gates.
-5. [pending] Close this plan through the final scoped commit and prove current
+4. [complete] Commit, push, open the PR, and complete ReviewGPT plus CI gates.
+5. [complete] Close this plan through the final scoped commit and prove current
    base mergeability.
 
 ## Decisions
@@ -81,4 +81,9 @@ Updated: 2026-08-07
   no group- or world-writable `/app` path, catalog contents, Node, and Python
   smoke: passed.
 - Local benchmark image tags were removed after measurement.
-- `git diff --check`, exact-head required CI, ReviewGPT, and mergeability proof.
+- `git diff --check` and every required exact-head CI check passed.
+- Preliminary ReviewGPT: one invalid packet omitted the unchanged base
+  Dockerfile; the corrected supplemental-evidence retry passed with no findings.
+- Final ReviewGPT round 1 passed with no findings. Parent final review found no
+  additional issue, and GitHub reports the PR mergeable.
+Completed: 2026-08-07
