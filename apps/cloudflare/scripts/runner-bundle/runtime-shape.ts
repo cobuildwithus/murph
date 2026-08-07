@@ -1,11 +1,24 @@
 import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+const unusedInstalledPackagePayloads = [
+  ["zod", "locales"],
+  ["zod", "mini"],
+  ["zod", "src"],
+  ["zod", "v3"],
+  ["zod", "v4-mini"],
+] as const;
+
 export async function pruneRunnerBundle(bundleDir: string): Promise<void> {
   await Promise.all([
     removeBundlePathIfPresent(path.join(bundleDir, "README.md")),
     removeBundlePathIfPresent(path.join(bundleDir, "DEPLOY.md")),
     removeBundlePathIfPresent(path.join(bundleDir, "LICENSE")),
+    ...unusedInstalledPackagePayloads.map((packagePath) =>
+      removeBundlePathIfPresent(
+        path.join(bundleDir, "node_modules", ...packagePath),
+      ),
+    ),
   ]);
   await pruneNonRuntimeFiles(bundleDir);
 }

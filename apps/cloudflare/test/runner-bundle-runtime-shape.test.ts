@@ -1,10 +1,11 @@
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  pruneRunnerBundle,
   rewriteRuntimeBinWrappers,
   rewriteRuntimePackageManifest,
 } from "../scripts/runner-bundle/runtime-shape.js";
@@ -20,6 +21,45 @@ afterEach(async () => {
 });
 
 describe("runner bundle runtime manifest rewriting", () => {
+  it("removes only the unused Zod payloads while retaining its v4 runtime and other package sources", async () => {
+    const bundleDir = await mkdtemp(path.join(tmpdir(), "murph-runner-runtime-shape-"));
+    const removedPaths = [
+      ["zod", "locales", "index.js"],
+      ["zod", "mini", "index.js"],
+      ["zod", "src", "index.ts"],
+      ["zod", "v3", "index.js"],
+      ["zod", "v4-mini", "index.js"],
+    ] as const;
+    const retainedPaths = [
+      ["zod", "index.js"],
+      ["zod", "package.json"],
+      ["zod", "v4", "classic", "external.js"],
+      ["zod", "v4", "core", "index.js"],
+      ["zod", "v4", "locales", "en.js"],
+      ["another-package", "src", "index.js"],
+    ] as const;
+
+    temporaryDirectories.push(bundleDir);
+    for (const relativePath of [...removedPaths, ...retainedPaths]) {
+      const filePath = path.join(bundleDir, "node_modules", ...relativePath);
+      await mkdir(path.dirname(filePath), { recursive: true });
+      await writeFile(filePath, "retained when required\n", "utf8");
+    }
+
+    await pruneRunnerBundle(bundleDir);
+
+    for (const relativePath of removedPaths) {
+      await expect(
+        access(path.join(bundleDir, "node_modules", ...relativePath)),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    for (const relativePath of retainedPaths) {
+      await expect(
+        readFile(path.join(bundleDir, "node_modules", ...relativePath), "utf8"),
+      ).resolves.toBe("retained when required\n");
+    }
+  });
+
   it("keeps installed optional dependencies and drops missing ones from the final bundle manifest", async () => {
     const bundleDir = await mkdtemp(path.join(tmpdir(), "murph-runner-runtime-shape-"));
 
