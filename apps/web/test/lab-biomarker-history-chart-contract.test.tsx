@@ -8,6 +8,7 @@ const captured = vi.hoisted(() => ({
   chartInitialDimension: null as { height: number; width: number } | null,
   gridRendered: false,
   lineChartProps: null as Record<string, unknown> | null,
+  referenceAreas: [] as Record<string, unknown>[],
   referenceLines: [] as Record<string, unknown>[],
   tooltipFormatter: null as ((
     value: unknown,
@@ -34,6 +35,10 @@ vi.mock("recharts", async () => {
     LineChart(props: Record<string, unknown> & { children?: ReactNode }) {
       captured.lineChartProps = props;
       return passthrough(props);
+    },
+    ReferenceArea(props: Record<string, unknown>) {
+      captured.referenceAreas.push(props);
+      return null;
     },
     ReferenceLine(props: Record<string, unknown>) {
       captured.referenceLines.push(props);
@@ -96,6 +101,7 @@ beforeEach(() => {
   captured.chartInitialDimension = null;
   captured.gridRendered = false;
   captured.lineChartProps = null;
+  captured.referenceAreas = [];
   captured.referenceLines = [];
   captured.tooltipFormatter = null;
   captured.yAxisDomain = null;
@@ -121,13 +127,14 @@ test("lab chart keeps tiny values precise without adding a nested keyboard stop"
     value: { color: "var(--chart-1)" },
   });
   expect(captured.chartInitialDimension).toEqual({ height: 320, width: 1 });
+  expect(captured.referenceAreas).toHaveLength(0);
 
   const tooltip = captured.tooltipFormatter?.(0.0015);
   expect(tooltip).toBeTruthy();
   expect(renderToStaticMarkup(createElement("div", null, tooltip))).toContain("0.0015 mg/L");
 });
 
-test("the latest reference range renders quiet boundary context without flattening the trend", () => {
+test("the latest two-sided range expands the scale and separates in-range from review regions", () => {
   const markup = renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "HbA1c",
     points: [
@@ -143,18 +150,44 @@ test("the latest reference range renders quiet boundary context without flatteni
   expect(markup).toContain("Latest lab range");
   expect(markup).toContain("4 to 5.6%");
   expect(markup).toContain("Example Lab");
+  expect(markup).toContain("bg-primary/10");
   expect(captured.chartAriaLabel).toBe(
     "HbA1c results over time; latest lab range 4 to 5.6% from Example Lab",
   );
-  expect(markup).toContain("border-y");
-  expect(markup).toContain("border-dashed");
   expect(captured.referenceLines.map((line) => line.y)).toEqual([4, 5.6]);
+  expect(captured.referenceAreas).toHaveLength(3);
+  expect(captured.referenceAreas[0]).toMatchObject({
+    fill: "var(--destructive)",
+    fillOpacity: 0.07,
+    ifOverflow: "hidden",
+    stroke: "none",
+    y1: 4,
+  });
+  expect(captured.referenceAreas[1]).toMatchObject({
+    fill: "var(--destructive)",
+    fillOpacity: 0.07,
+    ifOverflow: "hidden",
+    stroke: "none",
+    y2: 5.6,
+  });
+  expect(captured.referenceAreas[2]).toMatchObject({
+    fill: "var(--primary)",
+    fillOpacity: 0.1,
+    ifOverflow: "hidden",
+    stroke: "none",
+    y1: 4,
+    y2: 5.6,
+  });
   expect(captured.gridRendered).toBe(true);
   expect(captured.yAxisPadding).toMatchObject({ bottom: 16, top: 16 });
 
-  // Keep the automatic, data-focused domain and clip a wider current lab
-  // range rather than compressing the historical trend into a flat line.
-  expect(captured.yAxisDomain).toEqual(["auto", "auto"]);
+  const [minimum, maximum] = captured.yAxisDomain as [
+    (value: number) => number,
+    (value: number) => number,
+  ];
+  expect(minimum(5.6)).toBe(4);
+  expect(maximum(5.8)).toBe(5.8);
+
   for (const line of captured.referenceLines) {
     expect(line).toMatchObject({ ifOverflow: "hidden" });
   }
@@ -163,7 +196,31 @@ test("the latest reference range renders quiet boundary context without flatteni
   expect(renderToStaticMarkup(createElement("div", null, tooltip))).toContain("5.8%");
 });
 
-test("a single reference bound renders one dashed line and no band", () => {
+test("a wide two-sided range stays fully visible around a single in-range result", () => {
+  renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+    displayName: "Example marker",
+    points: [
+      { date: "2026-06-04", id: "p1", value: 15 },
+    ],
+    referenceRange: { high: 20, low: 6 },
+    referenceRangeLabel: "6 to 20 mg/dL",
+    unit: "mg/dL",
+  }));
+
+  const [minimum, maximum] = captured.yAxisDomain as [
+    (value: number) => number,
+    (value: number) => number,
+  ];
+  expect(minimum(15)).toBe(6);
+  expect(maximum(15)).toBe(20);
+  expect(captured.referenceAreas).toEqual(expect.arrayContaining([
+    expect.objectContaining({ fill: "var(--destructive)", y1: 6 }),
+    expect.objectContaining({ fill: "var(--destructive)", y2: 20 }),
+    expect.objectContaining({ fill: "var(--primary)", y1: 6, y2: 20 }),
+  ]));
+});
+
+test("an upper-only range shades the accepted side below its dashed limit", () => {
   const markup = renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "LDL cholesterol",
     points: [
@@ -179,6 +236,15 @@ test("a single reference bound renders one dashed line and no band", () => {
   expect(markup).toContain("Up to 99 mg/dL");
   expect(markup).toContain("border-dashed");
   expect(captured.referenceLines.map((line) => line.y)).toEqual([99]);
+  expect(captured.referenceAreas).toHaveLength(2);
+  expect(captured.referenceAreas[0]).toMatchObject({
+    fill: "var(--destructive)",
+    y2: 99,
+  });
+  expect(captured.referenceAreas[1]).toMatchObject({
+    fill: "var(--primary)",
+    y1: 99,
+  });
 });
 
 test("a fallback bound uses a distinct general-reference label", () => {
@@ -210,7 +276,7 @@ test("a fallback bound uses a distinct general-reference label", () => {
   expect(maximum(5)).toBe(5.7);
 });
 
-test("a lower-only reference keeps its bound visible below the data", () => {
+test("a lower-only range shades the accepted side above its dashed limit", () => {
   renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "eGFR",
     points: [
@@ -224,12 +290,37 @@ test("a lower-only reference keeps its bound visible below the data", () => {
   }));
 
   expect(captured.referenceLines.map((line) => line.y)).toEqual([60]);
+  expect(captured.referenceAreas).toHaveLength(2);
+  expect(captured.referenceAreas[0]).toMatchObject({
+    fill: "var(--destructive)",
+    y1: 60,
+  });
+  expect(captured.referenceAreas[1]).toMatchObject({
+    fill: "var(--primary)",
+    y2: 60,
+  });
   const [minimum, maximum] = captured.yAxisDomain as [
     (value: number) => number,
     (value: number) => number,
   ];
   expect(minimum(79)).toBe(60);
   expect(maximum(102)).toBe(102);
+});
+
+test("an inverted reference range is omitted instead of shading a misleading interval", () => {
+  renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+    displayName: "Invalid range",
+    points: [
+      { date: "2026-06-14", id: "p1", value: 15 },
+    ],
+    referenceRange: { high: 6, low: 20 },
+    referenceRangeLabel: "20 to 6 mg/dL",
+    unit: "mg/dL",
+  }));
+
+  expect(captured.referenceAreas).toHaveLength(0);
+  expect(captured.referenceLines).toHaveLength(0);
+  expect(captured.yAxisDomain).toEqual(["auto", "auto"]);
 });
 
 test("a supplied display value preserves the lab's reported precision in the tooltip", () => {
@@ -259,6 +350,7 @@ test("no reference range keeps the grid and default domain", () => {
     unit: "mIU/L",
   }));
 
+  expect(captured.referenceAreas).toHaveLength(0);
   expect(captured.referenceLines).toHaveLength(0);
   expect(captured.gridRendered).toBe(true);
   expect(captured.yAxisDomain).toEqual(["auto", "auto"]);
