@@ -407,7 +407,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Biomarker result detail">
-        <BiomarkerDetailStudy />
+        <div id="biomarker-result-range-bands">
+          <BiomarkerDetailStudy />
+        </div>
       </StudySection>
 
       <Separator />

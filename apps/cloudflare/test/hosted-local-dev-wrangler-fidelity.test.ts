@@ -39,6 +39,9 @@ describe("hosted-local dev wrangler config fidelity", () => {
     expect(dev.compatibility_date).toEqual(production.compatibility_date);
     expect(dev.compatibility_flags).toEqual(production.compatibility_flags);
     expect(dev.ai).toEqual(production.ai);
+    expect(dev.analytics_engine_datasets).toEqual(
+      production.analytics_engine_datasets,
+    );
     expect(dev.send_email).toEqual(production.send_email);
     expect(dev.version_metadata).toEqual(production.version_metadata);
     expect(dev.durable_objects).toEqual(production.durable_objects);
