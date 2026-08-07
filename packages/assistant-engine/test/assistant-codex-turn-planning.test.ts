@@ -54,7 +54,6 @@ vi.mock('../src/assistant/context-snapshot.js', () => ({
 }))
 
 vi.mock('../src/assistant/group-room-model.js', () => ({
-  ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES: 8 * 1024,
   assistantRouteSupportsGroupRoomModel: (input: {
     channel: string | null | undefined
     threadIsDirect: boolean | null | undefined
