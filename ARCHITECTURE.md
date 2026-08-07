@@ -1907,6 +1907,16 @@ four-digit error code and its fixed first-party recovery message through the
 existing `provider_unavailable` tool result. Provider prose, raw bodies, trace ids, private
 identifiers, capability URLs, credentials, and headers never cross that
 boundary; transport, cancellation, and timeout failures remain generic.
+Provider acceptance is only a pending request, not proof that iMessage applied
+the icon. Web emits a metadata-only accepted-request timing record and persists
+the subscribed `chat.group_icon_updated` and
+`chat.group_icon_update_failed` callbacks in the existing Linq provider-event
+ledger. Those rows correlate through the private chat lookup key and retain only
+the terminal status, provider timestamp, bounded event/trace suffixes, payload
+shape/hash, and the documented numeric failure code when present. Icon URLs,
+actor handles, raw callback values, and provider prose are discarded. This is
+diagnostic evidence only: it adds no retry, mailbox work, user-facing state, or
+second avatar lifecycle owner, and it cannot project line or chat health.
 
 Hosted Exa egress is narrower than the path allowlist alone: before injecting
 the Worker-owned key, `apps/cloudflare` must validate the exact bounded
