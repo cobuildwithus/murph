@@ -84,6 +84,12 @@ message-bound effects.
   distinct deterministic command from the same source to tie, validates source
   metadata on replay, and continues to order runtime application by each approved
   event's own mailbox sequence.
+- Final ReviewGPT round 5 found that the deterministic scheduled Clinical Records
+  callback did not enable the existing bounded retry and that the turn-local memo
+  retained a rejected promise. The candidate now permits one automatic replay only
+  for the non-mutating scheduled request-key branch, keeps accepted-message claim
+  creation single-attempt, shares in-flight and successful requests, and clears only
+  the exact rejected request so a later explicit invocation can retry.
 - Focused owner suites pass, including 278 assistant-runtime phase tests and a
   Strict Mode launcher replay test. The full-stack scheduled-image scenario
   observed the expected image upload, attachment, and Linq delivery, then timed

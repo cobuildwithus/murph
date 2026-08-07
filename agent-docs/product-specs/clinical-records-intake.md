@@ -157,9 +157,14 @@ single-use intent as current human action. Queued delivery and same-occurrence r
 therefore cannot invalidate a newer human link, resurrect a started or completed
 OAuth flow, or expire the scheduled link before delivery. A verified private current
 request or exact scheduled automation occurrence may invoke that same owner; neither
-path can choose a member,
-provider, or destination in tool arguments. Once an import is queued, the retrieval
-runtime uses three signed POST operations:
+path can choose a member, provider, or destination in tool arguments.
+
+The scheduled request-key branch permits one bounded exact transport replay after a
+retryable failure because it is deterministic and non-mutating. The turn shares one
+in-flight or successful launcher request and clears only an exact rejected request so
+a later explicit invocation can retry. Message-authorized link creation does not use
+automatic transport replay because it creates the live single-use claim.
+Once an import is queued, the retrieval runtime uses three signed POST operations:
 
 - `/api/internal/clinical-records/runtime/read-run`
 - `/api/internal/clinical-records/runtime/fetch-page`

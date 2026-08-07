@@ -856,6 +856,9 @@ command identity only: it cannot supply, replace, or widen accepted-input or sch
 authority. Clinical Records links remain private and use an operation-scoped retry
 key. Only the exact authenticated launcher may resume through sign-in. Its one-time
 claim is staged in browser history state and removed from any legacy visible fragment
-without erasing unrelated state or URL context. Ordinary feedback and verified-private
+without erasing unrelated state or URL context. Automatic Web-control replay is
+restricted to the deterministic, non-mutating scheduled request-key branch; current
+message-authorized claim creation remains single-attempt at the transport boundary.
+Ordinary feedback and verified-private
 support escalation both require accepted-message authority; scheduled turns receive
 neither capability.

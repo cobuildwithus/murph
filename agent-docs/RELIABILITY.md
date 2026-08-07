@@ -950,12 +950,16 @@ Replaying the same identity with different source metadata or approved bytes fai
 retryably; distinct commands in one turn remain distinct. No receipt table, second
 preference owner, or repair queue is introduced.
 Scheduled Clinical Records calls return a stable authenticated launcher and create no
-intent. The ordinary 15-minute, single-use claim begins only when the member opens
-that exact launcher; transient creation failure remains retryable, and successful
-creation stages the claim in the existing private browser-history owner without
-exposing it in the visible URL or replacing unrelated history state. Ordinary product
-feedback remains accepted-message-only and scheduled turns create no feedback
-obligation.
+intent. Their exact occurrence request key enables one bounded replay for retryable
+transport failure because the scheduled Web branch is deterministic and non-mutating.
+The turn-local owner shares an in-flight or successful request but clears only the
+exact rejected promise, allowing a later explicit tool call to retry. Message-authorized
+claim creation receives no automatic transport replay. The ordinary 15-minute,
+single-use claim begins only when the member opens that exact launcher; transient
+creation failure remains retryable, and successful creation stages the claim in the
+existing private browser-history owner without exposing it in the visible URL or
+replacing unrelated history state. Ordinary product feedback remains
+accepted-message-only and scheduled turns create no feedback obligation.
 
 Progress updates are the deliberate exception: queue-only cron work has no active
 reader and an ephemeral update could arrive after the final outbox reply. The

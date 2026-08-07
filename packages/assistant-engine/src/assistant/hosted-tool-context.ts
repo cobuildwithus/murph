@@ -330,9 +330,17 @@ export function createAssistantHostedToolContext(input: {
     clinicalRecordsConnectLinkTool: clinicalRecordsConnectLinkTool
       ? {
           createConnectLink: (options) => {
-            clinicalRecordsConnectLinkRequest ??=
-              clinicalRecordsConnectLinkTool.createConnectLink(options)
-            return clinicalRecordsConnectLinkRequest
+            if (clinicalRecordsConnectLinkRequest) {
+              return clinicalRecordsConnectLinkRequest
+            }
+            const request = clinicalRecordsConnectLinkTool.createConnectLink(options)
+            clinicalRecordsConnectLinkRequest = request
+            void request.catch(() => {
+              if (clinicalRecordsConnectLinkRequest === request) {
+                clinicalRecordsConnectLinkRequest = null
+              }
+            })
+            return request
           },
         }
       : null,

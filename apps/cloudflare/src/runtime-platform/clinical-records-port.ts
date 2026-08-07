@@ -43,6 +43,7 @@ export function createHostedWebClinicalRecordsPort(input: {
         description: "Hosted clinical records connect link",
         fetchImpl: input.fetchImpl,
         path: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+        replayOnceOnRetryableFailure: options?.requestKey !== undefined,
         sensitiveResponseBody: {
           maxBytes: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_RESPONSE_MAX_BYTES,
         },
