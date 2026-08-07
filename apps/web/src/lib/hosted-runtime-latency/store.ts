@@ -24,15 +24,38 @@ import {
 } from "../hosted-runtime-log/database";
 import {
   listHostedRuntimeTurnTimingLogs,
-  mergeHostedRuntimeTurnTimingLogs,
 } from "../hosted-runtime-log/store";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
-type HostedIngressLatencyPrismaReadClient = {
-  hostedIngressLatencyTrace: Pick<PrismaClient["hostedIngressLatencyTrace"], "findMany">;
-  hostedRuntimeLog: Pick<PrismaClient["hostedRuntimeLog"], "findMany">;
+type HostedIngressLatencyDashboardReadRow = {
+  acceptedAt: Date;
+  assistantInputStagedAt: Date | null;
+  linqDelivery: {
+    acceptedAt: Date | null;
+    attemptedAt: Date;
+    lastReceiptAt: Date | null;
+    sourceRef: string | null;
+    status: string;
+  } | null;
+  linqDeliveryId: string | null;
+  phaseBreakdownJson: unknown;
+  providerRequestOrdinal: number | null;
+  providerStartAt: Date | null;
+  replyRuntimeAttemptId: string | null;
+  runtimeAttemptId: string | null;
+  temporalSignalAcceptedAt: Date | null;
 };
+
+type HostedIngressLatencyPrismaReadClient =
+  | Pick<PrismaClient, "hostedIngressLatencyTrace">
+  | {
+      hostedIngressLatencyTrace: {
+        findMany(
+          input: Prisma.HostedIngressLatencyTraceFindManyArgs,
+        ): Promise<HostedIngressLatencyDashboardReadRow[]>;
+      };
+    };
 
 type HostedIngressLatencyPrismaClient = Pick<
   PrismaClient,
@@ -618,7 +641,6 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
 export async function readHostedIngressLatencyDashboard(
   input: HostedIngressLatencyDashboardInput = {},
 ): Promise<HostedIngressLatencyDashboard> {
-  const prisma = input.prisma ?? getPrisma();
   const source = normalizeHostedIngressLatencySource(input.source ?? "linq");
   const now = input.now ?? new Date();
   const windowHours = normalizeDashboardWindowHours(input.windowHours);
@@ -626,7 +648,7 @@ export async function readHostedIngressLatencyDashboard(
   const inFlightGraceMs = normalizeDashboardInFlightGraceMs(input.inFlightGraceMs);
   const windowStart = new Date(now.getTime() - windowHours * 60 * 60_000);
   const inFlightCutoff = new Date(now.getTime() - inFlightGraceMs);
-  const rows = await prisma.hostedIngressLatencyTrace.findMany({
+  const query = {
     orderBy: {
       acceptedAt: "desc",
     },
@@ -658,7 +680,10 @@ export async function readHostedIngressLatencyDashboard(
       },
       source,
     },
-  });
+  } satisfies Prisma.HostedIngressLatencyTraceFindManyArgs;
+  const rows = input.prisma
+    ? await input.prisma.hostedIngressLatencyTrace.findMany(query)
+    : await getPrisma().hostedIngressLatencyTrace.findMany(query);
   const truncated = rows.length > HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT;
   const visibleRows = truncated ? rows.slice(0, HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT) : rows;
   const runtimeAttemptIds: string[] = source === "linq"
@@ -677,7 +702,6 @@ export async function readHostedIngressLatencyDashboard(
     from: new Date(
       windowStart.getTime() - HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS,
     ),
-    prisma,
     runtimeAttemptIds,
     to: new Date(
       now.getTime() + HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS,
@@ -1111,7 +1135,6 @@ export async function readHostedIngressLatencyDashboard(
 
 async function readHostedIngressLatencyTimingLogs(input: {
   from: Date;
-  prisma: HostedIngressLatencyPrismaReadClient;
   runtimeAttemptIds: readonly string[];
   to: Date;
 }) {
@@ -1120,65 +1143,17 @@ async function readHostedIngressLatencyTimingLogs(input: {
   }
 
   const readLimit = HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT + 1;
-  const [legacyRows, dedicatedRead] = await Promise.all([
-    input.prisma.hostedRuntimeLog.findMany({
-      orderBy: [{ at: "desc" }, { id: "desc" }],
-      select: {
-        at: true,
-        attemptId: true,
-        id: true,
-        redactedJson: true,
-      },
-      take: readLimit,
-      where: {
-        at: {
-          gte: input.from,
-          lte: input.to,
-        },
-        attemptId: { in: [...input.runtimeAttemptIds] },
-        eventCode: "assistant.automation_detail",
-        AND: [
-          {
-            redactedJson: {
-              equals: HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
-              path: ["schema"],
-            },
-          },
-          {
-            redactedJson: {
-              equals: HOSTED_ASSISTANT_TURN_TIMING_TYPE,
-              path: ["type"],
-            },
-          },
-          {
-            redactedJson: {
-              equals: "reply-dispatched",
-              path: ["turnTimingStage"],
-            },
-          },
-        ],
-      },
-    }),
-    readDedicatedHostedRuntimeTimingLogsBestEffort({
-      attemptIds: input.runtimeAttemptIds,
-      from: input.from,
-      limit: readLimit,
-      to: input.to,
-    }),
-  ]);
-
-  const merged = mergeHostedRuntimeTurnTimingLogs([
-    dedicatedRead.rows,
-    legacyRows.map((row) => ({
-      at: row.at.toISOString(),
-      attemptId: row.attemptId,
-      id: row.id,
-      redactedJson: row.redactedJson,
-    })),
-  ], HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT);
+  const dedicatedRead = await readDedicatedHostedRuntimeTimingLogsBestEffort({
+    attemptIds: input.runtimeAttemptIds,
+    from: input.from,
+    limit: readLimit,
+    to: input.to,
+  });
   return {
-    rows: merged.rows,
-    truncated: dedicatedRead.unavailable || merged.truncated,
+    rows: dedicatedRead.rows.slice(0, HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT),
+    truncated:
+      dedicatedRead.unavailable
+      || dedicatedRead.rows.length > HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT,
   };
 }
 

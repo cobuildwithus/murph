@@ -487,17 +487,6 @@ interface HostedUsageDiagnosticsForTestPrismaClient {
       };
     }): Promise<HostedAiUsageForTestPrismaRow[]>;
   };
-  hostedRuntimeLog: {
-    findMany(input: {
-      orderBy: {
-        at: "asc";
-      };
-      take: number;
-      where: {
-        userId: string;
-      };
-    }): Promise<HostedRuntimeLogForTestPrismaRow[]>;
-  };
 }
 
 interface HostedWorkspaceSeedForTestStoreModule {
@@ -727,26 +716,6 @@ export interface HostedAiUsageForTestRow {
   tokenPricingBasis: string;
   totalTokens: number | null;
   triggerKind: string | null;
-}
-
-interface HostedRuntimeLogForTestPrismaRow {
-  at: Date;
-  attemptId: string | null;
-  component: string;
-  eventCode: string;
-  level: string;
-  phase: string;
-  redactedJson: unknown;
-}
-
-export interface HostedRuntimeLogForTestRow {
-  at: string;
-  attemptId: string | null;
-  component: string;
-  eventCode: string;
-  level: string;
-  phase: string;
-  redactedJson: Record<string, unknown> | null;
 }
 
 export interface HostedIngressLatencyTraceForTest {
@@ -1561,40 +1530,6 @@ export async function completeHostedComputerHandoffForTest(input: {
       memberId: input.memberId,
       token: input.token,
     });
-  });
-}
-
-export async function listHostedRuntimeLogsForTest(input: {
-  environment?: NodeJS.ProcessEnv;
-  fromAt?: Date | string | null;
-  limit?: number;
-  userId: string;
-}): Promise<HostedRuntimeLogForTestRow[]> {
-  return withHostedWebTestkitDeps(input.environment, async (deps) => {
-    const fromAt = input.fromAt ? new Date(input.fromAt) : null;
-    if (fromAt && !Number.isFinite(fromAt.getTime())) {
-      throw new TypeError("Hosted runtime log test lower bound must be a valid date.");
-    }
-    const rows = await deps.prisma.hostedRuntimeLog.findMany({
-      orderBy: {
-        at: "asc",
-      },
-      take: normalizeHostedTestingLimit(input.limit ?? 1_000),
-      where: {
-        ...(fromAt ? { at: { gte: fromAt } } : {}),
-        userId: input.userId,
-      },
-    });
-
-    return rows.map((row) => ({
-      at: row.at.toISOString(),
-      attemptId: row.attemptId,
-      component: row.component,
-      eventCode: row.eventCode,
-      level: row.level,
-      phase: row.phase,
-      redactedJson: normalizeHostedTestingRedactedJson(row.redactedJson),
-    }));
   });
 }
 

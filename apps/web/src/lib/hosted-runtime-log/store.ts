@@ -166,29 +166,6 @@ export async function listHostedRuntimeLogs(input: {
   return result.rows.map((row) => projectHostedRuntimeLogRow(row, userId));
 }
 
-export function mergeHostedRuntimeLogRecords<RecordType extends {
-  at: string;
-  id: string;
-}>(
-  sources: readonly (readonly RecordType[])[],
-  limit: number,
-): RecordType[] {
-  const normalizedLimit = normalizeHostedRuntimeLogLimit(limit);
-  const byId = new Map<string, RecordType>();
-  for (const source of sources) {
-    for (const record of source) {
-      byId.set(record.id, record);
-    }
-  }
-
-  return [...byId.values()]
-    .sort((left, right) => {
-      const timeDifference = Date.parse(right.at) - Date.parse(left.at);
-      return timeDifference !== 0 ? timeDifference : right.id.localeCompare(left.id);
-    })
-    .slice(0, normalizedLimit);
-}
-
 export async function listHostedRuntimeTurnTimingLogs(input: {
   attemptIds: readonly string[];
   database?: HostedRuntimeLogSqlDatabase;
@@ -226,30 +203,6 @@ export async function listHostedRuntimeTurnTimingLogs(input: {
     id: requireOpaqueString(row.id, "Hosted runtime timing log id"),
     redactedJson: normalizeHostedRuntimeRedactedJson(row.redactedJson),
   }));
-}
-
-export function mergeHostedRuntimeTurnTimingLogs(
-  sources: readonly (readonly HostedRuntimeTurnTimingLogRow[])[],
-  limit: number,
-): { rows: HostedRuntimeTurnTimingLogRow[]; truncated: boolean } {
-  const normalizedLimit = normalizePositiveInteger(
-    limit,
-    "Hosted runtime timing log merge limit",
-  );
-  const byId = new Map<string, HostedRuntimeTurnTimingLogRow>();
-  for (const source of sources) {
-    for (const row of source) {
-      byId.set(row.id, row);
-    }
-  }
-  const ordered = [...byId.values()].sort((left, right) => {
-    const timeDifference = Date.parse(right.at) - Date.parse(left.at);
-    return timeDifference !== 0 ? timeDifference : right.id.localeCompare(left.id);
-  });
-  return {
-    rows: ordered.slice(0, normalizedLimit),
-    truncated: ordered.length > normalizedLimit,
-  };
 }
 
 /**
