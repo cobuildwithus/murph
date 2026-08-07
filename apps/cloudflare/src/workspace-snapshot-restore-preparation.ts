@@ -17,9 +17,6 @@ import type {
   HostedUserCryptoContext,
 } from "./hosted-crypto/runtime-user-crypto-context.ts";
 import {
-  HOSTED_R2_CUTOVER_PHASE_ENV,
-} from "./r2-cutover.ts";
-import {
   createHostedR2PresignedGetUrl,
   readHostedR2PresignEnvironment,
 } from "./r2-presigned-url.ts";
@@ -65,15 +62,6 @@ export async function prepareHostedWorkspaceSnapshotRestore(input: {
   );
   if (wrappedRootKeyId !== ref.encryption.rootKeyId) {
     throw new Error("Hosted workspace snapshot wrapped data key root did not match its ref.");
-  }
-
-  // During two-bucket coexistence, a snapshot can exist in either fixed-role
-  // bucket regardless of this runner's phase. Leave cold restore to the
-  // existing fenced control-plane route, which locates the object before
-  // selecting the presign bucket.
-  const cutoverPhase = input.configSource[HOSTED_R2_CUTOVER_PHASE_ENV]?.trim();
-  if (cutoverPhase === "source_active" || cutoverPhase === "destination_active") {
-    return null;
   }
 
   // Historical-root lookup and data-key unwrap are best-effort: a 404 or a

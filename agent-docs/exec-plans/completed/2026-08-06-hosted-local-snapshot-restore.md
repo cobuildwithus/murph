@@ -2,7 +2,7 @@
 
 Status: completed
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Goal
 
@@ -13,10 +13,9 @@ Updated: 2026-08-06
 
 - Hosted-local presign GET discovery uses the configured local S3 control
   endpoint and does not consult the separate Wrangler R2 binding.
-- Production R2 source/destination lookup and cutover fallback behavior remain
-  unchanged.
-- A focused test reproduces the current 404 and proves the corrected source and
-  destination bucket selection.
+- Production continues to use the single bound R2 bucket's `head` method.
+- A focused test reproduces the current 404 and proves the corrected local S3
+  bucket selection.
 - Cloudflare focused tests, typecheck, exact-head CI, and required ReviewGPT
   gates pass before merge.
 
@@ -25,7 +24,7 @@ Updated: 2026-08-06
 - In scope: workspace-snapshot presign GET object discovery, focused Worker
   regression coverage, and the existing public PR verification package.
 - Out of scope: snapshot format, upload/session ownership, production bucket
-  migration behavior, retry policy, Durable Object state, or deployment config.
+  retirement, retry policy, Durable Object state, or deployment config.
 
 ## Constraints
 
@@ -38,11 +37,12 @@ Updated: 2026-08-06
 ## Risks and mitigations
 
 1. Local lookup could accidentally alter production bucket selection.
-   Mitigation: branch only when the existing local endpoint guard resolves a
-   local S3 store; otherwise call the unchanged production locator.
-2. Cutover tests could lose source/destination parity.
-   Mitigation: exercise local destination fallback as well as the single-source
-   path and retain the existing production cutover tests.
+   Mitigation: reuse the existing object-store adapter, which selects local S3
+   only behind the local endpoint guard and otherwise binds `BUNDLES.head`.
+2. A concurrent base change could reintroduce the retired R2 bridge during
+   conflict resolution.
+   Mitigation: resolve on the current single-bucket owner and rerun focused
+   tests, typecheck, exact-head CI, and ReviewGPT.
 3. A missing local control endpoint could become a silent 404.
    Mitigation: retain the existing fail-closed configuration error.
 
@@ -65,8 +65,8 @@ Updated: 2026-08-06
   failed because the presign GET path called the Wrangler R2 binding's `head`
   method instead of the configured local S3 control endpoint.
 - `pnpm --filter @murphai/cloudflare-runner exec vitest run test/runner-outbound.test.ts`
-  passes all 212 tests, including single-source and source-active destination
-  fallback restore discovery.
+  passes the focused hosted-local discovery regression on the current
+  single-bucket owner.
 - `pnpm --filter @murphai/cloudflare-runner typecheck` passes.
 - `git diff --check` passes.
 - Exact-head CI and ReviewGPT remain required before merge.
