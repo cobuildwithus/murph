@@ -11,6 +11,7 @@ export { HOSTED_PLAN_CODES, type HostedPlanCode };
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",
   "launch_edge_monthly",
+  "launch_max_monthly",
   "launch_group_monthly",
 ] as const;
 
@@ -136,6 +137,15 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
     recurringAmountUsdCents: 2_000,
   },
+  launch_max_monthly: {
+    badge: "New",
+    code: "launch_max_monthly",
+    displayName: "Max",
+    interval: "month",
+    planCode: "edge",
+    priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MAX_MONTHLY",
+    recurringAmountUsdCents: 5_000,
+  },
 } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
 
 const HOSTED_DEFAULT_BILLING_PLAN_CODE_BY_PLAN = {
@@ -147,6 +157,7 @@ const HOSTED_DIRECT_BILLING_PLAN_RANK = {
   launch_group_monthly: 0,
   launch_monthly: 1,
   launch_edge_monthly: 2,
+  launch_max_monthly: 3,
 } as const satisfies Record<HostedBillingPlanCode, number>;
 
 export interface HostedPlanDefinition {
