@@ -39,6 +39,9 @@
       "@murphai/contracts/browser-vault": [
         "../../packages/contracts/src/browser-vault.ts"
       ],
+      "@murphai/contracts/zod-runtime": [
+        "../../packages/contracts/src/zod-runtime.ts"
+      ],
       "@murphai/contracts/generated/*": [
         "../../packages/contracts/generated/*"
       ],

@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import * as zod from 'zod'
+import * as zod from '@murphai/contracts/zod-runtime'
 import type { JsonSchema } from '@murphai/contracts'
 import {
   emptyArgsSchema,

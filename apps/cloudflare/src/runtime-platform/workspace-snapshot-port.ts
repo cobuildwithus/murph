@@ -247,6 +247,12 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         encryptedBytes: request.ref.archive.encryptedByteSize,
         plainBytes: request.ref.archive.totalPlainBytes,
       };
+      const noteReplaySafeReadAttempt = (attempt: number): void => {
+        timing.replaySafeReadMaxAttempt = Math.max(
+          timing.replaySafeReadMaxAttempt ?? 0,
+          attempt,
+        );
+      };
       const sizeGuardStartedAt = Date.now();
       await runHostedWorkspaceSnapshotRestoreStep({
         details: restoreLogDetails,
@@ -280,6 +286,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         const dataKeyUnwrapStartedAt = Date.now();
         const dataKeyPromise = runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
           details: restoreLogDetails,
+          onAttempt: noteReplaySafeReadAttempt,
           run: async () => await unwrapWorkspaceSnapshotDataKey({
             aad: request.ref.encryption.aad,
             fetchImpl: input.fetchImpl,
@@ -297,6 +304,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         const presignGetStartedAt = Date.now();
         const presignedGetPromise = runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
           details: restoreLogDetails,
+          onAttempt: noteReplaySafeReadAttempt,
           run: async () => {
             const result = await presignWorkspaceSnapshotGet({
               fetchImpl: input.fetchImpl,
@@ -330,6 +338,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       const objectFetchStartedAt = Date.now();
       const archiveTimings = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
         details: restoreLogDetails,
+        onAttempt: noteReplaySafeReadAttempt,
         run: async () => {
           const objectFetchAttemptTiming = {
             objectFetchResponseHeadersMs: 0,
