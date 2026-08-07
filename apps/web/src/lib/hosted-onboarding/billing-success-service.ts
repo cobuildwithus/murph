@@ -27,14 +27,13 @@ import {
 } from "./stripe-billing-lookup";
 import {
   applyStripeCheckoutCompleted,
-  cancelHostedFamilySponsoredCheckoutSubscription,
+  cleanupHostedFamilySponsoredDirectSubscription,
+  cleanupHostedStandardCheckoutAndRetireAttempt,
   cancelHostedPulseTrialCheckoutLoserSubscription,
+  type HostedStripeCheckoutCleanup,
   prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeCheckoutCompletion,
 } from "./stripe-billing-events";
-import {
-  cleanupHostedStandardCheckoutLoser,
-} from "./stripe-checkout-loser-cleanup";
 
 export async function reconcileHostedBillingCheckoutSuccess(input: {
   inviteCode: string;
@@ -76,8 +75,24 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     session,
   });
   if (activationOutcome.cleanupFamilySponsoredStripeSubscriptionId) {
-    await cancelHostedFamilySponsoredCheckoutSubscription({
+    await cleanupHostedFamilySponsoredDirectSubscription({
+      memberId: invite.memberId,
+      prisma,
+      sourceEventId: `checkout-success:${session.id}:family-sponsored-cleanup`,
       subscriptionId: activationOutcome.cleanupFamilySponsoredStripeSubscriptionId,
+    });
+  }
+  if (activationOutcome.cleanupFamilySponsoredCheckout) {
+    await cleanupHostedFamilySponsoredDirectSubscription({
+      checkoutSessionId:
+        activationOutcome.cleanupFamilySponsoredCheckout.checkoutSessionId,
+      memberId: invite.memberId,
+      prisma,
+      refundCheckoutPayment: true,
+      sourceEventId:
+        `checkout-success:${session.id}:family-sponsored-checkout-cleanup`,
+      subscriptionId:
+        activationOutcome.cleanupFamilySponsoredCheckout.subscriptionId,
     });
   }
   if (activationOutcome.cleanupPulseTrialStripeSubscriptionId) {
@@ -87,11 +102,15 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
       subscriptionId: activationOutcome.cleanupPulseTrialStripeSubscriptionId,
     });
   }
-  if (activationOutcome.cleanupStandardCheckoutStripeSubscriptionId) {
-    await cleanupHostedStandardCheckoutLoser({
+  if (activationOutcome.cleanupStandardCheckout) {
+    await cleanupHostedStandardCheckoutAndRetireAttempt({
+      checkoutSessionId:
+        activationOutcome.cleanupStandardCheckout.checkoutSessionId,
+      memberId: invite.memberId,
+      prisma,
       stripe,
-      stripeSubscriptionId:
-        activationOutcome.cleanupStandardCheckoutStripeSubscriptionId,
+      subscriptionId:
+        activationOutcome.cleanupStandardCheckout.subscriptionId,
     });
   }
   await nudgeHostedCheckoutSuccessActivationRunner({
@@ -119,8 +138,9 @@ type HostedCheckoutSessionSuccessInput = {
 type HostedCheckoutSessionSuccessOutcome = {
   activatedMemberId: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
+  cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
-  cleanupStandardCheckoutStripeSubscriptionId?: string | null;
+  cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   welcomeEmailMemberId: string | null;
 };

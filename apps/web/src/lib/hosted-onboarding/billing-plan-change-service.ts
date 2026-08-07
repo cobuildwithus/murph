@@ -71,12 +71,6 @@ export async function upgradeHostedBillingPlan(input: {
     prisma,
     targetPlanCode: input.targetPlanCode,
   });
-  if (owner.currentPlanCode === input.targetPlanCode) {
-    return {
-      billingPlanCode: input.targetPlanCode,
-      status: "already_on_plan",
-    };
-  }
 
   const currentConfig = requireHostedStripeBillingPlanConfig({
     billingPlanCode: owner.currentPlanCode,
@@ -96,15 +90,6 @@ export async function upgradeHostedBillingPlan(input: {
     stripeCustomerId: owner.stripeCustomerId,
     subscription,
   });
-  if (isHostedStripeSubscriptionAppliedPlan({
-    subscription,
-    targetPriceId: targetConfig.priceId,
-  })) {
-    return {
-      billingPlanCode: input.targetPlanCode,
-      status: "already_on_plan",
-    };
-  }
   if (coerceStripeObjectId(subscription.schedule)) {
     throw buildHostedBillingPlanChangeAlreadyScheduledError();
   }
@@ -115,6 +100,16 @@ export async function upgradeHostedBillingPlan(input: {
       message:
         "A previous plan change is still waiting for payment. Finish or cancel it before starting another change.",
     });
+  }
+  assertHostedStripeSubscriptionLiveBillable(subscription);
+  if (isHostedStripeSubscriptionAppliedPlan({
+    subscription,
+    targetPriceId: targetConfig.priceId,
+  })) {
+    return {
+      billingPlanCode: input.targetPlanCode,
+      status: "already_on_plan",
+    };
   }
 
   const sourceItem = requireHostedStripePlanChangeSourceItem({
@@ -377,6 +372,26 @@ function assertHostedStripeSubscriptionMatchesCustomer(input: {
     code: "HOSTED_BILLING_STRIPE_CUSTOMER_MISMATCH",
     httpStatus: 409,
     message: "Your subscription does not match your billing account.",
+  });
+}
+
+function assertHostedStripeSubscriptionLiveBillable(
+  subscription: Stripe.Subscription,
+): void {
+  if (
+    subscription.status === "active"
+    && subscription.cancel_at == null
+    && subscription.cancel_at_period_end !== true
+    && subscription.pause_collection == null
+    && subscription.collection_method === "charge_automatically"
+  ) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_BILLING_PLAN_UPGRADE_SOURCE_INVALID",
+    httpStatus: 409,
+    message:
+      "Your current billing state is not ready for this plan change. Resolve the pending Stripe billing change and try again.",
   });
 }
 

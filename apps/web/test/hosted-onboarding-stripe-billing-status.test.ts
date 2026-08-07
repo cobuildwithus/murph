@@ -103,6 +103,17 @@ describe("resolveHostedStripeBillingStatusForWrite", () => {
     ).toBe(HostedBillingStatus.unpaid);
   });
 
+  it("lets successful refund updates write the explicit reversal status", () => {
+    expect(
+      resolveHostedStripeBillingStatusForWrite({
+        billingStatus: HostedBillingStatus.unpaid,
+        canonicalBillingStatus: HostedBillingStatus.active,
+        currentBillingStatus: HostedBillingStatus.active,
+        sourceType: "stripe.refund.updated",
+      }),
+    ).toBe(HostedBillingStatus.unpaid);
+  });
+
   it("throws when subscription or invoice events are missing canonical Stripe state", () => {
     expect(() =>
       resolveHostedStripeBillingStatusForWrite({
