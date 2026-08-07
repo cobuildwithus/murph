@@ -900,7 +900,7 @@ describe("hosted provider effects", () => {
     });
     expect(fetchMock.mock.calls.filter(([input]) =>
       String(input).endsWith("/capability/check_imessage")
-    )).toHaveLength(3);
+    )).toHaveLength(1);
     expect(fetchMock.mock.calls.filter(([input]) =>
       String(input).endsWith("/chats/current-direct-chat/messages")
     )).toHaveLength(1);

@@ -71,7 +71,8 @@ export type LinqAppCardFallbackTarget = {
 }
 
 export interface LinqRuntimeDependencies {
-  capabilityFetchImplementation?: LinqFetch
+  appCardCapabilityFetchImplementation?: LinqFetch
+  appCardTextFallbackFetchImplementation?: LinqFetch
   env?: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
   publicFetchImplementation?: LinqFetch

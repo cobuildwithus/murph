@@ -56,7 +56,6 @@ export interface AssistantOutboxIntentMirrorState {
 export interface AssistantOutboxPreparedDispatchState {
   attemptCount: number
   deliveryConfirmationPending: boolean
-  deliveryIdempotencyKey: string | null
   deliveryTransportIdempotent: boolean
   lastAttemptAt: string | null
   lastError: AssistantDeliveryError | null
@@ -1348,7 +1347,6 @@ function readAssistantOutboxPreparedDispatchState(
   return {
     attemptCount: intent.attemptCount,
     deliveryConfirmationPending: intent.deliveryConfirmationPending,
-    deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
     deliveryTransportIdempotent: intent.deliveryTransportIdempotent,
     lastAttemptAt: intent.lastAttemptAt,
     lastError: intent.lastError,
@@ -1359,7 +1357,6 @@ function readAssistantOutboxPreparedDispatchState(
 }
 
 export async function resetAssistantOutboxPreparedDispatch(input: {
-  deliveryIdempotencyKey?: string | null
   deliveryTransportIdempotent: boolean
   intent: AssistantOutboxIntent
   intentPath: string
@@ -1393,11 +1390,6 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
     if (current.deliveryTransportIdempotent !== input.deliveryTransportIdempotent) {
       return null
     }
-    const deliveryIdempotencyKey = input.deliveryIdempotencyKey ?? input.intent.deliveryIdempotencyKey
-    if (current.deliveryIdempotencyKey !== deliveryIdempotencyKey) {
-      return null
-    }
-
     const resetAt = input.resetAt.toISOString()
     const restoreDispatchState = input.restoreDispatchState ?? null
     const restoredNextAttemptAt = restoreDispatchState
@@ -1413,9 +1405,7 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
         attemptCount: restoreDispatchState?.attemptCount ?? current.attemptCount,
         deliveryConfirmationPending:
           restoreDispatchState?.deliveryConfirmationPending ?? false,
-        deliveryIdempotencyKey: restoreDispatchState
-          ? restoreDispatchState.deliveryIdempotencyKey
-          : current.deliveryIdempotencyKey,
+        deliveryIdempotencyKey: current.deliveryIdempotencyKey,
         deliveryTransportIdempotent: restoreDispatchState
           ? restoreDispatchState.deliveryTransportIdempotent
           : current.deliveryTransportIdempotent,

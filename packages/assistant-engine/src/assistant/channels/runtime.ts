@@ -611,7 +611,7 @@ export async function sendLinqMessage(
           {
             env,
             fetchImplementation:
-              dependencies.capabilityFetchImplementation
+              dependencies.appCardCapabilityFetchImplementation
               ?? dependencies.fetchImplementation,
             ...(dependencies.signal ? { signal: dependencies.signal } : {}),
           },
@@ -768,7 +768,11 @@ export async function sendLinqMessage(
     },
     {
       env,
-      fetchImplementation: dependencies.fetchImplementation,
+      fetchImplementation:
+        appCardFallbackIdempotencyKey
+          ? dependencies.appCardTextFallbackFetchImplementation
+            ?? dependencies.fetchImplementation
+          : dependencies.fetchImplementation,
       ...(dependencies.signal ? { signal: dependencies.signal } : {}),
     },
   )
@@ -791,7 +795,7 @@ function isLinqAppCardFallbackUnsafeError(error: unknown): boolean {
     && (
       (
         'deliveryMayHaveSucceeded' in error
-        && error.deliveryMayHaveSucceeded === true
+        && typeof error.deliveryMayHaveSucceeded === 'boolean'
       )
       || (
         'providerDispatchControl' in error

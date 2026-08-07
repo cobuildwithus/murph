@@ -52,7 +52,8 @@ type HostedLinqAppCardFallbackTarget = {
 };
 
 export interface HostedProviderEffectDependencies {
-  capabilityFetchImplementation?: typeof fetch;
+  appCardCapabilityFetchImplementation?: typeof fetch;
+  appCardTextFallbackFetchImplementation?: typeof fetch;
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
   loadVaultImage?: (media: AssistantVaultImageResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
@@ -70,7 +71,8 @@ export interface HostedProviderEffectDependencies {
 }
 
 interface HostedProviderEffectContext {
-  capabilityFetchImplementation?: typeof fetch;
+  appCardCapabilityFetchImplementation?: typeof fetch;
+  appCardTextFallbackFetchImplementation?: typeof fetch;
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
   loadVaultImage?: (media: AssistantVaultImageResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
@@ -184,6 +186,13 @@ export async function sendHostedProviderLinqMessage(
   if (persistAppCardTextFallback) {
     context.persistAppCardTextFallback = async (input) => {
       const recoveredTarget = await persistAppCardTextFallback(input);
+      if (
+        context.appCardTextFallbackFetchImplementation
+        && input.idempotencyKey !== effectiveRequest.idempotencyKey
+      ) {
+        context.fetchImplementation =
+          context.appCardTextFallbackFetchImplementation;
+      }
       const fallbackRequest: HostedRuntimeLinqSendRequest = {
         ...effectiveRequest,
         card: null,
@@ -378,8 +387,17 @@ async function sendHostedProviderLinqMessageDirect(
       ? {}
       : { card: request.card, threadIsDirect: request.threadIsDirect ?? null }),
   }, {
-    ...(context.capabilityFetchImplementation
-      ? { capabilityFetchImplementation: context.capabilityFetchImplementation }
+    ...(context.appCardCapabilityFetchImplementation
+      ? {
+          appCardCapabilityFetchImplementation:
+            context.appCardCapabilityFetchImplementation,
+        }
+      : {}),
+    ...(context.appCardTextFallbackFetchImplementation
+      ? {
+          appCardTextFallbackFetchImplementation:
+            context.appCardTextFallbackFetchImplementation,
+        }
       : {}),
     env: context.env,
     fetchImplementation: context.fetchImplementation,
@@ -422,6 +440,18 @@ function createHostedProviderEffectContext(
   const { publicFetchImplementation, ...providerDependencies } = dependencies;
   return {
     ...requireHostedProviderFetchDependencies(providerDependencies, operation),
+    ...(dependencies.appCardCapabilityFetchImplementation
+      ? {
+          appCardCapabilityFetchImplementation:
+            dependencies.appCardCapabilityFetchImplementation,
+        }
+      : {}),
+    ...(dependencies.appCardTextFallbackFetchImplementation
+      ? {
+          appCardTextFallbackFetchImplementation:
+            dependencies.appCardTextFallbackFetchImplementation,
+        }
+      : {}),
     ...(publicFetchImplementation
       ? { publicFetchImplementation }
       : {}),

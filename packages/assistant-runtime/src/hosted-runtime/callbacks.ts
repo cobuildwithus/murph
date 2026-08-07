@@ -999,6 +999,8 @@ function hostedAssistantReplyTargetsSignupWelcomeRecipient(
 }
 
 const HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX = "signup-welcome:";
+const HOSTED_LINQ_APP_CARD_REJECTED_FAILURE_CODE =
+  "ASSISTANT_LINQ_APP_CARD_REJECTED";
 const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
   "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
 
@@ -2683,7 +2685,6 @@ export async function resetHostedPreparedAssistantDeliveryEffects(input: {
       continue;
     }
     await resetAssistantOutboxPreparedDispatchById({
-      deliveryIdempotencyKey: effect.payload.idempotencyKey,
       deliveryTransportIdempotent: effect.payload.transportIdempotent,
       intentId: effect.effectId,
       ...(input.minimumNextAttemptAt
@@ -3017,6 +3018,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
+          onProviderDispatchSettledWithoutEffect: () => {
+            providerDispatchEntered = false;
+          },
           providerFetch: input.providerFetch,
           publicInternetFetch: input.publicInternetFetch,
           signal: input.signal,
@@ -3192,7 +3196,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       });
     if (input.preparedDispatch && resetPreparedDelivery) {
       await resetAssistantOutboxPreparedDispatchById({
-        deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
         deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
         intentId: input.assistantDeliveryEffect.effectId,
         preparedDispatchToken: input.preparedDispatch?.preparedDispatchToken ?? null,
@@ -3373,7 +3376,6 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
   }
 
   const reset = await resetAssistantOutboxPreparedDispatchById({
-    deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
     deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
     intentId: input.assistantDeliveryEffect.effectId,
     preparedDispatchToken: input.preparedDispatchToken,
@@ -3531,6 +3533,7 @@ function createHostedAssistantLinqSendDependency(input: {
     acceptedAt: Date;
   }) => void;
   onProviderDispatchEntered?: () => void;
+  onProviderDispatchSettledWithoutEffect?: () => void;
   providerFetch: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
@@ -3817,21 +3820,24 @@ function createHostedAssistantLinqSendDependency(input: {
       attemptedAt = new Date();
       input.onProviderDispatchEntered?.();
     };
-    const dependencies = requireHostedProviderFetchDependencies({
-      capabilityFetchImplementation: createHostedProviderFetchBoundary({
-        assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
-        operation: "Hosted assistant Linq capability check",
-        providerFetch: input.providerFetch,
-        providerDispatchEnabled: false,
-      }),
-      env: input.linqEnv,
-      fetchImplementation: createHostedProviderFetchBoundary({
+    const createMessageFetchBoundary = (): typeof fetch =>
+      createHostedProviderFetchBoundary({
         assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
         onProviderDispatchEntered: enterHostedLinqProviderDispatch,
         operation: "Hosted assistant Linq delivery",
         providerFetch: input.providerFetch,
         readProviderDispatchIdentity: () => effectiveIdempotencyKey,
+      });
+    const dependencies = requireHostedProviderFetchDependencies({
+      appCardCapabilityFetchImplementation: createHostedProviderFetchBoundary({
+        assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
+        operation: "Hosted assistant Linq capability check",
+        providerFetch: input.providerFetch,
+        providerDispatchEnabled: false,
       }),
+      appCardTextFallbackFetchImplementation: createMessageFetchBoundary(),
+      env: input.linqEnv,
+      fetchImplementation: createMessageFetchBoundary(),
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq delivery");
     let result: HostedRuntimeLinqSendResponse;
@@ -3898,6 +3904,40 @@ function createHostedAssistantLinqSendDependency(input: {
         ...(persistAppCardTextFallback
           ? {
               persistAppCardTextFallback: async (fallback) => {
+                const predecessorIdempotencyKey = effectiveIdempotencyKey;
+                if (
+                  attemptedAt
+                  && predecessorIdempotencyKey !== fallback.idempotencyKey
+                ) {
+                  await recordHostedAssistantLinqDeliveryOutcomeRequired({
+                    effectsPort: input.effectsPort ?? null,
+                    outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+                      attemptedAt,
+                      answeredMailboxItemIds: [],
+                      deliveryContext,
+                      directRecipientPhoneNumber:
+                        originalParticipantRecipientPhoneNumber,
+                      failedAt: new Date(),
+                      failureCode:
+                        HOSTED_LINQ_APP_CARD_REJECTED_FAILURE_CODE,
+                      failureReason: null,
+                      fromPhoneNumber,
+                      idempotencyKey: predecessorIdempotencyKey,
+                      intentId: input.intentId ?? null,
+                      providerTarget,
+                      providerThreadId: null,
+                      result: null,
+                      target: providerTarget,
+                      targetKind: providerTargetKind,
+                      threadIsDirect:
+                        input.threadIsDirect
+                        ?? deliveryContext?.threadIsDirect
+                        ?? null,
+                    }),
+                  });
+                  attemptedAt = null;
+                  input.onProviderDispatchSettledWithoutEffect?.();
+                }
                 let recoveredTarget:
                   | HostedRuntimeLinqTargetOverride
                   | null = null;
@@ -3974,7 +4014,6 @@ function createHostedAssistantLinqSendDependency(input: {
                     ? recoveredTarget
                     : {}),
                 });
-                const predecessorIdempotencyKey = effectiveIdempotencyKey;
                 effectiveIdempotencyKey = fallback.idempotencyKey;
                 providerDispatchRetrySafe = true;
                 if (recoveredTarget) {

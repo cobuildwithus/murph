@@ -7105,17 +7105,6 @@ describe("hostedRunnerIntercept", () => {
 
   it.each([
     {
-      body: {
-        address: "+15550000001",
-        from: "+15550000000",
-      },
-      method: "POST",
-      name: "iMessage capability check",
-      operation: "capability_check",
-      path: "/capability/check_imessage",
-      responseBody: JSON.stringify({ available: true }),
-    },
-    {
       name: "phone number probe",
       method: "GET",
       operation: "phone_numbers_list",
@@ -7150,6 +7139,20 @@ describe("hostedRunnerIntercept", () => {
       name: "chat creation",
       operation: "chat_create",
       path: "/chats",
+    },
+    {
+      body: {
+        address: "+15550000001",
+        from: "+15550000000",
+      },
+      method: "POST",
+      name: "iMessage capability check",
+      operation: "check_imessage_capability",
+      path: "/capability/check_imessage",
+      responseBody: JSON.stringify({
+        address: "+15550000001",
+        available: true,
+      }),
     },
     {
       body: {
