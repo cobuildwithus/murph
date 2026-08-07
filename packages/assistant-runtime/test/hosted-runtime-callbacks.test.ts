@@ -12977,7 +12977,7 @@ describe("hosted runtime callbacks", () => {
       }));
       return request.authorityCheckOnly
         ? {
-            providerDispatchStarted: true,
+            exactFallbackRouteMatched: true,
             threadIsDirect: true,
           }
         : { providerDispatchClaimed: false };

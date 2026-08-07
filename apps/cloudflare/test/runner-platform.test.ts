@@ -4702,7 +4702,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               deliveryPosture: "cautious",
               providerDispatchClaimed: true,
             }
-          : { providerDispatchStarted: true }),
+          : responseCount === 5
+            ? { exactFallbackRouteMatched: true }
+            : { providerDispatchStarted: true }),
         ...(responseCount === 2
           ? {
               targetOverride: {
@@ -4804,8 +4806,18 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       threadIsDirect: true,
     });
+    await expect(assertLinqRecentInboundEngagement({
+      authorityCheckOnly: true,
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
+      target: "chat_frozen_fallback",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      exactFallbackRouteMatched: true,
+      threadIsDirect: true,
+    });
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
     for (const [index, call] of fetchMock.mock.calls.entries()) {
       const request = requireFetchRequest(call, `direct Linq egress authority request ${index}`);
       expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`);

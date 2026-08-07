@@ -82,6 +82,9 @@ Last verified: 2026-08-06
   the fallback delivery row, that row freezes the thread or participant/line
   target: later home-route changes cannot rewrite it. Each fresh drain must
   reauthorize and exact-replay that claimed effect under the same provider key;
+  Web reports the exact-row route match independently of whether the row is
+  provider-started, accepted, delivered, or failed, so lifecycle advancement
+  cannot be mistaken for missing route authority.
   a target-kind, thread, participant, or line mismatch fails closed before
   local target mutation or provider entry. Every
   pre-provider dispatch-control error, including a liveness yield before the

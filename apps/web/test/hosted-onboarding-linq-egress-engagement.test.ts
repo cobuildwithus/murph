@@ -535,6 +535,7 @@ describe("hosted Linq egress authority", () => {
       target: "chat-current-home",
       targetKind: "thread",
     })).resolves.toEqual({
+      exactFallbackRouteMatched: true,
       linePhoneNumberLookupKey:
         createRequiredPhoneLookupKey(homeLinePhone),
       targetOverride: null,
@@ -718,6 +719,7 @@ describe("hosted Linq egress authority", () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-newer-home",
     });
+    let fallbackOutcome: "accepted" | "failed" = "accepted";
     prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) => {
       if (
         where.idempotencyKey
@@ -734,6 +736,17 @@ describe("hosted Linq egress authority", () => {
         === createHostedLinqDeliveryIdempotencyLookupKey(fallbackIdempotencyKey)
       ) {
         return buildHostedRuntimeProviderDispatchRow({
+          ...(fallbackOutcome === "accepted"
+            ? {
+                acceptedAt: new Date("2026-08-06T12:00:01.000Z"),
+                messageLookupKey: "message-fallback",
+                status: "accepted",
+              }
+            : {
+                failedAt: new Date("2026-08-06T12:00:01.000Z"),
+                failureCode: "LINQ_API_REQUEST_FAILED",
+                status: "failed",
+              }),
           linqChatLookupKey: createHostedLinqChatLookupKey("chat-frozen-fallback"),
         });
       }
@@ -749,15 +762,24 @@ describe("hosted Linq egress authority", () => {
       telegramUserId: null,
     });
 
-    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
-      authorityCheckOnly: true,
-      homeRouteFallbackAllowed: true,
-      idempotencyKey: fallbackIdempotencyKey,
-      memberId: "member-1",
-      prisma: asRuntimeEngagementPrisma(prisma),
-      target: "chat-frozen-fallback",
-      targetKind: "thread",
-    })).resolves.toEqual({
+    const assertFrozenFallbackRoute = () =>
+      assertHostedLinqRecentInboundEngagementForRuntime({
+        authorityCheckOnly: true,
+        homeRouteFallbackAllowed: true,
+        idempotencyKey: fallbackIdempotencyKey,
+        memberId: "member-1",
+        prisma: asRuntimeEngagementPrisma(prisma),
+        target: "chat-frozen-fallback",
+        targetKind: "thread",
+      });
+    await expect(assertFrozenFallbackRoute()).resolves.toEqual({
+      exactFallbackRouteMatched: true,
+      targetOverride: null,
+      threadIsDirect: true,
+    });
+    fallbackOutcome = "failed";
+    await expect(assertFrozenFallbackRoute()).resolves.toEqual({
+      exactFallbackRouteMatched: true,
       targetOverride: null,
       threadIsDirect: true,
     });
@@ -2346,6 +2368,67 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
   });
 
+  it("reports an exact accepted fallback route during an authority-only check", async () => {
+    const predecessorIdempotencyKey = "assistant-outbox:intent_123";
+    const fallbackIdempotencyKey =
+      `${predecessorIdempotencyKey}:stale-chat-fallback`;
+    const prisma = createPrismaStub({
+      homeChatId: "chat-newer-home",
+    });
+    prisma.hostedLinqDelivery.findUnique.mockImplementation(async ({ where }) => {
+      if (
+        where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(
+          predecessorIdempotencyKey,
+        )
+      ) {
+        return buildHostedRuntimeProviderDispatchRow({
+          linqChatLookupKey: createHostedLinqChatLookupKey("chat-rejected-card"),
+        });
+      }
+      if (
+        where.idempotencyKey
+        === createHostedLinqDeliveryIdempotencyLookupKey(fallbackIdempotencyKey)
+      ) {
+        return buildHostedRuntimeProviderDispatchRow({
+          acceptedAt: new Date("2026-08-06T12:00:01.000Z"),
+          linqChatLookupKey:
+            createHostedLinqChatLookupKey("chat-frozen-fallback"),
+          messageLookupKey: "message-fallback",
+          status: "accepted",
+        });
+      }
+      return null;
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: true,
+          homeRouteFallbackAllowed: true,
+          idempotencyKey: fallbackIdempotencyKey,
+          intentId: "intent_123",
+          target: "chat-frozen-fallback",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      exactFallbackRouteMatched: true,
+      ok: true,
+      threadIsDirect: true,
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
   it("returns direct audience authority with a current home-route override", async () => {
     const homeLinePhone = "+15550100099";
     const memberPhone = "+15550100001";
@@ -2619,12 +2702,17 @@ describe("hosted Linq egress authority", () => {
 
 function buildHostedRuntimeProviderDispatchRow(
   overrides: {
+    acceptedAt?: Date | null;
+    failedAt?: Date | null;
+    failureCode?: string | null;
     linqChatLookupKey?: string | null;
     memberId?: string | null;
     participantPhoneEncrypted?: string | null;
     participantPhoneLookupKey?: string | null;
     phoneNumberLookupKey?: string | null;
     sourceRef?: string | null;
+    messageLookupKey?: string | null;
+    status?: string;
     targetKind?: "participant" | "thread";
   } = {},
 ) {

@@ -255,6 +255,9 @@ export const POST = withJsonError(async (request: Request) => {
     ...(assertion.assistantAskFallbackRequired
       ? { assistantAskFallbackRequired: true }
       : {}),
+    ...(assertion.asserted.exactFallbackRouteMatched
+      ? { exactFallbackRouteMatched: true }
+      : {}),
     threadIsDirect: assertion.asserted.threadIsDirect,
     ...(assertion.asserted.targetOverride
       ? { targetOverride: assertion.asserted.targetOverride }

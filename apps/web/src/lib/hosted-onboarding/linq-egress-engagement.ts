@@ -67,6 +67,7 @@ export type HostedLinqRuntimeEgressTargetOverride = {
   targetKind: "participant";
 };
 export type HostedLinqRuntimeEgressAssertionResult = {
+  exactFallbackRouteMatched?: boolean;
   linePhoneNumberLookupKey?: string;
   routeDisposition?: "superseded" | "unavailable";
   threadIsDirect: boolean;
@@ -256,6 +257,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       throwHostedLinqRouteAuthorityMismatch();
     }
     return {
+      exactFallbackRouteMatched: true,
       ...(claimedFallbackRoute.fallbackLinePhoneLookupKey
         ? {
             linePhoneNumberLookupKey:

@@ -331,6 +331,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   assistantAskFallbackRequired?: boolean | null;
   deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null;
   deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null;
+  exactFallbackRouteMatched?: boolean | null;
   providerDispatchClaimed?: boolean | null;
   providerDispatchStarted?: boolean | null;
   routeDisposition?: "superseded" | "unavailable" | null;

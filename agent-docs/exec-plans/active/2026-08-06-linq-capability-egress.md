@@ -446,3 +446,17 @@ new participant fallback claims require the complete snapshot atomically.
   240 tests, including ordering proof, a focused authority-interruption
   regression, and predecessor-outcome failure ownership; the assistant-runtime
   typecheck passes.
+- Final ReviewGPT round 16 reproduced a fresh-drain stall for an exact thread
+  fallback whose Web row was already provider-started. The first regression
+  failed confirmation-pending before provider replay. The correction retained
+  the frozen thread when Web reported that exact fence; all 241 callback tests
+  and the assistant-runtime typecheck passed, and exact-head CI was green.
+- Final ReviewGPT round 17 showed that the provider-started signal disappeared
+  after the same exact Web row advanced to accepted or failed. Failing-first
+  Web, Cloudflare, and runtime tests proved the missing protocol projection.
+  Web now reports an exact fallback-route match independently of lifecycle
+  status; Cloudflare preserves it, and runtime applies the unavailable-route
+  guard only when neither an override nor that exact-row authority exists.
+  Focused proof passes all 241 callback tests, 62 Web engagement/route tests,
+  and 145 Cloudflare platform tests. Assistant runtime, prepared Web, and
+  Cloudflare typechecks pass; documentation gardening passes.

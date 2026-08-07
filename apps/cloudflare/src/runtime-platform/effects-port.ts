@@ -374,6 +374,7 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     assistantAskFallbackRequired?: unknown;
     deliveryBlockCode?: unknown;
     deliveryPosture?: unknown;
+    exactFallbackRouteMatched?: unknown;
     providerDispatchClaimed?: unknown;
     providerDispatchStarted?: unknown;
     routeDisposition?: unknown;
@@ -401,6 +402,9 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   }
   if (typeof response.providerDispatchClaimed === "boolean") {
     result.providerDispatchClaimed = response.providerDispatchClaimed;
+  }
+  if (typeof response.exactFallbackRouteMatched === "boolean") {
+    result.exactFallbackRouteMatched = response.exactFallbackRouteMatched;
   }
   if (typeof response.providerDispatchStarted === "boolean") {
     result.providerDispatchStarted = response.providerDispatchStarted;

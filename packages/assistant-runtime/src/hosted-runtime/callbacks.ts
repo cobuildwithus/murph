@@ -3609,7 +3609,7 @@ function createHostedAssistantLinqSendDependency(input: {
       currentHomeRouteOnly
       && providerDispatchPredecessorIdempotencyKey
       && !engagement.targetOverride
-      && engagement.providerDispatchStarted !== true
+      && engagement.exactFallbackRouteMatched !== true
     ) {
       emitHostedExecutionStructuredLog({
         component: "assistant-delivery",
@@ -5047,6 +5047,9 @@ function normalizeHostedAssistantLinqEngagementResult(
   }
   if (result?.deliveryPosture) {
     normalized.deliveryPosture = result.deliveryPosture;
+  }
+  if (typeof result?.exactFallbackRouteMatched === "boolean") {
+    normalized.exactFallbackRouteMatched = result.exactFallbackRouteMatched;
   }
   if (typeof result?.providerDispatchClaimed === "boolean") {
     normalized.providerDispatchClaimed = result.providerDispatchClaimed;
