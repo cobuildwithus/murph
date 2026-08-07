@@ -12,6 +12,8 @@ export const HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT = 3;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_SOURCES_PER_ITEM = 4;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_CANDIDATES = 48;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_TOPICS = 32;
+const REDUCER_ONLY_APPRAISAL_CAVEAT =
+  "This source record preserves reducer classifications but does not replace source-level full-text extraction.";
 
 export type HealthCommonsKnowledgeItemKind =
   | "appraisal"
@@ -43,7 +45,7 @@ export interface HealthCommonsKnowledgeSearchItem {
 
 export interface HealthCommonsKnowledgeSearchResult {
   catalogHash: string;
-  focus: string | null;
+  focus: string;
   items: HealthCommonsKnowledgeSearchItem[];
   query: string;
   safety: HealthCommonsKnowledgeSearchItem | null;
@@ -163,7 +165,7 @@ export function writeHealthCommonsKnowledgeIndex(
 
 export function searchHealthCommonsKnowledgeIndex(input: {
   databasePath: string;
-  focus?: string;
+  focus: string;
   limit?: number;
   query: string;
 }): HealthCommonsKnowledgeSearchResult {
@@ -179,7 +181,10 @@ export function searchHealthCommonsKnowledgeIndex(input: {
     Math.max(Math.trunc(input.limit ?? HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT), 1),
     HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT,
   );
-  const focus = input.focus?.trim() || null;
+  const focus = input.focus?.trim() ?? "";
+  if (!focus) {
+    throw new Error("Health Commons knowledge focus must not be blank.");
+  }
   const database = openKnowledgeDatabase(input.databasePath, true);
   try {
     const version = Number(database.prepare("PRAGMA user_version").get()?.user_version ?? 0);
@@ -226,7 +231,7 @@ export function searchHealthCommonsKnowledgeIndex(input: {
         safety: null,
       };
     }
-    const contentQuery = toFtsQuery(focus ?? query);
+    const contentQuery = toFtsQuery(focus);
     const placeholders = entityKeys.map(() => "?").join(", ");
     const candidateRows = database.prepare(`
       SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
@@ -246,18 +251,16 @@ export function searchHealthCommonsKnowledgeIndex(input: {
     const rows = selectDiverseKnowledgeRows(candidateRows, limit);
 
     const items = rows.map(readKnowledgeRow);
-    const safetyRow = focus
-      ? database.prepare(`
-          SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
-                 c.strength, c.sources_json, c.priority
-          FROM chunks_fts
-          JOIN chunks c ON c.rowid = chunks_fts.rowid
-          WHERE chunks_fts MATCH ? AND c.kind = 'safety'
-            AND c.entity_key IN (${placeholders})
-          ORDER BY bm25(chunks_fts) ASC, c.priority ASC, c.id ASC
-          LIMIT 1
-        `).get(contentQuery, ...entityKeys)
-      : undefined;
+    const safetyRow = database.prepare(`
+      SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
+             c.strength, c.sources_json, c.priority
+      FROM chunks_fts
+      JOIN chunks c ON c.rowid = chunks_fts.rowid
+      WHERE chunks_fts MATCH ? AND c.kind = 'safety'
+        AND c.entity_key IN (${placeholders})
+      ORDER BY bm25(chunks_fts) ASC, c.priority ASC, c.id ASC
+      LIMIT 1
+    `).get(contentQuery, ...entityKeys);
     const safety = safetyRow ? readKnowledgeRow(safetyRow) : null;
 
     return {
@@ -398,6 +401,14 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
   }
 
   for (const [appraisalIndex, appraisal] of catalog.evidenceAppraisals.entries()) {
+    if (
+      appraisal.caveat === REDUCER_ONLY_APPRAISAL_CAVEAT
+      || /\bcandidate row(?:\(s\))?\b|\bshard(?:\(s\))?\b/iu.test(
+        `${appraisal.headline} ${appraisal.implication}`,
+      )
+    ) {
+      continue;
+    }
     const target = entitiesByKey.get(appraisal.targetKey);
     const source = entitiesByKey.get(appraisal.sourceKey);
     const topicText = target ? entityTopicText(target) : source ? entityTopicText(source) : "";

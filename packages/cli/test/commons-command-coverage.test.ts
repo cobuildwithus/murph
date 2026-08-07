@@ -41,7 +41,7 @@ test("commons knowledge search returns a bounded source-backed sauna packet", as
   const cli = createCommonsSliceCli();
   const result = await runInProcessJsonCli<{
     available: boolean;
-    focus: string | null;
+    focus: string;
     items: Array<{
       entityKey: string;
       sources: Array<{ pmid: string | null; url: string | null }>;
@@ -101,8 +101,22 @@ test("commons knowledge search rejects a packet larger than three items", async 
     "knowledge",
     "search",
     "Finnish Dry Sauna",
+    "--focus",
+    "health benefits",
     "--limit",
     "4",
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.envelope.ok, false);
+});
+
+test("commons knowledge search requires a question focus", async () => {
+  const result = await runInProcessJsonCli(createCommonsSliceCli(), [
+    "commons",
+    "knowledge",
+    "search",
+    "Finnish Dry Sauna",
   ]);
 
   assert.equal(result.exitCode, 1);
@@ -118,7 +132,7 @@ test("commons knowledge search stays non-blocking when its generated index is mi
   try {
     const result = await runInProcessJsonCli<{
       available: boolean;
-      focus: string | null;
+      focus: string;
       items: unknown[];
       warning: string | null;
     }>(createCommonsSliceCli(), [
