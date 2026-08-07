@@ -16,6 +16,7 @@ import {
 
 interface CompletedImageGeneration {
   completedAt: string;
+  continuationSessionId: string;
   operationId: string;
   originAssistantInputId: string;
   originAssistantInputIdExact: boolean;
@@ -70,6 +71,7 @@ export function createHostedImageGenerationController(input: {
   }>();
   const operations = new Set<string>();
   const activeOperations = new Map<string, {
+    continuationSessionId: string;
     operationId: string;
     originAssistantInputId: string;
     originAssistantInputIdExact: boolean;
@@ -113,6 +115,7 @@ export function createHostedImageGenerationController(input: {
     activeOperations.delete(operationId);
     completed.push({
       completedAt: new Date().toISOString(),
+      continuationSessionId: operation.continuationSessionId,
       operationId,
       originAssistantInputId: operation.originAssistantInputId,
       originAssistantInputIdExact: operation.originAssistantInputIdExact,
@@ -144,6 +147,16 @@ export function createHostedImageGenerationController(input: {
 
   const launcher: AssistantHostedImageGenerationLauncher = {
     launch(request) {
+      const continuationSessionId = request.continuationSessionId?.trim() || null;
+      if (!continuationSessionId) {
+        // The host binds continuation identity. Accepting a missing one would
+        // stage a completion without an exact session and silently reopen
+        // conversation-based resolution, so fail closed before any operation,
+        // pending scope, or start side effect is recorded.
+        throw new TypeError(
+          "Hosted image generation requires a continuation session id.",
+        );
+      }
       if (operations.has(request.operationId)) {
         return "already-started";
       }
@@ -153,6 +166,7 @@ export function createHostedImageGenerationController(input: {
       }
       operations.add(request.operationId);
       activeOperations.set(request.operationId, {
+        continuationSessionId,
         operationId: request.operationId,
         originAssistantInputId: request.originAssistantInputId,
         originAssistantInputIdExact: request.originAssistantInputIdExact,
@@ -357,6 +371,9 @@ async function stageImageGenerationCompletion(input: {
         ...origin.conversation,
         actorId: null,
         actorIsSelf: false,
+        // Continuation identity is host-bound and independent of the pending
+        // image coordination scope.
+        sessionId: input.completion.continuationSessionId,
       },
       occurredAt: input.completion.completedAt,
       receivedAt: input.completion.completedAt,
