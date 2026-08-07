@@ -49,6 +49,22 @@ jobs:
             exit 1
           fi
 
+      - name: Normalize audit script for current helper boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/agent-max-final-audit.py")
+          text = path.read_text(encoding="utf-8")
+          old = "\\nfunction buildHostedTrialExpiredPendingBillingNotice("
+          new = "\\nfunction renderHostedAiUsageGateLimitNoticeMessage("
+          if text.count(old) != 1:
+              raise SystemExit(f"Expected one obsolete usage notice boundary, found {text.count(old)}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
       - name: Apply audited Max integration fixes
         run: python scripts/agent-max-final-audit.py
 
