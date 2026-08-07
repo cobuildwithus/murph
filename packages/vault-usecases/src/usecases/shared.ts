@@ -1,5 +1,15 @@
 import { randomBytes } from "node:crypto"
-import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import {
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises"
 import path from "node:path"
 
 import {
@@ -873,6 +883,44 @@ export async function materializeExportPack(
       targetDirectory,
       targetPath,
     })
+  }
+}
+
+export async function directoriesSharePhysicalIdentity(
+  leftDirectory: string,
+  rightDirectory: string,
+): Promise<boolean> {
+  const [left, right] = await Promise.all([
+    readExistingDirectoryIdentity(leftDirectory),
+    readExistingDirectoryIdentity(rightDirectory),
+  ])
+  if (!left || !right) {
+    return false
+  }
+  return left.canonicalPath === right.canonicalPath
+    || (
+      left.ino !== 0
+      && left.dev === right.dev
+      && left.ino === right.ino
+    )
+}
+
+async function readExistingDirectoryIdentity(candidate: string): Promise<{
+  canonicalPath: string
+  dev: number
+  ino: number
+} | null> {
+  try {
+    const canonicalPath = await realpath(path.resolve(candidate))
+    const stats = await stat(canonicalPath)
+    return stats.isDirectory()
+      ? { canonicalPath, dev: stats.dev, ino: stats.ino }
+      : null
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+    throw error
   }
 }
 

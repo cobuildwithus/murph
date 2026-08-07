@@ -92,9 +92,11 @@ Updated: 2026-08-07
 8. [completed] Resolve final ReviewGPT round 3 cross-archive starvation and
    local-owner findings with a one-snapshot sweep and one coalesced assistantd
    maintenance task.
-9. [in progress] Resolve final ReviewGPT round 4 materialization/prune locking
-   and permanent oversized-pack deferral findings; then push the exact
-   remediation head and complete final ReviewGPT plus exact-head CI.
+9. [completed] Resolve final ReviewGPT round 4 materialization/prune locking
+   and permanent oversized-pack deferral findings.
+10. [in progress] Resolve final ReviewGPT round 5 physical-directory alias and
+    external reconstruction lock-scope findings; then push the exact
+    remediation head and complete final ReviewGPT plus exact-head CI.
 
 ## Verification
 
@@ -116,4 +118,6 @@ Updated: 2026-08-07
   stale, terminally oversized, and active earlier pack candidates, cross-archive
   progress, terminal-authority retention, authenticated request preemption,
   outbox-drain recovery, coalescing, shutdown, and abort recovery.
-- Pending final round 5 ReviewGPT and exact-head CI.
+- Physical-identity helper, integrated alias, and external reconstruction lock
+  scope tests; typechecks for `vault-usecases`, `assistant-engine`, and CLI.
+- Pending final round 6 ReviewGPT and exact-head CI.

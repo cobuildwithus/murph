@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -241,6 +241,8 @@ test("repairIntegrationIngests delegates to the core migration primitive", async
 
 test("canonical export-pack materialization waits for the shared assistant runtime lock", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-export-pack-lock-"));
+  const aliasParent = `${vaultRoot}-alias-parent`;
+  const aliasVault = path.join(aliasParent, path.basename(vaultRoot));
   const packId = "shared-lock-pack";
   const manifestPath = `exports/packs/${packId}/manifest.json`;
   const files = [{
@@ -268,10 +270,17 @@ test("canonical export-pack materialization waits for the shared assistant runti
   };
 
   try {
+    await symlink(path.dirname(vaultRoot), aliasParent, "dir");
+    const actualShared = await import("../src/usecases/shared.ts");
+    const materializeExportPack = vi.fn(actualShared.materializeExportPack);
     const integratedServicesModule = await importWithMocks<
       typeof import("../src/usecases/integrated-services.ts")
     >("../src/usecases/integrated-services.ts", {
       "../src/usecases/runtime.js": () => runtimeModule,
+      "../src/usecases/shared.js": () => ({
+        ...actualShared,
+        materializeExportPack,
+      }),
     });
     const { withAssistantRuntimeWriteLock } = await import(
       "../src/assistant-runtime-write-lock.ts"
@@ -288,6 +297,7 @@ test("canonical export-pack materialization waits for the shared assistant runti
         requestId: "shared-lock-export",
         to: "2026-08-07",
         vault: vaultRoot,
+        out: aliasVault,
       }))
       .finally(() => {
         exportSettled = true;
@@ -304,7 +314,12 @@ test("canonical export-pack materialization waits for the shared assistant runti
 
     assert.equal((await exportResult).packId, packId);
     assert.equal(await readFile(path.join(vaultRoot, manifestPath), "utf8"), files[0]?.contents);
+    assert.deepEqual(
+      materializeExportPack.mock.calls.map(([outDir]) => outDir),
+      [vaultRoot],
+    );
   } finally {
+    await rm(aliasParent, { force: true });
     await rm(vaultRoot, { force: true, recursive: true });
   }
 });

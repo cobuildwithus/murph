@@ -21,6 +21,7 @@ import {
   assertNoReservedPayloadKeys,
   buildEntityLinks,
   buildScaffoldPayload,
+  directoriesSharePhysicalIdentity,
   describeLookupConstraint,
   inferEntityKind,
   isQueryableRecordId,
@@ -477,6 +478,9 @@ describe("helper barrel exports", () => {
     expect(() => requirePayloadObjectField({ payload: [] }, "payload")).toThrowError(VaultCliError);
 
     const tempDir = await mkdtemp(path.join(tmpdir(), "murph-export-pack-"));
+    const physicalIdentityRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-export-pack-identity-"),
+    );
 
     try {
       await materializeExportPack(tempDir, [{ path: "nested/file.txt", contents: "ok" }]);
@@ -504,8 +508,32 @@ describe("helper barrel exports", () => {
         name: "VaultCliError",
         code: "invalid_export_pack",
       });
+
+      const actualParent = path.join(physicalIdentityRoot, "actual-parent");
+      const actualVault = path.join(actualParent, "vault");
+      const aliasParent = path.join(physicalIdentityRoot, "alias-parent");
+      const distinctVault = path.join(physicalIdentityRoot, "distinct-vault");
+      await mkdir(actualVault, { recursive: true });
+      await mkdir(distinctVault, { recursive: true });
+      await symlink(actualParent, aliasParent, "dir");
+      await expect(
+        directoriesSharePhysicalIdentity(
+          actualVault,
+          path.join(aliasParent, "vault"),
+        ),
+      ).resolves.toBe(true);
+      await expect(
+        directoriesSharePhysicalIdentity(actualVault, distinctVault),
+      ).resolves.toBe(false);
+      await expect(
+        directoriesSharePhysicalIdentity(
+          actualVault,
+          path.join(physicalIdentityRoot, "missing-vault"),
+        ),
+      ).resolves.toBe(false);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
+      await rm(physicalIdentityRoot, { recursive: true, force: true });
     }
 
     const goalRecord = createQueryRecord({

@@ -1,4 +1,3 @@
-import path from "node:path"
 import {
   type JsonValue,
   type ExperimentStatus,
@@ -38,6 +37,7 @@ import {
 import {
   asEntityEnvelope,
   asListEnvelope,
+  directoriesSharePhysicalIdentity,
   describeLookupConstraint,
   materializeExportPack,
   matchesGenericKindFilter,
@@ -1439,12 +1439,15 @@ function createIntegratedQueryServices(): QueryServices {
         to,
         experimentSlug: experiment,
       })
+      const outSharesVault = out
+        ? await directoriesSharePhysicalIdentity(vault, out)
+        : false
 
       await withAssistantRuntimeWriteLock(vault, async () => {
         await materializeExportPack(vault, pack.files)
       })
 
-      if (out && path.resolve(out) !== path.resolve(vault)) {
+      if (out && !outSharesVault) {
         await materializeExportPack(out, pack.files)
       }
 

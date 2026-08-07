@@ -9,7 +9,11 @@ import {
   type QueryRuntimeModule,
   type QueryCanonicalEntity as AssessmentEntity,
 } from '@murphai/vault-usecases/runtime'
-import { materializeExportPack, resolveVaultRelativePath } from '@murphai/vault-usecases/helpers'
+import {
+  directoriesSharePhysicalIdentity,
+  materializeExportPack,
+  resolveVaultRelativePath,
+} from '@murphai/vault-usecases/helpers'
 import { withAssistantRuntimeWriteLock } from '@murphai/vault-usecases/assistant-runtime-write-lock'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
@@ -317,20 +321,14 @@ async function rebuildStoredExportPackFiles(
   return rebuilt.files
 }
 
-async function loadFilesForMaterialization(
+async function tryReadFilesForMaterialization(
   vaultRoot: string,
   manifest: ExportPackManifest,
 ) {
   try {
-    return {
-      rebuilt: false,
-      files: await readStoredExportPackFiles(vaultRoot, manifest),
-    }
+    return await readStoredExportPackFiles(vaultRoot, manifest)
   } catch {
-    return {
-      rebuilt: true,
-      files: await rebuildStoredExportPackFiles(vaultRoot, manifest),
-    }
+    return null
   }
 }
 
@@ -438,23 +436,39 @@ export async function materializeStoredExportPack(input: {
   out?: string
 }) {
   const outDir = input.out ?? input.vault
-  const writesCanonicalVault = path.resolve(outDir) === path.resolve(input.vault)
+  const writesCanonicalVault = await directoriesSharePhysicalIdentity(
+    input.vault,
+    outDir,
+  )
   const stored = await withAssistantRuntimeWriteLock(input.vault, async () => {
     const { manifestFile, manifest } = await readStoredExportPackManifest(
       input.vault,
       input.packId,
     )
-    const { rebuilt, files } = await loadFilesForMaterialization(input.vault, manifest)
-
-    if (writesCanonicalVault) {
-      await materializeExportPack(outDir, files)
+    const files = await tryReadFilesForMaterialization(input.vault, manifest)
+    if (writesCanonicalVault && files) {
+      await materializeExportPack(input.vault, files)
     }
-
-    return { files, manifest, manifestFile, rebuilt }
+    return {
+      files,
+      manifest,
+      manifestFile,
+      materializedCanonical: writesCanonicalVault && files !== null,
+    }
   })
+  const rebuilt = stored.files === null
+  const files = stored.files
+    ?? await rebuildStoredExportPackFiles(input.vault, stored.manifest)
 
-  if (!writesCanonicalVault) {
-    await materializeExportPack(outDir, stored.files)
+  if (writesCanonicalVault) {
+    if (!stored.materializedCanonical) {
+      await withAssistantRuntimeWriteLock(input.vault, async () => {
+        await readStoredExportPackManifest(input.vault, input.packId)
+        await materializeExportPack(input.vault, files)
+      })
+    }
+  } else {
+    await materializeExportPack(outDir, files)
   }
 
   return {
@@ -462,8 +476,8 @@ export async function materializeStoredExportPack(input: {
     packId: stored.manifest.packId,
     manifestFile: stored.manifestFile,
     outDir,
-    rebuilt: stored.rebuilt,
-    files: stored.files.map((file: { path: string }) => file.path),
+    rebuilt,
+    files: files.map((file: { path: string }) => file.path),
   }
 }
 
