@@ -7,6 +7,7 @@ import {
   hasHostedGroupSponsorshipCustomizationAuthority,
   parseHostedGroupSponsorshipDraft,
   readHostedActiveGroupRunningBit,
+  readHostedGroupFundingSupporters,
   readHostedGroupSponsorshipDraftForCreator,
   readHostedGroupSponsorshipMomentForNotification,
 } from "@/src/lib/hosted-groups/group-sponsorship-store";
@@ -48,6 +49,140 @@ describe("hosted group sponsorship store", () => {
     expect(() => parseHostedGroupSponsorshipDraft({
       sponsorMessage: "unsafe\u0000text",
     })).toThrow(/short plain text/u);
+  });
+
+  it("projects the live sponsor and recent one-time contributions from explicit public aliases", async () => {
+    const authorizationFindFirst = vi.fn(async () => ({
+      id: "hgsa_abcdefghijklmnop",
+      monthlyCapMinor: 1_000,
+    }));
+    const purchaseFindFirst = vi.fn(async () => ({
+      id: "hucp_monthlysponsor1",
+    }));
+    const purchaseFindMany = vi.fn(async () => [
+      { cashAmountMinor: 2_000, id: "hucp_onetimecontrib1" },
+      { cashAmountMinor: 500, id: "hucp_onetimecontrib2" },
+    ]);
+    const momentFindMany = vi.fn(async () => [
+      {
+        creatorMemberId: "member_monthly",
+        publicAliasEncrypted: sealTestValue("The Group Historian"),
+        purchaseId: "hucp_monthlysponsor1",
+      },
+      {
+        creatorMemberId: "member_one_time",
+        publicAliasEncrypted: sealTestValue("Night Shift"),
+        purchaseId: "hucp_onetimecontrib1",
+      },
+    ]);
+    const prisma = {
+      hostedGroupSponsorshipAuthorization: {
+        findFirst: authorizationFindFirst,
+      },
+      hostedGroupSponsorshipMoment: {
+        findMany: momentFindMany,
+      },
+      hostedUsageCreditPurchase: {
+        findFirst: purchaseFindFirst,
+        findMany: purchaseFindMany,
+      },
+    };
+
+    await expect(readHostedGroupFundingSupporters({
+      beneficiaryMemberId: "member_group_runtime",
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      monthlySponsor: {
+        id: "hucp_monthlysponsor1",
+        monthlyCapMinor: 1_000,
+        name: "The Group Historian",
+      },
+      oneTimeContributions: [
+        {
+          amountMinor: 2_000,
+          id: "hucp_onetimecontrib1",
+          name: "Night Shift",
+        },
+        {
+          amountMinor: 500,
+          id: "hucp_onetimecontrib2",
+          name: "Anonymous",
+        },
+      ],
+    });
+    expect(authorizationFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        beneficiaryMemberId: "member_group_runtime",
+      }),
+    }));
+    expect(purchaseFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 20,
+      where: expect.objectContaining({
+        beneficiaryMemberId: "member_group_runtime",
+        groupSponsorshipAuthorizationId: null,
+        status: "fulfilled",
+      }),
+    }));
+    expect(purchaseFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        groupSponsorshipAuthorizationId: "hgsa_abcdefghijklmnop",
+        groupSponsorshipChargeOrdinal: 0,
+        status: "fulfilled",
+      }),
+    }));
+    expect(momentFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        beneficiaryMemberId: "member_group_runtime",
+        purchaseId: {
+          in: [
+            "hucp_monthlysponsor1",
+            "hucp_onetimecontrib1",
+            "hucp_onetimecontrib2",
+          ],
+        },
+      }),
+    }));
+  });
+
+  it("keeps funding history available as Anonymous when aliases cannot be opened", async () => {
+    setHostedSecureBoxStringTestCodecForTests({
+      decrypt: () => {
+        throw new Error("secure box unavailable");
+      },
+      encrypt: ({ value }) => sealTestValue(value),
+    });
+    const prisma = {
+      hostedGroupSponsorshipAuthorization: {
+        findFirst: vi.fn(async () => null),
+      },
+      hostedGroupSponsorshipMoment: {
+        findMany: vi.fn(async () => [{
+          creatorMemberId: "member_one_time",
+          publicAliasEncrypted: sealTestValue("Hidden name"),
+          purchaseId: "hucp_onetimecontrib1",
+        }]),
+      },
+      hostedUsageCreditPurchase: {
+        findFirst: vi.fn(),
+        findMany: vi.fn(async () => [{
+          cashAmountMinor: 1_000,
+          id: "hucp_onetimecontrib1",
+        }]),
+      },
+    };
+
+    await expect(readHostedGroupFundingSupporters({
+      beneficiaryMemberId: "member_group_runtime",
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      monthlySponsor: null,
+      oneTimeContributions: [{
+        amountMinor: 1_000,
+        id: "hucp_onetimecontrib1",
+        name: "Anonymous",
+      }],
+    });
+    expect(prisma.hostedUsageCreditPurchase.findFirst).not.toHaveBeenCalled();
   });
 
   it("freezes encrypted content, rejects changed replay, and activates one expiring bit", async () => {
@@ -151,6 +286,10 @@ describe("hosted group sponsorship store", () => {
     });
   });
 });
+
+function sealTestValue(value: string): string {
+  return `sealed:${Buffer.from(value, "utf8").toString("base64url")}`;
+}
 
 function createHarness(input: { participantAuthorized?: boolean } = {}) {
   const state: { row: Record<string, unknown> } = { row: {} };
