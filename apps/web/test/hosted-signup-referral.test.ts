@@ -219,6 +219,44 @@ describe("hosted signup referral links", () => {
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
   });
 
+  it("takes the referrer row only after target provisioning and rechecks authority", async () => {
+    const { prisma, tx } = createPrisma();
+    const issued = await issueHostedSignupReferralLink({
+      prisma: prisma as never,
+      referrerMemberId: "member_referrer",
+    });
+    tx.hostedMember.findUnique.mockClear();
+
+    await claimHostedSignupReferralLink({
+      prisma: prisma as never,
+      referralCode: readReferralToken(issued.signupUrl),
+    });
+
+    expect(tx.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    const [initialAuthorityRead, finalAuthorityRead] =
+      tx.hostedMember.findUnique.mock.invocationCallOrder;
+    const [memberCreate] = mocks.createHostedMember.mock.invocationCallOrder;
+    const [identityProvision] =
+      mocks.upsertHostedMemberIdentity.mock.invocationCallOrder;
+    const [referrerLock] = mocks.lockHostedMemberRow.mock.invocationCallOrder;
+    const [inviteCreate] = tx.hostedInvite.create.mock.invocationCallOrder;
+    if (
+      initialAuthorityRead === undefined
+      || memberCreate === undefined
+      || identityProvision === undefined
+      || referrerLock === undefined
+      || finalAuthorityRead === undefined
+      || inviteCreate === undefined
+    ) {
+      throw new TypeError("Expected the complete signup-claim call order.");
+    }
+    expect(initialAuthorityRead).toBeLessThan(memberCreate);
+    expect(memberCreate).toBeLessThan(identityProvision);
+    expect(identityProvision).toBeLessThan(referrerLock);
+    expect(referrerLock).toBeLessThan(finalAuthorityRead);
+    expect(finalAuthorityRead).toBeLessThan(inviteCreate);
+  });
+
   it("fails fast on a concurrent claim before touching shared account state", async () => {
     const { prisma, tx } = createPrisma({ claimLockAcquired: false });
     const issued = await issueHostedSignupReferralLink({

@@ -427,7 +427,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     }, 60_000);
 
-    it("orders delayed activation publication before recovery without overbooking", async () => {
+    it("orders delayed publication and fast-host commitments without overbooking", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for this proof.");
       }
@@ -502,9 +502,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         await observer.hostedUsageReferral.createMany({
           data: priorReferralIds.map((id, index) => {
-            const rewardedAt = new Date(
-              activatedAt.getTime() - (index + 1) * 60_000,
-            );
+            const rewardedAt = index === 0
+              ? new Date(now.getTime() + 2 * 60_000)
+              : new Date(activatedAt.getTime() - 2 * 60_000);
             return {
               armedAt: new Date(rewardedAt.getTime() - 60_000),
               beneficiaryMemberId: referrerMemberId,
@@ -564,6 +564,24 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             outcome: "armed",
             status: "ok",
           },
+        });
+        const committedArm =
+          await observer.hostedUsageReferral.findFirstOrThrow({
+            select: { id: true },
+            where: {
+              policyCode: "active_group_v1",
+              referrerMemberId,
+              status: "armed",
+            },
+          });
+        const fastHostTimestamp = new Date(now.getTime() + 5 * 60_000);
+        await observer.hostedUsageReferral.update({
+          data: {
+            armedAt: fastHostTimestamp,
+            createdAt: fastHostTimestamp,
+            expiresAt: new Date(fastHostTimestamp.getTime() + 24 * 60 * 60_000),
+          },
+          where: { id: committedArm.id },
         });
 
         releasePublication();
@@ -627,8 +645,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
         const capRows = await observer.hostedUsageReferral.findMany({
           select: {
+            armedAt: true,
             introducedMemberId: true,
             policyCode: true,
+            rewardedAt: true,
             rewardUsdMicros: true,
             status: true,
           },
@@ -640,10 +660,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           .toHaveLength(2);
         expect(capRows.filter(({ status }) => status === "armed"))
           .toEqual([expect.objectContaining({
+            armedAt: fastHostTimestamp,
             introducedMemberId: null,
             policyCode: "active_group_v1",
             rewardUsdMicros: 3_500_000n,
           })]);
+        expect(capRows.some(({ rewardedAt }) =>
+          rewardedAt !== null && rewardedAt > now
+        )).toBe(true);
         expect(capRows
           .filter(({ status }) => status === "rewarded" || status === "armed")
           .reduce((total, row) => total + row.rewardUsdMicros, 0n))
@@ -691,6 +715,201 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         ]);
       }
     }, 60_000);
+
+    it.each(["suspended", "deleted"] as const)(
+      "keeps the referrer row available during target provisioning and rejects a %s authority race",
+      async (authorityOutcome) => {
+        if (!databaseUrl) {
+          throw new Error("DATABASE_URL is required for this proof.");
+        }
+
+        const fixtureId = randomUUID();
+        const referrerMemberId = `member_claim_authority_${fixtureId}`;
+        const now = new Date();
+        const restoreCryptoEnv = configureHostedSignupClaimLocalCryptoForTest();
+        const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
+        const blockerClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const claimantClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const authorityClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+        let markBlockerReady = (): void => {};
+        const blockerReady = new Promise<void>((resolve) => {
+          markBlockerReady = resolve;
+        });
+        let releaseBlocker = (): void => {};
+        const blockerRelease = new Promise<void>((resolve) => {
+          releaseBlocker = resolve;
+        });
+        let blocker: Promise<unknown> | null = null;
+        let claim: Promise<unknown> | null = null;
+        let authorityMutation: Promise<unknown> | null = null;
+
+        try {
+          await observer.hostedMember.create({
+            data: {
+              billingStatus: "active",
+              id: referrerMemberId,
+            },
+          });
+          const baselineOtherMembers = await observer.hostedMember.count({
+            where: { id: { not: referrerMemberId } },
+          });
+          const baselineIdentities =
+            await observer.hostedMemberIdentity.count();
+          const [baselineEnvelopeCount] = await observer.$queryRaw<
+            Array<{ count: number }>
+          >`
+            SELECT COUNT(*)::int AS count
+            FROM "hosted_user_crypto_envelope"
+          `;
+          const referralUrl = (await issueHostedSignupReferralLink({
+            now,
+            prisma: observer,
+            publicBaseUrl: "https://www.withmurph.ai",
+            referrerMemberId,
+          })).signupUrl;
+          const referralCode = decodeURIComponent(
+            new URL(referralUrl).pathname.slice("/r/".length),
+          );
+
+          blocker = blockerClient.$transaction(async (tx) => {
+            await tx.$executeRawUnsafe(
+              'LOCK TABLE "hosted_user_crypto_envelope" IN ACCESS EXCLUSIVE MODE',
+            );
+            markBlockerReady();
+            await blockerRelease;
+          }, { maxWait: 5_000, timeout: 30_000 });
+          await blockerReady;
+
+          claim = claimHostedSignupReferralLink({
+            now,
+            prisma: claimantClient,
+            publicBaseUrl: "https://www.withmurph.ai",
+            referralCode,
+          });
+          const claimOutcome = claim.then(
+            (value) => ({ status: "fulfilled" as const, value }),
+            (reason: unknown) => ({ reason, status: "rejected" as const }),
+          );
+
+          let targetProvisioningWaitObserved = false;
+          const waitDeadline = Date.now() + 10_000;
+          while (Date.now() < waitDeadline) {
+            const [state] = await observer.$queryRaw<Array<{ waiting: boolean }>>`
+              SELECT EXISTS (
+                SELECT 1
+                FROM pg_locks
+                WHERE relation = 'hosted_user_crypto_envelope'::regclass
+                  AND granted = false
+              ) AS waiting
+            `;
+            if (state?.waiting) {
+              targetProvisioningWaitObserved = true;
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+          expect(targetProvisioningWaitObserved).toBe(true);
+
+          let markAuthorityLocked = (): void => {};
+          const authorityLocked = new Promise<void>((resolve) => {
+            markAuthorityLocked = resolve;
+          });
+          authorityMutation = authorityClient.$transaction(async (tx) => {
+            const locked = await tx.$queryRaw<Array<{ id: string }>>`
+              SELECT id
+              FROM "hosted_member"
+              WHERE id = ${referrerMemberId}
+              FOR UPDATE NOWAIT
+            `;
+            expect(locked).toEqual([{ id: referrerMemberId }]);
+            markAuthorityLocked();
+            if (authorityOutcome === "suspended") {
+              await tx.hostedMember.update({
+                data: { suspendedAt: now },
+                where: { id: referrerMemberId },
+              });
+            } else {
+              await tx.hostedMember.delete({
+                where: { id: referrerMemberId },
+              });
+            }
+          });
+          await authorityLocked;
+          if (authorityOutcome === "suspended") {
+            await authorityMutation;
+          }
+
+          releaseBlocker();
+          await blocker;
+          await authorityMutation;
+          const outcome = await claimOutcome;
+          expect(outcome.status).toBe("rejected");
+          if (
+            outcome.status !== "rejected"
+            || !isHostedOnboardingError(outcome.reason)
+          ) {
+            throw new TypeError("Expected a typed claim authority rejection.");
+          }
+          expect(outcome.reason.code).toBe(
+            authorityOutcome === "suspended"
+              ? "HOSTED_MEMBER_SUSPENDED"
+              : "HOSTED_SIGNUP_REFERRER_NOT_FOUND",
+          );
+
+          await expect(Promise.all([
+            observer.hostedMember.count({
+              where: { id: { not: referrerMemberId } },
+            }),
+            observer.hostedMemberIdentity.count(),
+            observer.hostedInvite.count({ where: { referrerMemberId } }),
+            observer.$queryRaw<Array<{ count: number }>>`
+              SELECT COUNT(*)::int AS count
+              FROM "hosted_user_crypto_envelope"
+            `,
+          ])).resolves.toEqual([
+            baselineOtherMembers,
+            baselineIdentities,
+            0,
+            [{ count: baselineEnvelopeCount?.count ?? 0 }],
+          ]);
+          await expect(observer.hostedMember.findUnique({
+            select: { suspendedAt: true },
+            where: { id: referrerMemberId },
+          })).resolves.toEqual(
+            authorityOutcome === "suspended"
+              ? { suspendedAt: now }
+              : null,
+          );
+        } finally {
+          releaseBlocker();
+          await blocker?.catch(() => undefined);
+          await authorityMutation?.catch(() => undefined);
+          await claim?.catch(() => undefined);
+          const claimedMemberIds = (
+            await observer.hostedInvite.findMany({
+              select: { memberId: true },
+              where: { referrerMemberId },
+            })
+          ).map(({ memberId }) => memberId);
+          await observer.hostedInvite.deleteMany({
+            where: { referrerMemberId },
+          });
+          await observer.hostedMember.deleteMany({
+            where: {
+              id: { in: [referrerMemberId, ...claimedMemberIds] },
+            },
+          });
+          await Promise.all([
+            observer.$disconnect(),
+            blockerClient.$disconnect(),
+            claimantClient.$disconnect(),
+            authorityClient.$disconnect(),
+          ]);
+          restoreCryptoEnv();
+        }
+      },
+      60_000,
+    );
 
     it("admits only one concurrent claim at the 49-to-50 boundary", async () => {
       if (!databaseUrl) {

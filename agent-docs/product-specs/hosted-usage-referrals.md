@@ -112,11 +112,14 @@ feature-local advisory lock serializes one referrer's claim admission without
 queuing on account-wide state; a loser immediately receives the retryable busy
 state. At most 50 attributed invites may be created for one referrer in a
 rolling hour. The count is checked while holding that feature lock and before
-the shared member row or placeholder state is touched. An admitted claim then
-briefly takes the referrer's member row and rechecks active-account authority
-immediately before allocation. This keeps concurrent claims exact without
-adding another rate-limit service or persistence owner, and public claim
-pressure cannot queue unrelated billing, activation, settings, or deletion.
+the shared member row or placeholder state is touched. An admitted claim checks
+active authority without locking the referrer, provisions the pristine target,
+then briefly takes the referrer's member row and repeats the authority check
+immediately before inserting the attributed invite. Suspension or deletion
+that wins that final row order rolls the target member, identity, crypto
+envelope, and invite back together. This keeps concurrent claims exact without
+holding account-wide state across external crypto preparation, so public claim
+pressure cannot queue unrelated billing, activation, Settings, or deletion.
 
 Existing recipient-bound `/join/<inviteCode>` URLs remain valid. The browser
 never selects the referrer, reward, policy, destination, or accounting amount.
@@ -238,12 +241,15 @@ Signup activation occurrence remains the immutable qualification timestamp. It
 controls invite attribution, the 30-day recovery window, and oldest-first
 candidate scanning, but it is not a cap reservation before a receipt exists.
 After taking the shared referrer and beneficiary locks, recovery reads the
-database clock and evaluates capacity at that settlement instant. A
-conversational arm that committed before settlement therefore counts even if
-its provider time followed the activation source; recovery records one terminal cap disqualification
-rather than retroactively invalidating or overbooking that promised arm. If
-signup settlement obtains the lock first, its immutable reward counts before a
-later arm is admitted. This lock-ordered accounting is complete without adding
+database clock and evaluates current capacity at that settlement instant using
+completed rewards from the trailing 30 days plus the same armed/bound
+reservation predicate as conversational admission. There are no application-
+timestamp upper bounds: a conversational arm or reward that committed first
+counts even if its application host recorded a time slightly ahead of the
+database clock. Recovery records one terminal cap disqualification rather than
+retroactively invalidating or overbooking that promised commitment. If signup
+settlement obtains the locks first, its immutable reward counts before a later
+arm is admitted. This lock-ordered accounting is complete without adding
 activation-path locks, reservation rows, or another lifecycle.
 
 Recovery still scans activation candidates oldest first. If one candidate fails

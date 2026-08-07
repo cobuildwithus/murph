@@ -18,7 +18,7 @@ import {
   isHostedSignupReferralRewardEnabled,
 } from "./signup-referral-policy";
 import {
-  buildHostedUsageReferralCapacityAtWhere,
+  buildHostedUsageReferralOutstandingWhere,
   HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS,
   HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
   HOSTED_USAGE_REFERRAL_REFERRER_30D_CAP_USD_MICROS,
@@ -360,10 +360,13 @@ async function readHostedSignupReferralCapacityFailureTx(input: {
   referrerMemberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<string | null> {
+  const capacityWhere = buildHostedSignupReferralSettlementCapacityWhere(
+    input.capacityAt,
+  );
   const referrerCommitments = await input.tx.hostedUsageReferral.aggregate({
     where: {
       referrerMemberId: input.referrerMemberId,
-      OR: buildHostedUsageReferralCapacityAtWhere(input.capacityAt),
+      OR: capacityWhere,
     },
     _sum: { rewardUsdMicros: true },
   });
@@ -379,7 +382,7 @@ async function readHostedSignupReferralCapacityFailureTx(input: {
     await input.tx.hostedUsageReferral.aggregate({
       where: {
         beneficiaryMemberId: input.beneficiaryMemberId,
-        OR: buildHostedUsageReferralCapacityAtWhere(input.capacityAt),
+        OR: capacityWhere,
       },
       _sum: { rewardUsdMicros: true },
     });
@@ -390,6 +393,18 @@ async function readHostedSignupReferralCapacityFailureTx(input: {
       > HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS
     ? "signup_referral_beneficiary_reward_cap_reached"
     : null;
+}
+
+function buildHostedSignupReferralSettlementCapacityWhere(
+  settledAt: Date,
+): Prisma.HostedUsageReferralWhereInput[] {
+  const since = new Date(
+    settledAt.getTime() - HOSTED_SIGNUP_REFERRAL_RECOVERY_LOOKBACK_MS,
+  );
+  return [
+    { rewardedAt: { gte: since } },
+    ...buildHostedUsageReferralOutstandingWhere(settledAt),
+  ];
 }
 
 async function readHostedSignupReferralSettlementTimeTx(

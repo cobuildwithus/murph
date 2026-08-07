@@ -226,45 +226,21 @@ describe("hosted signup referral rewards", () => {
     expect(tx.hostedUsageReferral.aggregate).toHaveBeenCalledTimes(2);
     const capacityAtSettlement = [
       {
-        armedAt: { lte: SETTLED_AT },
         rewardedAt: {
           gte: new Date("2026-07-08T12:10:00.000Z"),
-          lte: SETTLED_AT,
         },
       },
       {
-        AND: [
-          {
-            OR: [
-              { terminalAt: null },
-              { terminalAt: { gt: SETTLED_AT } },
-            ],
-          },
-          {
-            OR: [
-              {
-                expiresAt: { gt: SETTLED_AT },
-                OR: [
-                  { targetBoundAt: null },
-                  { targetBoundAt: { gt: SETTLED_AT } },
-                ],
-              },
-              {
-                OR: [
-                  {
-                    expiresAt: {
-                      gt: new Date("2026-08-06T11:10:00.000Z"),
-                    },
-                  },
-                  { qualifiedAt: { lte: SETTLED_AT } },
-                ],
-                targetBoundAt: { lte: SETTLED_AT },
-              },
-            ],
-          },
-        ],
-        armedAt: { lte: SETTLED_AT },
-        createdAt: { lte: SETTLED_AT },
+        expiresAt: { gt: SETTLED_AT },
+        status: "armed",
+      },
+      {
+        expiresAt: { gt: new Date("2026-08-06T11:10:00.000Z") },
+        status: "target_bound",
+      },
+      {
+        qualifiedAt: { not: null },
+        status: "target_bound",
       },
     ];
     expect(tx.hostedUsageReferral.aggregate).toHaveBeenNthCalledWith(1, {

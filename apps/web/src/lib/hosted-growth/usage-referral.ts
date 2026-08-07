@@ -181,59 +181,6 @@ export function buildHostedUsageReferralOutstandingWhere(
   return outstandingHostedUsageReferralCommitmentWhere(now);
 }
 
-/**
- * Reconstructs the cap reservations that existed at a past qualification time.
- * Recovery must not let later commitments consume earlier capacity or let a
- * later terminal transition erase capacity that was reserved at that instant.
- */
-export function buildHostedUsageReferralCapacityAtWhere(
-  at: Date,
-): Prisma.HostedUsageReferralWhereInput[] {
-  const since = new Date(at.getTime() - THIRTY_DAYS_MS);
-  const lateEvidenceCutoff = new Date(
-    at.getTime() - HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS,
-  );
-  return [
-    {
-      armedAt: { lte: at },
-      rewardedAt: {
-        gte: since,
-        lte: at,
-      },
-    },
-    {
-      AND: [
-        {
-          OR: [
-            { terminalAt: null },
-            { terminalAt: { gt: at } },
-          ],
-        },
-        {
-          OR: [
-            {
-              expiresAt: { gt: at },
-              OR: [
-                { targetBoundAt: null },
-                { targetBoundAt: { gt: at } },
-              ],
-            },
-            {
-              OR: [
-                { expiresAt: { gt: lateEvidenceCutoff } },
-                { qualifiedAt: { lte: at } },
-              ],
-              targetBoundAt: { lte: at },
-            },
-          ],
-        },
-      ],
-      armedAt: { lte: at },
-      createdAt: { lte: at },
-    },
-  ];
-}
-
 interface HostedUsageReferralLockedRow {
   armedAt: Date;
   beneficiaryMemberId: string;

@@ -324,15 +324,21 @@ async function claimHostedSignupReferralLinkTx(input: {
   }
 
   // Keep the feature-local advisory lock through allocation so concurrent
-  // claims cannot exceed the rolling bound. Take the shared account row only
-  // after admission, then recheck account authority immediately before writes.
-  await lockHostedMemberRow(input.prisma, input.referrerMemberId);
+  // claims cannot exceed the rolling bound. Target crypto preparation may call
+  // an external provider, so check authority without holding the referrer's
+  // account-wide row, then take that row and recheck immediately before the
+  // attributed invite becomes durable.
   await requireActiveHostedSignupReferrer({
     prisma: input.prisma,
     referrerMemberId: input.referrerMemberId,
   });
 
   const targetMemberId = await createPristineHostedSignupMemberTx(input.prisma);
+  await lockHostedMemberRow(input.prisma, input.referrerMemberId);
+  await requireActiveHostedSignupReferrer({
+    prisma: input.prisma,
+    referrerMemberId: input.referrerMemberId,
+  });
   return input.prisma.hostedInvite.create({
     data: {
       channel: HOSTED_SIGNUP_REFERRAL_INVITE_CHANNEL,
