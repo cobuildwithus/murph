@@ -2064,7 +2064,22 @@ export async function createHostedFamilyBillingCheckout(input: {
   prisma?: PrismaClient;
   seatCount?: unknown;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
-  return createOrResumeHostedFamilyBillingCheckout(input, true);
+  let restartAllowed = true;
+  while (true) {
+    const outcome = await createOrResumeHostedFamilyBillingCheckout(input);
+    if (outcome !== "restart") {
+      return outcome;
+    }
+    if (!restartAllowed) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+        httpStatus: 409,
+        message: "Family checkout changed while restarting. Try again.",
+        retryable: true,
+      });
+    }
+    restartAllowed = false;
+  }
 }
 
 async function createOrResumeHostedFamilyBillingCheckout(
@@ -2075,8 +2090,10 @@ async function createOrResumeHostedFamilyBillingCheckout(
     prisma?: PrismaClient;
     seatCount?: unknown;
   },
-  restartAllowed: boolean,
-): Promise<{ alreadyActive: boolean; url: string | null }> {
+): Promise<
+  | { alreadyActive: boolean; url: string | null }
+  | "restart"
+> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const seatCount = normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
@@ -2198,35 +2215,20 @@ async function createOrResumeHostedFamilyBillingCheckout(
     };
   }
   const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
-  const operationIdentity = "checkoutAttemptId" in checkoutInput
-    ? checkoutInput.checkoutAttemptId
-    : [
-        checkoutInput.group.id,
-        checkoutInput.stripeSubscriptionId,
-        checkoutInput.targetPriceId,
-      ].join(":");
+  const directPaidUpgrade = isHostedFamilyDirectPaidUpgradeInput(checkoutInput);
+  const operationIdentity = directPaidUpgrade
+    ? buildHostedFamilyDirectPaidUpgradeIdempotencyKey(checkoutInput)
+    : checkoutInput.checkoutAttemptId;
   const executeCheckout = async () => {
-    if (isHostedFamilyDirectPaidUpgradeInput(checkoutInput)) {
+    if (directPaidUpgrade) {
       return upgradeHostedFamilyDirectPaidSubscription(checkoutInput);
     }
     if (checkoutInput.mode === "existingCheckout") {
-      const existingCheckout = await resumeHostedFamilyBillingCheckout({
+      return resumeHostedFamilyBillingCheckout({
         checkoutInput,
         prisma,
         stripe,
       });
-      if (existingCheckout === "restart") {
-        if (!restartAllowed) {
-          throw hostedOnboardingError({
-            code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
-            httpStatus: 409,
-            message: "Family checkout changed while restarting. Try again.",
-            retryable: true,
-          });
-        }
-        return createOrResumeHostedFamilyBillingCheckout(input, false);
-      }
-      return existingCheckout;
     }
 
     const metadata = {
@@ -2295,9 +2297,6 @@ async function createOrResumeHostedFamilyBillingCheckout(
         checkoutSession.url,
     };
   };
-  if (!restartAllowed) {
-    return executeCheckout();
-  }
   return withHostedStripeActionFailureAlert(
     {
       isTerminalStripeFailure: (error) =>

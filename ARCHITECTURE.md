@@ -1479,6 +1479,11 @@ schedule a plain-text Resend alert through the existing operational sender and
 recipient allowlist. Checkout action ownership spans its mandatory price read,
 customer provisioning, saved-card preparation, and Checkout Session
 creation/resume; individual SDK calls do not independently own email. The
+Family action derives one complete provider-effect identity from the current
+plan, current Price, target Price, and seat count, and a stale Session restart
+rebinds reporting to the replacement checkout attempt. Explicit
+group-sponsorship recovery is another checkout action owner; a capacity-only
+reactivation makes no provider request and remains silent. The
 central Stripe diagnostic logger is not alert eligibility because cleanup races
 and recovery reads also log safely absorbed rejections. Alert content is
 limited to bounded error tokens, operation/event type, an opaque stable

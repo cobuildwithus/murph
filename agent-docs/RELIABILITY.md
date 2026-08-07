@@ -327,7 +327,12 @@ Last verified: 2026-08-05
   aborts the complete checkout action. That owner covers mandatory price
   lookup, customer provisioning, saved-card preparation, and Checkout Session
   creation/resume without treating each provider call as a separate alert
-  occurrence. The central diagnostic logger remains log-only because it also
+  occurrence. Family replacement attempts rebind alert identity to the current
+  attempt, while direct paid upgrades include the complete current-plan,
+  current-Price, target-Price, and seat-count provider effect. An explicit
+  group-sponsorship recovery owns a terminal provider rejection, but a
+  no-charge capacity reactivation remains silent. The central diagnostic
+  logger remains log-only because it also
   observes recovered reads and cleanup races. New
   verified `checkout.session.async_payment_failed`,
   `payment_intent.payment_failed`, `invoice.payment_failed`, and

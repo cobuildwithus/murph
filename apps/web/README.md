@@ -1071,6 +1071,9 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   price reads, customer provisioning, saved-card preparation, and Checkout
   Session create/resume. It emails only when the provider rejection aborts the
   action; recovered reads, replays, and cleanup races remain diagnostic logs.
+  Family retries bind alerts to the current replacement attempt, and explicit
+  group-sponsorship recovery reports only when its own provider-backed checkout
+  terminates; a no-charge reactivation stays silent.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep

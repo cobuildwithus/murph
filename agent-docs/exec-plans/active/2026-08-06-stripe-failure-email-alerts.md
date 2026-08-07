@@ -134,3 +134,15 @@ Updated: 2026-08-06
   early usage-credit price-read failure, final Session failure, saved-card
   preparation failure, group customer provisioning failure, stable exact
   replay identity, recovered purchase projection, and non-Stripe action errors.
+- Final round 3 found three remaining occurrence-identity gaps. Family checkout
+  restart now leaves the completed stale attempt and runs the replacement as a
+  separately wrapped current attempt, so a failure and its retry use the
+  replacement attempt identity. Direct paid Family upgrades now reuse their
+  complete provider-effect idempotency identity, including current plan and
+  Price plus target Price and seat count. Explicit group-sponsorship recovery
+  now reports a propagated checkout failure at its action boundary while a
+  no-charge reactivation remains silent.
+- Added regression proof for a stale Family attempt replaced before a
+  request-id-free failure, distinct two-seat and three-seat direct provider
+  effects with stable replay, explicit group recovery failing during mandatory
+  Price read or Session creation, and passive no-charge recovery.

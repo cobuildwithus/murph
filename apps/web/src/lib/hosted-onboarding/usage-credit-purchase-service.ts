@@ -978,19 +978,27 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
           : {}),
       };
     }
-    if (
-      isHostedOnboardingError(error) &&
-      error.code === "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE"
-    ) {
-      reportHostedStripeOperationFailure({
-        error,
-        operationIdentity: resolution.purchase.id,
-        operationName: "usage-credit.checkout",
-        stripeLiveMode: resolution.purchase.stripeLiveMode,
-      });
-    }
+    reportHostedUsageCreditCheckoutActionFailure(error, resolution.purchase);
     throw error;
   }
+}
+
+function reportHostedUsageCreditCheckoutActionFailure(
+  error: unknown,
+  purchase: Pick<HostedUsageCreditPurchase, "id" | "stripeLiveMode">,
+): void {
+  if (
+    !isHostedOnboardingError(error) ||
+    error.code !== "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE"
+  ) {
+    return;
+  }
+  reportHostedStripeOperationFailure({
+    error,
+    operationIdentity: purchase.id,
+    operationName: "usage-credit.checkout",
+    stripeLiveMode: purchase.stripeLiveMode,
+  });
 }
 
 async function hostedGroupSponsorshipCheckoutSelectionMatchesTx(input: {
@@ -1249,11 +1257,16 @@ export async function recoverHostedGroupSponsorshipUsageCreditCheckout(input: {
   if (prepared.kind === "reactivated") {
     return null;
   }
-  return continueHostedUsageCreditCheckout({
-    now,
-    prisma,
-    purchase: prepared.purchase,
-  });
+  try {
+    return await continueHostedUsageCreditCheckout({
+      now,
+      prisma,
+      purchase: prepared.purchase,
+    });
+  } catch (error) {
+    reportHostedUsageCreditCheckoutActionFailure(error, prepared.purchase);
+    throw error;
+  }
 }
 
 export function buildHostedGroupSponsorshipPaymentAuthority(input: {

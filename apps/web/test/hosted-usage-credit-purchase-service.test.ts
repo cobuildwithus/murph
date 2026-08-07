@@ -4490,32 +4490,7 @@ describe("createHostedUsageCreditCheckout", () => {
 describe("automatic group refill saved-card recovery", () => {
   it("repairs a pre-fix failed refill and opens Checkout on the first recovery attempt", async () => {
     const fake = createFakePrisma();
-    const fixture = installAutomaticGroupRefillFixture(fake, {
-      status: "payment_failed",
-    });
-    const authorization = fake.sponsorshipAuthorizations.get(
-      fixture.authority.authorizationId,
-    );
-    expect(authorization).toBeDefined();
-    Object.assign(authorization!, {
-      recoveryStartedAt: NOW,
-      status: "recovery_required",
-    });
-    fixture.refill.checkoutCancelUrl =
-      "https://join.example.test/groups/fund/group_join_code_1234?usageCheckout=cancel&usagePurchase=hucp_activation_abcdefghijkl";
-    fixture.refill.checkoutSuccessUrl =
-      "https://join.example.test/groups/fund/group_join_code_1234?usageCheckout=success&usagePurchase=hucp_activation_abcdefghijkl";
-    fixture.refill.stripeCustomerIdEncrypted =
-      "encrypted:cus_group_payer";
-    fixture.refill.stripePriceIdEncrypted = "encrypted:price_usage_5";
-    Object.assign(fixture.refill, { terminalAt: NOW });
-    mocks.readHostedAiUsageGate.mockResolvedValueOnce({
-      allowanceSource: "thread_container",
-      allowed: false,
-      limitUsdMicros: 5_000_000n,
-      reason: "ai_usage_limit_exceeded",
-      remainingUsdMicros: 0n,
-    });
+    const fixture = installRecoverableAutomaticGroupRefillFixture(fake);
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
       buildStripeSession(request)
     );
@@ -4547,6 +4522,59 @@ describe("automatic group refill saved-card recovery", () => {
         idempotencyKey: expect.stringContaining(fixture.refill.id),
       }),
     );
+  });
+
+  it.each(["price-read", "session-create"] as const)(
+    "emails when explicit group-sponsorship recovery terminates at %s",
+    async (failurePoint) => {
+      const fake = createFakePrisma();
+      const fixture = installRecoverableAutomaticGroupRefillFixture(fake);
+      const fetchMock = stubStripeAlertEmailDelivery();
+      if (failurePoint === "price-read") {
+        mocks.stripePriceRetrieve.mockRejectedValueOnce(
+          buildStripeConnectionErrorWithoutRequestId(),
+        );
+      } else {
+        mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+          buildStripeConnectionErrorWithoutRequestId(),
+        );
+      }
+
+      await expect(recoverHostedGroupSponsorshipUsageCreditCheckout({
+        authorizationId: fixture.authority.authorizationId,
+        beneficiaryMemberId: fixture.authority.beneficiaryMemberId,
+        now: NOW,
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+      })).rejects.toMatchObject({
+        code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+      });
+
+      await runOnlyScheduledStripeAlert();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(readResendRequestBody(fetchMock)).toMatchObject({
+        subject: "Murph Stripe operation failed — usage-credit.checkout",
+      });
+    },
+  );
+
+  it("keeps a no-charge group-sponsorship recovery projection alert-silent", async () => {
+    const fake = createFakePrisma();
+    const fixture = installRecoverableAutomaticGroupRefillFixture(fake, {
+      capacityHealthy: true,
+    });
+    const fetchMock = stubStripeAlertEmailDelivery();
+
+    await expect(recoverHostedGroupSponsorshipUsageCreditCheckout({
+      authorizationId: fixture.authority.authorizationId,
+      beneficiaryMemberId: fixture.authority.beneficiaryMemberId,
+      now: NOW,
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toBeNull();
+
+    expect(nextServerMocks.after).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("retrieves and confirms the same bound PaymentIntent after a bind-before-confirm crash", async () => {
@@ -5698,6 +5726,15 @@ function buildStripeConnectionError(requestId: string) {
   });
 }
 
+function buildStripeConnectionErrorWithoutRequestId() {
+  return Object.assign(new Error("Stripe API unavailable"), {
+    code: "api_connection_error",
+    rawType: "api_connection_error",
+    statusCode: 503,
+    type: "StripeConnectionError",
+  });
+}
+
 async function runOnlyScheduledStripeAlert(): Promise<void> {
   expect(nextServerMocks.after).toHaveBeenCalledTimes(1);
   const task = nextServerMocks.after.mock.calls[0]?.[0];
@@ -5894,6 +5931,38 @@ function installAutomaticGroupRefillFixture(
     },
     refill,
   };
+}
+
+function installRecoverableAutomaticGroupRefillFixture(
+  fake: ReturnType<typeof createFakePrisma>,
+  input: { capacityHealthy?: boolean } = {},
+) {
+  const fixture = installAutomaticGroupRefillFixture(fake, {
+    status: "payment_failed",
+  });
+  const authorization = fake.sponsorshipAuthorizations.get(
+    fixture.authority.authorizationId,
+  );
+  expect(authorization).toBeDefined();
+  Object.assign(authorization!, {
+    recoveryStartedAt: NOW,
+    status: "recovery_required",
+  });
+  fixture.refill.checkoutCancelUrl =
+    "https://join.example.test/groups/fund/group_join_code_1234?usageCheckout=cancel&usagePurchase=hucp_activation_abcdefghijkl";
+  fixture.refill.checkoutSuccessUrl =
+    "https://join.example.test/groups/fund/group_join_code_1234?usageCheckout=success&usagePurchase=hucp_activation_abcdefghijkl";
+  fixture.refill.stripeCustomerIdEncrypted = "encrypted:cus_group_payer";
+  fixture.refill.stripePriceIdEncrypted = "encrypted:price_usage_5";
+  Object.assign(fixture.refill, { terminalAt: NOW });
+  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
+    allowanceSource: "thread_container",
+    allowed: input.capacityHealthy ?? false,
+    limitUsdMicros: 5_000_000n,
+    reason: input.capacityHealthy ? null : "ai_usage_limit_exceeded",
+    remainingUsdMicros: input.capacityHealthy ? 5_000_000n : 0n,
+  });
+  return fixture;
 }
 
 function buildStripePrice(override: Record<string, unknown> = {}) {
