@@ -11,7 +11,7 @@ import {
 vi.mock("server-only", () => ({}));
 
 describe("hosted ops growth sponsorship metrics", () => {
-  it("separates live fulfilled sponsorship charges and sums the active monthly cap", async () => {
+  it("separates live fulfilled charges and derives the active cap through lazy rollover", async () => {
     const queryRaw = vi.fn().mockResolvedValue([{
       activeMonthlyCapUsdCents: 3_000n,
       activeMonthlySponsorships: 2n,
@@ -50,6 +50,12 @@ describe("hosted ops growth sponsorship metrics", () => {
     expect(queryText).toContain('purchase."stripe_live_mode" = TRUE');
     expect(queryText).toContain('"hosted_thread_container"');
     expect(queryText).toContain('authorization."monthly_cap_minor"');
+    expect(queryText).toContain(
+      'authorization."period_ends_at" <= bounds.captured_at',
+    );
+    expect(queryText).toContain(
+      'authorization."pending_monthly_cap_minor" IS NOT NULL',
+    );
     expect(queryText).toContain(
       'activation_purchase."group_sponsorship_charge_ordinal" = 0',
     );
