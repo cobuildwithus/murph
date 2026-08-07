@@ -89,10 +89,9 @@ page. Link previews, crawlers, and scanners therefore cannot allocate onboarding
 state. The route is `noindex`, `nofollow`, and `no-referrer` so stable tokens do
 not enter search indexes or downstream referrer headers.
 
-The available landing has one action: `Join Murph`, followed by a short summary
-of what Murph can help with so the recipient can decide before joining. A single
-closing line states that Murph credits whoever shared the link and that the
-referrer cannot see the recipient's conversations or health information.
+The available landing has one action: `Join Murph`, above a single closing line
+stating that Murph credits whoever shared the link and that the referrer cannot
+see the recipient's conversations or health information.
 
 Known unavailable links render a human-readable recovery state instead of a
 generic 404. A temporarily exhausted claim allowance or unexpected read/claim

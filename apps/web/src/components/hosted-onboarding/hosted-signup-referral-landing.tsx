@@ -4,7 +4,6 @@ import { ArrowRightIcon } from "lucide-react";
 
 import { buttonVariants } from "@/src/components/ui/button";
 
-import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
 import { JoinInviteCenteredShell } from "./join-invite-shell";
 
 export type HostedSignupReferralLandingState =
@@ -58,8 +57,8 @@ export function HostedSignupReferralLanding(props: {
             Meet Murph
           </h1>
           <p className="max-w-md text-lg leading-8 text-pretty text-muted-foreground">
-            A private health assistant that gets more useful as it learns what
-            matters to you.
+            Murph reads your wearables and bloodwork, figures out what actually
+            works for you, and texts you when it matters.
           </p>
         </div>
 
@@ -74,29 +73,8 @@ export function HostedSignupReferralLanding(props: {
           </button>
         </form>
 
-        <div className="border-t border-border/50 pt-6">
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-            What Murph can help with
-          </p>
-          <div className="mt-4 grid gap-x-6 gap-y-4 sm:grid-cols-2">
-            {JOIN_INVITE_ACTIVE_FEATURE_CARDS.map((item) => (
-              <div className="flex gap-3" key={item.title}>
-                <item.icon className="mt-0.5 size-4 shrink-0 text-olive-light" />
-                <div>
-                  <p className="text-sm font-semibold text-foreground">
-                    {item.title}
-                  </p>
-                  <p className="mt-0.5 text-sm leading-relaxed text-pretty text-muted-foreground">
-                    {item.body}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
         <p
-          className="text-xs leading-5 text-pretty text-muted-foreground"
+          className="max-w-sm border-t border-border/50 pt-6 text-xs leading-5 text-pretty text-muted-foreground"
           id="referral-attribution-note"
         >
           Murph credits whoever shared this link. They cannot see your
