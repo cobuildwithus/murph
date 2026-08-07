@@ -33,6 +33,7 @@ import {
   hasHostedStripeSubscriptionPaymentMethod,
 } from "./stripe-subscription-payment-method";
 import {
+  buildHostedStripeAlertCorrelationCause,
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
   withHostedStripeActionFailureAlert,
@@ -1006,6 +1007,7 @@ async function callHostedStripePlanSwitchOperation<T>(
   } catch (error) {
     logHostedStripeFailure({ error, operationName });
     throw hostedOnboardingError({
+      cause: buildHostedStripeAlertCorrelationCause(error),
       code: "HOSTED_BILLING_STRIPE_PLAN_SWITCH_UNAVAILABLE",
       details: describeHostedStripeErrorDetails({ error, operationName }),
       httpStatus: 502,

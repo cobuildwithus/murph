@@ -9,6 +9,7 @@ import {
 } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
 import { readHostedOnboardingEnvironment, type HostedOnboardingEnvironment } from "./env";
+import { buildHostedStripeAlertCorrelationCause } from "./stripe-error-log";
 import {
   getHostedUsageCreditOfferDefinition,
   type HostedUsageCreditOfferCode,
@@ -190,7 +191,7 @@ async function requireValidatedHostedStripeBillingPlanConfigWithRequestOptions(
       : await config.stripe.prices.retrieve(config.priceId, retrieveParams);
   } catch (error) {
     throw hostedOnboardingError({
-      cause: error,
+      cause: buildHostedStripeAlertCorrelationCause(error),
       code: "HOSTED_BILLING_PRICE_UNAVAILABLE",
       httpStatus: 502,
       message:

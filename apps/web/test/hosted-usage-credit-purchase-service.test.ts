@@ -534,12 +534,12 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
 });
 
 describe("createHostedUsageCreditCheckout", () => {
-  it("emails once when the mandatory price read aborts a fresh action but not its recovered retry", async () => {
+  it("preserves price-read request identity while keeping recovered retries silent", async () => {
     const fake = createFakePrisma();
     const fetchMock = stubStripeAlertEmailDelivery();
-    mocks.stripePriceRetrieve.mockRejectedValue(
-      buildStripeConnectionError("req_price_read_failed"),
-    );
+    mocks.stripePriceRetrieve
+      .mockRejectedValueOnce(buildStripeConnectionError("req_first_failure"))
+      .mockRejectedValue(buildStripeConnectionError("req_second_failure"));
 
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
@@ -560,6 +560,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(firstAlert.text).toContain("error type: StripeConnectionError");
     expect(firstAlert.text).toContain("error code: api_connection_error");
     expect(firstAlert.text).toContain("http status: 503");
+    expect(firstAlert.text).toContain("Stripe request id: req_first_failure");
 
     nextServerMocks.after.mockClear();
     await expect(createHostedUsageCreditCheckout({
@@ -586,11 +587,33 @@ describe("createHostedUsageCreditCheckout", () => {
     });
     await runOnlyScheduledStripeAlert();
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(readResendIdempotencyKey(fetchMock, 1)).toBe(
+    expect(readResendIdempotencyKey(fetchMock, 1)).not.toBe(
       readResendIdempotencyKey(fetchMock, 0),
     );
-    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(
+    expect(fetchMock.mock.calls[1]?.[1]?.body).not.toBe(
       fetchMock.mock.calls[0]?.[1]?.body,
+    );
+    expect(String(fetchMock.mock.calls[1]?.[1]?.body)).toContain(
+      "req_second_failure",
+    );
+
+    nextServerMocks.after.mockClear();
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: new Date(NOW.getTime() + 3_000),
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+    });
+    await runOnlyScheduledStripeAlert();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(readResendIdempotencyKey(fetchMock, 2)).toBe(
+      readResendIdempotencyKey(fetchMock, 1),
+    );
+    expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(
+      fetchMock.mock.calls[1]?.[1]?.body,
     );
   });
 
@@ -4097,9 +4120,14 @@ describe("createHostedUsageCreditCheckout", () => {
     if (!(checkoutError instanceof Error)) {
       throw new TypeError("Expected a hosted Checkout error.");
     }
-    expect(checkoutError.cause).toBeUndefined();
+    expect(checkoutError.cause).toEqual({
+      kind: "hosted_stripe_alert_correlation",
+      requestId: "req_private",
+    });
+    expect(Object.isFrozen(checkoutError.cause)).toBe(true);
     expect(JSON.stringify(checkoutError)).not.toContain("price_private");
     expect(JSON.stringify(checkoutError)).not.toContain("cus_private");
+    expect(JSON.stringify(checkoutError)).not.toContain("req_private");
     expect(onlyPurchase(fake.purchases)).toMatchObject({
       status: "created",
     });

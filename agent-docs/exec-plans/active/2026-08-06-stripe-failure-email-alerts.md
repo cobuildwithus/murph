@@ -174,3 +174,14 @@ Updated: 2026-08-06
 - Added real Resend transport proof for request-id-free capacity-read and
   member-tier update failures across stable replays, plus explicit silence for
   successful, already-applied, and domain-only outcomes.
+- Final round 8 found that several provider adapters preserved only
+  request-id presence when translating raw Stripe failures into hosted errors.
+  Distinct provider requests on the same action could therefore collapse onto
+  the stable fallback email key. The translation boundary now retains only the
+  validated opaque request id in a frozen non-serialized correlation record;
+  client-visible details remain presence-only and raw provider data is still
+  discarded.
+- Added real Resend proof that plan-upgrade and usage-credit actions distinguish
+  two provider request ids, deduplicate replay of the same request id, preserve
+  request-id-free fallback behavior, and omit the exact id from client-visible
+  serialized errors.

@@ -1498,8 +1498,11 @@ central Stripe diagnostic logger is not alert eligibility because cleanup races
 and recovery reads also log safely absorbed rejections. Alert content is
 limited to bounded error tokens, operation/event type, an opaque stable
 operation-attempt or Stripe request/event correlation, HTTP status, and
-live/test mode;
-member identity, contact details, checkout contents, raw errors, and provider
+live/test mode. When an SDK adapter replaces a raw provider error with a hosted
+error, only the validated opaque Stripe request id crosses that internal
+boundary in a frozen non-serialized correlation record; client-visible details
+retain only request-id presence. Member identity, contact details, checkout
+contents, raw errors, and provider
 payloads are excluded. Stripe receipts retain retry authority, and alert
 configuration or delivery failure cannot alter checkout results, webhook
 acknowledgement, entitlement, or reconciliation state.

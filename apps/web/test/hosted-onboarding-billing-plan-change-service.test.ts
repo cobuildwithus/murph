@@ -206,6 +206,44 @@ describe("upgradeHostedBillingPlan", () => {
     expect(firstRequest.body).not.toContain("member_fixture");
   });
 
+  test("preserves distinct Stripe request identity through plan upgrade errors", async () => {
+    stubAlertEnvironment();
+    const fetchMock = createResendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.stripe.billingPortal.sessions.create
+      .mockRejectedValueOnce(makeStripeProviderError({
+        requestId: "req_first_failure",
+      }))
+      .mockRejectedValue(makeStripeProviderError({
+        requestId: "req_second_failure",
+      }));
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(upgradeHostedBillingPlan({
+        expectedCurrentPlanCode: "launch_monthly",
+        memberId: "member_fixture",
+        targetPlanCode: "launch_edge_monthly",
+      })).rejects.toMatchObject({
+        code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
+        details: { requestIdPresent: true },
+        httpStatus: 502,
+      });
+    }
+
+    expect(mocks.after).toHaveBeenCalledTimes(3);
+    for (const [task] of mocks.after.mock.calls) {
+      await task();
+    }
+
+    const firstRequest = readResendRequest(fetchMock, 0);
+    const secondRequest = readResendRequest(fetchMock, 1);
+    const replayedSecondRequest = readResendRequest(fetchMock, 2);
+    expect(firstRequest.idempotencyKey).not.toBe(secondRequest.idempotencyKey);
+    expect(firstRequest.body).toContain("req_first_failure");
+    expect(secondRequest.body).toContain("req_second_failure");
+    expect(replayedSecondRequest).toEqual(secondRequest);
+  });
+
   test("returns no-action when the local billing owner is already on target", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue(
       makeBillingRef({ currentBillingPlanCode: "launch_edge_monthly" }),

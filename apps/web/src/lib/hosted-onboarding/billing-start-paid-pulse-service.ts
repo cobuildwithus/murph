@@ -60,6 +60,7 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { applyStripeInvoicePaid } from "./stripe-billing-events";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
 import {
+  buildHostedStripeAlertCorrelationCause,
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
   withHostedStripeActionFailureAlert,
@@ -1385,6 +1386,7 @@ async function callHostedStripeStartPaidPulseOperation<T>(
   } catch (error) {
     logHostedStripeFailure({ error, operationName });
     throw hostedOnboardingError({
+      cause: buildHostedStripeAlertCorrelationCause(error),
       code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_UNAVAILABLE",
       details: describeHostedStripeErrorDetails({ error, operationName }),
       httpStatus: 502,

@@ -334,14 +334,19 @@ Last verified: 2026-08-06
   current-Price, target-Price, and seat-count provider effect. Paid Family
   capacity changes reuse the exact Stripe capacity-update idempotency identity,
   and member-tier swaps reuse their persisted transition identity. Their
-  already-applied, successful, and domain-only outcomes remain silent. An explicit
+  already-applied, successful, and domain-only outcomes remain silent. An
+  explicit
   group-sponsorship recovery owns a terminal provider rejection, but a
   no-charge capacity reactivation remains silent. The final Murph-owned Family
   redirect reports a blocking Session-read rejection only when the unique blind
   Session binding still names a current attempt; unknown, cleared, or stale
   public IDs remain log-only. The central diagnostic
   logger remains log-only because it also
-  observes recovered reads and cleanup races. New
+  observes recovered reads and cleanup races. Provider adapters that translate
+  a terminal Stripe rejection retain only the
+  validated opaque request id in a frozen non-serialized correlation record,
+  so distinct provider requests do not collapse onto the action fallback key;
+  the client-visible hosted error still exposes presence only. Newly recorded,
   verified `checkout.session.async_payment_failed`,
   `payment_intent.payment_failed`, `invoice.payment_failed`, and
   `invoice.finalization_failed` receipts schedule event-scoped alerts; and only

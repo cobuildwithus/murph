@@ -113,6 +113,47 @@ describe("requireHostedStripeCheckoutConfig", () => {
     });
   });
 
+  it("keeps only frozen request correlation when a Price read fails", async () => {
+    const providerError = Object.assign(
+      new Error("Stripe echoed private request content"),
+      {
+        requestId: "req_price_failure",
+        statusCode: 503,
+        type: "StripeAPIError",
+      },
+    );
+    globalForHostedOnboarding.__murphHostedOnboardingEnv =
+      createHostedOnboardingEnvironment();
+    globalForHostedOnboarding.__murphHostedOnboardingStripe = {
+      prices: { retrieve: vi.fn().mockRejectedValue(providerError) },
+    };
+
+    let checkoutError: unknown;
+    try {
+      await requireValidatedHostedStripeBillingPlanConfig({
+        billingPlanCode: "launch_group_monthly",
+      });
+    } catch (error) {
+      checkoutError = error;
+    }
+
+    expect(checkoutError).toMatchObject({
+      code: "HOSTED_BILLING_PRICE_UNAVAILABLE",
+      httpStatus: 502,
+    });
+    expect(checkoutError).toBeInstanceOf(Error);
+    if (!(checkoutError instanceof Error)) {
+      throw new TypeError("Expected a hosted billing error.");
+    }
+    expect(checkoutError.cause).toEqual({
+      kind: "hosted_stripe_alert_correlation",
+      requestId: "req_price_failure",
+    });
+    expect(Object.isFrozen(checkoutError.cause)).toBe(true);
+    expect(JSON.stringify(checkoutError)).not.toContain("req_price_failure");
+    expect(JSON.stringify(checkoutError)).not.toContain("private request content");
+  });
+
   it("bounds display-only Group Price validation and fails closed", async () => {
     vi.useFakeTimers();
     const retrieve = vi.fn(

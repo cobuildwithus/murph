@@ -1080,7 +1080,10 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   Session binding, keeping unknown or stale public IDs silent. Paid Family
   capacity changes reuse their exact Stripe update identity for alert replay;
   member-tier swaps reuse the persisted transition identity. Successful,
-  already-applied, and domain-only outcomes schedule no email.
+  already-applied, and domain-only outcomes schedule no email. Provider
+  adapters retain only a validated opaque Stripe request id in a frozen
+  non-serialized correlation record so distinct failed requests remain distinct
+  emails; client-visible error details still expose presence only.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep

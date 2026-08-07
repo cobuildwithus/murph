@@ -19,9 +19,12 @@ export function createResendFetch() {
   ));
 }
 
-export function makeStripeProviderError(): Error {
+export function makeStripeProviderError(input: {
+  requestId?: string;
+} = {}): Error {
   return Object.assign(new Error("Stripe API unavailable"), {
     rawType: "api_error",
+    ...(input.requestId ? { requestId: input.requestId } : {}),
     statusCode: 503,
     type: "StripeAPIError",
   });

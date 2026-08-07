@@ -134,6 +134,7 @@ import {
   type HostedFamilyPlanCapacities,
 } from "./family-plan-capacity";
 import {
+  buildHostedStripeAlertCorrelationCause,
   describeHostedStripeErrorDetails,
   isHostedStripeProviderError,
   logHostedStripeFailure,
@@ -2865,6 +2866,7 @@ async function callHostedFamilyDirectPaidStripeOperation<T>(
     }
     logHostedStripeFailure({ error, operationName });
     throw hostedOnboardingError({
+      cause: buildHostedStripeAlertCorrelationCause(error),
       code: "HOSTED_FAMILY_DIRECT_PAID_STRIPE_UNAVAILABLE",
       details: describeHostedStripeErrorDetails({ error, operationName }),
       httpStatus: 502,

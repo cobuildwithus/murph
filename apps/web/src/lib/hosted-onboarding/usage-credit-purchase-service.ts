@@ -73,6 +73,7 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
 import {
+  buildHostedStripeAlertCorrelationCause,
   isHostedStripeProviderError,
   logHostedStripeFailure,
   reportHostedStripeOperationFailure,
@@ -1171,6 +1172,7 @@ export async function continueHostedUsageCreditCheckout(input: {
       operationName: "checkout.sessions.create.usage-credit",
     });
     throw hostedOnboardingError({
+      cause: buildHostedStripeAlertCorrelationCause(error),
       code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
       details: describeSafeHostedUsageCreditStripeError(error),
       httpStatus: 502,

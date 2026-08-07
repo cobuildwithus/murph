@@ -33,6 +33,7 @@ import {
 } from "./runtime";
 import { normalizeNullableString } from "./shared";
 import {
+  buildHostedStripeAlertCorrelationCause,
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
   withHostedStripeActionFailureAlert,
@@ -518,6 +519,7 @@ async function callHostedStripePlanUpgradeOperation<T>(
   } catch (error) {
     logHostedStripeFailure({ error, operationName });
     throw hostedOnboardingError({
+      cause: buildHostedStripeAlertCorrelationCause(error),
       code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
       details: describeHostedStripeErrorDetails({ error, operationName }),
       httpStatus: 502,

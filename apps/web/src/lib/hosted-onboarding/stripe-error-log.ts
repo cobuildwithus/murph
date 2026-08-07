@@ -1,4 +1,7 @@
-import { isHostedOnboardingError } from "./errors";
+import {
+  isHostedOnboardingError,
+  type HostedOnboardingError,
+} from "./errors";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import type { HostedOnboardingStructuredLogDetails } from "./logging";
 import {
@@ -9,6 +12,8 @@ import {
 const STRIPE_ERROR_TOKEN_MAX_LENGTH = 120;
 const STRIPE_ERROR_MESSAGE_MAX_LENGTH = 240;
 const STRIPE_OPERATION_NAME_MAX_LENGTH = 120;
+const HOSTED_STRIPE_ALERT_CORRELATION_CAUSE_KIND =
+  "hosted_stripe_alert_correlation";
 // Stripe request ids are opaque correlation handles (`req_...`); anything else is dropped.
 const STRIPE_REQUEST_ID_PATTERN = /^req_[A-Za-z0-9_-]{1,64}$/u;
 const STRIPE_ERROR_TOKEN_PATTERN = /^[A-Za-z0-9_.\-[\]]{1,120}$/u;
@@ -22,6 +27,27 @@ export interface HostedStripeErrorFields {
   readonly requestId: string | null;
   readonly statusCode: number | null;
   readonly type: string | null;
+}
+
+/**
+ * Retains only Stripe's validated opaque request id when a provider adapter
+ * replaces the raw SDK error with a client-safe hosted error. The raw error,
+ * message, submitted parameters, and provider payload never cross this
+ * boundary.
+ */
+export function buildHostedStripeAlertCorrelationCause(
+  error: unknown,
+): Readonly<{
+  kind: typeof HOSTED_STRIPE_ALERT_CORRELATION_CAUSE_KIND;
+  requestId: string;
+}> | undefined {
+  const requestId = describeHostedStripeError(error).requestId;
+  return requestId
+    ? Object.freeze({
+        kind: HOSTED_STRIPE_ALERT_CORRELATION_CAUSE_KIND,
+        requestId,
+      })
+    : undefined;
 }
 
 /**
@@ -125,15 +151,22 @@ export function reportHostedStripeOperationFailure(input: {
 /**
  * Provider wrappers intentionally replace raw Stripe errors with safe hosted
  * errors before they reach an action owner. Rehydrate only their already-safe
- * token/status detail so the alert remains useful without retaining a raw
- * provider object or message.
+ * token/status detail and correlation-only cause so the alert remains useful
+ * without retaining a raw provider object or message.
  */
 function describeHostedStripeAlertFields(
   error: unknown,
 ): HostedStripeErrorFields {
   const direct = describeHostedStripeError(error);
-  if (!isHostedOnboardingError(error) || !error.details) {
+  if (!isHostedOnboardingError(error)) {
     return direct;
+  }
+  const requestId = readHostedStripeAlertCorrelationRequestId(error);
+  if (!error.details) {
+    return {
+      ...direct,
+      requestId: requestId ?? direct.requestId,
+    };
   }
 
   const providerType =
@@ -148,10 +181,28 @@ function describeHostedStripeAlertFields(
     code: providerCode ?? direct.code,
     param:
       readHostedStripeErrorToken(error.details, "stripeParam") ?? direct.param,
+    requestId: requestId ?? direct.requestId,
     statusCode:
       readHostedStripeErrorStatusCode(error.details) ?? direct.statusCode,
     type: providerType ?? direct.type,
   };
+}
+
+function readHostedStripeAlertCorrelationRequestId(
+  error: HostedOnboardingError,
+): string | null {
+  const cause = error.cause;
+  if (!cause || typeof cause !== "object") {
+    return null;
+  }
+  if (
+    readHostedStripeErrorString(cause, "kind") !==
+      HOSTED_STRIPE_ALERT_CORRELATION_CAUSE_KIND
+  ) {
+    return null;
+  }
+  const requestId = readHostedStripeErrorString(cause, "requestId");
+  return requestId && STRIPE_REQUEST_ID_PATTERN.test(requestId) ? requestId : null;
 }
 
 /**
@@ -217,7 +268,8 @@ export async function withHostedStripeActionFailureAlert<T>(
  * The client-visible detail shape carried on hosted onboarding domain errors.
  * Domain error details are serialized into HTTP error responses, so this stays
  * a narrow token-only projection; the provider message and request id are
- * log-only and live in {@link logHostedStripeFailure}.
+ * absent from this client-visible shape. A validated request id may cross an
+ * internal adapter only through the frozen, non-serialized correlation cause.
  */
 export function describeHostedStripeErrorDetails(input: {
   error: unknown;
