@@ -79,9 +79,11 @@ export async function readHostedGrowthSponsorshipMetrics(
           purchase."paid_at",
           purchase."remaining_credit_usd_micros"
         FROM "hosted_usage_credit_purchase" AS purchase
+        CROSS JOIN bounds
         WHERE purchase."cash_currency" = 'usd'
           AND purchase."status" = 'fulfilled'
           AND purchase."stripe_live_mode" = TRUE
+          AND purchase."paid_at" < bounds.captured_at
           AND EXISTS (
             SELECT 1
             FROM "hosted_thread_container" AS container
