@@ -817,18 +817,19 @@ export async function sendHostedLinqAttachmentMessage(input: {
   });
 
   const idempotencyKey = normalizeNullableString(input.idempotencyKey);
-  const sendResponse = await fetchHostedLinqApiOrThrow({
-    body: JSON.stringify({
-      message: {
-        parts: [
-          {
-            attachment_id: attachmentId,
-            type: "media",
-          },
-        ],
-        ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+  const message: MessageSendParams["message"] = {
+    parts: [
+      {
+        attachment_id: attachmentId,
+        type: "media",
       },
-    }),
+    ],
+  };
+  if (idempotencyKey) {
+    message.idempotency_key = idempotencyKey;
+  }
+  const sendResponse = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify({ message } satisfies MessageSendParams),
     method: "POST",
     operation: "attachment send",
     path: `chats/${encodeURIComponent(chatId)}/messages`,
@@ -1143,19 +1144,16 @@ function buildHostedLinqRichLinkMessageBody(input: {
   linkUrl: string;
 }): MessageSendParams {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey);
-  return {
-    message: {
-      parts: [{
-        type: "link",
-        value: normalizeRequiredString(input.linkUrl, "rich link url"),
-      }],
-      ...(idempotencyKey
-        ? {
-            idempotency_key: idempotencyKey,
-          }
-        : {}),
-    },
+  const message: MessageSendParams["message"] = {
+    parts: [{
+      type: "link",
+      value: normalizeRequiredString(input.linkUrl, "rich link url"),
+    }],
   };
+  if (idempotencyKey) {
+    message.idempotency_key = idempotencyKey;
+  }
+  return { message };
 }
 
 function buildHostedLinqRichLinkIdempotencyKey(
@@ -1182,17 +1180,11 @@ function buildHostedLinqTextMessageBody(input: {
     type: "text",
     value: normalizeRequiredString(input.message, "message"),
   };
-
-  return {
-    message: {
-      parts: [
-        textPart,
-      ],
-      ...(idempotencyKey
-        ? {
-            idempotency_key: idempotencyKey,
-          }
-        : {}),
-    },
+  const message: MessageSendParams["message"] = {
+    parts: [textPart],
   };
+  if (idempotencyKey) {
+    message.idempotency_key = idempotencyKey;
+  }
+  return { message };
 }

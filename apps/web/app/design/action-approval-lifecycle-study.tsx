@@ -1,7 +1,6 @@
 import { ShieldCheck } from "lucide-react";
 
 import {
-  ACTION_APPROVAL_PENDING_CAVEAT,
   ActionApprovalDecisionFallback,
   ActionApprovalScreen,
 } from "@/src/components/sensitive-actions/action-approval-screen";
@@ -17,7 +16,6 @@ export function ActionApprovalLifecycleStudy() {
         <ActionApprovalScreen
           badgeIcon={ShieldCheck}
           body={<p>Send generated report.zip to this conversation.</p>}
-          caveat={ACTION_APPROVAL_PENDING_CAVEAT}
           title="Send this file?"
         >
           <div className="mt-7 border-t border-[#c4a882]/25 pt-6">
@@ -49,7 +47,6 @@ function DecisionFallbackStudy({
     <ActionApprovalScreen
       badgeIcon={ShieldCheck}
       body={<p>Send generated report.zip to this conversation.</p>}
-      caveat={ACTION_APPROVAL_PENDING_CAVEAT}
       title="Send this file?"
     >
       <div className="mt-7 border-t border-[#c4a882]/25 pt-6">

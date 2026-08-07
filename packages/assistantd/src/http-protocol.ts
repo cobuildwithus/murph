@@ -5,6 +5,10 @@ import {
   assertAssistantSessionId,
   isAssistantSessionNotFoundError,
 } from '@murphai/assistant-engine'
+import {
+  assistantDaemonMessageWireFields,
+  assistantDaemonSessionResolutionWireFields,
+} from './client.js'
 import { ASSISTANTD_VAULT_MISMATCH_CODE } from './errors.js'
 import type { AssistantLocalService } from './service.js'
 
@@ -27,6 +31,21 @@ const assistantCanonicalConversationFields = new Set([
   'sessionId',
   'threadId',
 ])
+const assistantLegacyRejectedSessionResolutionFields = [
+  'codexProfile',
+  'modelSpec',
+  'oss',
+  'provider',
+  'sourceThreadId',
+] as const
+const assistantOpenConversationRequestFields = new Set([
+  ...assistantDaemonSessionResolutionWireFields,
+  ...assistantLegacyRejectedSessionResolutionFields,
+])
+const assistantMessageRequestFields = new Set([
+  ...assistantDaemonMessageWireFields,
+  ...assistantLegacyRejectedSessionResolutionFields,
+])
 
 type AssistantOpenConversationRequest = Parameters<AssistantLocalService['openConversation']>[0]
 type AssistantMessageRequest = Parameters<AssistantLocalService['sendMessage']>[0]
@@ -41,12 +60,22 @@ type AssistantCronTargetSetRequest = Parameters<AssistantLocalService['setCronTa
 
 function parseOpenConversationRequestBody(payload: unknown): AssistantOpenConversationRequest {
   const record = asAssistantRequestRecord(payload, 'open-conversation')
+  assertSupportedAssistantRequestFields(
+    record,
+    assistantOpenConversationRequestFields,
+    'open-conversation',
+  )
   validateAssistantSessionResolutionRecord(record, 'open-conversation')
   return record as AssistantOpenConversationRequest
 }
 
 function parseAssistantMessageRequestBody(payload: unknown): AssistantMessageRequest {
   const record = asAssistantRequestRecord(payload, 'message')
+  assertSupportedAssistantRequestFields(
+    record,
+    assistantMessageRequestFields,
+    'message',
+  )
   validateAssistantSessionResolutionRecord(record, 'message')
   const prompt = record.prompt
   if (typeof prompt !== 'string' || prompt.trim().length === 0) {
@@ -350,7 +379,6 @@ function validateAssistantSessionResolutionRecord(
   assertOptionalNullableStringField(record, 'codexCommand', context)
   assertOptionalNullableStringField(record, 'codexHome', context)
   assertOptionalNullableStringField(record, 'workingDirectory', context)
-  assertOptionalNullableStringField(record, 'now', context)
   assertOptionalBooleanField(record, 'threadIsDirect', context)
   assertUnsupportedAssistantProviderOverrideField(record, 'oss', context)
   assertOptionalFiniteNumberField(record, 'maxSessionAgeMs', context)
@@ -359,6 +387,21 @@ function validateAssistantSessionResolutionRecord(
   if (conversation !== undefined) {
     const conversationRecord = readRequiredRecordField(record, 'conversation', context)
     validateAssistantConversationRecord(conversationRecord, context)
+  }
+}
+
+function assertSupportedAssistantRequestFields(
+  record: Record<string, unknown>,
+  supportedFields: ReadonlySet<string>,
+  context: string,
+): void {
+  for (const key of Object.keys(record)) {
+    if (!supportedFields.has(key)) {
+      throw new AssistantHttpRequestError(
+        `Assistant ${context} field ${key} is not supported.`,
+        400,
+      )
+    }
   }
 }
 
