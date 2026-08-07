@@ -195,7 +195,7 @@ describe("automatic group sponsorship refill availability", () => {
     const harness = createAutomaticRefillReadHarness({
       activation: {
         ...buildActivationPurchase(),
-        stripeCustomerIdEncrypted: null,
+        stripeCustomerIdEncrypted: "",
       },
       authorization: buildAuthorization(),
       purchases: [{
