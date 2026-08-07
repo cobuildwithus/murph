@@ -134,11 +134,11 @@ export default async function HostedOpsGrowthPage() {
                 </TableCell>
               </TableRow>
               <TableRow>
-                <TableCell>All tracked fulfilled usage-credit purchases</TableCell>
+                <TableCell>Tracked fulfilled usage top-ups</TableCell>
                 <TableCell className="text-right">
                   {formatInteger(dashboard.usageTopUps.trackedFulfilled)}
                 </TableCell>
-                <TableCell className="text-right">Not MRR</TableCell>
+                <TableCell className="text-right">One-time</TableCell>
               </TableRow>
               <TableRow>
                 <TableCell>Unpriced paid members</TableCell>
