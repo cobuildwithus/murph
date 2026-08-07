@@ -31,6 +31,10 @@ import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "./linq-observability-identifiers";
 import {
+  isHostedLinqStaleChatAppCardFallbackIdempotencyKey,
+  parseHostedLinqAppCardFallbackIdentity,
+} from "./linq-app-card-fallback";
+import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
@@ -60,12 +64,12 @@ export type HostedLinqRuntimeEgressTargetOverride = {
 };
 export type HostedLinqRuntimeEgressAssertionResult = {
   linePhoneNumberLookupKey?: string;
+  routeDisposition?: "superseded" | "unavailable";
   threadIsDirect: boolean;
   targetOverride: HostedLinqRuntimeEgressTargetOverride | null;
 };
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
-const HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX = ":fallback";
 const HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT = 100;
 
 const HOSTED_LINQ_EGRESS_ROUTING_SELECT = {
@@ -202,7 +206,9 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   targetKind?: string | null;
 }): Promise<HostedLinqRuntimeEgressAssertionResult> {
   if (normalizeNullable(input.targetKind) === "participant") {
-    if (isHostedLinqAppCardFallbackIdempotencyKey(input.idempotencyKey)) {
+    const appCardFallbackIdentity =
+      parseHostedLinqAppCardFallbackIdentity(input.idempotencyKey);
+    if (appCardFallbackIdentity?.kind === "stale_chat") {
       return await assertHostedLinqAppCardFallbackParticipantEgressAuthority({
         fromPhoneNumber: input.fromPhoneNumber,
         idempotencyKey: input.idempotencyKey,
@@ -210,6 +216,9 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
         prisma: input.prisma,
         target: input.target ?? input.directRecipientPhoneNumber ?? null,
       });
+    }
+    if (appCardFallbackIdentity) {
+      throwHostedLinqParticipantEgressAuthorityMismatch();
     }
     await assertHostedLinqSignupWelcomeParticipantEgressAuthority({
       directRecipientPhoneNumber: input.directRecipientPhoneNumber,
@@ -283,13 +292,16 @@ function isHostedLinqCurrentHomeOnlyAssertion(input: {
   idempotencyKey?: string | null;
   replyToMessageId?: string | null;
 }): boolean {
+  const appCardFallbackIdentity =
+    parseHostedLinqAppCardFallbackIdentity(input.idempotencyKey);
   return input.homeRouteFallbackAllowed === true
     && (
-      isHostedLinqAppCardFallbackIdempotencyKey(input.idempotencyKey)
-      || (
-        normalizeNullable(input.replyToMessageId) === null
-        && (input.answeredMailboxItemIds?.length ?? 0) === 0
-      )
+      appCardFallbackIdentity
+        ? appCardFallbackIdentity.kind === "stale_chat"
+        : (
+            normalizeNullable(input.replyToMessageId) === null
+            && (input.answeredMailboxItemIds?.length ?? 0) === 0
+          )
     );
 }
 
@@ -498,7 +510,7 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
     throwHostedLinqRouteAuthorityMismatch();
   }
   const appCardFallbackRoute = input.homeRouteFallbackAllowed
-    && isHostedLinqAppCardFallbackIdempotencyKey(input.idempotencyKey)
+    && isHostedLinqStaleChatAppCardFallbackIdempotencyKey(input.idempotencyKey)
       ? await readHostedLinqAppCardFallbackRoute({
           idempotencyKey: input.idempotencyKey,
           prisma: input.prisma,
@@ -515,8 +527,8 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
         prisma: input.prisma,
         routing,
       });
-    if (participantRecovery) {
-      return participantRecovery;
+    if (participantRecovery.kind !== "unavailable") {
+      return participantRecovery.authority;
     }
     return {
       ...(routing.linqRecipientPhoneLookupKey
@@ -535,7 +547,9 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   ) {
     if (
       input.homeRouteFallbackAllowed
-      && isHostedLinqAppCardFallbackIdempotencyKey(input.idempotencyKey)
+      && isHostedLinqStaleChatAppCardFallbackIdempotencyKey(
+        input.idempotencyKey,
+      )
     ) {
       if (
         appCardFallbackRoute
@@ -552,8 +566,8 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
             prisma: input.prisma,
             routing,
           });
-        if (participantRecovery) {
-          return participantRecovery;
+        if (participantRecovery.kind !== "unavailable") {
+          return participantRecovery.authority;
         }
       } else {
         const currentChatId = normalizeNullable(input.chatId);
@@ -691,12 +705,26 @@ async function assertHostedLinqAppCardFallbackParticipantEgressAuthority(input: 
   ) {
     throwHostedLinqParticipantEgressAuthorityMismatch();
   }
-  const authority = await resolveHostedLinqAppCardFallbackParticipantRoute({
+  const resolution = await resolveHostedLinqAppCardFallbackParticipantRoute({
     expectedCurrentChatLookupKey: predecessor.predecessorChatLookupKey,
     memberId: input.memberId,
     prisma: input.prisma,
     routing,
   });
+  if (resolution.kind === "superseded") {
+    return {
+      ...resolution.authority,
+      routeDisposition: "superseded",
+    };
+  }
+  if (resolution.kind === "unavailable") {
+    return {
+      routeDisposition: "unavailable",
+      targetOverride: null,
+      threadIsDirect: true,
+    };
+  }
+  const authority = resolution.authority;
   const expected = authority?.targetOverride;
   if (
     !authority
@@ -723,9 +751,8 @@ async function readHostedLinqAppCardFallbackRoute(input: {
   predecessorChatLookupKey: string;
 } | null> {
   const predecessorIdempotencyKey =
-    parseHostedLinqAppCardFallbackPredecessorIdempotencyKey(
-      input.idempotencyKey,
-    );
+    parseHostedLinqAppCardFallbackIdentity(input.idempotencyKey)
+      ?.predecessorIdempotencyKey ?? null;
   const predecessorIdempotencyLookupKey =
     createHostedLinqDeliveryIdempotencyLookupKey(
       predecessorIdempotencyKey,
@@ -780,7 +807,13 @@ async function resolveHostedLinqAppCardFallbackParticipantRoute(input: {
   memberId: string;
   prisma: HostedLinqEngagementClient;
   routing: HostedLinqEgressRouting;
-}): Promise<HostedLinqRuntimeEgressAssertionResult | null> {
+}): Promise<
+  | {
+      authority: HostedLinqRuntimeEgressAssertionResult;
+      kind: "participant" | "superseded";
+    }
+  | { kind: "unavailable" }
+> {
   const [privateState, identity] = await Promise.all([
     readHostedMemberRoutingPrivateState(input.routing, input.prisma),
     input.prisma.hostedMemberIdentity.findUnique({
@@ -797,7 +830,12 @@ async function resolveHostedLinqAppCardFallbackParticipantRoute(input: {
     expectedCurrentChatId
     && normalizeNullable(privateState.linqChatId) !== expectedCurrentChatId
   ) {
-    return null;
+    return resolveHostedLinqSupersedingHomeThreadRoute({
+      identityPhoneLookupKey: identity?.phoneLookupKey,
+      memberId: input.memberId,
+      privateState,
+      routing: input.routing,
+    });
   }
   const expectedCurrentChatLookupKey = normalizeNullable(
     input.expectedCurrentChatLookupKey,
@@ -807,10 +845,15 @@ async function resolveHostedLinqAppCardFallbackParticipantRoute(input: {
     && !createHostedLinqChatLookupKeyReadCandidates(privateState.linqChatId)
       .includes(expectedCurrentChatLookupKey)
   ) {
-    return null;
+    return resolveHostedLinqSupersedingHomeThreadRoute({
+      identityPhoneLookupKey: identity?.phoneLookupKey,
+      memberId: input.memberId,
+      privateState,
+      routing: input.routing,
+    });
   }
   if (!identity?.phoneLookupKey) {
-    return null;
+    return { kind: "unavailable" };
   }
   const memberPhoneNumber = normalizePhoneNumber(
     await readHostedMemberIdentityPhoneNumber(identity, input.prisma),
@@ -827,28 +870,78 @@ async function resolveHostedLinqAppCardFallbackParticipantRoute(input: {
     messaging,
   });
   if (route?.channel !== "linq" || route.delivery.kind !== "participant") {
-    return null;
+    return { kind: "unavailable" };
   }
   const fromPhoneNumber = normalizePhoneNumber(
     route.delivery.source?.fromPhoneNumber,
   );
   const target = normalizePhoneNumber(route.delivery.target);
   if (!fromPhoneNumber || !target) {
-    return null;
+    return { kind: "unavailable" };
   }
   return {
-    ...(input.routing.linqRecipientPhoneLookupKey
-      ? {
-          linePhoneNumberLookupKey:
-            input.routing.linqRecipientPhoneLookupKey,
-        }
-      : {}),
-    targetOverride: {
-      fromPhoneNumber,
-      target,
-      targetKind: "participant",
+    authority: {
+      ...(input.routing.linqRecipientPhoneLookupKey
+        ? {
+            linePhoneNumberLookupKey:
+              input.routing.linqRecipientPhoneLookupKey,
+          }
+        : {}),
+      targetOverride: {
+        fromPhoneNumber,
+        target,
+        targetKind: "participant",
+      },
+      threadIsDirect: true,
     },
-    threadIsDirect: true,
+    kind: "participant",
+  };
+}
+
+function resolveHostedLinqSupersedingHomeThreadRoute(input: {
+  identityPhoneLookupKey: string | null | undefined;
+  memberId: string;
+  privateState: Awaited<ReturnType<typeof readHostedMemberRoutingPrivateState>>;
+  routing: HostedLinqEgressRouting;
+}):
+  | {
+      authority: HostedLinqRuntimeEgressAssertionResult;
+      kind: "superseded";
+    }
+  | { kind: "unavailable" } {
+  const homeChatId = normalizeNullable(input.privateState.linqChatId);
+  if (!homeChatId) {
+    return { kind: "unavailable" };
+  }
+  const canonicalParticipantKind =
+    normalizeHostedLinqParticipantContactKind(
+      input.routing.linqParticipantContactKind,
+    );
+  const canonicalContactLookupKey = canonicalParticipantKind
+    ? normalizeNullable(input.routing.linqParticipantContactLookupKey)
+    : null;
+  const conversationThreadId = resolveHostedLinqConversationThreadId({
+    linqContactLookupKey:
+      canonicalContactLookupKey ?? input.identityPhoneLookupKey,
+    memberId: input.memberId,
+    threadId: homeChatId,
+  });
+  return {
+    authority: {
+      ...(input.routing.linqRecipientPhoneLookupKey
+        ? {
+            linePhoneNumberLookupKey:
+              input.routing.linqRecipientPhoneLookupKey,
+          }
+        : {}),
+      targetOverride: {
+        ...(conversationThreadId ? { conversationThreadId } : {}),
+        target: homeChatId,
+        targetKind: "thread",
+      },
+      threadIsDirect: true,
+    },
+    kind: "superseded",
   };
 }
 
@@ -973,32 +1066,6 @@ function isHostedLinqSignupWelcomeFirstContact(input: {
 }): boolean {
   return normalizeNullable(input.idempotencyKey)
     === `${HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX}${input.memberId}`;
-}
-
-function isHostedLinqAppCardFallbackIdempotencyKey(
-  value: string | null | undefined,
-): boolean {
-  return parseHostedLinqAppCardFallbackPredecessorIdempotencyKey(value) !== null;
-}
-
-function parseHostedLinqAppCardFallbackPredecessorIdempotencyKey(
-  value: string | null | undefined,
-): string | null {
-  const idempotencyKey = normalizeNullable(value);
-  if (
-    !idempotencyKey
-    || idempotencyKey.length
-      <= HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX.length
-    || !idempotencyKey.endsWith(
-      HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX,
-    )
-  ) {
-    return null;
-  }
-  return idempotencyKey.slice(
-    0,
-    -HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX.length,
-  );
 }
 
 function normalizeNullable(value: string | null | undefined): string | null {

@@ -40,6 +40,9 @@ import {
 import {
   HOSTED_LINQ_APP_CARD_REJECTED_FAILURE_CODE,
 } from "./linq-delivery-store";
+import {
+  parseHostedLinqAppCardFallbackIdentity,
+} from "./linq-app-card-fallback";
 import { normalizePhoneNumber } from "./phone";
 import { hostedOnboardingError } from "./errors";
 import type { HostedLinqParticipantContact } from "./linq-participant-contact";
@@ -47,7 +50,6 @@ import { lockHostedMemberRow } from "./shared";
 import type { Prisma } from "@prisma/client";
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
-const HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX = ":fallback";
 
 export interface HostedMemberActivationLinqRouteResolution {
   welcomeRoute: HostedMemberAssistantNotificationRoute | null;
@@ -158,14 +160,12 @@ async function materializeHostedParticipantHomeRouteTx(input: {
   const fromPhoneNumber = normalizePhoneNumber(input.fromPhoneNumber);
   const expectedIdempotencyKey =
     `${HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX}${input.memberId}`;
+  const appCardFallbackIdentity =
+    parseHostedLinqAppCardFallbackIdentity(idempotencyKey);
   const predecessorIdempotencyKey =
     input.authorityKind === "app_card_fallback"
-    && idempotencyKey.length > HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX.length
-    && idempotencyKey.endsWith(HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX)
-      ? idempotencyKey.slice(
-          0,
-          -HOSTED_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_SUFFIX.length,
-        )
+    && appCardFallbackIdentity?.kind === "stale_chat"
+      ? appCardFallbackIdentity.predecessorIdempotencyKey
       : null;
   const deliveryIdempotencyLookupKey =
     createHostedLinqDeliveryIdempotencyLookupKey(idempotencyKey);

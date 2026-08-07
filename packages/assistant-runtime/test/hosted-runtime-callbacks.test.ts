@@ -11087,7 +11087,8 @@ describe("hosted runtime callbacks", () => {
     ]);
 
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       staleTargetRecoveryRequired: true,
       target: "current-direct-chat",
       targetKind: "thread",
@@ -11106,12 +11107,12 @@ describe("hosted runtime callbacks", () => {
     expect(observedOrder).toEqual(expect.arrayContaining([
       "claim:assistant-outbox:intent_123:stale-direct-chat",
       "provider:stale-card",
-      "authorize:assistant-outbox:intent_123:fallback:stale-direct-chat",
+      "authorize:assistant-outbox:intent_123:stale-chat-fallback:stale-direct-chat",
       "persist-fallback",
-      "claim:assistant-outbox:intent_123:fallback:current-direct-chat",
+      "claim:assistant-outbox:intent_123:stale-chat-fallback:current-direct-chat",
       "provider:current-text",
     ]));
-    expect(observedOrder.indexOf("authorize:assistant-outbox:intent_123:fallback:stale-direct-chat"))
+    expect(observedOrder.indexOf("authorize:assistant-outbox:intent_123:stale-chat-fallback:stale-direct-chat"))
       .toBeLessThan(observedOrder.indexOf("persist-fallback"));
     expect(observedOrder.indexOf("persist-fallback"))
       .toBeLessThan(observedOrder.indexOf("provider:current-text"));
@@ -11161,7 +11162,9 @@ describe("hosted runtime callbacks", () => {
           threadIsDirect: true,
         };
       }
-      if (request.idempotencyKey?.endsWith(":fallback")) {
+      if (
+        request.idempotencyKey?.endsWith(":stale-chat-fallback")
+      ) {
         expect(request).toEqual(expect.objectContaining({
           directRecipientPhoneNumber: "+15550001",
           fromPhoneNumber: "+15550000",
@@ -11190,7 +11193,8 @@ describe("hosted runtime callbacks", () => {
           message?: { idempotency_key?: string; parts?: Array<{ type?: string }> };
         };
         expect(body.message).toMatchObject({
-          idempotency_key: "assistant-outbox:intent_123:fallback",
+          idempotency_key:
+            "assistant-outbox:intent_123:stale-chat-fallback",
           parts: [{ type: "text" }],
         });
         observedOrder.push("provider:materialize-text");
@@ -11256,7 +11260,8 @@ describe("hosted runtime callbacks", () => {
     ]);
 
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       staleTargetRecoveryRequired: true,
     });
     expect(JSON.stringify(persistAppCardTextFallback.mock.calls))
@@ -11279,7 +11284,8 @@ describe("hosted runtime callbacks", () => {
       bindingDeliveryTarget: "stale-direct-chat",
       channel: "linq",
       explicitTarget: "stale-direct-chat",
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       transportIdempotent: true,
     });
     const assertRecentInbound = vi.fn(async (request: {
@@ -11321,7 +11327,8 @@ describe("hosted runtime callbacks", () => {
       const delivery = await dependencies.sendLinq({
         answeredMailboxItemIds: ["mailbox-stale-direct-chat"],
         homeRouteFallbackAllowed: true,
-        idempotencyKey: "assistant-outbox:intent_123:fallback",
+        idempotencyKey:
+          "assistant-outbox:intent_123:stale-chat-fallback",
         message: "Nutrition summary",
         replyToMessageId: "message-stale-direct-chat",
         target: "stale-direct-chat",
@@ -11357,8 +11364,8 @@ describe("hosted runtime callbacks", () => {
     }
 
     expect(providerKeys).toEqual([
-      "assistant-outbox:intent_123:fallback",
-      "assistant-outbox:intent_123:fallback",
+      "assistant-outbox:intent_123:stale-chat-fallback",
+      "assistant-outbox:intent_123:stale-chat-fallback",
     ]);
     const authorityChecks = assertRecentInbound.mock.calls
       .map(([request]) => request)
@@ -11369,7 +11376,8 @@ describe("hosted runtime callbacks", () => {
         answeredMailboxItemIds: ["mailbox-stale-direct-chat"],
         directRecipientPhoneNumber: null,
         fromPhoneNumber: null,
-        idempotencyKey: "assistant-outbox:intent_123:fallback",
+        idempotencyKey:
+          "assistant-outbox:intent_123:stale-chat-fallback",
         replyToMessageId: "message-stale-direct-chat",
         target: "stale-direct-chat",
         targetKind: "thread",
@@ -11377,12 +11385,171 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
+  it("retries a stale participant recovery on a newer home before provider entry", async () => {
+    const staleFallbackIdempotencyKey =
+      "assistant-outbox:intent_123:stale-chat-fallback";
+    const effect = createEffect({
+      bindingDeliveryTarget: "stale-direct-chat",
+      channel: "linq",
+      explicitTarget: "stale-direct-chat",
+      idempotencyKey: staleFallbackIdempotencyKey,
+      transportIdempotent: true,
+    });
+    const persistAppCardTextFallback = vi.fn(async () => undefined);
+    let drainAttempt = 0;
+    const assertRecentInbound = vi.fn()
+      .mockResolvedValueOnce({
+        targetOverride: {
+          fromPhoneNumber: "+15550000",
+          target: "+15550001",
+          targetKind: "participant" as const,
+        },
+        threadIsDirect: true,
+      })
+      .mockResolvedValueOnce({
+        routeDisposition: "superseded" as const,
+        targetOverride: {
+          target: "newer-direct-chat",
+          targetKind: "thread" as const,
+        },
+        threadIsDirect: true,
+      })
+      .mockResolvedValueOnce({
+        targetOverride: {
+          target: "newer-direct-chat",
+          targetKind: "thread" as const,
+        },
+        threadIsDirect: true,
+      })
+      .mockResolvedValueOnce({ providerDispatchClaimed: true });
+    const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toContain("/chats/newer-direct-chat/messages");
+      const body = JSON.parse(String(init?.body)) as {
+        message?: {
+          idempotency_key?: string;
+          parts?: Array<{ type?: string }>;
+        };
+      };
+      expect(body.message).toMatchObject({
+        idempotency_key: staleFallbackIdempotencyKey,
+        parts: [{ type: "text" }],
+      });
+      return new Response(JSON.stringify({
+        message: { id: "newer-home-fallback-message" },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    mocks.useActualLinqMessage = true;
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ dependencies }) => {
+      drainAttempt += 1;
+      const target = drainAttempt === 1
+        ? "stale-direct-chat"
+        : "newer-direct-chat";
+      try {
+        const delivery = await dependencies.sendLinq({
+          answeredMailboxItemIds: ["mailbox-stale-direct-chat"],
+          homeRouteFallbackAllowed: true,
+          idempotencyKey: staleFallbackIdempotencyKey,
+          message: "Nutrition summary",
+          persistAppCardTextFallback,
+          replyToMessageId: "message-stale-direct-chat",
+          target,
+          targetKind: "thread",
+          threadIsDirect: true,
+        });
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            providerMessageId: delivery.providerMessageId,
+            providerThreadId: delivery.providerThreadId,
+            target: delivery.target,
+            targetKind: "thread",
+          }),
+          status: "sent",
+        });
+      } catch (error) {
+        expect(error).toMatchObject({
+          code: "ASSISTANT_LINQ_APP_CARD_FALLBACK_ROUTE_SUPERSEDED",
+          context: expect.objectContaining({ retryable: true }),
+          providerDispatchControl: true,
+        });
+        return createDispatchResult({
+          delivery: null,
+          status: "retryable",
+        }, {
+          code: "ASSISTANT_LINQ_APP_CARD_FALLBACK_ROUTE_SUPERSEDED",
+          message: "Route superseded before provider entry.",
+        });
+      }
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryErrorCode:
+          "ASSISTANT_LINQ_APP_CARD_FALLBACK_ROUTE_SUPERSEDED",
+        deliveryStatus: "retryable",
+      }),
+    ]);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: staleFallbackIdempotencyKey,
+      target: "newer-direct-chat",
+      targetKind: "thread",
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          eventType: "assistant.delivery.linq_app_card_route_superseded",
+          retryMode: "current_home_projection",
+        }),
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          eventType: "assistant.delivery.provider_dispatch_control_error",
+          providerDispatchPhase: "pre_provider",
+        }),
+        level: "warn",
+      }),
+    );
+  });
+
+
   it("keeps a fresh persisted fallback confirmation-pending when Web has no replacement route", async () => {
     const effect = createEffect({
       bindingDeliveryTarget: "stale-direct-chat",
       channel: "linq",
       explicitTarget: "stale-direct-chat",
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       transportIdempotent: true,
     });
     const assertRecentInbound = vi.fn(async (request: {
@@ -11398,7 +11565,8 @@ describe("hosted runtime callbacks", () => {
         await dependencies.sendLinq({
           answeredMailboxItemIds: ["mailbox-stale-direct-chat"],
           homeRouteFallbackAllowed: true,
-          idempotencyKey: "assistant-outbox:intent_123:fallback",
+          idempotencyKey:
+            "assistant-outbox:intent_123:stale-chat-fallback",
           message: "Nutrition summary",
           replyToMessageId: "message-stale-direct-chat",
           target: "stale-direct-chat",
@@ -11544,6 +11712,7 @@ describe("hosted runtime callbacks", () => {
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: "+15550001",
+        homeRouteFallbackAllowed: true,
         idempotencyKey: "assistant-outbox:intent_123:fallback",
         message: "Nutrition summary",
         replyToMessageId: null,
@@ -11576,10 +11745,12 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith(expect.objectContaining({
       authorityCheckOnly: false,
+      homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_123:fallback",
       providerDispatchPredecessorIdempotencyKey:
         "assistant-outbox:intent_123",
     }), { signal: null });
+    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
     expect(providerFetch).toHaveBeenCalledWith(
       "https://linq.example.test/v1/messages/text",
       { method: "POST" },

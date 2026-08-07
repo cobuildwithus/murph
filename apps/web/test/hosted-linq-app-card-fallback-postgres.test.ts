@@ -88,7 +88,8 @@ describe.skipIf(!runPostgresProof)(
       const suffix = randomUUID();
       const intentId = `intent-card-fallback-${suffix}`;
       const predecessorIdempotencyKey = `assistant-outbox:${intentId}`;
-      const fallbackIdempotencyKey = `${predecessorIdempotencyKey}:fallback`;
+      const fallbackIdempotencyKey =
+        `${predecessorIdempotencyKey}:stale-chat-fallback`;
       const predecessorLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
         predecessorIdempotencyKey,
       );
@@ -153,6 +154,32 @@ describe.skipIf(!runPostgresProof)(
           targetKind: "thread",
         })).resolves.toMatchObject({ claimed: false });
 
+        await expect(transitionHostedLinqRuntimeAppCardFallbackFenceTx({
+          fallbackIdempotencyKey,
+          linqChatId: null,
+          phoneNumber: "+15550100099",
+          predecessorIdempotencyKey,
+          prisma,
+          sourceRef: intentId,
+          targetKind: "participant",
+        })).resolves.toBeNull();
+        await expect(transitionHostedLinqRuntimeAppCardFallbackFenceTx({
+          fallbackIdempotencyKey,
+          linqChatId: `${fallbackLinqChatId}-changed`,
+          predecessorIdempotencyKey,
+          prisma,
+          sourceRef: intentId,
+          targetKind: "thread",
+        })).resolves.toBeNull();
+        await expect(transitionHostedLinqRuntimeAppCardFallbackFenceTx({
+          fallbackIdempotencyKey,
+          linqChatId: fallbackLinqChatId,
+          predecessorIdempotencyKey,
+          prisma,
+          sourceRef: `${intentId}-changed`,
+          targetKind: "thread",
+        })).resolves.toBeNull();
+
         await recordHostedLinqRuntimeDeliveryOutcomeTx({
           acceptedAt: new Date("2026-08-06T12:00:02.000Z"),
           attemptedAt: new Date("2026-08-06T12:00:01.000Z"),
@@ -187,7 +214,8 @@ describe.skipIf(!runPostgresProof)(
       const suffix = randomUUID();
       const intentId = `intent-card-participant-fallback-${suffix}`;
       const predecessorIdempotencyKey = `assistant-outbox:${intentId}`;
-      const fallbackIdempotencyKey = `${predecessorIdempotencyKey}:fallback`;
+      const fallbackIdempotencyKey =
+        `${predecessorIdempotencyKey}:stale-chat-fallback`;
       const predecessorLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
         predecessorIdempotencyKey,
       );
@@ -211,6 +239,7 @@ describe.skipIf(!runPostgresProof)(
         await expect(transitionHostedLinqRuntimeAppCardFallbackFenceTx({
           fallbackIdempotencyKey,
           linqChatId: null,
+          phoneNumber: "+15550100099",
           predecessorIdempotencyKey,
           prisma,
           sourceRef: intentId,
@@ -229,6 +258,15 @@ describe.skipIf(!runPostgresProof)(
           status: "provider_dispatch_started",
           targetKind: "participant",
         });
+
+        await expect(transitionHostedLinqRuntimeAppCardFallbackFenceTx({
+          fallbackIdempotencyKey,
+          linqChatId: `chat-card-participant-fallback-${suffix}`,
+          predecessorIdempotencyKey,
+          prisma,
+          sourceRef: intentId,
+          targetKind: "thread",
+        })).resolves.toBeNull();
       } finally {
         await prisma.hostedLinqDelivery.deleteMany({
           where: {

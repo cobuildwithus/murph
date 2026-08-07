@@ -396,7 +396,8 @@ describe("hosted Linq egress authority", () => {
       answeredMailboxItemIds: ["mailbox-stale-direct-chat"],
       authorityCheckOnly: true,
       homeRouteFallbackAllowed: true,
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       replyToMessageId: "message-stale-direct-chat",
@@ -411,6 +412,59 @@ describe("hosted Linq egress authority", () => {
         targetKind: "participant",
       },
       threadIsDirect: true,
+    });
+  });
+
+  it("keeps an ordinary card fallback on its persisted inbound thread", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-newer-home",
+    });
+    mockPersistedLinqInbound({
+      chatId: "chat-original-fallback",
+      dedupeKey: "linq:message-original-fallback",
+      mailboxItemId: "mailbox-original-fallback",
+      messageId: "message-original-fallback",
+      occurredAt: "2026-08-06T12:00:00.000Z",
+      prisma,
+      threadIsDirect: true,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      answeredMailboxItemIds: ["mailbox-original-fallback"],
+      authorityCheckOnly: true,
+      homeRouteFallbackAllowed: true,
+      idempotencyKey: "assistant-outbox:intent_ordinary:fallback",
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      replyToMessageId: "message-original-fallback",
+      target: "chat-original-fallback",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      targetOverride: null,
+      threadIsDirect: true,
+    });
+
+    expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
+  });
+
+  it("does not re-home an ordinary card fallback without persisted inbound selectors", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-newer-home",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      answeredMailboxItemIds: [],
+      authorityCheckOnly: true,
+      homeRouteFallbackAllowed: true,
+      idempotencyKey: "assistant-outbox:intent_ordinary:fallback",
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      replyToMessageId: null,
+      target: "chat-original-fallback",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
     });
   });
 
@@ -431,7 +485,8 @@ describe("hosted Linq egress authority", () => {
       answeredMailboxItemIds: ["mailbox-stale-direct-chat"],
       authorityCheckOnly: true,
       homeRouteFallbackAllowed: true,
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       replyToMessageId: "message-stale-direct-chat",
@@ -452,7 +507,8 @@ describe("hosted Linq egress authority", () => {
     const homeLinePhone = "+15550100099";
     const memberPhone = "+15550100001";
     const predecessorIdempotencyKey = "assistant-outbox:intent_123";
-    const fallbackIdempotencyKey = `${predecessorIdempotencyKey}:fallback`;
+    const fallbackIdempotencyKey =
+      `${predecessorIdempotencyKey}:stale-chat-fallback`;
     const prisma = createPrismaStub({
       homeChatId: "chat-materialized-fallback",
       homeLinePhone,
@@ -537,7 +593,8 @@ describe("hosted Linq egress authority", () => {
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: true,
       homeRouteFallbackAllowed: true,
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-current-home",
@@ -577,7 +634,8 @@ describe("hosted Linq egress authority", () => {
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: false,
       fromPhoneNumber: homeLinePhone,
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: memberPhone,
@@ -592,7 +650,8 @@ describe("hosted Linq egress authority", () => {
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: false,
       fromPhoneNumber: homeLinePhone,
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "+15550100002",
@@ -614,14 +673,18 @@ describe("hosted Linq egress authority", () => {
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: false,
       fromPhoneNumber: homeLinePhone,
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: memberPhone,
       targetKind: "participant",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
-      httpStatus: 403,
+    })).resolves.toMatchObject({
+      routeDisposition: "superseded",
+      targetOverride: {
+        target: "chat-newer-home",
+        targetKind: "thread",
+      },
     });
   });
 
@@ -1331,7 +1394,8 @@ describe("hosted Linq egress authority", () => {
       homeChatId: "chat-home",
     });
     const predecessorIdempotencyKey = "assistant-outbox:intent_123";
-    const fallbackIdempotencyKey = `${predecessorIdempotencyKey}:fallback`;
+    const fallbackIdempotencyKey =
+      `${predecessorIdempotencyKey}:stale-chat-fallback`;
     const predecessorLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
       predecessorIdempotencyKey,
     );
@@ -1413,7 +1477,8 @@ describe("hosted Linq egress authority", () => {
       identityPhone: memberPhone,
     });
     const predecessorIdempotencyKey = "assistant-outbox:intent_123";
-    const fallbackIdempotencyKey = `${predecessorIdempotencyKey}:fallback`;
+    const fallbackIdempotencyKey =
+      `${predecessorIdempotencyKey}:stale-chat-fallback`;
     const predecessorLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
       predecessorIdempotencyKey,
     );

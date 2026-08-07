@@ -333,6 +333,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null;
   providerDispatchClaimed?: boolean | null;
   providerDispatchStarted?: boolean | null;
+  routeDisposition?: "superseded" | "unavailable" | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
   threadIsDirect?: boolean | null;
 }

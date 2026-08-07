@@ -598,13 +598,13 @@ describe("hosted provider effects", () => {
       fetchImplementation: fetchMock,
       persistAppCardTextFallback,
     })).resolves.toMatchObject({
-      idempotencyKey: "detached-stale-card:fallback",
+      idempotencyKey: "detached-stale-card:stale-chat-fallback",
       providerMessageId: "recovered-fallback-message",
       target: "current-direct-chat",
     });
 
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
-      idempotencyKey: "detached-stale-card:fallback",
+      idempotencyKey: "detached-stale-card:stale-chat-fallback",
       staleTargetRecoveryRequired: true,
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -642,7 +642,7 @@ describe("hosted provider effects", () => {
         expect(body).toMatchObject({
           from: "+15550000",
           message: {
-            idempotency_key: "same-home-stale-card:fallback",
+            idempotency_key: "same-home-stale-card:stale-chat-fallback",
           },
           to: ["+15550001"],
         });
@@ -685,14 +685,14 @@ describe("hosted provider effects", () => {
         return await persistAppCardTextFallback(input);
       },
     })).resolves.toMatchObject({
-      idempotencyKey: "same-home-stale-card:fallback",
+      idempotencyKey: "same-home-stale-card:stale-chat-fallback",
       providerMessageId: "materialized-fallback-message",
       providerThreadId: "materialized-direct-chat",
       target: "materialized-direct-chat",
     });
 
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
-      idempotencyKey: "same-home-stale-card:fallback",
+      idempotencyKey: "same-home-stale-card:stale-chat-fallback",
       staleTargetRecoveryRequired: true,
     });
     expect(observedOrder).toEqual([
@@ -764,7 +764,7 @@ describe("hosted provider effects", () => {
     });
 
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
-      idempotencyKey: "stale-card-no-ephemeral-recovery:fallback",
+      idempotencyKey: "stale-card-no-ephemeral-recovery:stale-chat-fallback",
       staleTargetRecoveryRequired: true,
     });
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/chats")))
@@ -1032,7 +1032,7 @@ describe("hosted provider effects", () => {
       expectedIdempotencyKey: "hosted-stale-card:fallback",
       name: "definitively rejected exact replay",
     },
-  ])("recovers a stale Linq thread after $name using the persisted text identity", async ({
+  ])("keeps the original Linq thread after $name using the persisted text identity", async ({
     capabilityAvailable,
     exactReplay,
     expectedCapabilityRequests,
@@ -1065,19 +1065,7 @@ describe("hosted provider effects", () => {
           });
         }
         return new Response(JSON.stringify({
-          code: "CHAT_NOT_FOUND",
-          message: "redacted provider detail",
-        }), {
-          headers: { "content-type": "application/json" },
-          status: 404,
-        });
-      }
-      if (url.endsWith("/chats")) {
-        return new Response(JSON.stringify({
-          chat: {
-            id: "recovered-card-chat",
-            message: { id: "recovered-card-message" },
-          },
+          message: { id: "original-thread-fallback-message" },
         }), {
           headers: { "content-type": "application/json" },
         });
@@ -1112,25 +1100,30 @@ describe("hosted provider effects", () => {
       persistAppCardTextFallback,
     })).resolves.toEqual({
       idempotencyKey: expectedIdempotencyKey,
-      providerMessageId: "recovered-card-message",
-      providerThreadId: "recovered-card-chat",
-      target: "recovered-card-chat",
+      providerMessageId: "original-thread-fallback-message",
+      providerThreadId: null,
+      target: "stale-chat",
     });
 
     expect(persistAppCardTextFallback).toHaveBeenCalledOnce();
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
       idempotencyKey: expectedIdempotencyKey,
     });
-    const createChatRequest = providerRequests.find(({ url }) =>
-      url.endsWith("/chats")
-    );
-    expect(createChatRequest?.body).toMatchObject({
+    const textRequest = providerRequests.find(({ body, url }) => {
+      const message = body.message as {
+        parts?: Array<{ type?: string }>;
+      } | undefined;
+      return url.endsWith("/chats/stale-chat/messages")
+        && message?.parts?.[0]?.type === "text";
+    });
+    expect(textRequest?.body).toMatchObject({
       message: {
         idempotency_key: expectedIdempotencyKey,
         parts: [{ type: "text", value: "Nutrition summary" }],
       },
-      to: ["+15550001"],
     });
+    expect(providerRequests.some(({ url }) => url.endsWith("/chats")))
+      .toBe(false);
     expect(providerRequests.filter(({ url }) =>
       url.endsWith("/chats/stale-chat/messages")
     )).toHaveLength(capabilityAvailable ? 2 : 1);

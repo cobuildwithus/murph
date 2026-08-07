@@ -187,6 +187,7 @@ export async function sendHostedProviderLinqMessage(
       const fallbackRequest: HostedRuntimeLinqSendRequest = {
         ...effectiveRequest,
         card: null,
+        homeRouteFallbackAllowed: false,
         idempotencyKey: input.idempotencyKey,
         ...(recoveredTarget
           ? {
@@ -203,7 +204,6 @@ export async function sendHostedProviderLinqMessage(
           fallbackRequest.directRecipientPhoneNumber = null;
           fallbackRequest.fromPhoneNumber = null;
         }
-        fallbackRequest.homeRouteFallbackAllowed = false;
       }
       delete fallbackRequest.linqAppCardReplay;
       effectiveRequest = fallbackRequest;

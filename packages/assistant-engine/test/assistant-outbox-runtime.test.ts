@@ -1182,7 +1182,8 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
     const originalIdempotencyKey = `assistant-outbox:${intent.intentId}`
-    const fallbackIdempotencyKey = `${originalIdempotencyKey}:fallback`
+    const fallbackIdempotencyKey =
+      `${originalIdempotencyKey}:stale-chat-fallback`
     const recoveredTarget = 'thread-card-fallback-current'
     const processTerminated = new Error('simulated process termination')
     const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>()
@@ -1201,9 +1202,12 @@ describe('assistant outbox runtime', () => {
         parts?: Array<{ type?: string }>
       } | undefined
       if (message?.parts?.[0]?.type === 'imessage_app') {
-        return new Response(JSON.stringify({ error: 'unsupported app card' }), {
+        return new Response(JSON.stringify({
+          code: 'CHAT_NOT_FOUND',
+          message: 'redacted provider detail',
+        }), {
           headers: { 'Content-Type': 'application/json' },
-          status: 400,
+          status: 404,
         })
       }
       return new Response(JSON.stringify({
@@ -1309,6 +1313,98 @@ describe('assistant outbox runtime', () => {
         idempotencyKey: fallbackIdempotencyKey,
         providerMessageId: 'linq-card-fallback-text',
       },
+    })
+  })
+
+  it('keeps an ordinary rejected-card fallback pinned across restart replay', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-card-ordinary-fallback-restart-',
+    )
+    const originalTarget = 'thread-card-ordinary-fallback'
+    const intent = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      answeredMailboxItemIds: ['mailbox-card-ordinary-fallback'],
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: 'stable-card-ordinary-fallback',
+      deliverySource: TEST_LINQ_DELIVERY_SOURCE,
+      message: 'ignored model prose',
+      replyToMessageId: 'message-card-ordinary-fallback',
+      sessionId: 'session-card-ordinary-fallback',
+      threadId: originalTarget,
+      threadIsDirect: true,
+      turnId: 'turn-card-ordinary-fallback',
+      vault: vaultRoot,
+    })
+    const originalIdempotencyKey = `assistant-outbox:${intent.intentId}`
+    const fallbackIdempotencyKey = `${originalIdempotencyKey}:fallback`
+    const processTerminated = new Error('simulated process termination')
+    const sendLinq = vi.fn<
+      NonNullable<AssistantChannelDependencies['sendLinq']>
+    >()
+
+    sendLinq.mockImplementationOnce(async (request) => {
+      await request.persistAppCardTextFallback?.({
+        idempotencyKey: fallbackIdempotencyKey,
+      })
+      throw processTerminated
+    })
+
+    await useActualOutboundDeliveryImplementation()
+    await expect(dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      dispatchHooks: {
+        shouldRethrowDispatchError: ({ error }) => error === processTerminated,
+      },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-07-31T02:00:00.000Z'),
+      vault: vaultRoot,
+    })).rejects.toBe(processTerminated)
+
+    await expect(readAssistantOutboxIntent(
+      vaultRoot,
+      intent.intentId,
+    )).resolves.toMatchObject({
+      answeredMailboxItemIds: ['mailbox-card-ordinary-fallback'],
+      bindingDelivery: {
+        kind: 'thread',
+        target: originalTarget,
+      },
+      card: null,
+      deliveryIdempotencyKey: fallbackIdempotencyKey,
+      replyToMessageId: 'message-card-ordinary-fallback',
+      status: 'sending',
+    })
+
+    sendLinq.mockImplementationOnce(async (request) => ({
+      idempotencyKey: request.idempotencyKey,
+      providerMessageId: 'ordinary-fallback-message',
+      providerThreadId: null,
+      target: request.target,
+      targetKind: 'thread',
+    }))
+
+    const replayed = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-07-31T02:15:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(sendLinq.mock.calls[1]?.[0]).toMatchObject({
+      answeredMailboxItemIds: ['mailbox-card-ordinary-fallback'],
+      idempotencyKey: fallbackIdempotencyKey,
+      replyToMessageId: 'message-card-ordinary-fallback',
+      target: originalTarget,
+      targetKind: 'thread',
+    })
+    expect(sendLinq.mock.calls[1]?.[0]).not.toHaveProperty('card')
+    expect(replayed.intent).toMatchObject({
+      bindingDelivery: { kind: 'thread', target: originalTarget },
+      deliveryIdempotencyKey: fallbackIdempotencyKey,
+      status: 'sent',
     })
   })
 

@@ -1609,6 +1609,10 @@ function isLinqDeliveryControlError(error: unknown): error is Error {
         && error.deliveryMayHaveSucceeded === true
       )
       || (
+        'providerDispatchControl' in error
+        && error.providerDispatchControl === true
+      )
+      || (
         error instanceof VaultCliError
         && error.code === 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING'
       )

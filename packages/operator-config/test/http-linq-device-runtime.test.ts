@@ -486,6 +486,25 @@ test('linq capability preserves delivery-control errors from the hosted fetch bo
   })).rejects.toBe(deliveryControlError)
 })
 
+test('linq requests preserve pre-provider dispatch control errors', async () => {
+  const providerDispatchControlError = Object.assign(new VaultCliError(
+    'ASSISTANT_LINQ_APP_CARD_FALLBACK_ROUTE_SUPERSEDED',
+    'Hosted provider route changed before dispatch.',
+    { retryable: true },
+  ), {
+    providerDispatchControl: true,
+  })
+
+  await expect(checkLinqIMessageCapability({
+    address: '+15550001',
+  }, {
+    env: { LINQ_API_TOKEN: 'linq-token' },
+    fetchImplementation: async () => {
+      throw providerDispatchControlError
+    },
+  })).rejects.toBe(providerDispatchControlError)
+})
+
 test('linq app-card failure diagnostics do not expose nutrition values', async () => {
   await assert.rejects(
     () => sendLinqIMessageAppCard({

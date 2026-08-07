@@ -17,6 +17,9 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
+  parseHostedLinqAppCardFallbackIdentity,
+} from "@/src/lib/hosted-onboarding/linq-app-card-fallback";
+import {
   acquireHostedMemberHomeLinqRouteLockTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import {
@@ -101,6 +104,16 @@ export const POST = withJsonError(async (request: Request) => {
     });
     const providerTarget = asserted.targetOverride?.target ?? target;
     const providerTargetKind = asserted.targetOverride?.targetKind ?? targetKind;
+    if (asserted.routeDisposition) {
+      return {
+        assistantAskFallbackRequired: false,
+        asserted,
+        deliveryBlockCode: null,
+        deliveryPosture: null,
+        providerDispatchClaimed: null,
+        providerDispatchStarted: false,
+      };
+    }
     let finalAuthority = asserted;
     if (
       providerTargetKind !== "participant"
@@ -242,6 +255,9 @@ export const POST = withJsonError(async (request: Request) => {
     ...(assertion.asserted.targetOverride
       ? { targetOverride: assertion.asserted.targetOverride }
       : {}),
+    ...(assertion.asserted.routeDisposition
+      ? { routeDisposition: assertion.asserted.routeDisposition }
+      : {}),
     ...(assertion.deliveryBlockCode
       ? { deliveryBlockCode: assertion.deliveryBlockCode }
       : {}),
@@ -287,7 +303,8 @@ function assertHostedLinqAppCardFallbackTransitionRequest(input: {
   if (
     input.authorityCheckOnly
     || !input.intentId
-    || input.idempotencyKey !== `${predecessor}:fallback`
+    || parseHostedLinqAppCardFallbackIdentity(input.idempotencyKey)
+      ?.predecessorIdempotencyKey !== predecessor
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_LINQ_APP_CARD_FALLBACK_TRANSITION_INVALID",

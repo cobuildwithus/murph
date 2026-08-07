@@ -17,6 +17,9 @@ import {
   createHostedLinqDeliverySourceRefLookupKey,
 } from "./linq-observability-identifiers";
 import {
+  parseHostedLinqAppCardFallbackIdentity,
+} from "./linq-app-card-fallback";
+import {
   buildHostedLinqInviteSignupEffectId,
   type HostedLinqInviteSignupGroupJoinReplyContext,
   parseHostedLinqInviteSignupEffectId,
@@ -715,11 +718,20 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
   const linqChatLookupKey = input.targetKind === "thread"
     ? createHostedLinqChatLookupKey(input.linqChatId)
     : null;
+  const phoneNumberLookupKey = createHostedPhoneLookupKey(
+    normalizePhoneNumber(input.phoneNumber),
+  );
+  const fallbackIdentity = parseHostedLinqAppCardFallbackIdentity(
+    fallbackIdempotencyKey,
+  );
   if (
     !predecessorIdempotencyKey
-    || fallbackIdempotencyKey !== `${predecessorIdempotencyKey}:fallback`
+    || !fallbackIdempotencyKey
+    || fallbackIdentity?.predecessorIdempotencyKey
+      !== predecessorIdempotencyKey
     || !sourceRef
     || (input.targetKind === "thread" && !linqChatLookupKey)
+    || (input.targetKind === "participant" && !phoneNumberLookupKey)
   ) {
     return null;
   }
@@ -729,7 +741,10 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
   const sourceRefLookupKey = createHostedLinqDeliverySourceRefLookupKey(
     sourceRef,
   );
-  if (!predecessorLookupKey || !sourceRefLookupKey) {
+  const fallbackLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+    fallbackIdempotencyKey,
+  );
+  if (!predecessorLookupKey || !sourceRefLookupKey || !fallbackLookupKey) {
     return null;
   }
 
@@ -744,6 +759,23 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
         delivery: predecessor,
         sourceRefLookupKey,
       })) {
+        return null;
+      }
+
+      const existingFallback = await prisma.hostedLinqDelivery.findUnique({
+        where: { idempotencyKey: fallbackLookupKey },
+        select: hostedLinqDeliveryLifecycleSelect,
+      });
+      if (
+        existingFallback
+        && !hostedLinqAppCardFallbackClaimMatches({
+          delivery: existingFallback,
+          linqChatLookupKey,
+          phoneNumberLookupKey,
+          sourceRefLookupKey,
+          targetKind: input.targetKind,
+        })
+      ) {
         return null;
       }
 
@@ -802,6 +834,22 @@ export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
       });
     },
   );
+}
+
+function hostedLinqAppCardFallbackClaimMatches(input: {
+  delivery: Prisma.HostedLinqDeliveryGetPayload<{
+    select: typeof hostedLinqDeliveryLifecycleSelect;
+  }>;
+  linqChatLookupKey: string | null;
+  phoneNumberLookupKey: string | null;
+  sourceRefLookupKey: string;
+  targetKind: "participant" | "thread";
+}): boolean {
+  return input.delivery.linqChatLookupKey === input.linqChatLookupKey
+    && input.delivery.phoneNumberLookupKey === input.phoneNumberLookupKey
+    && input.delivery.source === "hosted_runtime_linq_delivery"
+    && input.delivery.sourceRef === input.sourceRefLookupKey
+    && input.delivery.targetKind === input.targetKind;
 }
 
 function hostedLinqAppCardPredecessorMatches(input: {

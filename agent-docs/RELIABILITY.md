@@ -36,9 +36,13 @@ Last verified: 2026-08-06
   claim becomes confirmation-pending before another capability or message
   request. The capability probe is authority-checked but does not create that
   irreversible claim; the claim is written only when the first provider
-  message request begins. Only a definitive rejection, including a
-  structurally classified stale-chat `404`, can commit the text-only
-  transition, clear the card, and retry under one stable fallback identity. A caught
+  message request begins. An ordinary definitive 400, 415, or 422 rejection
+  commits the text-only transition under `:fallback`, which remains pinned to
+  the exact persisted thread across restart and may not use current-home
+  projection, participant recovery, or provider chat materialization. Only a
+  structurally classified stale-chat `404` commits under
+  `:stale-chat-fallback`, whose distinct identity may receive Web-authorized
+  route replacement. A caught
   capability-check failure, including a capability-specific exhausted rate
   limit, or definitive
   app-card rejection emits one sanitized hosted warning before the existing
@@ -57,8 +61,8 @@ Last verified: 2026-08-06
   raw participant route, and every initial or resumed fallback dispatch
   reacquires that route from Web. Retained answered-mailbox and reply-target
   selectors remain available for accounting and receipts but cannot authorize
-  a persisted app-card fallback target; the fallback key forces the
-  current-home-only projection on every drain. Web atomically terminalizes the thread-card
+  a persisted stale-chat app-card fallback target; the stale-chat fallback key
+  forces the current-home-only projection on every drain. Web atomically terminalizes the thread-card
   predecessor and claims the participant fallback fence without persisting its
   raw target. An accepted provider chat replaces the exact rejected home chat
   under the same member, route, identity, line, and predecessor-provenance
@@ -70,7 +74,13 @@ Last verified: 2026-08-06
   exact Web transition, so a lost control response cannot strand the original
   card fence or bypass provider-entry authority. Once the fallback outcome is
   terminal, no unresolved card fence remains to block later canonical group
-  routing.
+  routing. If a newer home appears between participant projection and provider
+  entry, Web returns a typed superseded disposition without claiming or
+  contacting Linq. The runtime persists that newer thread under the same stale
+  fallback identity, emits a metadata-only event, and retries the outbox. Every
+  pre-provider dispatch-control error also emits a sanitized structured warning
+  and retains its typed retry/control semantics through the Linq HTTP wrapper;
+  it is never rewritten as a generic provider transport error.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
 - Health-data withdrawal commits its revocation boundary, then waits for the
@@ -904,9 +914,11 @@ Last verified: 2026-08-06
   must enter the same confirmation-pending state before capability or provider
   message I/O. Capability probing itself does not create a provider-dispatch
   fence; only the first message request does. Text retry is safe only after a
-  definitive rejection, including a structured stale-chat app-card `404`, and
-  the text-only transition commits with `card: null` and a stable fallback
-  identity. A detached replay must resolve current-home-only authority before
+  definitive rejection. Ordinary 400, 415, and 422 recovery commits with
+  `card: null` under `:fallback` and stays on the exact persisted thread without
+  re-home or participant authority. A structured stale-chat app-card `404`
+  instead commits under `:stale-chat-fallback`. A detached stale-chat replay
+  must resolve current-home-only authority before
   that commit. A different current chat is persisted with the fallback. When
   the rejected chat remains current, the fallback instead reacquires Web's
   encrypted participant and assigned-line route on every drain, persists no raw
@@ -919,6 +931,12 @@ Last verified: 2026-08-06
   path. Acceptance of a materialized chat atomically replaces only the exact
   rejected home; a persisted-fallback retry and a repeated outcome callback are
   idempotent, while a newer home route is preserved.
+  If that newer home appears between participant projection and provider entry,
+  Web returns a typed superseded disposition before a provider claim. The
+  runtime persists the newer thread, logs metadata-only control evidence, and
+  retries without contacting Linq on the superseded attempt. Pre-provider
+  control errors retain their original typed semantics through the Linq HTTP
+  transport rather than being replaced with a generic provider error.
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
 - Assistant product-feedback capture accepts at most one in-memory candidate during a successful provider turn. The assistant execution context can only hand that candidate to its hosted invocation synchronously; the existing web-control write remains at the foreground delivery owner and starts only after a current-turn member-channel send succeeds. Failed provider attempts discard their candidate, invocations without a successful foreground send may abandon it, feedback never counts as a provider side effect for transport retry safety, and persistence remains best-effort with a two-second maximum deadline, no retry queue, and no user-visible delivery state. The accepted-input-derived idempotency key remains the ambiguity fence when a timed-out post-reply write may already have reached Web.
 - Exact private support escalation remains the bounded in-turn exception to ordinary post-reply feedback persistence. Under the same member-scoped advisory lock, Web writes the fixed member marker plus the anonymous bounded and sanitized issue Murph wrote in its own words, reads and validates both rows, and ranks the member marker for the three-per-UTC-day alert cap. An eligible provider attempt formats from the first stored issue rather than callback memory and uses the feedback-derived Resend idempotency key, so replay has one stable body even when a later callback supplies different wording; missing, member-linked, unsanitized, still-prefixed, or malformed stored detail fails before email. Later records remain durable without another alert; missing email configuration or provider failure remains visible to the current turn without adding a retry queue or second delivery owner.

@@ -3429,7 +3429,24 @@ function createHostedProviderFetchBoundary(input: {
       providerEntryIdentity = identity;
       providerEntryPromise = Promise.resolve().then(
         input.onProviderDispatchEntered,
-      );
+      ).catch((error: unknown) => {
+        if (error instanceof Error) {
+          Object.assign(error, { providerDispatchControl: true });
+        }
+        emitHostedExecutionStructuredLog({
+          component: "assistant-delivery",
+          details: {
+            eventType:
+              "assistant.delivery.provider_dispatch_control_error",
+            providerDispatchPhase: "pre_provider",
+          },
+          error,
+          level: "warn",
+          message: "Hosted delivery stopped at the pre-provider dispatch control boundary.",
+          phase: "outbox",
+        });
+        throw error;
+      });
     }
     return providerEntryPromise;
   };
@@ -3623,6 +3640,22 @@ function createHostedAssistantLinqSendDependency(input: {
       originalParticipantRecipientPhoneNumber = directRecipientPhoneNumber;
     }
     if (
+      currentHomeRouteOnly
+      && request.card == null
+      && engagement.targetOverride?.targetKind === "thread"
+      && effectiveIdempotencyKey
+      && persistAppCardTextFallback
+      && isHostedLinqStaleChatAppCardFallbackIdempotencyKey(
+        effectiveIdempotencyKey,
+      )
+    ) {
+      await persistAppCardTextFallback({
+        idempotencyKey: effectiveIdempotencyKey,
+        target: engagement.targetOverride.target,
+        targetKind: "thread",
+      });
+    }
+    if (
       includesVaultFile
       && (
         providerTarget !== request.target
@@ -3688,6 +3721,75 @@ function createHostedAssistantLinqSendDependency(input: {
           target: providerTarget,
           targetKind: providerTargetKind,
         });
+      if (providerEntry.routeDisposition === "superseded") {
+        const supersedingTarget = providerEntry.targetOverride;
+        if (
+          supersedingTarget?.targetKind !== "thread"
+          || !effectiveIdempotencyKey
+          || !persistAppCardTextFallback
+          || !isHostedLinqStaleChatAppCardFallbackIdempotencyKey(
+            effectiveIdempotencyKey,
+          )
+        ) {
+          emitHostedExecutionStructuredLog({
+            component: "assistant-delivery",
+            details: {
+              eventType:
+                "assistant.delivery.linq_app_card_route_supersession_invalid",
+              providerKind: "linq",
+            },
+            level: "warn",
+            message: "Hosted Linq stale app-card route supersession was incomplete before provider entry.",
+            phase: "outbox",
+          });
+          throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
+            "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+            "Hosted iMessage app-card recovery route changed without a complete replacement authority.",
+            { retryable: false },
+          ));
+        }
+        await persistAppCardTextFallback({
+          idempotencyKey: effectiveIdempotencyKey,
+          target: supersedingTarget.target,
+          targetKind: "thread",
+        });
+        emitHostedExecutionStructuredLog({
+          component: "assistant-delivery",
+          details: {
+            eventType:
+              "assistant.delivery.linq_app_card_route_superseded",
+            providerKind: "linq",
+            retryMode: "current_home_projection",
+          },
+          level: "info",
+          message: "Hosted Linq stale app-card recovery moved to a newer Web-authorized home route before provider entry.",
+          phase: "outbox",
+        });
+        throw new VaultCliError(
+          "ASSISTANT_LINQ_APP_CARD_FALLBACK_ROUTE_SUPERSEDED",
+          "Hosted iMessage app-card recovery moved to a newer direct route before provider delivery.",
+          { retryable: true },
+        );
+      }
+      if (providerEntry.routeDisposition === "unavailable") {
+        emitHostedExecutionStructuredLog({
+          component: "assistant-delivery",
+          details: {
+            eventType:
+              "assistant.delivery.linq_app_card_stale_chat_recovery_unavailable",
+            providerKind: "linq",
+            recoveryPhase: "provider_entry",
+          },
+          level: "warn",
+          message: "Hosted Linq stale app-card recovery lost its authorized route before provider entry.",
+          phase: "outbox",
+        });
+        throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
+          "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+          "Hosted iMessage app-card recovery requires a current direct route before provider delivery.",
+          { retryable: false },
+        ));
+      }
       if (providerEntry.assistantAskFallbackRequired === true) {
         if (!input.intentId || !input.vaultRoot) {
           throw new VaultCliError(
@@ -4719,11 +4821,24 @@ function readHostedLinqAppCardFallbackPredecessorIdempotencyKey(
   value: string | null,
 ): string | null {
   const idempotencyKey = value?.trim() ?? "";
-  const suffix = ":fallback";
-  return idempotencyKey.length > suffix.length
+  for (const suffix of [":stale-chat-fallback", ":fallback"]) {
+    if (
+      idempotencyKey.length > suffix.length
       && idempotencyKey.endsWith(suffix)
-    ? idempotencyKey.slice(0, -suffix.length)
-    : null;
+    ) {
+      return idempotencyKey.slice(0, -suffix.length);
+    }
+  }
+  return null;
+}
+
+function isHostedLinqStaleChatAppCardFallbackIdempotencyKey(
+  value: string | null,
+): boolean {
+  const idempotencyKey = value?.trim() ?? "";
+  const suffix = ":stale-chat-fallback";
+  return idempotencyKey.length > suffix.length
+    && idempotencyKey.endsWith(suffix);
 }
 
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
@@ -4827,6 +4942,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   if (
     input.authorityCheckOnly !== true
     && normalized.assistantAskFallbackRequired !== true
+    && normalized.routeDisposition === undefined
   ) {
     assertHostedAssistantLinqProviderDispatchClaim({
       providerDispatchRetrySafe: input.providerDispatchRetrySafe === true,
@@ -4886,6 +5002,12 @@ function normalizeHostedAssistantLinqEngagementResult(
   if (typeof result?.providerDispatchStarted === "boolean") {
     normalized.providerDispatchStarted = result.providerDispatchStarted;
   }
+  if (
+    result?.routeDisposition === "superseded"
+    || result?.routeDisposition === "unavailable"
+  ) {
+    normalized.routeDisposition = result.routeDisposition;
+  }
   const targetOverride = result?.targetOverride ?? null;
   if (targetOverride?.target && targetOverride.targetKind === "thread") {
     normalized.targetOverride = {
@@ -4924,16 +5046,21 @@ function shouldBypassHostedLinqDeliveryContextForHomeFallback(input: {
   nativeReplyRequested?: true;
   replyToMessageId: string | null;
 }): boolean {
+  const appCardFallbackPredecessorIdempotencyKey =
+    readHostedLinqAppCardFallbackPredecessorIdempotencyKey(
+      input.idempotencyKey,
+    );
   return input.homeRouteFallbackAllowed
     && input.nativeReplyRequested !== true
     && (
-      readHostedLinqAppCardFallbackPredecessorIdempotencyKey(
-        input.idempotencyKey,
-      ) !== null
-      || (
-        !input.replyToMessageId?.trim()
-        && (input.answeredMailboxItemIds?.length ?? 0) === 0
-      )
+      appCardFallbackPredecessorIdempotencyKey !== null
+        ? isHostedLinqStaleChatAppCardFallbackIdempotencyKey(
+            input.idempotencyKey,
+          )
+        : (
+            !input.replyToMessageId?.trim()
+            && (input.answeredMailboxItemIds?.length ?? 0) === 0
+          )
     );
 }
 

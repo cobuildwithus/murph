@@ -56,6 +56,9 @@ import type {
   LinqRuntimeDependencies,
   TelegramRuntimeDependencies,
 } from './types.js'
+import {
+  buildAssistantLinqAppCardFallbackIdempotencyKey,
+} from '../linq-app-card-fallback.js'
 import type {
   AssistantMessageReaction,
   AssistantResponseMedia,
@@ -656,11 +659,15 @@ export async function sendLinqMessage(
           error,
           reason: 'app_card_rejected',
         })
-        appCardFallbackIdempotencyKey = `${idempotencyKey}:fallback`
         staleTargetRecoveryRequired =
           error instanceof VaultCliError
           && error.context?.status === 404
           && error.context?.linqFailureKind === 'chat_not_found'
+        appCardFallbackIdempotencyKey =
+          buildAssistantLinqAppCardFallbackIdempotencyKey({
+            idempotencyKey,
+            staleChat: staleTargetRecoveryRequired,
+          })
       }
     }
   }

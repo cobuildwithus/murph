@@ -376,6 +376,7 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     deliveryPosture?: unknown;
     providerDispatchClaimed?: unknown;
     providerDispatchStarted?: unknown;
+    routeDisposition?: unknown;
     targetOverride?: unknown;
     threadIsDirect?: unknown;
   };
@@ -403,6 +404,12 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   }
   if (typeof response.providerDispatchStarted === "boolean") {
     result.providerDispatchStarted = response.providerDispatchStarted;
+  }
+  if (
+    response.routeDisposition === "superseded"
+    || response.routeDisposition === "unavailable"
+  ) {
+    result.routeDisposition = response.routeDisposition;
   }
   if (typeof response.threadIsDirect === "boolean") {
     result.threadIsDirect = response.threadIsDirect;

@@ -1773,19 +1773,19 @@ describe('assistant channels runtime seam', () => {
       env: { LINQ_API_TOKEN: 'linq-token' },
       persistAppCardTextFallback,
     })).resolves.toMatchObject({
-      idempotencyKey: 'card-replay-stale-chat:fallback',
+      idempotencyKey: 'card-replay-stale-chat:stale-chat-fallback',
       providerMessageId: 'materialized-fallback-message',
       providerThreadId: 'materialized-fallback-chat',
       target: 'materialized-fallback-chat',
     })
 
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
-      idempotencyKey: 'card-replay-stale-chat:fallback',
+      idempotencyKey: 'card-replay-stale-chat:stale-chat-fallback',
       staleTargetRecoveryRequired: true,
     })
     expect(runtimeMocks.createLinqChat).toHaveBeenCalledWith({
       from: '+15550000',
-      idempotencyKey: 'card-replay-stale-chat:fallback',
+      idempotencyKey: 'card-replay-stale-chat:stale-chat-fallback',
       message: NUTRITION_CARD_TEXT,
       to: ['+15550001'],
     }, {
@@ -2032,25 +2032,11 @@ describe('assistant channels runtime seam', () => {
       expectedIdempotencyKey: 'card-stale-thread:fallback',
       name: 'definitive app-card rejection',
     },
-  ])('recovers a stale Linq thread after $name using the persisted text identity', async ({
+  ])('keeps the original Linq thread after $name using the persisted text identity', async ({
     capabilityAvailable,
     expectedIdempotencyKey,
   }) => {
     vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
-    const missingChatError = new VaultCliError(
-      'LINQ_API_REQUEST_FAILED',
-      'Linq request POST /chats/[chat]/messages failed with HTTP 404.',
-      {
-        failureStage: 'http',
-        linqFailureKind: 'chat_not_found',
-        method: 'POST',
-        operation: 'send_message',
-        path: '/chats/[chat]/messages',
-        provider: 'linq',
-        retryable: false,
-        status: 404,
-      },
-    )
     const persistLinqAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
     runtimeMocks.checkLinqIMessageCapability.mockResolvedValue(capabilityAvailable)
     if (capabilityAvailable) {
@@ -2068,10 +2054,8 @@ describe('assistant channels runtime seam', () => {
         },
       ))
     }
-    runtimeMocks.sendLinqChatMessage.mockRejectedValueOnce(missingChatError)
-    runtimeMocks.createLinqChat.mockResolvedValueOnce({
-      chatId: 'recovered-card-chat',
-      messageId: 'recovered-card-message',
+    runtimeMocks.sendLinqChatMessage.mockResolvedValueOnce({
+      message: { id: 'original-thread-fallback-message' },
     })
 
     await expect(ASSISTANT_CHANNEL_ADAPTERS.linq.send({
@@ -2092,26 +2076,67 @@ describe('assistant channels runtime seam', () => {
       persistLinqAppCardTextFallback,
     })).resolves.toMatchObject({
       idempotencyKey: expectedIdempotencyKey,
-      providerMessageId: 'recovered-card-message',
-      providerThreadId: 'recovered-card-chat',
-      target: 'recovered-card-chat',
+      providerMessageId: 'original-thread-fallback-message',
+      providerThreadId: 'stale-card-chat',
+      target: 'stale-card-chat',
     })
 
     expect(persistLinqAppCardTextFallback).toHaveBeenCalledWith({
       idempotencyKey: expectedIdempotencyKey,
     })
-    expect(runtimeMocks.createLinqChat).toHaveBeenCalledWith({
-      from: '+15550000',
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledWith({
+      chatId: 'stale-card-chat',
       idempotencyKey: expectedIdempotencyKey,
       message: NUTRITION_CARD_TEXT,
-      to: ['+15550001'],
+      replyToMessageId: null,
     }, {
       env: process.env,
       fetchImplementation: undefined,
     })
-    expect(runtimeMocks.createLinqChat.mock.invocationCallOrder[0]).toBeGreaterThan(
+    expect(runtimeMocks.sendLinqChatMessage.mock.invocationCallOrder[0]).toBeGreaterThan(
       persistLinqAppCardTextFallback.mock.invocationCallOrder[0]!,
     )
+    expect(runtimeMocks.createLinqChat).not.toHaveBeenCalled()
+  })
+
+  it('does not rematerialize an ordinary persisted app-card fallback after a text 404', async () => {
+    vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
+    const missingChatError = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq rejected the persisted app-card text fallback.',
+      {
+        failureStage: 'http',
+        linqFailureKind: 'chat_not_found',
+        method: 'POST',
+        operation: 'send_message',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 404,
+      },
+    )
+    runtimeMocks.sendLinqChatMessage.mockRejectedValueOnce(missingChatError)
+
+    await expect(ASSISTANT_CHANNEL_ADAPTERS.linq.send({
+      actorId: '+15550001',
+      bindingDelivery: createAssistantBindingDelivery(
+        'thread',
+        'ordinary-fallback-chat',
+      ),
+      card: null,
+      deliverySource: {
+        kind: 'linq',
+        fromPhoneNumber: '+15550000',
+      },
+      explicitTarget: null,
+      idempotencyKey: 'card-ordinary-restart:fallback',
+      identityId: null,
+      message: NUTRITION_CARD_TEXT,
+      replyToMessageId: null,
+      threadIsDirect: true,
+    }, {})).rejects.toBe(missingChatError)
+
+    expect(runtimeMocks.createLinqChat).not.toHaveBeenCalled()
   })
 
   it('uploads private Linq image bytes and sends only the provider attachment id', async () => {

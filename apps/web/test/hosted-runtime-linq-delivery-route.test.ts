@@ -142,7 +142,8 @@ describe("hosted runtime Linq delivery route", () => {
       attemptedAt: "2026-04-26T00:00:03.000Z",
       directRecipientPhoneNumber: "+15550100001",
       fromPhoneNumber: "+15550100099",
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       intentId: "intent_123",
       providerMessageId: "linq_message_fallback",
       providerThreadId: "linq_chat_materialized",
@@ -155,7 +156,8 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.materializeHostedAppCardFallbackHomeRouteTx).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550100001",
       fromPhoneNumber: "+15550100099",
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       linqChatId: "linq_chat_materialized",
       memberId: "member_123",
       prisma,

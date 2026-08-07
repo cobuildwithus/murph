@@ -93,6 +93,9 @@ import {
   type AssistantOutboxPreparedMirrorDispatch,
 } from './outbox/dispatch-state.js'
 import {
+  isAssistantLinqStaleChatAppCardFallbackIdempotencyKey,
+} from './linq-app-card-fallback.js'
+import {
   normalizeNullableString,
   writeJsonFileAtomic,
 } from './shared.js'
@@ -976,7 +979,11 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       input.signal,
     )
     const delivered = await sendAssistantOutboxDispatchIntent({
-      dependencies: dispatchIntent.card === null
+      dependencies:
+        dispatchIntent.card === null
+        && !isAssistantLinqStaleChatAppCardFallbackIdempotencyKey(
+          dispatchIntent.deliveryIdempotencyKey,
+        )
         ? dispatchDependencies
         : {
             ...(dispatchDependencies ?? {}),

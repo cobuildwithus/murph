@@ -287,7 +287,8 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
     await expect(materializeHostedAppCardFallbackHomeRouteTx({
       directRecipientPhoneNumber,
       fromPhoneNumber,
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       linqChatId: materializedChatId,
       memberId,
       prisma: prisma as never,
@@ -319,7 +320,8 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
     await expect(materializeHostedAppCardFallbackHomeRouteTx({
       directRecipientPhoneNumber,
       fromPhoneNumber,
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       linqChatId: materializedChatId,
       memberId,
       prisma: prisma as never,
@@ -338,7 +340,8 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
     await expect(materializeHostedAppCardFallbackHomeRouteTx({
       directRecipientPhoneNumber,
       fromPhoneNumber,
-      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      idempotencyKey:
+        "assistant-outbox:intent_123:stale-chat-fallback",
       linqChatId: materializedChatId,
       memberId,
       prisma: prisma as never,

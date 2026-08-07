@@ -30,6 +30,11 @@ import {
   buildAssistantOutboxRawTargetIdentity,
   hashAssistantOutboxTargetFingerprint,
 } from './intents.js'
+import {
+  ASSISTANT_LINQ_APP_CARD_FALLBACK_SUFFIX,
+  ASSISTANT_LINQ_STALE_CHAT_APP_CARD_FALLBACK_SUFFIX,
+  isAssistantLinqStaleChatAppCardFallbackIdempotencyKey,
+} from '../linq-app-card-fallback.js'
 
 /**
  * Dispatch-state owns the persisted outbox intent transitions that happen once
@@ -184,7 +189,10 @@ export async function persistAssistantOutboxIntentLinqAppCardTextFallback(input:
       originalIdempotencyKey !== null &&
       (
         fallbackIdempotencyKey === originalIdempotencyKey ||
-        fallbackIdempotencyKey === `${originalIdempotencyKey}:fallback`
+        fallbackIdempotencyKey ===
+          `${originalIdempotencyKey}${ASSISTANT_LINQ_APP_CARD_FALLBACK_SUFFIX}` ||
+        fallbackIdempotencyKey ===
+          `${originalIdempotencyKey}${ASSISTANT_LINQ_STALE_CHAT_APP_CARD_FALLBACK_SUFFIX}`
       )
     if (!fallbackIdentityIsValid) {
       throw new VaultCliError(
@@ -203,18 +211,50 @@ export async function persistAssistantOutboxIntentLinqAppCardTextFallback(input:
         false,
       )
     ) {
-      if (
-        recoveredTarget !== null
-        && (
+      if (recoveredTarget !== null) {
+        const targetChanged =
           current.bindingDelivery?.kind !== 'thread'
           || current.bindingDelivery.target !== recoveredTarget
-        )
-      ) {
-        throw new VaultCliError(
-          'ASSISTANT_LINQ_APP_CARD_FALLBACK_TARGET_CHANGED',
-          'The persisted iMessage app-card text fallback target changed.',
-          { retryable: true },
-        )
+        if (
+          targetChanged
+          && (
+            !isAssistantLinqStaleChatAppCardFallbackIdempotencyKey(
+              fallbackIdempotencyKey,
+            )
+            || current.bindingDelivery?.kind !== 'thread'
+            || current.explicitTarget !== null
+          )
+        ) {
+          throw new VaultCliError(
+            'ASSISTANT_LINQ_APP_CARD_FALLBACK_TARGET_CHANGED',
+            'The persisted iMessage app-card text fallback target changed.',
+            { retryable: true },
+          )
+        }
+        if (targetChanged) {
+          const bindingDelivery = {
+            kind: 'thread' as const,
+            target: recoveredTarget,
+          }
+          const persistedIntent = assistantOutboxIntentSchema.parse(
+            sanitizeAssistantOutboxIntentForPersistence({
+              ...current,
+              bindingDelivery,
+              targetFingerprint: hashAssistantOutboxTargetFingerprint(
+                buildAssistantOutboxRawTargetIdentity({
+                  ...current,
+                  bindingDelivery,
+                }),
+              ),
+              updatedAt: input.persistedAt.toISOString(),
+            }),
+          )
+          await writeJsonFileAtomic(
+            input.intentPath,
+            sanitizeAssistantOutboxIntentForPersistence(persistedIntent),
+          )
+          return persistedIntent
+        }
       }
       return current
     }
@@ -235,6 +275,12 @@ export async function persistAssistantOutboxIntentLinqAppCardTextFallback(input:
       && (
         current.bindingDelivery?.kind !== 'thread'
         || current.explicitTarget !== null
+        || (
+          current.bindingDelivery.target !== recoveredTarget
+          && !isAssistantLinqStaleChatAppCardFallbackIdempotencyKey(
+            fallbackIdempotencyKey,
+          )
+        )
       )
     ) {
       throw new VaultCliError(

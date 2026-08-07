@@ -77,6 +77,16 @@ Updated: 2026-08-06
   A fresh process treated those historical selectors as route authority before
   current-home projection, so it could send fallback text to the rejected chat
   despite the phone-free participant recovery added in round 9.
+- Final ReviewGPT round 11 exposed that one generic fallback identity still
+  conflated ordinary app-card rejection with a structured stale-chat rejection.
+  Ordinary 400, 415, or 422 recovery could therefore inherit the stale route's
+  current-home and participant materialization authority after restart.
+- The same round exposed a race after participant projection: if Web installed
+  a newer direct home before provider entry, the participant assertion returned
+  a permanent authority error even though no provider request had started.
+  Inspection through the actual hosted fetch boundary then proved the typed
+  retry was itself being replaced by a generic Linq transport error, erasing
+  its control semantics and the useful failure classification.
 
 ## Success criteria
 
@@ -134,6 +144,21 @@ Updated: 2026-08-06
   target. The projection distinguishes the exact rejected predecessor from an
   already-persisted replacement thread; missing replacement authority makes no
   provider delivery request and remains confirmation-pending.
+- An ordinary 400, 415, or 422 rejection uses the stable `:fallback` identity
+  and remains pinned to its exact persisted thread across live and restarted
+  delivery. It may not use current-home projection, participant recovery, or
+  provider chat materialization. Only the structurally classified stale-chat
+  `404` uses `:stale-chat-fallback` and receives that replacement authority.
+- If a newer direct home supersedes participant recovery before provider entry,
+  Web returns a typed pre-provider disposition without claiming or contacting
+  Linq. The runtime atomically persists the newer thread under the same stale
+  fallback identity, records a metadata-only event, and retries so the next
+  drain sends exactly once to that thread. Missing authority remains
+  confirmation-pending.
+- Every error raised by the pre-provider dispatch-control boundary emits a
+  sanitized structured warning and retains its original typed retry/control
+  semantics through the Linq HTTP wrapper instead of becoming a generic
+  provider transport error.
 - Exhausted provider-message `429` responses after dispatch admission are
   confirmation-pending; a capability-only `429` may still select deterministic
   text fallback before message dispatch.
@@ -287,3 +312,18 @@ Updated: 2026-08-06
   files pass 160 assistant-engine tests, 252 hosted-runtime tests, and 136 Web
   tests including the PostgreSQL lifecycle; affected typechecks and both
   documentation checks pass.
+- Final ReviewGPT round 11 found the ordinary/stale fallback identity collision
+  and the concurrent-home participant race. Failing-first proof reproduced the
+  ordinary restart re-home and the permanent pre-provider authority failure.
+  The correction assigns route replacement only to the stale-chat identity,
+  atomically projects a superseding home before a retry, and preserves plus
+  logs the typed control error at the hosted fetch boundary. Focused proof
+  covers live and restarted ordinary fallback, selector-free fail-closed
+  authority, the two-drain supersession race with no first provider request,
+  exact Web claim replay, and structured control diagnostics.
+- Current round 11 correction proof passes 162 assistant-engine tests, 253
+  assistant-runtime tests, 55 operator-config Linq HTTP tests, 135 Web authority
+  and callback tests, 145 Cloudflare runtime-platform tests, and all 3 opt-in
+  PostgreSQL lifecycle cases. Typechecks pass for assistant engine, assistant
+  runtime, operator config, prepared Web, and Cloudflare; documentation
+  gardening and drift checks also pass.

@@ -35,6 +35,9 @@ import {
   readDeliveredTargetKind,
   readDeliveredTargetMessageId,
 } from './helpers.js'
+import {
+  isAssistantLinqAppCardFallbackIdempotencyKey,
+} from '../linq-app-card-fallback.js'
 import { createAssistantDeliveryConfirmationPendingError } from '../outbox/retry-policy.js'
 import {
   sendEmailMessage,
@@ -548,8 +551,16 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     }
 
     let delivered
-    let effectiveTextDelivery = card === null
-      ? { idempotencyKey }
+    let effectiveTextDelivery: {
+      appCardFallback: boolean
+      idempotencyKey?: string | null
+      staleTargetRecoveryRequired?: true
+    } | null = card === null
+      ? {
+          appCardFallback:
+            isAssistantLinqAppCardFallbackIdempotencyKey(idempotencyKey),
+          idempotencyKey,
+        }
       : null
     const persistLinqAppCardTextFallback =
       dependencies.persistLinqAppCardTextFallback
@@ -562,7 +573,10 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
             targetKind?: 'thread'
           }) => {
             const persistedTarget = await persistLinqAppCardTextFallback(input)
-            effectiveTextDelivery = input
+            effectiveTextDelivery = {
+              ...input,
+              appCardFallback: true,
+            }
             return persistedTarget
           }
         : undefined
@@ -612,7 +626,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
           })
     } catch (error) {
       const textDelivery = effectiveTextDelivery
-      const recovered = textDelivery
+      const recovered = textDelivery && !textDelivery.appCardFallback
         ? await maybeRecoverMissingLinqDirectThread({
             actorId,
             candidate,
