@@ -184,3 +184,15 @@ Updated: 2026-08-06
   the subscription and physical-notes public subpaths with `skipLibCheck: false`.
   The production assembly still stages only one root Zod copy and the
   bundle bytes remain exactly unchanged.
+- Final ReviewGPT round 4 found the second public-package declaration edge:
+  the published CLI bundles Vault Usecases declarations that name `zod/v4`,
+  while the release packer strips the bundled private package's dependency
+  metadata. The CLI therefore also retains Zod as an install-time dependency,
+  and its existing package-shape verifier rejects a dev-only classification.
+- The real release packer produced all five tarballs. In an isolated pnpm
+  consumer with no root-level Zod, the packed CLI manifest declares Zod and
+  TypeScript resolves the bundled Vault Usecases `zod/v4` reference through
+  the CLI's own install edge. A `skipLibCheck: false` root-import compile then
+  passed after neutralizing two unrelated pre-existing declaration defects in
+  the temporary consumer (`@murphai/query` and `incur`); no packed artifact or
+  repository source was changed for those temporary corrections.

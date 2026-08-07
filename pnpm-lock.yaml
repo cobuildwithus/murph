@@ -593,6 +593,9 @@ importers:
       yaml:
         specifier: ^2.8.2
         version: 2.9.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
       zxing-wasm:
         specifier: 3.0.3
         version: 3.0.3(@types/emscripten@1.41.5)
@@ -603,9 +606,6 @@ importers:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
 
   packages/clinical-records:
     dependencies:
