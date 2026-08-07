@@ -16,47 +16,83 @@ import {
   type MurphContactOption,
 } from "@/src/lib/murph-contact-routing";
 
-import type { ConnectIntentRecoveryRequest, ConnectSource } from "./connect-page-types";
+import type {
+  ConnectIntentRecoveryRequest,
+  ConnectSource,
+} from "./connect-page-types";
 
-const DEFAULT_GARMIN_HISTORICAL_DATA_VOICE_MEMO_SRC =
-  `/audio/garmin-historical-data-memos/${defaultAssistantVoiceOptionId}.mp3`;
+const DEFAULT_GARMIN_HISTORICAL_DATA_VOICE_MEMO_SRC = `/audio/garmin-historical-data-memos/${defaultAssistantVoiceOptionId}.mp3`;
 
-export function GarminHistoricalDataDialog({
-  open,
+export function VitalConnectionDialog({
   onContinue,
   onOpenChange,
+  source,
   voiceMemoSrc,
 }: {
-  open: boolean;
   onContinue: () => void;
   onOpenChange: (open: boolean) => void;
+  source: Pick<ConnectSource, "id" | "name" | "requiresReconnect"> | null;
   voiceMemoSrc?: string | null;
 }) {
+  const sourceName = source?.name ?? "your health source";
+  const showGarminHistoricalData =
+    source?.id === "garmin" && source.requiresReconnect !== true;
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={Boolean(source)} onOpenChange={onOpenChange}>
       <DialogContent className="gap-5 p-6 sm:max-w-md md:p-7">
         <DialogHeader className="pr-10">
           <span className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-            Garmin
+            {sourceName}
           </span>
           <DialogTitle className="font-serif text-2xl font-semibold tracking-normal text-foreground">
-            Turn on Historical Data
+            Vital connects {sourceName} for Murph
           </DialogTitle>
           <DialogDescription className="leading-6">
-            When Garmin opens, turn on Historical Data before approving.
+            The next authorization screen may name Vital instead of Murph. That
+            is expected.
           </DialogDescription>
         </DialogHeader>
 
-        <VoiceMemoPlayer
-          accessibleLabel="Garmin Historical Data reminder"
-          src={voiceMemoSrc ?? DEFAULT_GARMIN_HISTORICAL_DATA_VOICE_MEMO_SRC}
-          bars={24}
-          preload="metadata"
-          containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"
-          accentClassName="bg-primary"
-          fillClassName="bg-primary"
-          trackClassName="bg-primary/20"
-        />
+        <div className="space-y-3 text-sm leading-6 text-muted-foreground">
+          <p>
+            Vital acts as Murph&apos;s health-sync provider. It processes the
+            data you approve to operate this connection and send it to Murph; it
+            is not the health assistant using the data.
+          </p>
+          <p>
+            Murph does not authorize Vital to sell this data, use it for
+            advertising, train models on it, or use it for unrelated purposes.
+            You can disconnect
+            {` ${sourceName}`} at any time.
+          </p>
+        </div>
+
+        {showGarminHistoricalData ? (
+          <>
+            <div className="border-t border-border pt-3 text-sm leading-6 text-muted-foreground">
+              <p className="font-medium text-foreground">
+                Turn on Historical Data
+              </p>
+              <p className="mt-1">
+                When Garmin opens, turn on Historical Data before approving.
+              </p>
+            </div>
+
+            <VoiceMemoPlayer
+              accessibleLabel="Garmin Historical Data reminder"
+              src={
+                voiceMemoSrc ?? DEFAULT_GARMIN_HISTORICAL_DATA_VOICE_MEMO_SRC
+              }
+              bars={24}
+              preload="metadata"
+              containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"
+              accentClassName="bg-primary"
+              fillClassName="bg-primary"
+              trackClassName="bg-primary/20"
+            />
+          </>
+        ) : null}
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button
@@ -68,7 +104,7 @@ export function GarminHistoricalDataDialog({
             Cancel
           </Button>
           <Button type="button" size="lg" onClick={onContinue}>
-            Continue to Garmin
+            Continue to {sourceName}
           </Button>
         </div>
       </DialogContent>
@@ -93,7 +129,10 @@ export function ConnectDisconnectDialog({
 }) {
   return (
     <Dialog open={Boolean(source)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md gap-6 p-6 md:p-7" inert={inert || undefined}>
+      <DialogContent
+        className="max-w-md gap-6 p-6 md:p-7"
+        inert={inert || undefined}
+      >
         <DialogHeader className="pr-10">
           <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
             {resolveDisconnectDialogTitle(source)}
@@ -145,7 +184,9 @@ function resolveDisconnectDialogTitle(source: ConnectSource | null): string {
   return `Disconnect ${source?.name ?? "source"}?`;
 }
 
-function resolveDisconnectDialogDescription(source: ConnectSource | null): string {
+function resolveDisconnectDialogDescription(
+  source: ConnectSource | null,
+): string {
   if (source?.disconnectScope === "junction_account") {
     return "Murph will stop syncing new data from every source in this connection. Your history is kept.";
   }
@@ -153,18 +194,26 @@ function resolveDisconnectDialogDescription(source: ConnectSource | null): strin
   return `Murph will stop syncing new data from ${source?.name ?? "this source"}. Your history is kept.`;
 }
 
-export function ConnectRedirectDialog({ sourceName }: { sourceName: string | null }) {
+export function ConnectRedirectDialog({
+  sourceName,
+}: {
+  sourceName: string | null;
+}) {
   return (
     <Dialog open={Boolean(sourceName)}>
-      <DialogContent showCloseButton={false} className="max-w-sm gap-5 p-6 md:p-7">
+      <DialogContent
+        showCloseButton={false}
+        className="max-w-sm gap-5 p-6 md:p-7"
+      >
         <DialogHeader className="items-center text-center">
           <MurphPulseLoader className="mb-1 h-10 w-auto" />
           <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
             {sourceName ? `Connecting ${sourceName}` : "Connecting"}
           </DialogTitle>
           <DialogDescription>
-            Hang tight &mdash; we&apos;re taking you to {sourceName ?? "your source"} to finish setting up
-            the connection. This only takes a moment.
+            Hang tight &mdash; we&apos;re taking you to{" "}
+            {sourceName ?? "your source"} to finish setting up the connection.
+            This only takes a moment.
           </DialogDescription>
         </DialogHeader>
       </DialogContent>
@@ -181,8 +230,11 @@ export function ConnectIntentRecoveryDialog({
   onOpenChange: (open: boolean) => void;
   request: ConnectIntentRecoveryRequest | null;
 }) {
-  const resolvedContactAction = contactAction ?? buildConnectIntentRecoveryFallbackContactAction();
-  const contactLabel = resolveConnectIntentRecoveryContactLabel(resolvedContactAction);
+  const resolvedContactAction =
+    contactAction ?? buildConnectIntentRecoveryFallbackContactAction();
+  const contactLabel = resolveConnectIntentRecoveryContactLabel(
+    resolvedContactAction,
+  );
 
   return (
     <Dialog open={Boolean(request)} onOpenChange={onOpenChange}>
@@ -202,7 +254,8 @@ export function ConnectIntentRecoveryDialog({
               Connection link unavailable
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
-              {request?.message ?? "This connection link is no longer available."}
+              {request?.message ??
+                "This connection link is no longer available."}
             </DialogDescription>
           </div>
         </DialogHeader>
@@ -251,7 +304,9 @@ function buildConnectIntentRecoveryFallbackContactAction(): MurphContactOption {
   };
 }
 
-function resolveConnectIntentRecoveryContactLabel(action: MurphContactOption): string {
+function resolveConnectIntentRecoveryContactLabel(
+  action: MurphContactOption,
+): string {
   if (action.kind === "text" || action.kind === "telegram") {
     return "Text Murph";
   }
@@ -265,6 +320,7 @@ function resolveConnectIntentRecoveryContactAriaLabel(input: {
   sourceName: string | null;
 }): string {
   const sourceName = input.sourceName ?? "device";
-  const suffix = input.action.target === "_blank" ? " (opens in a new tab)" : "";
+  const suffix =
+    input.action.target === "_blank" ? " (opens in a new tab)" : "";
   return `${input.label} for a fresh ${sourceName} connection link${suffix}`;
 }

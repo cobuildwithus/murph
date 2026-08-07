@@ -11,7 +11,6 @@ export type ConnectSourceSetupGuideId =
   | "zepp-apple-health"
   | AppleHealthRelaySetupGuideId;
 
-
 export type ConnectSource = {
   connectionAvailable?: boolean;
   connectProvider?: string;
@@ -27,6 +26,7 @@ export type ConnectSource = {
   name: string;
   recoveryKind?: "connection_reset";
   requiresReconnect?: boolean;
+  requiresVitalDisclosure?: boolean;
   setupGuideActionLabel?: string;
   setupGuideId?: ConnectSourceSetupGuideId;
   unavailableActionLabel?: string;
