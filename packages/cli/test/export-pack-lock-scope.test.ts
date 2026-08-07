@@ -117,18 +117,14 @@ test.sequential(
         vault: vaultRoot,
       })
       await within(rebuildStarted, 'rebuild did not start')
-      let releaseTimeout!: () => void
-      const timeout = new Promise<'timeout'>((resolve) => {
-        const timeoutId = setTimeout(() => resolve('timeout'), 500)
-        releaseTimeout = () => clearTimeout(timeoutId)
-      })
       const lockAttempt = withAssistantRuntimeWriteLock(vaultRoot, async () => 'acquired' as const)
-      const lockOutcome = await Promise.race([lockAttempt, timeout])
-      releaseTimeout()
+      const lockOutcome = await within(
+        lockAttempt,
+        'external reconstruction held the runtime lock',
+      )
       releaseRebuild()
 
       const result = await materialization
-      await lockAttempt
       assert.equal(lockOutcome, 'acquired')
       assert.equal(result.rebuilt, true)
       const externalManifest = path.join(
@@ -220,6 +216,85 @@ test.sequential(
         'canonical materialization did not reject after retirement',
       )
       await assert.rejects(access(packDirectory), { code: 'ENOENT' })
+    } finally {
+      releaseRebuild()
+      await rm(aliasParent, { force: true })
+      await rm(vaultRoot, { force: true, recursive: true })
+    }
+  },
+)
+
+test.sequential(
+  'canonical reconstruction does not overwrite a newer same-id generation',
+  async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), 'murph-export-lock-newer-'),
+    )
+    const aliasParent = `${vaultRoot}-alias-parent`
+    const aliasVault = path.join(aliasParent, path.basename(vaultRoot))
+    let releaseRebuild!: () => void
+    const rebuildRelease = new Promise<void>((resolve) => {
+      releaseRebuild = resolve
+    })
+    let reportRebuildStarted!: () => void
+    const rebuildStarted = new Promise<void>((resolve) => {
+      reportRebuildStarted = resolve
+    })
+
+    try {
+      await initializeVault({ vaultRoot })
+      await symlink(path.dirname(vaultRoot), aliasParent, 'dir')
+      const readModel = await readVault(vaultRoot)
+      const olderPack = buildExportPack(readModel, {
+        packId: 'canonical-generation-pack',
+        generatedAt: '2026-03-13T12:00:00.000Z',
+      })
+      await materializeExportPack(vaultRoot, olderPack.files)
+      const missingFile = olderPack.files.find(
+        (file) => !file.path.endsWith('/manifest.json'),
+      )
+      assert.ok(missingFile)
+      await rm(path.join(vaultRoot, missingFile.path), { force: true })
+      readVaultTolerantMock.mockImplementation(async () => {
+        reportRebuildStarted()
+        await rebuildRelease
+        return readModel
+      })
+
+      const materialization = materializeStoredExportPack({
+        out: aliasVault,
+        packId: olderPack.packId,
+        vault: vaultRoot,
+      })
+      await within(rebuildStarted, 'same-id rebuild did not start')
+      const newerPack = buildExportPack(readModel, {
+        packId: olderPack.packId,
+        generatedAt: '2026-03-14T12:00:00.000Z',
+      })
+      await withAssistantRuntimeWriteLock(vaultRoot, async () => {
+        await materializeExportPack(vaultRoot, newerPack.files)
+      })
+      releaseRebuild()
+
+      await within(
+        assert.rejects(materialization, { code: 'export_pack_changed' }),
+        'stale canonical materialization did not reject',
+      )
+      const manifestPath = path.join(
+        vaultRoot,
+        `exports/packs/${olderPack.packId}/manifest.json`,
+      )
+      assert.equal(
+        await readFile(manifestPath, 'utf8'),
+        newerPack.files.find((file) => file.path.endsWith('/manifest.json'))
+          ?.contents,
+      )
+      for (const file of newerPack.files) {
+        assert.equal(
+          await readFile(path.join(vaultRoot, file.path), 'utf8'),
+          file.contents,
+        )
+      }
     } finally {
       releaseRebuild()
       await rm(aliasParent, { force: true })

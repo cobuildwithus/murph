@@ -91,6 +91,22 @@ async function readJsonRelativeFile<T>(
   missingCode: string,
   invalidCode: string,
 ): Promise<T> {
+  return (await readJsonRelativeFileWithContents(
+    vaultRoot,
+    relativePath,
+    schema,
+    missingCode,
+    invalidCode,
+  )).value
+}
+
+async function readJsonRelativeFileWithContents<T>(
+  vaultRoot: string,
+  relativePath: string,
+  schema: z.ZodType<T>,
+  missingCode: string,
+  invalidCode: string,
+): Promise<{ contents: string; value: T }> {
   const absolutePath = await resolveVaultRelativePath(vaultRoot, relativePath)
   let contents: string
 
@@ -121,7 +137,10 @@ async function readJsonRelativeFile<T>(
   }
 
   try {
-    return schema.parse(parsed)
+    return {
+      contents,
+      value: schema.parse(parsed),
+    }
   } catch (error) {
     throw new VaultCliError(
       invalidCode,
@@ -269,7 +288,10 @@ function matchesExportPackRange(
 
 async function readStoredExportPackManifest(vaultRoot: string, packId: string) {
   const manifestFile = path.posix.join(packDirectory(packId), 'manifest.json')
-  const manifest = await readJsonRelativeFile(
+  const {
+    contents: manifestContents,
+    value: manifest,
+  } = await readJsonRelativeFileWithContents(
     vaultRoot,
     manifestFile,
     exportPackManifestSchema,
@@ -286,6 +308,7 @@ async function readStoredExportPackManifest(vaultRoot: string, packId: string) {
 
   return {
     manifestFile,
+    manifestContents,
     manifest,
   }
 }
@@ -441,10 +464,11 @@ export async function materializeStoredExportPack(input: {
     outDir,
   )
   const stored = await withAssistantRuntimeWriteLock(input.vault, async () => {
-    const { manifestFile, manifest } = await readStoredExportPackManifest(
-      input.vault,
-      input.packId,
-    )
+    const {
+      manifestContents,
+      manifestFile,
+      manifest,
+    } = await readStoredExportPackManifest(input.vault, input.packId)
     const files = await tryReadFilesForMaterialization(input.vault, manifest)
     if (writesCanonicalVault && files) {
       await materializeExportPack(input.vault, files)
@@ -452,6 +476,7 @@ export async function materializeStoredExportPack(input: {
     return {
       files,
       manifest,
+      manifestContents,
       manifestFile,
       materializedCanonical: writesCanonicalVault && files !== null,
     }
@@ -463,7 +488,16 @@ export async function materializeStoredExportPack(input: {
   if (writesCanonicalVault) {
     if (!stored.materializedCanonical) {
       await withAssistantRuntimeWriteLock(input.vault, async () => {
-        await readStoredExportPackManifest(input.vault, input.packId)
+        const current = await readStoredExportPackManifest(
+          input.vault,
+          input.packId,
+        )
+        if (current.manifestContents !== stored.manifestContents) {
+          throw new VaultCliError(
+            'export_pack_changed',
+            `Export pack "${input.packId}" changed while it was being rebuilt; retry the materialization.`,
+          )
+        }
         await materializeExportPack(input.vault, files)
       })
     }

@@ -94,9 +94,11 @@ Updated: 2026-08-07
    maintenance task.
 9. [completed] Resolve final ReviewGPT round 4 materialization/prune locking
    and permanent oversized-pack deferral findings.
-10. [in progress] Resolve final ReviewGPT round 5 physical-directory alias and
-    external reconstruction lock-scope findings; then push the exact
-    remediation head and complete final ReviewGPT plus exact-head CI.
+10. [completed] Resolve final ReviewGPT round 5 physical-directory alias and
+    external reconstruction lock-scope findings.
+11. [in progress] Resolve final ReviewGPT round 6 stale same-ID generation
+    publication during unlocked reconstruction; then push the exact remediation
+    head and complete final ReviewGPT plus exact-head CI.
 
 ## Verification
 
@@ -120,4 +122,8 @@ Updated: 2026-08-07
   outbox-drain recovery, coalescing, shutdown, and abort recovery.
 - Physical-identity helper, integrated alias, and external reconstruction lock
   scope tests; typechecks for `vault-usecases`, `assistant-engine`, and CLI.
-- Pending final round 6 ReviewGPT and exact-head CI.
+- Same-ID newer-generation interleaving rejects the stale canonical rebuild and
+  preserves every newer pack file; missing-pack retirement still cannot be
+  resurrected and physically distinct external reconstruction remains lock-free.
+- Exact-head CI passed at the round 6 candidate head.
+- Pending final round 7 ReviewGPT and exact-head CI.
