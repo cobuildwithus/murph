@@ -3754,22 +3754,18 @@ function createHostedAssistantLinqSendDependency(input: {
                 let recoveredTarget:
                   | { target: string; targetKind: "thread" }
                   | null = null;
-                if (
-                  fallback.staleTargetRecoveryRequired === true
-                  && directRecipientPhoneNumber === null
-                ) {
+                if (fallback.staleTargetRecoveryRequired === true) {
                   const recoveryEngagement =
                     await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-                      answeredMailboxItemIds: request.answeredMailboxItemIds,
+                      answeredMailboxItemIds: [],
                       authorityCheckOnly: true,
-                      directRecipientPhoneNumber,
+                      directRecipientPhoneNumber: null,
                       effectsPort: input.effectsPort ?? null,
                       fromPhoneNumber,
-                      homeRouteFallbackAllowed:
-                        request.homeRouteFallbackAllowed === true,
+                      homeRouteFallbackAllowed: true,
                       idempotencyKey: fallback.idempotencyKey,
                       intentId: input.intentId ?? null,
-                      replyToMessageId: request.replyToMessageId ?? null,
+                      replyToMessageId: null,
                       signal: signal ?? null,
                       target: providerTarget,
                       targetKind: providerTargetKind,

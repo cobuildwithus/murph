@@ -62,6 +62,11 @@ Updated: 2026-08-06
   provider-dispatch fence before any message request, so an interruption after
   an ordinary `available: false` result could incorrectly force exact card
   replay on the next drain.
+- Final ReviewGPT round 8 exposed that stale-target authorization still reused
+  historical reply selectors and ran only when the process lacked a raw
+  recipient phone. A retained inbound could therefore re-authorize the dead
+  chat, while a live process could commit fallback before rehoming through
+  transient phone state. Either path could strand fallback after restart.
 
 ## Success criteria
 
@@ -97,12 +102,14 @@ Updated: 2026-08-06
   fallback leaves no unresolved dispatch fence for the chat.
 - Typed hosted delivery-control errors survive the Linq HTTP wrapper and are
   rethrown rather than logged or persisted as capability fallback.
-- A detached stale-chat replay authorizes a current direct chat before clearing
-  the card. The same atomic outbox write stores that current chat binding and
+- Every stale-chat replay authorizes the current direct chat before clearing
+  the card, without historical reply selectors or process-local recipient
+  hints. The same atomic outbox write stores that current chat binding and
   recomputes the target fingerprint, so a process restart replays text to the
   authorized chat. The exact predecessor may be terminalized on its old chat
   while the fallback fence is claimed on that current chat. Missing authority
-  preserves the card and confirmation-pending state.
+  preserves the card and confirmation-pending state, and provider-side chat
+  materialization cannot replace the durable target transition.
 - Exhausted provider-message `429` responses after dispatch admission are
   confirmation-pending; a capability-only `429` may still select deterministic
   text fallback before message dispatch.
@@ -226,3 +233,10 @@ Updated: 2026-08-06
   Cloudflare Linq engagement parsing 1, and local PostgreSQL fence lifecycle 2.
   Assistant engine, assistant runtime, Cloudflare, and prepared Web typechecks
   pass. Documentation gardening and drift checks pass.
+- Final ReviewGPT round 8 found that historical reply authority and transient
+  phone recovery could still bypass durable current-chat selection. The
+  remediation always requests the current-home-only Web projection before the
+  fallback transition and disables provider-side phone recovery after that
+  transition. Focused live, detached, missing-authority, and fresh-restart
+  regressions pass: hosted provider effects 27, hosted callbacks 3, and the
+  assistant outbox restart case 1.

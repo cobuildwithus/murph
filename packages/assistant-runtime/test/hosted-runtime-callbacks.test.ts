@@ -10866,7 +10866,12 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("resolves a current direct thread before persisting detached stale-card fallback", async () => {
+  it.each([
+    { directRecipientPhoneNumber: null, execution: "detached" },
+    { directRecipientPhoneNumber: "+15550001", execution: "live" },
+  ])("resolves a current direct thread before persisting $execution stale-card fallback", async ({
+    directRecipientPhoneNumber,
+  }) => {
     const effect = createEffect({
       bindingDeliveryTarget: "stale-direct-chat",
       channel: "linq",
@@ -10878,8 +10883,12 @@ describe("hosted runtime callbacks", () => {
       observedOrder.push("persist-fallback");
     });
     const assertRecentInbound = vi.fn(async (request: {
+      answeredMailboxItemIds?: readonly string[] | null;
       authorityCheckOnly: boolean;
+      directRecipientPhoneNumber?: string | null;
+      homeRouteFallbackAllowed?: boolean | null;
       idempotencyKey?: string | null;
+      replyToMessageId?: string | null;
       target?: string | null;
     }) => {
       observedOrder.push(
@@ -10926,6 +10935,7 @@ describe("hosted runtime callbacks", () => {
     mocks.useActualLinqMessage = true;
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
+        answeredMailboxItemIds: ["mailbox-stale-direct-chat"],
         card: {
           kind: "daily_nutrition",
           localDate: "2026-07-31",
@@ -10937,11 +10947,14 @@ describe("hosted runtime callbacks", () => {
             proteinGrams: { mealCount: 1, total: 35 },
           },
         },
-        directRecipientPhoneNumber: null,
+        directRecipientPhoneNumber,
+        fromPhoneNumber: "+15550000",
+        homeRouteFallbackAllowed: true,
         idempotencyKey: "assistant-outbox:intent_123",
         linqAppCardReplay: true,
         message: "Nutrition summary",
         persistAppCardTextFallback,
+        replyToMessageId: "message-stale-direct-chat",
         target: "stale-direct-chat",
         targetKind: "thread",
         threadIsDirect: true,
@@ -10978,6 +10991,17 @@ describe("hosted runtime callbacks", () => {
       target: "current-direct-chat",
       targetKind: "thread",
     });
+    const recoveryRequest = assertRecentInbound.mock.calls.find(
+      ([request]) => request.authorityCheckOnly,
+    )?.[0];
+    expect(recoveryRequest).toEqual(expect.objectContaining({
+      authorityCheckOnly: true,
+      directRecipientPhoneNumber: null,
+      homeRouteFallbackAllowed: true,
+      replyToMessageId: null,
+      target: "stale-direct-chat",
+    }));
+    expect(recoveryRequest).not.toHaveProperty("answeredMailboxItemIds");
     expect(observedOrder).toEqual(expect.arrayContaining([
       "claim:assistant-outbox:intent_123:stale-direct-chat",
       "provider:stale-card",
@@ -10992,7 +11016,7 @@ describe("hosted runtime callbacks", () => {
       .toBeLessThan(observedOrder.indexOf("provider:current-text"));
   });
 
-  it("keeps detached stale-card state when no current direct thread is authorized", async () => {
+  it("keeps stale-card state when no current direct thread is authorized", async () => {
     const effect = createEffect({
       bindingDeliveryTarget: "stale-direct-chat",
       channel: "linq",
@@ -11020,6 +11044,7 @@ describe("hosted runtime callbacks", () => {
     mocks.useActualLinqMessage = true;
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       await dependencies.sendLinq({
+        answeredMailboxItemIds: ["mailbox-stale-direct-chat"],
         card: {
           kind: "daily_nutrition",
           localDate: "2026-07-31",
@@ -11031,11 +11056,14 @@ describe("hosted runtime callbacks", () => {
             proteinGrams: { mealCount: 1, total: 35 },
           },
         },
-        directRecipientPhoneNumber: null,
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550000",
+        homeRouteFallbackAllowed: true,
         idempotencyKey: "assistant-outbox:intent_123",
         linqAppCardReplay: true,
         message: "Nutrition summary",
         persistAppCardTextFallback,
+        replyToMessageId: "message-stale-direct-chat",
         target: "stale-direct-chat",
         targetKind: "thread",
         threadIsDirect: true,

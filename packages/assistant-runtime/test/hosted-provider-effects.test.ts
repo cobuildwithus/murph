@@ -531,7 +531,12 @@ describe("hosted provider effects", () => {
     expect(serializedLog).not.toContain("linq-token");
   });
 
-  it("uses an authority-resolved thread for detached replay fallback after structured stale-chat rejection", async () => {
+  it.each([
+    { directRecipientPhoneNumber: null, execution: "detached" },
+    { directRecipientPhoneNumber: "+15550001", execution: "live" },
+  ])("uses an authority-resolved thread for $execution replay fallback after structured stale-chat rejection", async ({
+    directRecipientPhoneNumber,
+  }) => {
     const persistAppCardTextFallback = vi.fn(async () => ({
       target: "current-direct-chat",
       targetKind: "thread" as const,
@@ -576,7 +581,9 @@ describe("hosted provider effects", () => {
           proteinGrams: { mealCount: 1, total: 35 },
         },
       },
-      directRecipientPhoneNumber: null,
+      directRecipientPhoneNumber,
+      fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
       idempotencyKey: "detached-stale-card",
       linqAppCardReplay: true,
       message: "Nutrition summary",
@@ -597,6 +604,76 @@ describe("hosted provider effects", () => {
       idempotencyKey: "detached-stale-card:fallback",
       staleTargetRecoveryRequired: true,
     });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not use transient phone recovery after persisting a stale-card target replacement", async () => {
+    const persistAppCardTextFallback = vi.fn(async () => ({
+      target: "current-direct-chat",
+      targetKind: "thread" as const,
+    }));
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (
+        url.endsWith("/chats/stale-direct-chat/messages")
+        || url.endsWith("/chats/current-direct-chat/messages")
+      ) {
+        return new Response(JSON.stringify({
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 404,
+        });
+      }
+      if (url.endsWith("/chats")) {
+        return new Response(JSON.stringify({
+          chat: {
+            id: "process-local-chat",
+            message: { id: "process-local-message" },
+          },
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(null, { status: 500 });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-07-31",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
+      idempotencyKey: "stale-card-no-ephemeral-recovery",
+      linqAppCardReplay: true,
+      message: "Nutrition summary",
+      target: "stale-direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      persistAppCardTextFallback,
+    })).rejects.toMatchObject({
+      code: "LINQ_API_REQUEST_FAILED",
+    });
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: "stale-card-no-ephemeral-recovery:fallback",
+      staleTargetRecoveryRequired: true,
+    });
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/chats")))
+      .toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -840,7 +917,6 @@ describe("hosted provider effects", () => {
 
   it.each([
     {
-      appCardChatNotFound: false,
       capabilityAvailable: false,
       exactReplay: false,
       expectedCapabilityRequests: 1,
@@ -848,7 +924,6 @@ describe("hosted provider effects", () => {
       name: "capability fallback",
     },
     {
-      appCardChatNotFound: false,
       capabilityAvailable: true,
       exactReplay: false,
       expectedCapabilityRequests: 1,
@@ -856,23 +931,13 @@ describe("hosted provider effects", () => {
       name: "definitive app-card rejection",
     },
     {
-      appCardChatNotFound: false,
       capabilityAvailable: true,
       exactReplay: true,
       expectedCapabilityRequests: 0,
       expectedIdempotencyKey: "hosted-stale-card:fallback",
       name: "definitively rejected exact replay",
     },
-    {
-      appCardChatNotFound: true,
-      capabilityAvailable: true,
-      exactReplay: false,
-      expectedCapabilityRequests: 1,
-      expectedIdempotencyKey: "hosted-stale-card:fallback",
-      name: "structured app-card chat-not-found rejection",
-    },
   ])("recovers a stale Linq thread after $name using the persisted text identity", async ({
-    appCardChatNotFound,
     capabilityAvailable,
     exactReplay,
     expectedCapabilityRequests,
@@ -899,14 +964,9 @@ describe("hosted provider effects", () => {
           parts?: Array<{ type?: string }>;
         } | undefined;
         if (message?.parts?.[0]?.type === "imessage_app") {
-          return new Response(JSON.stringify(appCardChatNotFound
-            ? {
-              code: "CHAT_NOT_FOUND",
-              message: "redacted provider detail",
-            }
-            : { error: "unsupported app card" }), {
+          return new Response(JSON.stringify({ error: "unsupported app card" }), {
             headers: { "content-type": "application/json" },
-            status: appCardChatNotFound ? 404 : 400,
+            status: 400,
           });
         }
         return new Response(JSON.stringify({
@@ -965,9 +1025,6 @@ describe("hosted provider effects", () => {
     expect(persistAppCardTextFallback).toHaveBeenCalledOnce();
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
       idempotencyKey: expectedIdempotencyKey,
-      ...(appCardChatNotFound
-        ? { staleTargetRecoveryRequired: true }
-        : {}),
     });
     const createChatRequest = providerRequests.find(({ url }) =>
       url.endsWith("/chats")

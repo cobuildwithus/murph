@@ -192,6 +192,11 @@ export async function sendHostedProviderLinqMessage(
             }
           : {}),
       };
+      if (input.staleTargetRecoveryRequired === true) {
+        fallbackRequest.directRecipientPhoneNumber = null;
+        fallbackRequest.fromPhoneNumber = null;
+        fallbackRequest.homeRouteFallbackAllowed = false;
+      }
       delete fallbackRequest.linqAppCardReplay;
       effectiveRequest = fallbackRequest;
       return recoveredTarget;

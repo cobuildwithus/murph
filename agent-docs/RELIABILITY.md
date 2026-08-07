@@ -46,11 +46,13 @@ Last verified: 2026-08-06
   fallback rather than an error. Before promoted fallback text enters Linq,
   Web atomically terminalizes the exact original provider-dispatch fence with
   the bounded app-card rejection code and claims the fallback fence under the
-  same runtime intent, source, and thread target. When a detached exact replay
-  proves its old chat stale, Web must first authorize a current direct chat;
+  same runtime intent, source, and thread target. Whenever an exact replay
+  proves its old chat stale, Web must first authorize the current direct chat
+  without historical reply selectors or a process-local recipient hint;
   only then may the runtime atomically persist the text transition, current
   chat binding, and matching target fingerprint before claiming its fallback
-  fence on that current chat. A restart therefore replays fallback text to the
+  fence on that current chat. Provider-side chat materialization cannot replace
+  this durable transition. A restart therefore replays fallback text to the
   authorized current chat rather than the stale predecessor. Failure to
   resolve that target leaves the card intact and confirmation-pending. A retry whose local
   outbox already contains the fallback repeats that exact transition, so a
