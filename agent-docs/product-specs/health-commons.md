@@ -204,28 +204,30 @@ remain authoritative. The SQLite file is read-only build output, contains no
 user data, and returns at most a small evidence packet instead of loading the
 catalog or source files into a turn. The command first resolves one exact
 normalized entity title or authored alias. An exact title wins over an alias.
-Two equally ranked owners or an unknown topic return no packet. Required
-question terms then filter and rank evidence only within that resolved owner
-set. A protocol with the same title as its direct family shares the family
-owner. A canonical family title can include its typed child protocols. A family
-alias stays on the family and never makes a child protocol interchangeable.
-Child titles and aliases resolve the child directly. Unrelated equal aliases
-still fail closed. Every lookup requires a short question focus, including
-broad intent such as health benefits or overall evidence. Source findings use one
-unambiguous authored target: `related_protocol`, then `parent_family`, then
-`measures`. Multi-target and untargeted findings stay out of the projection
-until their ownership is authored more precisely. Safety comes only from a
-directly sourced safety claim, appraisal, or typed source finding. Page-wide
+Two equally ranked owners or an unknown topic return no packet. A required
+focus is a strict content predicate, except the exact `overall evidence` class.
+That class returns a deterministic bounded overview within the resolved owner.
+The result states whether the topic resolved, so an empty focused result does
+not trigger another topic guess. A protocol with the same title as its direct
+family shares the family owner. A canonical family title can include its typed
+child protocols. A family alias stays on the family and never makes a child
+protocol interchangeable. Child titles and aliases resolve the child directly.
+Unrelated equal aliases still fail closed. Every lookup requires a short
+question focus. Source findings use one unambiguous authored target:
+`related_protocol`, then `parent_family`, then `measures`. Multi-target and
+untargeted findings stay out of the projection until their ownership is
+authored more precisely. Safety comes only from a directly sourced safety claim
+or typed source finding. Page-wide
 `safety` arrays do not enter the source-backed projection. The default packet
 contains three distinct sourced evidence items,
 up to one safety item that matches the question terms, and at most four source
 locators per item. Multi-term question terms require every term and use
-stemming. Unsourced overview text is not part of the assistant projection.
-Reducer-only appraisals that preserve candidate or shard bookkeeping also stay
-out until source-level extraction produces member-readable evidence. One
-question normally uses one lookup. Independent evidence and safety clauses may
-use two lookups for the same topic. Their catalog hashes must match, and the
-combined packet keeps the same three-item plus one-safety ceiling.
+stemming. Unsourced overview text and all editorial evidence-appraisal rows are
+not part of the assistant projection. Claims and extracted typed findings are
+the only member-facing evidence shapes. One question normally uses one lookup.
+Independent evidence and safety clauses may use two lookups for the same topic.
+Their catalog hashes must match, and the combined packet keeps the same
+three-item plus one-safety ceiling.
 Hosted runner packaging must include that compact direction projection and the
 knowledge index without shipping the web artifact tree. A missing direction
 projection is auxiliary availability loss: progress cards remain available with

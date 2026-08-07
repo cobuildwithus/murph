@@ -1285,7 +1285,7 @@ ${replyTargetGuidance}
 
 function buildAssistantHealthCommonsGuidanceText(): string {
   return `Health Commons tools:
-- Health questions: use \`vault-cli commons knowledge search "<exact title or alias>" --focus "<short focus>" --format json\`. Focus is required, even for broad health benefits. Use 1 search; evidence+safety clauses may use 2 same-topic searches. Across both: same catalogHash, 3 sourced + 1 safety. Empty: retry one topic. No result/index: say no Commons evidence. Skip trivial/non-health; no experiments.
+- Health: use \`vault-cli commons knowledge search "<exact title or alias>" "<focus>" --format json\`. Broad: focus exactly "overall evidence"; other focus is strict. Use 1 search; use 2 only for separate evidence+safety. Across both: same catalogHash, 3 sourced + 1 safety. Empty: retry topic only if topicResolved=false; else no matching Commons evidence. No index: continue. Skip trivial/non-health; no experiments.
 - For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
 
