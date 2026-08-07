@@ -5,6 +5,7 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceArea,
   ReferenceLine,
   XAxis,
   YAxis,
@@ -44,6 +45,20 @@ const RANGE_LINE_STYLE = {
   stroke: "var(--color-value)",
   strokeDasharray: "4 4",
   strokeOpacity: 0.5,
+} as const;
+
+const IN_RANGE_AREA_STYLE = {
+  fill: "var(--primary)",
+  fillOpacity: 0.1,
+  ifOverflow: "hidden",
+  stroke: "none",
+} as const;
+
+const OUT_OF_RANGE_AREA_STYLE = {
+  fill: "var(--destructive)",
+  fillOpacity: 0.07,
+  ifOverflow: "hidden",
+  stroke: "none",
 } as const;
 
 // Recharts needs a positive seed before ResizeObserver reports the container.
@@ -93,6 +108,7 @@ export function LabBiomarkerHistoryChart({
   const rangeLabel = range ? referenceRangeLabel?.trim() || null : null;
   const rangeSourceLabel = rangeLabel ? referenceRangeSourceLabel?.trim() || null : null;
   const rangeIsBand = range !== null && range.low !== null && range.high !== null;
+  const inRangeArea = resolveInRangeArea(range);
   const yDomain = resolveYDomain(range);
 
   return (
@@ -102,7 +118,7 @@ export function LabBiomarkerHistoryChart({
           <span
             aria-hidden="true"
             className={rangeIsBand
-              ? "h-2 w-5 shrink-0 border-y border-dashed border-primary/50"
+              ? "h-2 w-5 shrink-0 rounded-[2px] border-y border-dashed border-primary/50 bg-primary/10"
               : "h-0 w-5 shrink-0 border-t border-dashed border-primary/50"}
           />
           <span>{referenceRangeTitle}</span>
@@ -128,6 +144,24 @@ export function LabBiomarkerHistoryChart({
           data={data}
           margin={{ bottom: 0, left: 0, right: 12, top: 12 }}
         >
+          {range && range.low !== null ? (
+            <ReferenceArea
+              {...OUT_OF_RANGE_AREA_STYLE}
+              y1={range.low}
+            />
+          ) : null}
+          {range && range.high !== null ? (
+            <ReferenceArea
+              {...OUT_OF_RANGE_AREA_STYLE}
+              y2={range.high}
+            />
+          ) : null}
+          {inRangeArea ? (
+            <ReferenceArea
+              {...IN_RANGE_AREA_STYLE}
+              {...inRangeArea}
+            />
+          ) : null}
           <CartesianGrid vertical={false} strokeDasharray="3 5" />
           <XAxis
             axisLine={false}
@@ -215,8 +249,26 @@ function normalizeRange(
   if (low === null && high === null) {
     return null;
   }
+  if (low !== null && high !== null && low > high) {
+    return null;
+  }
 
   return { high, low };
+}
+
+function resolveInRangeArea(
+  range: LabBiomarkerChartRange | null,
+): { y1?: number; y2?: number } | null {
+  if (!range) {
+    return null;
+  }
+  if (range.low !== null && range.high !== null) {
+    return { y1: range.low, y2: range.high };
+  }
+  if (range.low !== null) {
+    return { y2: range.low };
+  }
+  return range.high !== null ? { y1: range.high } : null;
 }
 
 function resolveYDomain(
@@ -225,18 +277,20 @@ function resolveYDomain(
   (dataMinimum: number) => number,
   (dataMaximum: number) => number,
 ] {
-  if (!range || (range.low !== null && range.high !== null)) {
+  if (!range) {
     return ["auto", "auto"];
   }
 
-  const bound = range.low ?? range.high;
-  if (bound === null) {
-    return ["auto", "auto"];
-  }
+  const minimumBound = range.low ?? range.high;
+  const maximumBound = range.high ?? range.low;
 
   return [
-    (dataMinimum) => Math.min(dataMinimum, bound),
-    (dataMaximum) => Math.max(dataMaximum, bound),
+    (dataMinimum) => minimumBound === null
+      ? dataMinimum
+      : Math.min(dataMinimum, minimumBound),
+    (dataMaximum) => maximumBound === null
+      ? dataMaximum
+      : Math.max(dataMaximum, maximumBound),
   ];
 }
 
