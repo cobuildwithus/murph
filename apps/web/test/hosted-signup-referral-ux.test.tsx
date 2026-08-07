@@ -56,8 +56,9 @@ describe("hosted signup referral UX", () => {
 
     assert.match(markup, /You&#x27;re invited/);
     assert.match(markup, />Join Murph</);
-    assert.match(markup, /only for referral attribution/);
+    assert.match(markup, /Murph credits whoever shared this link/);
     assert.match(markup, /cannot see your conversations or health information/);
+    assert.match(markup, /What Murph can help with/);
     expect(mocks.claimHostedSignupReferralLink).not.toHaveBeenCalled();
   });
 
