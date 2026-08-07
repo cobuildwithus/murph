@@ -196,3 +196,10 @@ Updated: 2026-08-06
   passed after neutralizing two unrelated pre-existing declaration defects in
   the temporary consumer (`@murphai/query` and `incur`); no packed artifact or
   repository source was changed for those temporary corrections.
+- After the zero-finding final audit, the base-only merge from current `main`
+  removed the now-upstream test expectation deltas. Workspace boundaries,
+  package cycles, Hosted Execution typecheck, CLI package-shape verification,
+  and full production assembly pass on the merge head. The current candidate
+  assembly is 1,733,178 B entry, 8,196,127 B static closure, and 9,875,940 B
+  total; the 3,546 B entry and 13,205 B closure/total increases are inherited
+  from the updated base rather than authored Zod changes.
