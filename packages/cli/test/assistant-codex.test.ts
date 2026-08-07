@@ -314,9 +314,8 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
           jsonLine({
             method: 'turn/started',
             params: {
-              turn: {
-                id: 'turn-public-1',
-              },
+              threadId: 'thread-public-1',
+              turn: createCodexTurn('turn-public-1', 'inProgress'),
             },
           }),
         )
@@ -326,22 +325,32 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
             method: 'item/started',
             params: {
               item: {
-                id: 'command-public-1',
-                type: 'command.execution',
+                aggregatedOutput: null,
                 command: 'pwd',
+                commandActions: [],
+                cwd: expectedWorkingDirectory,
+                durationMs: null,
+                exitCode: null,
+                id: 'command-public-1',
+                processId: null,
+                source: 'agent',
+                status: 'inProgress',
+                type: 'commandExecution',
               },
+              startedAtMs: 1,
+              threadId: 'thread-public-1',
+              turnId: 'turn-public-1',
             },
           }),
         )
         child.stdout.write(
           jsonLine({
-            method: 'assistant.message.delta',
+            method: 'item/agentMessage/delta',
             params: {
-              item: {
-                id: 'assistant-public-1',
-                type: 'assistant_message',
-              },
               delta: 'Hello ',
+              itemId: 'assistant-public-1',
+              threadId: 'thread-public-1',
+              turnId: 'turn-public-1',
             },
           }),
         )
@@ -349,11 +358,16 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
           jsonLine({
             method: 'item/completed',
             params: {
+              completedAtMs: 2,
               item: {
                 id: 'assistant-public-1',
-                type: 'assistant_message',
-                message: 'Hello world',
+                memoryCitation: null,
+                phase: 'final_answer',
+                text: 'Hello world',
+                type: 'agentMessage',
               },
+              threadId: 'thread-public-1',
+              turnId: 'turn-public-1',
             },
           }),
         )
@@ -361,10 +375,8 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
           jsonLine({
             method: 'turn/completed',
             params: {
-              turn: {
-                id: 'turn-public-1',
-                status: 'completed',
-              },
+              threadId: 'thread-public-1',
+              turn: createCodexTurn('turn-public-1', 'completed'),
             },
           }),
         )
@@ -514,6 +526,7 @@ test('executeCodexAppServerTurn classifies resume RPC failures as stale provider
           jsonLine({
             id: 2,
             error: {
+              code: -32_000,
               message: 'thread/resume failed: no rollout found for thread id stale-thread',
             },
           }),
@@ -585,9 +598,8 @@ test('executeCodexAppServerTurn interrupts the child and records the provider th
           jsonLine({
             method: 'turn/started',
             params: {
-              turn: {
-                id: 'turn-abort-public',
-              },
+              threadId: 'thread-abort-public',
+              turn: createCodexTurn('turn-abort-public', 'inProgress'),
             },
           }),
         )
@@ -639,13 +651,12 @@ test('executeCodexAppServerTurn interrupts the child and records the provider th
 test('extractCodexTraceUpdates stays usable through the public assistant-engine codex export', () => {
   assert.deepEqual(
     extractCodexTraceUpdates({
-      method: 'assistant.message.delta',
+      method: 'item/agentMessage/delta',
       params: {
-        item: {
-          id: 'assistant-export-1',
-          type: 'assistant_message',
-        },
         delta: 'token',
+        itemId: 'assistant-export-1',
+        threadId: 'thread-export-1',
+        turnId: 'turn-export-1',
       },
     }),
     [
@@ -658,6 +669,23 @@ test('extractCodexTraceUpdates stays usable through the public assistant-engine 
     ],
   )
 })
+
+function createCodexTurn(
+  id: string,
+  status: 'completed' | 'inProgress',
+): Record<string, unknown> {
+  const completed = status === 'completed'
+  return {
+    completedAt: completed ? 1 : null,
+    durationMs: completed ? 1 : null,
+    error: null,
+    id,
+    items: [],
+    itemsView: 'full',
+    startedAt: 0,
+    status,
+  }
+}
 
 class MockChildProcess extends EventEmitter {
   exitCode: number | null = null
