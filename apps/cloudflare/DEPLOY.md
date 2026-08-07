@@ -662,6 +662,13 @@ Set these in the selected GitHub environment as secrets:
 - `MURPH_DATA_API_KEY`
 - `OPENAI_API_KEY`
 
+The protected GitHub Environment may also hold the optional
+`HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON` secret. Deploy
+automation forwards it to the Worker secret store without exposing it to the
+runner. Its entries are compatibility material only; the required
+`HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK` remains the active private
+key.
+
 The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
 The optional read-only Labs port uses that existing signed callback and adds no
 Cloudflare secret or provider credential. `JUNCTION_API_KEY` for Labs remains in
@@ -780,8 +787,42 @@ Hosted crypto authority metadata:
 
 - `HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION`
 - `HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM`
+- `HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON` for additional `verify_only` or
+  `disabled` public verification keys
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
 - `HOSTED_CRYPTO_ENV`
+
+### Hosted crypto standby-key preload
+
+Treat a hosted authority or Cloudflare automation key change as a reader-first
+compatibility rollout. The protected GitHub Environment is the Cloudflare
+deploy source of truth: store
+`HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON` as an environment variable and
+`HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON` as an environment
+secret. Vercel Production must receive the same authority verify keyring plus
+`HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON`. Updating Vercel
+configuration is incomplete until the Web app is redeployed; updating the
+GitHub Environment is incomplete until the protected Cloudflare workflow
+renders, syncs, deploys, and proves the live Worker bindings.
+
+For a non-active preload, create a new non-exportable version on the existing
+GCP KMS asymmetric signing key and add its public key as `verify_only` on both
+Web and Worker. Generate the P-256 Cloudflare recipient keypair with an
+operating-system cryptographic random source, retain the private JWK only in an
+approved local secret store during transfer, add its public entry to Web as
+`disabled`, and add its private entry to Cloudflare as `decrypt_only`. Keep all
+required single-key variables unchanged, deploy Web first, then deploy
+Cloudflare, and confirm production envelope key-reference aggregates are
+unchanged. Provider inspection and logs must show names, scopes, statuses, and
+counts only—not keyring JSON, PEM bodies, JWKs, or production rows.
+
+Standby preload is not authority activation or envelope rotation. Do not change
+an active key id/version, re-sign or rewrap domain-root envelopes, disable a
+current key, or remove compatibility entries until a separately reviewed
+production mutation owner exists. That later operation must deploy all readers
+first, preserve the current Cloudflare private key for the entire compatibility
+window, migrate in bounded batches, prove healthy reads, and prove zero active
+or `decrypt_only` envelope references before retirement.
 
 Hosted assistant config:
 

@@ -190,6 +190,14 @@ function findMutableActionRefs(workflow: string): Array<{ line: number; ref: str
 
 describe("hosted deploy automation helpers", () => {
   it("builds a generated wrangler config for the native container worker", () => {
+    const authorityVerifyKeyringJson = JSON.stringify({
+      "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/2": {
+        keyVersionName:
+          "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/2",
+        publicKeyPem: "-----BEGIN PUBLIC KEY-----\nstandby\n-----END PUBLIC KEY-----\n",
+        status: "verify_only",
+      },
+    });
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
@@ -201,6 +209,7 @@ describe("hosted deploy automation helpers", () => {
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v2",
+      HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: authorityVerifyKeyringJson,
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
       HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
       HOSTED_PHYSICAL_NOTES_ENABLED: "true",
@@ -380,6 +389,9 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_PHYSICAL_NOTES_ENABLED).toBe("true");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toContain("cryptoKeyVersions/1");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toContain("BEGIN PUBLIC KEY");
+    expect(config.vars.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON).toBe(
+      authorityVerifyKeyringJson,
+    );
     expect(config.vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID).toBe("cloudflare-automation:v2");
     expect(config.vars.HOSTED_CRYPTO_ENV).toBe("production");
     expect(config.vars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID).toBe("callback:v2");
@@ -744,6 +756,20 @@ describe("hosted deploy automation helpers", () => {
   });
 
   it("renders required and optional worker secrets from CI secrets", () => {
+    const automationPrivateKeyringJson = JSON.stringify({
+      "cloudflare-automation:v2": {
+        privateJwk: {
+          crv: "P-256",
+          d: "standby-private-coordinate",
+          kty: "EC",
+          x: "standby-x-coordinate",
+          y: "standby-y-coordinate",
+        },
+        recipient: "cloudflare-automation-secret",
+        recipientKeyId: "cloudflare-automation:v2",
+        status: "decrypt_only",
+      },
+    });
     const legacyHostedAssistantProviderSecrets = Object.fromEntries(
       LEGACY_HOSTED_ASSISTANT_PROVIDER_SECRET_NAMES.map((name) => [
         name,
@@ -760,6 +786,8 @@ describe("hosted deploy automation helpers", () => {
       ...legacyHostedAssistantProviderSecrets,
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+        automationPrivateKeyringJson,
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
         "provider-egress-signing-secret",
@@ -784,6 +812,8 @@ describe("hosted deploy automation helpers", () => {
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+        automationPrivateKeyringJson,
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
         "provider-egress-signing-secret",
