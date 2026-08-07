@@ -338,6 +338,7 @@ describe("cloudflare worker routes", () => {
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
       "deploy-container-smoke",
       "runtime-ensure-processing",
+      "runtime-shell-prewarm",
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
@@ -367,6 +368,7 @@ describe("cloudflare worker routes", () => {
       "test-direct-r2-locator-marker",
       "deploy-container-smoke",
       "runtime-ensure-processing",
+      "runtime-shell-prewarm",
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
@@ -2928,6 +2930,107 @@ describe("cloudflare worker routes", () => {
       });
       expect(stub.bindUser).not.toHaveBeenCalled();
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+    });
+
+    it("issues shell startup through only the deterministic named container", async () => {
+      const prewarmShell = vi.fn(async () => ({
+        action: "start_issued" as const,
+        kind: "started" as const,
+      }));
+      const containerStub: HostedExecutionContainerStubLike = {
+        destroyInstance: vi.fn(async () => undefined),
+        invoke: vi.fn(async () => {
+          throw new Error("Shell prewarm must not invoke runtime work.");
+        }),
+        prewarmShell,
+        smokeHealth: vi.fn(async () => ({
+          ok: true,
+          runnerBundle: null,
+          service: "runner",
+          status: 200,
+        })),
+      };
+      const runnerContainerGetByName = vi.fn(() => containerStub);
+      const userRunnerGetByName = vi.fn(() => createUserRunnerStub());
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        CF_VERSION_METADATA: { id: "version-123" },
+        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
+        USER_RUNNER: { getByName: userRunnerGetByName },
+      });
+
+      const response = await worker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
+          {
+            body: "{}",
+            headers: { "content-type": "application/json; charset=utf-8" },
+            method: "POST",
+          },
+        )),
+        env,
+      );
+
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({ accepted: true });
+      expect(runnerContainerGetByName).toHaveBeenCalledWith(
+        "test-user--v-version-123",
+      );
+      expect(prewarmShell).toHaveBeenCalledWith({
+        timeoutMs: 20_000,
+        userId: "test-user",
+      });
+      expect(userRunnerGetByName).not.toHaveBeenCalled();
+      expect(containerStub.invoke).not.toHaveBeenCalled();
+    });
+
+    it("rejects nonempty shell-prewarm bodies without resolving a runtime owner", async () => {
+      const runnerContainerGetByName = vi.fn();
+      const userRunnerGetByName = vi.fn(() => createUserRunnerStub());
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
+        USER_RUNNER: { getByName: userRunnerGetByName },
+      });
+
+      const response = await worker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
+          {
+            body: JSON.stringify({ wake: true }),
+            headers: { "content-type": "application/json; charset=utf-8" },
+            method: "POST",
+          },
+        )),
+        env,
+      );
+
+      expect(response.status).toBe(400);
+      expect(runnerContainerGetByName).not.toHaveBeenCalled();
+      expect(userRunnerGetByName).not.toHaveBeenCalled();
+    });
+
+    it("rejects shell prewarm when the only credential is a web callback signature", async () => {
+      const runnerContainerGetByName = vi.fn();
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
+      });
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request(
+            "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
+            {
+              body: "{}",
+              headers: { "content-type": "application/json; charset=utf-8" },
+              method: "POST",
+            },
+          ),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(401);
+      expect(runnerContainerGetByName).not.toHaveBeenCalled();
     });
 
     it("starts runtime processing without an active fence", async () => {
