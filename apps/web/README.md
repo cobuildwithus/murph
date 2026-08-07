@@ -784,7 +784,9 @@ Hosted managed crypto:
   every configured standby ring through the shared runtime-state acceptance
   contract, rejects active entries, private material in the public ring, and
   any private keyring configured in Web runtime, and reports field-only errors
-  without echoing key material. Before changing
+  without echoing key material. Public-ring entries and JWKs use closed schemas,
+  so a sibling `privateJwk` or another ignored field cannot ride into Vercel;
+  every ring also rejects identifiers that collide after trimming. Before changing
   a provider, load the three proposed payloads from their approved secret
   stores into the process environment together with the current active IDs and
   the operator-only `HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION` and

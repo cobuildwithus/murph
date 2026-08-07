@@ -120,6 +120,14 @@ Updated: 2026-08-07
    explicit non-secret proposed IDs, requires their exact `verify_only` /
    `disabled` / `decrypt_only` states, constructs the effective runtime rings,
    and proves a synthetic envelope with the proposed signer and recipient.
+7. Risk: lossy parsing drops sibling private material from the validated Web
+   projection, or first-match validation approves one raw entry while a later
+   whitespace-equivalent ID replaces it in the effective runtime map.
+   Mitigation: final ReviewGPT round 4 identified both as review-induced. Keep
+   validation in the same shared owner, close the Web public entry/JWK schemas,
+   reject duplicate normalized identifiers in every ring, and resolve proposed
+   entries only from the resulting unique maps. Field-only errors and the
+   effective-ring proposed-generation proof remain unchanged.
 
 ## Tasks
 
@@ -149,6 +157,9 @@ Updated: 2026-08-07
 - Continue that same decision after the round-3 review-induced finding: prove
   the proposed generation survives the existing active overlay and is usable,
   without adding a deployment owner, persisted state, or rotation lifecycle.
+- Continue it after round 4 as well: exact raw-payload validation and unique
+  normalized IDs tighten the existing boundary without creating another owner
+  or compatibility mechanism.
 - Generate and preload keys only after the exact pushed implementation head has
   passed focused proof, CI, and both ReviewGPT gates. Merge the reviewed
   contract to public `main`, deploy from the protected private workflow's

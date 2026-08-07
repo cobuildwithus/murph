@@ -146,28 +146,34 @@ export function assertHostedCryptoStandbyKeyringJsons(input: {
     throw new TypeError(HOSTED_CRYPTO_COMPLETE_STANDBY_IDENTIFIERS_ERROR);
   }
 
-  const proposedAuthorityEntry = authorityEntries.find(
-    (entry) => entry.keyVersionName === proposedAuthorityKeyVersionName,
+  const authorityEntriesById = new Map(
+    authorityEntries.map((entry) => [entry.keyVersionName, entry] as const),
+  );
+  const publicEntriesById = new Map(
+    publicEntries.map((entry) => [entry.recipientKeyId, entry] as const),
+  );
+  const privateEntriesById = new Map(
+    privateEntries.map((entry) => [entry.recipientKeyId, entry] as const),
+  );
+  const proposedAuthorityEntry = authorityEntriesById.get(
+    proposedAuthorityKeyVersionName,
   );
   if (proposedAuthorityEntry?.status !== "verify_only") {
     throw new TypeError(HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR);
   }
-  const proposedPublicEntry = publicEntries.find(
-    (entry) => entry.recipientKeyId === proposedCloudflareRecipientKeyId,
+  const proposedPublicEntry = publicEntriesById.get(
+    proposedCloudflareRecipientKeyId,
   );
   if (proposedPublicEntry?.status !== "disabled") {
     throw new TypeError(HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR);
   }
-  const proposedPrivateEntry = privateEntries.find(
-    (entry) => entry.recipientKeyId === proposedCloudflareRecipientKeyId,
+  const proposedPrivateEntry = privateEntriesById.get(
+    proposedCloudflareRecipientKeyId,
   );
   if (proposedPrivateEntry?.status !== "decrypt_only") {
     throw new TypeError(HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR);
   }
 
-  const privateEntriesById = new Map(
-    privateEntries.map((entry) => [entry.recipientKeyId, entry] as const),
-  );
   if (
     publicEntries.length !== privateEntries.length
     || publicEntries.some((publicEntry) => {
@@ -342,7 +348,10 @@ function readHostedAuthorityStandbyEntries(
 ): HostedAuthorityVerifyKeyringEntry[] {
   try {
     const entries = parseHostedAuthorityVerifyKeyringJson(value);
-    if (entries.some((entry) => entry.status === "active")) {
+    if (
+      hasDuplicateStrings(entries.map((entry) => entry.keyVersionName))
+      || entries.some((entry) => entry.status === "active")
+    ) {
       throw new TypeError(HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR);
     }
     return entries;
@@ -360,8 +369,8 @@ function readHostedCloudflarePublicStandbyEntries(
       value,
       "Hosted recipient public keyring JSON",
     );
-    const containsPrivateMaterial = rawKeyring
-      ? Object.values(rawKeyring).some((rawEntry) => {
+    const containsUnsafeRawMaterial = rawKeyring
+      ? Object.entries(rawKeyring).some(([rawRecipientKeyId, rawEntry]) => {
           const entry = requireRecord(
             rawEntry,
             "Hosted recipient public standby entry",
@@ -370,11 +379,37 @@ function readHostedCloudflarePublicStandbyEntries(
             entry.publicJwk,
             "Hosted recipient public standby JWK",
           );
-          return Object.hasOwn(publicJwk, "d");
+          const normalizedRecipientKeyId = requireNonEmptyString(
+            rawRecipientKeyId,
+            "Hosted recipient public standby key id",
+          );
+          const declaredRecipientKeyId = normalizeOptionalString(
+            entry.recipientKeyId,
+          );
+          return !hasOnlyKeys(entry, [
+            "publicJwk",
+            "recipient",
+            "recipientKeyId",
+            "status",
+            "teePolicyId",
+          ])
+            || !hasOnlyKeys(publicJwk, [
+              "crv",
+              "ext",
+              "key_ops",
+              "kty",
+              "x",
+              "y",
+            ])
+            || (
+              entry.recipientKeyId !== undefined
+              && declaredRecipientKeyId !== normalizedRecipientKeyId
+            );
         })
       : false;
     if (
-      containsPrivateMaterial
+      containsUnsafeRawMaterial
+      || hasDuplicateStrings(entries.map((entry) => entry.recipientKeyId))
       || entries.some(
         (entry) =>
           entry.recipient !== "cloudflare-automation-secret"
@@ -395,7 +430,8 @@ function readHostedCloudflarePrivateStandbyEntries(
   try {
     const entries = parseHostedRecipientPrivateKeyringJson(value);
     if (
-      entries.some(
+      hasDuplicateStrings(entries.map((entry) => entry.recipientKeyId))
+      || entries.some(
         (entry) =>
           entry.recipient !== "cloudflare-automation-secret"
           || entry.status === "active",
@@ -407,6 +443,18 @@ function readHostedCloudflarePrivateStandbyEntries(
   } catch {
     throw new TypeError(HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR);
   }
+}
+
+function hasDuplicateStrings(values: string[]): boolean {
+  return new Set(values).size !== values.length;
+}
+
+function hasOnlyKeys(
+  value: Record<string, unknown>,
+  allowedKeys: readonly string[],
+): boolean {
+  const allowed = new Set(allowedKeys);
+  return Object.keys(value).every((key) => allowed.has(key));
 }
 
 function parseHostedAuthorityVerifyKeyringJson(

@@ -471,7 +471,10 @@ Last verified: 2026-08-07
   complete-preload validation must require all three authority/public/private
   payloads, reject required-active-ID collisions, require the intended
   `verify_only` / `disabled` / `decrypt_only` statuses under explicit proposed
-  IDs, and match the Cloudflare public/private P-256 coordinates by key id;
+  IDs, reject duplicate normalized IDs, and match the Cloudflare public/private
+  P-256 coordinates by key id. Web public entries and public JWKs must use
+  closed raw schemas so sibling private material or another ignored field cannot
+  enter Vercel;
   errors may name fields but must never reproduce values. Proposed IDs are
   non-secret one-shot operator validation metadata, not provider runtime
   configuration. Record the current

@@ -187,6 +187,7 @@ test("hosted crypto standby acceptance matches complete Cloudflare keypairs", as
     [STANDBY_CLOUDFLARE_KEY_ID]: {
       publicJwk: standbyRecipient.publicKeyJwk,
       recipient: "cloudflare-automation-secret",
+      recipientKeyId: STANDBY_CLOUDFLARE_KEY_ID,
       status: "disabled",
     },
   });
@@ -408,6 +409,36 @@ test("complete standby acceptance requires intended usable statuses and identifi
     ...completeInput,
     cloudflarePrivateKeyringJson: JSON.stringify({
       [STANDBY_CLOUDFLARE_KEY_ID]: {
+        privateJwk: standbyRecipient.privateKeyJwk,
+        recipient: "cloudflare-automation-secret",
+        status: "disabled",
+      },
+    }),
+  })).toThrow(HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR);
+  expect(() => assertHostedCryptoStandbyKeyringJsons({
+    ...completeInput,
+    authorityVerifyKeyringJson: JSON.stringify({
+      [STANDBY_AUTHORITY_KEY_VERSION]: {
+        publicKeyPem:
+          "-----BEGIN PUBLIC KEY-----\nstandby\n-----END PUBLIC KEY-----",
+        status: "verify_only",
+      },
+      [` ${STANDBY_AUTHORITY_KEY_VERSION} `]: {
+        publicKeyPem:
+          "-----BEGIN PUBLIC KEY-----\ndisabled\n-----END PUBLIC KEY-----",
+        status: "disabled",
+      },
+    }),
+  })).toThrow(HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR);
+  expect(() => assertHostedCryptoStandbyKeyringJsons({
+    ...completeInput,
+    cloudflarePrivateKeyringJson: JSON.stringify({
+      [STANDBY_CLOUDFLARE_KEY_ID]: {
+        privateJwk: standbyRecipient.privateKeyJwk,
+        recipient: "cloudflare-automation-secret",
+        status: "decrypt_only",
+      },
+      [` ${STANDBY_CLOUDFLARE_KEY_ID} `]: {
         privateJwk: standbyRecipient.privateKeyJwk,
         recipient: "cloudflare-automation-secret",
         status: "disabled",

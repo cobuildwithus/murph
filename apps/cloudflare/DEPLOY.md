@@ -822,9 +822,13 @@ malformed or active optional entries, rejects private material in Web's public
 ring or a private keyring in Web runtime, and permits Cloudflare entries only
 for `cloudflare-automation-secret`. Both provider gates also reject an optional
 entry that collides with the required active authority or Cloudflare key ID,
-because runtime overlay would otherwise replace it. Before any provider
-mutation, load all three proposed payloads from approved secret stores into the
-process environment together with the current active IDs and the operator-only
+because runtime overlay would otherwise replace it. Before either provider
+gate accepts a ring, identifiers must also remain unique after the same trimming
+used by runtime constructors. Web public entries and their JWKs use closed raw
+schemas; sibling private material and undeclared fields fail before Vercel.
+Before any provider mutation, load all three proposed payloads from approved
+secret stores into the process environment together with the current active
+IDs and the operator-only
 `HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION` and
 `HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID`. Run the Web
 `hosted-crypto:env-check` script with `--require-complete-preload`; complete

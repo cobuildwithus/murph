@@ -405,6 +405,22 @@ describe("deploy preflight helpers", () => {
       HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
     ],
     [
+      "authority entries with duplicate normalized identifiers",
+      {
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          "authority-standby": {
+            publicKeyPem: "private-keyring-canary",
+            status: "verify_only",
+          },
+          " authority-standby ": {
+            publicKeyPem: "disabled",
+            status: "disabled",
+          },
+        }),
+      },
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+    ],
+    [
       "a private JWK without d",
       {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
@@ -498,6 +514,37 @@ describe("deploy preflight helpers", () => {
               },
               recipient: "cloudflare-automation-secret",
               status: "decrypt_only",
+            },
+          }),
+      },
+      HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "private entries with duplicate normalized identifiers",
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          JSON.stringify({
+            "cloudflare-automation:v2": {
+              privateJwk: {
+                crv: "P-256",
+                d: "private-keyring-canary",
+                kty: "EC",
+                x: "standby-public-x",
+                y: "standby-public-y",
+              },
+              recipient: "cloudflare-automation-secret",
+              status: "decrypt_only",
+            },
+            " cloudflare-automation:v2 ": {
+              privateJwk: {
+                crv: "P-256",
+                d: "private-keyring-canary",
+                kty: "EC",
+                x: "standby-public-x",
+                y: "standby-public-y",
+              },
+              recipient: "cloudflare-automation-secret",
+              status: "disabled",
             },
           }),
       },
