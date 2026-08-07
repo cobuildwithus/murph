@@ -2335,7 +2335,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain('Supported experiment protocols:')
     expect(prompt).toContain('Health Commons tools:')
     expect(prompt).toContain(
-      '`vault-cli commons knowledge search "<topic only; 1-5 terms>" --format json`',
+      '`vault-cli commons knowledge search "<exact title or alias>" --focus "<question terms>" --format json`',
     )
     expect(prompt).toContain(
       'Skip trivial/non-health.',
@@ -2344,10 +2344,10 @@ describe('assistant experiment onboarding guidance', () => {
       'It never starts experiments.',
     )
     expect(prompt).toContain(
-      'If empty, retry once.',
+      'If empty, retry once with another exact topic.',
     )
     expect(prompt).toContain(
-      'If unavailable/empty, do not claim Commons evidence.',
+      'If unavailable/empty, claim no Commons evidence.',
     )
     expect(prompt).toContain(
       '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',

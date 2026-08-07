@@ -108,7 +108,7 @@ const commonsKnowledgeItemSchema = z.object({
   caveat: z.string().min(1).nullable(),
   entityKey: z.string().min(1),
   entityTitle: z.string().min(1),
-  kind: z.enum(["appraisal", "claim", "overview", "safety", "source_finding"]),
+  kind: z.enum(["appraisal", "claim", "safety", "source_finding"]),
   strength: z.string().min(1).nullable(),
   text: z.string().min(1),
   sources: z.array(z.object({
@@ -127,6 +127,7 @@ const commonsKnowledgeItemSchema = z.object({
 export const commonsKnowledgeSearchResultSchema = z.object({
   available: z.boolean(),
   catalogHash: z.string(),
+  focus: z.string().min(1).nullable(),
   items: z.array(commonsKnowledgeItemSchema),
   query: z.string().min(1),
   safety: commonsKnowledgeItemSchema.nullable(),
@@ -151,17 +152,18 @@ export function registerCommonsCommands(cli: Cli.Cli) {
 
   knowledge.command("search", {
     description:
-      "Return a small evidence packet for a substantive health topic. Use a few English medical or health terms.",
+      "Return a small evidence packet for one exact Health Commons title or alias, with optional question terms.",
     args: z.object({
       query: z.string().min(2).max(240),
     }),
     options: z.object({
+      focus: z.string().min(1).max(240).optional(),
       limit: z.number().int().positive().max(HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT).default(3),
     }),
     examples: [{
       description: "Find evidence and safety context about dry sauna.",
-      args: { query: "dry sauna evidence" },
-      options: { limit: 3 },
+      args: { query: "Finnish Dry Sauna" },
+      options: { focus: "recent fainting", limit: 3 },
     }],
     output: commonsKnowledgeSearchResultSchema,
     run({ args, options }) {
@@ -169,6 +171,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         return {
           available: true,
           ...searchGeneratedHealthCommonsKnowledge({
+            focus: options.focus,
             limit: options.limit,
             query: args.query,
           }),
@@ -178,6 +181,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         return {
           available: false,
           catalogHash: "",
+          focus: options.focus ?? null,
           items: [],
           query: args.query,
           safety: null,

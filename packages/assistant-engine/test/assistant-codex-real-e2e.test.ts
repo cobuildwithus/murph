@@ -2167,6 +2167,7 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
           && action.command.includes('vault-cli commons knowledge search')
           && action.command.includes('sauna')
           && action.command.includes('fentanyl')
+          && action.command.includes('--focus')
         ),
         'Health Commons safety lookup',
       ).toBe(true)
@@ -5133,6 +5134,9 @@ async function runNameFirstExperimentStartProbe(input: {
         buildExperimentOnboardingDeveloperInstructions(),
       env: {
         ...config.env,
+        HEALTH_COMMONS_E2E_CLI_ENTRYPOINT:
+          HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+        HEALTH_COMMONS_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
         PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
       },
@@ -5216,43 +5220,14 @@ async function materializeHealthCommonsKnowledgeVaultCli(input: {
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
-  const result = {
-    data: {
-      available: true,
-      catalogHash: 'sha256:test',
-      items: [],
-      query: 'sauna fentanyl patch',
-      safety: {
-        caveat: 'External heat can increase fentanyl absorption.',
-        entityKey: 'experiment_family:dry-sauna',
-        entityTitle: 'Finnish Dry Sauna',
-        kind: 'safety',
-        sources: [{
-          pmid: '32740103',
-          sourceKey: 'source_artifact:pmid-32740103',
-          title: 'Death in Sauna Associated With a Transdermal Fentanyl Patch',
-          url: 'https://pubmed.ncbi.nlm.nih.gov/32740103/',
-        }],
-        strength: 'hard_stop',
-        text: 'Do not combine a transdermal fentanyl patch with sauna or external heat because it can cause life-threatening poisoning.',
-      },
-      warning: null,
-    },
-    ok: true,
-  }
   await writeFile(
     executablePath,
     [
       '#!/bin/sh',
-      'case "$*" in',
-      '  *"commons knowledge search"*)',
-      `    printf '%s\\n' '${JSON.stringify(result)}'`,
-      '    ;;',
-      '  *)',
-      '    printf \'%s\\n\' \'{"error":"unexpected command"}\' >&2',
-      '    exit 1',
-      '    ;;',
-      'esac',
+      'if [ -z "$HEALTH_COMMONS_E2E_CLI_ENTRYPOINT" ] || [ -z "$HEALTH_COMMONS_E2E_TSX_BIN" ]; then',
+      '  exit 70',
+      'fi',
+      'exec "$HEALTH_COMMONS_E2E_TSX_BIN" "$HEALTH_COMMONS_E2E_CLI_ENTRYPOINT" "$@"',
       '',
     ].join('\n'),
     { encoding: 'utf8', mode: 0o700 },

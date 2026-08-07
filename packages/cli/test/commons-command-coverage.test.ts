@@ -41,6 +41,7 @@ test("commons knowledge search returns a bounded source-backed sauna packet", as
   const cli = createCommonsSliceCli();
   const result = await runInProcessJsonCli<{
     available: boolean;
+    focus: string | null;
     items: Array<{
       entityKey: string;
       sources: Array<{ pmid: string | null; url: string | null }>;
@@ -50,7 +51,9 @@ test("commons knowledge search returns a bounded source-backed sauna packet", as
     "commons",
     "knowledge",
     "search",
-    "dry sauna",
+    "Finnish Dry Sauna",
+    "--focus",
+    "systematic review",
     "--limit",
     "3",
   ]);
@@ -58,11 +61,11 @@ test("commons knowledge search returns a bounded source-backed sauna packet", as
   assert.equal(result.envelope.ok, true);
   const data = requireData(result.envelope);
   assert.equal(data.available, true);
+  assert.equal(data.focus, "systematic review");
   assert.ok(data.items.length > 0 && data.items.length <= 3);
   assert.ok(data.items.some((item) =>
     item.sources.some((source) => source.pmid === "29849692")
   ));
-  assert.equal(data.safety?.kind, "safety");
 });
 
 test("commons knowledge search returns a safety-only sauna hard stop", async () => {
@@ -77,7 +80,9 @@ test("commons knowledge search returns a safety-only sauna hard stop", async () 
     "commons",
     "knowledge",
     "search",
-    "sauna fentanyl patch",
+    "Finnish Dry Sauna",
+    "--focus",
+    "fentanyl patch",
   ]);
 
   assert.equal(result.envelope.ok, true);
@@ -99,13 +104,22 @@ test("commons knowledge search stays non-blocking when its generated index is mi
   try {
     const result = await runInProcessJsonCli<{
       available: boolean;
+      focus: string | null;
       items: unknown[];
       warning: string | null;
-    }>(createCommonsSliceCli(), ["commons", "knowledge", "search", "dry sauna evidence"]);
+    }>(createCommonsSliceCli(), [
+      "commons",
+      "knowledge",
+      "search",
+      "Finnish Dry Sauna",
+      "--focus",
+      "recent fainting",
+    ]);
 
     assert.equal(result.envelope.ok, true);
     const data = requireData(result.envelope);
     assert.equal(data.available, false);
+    assert.equal(data.focus, "recent fainting");
     assert.deepEqual(data.items, []);
     assert.match(data.warning ?? "", /continue without corpus context/u);
   } finally {
