@@ -2,14 +2,10 @@ import {
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
 
-import type { HostedR2BucketRole } from "./r2-cutover.ts";
-
 export const HOSTED_R2_PRESIGN_ACCOUNT_ID_ENV = "HOSTED_R2_PRESIGN_ACCOUNT_ID";
 export const HOSTED_R2_PRESIGN_ACCESS_KEY_ID_ENV = "HOSTED_R2_PRESIGN_ACCESS_KEY_ID";
 export const HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT_ENV = "HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT";
 export const HOSTED_R2_PRESIGN_BUCKET_NAME_ENV = "HOSTED_R2_PRESIGN_BUCKET_NAME";
-export const HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME_ENV =
-  "HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME";
 export const HOSTED_R2_PRESIGN_CONTROL_ENDPOINT_ENV = "HOSTED_R2_PRESIGN_CONTROL_ENDPOINT";
 export const HOSTED_R2_PRESIGN_ENDPOINT_ENV = "HOSTED_R2_PRESIGN_ENDPOINT";
 export const HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY_ENV = "HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY";
@@ -87,23 +83,6 @@ export function readHostedR2PresignEnvironment(
     secretAccessKey: requireHostedR2PresignString(
       source[HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY_ENV],
       HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY_ENV,
-    ),
-  };
-}
-
-export function readHostedR2PresignEnvironmentForBucketRole(
-  source: Readonly<Record<string, string | undefined>>,
-  role: HostedR2BucketRole,
-): HostedR2PresignEnvironment {
-  const environment = readHostedR2PresignEnvironment(source);
-  if (role === "source") {
-    return environment;
-  }
-  return {
-    ...environment,
-    bucketName: requireHostedR2PresignString(
-      source[HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME_ENV],
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME_ENV,
     ),
   };
 }

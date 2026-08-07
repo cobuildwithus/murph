@@ -10,7 +10,6 @@ import {
   createHostedR2PresignedHeadUrl,
   createHostedR2PresignedPutUrl,
   readHostedR2PresignEnvironment,
-  readHostedR2PresignEnvironmentForBucketRole,
 } from "../src/r2-presigned-url.js";
 
 describe("R2 presigned URL helpers", () => {
@@ -147,25 +146,6 @@ describe("R2 presigned URL helpers", () => {
       localEndpointAllowed: false,
       secretAccessKey: "secret-key",
     });
-  });
-
-  it("keeps old tickets on OC and signs new destination tickets for ENAM", () => {
-    const source = {
-      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "access-key",
-      HOSTED_R2_PRESIGN_ACCOUNT_ID: "account-id",
-      HOSTED_R2_PRESIGN_BUCKET_NAME: "bundles-oc",
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles-enam",
-      HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "secret-key",
-    };
-
-    expect(readHostedR2PresignEnvironmentForBucketRole(source, "source").bucketName)
-      .toBe("bundles-oc");
-    expect(readHostedR2PresignEnvironmentForBucketRole(source, "destination").bucketName)
-      .toBe("bundles-enam");
-    expect(() => readHostedR2PresignEnvironmentForBucketRole({
-      ...source,
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: undefined,
-    }, "destination")).toThrow("HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME");
   });
 
   it("allows explicit hosted-local MinIO endpoints without loosening production defaults", async () => {
